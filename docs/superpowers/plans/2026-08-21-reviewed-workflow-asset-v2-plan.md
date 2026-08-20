@@ -3,7 +3,7 @@
 1. 以 TDD 新增 v2 canonical contract、validator 和内容 hash。
 2. 新增独立 content-addressed store 与 CAS registry，验证无 v1 migration。
 3. 从 canonical `single_application_workflow_review_v1` 编译 state/transition/lineage。
-4. 新增 offline replay coordinator：state resolution、transition selection、semantic verification、recovery decision。
+4. 新增 offline replay coordinator：state resolution、transition selection、semantic verification、recovery decision；首个里程碑仅启用 `open_detail` / `open_apply_flow` / `back` / `close_modal`，`read` / `scroll` 等待专用 effect verifier。
 5. 强化 approved-plan capture lineage，真实执行前拒绝 stale plan。
 6. 新增 compile/publish/preview API，并将 summary 投影到 workflow review context。
 7. 在现有 workflow 面板增加最小状态条和只读 preview。

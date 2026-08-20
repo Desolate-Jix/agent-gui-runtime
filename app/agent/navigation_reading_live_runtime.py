@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
@@ -7,6 +8,8 @@ from typing import Any
 
 OBSERVATION_RECORD_CONTRACT = "navigation_runtime_observation_record_v1"
 OPERATION_RESULT_CONTRACT = "navigation_reading_operation_result_v1"
+REPLAY_EXECUTION_CONTEXT_CONTRACT = "reviewed_workflow_replay_execution_context_v1"
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 class BufferedNavigationRuntimeObserver:
@@ -78,11 +81,32 @@ class RuntimeNavigationOperationAdapter:
         context: dict[str, Any],
     ) -> dict[str, Any]:
         action = _required_text(plan.get("semantic_action"), "semantic_action")
+        replay_context = _validated_replay_context(plan.get("replay_context"))
+        if replay_context is not None and action in {"read", "scroll"}:
+            return {
+                "contract_version": OPERATION_RESULT_CONTRACT,
+                "action_type": action,
+                "gate_result": {
+                    "allowed": False,
+                    "reason": "unsupported_reviewed_workflow_replay_action",
+                    "details": {"semantic_action": action},
+                },
+                "action_dispatched": False,
+                "action_executed": False,
+                "effect_verified": False,
+                "post_action_verified": False,
+                "replay_context": deepcopy(replay_context),
+                "evidence_refs": [],
+            }
         if action == "read":
             return self._read(plan=plan, context=context)
         if action == "scroll":
             return self._scroll(plan=plan, context=context)
-        return self._transition(plan=plan, context=context)
+        return self._transition(
+            plan=plan,
+            context=context,
+            replay_context=replay_context,
+        )
 
     def _read(
         self,
@@ -252,8 +276,23 @@ class RuntimeNavigationOperationAdapter:
         *,
         plan: dict[str, Any],
         context: dict[str, Any],
+        replay_context: dict[str, str] | None,
     ) -> dict[str, Any]:
-        self._fresh_record(plan)
+        current_record = self._fresh_record(plan)
+        source_freshness = _normalized_transition_source_freshness(
+            plan=plan,
+            current_record=current_record,
+        )
+
+        def result_lineage(*responses: Any) -> dict[str, Any]:
+            payload: dict[str, Any] = {
+                "source_freshness": deepcopy(source_freshness),
+                "evidence_refs": _response_evidence_refs(*responses),
+            }
+            if replay_context is not None:
+                payload["replay_context"] = deepcopy(replay_context)
+            return payload
+
         interface = (
             context.get("interface")
             if isinstance(context.get("interface"), dict)
@@ -267,22 +306,10 @@ class RuntimeNavigationOperationAdapter:
             or plan.get("semantic_action")
             or ""
         ).strip()
-        current_record = self._observer.latest_record()
-        current_observation = current_record.get("observation") if isinstance(current_record.get("observation"), dict) else {}
-        freshness = plan.get("freshness") if isinstance(plan.get("freshness"), dict) else {}
-        viewport = (
-            freshness.get("viewport")
-            or freshness.get("viewport_size")
-            or current_record.get("window_size")
-        )
         capture_lineage = {
-            "capture_id": str(freshness.get("capture_id") or current_observation.get("capture_id") or "").strip(),
-            "screenshot_sha256": str(
-                freshness.get("screenshot_sha256")
-                or current_observation.get("screenshot_sha256")
-                or ""
-            ).strip(),
-            "viewport": deepcopy(viewport) if isinstance(viewport, dict) else None,
+            "capture_id": source_freshness["capture_id"],
+            "screenshot_sha256": source_freshness["screenshot_sha256"],
+            "viewport": deepcopy(source_freshness["viewport_size"]),
         }
         body = {
             "agent_mode": "execute",
@@ -308,6 +335,11 @@ class RuntimeNavigationOperationAdapter:
                 "expected_target_interface_id": plan.get(
                     "expected_target_interface_id"
                 ),
+                **(
+                    {"replay_context": deepcopy(replay_context)}
+                    if replay_context is not None
+                    else {}
+                ),
             },
             "write_policy": {
                 "path_graph": False,
@@ -328,7 +360,7 @@ class RuntimeNavigationOperationAdapter:
                 },
                 "action_executed": False,
                 "post_action_verified": False,
-                "source_freshness": deepcopy(plan["freshness"]),
+                **result_lineage(dry_response),
             }
         dry_result = _required_api_result(dry_response, "recognition dry-run")
         pre_click = (
@@ -351,7 +383,7 @@ class RuntimeNavigationOperationAdapter:
                 },
                 "action_executed": False,
                 "post_action_verified": False,
-                "source_freshness": deepcopy(plan["freshness"]),
+                **result_lineage(dry_response),
             }
 
         real_body = deepcopy(body)
@@ -374,7 +406,7 @@ class RuntimeNavigationOperationAdapter:
                 "action_executed": False,
                 "post_action_verified": False,
                 "approved_plan_id": approved_plan_id,
-                "source_freshness": deepcopy(plan["freshness"]),
+                **result_lineage(dry_response, real_response),
             }
         real_result = _required_api_result(
             real_response,
@@ -410,7 +442,7 @@ class RuntimeNavigationOperationAdapter:
             "action_executed": action_executed,
             "post_action_verified": post_action_verified,
             "approved_plan_id": approved_plan_id,
-            "source_freshness": deepcopy(plan["freshness"]),
+            **result_lineage(dry_response, real_response),
         }
 
     def _fresh_record(self, plan: dict[str, Any]) -> dict[str, Any]:
@@ -518,6 +550,114 @@ class RuntimeNavigationOperationAdapter:
         )
         return _required_api_data(response, "read region batch")
 
+
+
+def _validated_replay_context(value: Any) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {
+        "contract_version",
+        "asset_content_sha256",
+        "transition_id",
+        "selection_sha256",
+    }:
+        raise ValueError("invalid reviewed workflow replay context")
+    asset_content_sha256 = str(value.get("asset_content_sha256") or "").strip()
+    transition_id = str(value.get("transition_id") or "").strip()
+    selection_sha256 = str(value.get("selection_sha256") or "").strip()
+    if (
+        value.get("contract_version") != REPLAY_EXECUTION_CONTEXT_CONTRACT
+        or not _SHA256_RE.fullmatch(asset_content_sha256)
+        or not transition_id
+        or not _SHA256_RE.fullmatch(selection_sha256)
+    ):
+        raise ValueError("invalid reviewed workflow replay context")
+    return {
+        "contract_version": REPLAY_EXECUTION_CONTEXT_CONTRACT,
+        "asset_content_sha256": asset_content_sha256.lower(),
+        "transition_id": transition_id,
+        "selection_sha256": selection_sha256.lower(),
+    }
+
+
+def _normalized_transition_source_freshness(
+    *,
+    plan: dict[str, Any],
+    current_record: dict[str, Any],
+) -> dict[str, Any]:
+    observation = current_record.get("observation")
+    freshness = plan.get("freshness")
+    if not isinstance(observation, dict) or not isinstance(freshness, dict):
+        raise ValueError("Operation source freshness is required")
+    current_viewport = _normalized_viewport_size(current_record.get("window_size"))
+    planned_viewport = freshness.get("viewport_size")
+    if planned_viewport is None:
+        planned_viewport = freshness.get("viewport")
+    viewport_size = (
+        _normalized_viewport_size(planned_viewport)
+        if planned_viewport is not None
+        else current_viewport
+    )
+    if viewport_size != current_viewport:
+        raise ValueError("Operation source viewport does not match the current capture")
+    source_freshness = {
+        "capture_id": _required_text(observation.get("capture_id"), "capture_id"),
+        "screenshot_sha256": _required_text(
+            observation.get("screenshot_sha256"),
+            "screenshot_sha256",
+        ),
+        "viewport_size": viewport_size,
+    }
+    trace_path = str(observation.get("trace_path") or "").strip()
+    if trace_path:
+        source_freshness["trace_path"] = trace_path
+    return source_freshness
+
+
+def _normalized_viewport_size(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        raise ValueError("viewport_size is required")
+    width, height = value.get("width"), value.get("height")
+    if (
+        not isinstance(width, int)
+        or isinstance(width, bool)
+        or width <= 0
+        or not isinstance(height, int)
+        or isinstance(height, bool)
+        or height <= 0
+    ):
+        raise ValueError("viewport_size must be positive")
+    return {"width": width, "height": height}
+
+
+def _response_evidence_refs(*responses: Any) -> list[str]:
+    refs: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str) and value.strip():
+            refs.add(value.strip())
+        elif isinstance(value, list):
+            for item in value:
+                add(item)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {
+                    "trace_path",
+                    "trace_paths",
+                    "evidence_path",
+                    "evidence_paths",
+                }:
+                    add(child)
+                visit(child)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    for response in responses:
+        visit(response)
+    return sorted(refs)
 
 def _validated_record(value: Any) -> dict[str, Any]:
     if (

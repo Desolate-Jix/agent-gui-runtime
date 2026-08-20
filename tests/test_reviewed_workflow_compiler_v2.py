@@ -474,6 +474,8 @@ def test_element_reference_must_belong_to_edge_source_node(tmp_path: Path) -> No
         "fill_field",
         "continue_next_step",
         "select_option",
+        "read",
+        "scroll",
         "wait",
         "unknown_action",
         "open_external_apply",

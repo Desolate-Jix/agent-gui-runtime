@@ -18,6 +18,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 
 ASSET_CONTRACT = "reviewed_workflow_asset_v2"
@@ -39,8 +40,6 @@ _FORBIDDEN_ACTIONS = {
 _ALLOWED_ACTIONS = {
     "open_detail",
     "open_apply_flow",
-    "read",
-    "scroll",
     "back",
     "close_modal",
     "fill_field",
@@ -338,6 +337,65 @@ def _is_normalized_project_relative_path(value: Any) -> bool:
     return posix_path.as_posix() == text and not text.startswith("//")
 
 
+def _web_application_identity_errors(application: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    origin_value = application.get("canonical_origin")
+    domain_value = application.get("canonical_domain")
+    if not isinstance(origin_value, str) or not origin_value:
+        return ["web application canonical_origin is required"]
+    if not isinstance(domain_value, str) or not domain_value:
+        return ["web application canonical_domain is required"]
+    if origin_value != origin_value.strip() or domain_value != domain_value.strip():
+        return ["web application canonical_origin and canonical_domain must be normalized"]
+    try:
+        parsed = urlsplit(origin_value)
+        port = parsed.port
+    except ValueError:
+        return ["web application canonical_origin is malformed"]
+    if parsed.scheme not in {"http", "https"}:
+        errors.append("web application canonical_origin must use http or https")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        errors.append("web application canonical_origin hostname is required")
+    if "%" in hostname:
+        errors.append(
+            "web application canonical_origin hostname must not contain percent encoding"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        errors.append("web application canonical_origin must not contain credentials")
+    if parsed.path or parsed.query or parsed.fragment:
+        errors.append(
+            "web application canonical_origin must not contain path, query, or fragment"
+        )
+    canonical_hostname = hostname.casefold()
+    if hostname != canonical_hostname:
+        errors.append("web application canonical_origin hostname must be lowercase")
+    try:
+        ascii_hostname = canonical_hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        ascii_hostname = ""
+        errors.append("web application canonical_origin hostname is malformed")
+    if ascii_hostname and ascii_hostname != canonical_hostname:
+        errors.append("web application canonical_origin hostname must use canonical IDNA form")
+    default_port = (parsed.scheme == "http" and port == 80) or (
+        parsed.scheme == "https" and port == 443
+    )
+    if default_port:
+        errors.append("web application canonical_origin must omit the default port")
+    host_for_origin = (
+        f"[{canonical_hostname}]" if ":" in canonical_hostname else canonical_hostname
+    )
+    expected_netloc = host_for_origin if port is None else f"{host_for_origin}:{port}"
+    expected_origin = f"{parsed.scheme}://{expected_netloc}"
+    if origin_value != expected_origin:
+        errors.append("web application canonical_origin is not normalized")
+    if domain_value != canonical_hostname:
+        errors.append(
+            "web application canonical_domain must equal canonical_origin hostname"
+        )
+    return errors
+
+
 def _contains_forbidden_semantic_reference(value: Any) -> bool:
     text = _text(value)
     if not text:
@@ -401,17 +459,16 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
     else:
         if application.get("identity_status") != "resolved":
             errors.append("application identity_status must be resolved")
-        kind = _text(application.get("kind") or application.get("type")).casefold()
+        kind = application.get("kind")
+        if kind not in {"web", "native"}:
+            errors.append("application.kind must be exactly lowercase web or native")
         if kind == "web":
-            if not _text(application.get("canonical_origin") or application.get("canonical_domain")):
-                errors.append("web application canonical origin/domain is required")
+            errors.extend(_web_application_identity_errors(application))
             if type(application.get("allow_external_sites")) is not bool:
                 errors.append("web application allow_external_sites must be an explicit boolean")
         elif kind == "native":
             if not _text(application.get("executable") or application.get("product_identity")):
                 errors.append("native application executable/product identity is required")
-        else:
-            errors.append("application kind must be web or native")
 
     lineage = canonical.get("source_review_lineage")
     if not isinstance(lineage, dict):
@@ -451,6 +508,7 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         states = []
     state_ids: set[str] = set()
     anchor_ids: set[str] = set()
+    anchor_owner_by_id: dict[str, str] = {}
     reviewed_state_ids: set[str] = set()
     for index, state in enumerate(states):
         label = f"states[{index}]"
@@ -492,11 +550,41 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
                 errors.append(f"duplicate anchor_id: {anchor_id}")
             else:
                 anchor_ids.add(anchor_id)
+                anchor_owner_by_id[anchor_id] = state_id
             if not _text(anchor.get("label") or anchor.get("value")):
                 errors.append(f"{anchor_label}.label is required")
         for transition_id in state.get("allowed_transition_ids") or []:
             if not _text(transition_id):
                 errors.append(f"{label}.allowed_transition_ids contains an empty ID")
+
+    element_owner_by_id: dict[str, str] = {}
+    declared_elements = canonical.get("elements")
+    if declared_elements is not None:
+        if not isinstance(declared_elements, list):
+            errors.append("elements must be a list")
+            declared_elements = []
+        for element_index, element in enumerate(declared_elements):
+            element_label = f"elements[{element_index}]"
+            if not isinstance(element, dict):
+                errors.append(f"{element_label} must be an object")
+                continue
+            element_id = _text(element.get("element_id") or element.get("id"))
+            if not element_id or not _ID_RE.fullmatch(element_id):
+                errors.append(f"{element_label}.element_id is invalid")
+                continue
+            owner_state_id = _text(element.get("owner_source_state_id"))
+            if not owner_state_id:
+                errors.append(f"{element_label}.owner_source_state_id is required")
+                continue
+            if owner_state_id not in state_ids:
+                errors.append(
+                    f"{element_label}.owner_source_state_id references an unknown state"
+                )
+                continue
+            if element_id in anchor_owner_by_id or element_id in element_owner_by_id:
+                errors.append(f"duplicate element/anchor reference ID: {element_id}")
+                continue
+            element_owner_by_id[element_id] = owner_state_id
 
     transitions = canonical.get("transitions")
     if not isinstance(transitions, list):
@@ -529,24 +617,27 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         elif action not in _ALLOWED_ACTIONS:
             errors.append(f"unsupported semantic action: {action}")
         reference_fields = ("element_ref", "action_ref", "memory_ref", "locator_anchor")
-        if not _text(next((transition.get(key) for key in reference_fields if transition.get(key)), "")):
-            errors.append(f"{label}.element/action/locator reference is required")
-        for reference_field in reference_fields:
-            reference = transition.get(reference_field)
+        selected_references = [
+            (reference_field, _text(transition.get(reference_field)))
+            for reference_field in reference_fields
+            if _text(transition.get(reference_field))
+        ]
+        if len(selected_references) != 1:
+            errors.append(f"{label} must contain exactly one target reference")
+        for reference_field, reference in selected_references:
             if _contains_forbidden_semantic_reference(reference):
                 errors.append(
                     f"forbidden semantic reference in {reference_field}: {_text(reference)}"
                 )
-        element_ref = _text(transition.get("element_ref"))
-        if element_ref and element_ref not in anchor_ids:
-            declared_elements = canonical.get("elements")
-            declared_element_ids = {
-                _text(item.get("element_id") or item.get("id"))
-                for item in (declared_elements if isinstance(declared_elements, list) else [])
-                if isinstance(item, dict)
-            }
-            if element_ref not in declared_element_ids:
-                errors.append(f"unknown element_ref: {element_ref}")
+        for owned_reference_field, reference_id in selected_references:
+            owner_state_id = anchor_owner_by_id.get(reference_id) or element_owner_by_id.get(
+                reference_id
+            )
+            if owner_state_id != source_id:
+                errors.append(
+                    f"{label}.{owned_reference_field} reference must belong to source state "
+                    f"{source_id}: {reference_id}"
+                )
 
         source_state = next((state for state in states if isinstance(state, dict) and state.get("state_id") == source_id), None)
         if source_state and source_state.get("availability") != "reviewed":

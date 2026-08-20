@@ -344,6 +344,22 @@ def test_validator_rejects_unresolved_or_stale_identity_lineage(field: str, valu
         validate_reviewed_workflow_asset(asset)
 
 
+@pytest.mark.parametrize("mutation", ["missing", "type_alias", "uppercase"])
+def test_application_kind_must_be_explicit_canonical_lowercase(mutation: str) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    if mutation == "missing":
+        asset["application"].pop("kind")
+    elif mutation == "type_alias":
+        asset["application"].pop("kind")
+        asset["application"]["type"] = "web"
+    elif mutation == "uppercase":
+        asset["application"]["kind"] = "WEB"
+    with pytest.raises(ValueError, match="application.kind.*web or native"):
+        validate_reviewed_workflow_asset(asset)
+
+
 def test_validator_rejects_duplicate_and_dangling_ids() -> None:
     from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
 
@@ -356,6 +372,91 @@ def test_validator_rejects_duplicate_and_dangling_ids() -> None:
     dangling["transitions"][0]["target_state_id"] = "missing"
     with pytest.raises(ValueError, match="unknown target_state_id"):
         validate_reviewed_workflow_asset(dangling)
+
+
+@pytest.mark.parametrize("reference_field", ["element_ref", "action_ref", "locator_anchor"])
+def test_transition_reference_must_be_owned_by_its_source_state(
+    reference_field: str,
+) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    apply_entry = next(
+        state for state in asset["states"] if state["state_id"] == "apply_entry"
+    )
+    apply_entry["identity_anchors"].append(
+        {
+            "anchor_id": "apply_entry_only_control",
+            "label": "Apply entry only control",
+            "kind": "control",
+        }
+    )
+    transition = asset["transitions"][0]
+    transition.pop("element_ref", None)
+    transition[reference_field] = "apply_entry_only_control"
+
+    with pytest.raises(ValueError, match="reference.*source state"):
+        validate_reviewed_workflow_asset(asset)
+
+
+def test_global_element_reference_requires_matching_source_state_owner() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    missing_owner = _asset()
+    missing_owner["elements"] = [{"element_id": "global_job_card"}]
+    missing_owner["transitions"][0]["element_ref"] = "global_job_card"
+    with pytest.raises(ValueError, match="owner_source_state_id"):
+        validate_reviewed_workflow_asset(missing_owner)
+
+    wrong_owner = _asset()
+    wrong_owner["elements"] = [
+        {
+            "element_id": "global_job_card",
+            "owner_source_state_id": "apply_entry",
+        }
+    ]
+    wrong_owner["transitions"][0]["element_ref"] = "global_job_card"
+    with pytest.raises(ValueError, match="reference.*source state"):
+        validate_reviewed_workflow_asset(wrong_owner)
+
+
+def test_transition_requires_exactly_one_target_reference() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    multiple = _asset()
+    multiple["transitions"][0]["action_ref"] = "job_card"
+    with pytest.raises(ValueError, match="exactly one.*reference"):
+        validate_reviewed_workflow_asset(multiple)
+
+    none = _asset()
+    none["transitions"][0].pop("element_ref")
+    with pytest.raises(ValueError, match="exactly one.*reference"):
+        validate_reviewed_workflow_asset(none)
+
+
+def test_memory_reference_must_resolve_to_source_owned_anchor() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    undeclared = _asset()
+    undeclared["transitions"][0].pop("element_ref")
+    undeclared["transitions"][0]["memory_ref"] = "undeclared_memory_target"
+    with pytest.raises(ValueError, match="memory_ref.*source state"):
+        validate_reviewed_workflow_asset(undeclared)
+
+    wrong_state = _asset()
+    wrong_state["transitions"][0].pop("element_ref")
+    wrong_state["transitions"][0]["memory_ref"] = "quick_apply"
+    with pytest.raises(ValueError, match="memory_ref.*source state"):
+        validate_reviewed_workflow_asset(wrong_state)
+
+    source_owned = _asset()
+    source_owned["transitions"][0].pop("element_ref")
+    source_owned["transitions"][0]["memory_ref"] = "job_card"
+    validated = validate_reviewed_workflow_asset(source_owned)
+    selected = next(
+        item for item in validated["transitions"] if item["transition_id"] == "open_detail"
+    )
+    assert selected["memory_ref"] == "job_card"
 
 
 def test_stop_boundary_cannot_declare_outgoing_transitions() -> None:
@@ -521,6 +622,16 @@ def test_validator_rejects_dangerous_action_aliases(semantic_action: str) -> Non
         validate_reviewed_workflow_asset(asset)
 
 
+@pytest.mark.parametrize("semantic_action", ["read", "scroll"])
+def test_validator_rejects_out_of_scope_read_and_scroll(semantic_action: str) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    asset["transitions"][0]["semantic_action"] = semantic_action
+    with pytest.raises(ValueError, match="unsupported semantic action"):
+        validate_reviewed_workflow_asset(asset)
+
+
 @pytest.mark.parametrize("reference_field", ["action_ref", "memory_ref", "locator_anchor", "element_ref"])
 def test_validator_rejects_dangerous_semantics_hidden_in_reference_ids(reference_field: str) -> None:
     from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
@@ -585,6 +696,10 @@ def test_validator_allows_read_only_references_containing_dangerous_prefixes(
     transition = asset["transitions"][0]
     transition.pop("element_ref")
     transition["locator_anchor"] = safe_ref
+    homepage = next(state for state in asset["states"] if state["state_id"] == "homepage")
+    homepage["identity_anchors"].append(
+        {"anchor_id": safe_ref, "label": safe_ref, "kind": "read_only"}
+    )
     validated = validate_reviewed_workflow_asset(asset)
     selected = next(
         item for item in validated["transitions"] if item["transition_id"] == "open_detail"
@@ -830,6 +945,89 @@ def test_web_application_requires_explicit_boolean_external_site_policy(
     else:
         asset["application"]["allow_external_sites"] = allow_external_sites
     with pytest.raises(ValueError, match="allow_external_sites.*boolean"):
+        validate_reviewed_workflow_asset(asset)
+
+
+@pytest.mark.parametrize(
+    ("origin", "domain"),
+    [
+        ("https://evil.example", "nz.seek.com"),
+        ("https://NZ.SEEK.COM", "nz.seek.com"),
+        ("https://nz.seek.com:443", "nz.seek.com"),
+        ("http://nz.seek.com:80", "nz.seek.com"),
+        ("https://user:pass@nz.seek.com", "nz.seek.com"),
+        ("https://nz.seek.com/jobs", "nz.seek.com"),
+        ("https://nz.seek.com?x=1", "nz.seek.com"),
+        ("https://nz.seek.com#fragment", "nz.seek.com"),
+        ("ftp://nz.seek.com", "nz.seek.com"),
+        ("not-an-origin", "nz.seek.com"),
+        ("https://nz%2eseek.com", "nz%2eseek.com"),
+        ("https://nz%.seek.com", "nz%.seek.com"),
+    ],
+)
+def test_web_application_rejects_mismatched_or_noncanonical_origin(
+    origin: str,
+    domain: str,
+) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    asset["application"]["canonical_origin"] = origin
+    asset["application"]["canonical_domain"] = domain
+    with pytest.raises(ValueError, match="canonical_origin|canonical_domain"):
+        validate_reviewed_workflow_asset(asset)
+
+
+@pytest.mark.parametrize(
+    ("origin", "domain"),
+    [
+        ("https://nz.seek.com", "nz.seek.com"),
+        ("http://localhost:8080", "localhost"),
+    ],
+)
+def test_web_application_accepts_normalized_origin_and_matching_domain(
+    origin: str,
+    domain: str,
+) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    asset["application"]["canonical_origin"] = origin
+    asset["application"]["canonical_domain"] = domain
+    validated = validate_reviewed_workflow_asset(asset)
+    assert validated["application"]["canonical_origin"] == origin
+    assert validated["application"]["canonical_domain"] == domain
+
+
+def test_web_application_accepts_bracketed_ipv6_origin_with_hostname_domain() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    asset["application"]["canonical_origin"] = "https://[::1]"
+    asset["application"]["canonical_domain"] = "::1"
+    validated = validate_reviewed_workflow_asset(asset)
+    assert validated["application"]["canonical_origin"] == "https://[::1]"
+    assert validated["application"]["canonical_domain"] == "::1"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://[::1]:443",
+        "https://user:pass@[::1]",
+        "https://[::1]/path",
+        "https://[::1]?query=1",
+        "https://[::1]#fragment",
+        "https://::1",
+    ],
+)
+def test_web_application_rejects_noncanonical_ipv6_origin(origin: str) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    asset["application"]["canonical_origin"] = origin
+    asset["application"]["canonical_domain"] = "::1"
+    with pytest.raises(ValueError, match="canonical_origin|canonical_domain"):
         validate_reviewed_workflow_asset(asset)
 
 

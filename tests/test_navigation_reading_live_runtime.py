@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from app.agent.navigation_reading_live_runtime import (
     BufferedNavigationRuntimeObserver,
     RuntimeNavigationOperationAdapter,
@@ -63,6 +65,10 @@ def _freshness(capture_id: str) -> dict:
         "screenshot_sha256": observation["screenshot_sha256"],
         "trace_path": observation["trace_path"],
     }
+
+
+def _transition_freshness(capture_id: str) -> dict:
+    return _freshness(capture_id) | {"viewport_size": {"width": 1000, "height": 700}}
 
 
 def test_runtime_adapter_merges_current_read_evidence() -> None:
@@ -491,7 +497,7 @@ def test_runtime_adapter_reports_pre_click_rejection_as_safe_gate_result() -> No
     }
     assert result["action_executed"] is False
     assert result["post_action_verified"] is False
-    assert result["source_freshness"] == _freshness("capture-list")
+    assert result["source_freshness"] == _transition_freshness("capture-list")
 
 
 def test_runtime_adapter_reports_foreground_verification_failure_as_safe_intercept() -> None:
@@ -569,4 +575,258 @@ def test_runtime_adapter_reports_foreground_verification_failure_as_safe_interce
     }
     assert result["action_executed"] is False
     assert result["post_action_verified"] is False
-    assert result["source_freshness"] == _freshness("capture-list")
+    assert result["source_freshness"] == _transition_freshness("capture-list")
+
+
+
+def _replay_context() -> dict:
+    return {
+        "contract_version": "reviewed_workflow_replay_execution_context_v1",
+        "asset_content_sha256": "a" * 64,
+        "transition_id": "homepage_to_detail",
+        "selection_sha256": "b" * 64,
+    }
+
+
+def test_runtime_adapter_propagates_valid_replay_envelope_lineage_and_server_evidence() -> None:
+    captures = iter([
+        _record("capture-list"),
+        _record("capture-detail", interface_id="fixture_detail"),
+    ])
+    observer = BufferedNavigationRuntimeObserver(
+        capture_current=lambda expected_interface_id=None: next(captures)
+    )
+    assert observer.observe_current()["capture_id"] == "capture-list"
+    calls: list[tuple[str, dict]] = []
+
+    def post_json(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        if payload["dry_run"]:
+            return {
+                "success": True,
+                "data": {
+                    "result": {
+                        "approved_plan_id": "approved-replay",
+                        "pre_click_decision": {"allowed": True, "reason": "approved_plan"},
+                        "trace_path": "logs/traces/dry-replay.json",
+                    }
+                },
+            }
+        return {
+            "success": True,
+            "data": {
+                "result": {
+                    "execution_path": {"action_executed": True},
+                    "post_click_verification": {"verified": True},
+                    "trace_path": "logs/traces/real-replay.json",
+                    "evidence_path": "evidence/replay/real.json",
+                }
+            },
+        }
+
+    context = _replay_context()
+    adapter = RuntimeNavigationOperationAdapter(
+        post_json=post_json, observer=observer, app_name="fixture"
+    )
+    result = adapter.execute(
+        {
+            "semantic_action": "open_detail",
+            "operation_goal": "Open the reviewed detail.",
+            "expected_target_interface_id": "fixture_detail",
+            "freshness": _freshness("capture-list") | {"viewport": {"width": 1000, "height": 700}},
+            "replay_context": context,
+        },
+        {"read_state": {}, "choices": []},
+    )
+
+    assert len(calls) == 2
+    assert calls[0][1]["metadata"]["replay_context"] == context
+    assert calls[1][1]["metadata"]["replay_context"] == context
+    assert result["replay_context"] == context
+    assert result["source_freshness"] == {
+        "capture_id": "capture-list",
+        "screenshot_sha256": _record("capture-list")["observation"]["screenshot_sha256"],
+        "viewport_size": {"width": 1000, "height": 700},
+        "trace_path": "logs/traces/capture-list.json",
+    }
+    assert result["evidence_refs"] == [
+        "evidence/replay/real.json",
+        "logs/traces/dry-replay.json",
+        "logs/traces/real-replay.json",
+    ]
+
+
+def test_runtime_adapter_rejects_invalid_replay_context_before_post() -> None:
+    observer = BufferedNavigationRuntimeObserver(
+        capture_current=lambda expected_interface_id=None: _record("capture-list")
+    )
+    assert observer.observe_current()["capture_id"] == "capture-list"
+    calls: list[tuple[str, dict]] = []
+    adapter = RuntimeNavigationOperationAdapter(
+        post_json=lambda path, payload: calls.append((path, payload)) or {},
+        observer=observer,
+        app_name="fixture",
+    )
+
+    with pytest.raises(ValueError, match="invalid reviewed workflow replay context"):
+        adapter.execute(
+            {
+                "semantic_action": "open_detail",
+                "operation_goal": "Open the reviewed detail.",
+                "freshness": _freshness("capture-list"),
+                "replay_context": _replay_context() | {"selection_sha256": "not-a-sha"},
+            },
+            {"read_state": {}, "choices": []},
+        )
+
+    assert calls == []
+
+
+def test_runtime_adapter_normalizes_replay_source_viewport_from_current_record_fallback() -> None:
+    observer = BufferedNavigationRuntimeObserver(
+        capture_current=lambda expected_interface_id=None: _record("capture-list")
+    )
+    assert observer.observe_current()["capture_id"] == "capture-list"
+    context = _replay_context()
+    adapter = RuntimeNavigationOperationAdapter(
+        post_json=lambda path, payload: {
+            "success": False,
+            "error": {"code": "pre_click_rejected", "details": []},
+        },
+        observer=observer,
+        app_name="fixture",
+    )
+    result = adapter.execute(
+        {
+            "semantic_action": "open_detail",
+            "operation_goal": "Open the reviewed detail.",
+            "freshness": _freshness("capture-list"),
+            "replay_context": context,
+        },
+        {"read_state": {}, "choices": []},
+    )
+
+    assert result["replay_context"] == context
+    assert result["source_freshness"]["viewport_size"] == {"width": 1000, "height": 700}
+    assert "viewport" not in result["source_freshness"]
+    assert result["evidence_refs"] == []
+
+
+def test_runtime_adapter_preserves_safety_rejection_reason_with_replay_envelope() -> None:
+    observer = BufferedNavigationRuntimeObserver(
+        capture_current=lambda expected_interface_id=None: _record("capture-list")
+    )
+    assert observer.observe_current()["capture_id"] == "capture-list"
+    calls: list[tuple[str, dict]] = []
+
+    def post_json(path: str, payload: dict) -> dict:
+        calls.append((path, payload))
+        if payload["dry_run"]:
+            return {
+                "success": True,
+                "data": {"result": {
+                    "approved_plan_id": "approved-stale",
+                    "pre_click_decision": {"allowed": True, "reason": "approved_plan"},
+                    "trace_path": "logs/traces/dry-stale.json",
+                }},
+            }
+        return {
+            "success": False,
+            "data": {"trace_path": "logs/traces/real-stale.json"},
+            "error": {"code": "stale_approved_plan", "details": "content changed"},
+        }
+
+    context = _replay_context()
+    adapter = RuntimeNavigationOperationAdapter(
+        post_json=post_json, observer=observer, app_name="fixture"
+    )
+    result = adapter.execute(
+        {
+            "semantic_action": "open_detail",
+            "operation_goal": "Open the reviewed detail.",
+            "freshness": _freshness("capture-list"),
+            "replay_context": context,
+        },
+        {"read_state": {}, "choices": []},
+    )
+
+    assert result["gate_result"]["reason"] == "stale_approved_plan"
+    assert result["replay_context"] == context
+    assert result["evidence_refs"] == [
+        "logs/traces/dry-stale.json",
+        "logs/traces/real-stale.json",
+    ]
+
+
+
+@pytest.mark.parametrize("action", ["read", "scroll"])
+def test_runtime_adapter_blocks_replay_read_and_scroll_before_observe_or_post(action: str) -> None:
+    capture_calls = 0
+    post_calls: list[tuple[str, dict]] = []
+
+    def capture_current(expected_interface_id=None) -> dict:
+        nonlocal capture_calls
+        capture_calls += 1
+        return _record("unexpected-capture")
+
+    adapter = RuntimeNavigationOperationAdapter(
+        post_json=lambda path, payload: post_calls.append((path, payload)) or {},
+        observer=BufferedNavigationRuntimeObserver(capture_current=capture_current),
+        app_name="fixture",
+    )
+    context = _replay_context()
+    result = adapter.execute(
+        {
+            "semantic_action": action,
+            "freshness": _freshness("capture-list"),
+            "replay_context": context,
+        },
+        {"read_state": {}, "choices": []},
+    )
+
+    assert capture_calls == 0
+    assert post_calls == []
+    assert result == {
+        "contract_version": "navigation_reading_operation_result_v1",
+        "action_type": action,
+        "gate_result": {
+            "allowed": False,
+            "reason": "unsupported_reviewed_workflow_replay_action",
+            "details": {"semantic_action": action},
+        },
+        "action_dispatched": False,
+        "action_executed": False,
+        "effect_verified": False,
+        "post_action_verified": False,
+        "replay_context": context,
+        "evidence_refs": [],
+    }
+
+
+def test_runtime_adapter_rejects_malformed_replay_read_before_observe_or_post() -> None:
+    capture_calls = 0
+    post_calls: list[tuple[str, dict]] = []
+
+    def capture_current(expected_interface_id=None) -> dict:
+        nonlocal capture_calls
+        capture_calls += 1
+        return _record("unexpected-capture")
+
+    adapter = RuntimeNavigationOperationAdapter(
+        post_json=lambda path, payload: post_calls.append((path, payload)) or {},
+        observer=BufferedNavigationRuntimeObserver(capture_current=capture_current),
+        app_name="fixture",
+    )
+
+    with pytest.raises(ValueError, match="invalid reviewed workflow replay context"):
+        adapter.execute(
+            {
+                "semantic_action": "read",
+                "freshness": _freshness("capture-list"),
+                "replay_context": {"contract_version": "bad"},
+            },
+            {"read_state": {}, "choices": []},
+        )
+
+    assert capture_calls == 0
+    assert post_calls == []

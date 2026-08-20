@@ -18,7 +18,7 @@ from app.learn.interface_workflow_review import (
 
 _COMPILE_CONTRACT = "reviewed_workflow_compile_result_v2"
 _REGISTRY_CONTRACT = "interface_workflow_library_registry_v1"
-_ALLOWED_ACTIONS = {"open_detail", "open_apply_flow", "read", "scroll", "back", "close_modal"}
+_ALLOWED_ACTIONS = {"open_detail", "open_apply_flow", "back", "close_modal"}
 _STOP_BOUNDARY_STATUS = "needs_learning"
 _SAFE_ID_PART = re.compile(r"[^A-Za-z0-9_.:-]+")
 

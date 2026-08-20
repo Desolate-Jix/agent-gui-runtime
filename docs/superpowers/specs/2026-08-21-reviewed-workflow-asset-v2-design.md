@@ -79,7 +79,7 @@ State 中禁止 `click_point`、`actual_point`、`screen_point`、`window_handle
 - recovery policy；
 - risk policy。
 
-允许的首个 MVP 动作只有 `open_detail`、`open_apply_flow`、`read`、`scroll`、`back`、`close_modal`。`fill_field` 和 `continue_next_step` 可以保留为 blocked semantics，但不进入本轮 replay。
+首个可验证回放里程碑只允许 `open_detail`、`open_apply_flow`、`back`、`close_modal`。`read` 和 `scroll` 需要各自的 effect contract、scope verification 与可信 replay envelope，本轮与 `fill_field`、`continue_next_step` 一样在编译、资产校验和 replay 入口统一 fail-closed，避免把 click-style verifier 错用于读取或滚动。
 
 以下语义及别名永远拒绝自动执行：
 
