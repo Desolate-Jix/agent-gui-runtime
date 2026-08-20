@@ -2544,7 +2544,7 @@ def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disa
                 {
                     "provider": "windows_uia",
                     "control_id": "resume_radio",
-                    "name": "WENQING_JI.pdf",
+                    "name": "EXAMPLE_USER.pdf",
                     "control_type": "RadioButton",
                     "automation_id": "resumeRadio",
                     "class_name": "RadioButton",
@@ -2565,7 +2565,7 @@ def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disa
             "image_path": str(image_path),
             "provider_mode": "local_grounding",
             "task": "click_target",
-            "goal": "Select WENQING_JI.pdf resume radio button",
+            "goal": "Select EXAMPLE_USER.pdf resume radio button",
             "app_name": "demo",
             "agent_mode": "execute",
             "top_k": 3,

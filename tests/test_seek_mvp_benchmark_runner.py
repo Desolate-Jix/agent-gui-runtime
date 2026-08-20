@@ -855,7 +855,7 @@ def test_safe_fill_fixture_attempted_zero_is_not_covered(tmp_path: Path) -> None
 
 
 def test_safe_fill_fixture_raw_pii_is_not_emitted_in_report(tmp_path: Path) -> None:
-    raw_pii = "Ada.Private+seek@example.test"
+    raw_pii = "private@example.invalid"
     screenshot = tmp_path / "screen.png"
     screenshot.write_bytes(b"safe fill pii audit screenshot")
     checksum = hashlib.sha256(screenshot.read_bytes()).hexdigest()

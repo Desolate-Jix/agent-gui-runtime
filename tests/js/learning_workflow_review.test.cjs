@@ -451,7 +451,7 @@ test("live safe-fill preflight projection is redacted and non-authorizing", () =
       value_length: 31,
       value_hash: "abc123",
       value_redacted: true,
-      raw_value: "must-not-leak@example.com",
+      raw_value: "must-not-leak@example.invalid",
     },
     target: { state_type: "easy_apply", current_step: "Contact details" },
     expected_verification: {
@@ -476,7 +476,7 @@ test("live safe-fill preflight projection is redacted and non-authorizing", () =
   assert.equal(projection.value_evidence.value_hash, "abc123");
   assert.equal(projection.safety.artifact_is_authorization, false);
   assert.equal(projection.interpretation.includes("not authorization"), true);
-  assert.equal(JSON.stringify(projection).includes("must-not-leak@example.com"), false);
+  assert.equal(JSON.stringify(projection).includes("must-not-leak@example.invalid"), false);
 });
 
 test("unrecognized or unsafe preflight is not reviewable", () => {

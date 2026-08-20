@@ -48,7 +48,7 @@ def test_cli_accepts_real_profile_and_writes_report(tmp_path, capsys) -> None:
                 "profile_source": "real_user_candidate_profile_v1",
                 "profile_purpose": "real_resume_profile",
                 "candidate_name": "Alex Chen",
-                "email": "alex@example.com",
+                "email": "user@example.invalid",
                 "skills": ["Python", "JavaScript"],
                 "target_roles": ["Software Engineer"],
                 "location_constraints": ["Auckland", "Remote"],

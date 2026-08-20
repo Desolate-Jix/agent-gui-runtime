@@ -53,7 +53,7 @@ def test_reviewed_profile_fields_are_auto_fill_without_raw_pii(
         "last_name": "PrivateLast",
         "preferred_name": "PrivatePreferred",
         "email": "private@example.invalid",
-        "phone": "+64 21 555 0199",
+        "phone": "+64 00 000 0000",
     }[field_key]
 
     decision = plan_form_answer(

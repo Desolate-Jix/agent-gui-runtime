@@ -3816,7 +3816,11 @@ def test_learning_draft_panel_renders_open_detail_transition_hints() -> None:
     assert 'clearLearningDraftWorkspaceForNewRun("not_loaded · new learning run started")' in run_flow_body
     assert run_flow_body.index("clearLearningDraftWorkspaceForNewRun") < run_flow_body.index("runLearningInterfaceCaptureStrategy")
     assert 'clearScreenUnderstandingResidualDisplays("not_loaded · screen understanding started")' in capture_trial_body
-    assert "await loadLearningDraftReview({ skipResponse: true })" in run_trial_body
+    assert "await applyLearningDraftTrialResponse(response, options)" in run_trial_body
+    apply_trial_start = panel_js.index("async function applyLearningDraftTrialResponse")
+    apply_trial_end = panel_js.index("function learningReviewLabel", apply_trial_start)
+    apply_trial_body = panel_js[apply_trial_start:apply_trial_end]
+    assert "await loadLearningDraftReview({" in apply_trial_body
     assert 'clearScreenUnderstandingResidualDisplays("not_loaded · generating learning draft", {' in run_trial_body
     assert "preserveTwoStageReportPath: Boolean(options.preserveTwoStageReportPath)" in run_trial_body
     request_payload_start = panel_js.index("function learningRecognitionTrialRequestPayload")
@@ -5109,7 +5113,7 @@ def test_panel_loads_only_redacted_live_safe_fill_preflight(tmp_path: Path) -> N
                     "value_hash": "abc123",
                     "value_length": 17,
                     "value_redacted": True,
-                    "raw_value": "must-not-leak@example.com",
+                    "raw_value": "must-not-leak@example.invalid",
                 },
                 "safety": {"artifact_is_authorization": False},
                 "pii_redacted": True,
@@ -5128,7 +5132,7 @@ def test_panel_loads_only_redacted_live_safe_fill_preflight(tmp_path: Path) -> N
         assert payload["success"] is True
         assert payload["data"]["contract_version"] == "seek_live_safe_fill_preflight_v1"
         assert payload["data"]["pii_redacted"] is True
-        assert "must-not-leak@example.com" not in response.text
+        assert "must-not-leak@example.invalid" not in response.text
     finally:
         preflight_path.unlink(missing_ok=True)
         preflight_dir.rmdir()

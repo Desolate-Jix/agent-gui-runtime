@@ -15,10 +15,10 @@ http://127.0.0.1:8000/panel
 http://127.0.0.1:8000
 
 你的任务：
-<在这里写任务，例如：打开 SEEK 首页，找两个适合 Wenqing Ji 的软件/AI/自动化相关岗位，只记录岗位信息和判断，不申请>
+<在这里写任务，例如：打开 SEEK 首页，找两个适合 Example User 的软件/AI/自动化相关岗位，只记录岗位信息和判断，不申请>
 
 候选人/用户资料：
-<在这里写资料路径或摘要，例如：D:\资料\CV\candidate_profile_wenqingji_personal.json；D:\资料\CV 目录里的 CV 和签证文件是个人资料来源>
+<在这里写资料路径或摘要，例如：C:\Users\Example\Documents\CV\candidate_profile_example_user_personal.json；C:\Users\Example\Documents\CV 目录里的 CV 和签证文件是个人资料来源>
 
 必须先阅读这些文件：
 1. D:\agent-gui-runtime\AGENT_ONBOARDING.md

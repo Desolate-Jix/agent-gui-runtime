@@ -118,8 +118,8 @@ def test_answer_plan_recognizes_common_safe_text_fields_only_with_profile_values
             "contract_version": "candidate_profile_v1",
             "first_name": "Alex",
             "last_name": "Chen",
-            "email": "alex@example.com",
-            "github_url": "https://github.com/alex",
+            "email": "user@example.invalid",
+            "github_url": "https://github.com/example-user",
         },
         application_flow_state=flow,
     )
@@ -129,8 +129,8 @@ def test_answer_plan_recognizes_common_safe_text_fields_only_with_profile_values
     assert by_label["Last name"]["category"] == "auto_safe_known"
     assert by_label["Email address"]["category"] == "auto_safe_known"
     assert by_label["GitHub profile"]["category"] == "auto_safe_known"
-    assert by_label["Email address"]["value_preview"] == "<redacted:email:len=16>"
-    assert by_label["Email address"]["value_length"] == len("alex@example.com")
+    assert by_label["Email address"]["value_preview"] == "<redacted:email:len=20>"
+    assert by_label["Email address"]["value_length"] == len("user@example.invalid")
     assert len(by_label["Email address"]["value_hash"]) == 64
     assert by_label["First name"]["value_preview"] == "<redacted:name:len=4>"
     assert by_label["Phone"]["category"] == "needs_user_review"
@@ -158,16 +158,16 @@ def test_answer_plan_output_does_not_echo_raw_email_or_phone() -> None:
     plan = build_application_answer_plan(
         profile={
             "contract_version": "candidate_profile_v1",
-            "email": "alex@example.com",
-            "phone": "+64 21 555 0123",
+            "email": "user@example.invalid",
+            "phone": "+64 00 000 0000",
         },
         application_flow_state=flow,
     )
 
     payload_text = json.dumps(plan, ensure_ascii=False)
-    assert "alex@example.com" not in payload_text
-    assert "+64 21 555 0123" not in payload_text
-    assert "<redacted:email:len=16>" in payload_text
+    assert "user@example.invalid" not in payload_text
+    assert "+64 00 000 0000" not in payload_text
+    assert "<redacted:email:len=20>" in payload_text
     assert "<redacted:phone:len=15>" in payload_text
 
 
@@ -188,8 +188,8 @@ def test_answer_plan_does_not_autofill_buttons_or_dropdowns_with_profile_values(
     plan = build_application_answer_plan(
         profile={
             "contract_version": "candidate_profile_v1",
-            "email": "alex@example.com",
-            "phone": "0210000000",
+            "email": "user@example.invalid",
+            "phone": "+1 555 010 0001",
         },
         application_flow_state=flow,
     )

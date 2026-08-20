@@ -1376,11 +1376,11 @@ def test_extract_final_review_writes_reconciliation_without_clicks(monkeypatch, 
                 "submit_clicks": 0,
                 "final_submissions": 0,
                 "filled_content": {
-                    "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+                    "resume": "Example User.pdf (SEEK default/selected resume)",
                     "cover_letter": (
                         "Dear Hiring Team,\n\n"
                         "I am interested because the role aligns with React, SQL, and careful testing.\n\n"
-                        "Kind regards,\nWenqing Ji"
+                        "Kind regards,\nExample User"
                     ),
                     "employer_questions": [
                         {"question": "Can you start immediately or within 1-2 weeks?", "answer": "Yes"},
@@ -1405,7 +1405,7 @@ def test_extract_final_review_writes_reconciliation_without_clicks(monkeypatch, 
                 "available_actions": [{"label": "Submit application"}],
                 "page_elements": [
                     {"text": "Review and submit"},
-                    {"text": "WENQING JI.pdf"},
+                    {"text": "Example User.pdf"},
                     {"text": "I am interested because the role aligns with React, SQL, and careful testing."},
                     {"text": "Can you start immediately or within 1-2 weeks?"},
                     {"text": "Yes"},

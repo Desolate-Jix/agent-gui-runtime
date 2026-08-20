@@ -3402,7 +3402,7 @@ def _expected_visible_in_ocr(expected: str, observed: str) -> dict[str, Any]:
 def _expected_ocr_anchors(expected: str) -> list[str]:
     words = [word for word in expected.split() if word]
     anchors: list[str] = []
-    for phrase in ("dear hiring team", "kind regards", "wenqing ji"):
+    for phrase in ("dear hiring team", "kind regards", "example user"):
         if phrase in expected:
             anchors.append(phrase)
     for start in (0, 8, max(0, len(words) // 2 - 4), max(0, len(words) - 8)):

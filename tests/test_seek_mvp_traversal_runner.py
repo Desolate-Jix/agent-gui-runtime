@@ -1122,8 +1122,8 @@ def test_runner_scores_profile_and_saves_suitable_job(tmp_path, monkeypatch) -> 
                 "profile_source": "real_user_candidate_profile_v1",
                 "profile_purpose": "real_resume_profile",
                 "candidate_name": "Alex Chen",
-                "email": "alex@example.com",
-                "phone": "+64 21 555 0123",
+                "email": "user@example.invalid",
+                "phone": "+64 00 000 0000",
                 "experience_summary": ["Built production-style C# and test automation projects."],
                 "skills": ["C#", "test automation", "photonics"],
                 "target_roles": ["Software Engineer"],
@@ -1209,12 +1209,12 @@ def test_runner_scores_profile_and_saves_suitable_job(tmp_path, monkeypatch) -> 
     report_text = json.dumps(report, ensure_ascii=False)
     saved_text = json.dumps(saved, ensure_ascii=False)
     trace_text = json.dumps(trace, ensure_ascii=False)
-    assert "alex@example.com" not in report_text
-    assert "+64 21 555 0123" not in report_text
-    assert "alex@example.com" not in saved_text
-    assert "+64 21 555 0123" not in saved_text
-    assert "alex@example.com" not in trace_text
-    assert "+64 21 555 0123" not in trace_text
+    assert "user@example.invalid" not in report_text
+    assert "+64 00 000 0000" not in report_text
+    assert "user@example.invalid" not in saved_text
+    assert "+64 00 000 0000" not in saved_text
+    assert "user@example.invalid" not in trace_text
+    assert "+64 00 000 0000" not in trace_text
 
 
 def test_runner_no_apply_matching_runs_when_profile_source_not_live_ready(tmp_path, monkeypatch) -> None:
@@ -1227,8 +1227,8 @@ def test_runner_no_apply_matching_runs_when_profile_source_not_live_ready(tmp_pa
                 "contract_version": "candidate_profile_v1",
                 "profile_purpose": "real_resume_profile",
                 "candidate_name": "Alex Chen",
-                "email": "alex@example.com",
-                "phone": "+64 21 555 0123",
+                "email": "user@example.invalid",
+                "phone": "+64 00 000 0000",
                 "experience_summary": ["Built production-style C# and test automation projects."],
                 "skills": ["C#", "test automation", "photonics"],
                 "target_roles": ["Software Engineer"],
@@ -1289,8 +1289,8 @@ def test_runner_no_apply_matching_runs_when_profile_source_not_live_ready(tmp_pa
     assert report["application_flows_started"] == 0
     assert report["saved_jobs"]
     report_text = json.dumps(report, ensure_ascii=False)
-    assert "alex@example.com" not in report_text
-    assert "+64 21 555 0123" not in report_text
+    assert "user@example.invalid" not in report_text
+    assert "+64 00 000 0000" not in report_text
 
 
 def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, monkeypatch) -> None:
@@ -1304,7 +1304,7 @@ def test_runner_apply_entry_for_strong_apply_starts_flow_and_stops(tmp_path, mon
                 "profile_source": "real_user_candidate_profile_v1",
                 "profile_purpose": "real_resume_profile",
                 "candidate_name": "Alex Chen",
-                "email": "alex@example.com",
+                "email": "user@example.invalid",
                 "experience_summary": ["Built production-style C# and test automation projects."],
                 "skills": ["C#", "test automation", "photonics"],
                 "target_roles": ["Software Engineer"],
@@ -1467,7 +1467,7 @@ def test_runner_apply_entry_defers_third_party_ats_without_downstream_plans(tmp_
                 "profile_source": "real_user_candidate_profile_v1",
                 "profile_purpose": "real_resume_profile",
                 "candidate_name": "Alex Chen",
-                "email": "alex@example.com",
+                "email": "user@example.invalid",
                 "experience_summary": ["Built production-style C# and test automation projects."],
                 "skills": ["C#", "test automation", "photonics"],
                 "target_roles": ["Software Engineer"],
@@ -2229,7 +2229,7 @@ def test_runner_apply_entry_blocks_when_current_detail_no_longer_matches(tmp_pat
                 "profile_source": "real_user_candidate_profile_v1",
                 "profile_purpose": "real_resume_profile",
                 "candidate_name": "Alex Chen",
-                "email": "alex@example.com",
+                "email": "user@example.invalid",
                 "experience_summary": ["Built production-style C# and test automation projects."],
                 "skills": ["C#", "test automation", "photonics"],
                 "target_roles": ["Software Engineer"],
@@ -2423,7 +2423,7 @@ def test_runner_apply_entry_blocks_when_profile_not_live_ready(tmp_path, monkeyp
                 "skills": ["C#", "photonics"],
                 "target_roles": ["Software Engineer"],
                 "location_constraints": ["Auckland"],
-                "email": "smoke@example.com",
+                "email": "smoke@example.invalid",
             },
             ensure_ascii=False,
         ),
@@ -2801,7 +2801,7 @@ def test_safe_form_fill_attempt_preview_includes_trace_without_typing() -> None:
                     "bbox": {"x": 100, "y": 300, "w": 420, "h": 48},
                 },
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             }
         ],
     }
@@ -2810,7 +2810,7 @@ def test_safe_form_fill_attempt_preview_includes_trace_without_typing() -> None:
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"email": "alex@example.com"},
+        candidate_profile={"email": "user@example.invalid"},
         execute_fill=False,
         timeout=10,
     )
@@ -2822,7 +2822,7 @@ def test_safe_form_fill_attempt_preview_includes_trace_without_typing() -> None:
     assert trace["enabled"] is False
     assert trace["field_id"] == "email-field"
     assert trace["field_bbox"] == {"x": 100, "y": 300, "w": 420, "h": 48}
-    assert trace["value_preview"] == "<redacted:email:len=16>"
+    assert trace["value_preview"] == "<redacted:email:len=20>"
     assert trace["type_text_request"]["submit"] is False
     assert trace["post_fill_verification"]["status"] == "not_run_preview"
     assert trace["safety"]["final_submissions"] == 0
@@ -2839,7 +2839,7 @@ def test_safe_form_fill_attempt_output_does_not_echo_raw_email_or_phone() -> Non
                 "reason": "profile_email_available",
                 "source": {"collection": "page_elements", "id": "email-field", "role": "email_input"},
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             },
             {
                 "category": "auto_safe_known",
@@ -2847,7 +2847,7 @@ def test_safe_form_fill_attempt_output_does_not_echo_raw_email_or_phone() -> Non
                 "reason": "profile_phone_available",
                 "source": {"collection": "page_elements", "id": "phone-field", "role": "tel"},
                 "answer_source": "candidate_profile_v1.phone",
-                "value_preview": "+64 21 555 0123",
+                "value_preview": "+64 00 000 0000",
             },
         ],
     }
@@ -2856,16 +2856,16 @@ def test_safe_form_fill_attempt_output_does_not_echo_raw_email_or_phone() -> Non
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"email": "alex@example.com", "phone": "+64 21 555 0123"},
+        candidate_profile={"email": "user@example.invalid", "phone": "+64 00 000 0000"},
         execute_fill=False,
         max_safe_fields_to_fill=2,
         timeout=10,
     )
 
     payload_text = json.dumps(attempt, ensure_ascii=False)
-    assert "alex@example.com" not in payload_text
-    assert "+64 21 555 0123" not in payload_text
-    assert "<redacted:email:len=16>" in payload_text
+    assert "user@example.invalid" not in payload_text
+    assert "+64 00 000 0000" not in payload_text
+    assert "<redacted:email:len=20>" in payload_text
     assert "<redacted:phone:len=15>" in payload_text
     assert attempt["field_results"][0]["safe_form_fill_trace"]["value_hash"]
     assert attempt["field_results"][1]["safe_form_fill_trace"]["value_hash"]
@@ -2882,7 +2882,7 @@ def test_safe_form_fill_attempt_limits_to_one_field_and_blocks_cover_letter_by_d
                 "reason": "profile_email_available",
                 "source": {"id": "email-field", "role": "email_input"},
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             },
             {
                 "category": "auto_safe_known",
@@ -2907,7 +2907,7 @@ def test_safe_form_fill_attempt_limits_to_one_field_and_blocks_cover_letter_by_d
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"email": "alex@example.com", "first_name": "Alex"},
+        candidate_profile={"email": "user@example.invalid", "first_name": "Alex"},
         cover_letter_draft={"draft": "Dear Hiring Team..."},
         execute_fill=False,
         timeout=10,
@@ -2949,7 +2949,7 @@ def test_safe_form_fill_attempt_selects_only_explicitly_approved_field() -> None
                 "reason": "profile_email_available",
                 "source": {"id": "email-field", "role": "email_input"},
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             },
         ],
     }
@@ -2958,7 +2958,7 @@ def test_safe_form_fill_attempt_selects_only_explicitly_approved_field() -> None
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"first_name": "Alex", "email": "alex@example.com"},
+        candidate_profile={"first_name": "Alex", "email": "user@example.invalid"},
         execute_fill=False,
         approved_field_id="email-field",
         timeout=10,
@@ -2981,7 +2981,7 @@ def test_safe_form_fill_attempt_live_fill_requires_approved_field_id(monkeypatch
                 "reason": "profile_email_available",
                 "source": {"id": "email-field", "role": "email_input"},
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             }
         ],
     }
@@ -2995,7 +2995,7 @@ def test_safe_form_fill_attempt_live_fill_requires_approved_field_id(monkeypatch
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"email": "alex@example.com"},
+        candidate_profile={"email": "user@example.invalid"},
         execute_fill=True,
         timeout=10,
     )
@@ -3017,7 +3017,7 @@ def test_safe_form_fill_attempt_live_fill_rejects_unknown_approved_field_id(monk
                 "reason": "profile_email_available",
                 "source": {"id": "email-field", "role": "email_input"},
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             }
         ],
     }
@@ -3031,7 +3031,7 @@ def test_safe_form_fill_attempt_live_fill_rejects_unknown_approved_field_id(monk
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"email": "alex@example.com"},
+        candidate_profile={"email": "user@example.invalid"},
         execute_fill=True,
         approved_field_id="different-field",
         timeout=10,
@@ -3128,7 +3128,7 @@ def test_cover_letter_post_fill_verification_uses_degraded_observation_ocr_lines
         "Sourced | IT Recruitment Specialists. The role stood out to me because it matches my "
         "frontend and database project experience.\n\n"
         "Kind regards,\n"
-        "Wenqing Ji"
+        "Example User"
     )
 
     verification = runner._verify_expected_value_from_structured_inventory(
@@ -3149,7 +3149,7 @@ def test_cover_letter_post_fill_verification_uses_degraded_observation_ocr_lines
                     "bbox": {"x": 852, "y": 876, "w": 584, "h": 25},
                 },
                 {"id": "ocr_5", "text": "Kind regards,", "bbox": {"x": 850, "y": 1340, "w": 113, "h": 29}},
-                {"id": "ocr_6", "text": "Wenqing Ji", "bbox": {"x": 848, "y": 1363, "w": 106, "h": 33}},
+                {"id": "ocr_6", "text": "Example User", "bbox": {"x": 848, "y": 1363, "w": 106, "h": 33}},
             ],
             "screen_reading": {"contract_version": "screen_reading_v1", "texts": []},
         },
@@ -3174,7 +3174,7 @@ def test_cover_letter_post_fill_verification_rejects_unrelated_degraded_ocr() ->
         "Dear Hiring Team,\n\n"
         "I am interested in the Software Engineer (Business Systems) role.\n\n"
         "Kind regards,\n"
-        "Wenqing Ji"
+        "Example User"
     )
 
     verification = runner._verify_expected_value_from_structured_inventory(
@@ -3228,7 +3228,7 @@ def test_safe_form_fill_attempt_stops_when_post_fill_verification_unverified(mon
                 "reason": "profile_email_available",
                 "source": {"id": "email-field", "role": "input"},
                 "answer_source": "candidate_profile_v1.email",
-                "value_preview": "alex@example.com",
+                "value_preview": "user@example.invalid",
             },
         ],
     }
@@ -3281,7 +3281,7 @@ def test_safe_form_fill_attempt_stops_when_post_fill_verification_unverified(mon
         "http://runtime",
         app_name="edge",
         answer_plan=answer_plan,
-        candidate_profile={"candidate_name": "Alex Chen", "email": "alex@example.com"},
+        candidate_profile={"candidate_name": "Alex Chen", "email": "user@example.invalid"},
         execute_fill=True,
         approved_field_id="full-name-field",
         timeout=10,

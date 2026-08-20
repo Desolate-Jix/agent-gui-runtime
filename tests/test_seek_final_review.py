@@ -10,7 +10,7 @@ def test_final_review_accepts_seek_answered_count_summary_for_employer_questions
         "submit_clicks": 0,
         "final_submissions": 0,
         "filled_content": {
-            "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+            "resume": "Example User.pdf (SEEK default/selected resume)",
             "cover_letter": "Dear Hiring Team,\nI am interested in this role because it matches my software engineering skills.",
             "employer_questions": [
                 {"question": "Gender", "answer": "Do not wish to disclose"},
@@ -30,7 +30,7 @@ def test_final_review_accepts_seek_answered_count_summary_for_employer_questions
         "screen_inventory": {
             "page_elements": [
                 {"text": "Review and submit"},
-                {"text": "WENQING JI.pdf"},
+                {"text": "Example User.pdf"},
                 {"text": "You wrote a cover letter for this application"},
                 {"text": "Employer questions"},
                 {"text": "You answered 3 out of 3"},
@@ -60,7 +60,7 @@ def test_final_review_accepts_filename_scoped_ocr_confusion_for_resume() -> None
         "submit_clicks": 0,
         "final_submissions": 0,
         "filled_content": {
-            "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+            "resume": "Example User.pdf (SEEK default/selected resume)",
             "cover_letter": "Dear Hiring Team,\nI am interested in this role because it matches my software engineering skills.",
             "employer_questions": [],
         },
@@ -70,7 +70,7 @@ def test_final_review_accepts_filename_scoped_ocr_confusion_for_resume() -> None
         "screen_inventory": {
             "page_elements": [
                 {"text": "Review and submit"},
-                {"text": "WENQING JIl.pdf"},
+                {"text": "EXAMPLE USERl.pdf"},
                 {"text": "You wrote a cover letter for this application"},
                 {"text": "Submit application"},
             ]

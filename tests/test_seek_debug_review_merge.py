@@ -10,7 +10,7 @@ def test_merge_review_observations_keeps_top_and_bottom_review_evidence() -> Non
         "screen_inventory": {
             "page_elements": [
                 {"id": "title", "text": "Review and submit", "role": "text"},
-                {"id": "resume", "text": "WENQING JI.pdf", "role": "text"},
+                {"id": "resume", "text": "Example User.pdf", "role": "text"},
                 {"id": "cover", "text": "You wrote a cover letter for this application", "role": "text"},
             ]
         },
@@ -30,7 +30,7 @@ def test_merge_review_observations_keeps_top_and_bottom_review_evidence() -> Non
         "submit_clicks": 0,
         "final_submissions": 0,
         "filled_content": {
-            "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+            "resume": "Example User.pdf (SEEK default/selected resume)",
             "cover_letter": "Dear Hiring Team,\nI am interested in this role because it matches my software engineering skills.",
             "employer_questions": [
                 {"question": "Gender", "answer": "Do not wish to disclose"},

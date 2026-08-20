@@ -694,7 +694,7 @@ def test_finish_application_flow_read_only_inventory_runs_once_without_fill_flag
             },
             "application_answer_plan": {
                 "contract_version": "application_answer_plan_v1",
-                "answers": [{"field_id": "email", "policy": "auto_fill", "value": "must-not-leak@example.com"}],
+                "answers": [{"field_id": "email", "policy": "auto_fill", "value": "must-not-leak@example.invalid"}],
             },
             "employer_question_answer_plan": {
                 "contract_version": "employer_question_answer_plan_v1",
@@ -730,7 +730,7 @@ def test_finish_application_flow_read_only_inventory_runs_once_without_fill_flag
     assert result["final_submissions"] == 0
     report_path = Path(result["read_only_inventory_report_path"])
     report_text = report_path.read_text(encoding="utf-8")
-    assert "must-not-leak@example.com" not in report_text
+    assert "must-not-leak@example.invalid" not in report_text
     assert "must-not-leak" not in report_text
     report = json.loads(report_text)
     assert report["contract_version"] == "seek_read_only_inventory_checkpoint_v1"
@@ -802,7 +802,7 @@ def test_live_safe_fill_preflight_projects_one_redacted_field_for_human_review()
                         "field_id": "email",
                         "policy": "auto_fill",
                         "answer_source": "candidate_profile.email",
-                        "value": "must-not-leak@example.com",
+                        "value": "must-not-leak@example.invalid",
                     }
                 ],
             },
@@ -816,7 +816,7 @@ def test_live_safe_fill_preflight_projects_one_redacted_field_for_human_review()
     )
 
     serialized = json.dumps(preflight, ensure_ascii=False)
-    assert "must-not-leak@example.com" not in serialized
+    assert "must-not-leak@example.invalid" not in serialized
     assert preflight["contract_version"] == "seek_live_safe_fill_preflight_v1"
     assert preflight["status"] == "ready_for_human_review"
     assert preflight["approval_state"] == "awaiting_explicit_approval"
@@ -884,7 +884,7 @@ def test_prepare_live_safe_fill_writes_preflight_without_fill_or_continue(tmp_pa
                         "field_id": "email",
                         "policy": "auto_fill",
                         "answer_source": "candidate_profile.email",
-                        "value": "must-not-leak@example.com",
+                        "value": "must-not-leak@example.invalid",
                     }
                 ],
             },
@@ -919,7 +919,7 @@ def test_prepare_live_safe_fill_writes_preflight_without_fill_or_continue(tmp_pa
     assert result["final_submissions"] == 0
     report_path = Path(result["live_safe_fill_preflight_path"])
     report_text = report_path.read_text(encoding="utf-8")
-    assert "must-not-leak@example.com" not in report_text
+    assert "must-not-leak@example.invalid" not in report_text
     assert json.loads(report_text)["status"] == "ready_for_human_review"
 
 

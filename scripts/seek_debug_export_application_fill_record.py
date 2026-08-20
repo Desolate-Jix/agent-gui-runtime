@@ -386,7 +386,7 @@ def build_record_from_debug_run(run_dir: str | Path, *, created_at: str | None =
         {
             "step": "choose_documents",
             "field": "resume",
-            "value": "WENQING JI.pdf (SEEK default/selected resume)",
+            "value": "Example User.pdf (SEEK default/selected resume)",
             "policy": "unchanged",
         },
         {
@@ -413,7 +413,7 @@ def build_record_from_debug_run(run_dir: str | Path, *, created_at: str | None =
         "final_submit_performed": False,
         "job": job,
         "filled_content": {
-            "resume": "WENQING JI.pdf (SEEK default/selected resume)",
+            "resume": "Example User.pdf (SEEK default/selected resume)",
             "cover_letter": cover_letter,
             "employer_questions": employer_questions,
             "seek_profile_mutation": "none; Update SEEK Profile step was continued without pressing Add/Edit controls",

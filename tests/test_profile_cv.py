@@ -15,9 +15,9 @@ cli = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cli)
 
 
-CV_TEXT = """WENQING JI
+CV_TEXT = """EXAMPLE USER
 Auckland, New Zealand
-0212010309 | wji044@aucklanduni.ac.nz
++1 555 010 0000 | user@example.invalid
 SUMMARY
 IT graduate from the University of Auckland with data analytics and frontend applications experience.
 Built Python and JavaScript automation projects with React, SQL, Power BI, and API integration.
@@ -30,9 +30,9 @@ def test_build_candidate_profile_from_cv_text_keeps_real_source_but_requires_rev
 
     assert profile["contract_version"] == "candidate_profile_v1"
     assert profile["profile_source"] == "real_user_candidate_profile_v1"
-    assert profile["candidate_name"] == "Wenqing Ji"
-    assert profile["email"] == "wji044@aucklanduni.ac.nz"
-    assert profile["phone"] == "0212010309"
+    assert profile["candidate_name"] == "Example User"
+    assert profile["email"] == "user@example.invalid"
+    assert profile["phone"] == "+1 555 010 0000"
     assert {"Python", "JavaScript", "React", "SQL", "Power BI"} <= set(profile["skills"])
     assert "Software Engineer" in profile["target_roles"]
     assert "Data Analyst" in profile["target_roles"]
@@ -65,8 +65,8 @@ def test_cli_writes_profile_and_redacts_summary_values(tmp_path, capsys) -> None
 
     assert exit_code == 0
     assert summary["success"] is True
-    assert summary["email_length"] == len("wji044@aucklanduni.ac.nz")
-    assert summary["phone_length"] == len("0212010309")
-    assert "wji044@aucklanduni.ac.nz" not in printed
-    assert "0212010309" not in printed
-    assert profile["email"] == "wji044@aucklanduni.ac.nz"
+    assert summary["email_length"] == len("user@example.invalid")
+    assert summary["phone_length"] == len("+1 555 010 0000")
+    assert "user@example.invalid" not in printed
+    assert "+1 555 010 0000" not in printed
+    assert profile["email"] == "user@example.invalid"

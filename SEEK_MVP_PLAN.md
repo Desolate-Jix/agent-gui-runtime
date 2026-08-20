@@ -174,7 +174,7 @@ Implemented in the current slice:
   - Reusable audit helpers live in `app/core/audit.py`; SEEK keeps only domain-specific audit rules in `app/seek/audit.py`.
   - Generic CV text extraction and local candidate-profile draft generation live in `app/profile/cv.py` and `scripts/candidate_profile_from_cv.py`.
   - The CV draft generator emits `candidate_profile_v1` with `profile_source="real_user_candidate_profile_v1"`, but it deliberately leaves `work_rights_summary` blank and marks review required. It must not infer work rights, salary, availability, or sensitive answers from a resume.
-  - A Wenqing Ji local draft was generated from `D:\资料\CV\WENQING JI.docx` to `artifacts\seek\candidate_profile_wenqingji_draft.json`. The readiness check blocks live Apply/safe-fill until the missing `work_rights_summary` is explicitly supplied by the user.
+  - A Example User local draft was generated from `C:\Users\Example\Documents\CV\Example User.docx` to `artifacts\seek\candidate_profile_example_user_draft.json`. The readiness check blocks live Apply/safe-fill until the missing `work_rights_summary` is explicitly supplied by the user.
 - Learn Mode artifact export from stable execution experience:
   - `app/seek/learn_artifacts.py` exports `learned_app_profile_v1` and `path_graph_seed_v1` from `seek_mvp_run_report_v1` plus optional `seek_mvp_traversal_trace_v1`.
   - `learned_app_profile_v1` records `page_type=seek_search_results_with_detail`, the SEEK scroll containers, job-card/detail entity patterns, action templates, verification rules, and the no-final-submit safety policy.
@@ -537,10 +537,10 @@ Next, review the generated local draft profile, explicitly fill `work_rights_sum
 
 ```powershell
 $env:PYTHONIOENCODING='utf-8'
-uv run python scripts\candidate_profile_from_cv.py --cv "D:\资料\CV\WENQING JI.docx" --out artifacts\seek\candidate_profile_wenqingji_draft.json
-uv run python scripts\seek_profile_readiness.py --candidate-profile artifacts\seek\candidate_profile_wenqingji_draft.json --out logs\smoke\seek_profile_readiness_wenqingji_draft.json --fail-if-blocked
+uv run python scripts\candidate_profile_from_cv.py --cv "C:\Users\Example\Documents\CV\Example User.docx" --out artifacts\seek\candidate_profile_example_user_draft.json
+uv run python scripts\seek_profile_readiness.py --candidate-profile artifacts\seek\candidate_profile_example_user_draft.json --out logs\smoke\seek_profile_readiness_example_user_draft.json --fail-if-blocked
 uv run python scripts\seek_export_learn_artifacts.py --report logs\smoke\seek_mvp_readonly_after_parser_title_filter_5jobs_20260617.json --out artifacts\seek\learned_seek_mvp_from_5job_smoke_20260617.json --profile-out artifacts\seek\learned_app_profile_seek_mvp_20260617.json --path-graph-out artifacts\seek\path_graph_seed_seek_mvp_20260617.json --runtime-graph-out artifacts\seek\runtime_path_graph_seek_mvp_20260617.json --learned-skills-out artifacts\seek\learned_skills_seek_mvp_20260617.json --visual-assets-out artifacts\seek\visual_assets_seek_mvp_20260617.json
-uv run python scripts\seek_mvp_traversal_runner.py --max-jobs 5 --max-detail-scrolls 6 --max-results-scrolls 8 --execute-clicks --candidate-profile artifacts\seek\candidate_profile_wenqingji_draft.json --out logs\smoke\seek_mvp_traversal_report.json
+uv run python scripts\seek_mvp_traversal_runner.py --max-jobs 5 --max-detail-scrolls 6 --max-results-scrolls 8 --execute-clicks --candidate-profile artifacts\seek\candidate_profile_example_user_draft.json --out logs\smoke\seek_mvp_traversal_report.json
 ```
 
 Then inspect the generated report, card-click overlays, action traces, scroll traces, completeness decisions, `seek_application_flow_state_v1`, `final_submit_visible_blocker_v1`, `cover_letter_draft_v1`, `application_answer_plan_v1`, `safe_form_fill_attempt_v1`, and `final_submit_guard_v1`. First run without `--fill-safe-fields`; only run with `--fill-safe-fields` if a low-risk `auto_safe_known` field is visible. Continue / Next / Review / Submit remain forbidden.

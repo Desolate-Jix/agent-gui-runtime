@@ -74,8 +74,8 @@ from app.operation.verification import build_ui_diff_verification  # noqa: E402
 DEFAULT_SEEK_URL = "https://nz.seek.com/"
 DEFAULT_RUN_DIR = Path("logs/smoke/seek_debug_step_run_latest")
 DEFAULT_APPLICATION_FLOW_REPLAY = Path("logs/smoke/seek_application_flow_replay_20260620.json")
-DEFAULT_PERSONAL_CANDIDATE_PROFILE = Path(r"D:\资料\CV\candidate_profile_wenqingji_personal.json")
-DEFAULT_PROJECT_CANDIDATE_PROFILE = Path("artifacts/seek/candidate_profile_wenqingji_draft.json")
+DEFAULT_PERSONAL_CANDIDATE_PROFILE = Path(r"C:\Users\Example\Documents\CV\candidate_profile_example_user_personal.json")
+DEFAULT_PROJECT_CANDIDATE_PROFILE = Path("artifacts/seek/candidate_profile_example_user_draft.json")
 
 
 def _path_exists_no_raise(path: Path) -> bool:

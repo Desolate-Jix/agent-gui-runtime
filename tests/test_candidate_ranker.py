@@ -106,14 +106,14 @@ def test_rank_candidates_prefers_explicit_radio_role_over_generic_heading_and_du
     structure = _structure(
         [
             _element("resume_heading", "Resumé", role="text"),
-            _element("resume_radio", "WENQING_JI.pdf", role="radio"),
-            _element("resume_text", "WENQING_JI.pdf", role="text"),
+            _element("resume_radio", "EXAMPLE_USER.pdf", role="radio"),
+            _element("resume_text", "EXAMPLE_USER.pdf", role="text"),
         ]
     )
 
     result = rank_candidates(
         CandidateRankRequest(
-            goal="Select WENQING_JI.pdf resume radio button",
+            goal="Select EXAMPLE_USER.pdf resume radio button",
             page_structure=structure,
             top_k=3,
         )

@@ -141,7 +141,7 @@ def test_application_flow_state_ignores_progress_steps_on_choose_documents() -> 
                 {"text": "Answer employer questions"},
                 {"text": "Review and submit"},
                 {"text": "Upload a resume"},
-                {"text": "13/5/26-WENQING JI.pdf"},
+                {"text": "13/5/26-Example User.pdf"},
                 {"text": "Resume attached"},
                 {"text": "Upload a cover letter"},
                 {"text": "Write a cover letter"},
@@ -549,7 +549,7 @@ def test_final_review_audit_passes_station_internal_fill_before_submit(tmp_path)
         "apply_url": "https://nz.seek.com/job/92822270/apply",
         "stage": "review_before_submit",
         "filled_fields": [
-            {"step": "choose_documents", "field": "resume", "value": "WENQING JI.pdf", "policy": "unchanged"},
+            {"step": "choose_documents", "field": "resume", "value": "Example User.pdf", "policy": "unchanged"},
             {"step": "choose_documents", "field": "cover_letter", "value": "Dear Alicia...", "policy": "replaced_existing_cover_letter"},
             {"step": "answer_employer_questions", "field": "right_to_work_nz", "value": "Post-study open work visa"},
             {"step": "answer_employer_questions", "field": "web_experience", "value": "Yes"},
@@ -594,7 +594,7 @@ def test_final_review_audit_passes_when_seek_profile_suggestions_not_shown(tmp_p
         "stage": "review_before_submit",
         "employer_question_total": 2,
         "filled_fields": [
-            {"step": "choose_documents", "field": "resume", "value": "WENQING JI.pdf", "policy": "unchanged"},
+            {"step": "choose_documents", "field": "resume", "value": "Example User.pdf", "policy": "unchanged"},
             {"step": "choose_documents", "field": "cover_letter", "value": "Dear Hiring Team...", "policy": "replaced_existing_cover_letter"},
             {"step": "answer_employer_questions", "field": "right_to_work_nz", "value": "Post-study open work visa"},
             {"step": "answer_employer_questions", "field": "notice_period", "value": "None, I'm ready to go now"},
@@ -625,7 +625,7 @@ def test_final_review_audit_passes_when_no_employer_questions_were_shown(tmp_pat
         "stage": "review_before_submit",
         "employer_question_total": 0,
         "filled_fields": [
-            {"step": "choose_documents", "field": "resume", "value": "WENQING JI.pdf", "policy": "unchanged"},
+            {"step": "choose_documents", "field": "resume", "value": "Example User.pdf", "policy": "unchanged"},
             {
                 "step": "choose_documents",
                 "field": "cover_letter",
@@ -658,7 +658,7 @@ def test_final_review_audit_fails_when_submit_was_clicked(tmp_path) -> None:
         "final_submissions": 1,
         "submit_clicks": 1,
         "filled_fields": [
-            {"step": "choose_documents", "field": "resume", "value": "WENQING JI.pdf"},
+            {"step": "choose_documents", "field": "resume", "value": "Example User.pdf"},
             {"step": "choose_documents", "field": "cover_letter", "value": "Cover letter"},
             {"step": "answer_employer_questions", "field": "availability", "value": "Within 1-2 weeks"},
             {

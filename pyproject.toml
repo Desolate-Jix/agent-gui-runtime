@@ -1,6 +1,7 @@
 [project]
 name = "agent-gui-runtime"
-version = "0.1.0"
+version = "0.2.0"
+license = { file = "LICENSE" }
 description = "Local Windows GUI automation runtime for AI agents"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"

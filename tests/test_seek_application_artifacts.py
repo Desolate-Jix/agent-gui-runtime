@@ -24,8 +24,8 @@ def _record() -> dict:
             "application_url": "https://nz.seek.com/job/1/apply/review",
         },
         "filled_content": {
-            "resume": "WENQING JI.pdf (SEEK default/selected resume)",
-            "cover_letter": "Dear Hiring Team,\n\nI am interested in this role.\n\nKind regards,\nWenqing Ji",
+            "resume": "Example User.pdf (SEEK default/selected resume)",
+            "cover_letter": "Dear Hiring Team,\n\nI am interested in this role.\n\nKind regards,\nExample User",
             "employer_questions": [
                 {
                     "question": "Which statement best describes your right to work?",

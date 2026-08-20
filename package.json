@@ -1,6 +1,6 @@
 {
   "name": "agent-gui-runtime",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "[中文](README.md) | [English](README.en.md)",
   "main": "index.js",
   "directories": {

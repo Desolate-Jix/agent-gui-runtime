@@ -505,8 +505,8 @@ Agent decision:
 - For SEEK profile preparation, keep the domain workflow in `skills/seek-high-precision/SKILL.md` and use the reusable profile helper only to prepare local data:
 
 ```powershell
-uv run python scripts\candidate_profile_from_cv.py --cv "D:\资料\CV\WENQING JI.docx" --out artifacts\seek\candidate_profile_wenqingji_draft.json
-uv run python scripts\seek_profile_readiness.py --candidate-profile artifacts\seek\candidate_profile_wenqingji_draft.json --out logs\smoke\seek_profile_readiness_wenqingji_draft.json --fail-if-blocked
+uv run python scripts\candidate_profile_from_cv.py --cv "C:\Users\Example\Documents\CV\Example User.docx" --out artifacts\seek\candidate_profile_example_user_draft.json
+uv run python scripts\seek_profile_readiness.py --candidate-profile artifacts\seek\candidate_profile_example_user_draft.json --out logs\smoke\seek_profile_readiness_example_user_draft.json --fail-if-blocked
 ```
 
 Agent decision:

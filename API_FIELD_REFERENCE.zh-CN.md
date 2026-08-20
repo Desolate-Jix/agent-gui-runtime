@@ -1079,7 +1079,7 @@ These contracts are produced by the reusable CV helper, not by the SEEK-only run
 Command:
 
 ```powershell
-uv run python scripts\candidate_profile_from_cv.py --cv "D:\资料\CV\WENQING JI.docx" --out artifacts\seek\candidate_profile_wenqingji_draft.json
+uv run python scripts\candidate_profile_from_cv.py --cv "D:\资料\CV\Example User.docx" --out artifacts\seek\candidate_profile_example_user_draft.json
 ```
 
 `cv_text_extraction_v1`:
