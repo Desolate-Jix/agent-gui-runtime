@@ -267,6 +267,23 @@ class RuntimeNavigationOperationAdapter:
             or plan.get("semantic_action")
             or ""
         ).strip()
+        current_record = self._observer.latest_record()
+        current_observation = current_record.get("observation") if isinstance(current_record.get("observation"), dict) else {}
+        freshness = plan.get("freshness") if isinstance(plan.get("freshness"), dict) else {}
+        viewport = (
+            freshness.get("viewport")
+            or freshness.get("viewport_size")
+            or current_record.get("window_size")
+        )
+        capture_lineage = {
+            "capture_id": str(freshness.get("capture_id") or current_observation.get("capture_id") or "").strip(),
+            "screenshot_sha256": str(
+                freshness.get("screenshot_sha256")
+                or current_observation.get("screenshot_sha256")
+                or ""
+            ).strip(),
+            "viewport": deepcopy(viewport) if isinstance(viewport, dict) else None,
+        }
         body = {
             "agent_mode": "execute",
             "goal": _required_text(plan.get("operation_goal"), "operation_goal"),
@@ -278,6 +295,8 @@ class RuntimeNavigationOperationAdapter:
             "metadata": {
                 "forbid_final_submit": True,
                 "artifact_is_authorization": False,
+                "require_current_grounding": True,
+                "capture_lineage": capture_lineage,
                 "semantic_action": plan.get("semantic_action"),
                 "surface_context": surface_context,
                 "source_interface_id": interface.get("interface_id"),
@@ -587,7 +606,21 @@ def _execution_safety_rejection(response: Any) -> dict[str, Any] | None:
     if not isinstance(response, dict) or response.get("success") is True:
         return None
     error = response.get("error")
-    if not isinstance(error, dict) or error.get("code") != "recognition_plan_click_failed":
+    if not isinstance(error, dict):
+        return None
+    code = str(error.get("code") or "")
+    if code in {"stale_approved_plan", "capture_lineage_mismatch"}:
+        data = response.get("data") if isinstance(response.get("data"), dict) else {}
+        return {
+            "reason": code,
+            "details": {
+                "code": code,
+                "message": str(error.get("details") or ""),
+                "capture_lineage_validation": data.get("capture_lineage_validation"),
+                "trace_path": data.get("trace_path"),
+            },
+        }
+    if code != "recognition_plan_click_failed":
         return None
     message = str(error.get("details") or "")
     if not message.startswith("Bound window foreground verification failed:"):

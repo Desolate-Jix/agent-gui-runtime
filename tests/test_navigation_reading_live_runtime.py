@@ -548,6 +548,12 @@ def test_runtime_adapter_reports_foreground_verification_failure_as_safe_interce
 
     assert len(calls) == 2
     assert calls[0][1]["dry_run"] is True
+    assert calls[0][1]["metadata"]["require_current_grounding"] is True
+    assert calls[0][1]["metadata"]["capture_lineage"] == {
+        "capture_id": "capture-list",
+        "screenshot_sha256": _record("capture-list")["observation"]["screenshot_sha256"],
+        "viewport": {"width": 1000, "height": 700},
+    }
     assert calls[1][1]["dry_run"] is False
     assert result["gate_result"] == {
         "allowed": False,

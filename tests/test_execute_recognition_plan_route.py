@@ -1201,3 +1201,163 @@ def test_execute_mode_blocks_real_saved_image_without_override(monkeypatch) -> N
     assert response.error is not None
     assert response.error.code == "saved_image_execution_not_allowed"
     assert response.data["trace_path"].endswith("saved-image-blocked.json")
+
+
+
+def test_strict_approved_plan_rejects_changed_capture_content_before_click(monkeypatch, tmp_path) -> None:
+    import hashlib
+
+    clicks = {"count": 0}
+    source_path = tmp_path / "source.png"
+    current_path = tmp_path / "current.png"
+    source_path.write_bytes(b"source-screen")
+    current_path.write_bytes(b"changed-screen")
+    source_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    current_sha = hashlib.sha256(current_path.read_bytes()).hexdigest()
+    lineage = {
+        "capture_id": "capture-seek-home",
+        "screenshot_sha256": source_sha,
+        "viewport": {"width": 1200, "height": 800},
+    }
+    captures = iter(
+        [
+            {
+                "image_path": str(source_path),
+                "roi": None,
+                "roi_adjusted": False,
+                "window_size": {"width": 1200, "height": 800},
+            },
+            {
+                "image_path": str(current_path),
+                "roi": None,
+                "roi_adjusted": False,
+                "window_size": {"width": 1200, "height": 800},
+            },
+        ]
+    )
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: next(captures))
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(),
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda *args, **kwargs: clicks.update(count=clicks["count"] + 1) or {"clicked": True},
+    )
+
+    dry = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            metadata={"require_current_grounding": True, "capture_lineage": lineage},
+            dry_run=True,
+        )
+    )
+    approved_plan_id = dry.data["result"]["approved_plan_id"]
+    approved_record = action_api._load_approved_plan(approved_plan_id)
+
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            approved_plan_id=approved_plan_id,
+            metadata={"require_current_grounding": True, "capture_lineage": lineage},
+            dry_run=False,
+        )
+    )
+
+    assert dry.success is True
+    assert approved_record["source_capture_id"] == "capture-seek-home"
+    assert approved_record["source_screenshot_sha256"] == source_sha
+    assert approved_record["viewport"] == {"width": 1200, "height": 800}
+    assert real.success is False
+    assert real.error is not None
+    assert real.error.code == "stale_approved_plan"
+    assert real.data["capture_lineage_validation"]["actual"]["screenshot_sha256"] == current_sha
+    assert real.data["capture_lineage_validation"]["expected"]["screenshot_sha256"] == source_sha
+    assert clicks["count"] == 0
+
+
+def test_strict_approved_plan_rejects_declared_lineage_mismatch_before_click(monkeypatch, tmp_path) -> None:
+    import hashlib
+
+    clicks = {"count": 0}
+    image_path = tmp_path / "screen.png"
+    image_path.write_bytes(b"screen")
+    screenshot_sha = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    source_lineage = {
+        "capture_id": "capture-seek-home",
+        "screenshot_sha256": screenshot_sha,
+        "viewport": {"width": 1200, "height": 800},
+    }
+    wrong_lineage = {**source_lineage, "capture_id": "capture-other"}
+    captures = iter(
+        [
+            {
+                "image_path": str(image_path),
+                "roi": None,
+                "roi_adjusted": False,
+                "window_size": {"width": 1200, "height": 800},
+            },
+            {
+                "image_path": str(image_path),
+                "roi": None,
+                "roi_adjusted": False,
+                "window_size": {"width": 1200, "height": 800},
+            },
+        ]
+    )
+    monkeypatch.setattr(action_api, "APPROVED_PLANS_DIR", tmp_path / "approved-plans")
+    action_api.APPROVED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(action_api.window_manager, "get_bound_window", lambda: _bound_window())
+    monkeypatch.setattr(action_api.screenshot_service, "capture_window", lambda **kwargs: next(captures))
+    monkeypatch.setattr(
+        action_api,
+        "_run_recognition_plan_for_execution",
+        lambda request: APIResponse(
+            success=True,
+            message="ok",
+            data=VisionResultData(result=_allowed_plan(goal=request.goal)).model_dump(),
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(
+        action_api.input_controller,
+        "click_point",
+        lambda *args, **kwargs: clicks.update(count=clicks["count"] + 1) or {"clicked": True},
+    )
+
+    dry = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            metadata={"require_current_grounding": True, "capture_lineage": source_lineage},
+            dry_run=True,
+        )
+    )
+    real = action_api.execute_recognition_plan(
+        ExecuteRecognitionPlanRequest(
+            goal="Click Learn more link",
+            app_name="edge",
+            approved_plan_id=dry.data["result"]["approved_plan_id"],
+            metadata={"require_current_grounding": True, "capture_lineage": wrong_lineage},
+            dry_run=False,
+        )
+    )
+
+    assert dry.success is True
+    assert real.success is False
+    assert real.error is not None
+    assert real.error.code == "capture_lineage_mismatch"
+    assert real.data["capture_lineage_validation"]["reason"] == "declared_lineage_mismatch"
+    assert clicks["count"] == 0

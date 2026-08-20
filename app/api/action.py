@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import shutil
 import uuid
@@ -65,6 +66,15 @@ APPROVED_PLAN_TTL_SECONDS = 300
 LEARNED_INSTRUCTIONS_DIR = Path("artifacts/local-learning/instructions")
 LEARNED_INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
 reviewed_interface_memory_store = ReviewedInterfaceMemoryStore(project_root=Path(__file__).resolve().parents[2])
+
+
+class _ApprovedPlanLineageError(ValueError):
+    """Structured safe-stop for a reviewed plan whose capture is no longer current."""
+
+    def __init__(self, code: str, details: dict[str, Any]) -> None:
+        super().__init__(code)
+        self.code = code
+        self.details = details
 
 
 def _record_operational_memory_feedback(
@@ -623,6 +633,80 @@ def _record_coordinate_window_size(record: dict[str, Any]) -> dict[str, int]:
     return _size_from_rect(rect)
 
 
+def _capture_lineage_from_payload(
+    capture: dict[str, Any] | None,
+    *,
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the content identity used by reviewed-plan replay.
+
+    Screenshot paths are only transport.  The bytes and viewport are the
+    authority, so a same-HWND/same-size but changed screen cannot reuse a
+    reviewed coordinate.
+    """
+    payload = capture if isinstance(capture, dict) else {}
+    declared = fallback if isinstance(fallback, dict) else {}
+    image_path = str(payload.get("image_path") or "").strip()
+    screenshot_sha256 = str(
+        payload.get("screenshot_sha256")
+        or payload.get("source_screenshot_sha256")
+        or ""
+    ).strip().lower()
+    if not screenshot_sha256 and image_path:
+        try:
+            screenshot_sha256 = hashlib.sha256(Path(image_path).read_bytes()).hexdigest()
+        except (OSError, ValueError):
+            screenshot_sha256 = ""
+    viewport = _positive_size(
+        payload.get("viewport")
+        if isinstance(payload.get("viewport"), dict)
+        else payload.get("viewport_size")
+        if isinstance(payload.get("viewport_size"), dict)
+        else payload.get("window_size")
+        if isinstance(payload.get("window_size"), dict)
+        else None
+    )
+    if viewport is None:
+        viewport = _positive_size(declared.get("viewport") if isinstance(declared.get("viewport"), dict) else None)
+    capture_id = str(
+        payload.get("capture_id")
+        or payload.get("source_capture_id")
+        or declared.get("capture_id")
+        or ""
+    ).strip()
+    if not capture_id and screenshot_sha256:
+        capture_id = f"capture-{screenshot_sha256[:16]}"
+    return {
+        "capture_id": capture_id,
+        "screenshot_sha256": screenshot_sha256,
+        "viewport": viewport,
+        "image_path": image_path or None,
+    }
+
+
+def _requested_capture_lineage(request: ExecuteRecognitionPlanRequest) -> dict[str, Any]:
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    value = metadata.get("capture_lineage")
+    if not isinstance(value, dict):
+        value = metadata.get("lineage")
+    return _capture_lineage_from_payload(value if isinstance(value, dict) else None)
+
+
+def _requires_current_grounding(request: ExecuteRecognitionPlanRequest) -> bool:
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    return metadata.get("require_current_grounding") is True
+
+
+def _lineage_mismatches(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
+    mismatches: list[str] = []
+    for key in ("capture_id", "screenshot_sha256", "viewport"):
+        expected_value = expected.get(key)
+        actual_value = actual.get(key)
+        if not expected_value or not actual_value or expected_value != actual_value:
+            mismatches.append(key)
+    return mismatches
+
+
 def _normalize_window_token(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
 
@@ -1103,6 +1187,10 @@ def _save_approved_plan(
     expires_at = created_at + timedelta(seconds=APPROVED_PLAN_TTL_SECONDS)
     bound_window = _bound_window_snapshot(bound)
     coordinate_window_size = _coordinate_size_from_live_capture(live_capture) or _size_from_rect(bound_window.get("rect") or {})
+    source_lineage = _capture_lineage_from_payload(
+        live_capture,
+        fallback=_requested_capture_lineage(request),
+    )
     record = {
         "contract_version": "approved_recognition_plan_v1",
         "approved_plan_id": approved_plan_id,
@@ -1118,6 +1206,14 @@ def _save_approved_plan(
         "request_metadata": request.metadata,
         "bound_window": bound_window,
         "coordinate_window_size": coordinate_window_size,
+        "source_capture_id": source_lineage["capture_id"],
+        "source_screenshot_sha256": source_lineage["screenshot_sha256"],
+        "viewport": source_lineage["viewport"],
+        "source_capture_lineage": {
+            "capture_id": source_lineage["capture_id"],
+            "screenshot_sha256": source_lineage["screenshot_sha256"],
+            "viewport": source_lineage["viewport"],
+        },
         "image_path": image_path,
         "live_capture": live_capture,
         "recognition_plan": plan,
@@ -1188,6 +1284,46 @@ def _validate_approved_plan_reuse(
         "approved_coordinate_window_size": approved_size,
         "selected_click_point": selected_point,
     }
+
+
+def _validate_current_approved_plan_lineage(
+    *,
+    request: ExecuteRecognitionPlanRequest,
+    record: dict[str, Any],
+    current_capture: dict[str, Any],
+) -> dict[str, Any]:
+    """Fail closed when a reviewed plan is not grounded in the current screen."""
+    source = {
+        "capture_id": str(record.get("source_capture_id") or "").strip(),
+        "screenshot_sha256": str(record.get("source_screenshot_sha256") or "").strip().lower(),
+        "viewport": _positive_size(record.get("viewport") if isinstance(record.get("viewport"), dict) else None),
+    }
+    nested_source = record.get("source_capture_lineage")
+    if isinstance(nested_source, dict):
+        source = _capture_lineage_from_payload(nested_source, fallback=source)
+    actual = _capture_lineage_from_payload(
+        current_capture,
+        fallback=source,
+    )
+    declared = _requested_capture_lineage(request)
+    details: dict[str, Any] = {
+        "contract_version": "approved_plan_capture_lineage_validation_v1",
+        "required": True,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "expected": source,
+        "actual": actual,
+        "declared": declared,
+    }
+    source_mismatches = _lineage_mismatches(source, actual)
+    if source_mismatches:
+        details.update(valid=False, reason="approved_plan_source_stale", mismatches=source_mismatches)
+        raise _ApprovedPlanLineageError("stale_approved_plan", details)
+    declared_mismatches = _lineage_mismatches(declared, actual)
+    if declared_mismatches:
+        details.update(valid=False, reason="declared_lineage_mismatch", mismatches=declared_mismatches)
+        raise _ApprovedPlanLineageError("capture_lineage_mismatch", details)
+    details.update(valid=True, reason="current_capture_matches_approved_plan")
+    return details
 
 
 def _copy_learning_file(source: Any, destination: Path, *, missing_sources: list[str]) -> Optional[str]:
@@ -1578,6 +1714,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             "max_execution_attempts": int(request.max_execution_attempts),
         }
     approval_reuse_validation: dict[str, Any] | None = None
+    capture_lineage_validation: dict[str, Any] | None = None
     if request.approved_plan_id:
         if bound is None:
             timings = timer.to_dict()
@@ -1607,9 +1744,26 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 )
             image_path = str(approved_record.get("image_path") or "")
             live_capture = approved_record.get("live_capture") if isinstance(approved_record.get("live_capture"), dict) else None
+            if _requires_current_grounding(request):
+                with timer.step("capture_current_approved_plan_grounding"):
+                    current_capture = screenshot_service.capture_window(
+                        save_image=True,
+                        purpose="approved_plan_current_grounding",
+                        name_hint=request.app_name or "approved_plan",
+                    )
+                capture_lineage_validation = _validate_current_approved_plan_lineage(
+                    request=request,
+                    record=approved_record,
+                    current_capture=current_capture,
+                )
+                live_capture = current_capture
+                image_path = str(current_capture.get("image_path") or image_path)
+                approval_reuse_validation["capture_lineage"] = capture_lineage_validation
             plan_trace_path = approved_record.get("recognition_plan_trace_path") or plan.get("trace_path")
             overlay = approved_record.get("recognition_plan_overlay") if isinstance(approved_record.get("recognition_plan_overlay"), dict) else None
         except Exception as exc:
+            error_code = getattr(exc, "code", "approved_plan_reuse_failed")
+            error_details = getattr(exc, "details", str(exc))
             timings = timer.to_dict()
             trace_path = _write_execute_trace_if_enabled(
                 request,
@@ -1619,8 +1773,9 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     "success": False,
                     "request": request.model_dump(),
                     "approved_plan_id": request.approved_plan_id,
-                    "failure_reason": "approved_plan_reuse_failed",
-                    "error": str(exc),
+                    "failure_reason": error_code,
+                    "error": error_details,
+                    "capture_lineage_validation": error_details if error_code in {"stale_approved_plan", "capture_lineage_mismatch"} else None,
                     "timings": timings,
                 },
                 name_hint=request.app_name or "recognition_plan",
@@ -1628,8 +1783,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             return APIResponse(
                 success=False,
                 message="Approved recognition plan could not be reused",
-                data={"trace_path": trace_path, "approved_plan_id": request.approved_plan_id, "timings": timings},
-                error=ErrorModel(code="approved_plan_reuse_failed", details=str(exc)),
+                data={
+                    "trace_path": trace_path,
+                    "approved_plan_id": request.approved_plan_id,
+                    "capture_lineage_validation": error_details if error_code in {"stale_approved_plan", "capture_lineage_mismatch"} else None,
+                    "timings": timings,
+                },
+                error=ErrorModel(code=error_code, details=error_details),
             )
         execution_path = {
             "vision_model_used": False,
@@ -2234,6 +2394,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "selected_click_point": selected_point,
         "approved_plan_id": request.approved_plan_id,
         "approved_plan_reuse_validation": approval_reuse_validation,
+        "capture_lineage_validation": capture_lineage_validation,
         "learned_instruction_id": request.learned_instruction_id,
         "learning_mode": request.learning_mode,
         "learned_instruction_reuse_validation": learned_instruction_reuse_validation,
