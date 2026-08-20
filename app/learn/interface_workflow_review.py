@@ -1012,7 +1012,17 @@ def load_interface_workflow_library_registry(
         or registry.get("contract_version") != "interface_workflow_library_registry_v1"
     ):
         raise ValueError("interface workflow library registry has an invalid contract")
-    for record in registry.get("workflows", {}).values():
+    applications = registry.get("applications")
+    workflows = registry.get("workflows")
+    revision = registry.get("registry_revision")
+    if (
+        not isinstance(applications, dict)
+        or not isinstance(workflows, dict)
+        or type(revision) is not int
+        or revision < 0
+    ):
+        raise ValueError("interface workflow library registry has an invalid shape")
+    for record in workflows.values():
         if not isinstance(record, dict):
             continue
         review_groups, projection_error = _project_interface_review_groups(

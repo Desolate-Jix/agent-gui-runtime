@@ -17,13 +17,16 @@ from uuid import uuid4
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from PIL import Image, ImageDraw
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent.continuous_task_handoff import (
     load_continuous_task_handoff,
     start_continuous_task_resume,
 )
 from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
+from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore, content_sha256
+from app.agent.reviewed_workflow_compiler import compile_reviewed_workflow_asset_v2
+from app.agent.reviewed_workflow_replay import resolve_current_state
 from app.core.runtime_artifacts import write_trace
 from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
@@ -243,6 +246,30 @@ class PanelDeleteLearningEvidenceRequest(BaseModel):
 
 class PanelDeleteInterfaceWorkflowRequest(BaseModel):
     workflow_id: str = Field(min_length=1)
+
+
+class PanelCompileReviewedWorkflowAssetRequest(BaseModel):
+    """服务端解析 v1 人审流程并编译 v2 资产。"""
+
+    model_config = ConfigDict(extra="forbid")
+    application_identity_key: str = Field(min_length=1)
+    workflow_id: str = Field(min_length=1)
+    expected_source_workflow_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+
+
+class PanelPublishReviewedWorkflowAssetRequest(PanelCompileReviewedWorkflowAssetRequest):
+    """重新编译后以 CAS revision 发布 v2 资产。"""
+
+    expected_registry_revision: int = Field(ge=0)
+
+
+class PanelPreviewReviewedWorkflowReplayRequest(BaseModel):
+    """只读地解析已发布资产的当前状态；绝不捕获或执行。"""
+
+    model_config = ConfigDict(extra="forbid")
+    asset_id: str = Field(min_length=1)
+    expected_content_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
+    current_observation: dict[str, Any] | None = None
 
 
 class PanelCreateLearningDemoGoalReadinessRequest(BaseModel):
@@ -1579,6 +1606,14 @@ def _interface_workflow_save_lock(review: dict[str, Any]) -> Lock:
         character if character.isalnum() or character in "_.-" else "_"
         for character in workflow_id
     ).strip("._") or "__invalid_workflow__"
+    return _interface_workflow_lock(workflow_id)
+
+
+def _interface_workflow_lock(workflow_id: str) -> Lock:
+    lock_key = "".join(
+        character if character.isalnum() or character in "_.-" else "_"
+        for character in str(workflow_id or "").strip()
+    ).strip("._") or "__invalid_workflow__"
     with _INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD:
         return _INTERFACE_WORKFLOW_SAVE_LOCKS.setdefault(lock_key, Lock())
 
@@ -1688,6 +1723,140 @@ def save_interface_workflow_review_endpoint(
         )
 
 
+def _resolve_reviewed_workflow_source(
+    *, application_identity_key: str, workflow_id: str
+) -> tuple[str, str]:
+    """仅信任 v1 registry 中绑定的项目内 source workflow。"""
+
+    identity_key = str(application_identity_key or "").strip()
+    selected_workflow_id = str(workflow_id or "").strip()
+    registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
+    if not isinstance(registry, dict):
+        raise ValueError("interface workflow registry is invalid")
+    applications = registry.get("applications")
+    workflows = registry.get("workflows")
+    revision = registry.get("registry_revision")
+    if not isinstance(applications, dict) or not isinstance(workflows, dict) or type(revision) is not int or revision < 0:
+        raise ValueError("interface workflow registry shape is invalid")
+    application = applications.get(identity_key)
+    if not isinstance(application, dict):
+        raise ValueError("interface workflow application identity not found")
+    workflow_ids = application.get("workflow_ids")
+    if not isinstance(workflow_ids, list) or any(not isinstance(item, str) for item in workflow_ids):
+        raise ValueError("interface workflow application workflow_ids are invalid")
+    if selected_workflow_id not in set(workflow_ids):
+        raise ValueError("interface workflow does not belong to selected application")
+    record = workflows.get(selected_workflow_id)
+    if not isinstance(record, dict):
+        raise ValueError("interface workflow not found")
+    if str(record.get("application_identity_key") or "").strip() != identity_key:
+        raise ValueError("interface workflow application identity mismatch")
+    declared_path = Path(str(record.get("path") or ""))
+    resolved_path = declared_path.resolve() if declared_path.is_absolute() else (ROOT_DIR / declared_path).resolve()
+    if ROOT_DIR not in resolved_path.parents or not resolved_path.is_file():
+        raise ValueError("interface workflow source path is invalid")
+    source_sha = str(record.get("source_asset_sha256") or "").strip().lower()
+    if len(source_sha) != 64 or any(character not in "0123456789abcdef" for character in source_sha):
+        raise ValueError("interface workflow source SHA-256 is invalid")
+    return resolved_path.relative_to(ROOT_DIR).as_posix(), source_sha
+
+
+def _compile_reviewed_workflow_request(
+    request: PanelCompileReviewedWorkflowAssetRequest,
+) -> dict[str, Any]:
+    source_path, registry_sha = _resolve_reviewed_workflow_source(
+        application_identity_key=request.application_identity_key,
+        workflow_id=request.workflow_id,
+    )
+    expected_sha = request.expected_source_workflow_sha256.lower()
+    if expected_sha != registry_sha:
+        return {
+            "contract_version": "reviewed_workflow_compile_result_v2",
+            "status": "blocked",
+            "asset": None,
+            "blocked_reasons": [{"code": "source_workflow_sha256_mismatch", "message": "expected source workflow SHA-256 does not match registry binding"}],
+        }
+    return compile_reviewed_workflow_asset_v2(
+        project_root=ROOT_DIR,
+        source_workflow_path=source_path,
+        expected_source_workflow_sha256=expected_sha,
+    )
+
+
+def _safe_blocked_compile_result(result: dict[str, Any]) -> dict[str, Any]:
+    """阻断结果只暴露稳定 reason code，绝不回传编译器的文件路径文本。"""
+
+    return {
+        "contract_version": "reviewed_workflow_compile_result_v2",
+        "status": "blocked",
+        "asset": None,
+        "blocked_reasons": [
+            {"code": str(item.get("code") or "compile_blocked"), "message": "reviewed workflow compilation blocked"}
+            for item in result.get("blocked_reasons", [])
+            if isinstance(item, dict)
+        ],
+    }
+
+
+@router.post("/panel/compile_reviewed_workflow_asset", response_model=APIResponse)
+def compile_reviewed_workflow_asset_endpoint(request: PanelCompileReviewedWorkflowAssetRequest) -> APIResponse:
+    """编译服务端注册的人审流程；此端点不写入 v2 CAS。"""
+
+    try:
+        result = _compile_reviewed_workflow_request(request)
+        registry_revision = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).registry()["registry_revision"]
+    except (OSError, ValueError, json.JSONDecodeError):
+        return APIResponse(success=False, message="Reviewed workflow compile failed", data=None, error=ErrorModel(code="reviewed_workflow_compile_failed", details="server-side reviewed workflow source validation failed"))
+    if result.get("status") != "compiled":
+        return APIResponse(success=False, message="Reviewed workflow compile blocked", data={"result": _safe_blocked_compile_result(result), "registry_revision": registry_revision, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=ErrorModel(code="reviewed_workflow_compile_blocked", details="reviewed workflow compilation did not satisfy fail-closed checks"))
+    return APIResponse(success=True, message="Reviewed workflow compiled", data={"result": result, "registry_revision": registry_revision, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=None)
+
+
+@router.post("/panel/publish_reviewed_workflow_asset", response_model=APIResponse)
+def publish_reviewed_workflow_asset_endpoint(request: PanelPublishReviewedWorkflowAssetRequest) -> APIResponse:
+    """在 CAS 写入前重新编译；从不接受客户端提供的 asset。"""
+
+    try:
+        with _interface_workflow_lock(request.workflow_id):
+            compile_request = PanelCompileReviewedWorkflowAssetRequest(
+                application_identity_key=request.application_identity_key,
+                workflow_id=request.workflow_id,
+                expected_source_workflow_sha256=request.expected_source_workflow_sha256,
+            )
+            result = _compile_reviewed_workflow_request(compile_request)
+            if result.get("status") != "compiled" or not isinstance(result.get("asset"), dict):
+                return APIResponse(success=False, message="Reviewed workflow publish blocked", data={"compile_result": _safe_blocked_compile_result(result)}, error=ErrorModel(code="reviewed_workflow_compile_blocked", details="reviewed workflow must compile immediately before publish"))
+            # 在 CAS 写入前再次读取 v1 binding 与 source bytes，避免 save/delete 的 TOCTOU。
+            source_path, source_sha = _resolve_reviewed_workflow_source(application_identity_key=request.application_identity_key, workflow_id=request.workflow_id)
+            if source_sha != result["asset"]["source_review_lineage"]["source_workflow_sha256"] or hashlib.sha256((ROOT_DIR / source_path).read_bytes()).hexdigest() != source_sha:
+                return APIResponse(success=False, message="Reviewed workflow publish blocked", data={"compile_result": result}, error=ErrorModel(code="reviewed_workflow_source_changed", details="reviewed workflow source changed before publish"))
+            publish_result = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).publish(result["asset"], expected_registry_revision=request.expected_registry_revision)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return APIResponse(success=False, message="Reviewed workflow publish failed", data=None, error=ErrorModel(code="reviewed_workflow_publish_failed", details="server-side reviewed workflow publish validation failed"))
+    return APIResponse(success=True, message="Reviewed workflow published", data={"compile_result": result, "publish_result": publish_result, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=None)
+
+
+@router.post("/panel/preview_reviewed_workflow_replay", response_model=APIResponse)
+def preview_reviewed_workflow_replay_endpoint(request: PanelPreviewReviewedWorkflowReplayRequest) -> APIResponse:
+    """只读 replay preview：仅加载 CAS 与解析 observation，绝不调用捕获或 action。"""
+
+    try:
+        asset = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).load_active(request.asset_id)
+        actual_sha = content_sha256(asset)
+        preview_base = {"mode": "read_only_preview", "would_call_action_api": False, "execution_authorized": False, "artifact_is_authorization": False, "execute_binding_enabled": False}
+        if actual_sha != request.expected_content_sha256.lower():
+            return APIResponse(success=False, message="Reviewed workflow preview blocked", data=preview_base, error=ErrorModel(code="reviewed_workflow_preview_hash_mismatch", details="expected content SHA-256 does not match active reviewed workflow asset"))
+        if not request.current_observation:
+            return APIResponse(success=False, message="Reviewed workflow preview observation required", data={**preview_base, "asset_id": asset["asset_id"], "content_sha256": actual_sha}, error=ErrorModel(code="reviewed_workflow_preview_observation_required", details="a nonempty current observation is required for read-only replay preview"))
+        resolution = resolve_current_state(asset, request.current_observation)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return APIResponse(success=False, message="Reviewed workflow preview failed", data={"mode": "read_only_preview", "would_call_action_api": False, "execution_authorized": False, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=ErrorModel(code="reviewed_workflow_preview_failed", details="server-side reviewed workflow preview validation failed"))
+    data = {**preview_base, "asset_id": asset["asset_id"], "content_sha256": actual_sha, "state_resolution": resolution}
+    if resolution.get("status") != "resolved":
+        return APIResponse(success=False, message="Reviewed workflow preview unresolved", data=data, error=ErrorModel(code="reviewed_workflow_preview_unresolved", details="current observation did not resolve one reviewed workflow state"))
+    return APIResponse(success=True, message="Reviewed workflow replay preview resolved", data=data, error=None)
+
+
 @router.post("/panel/delete_learning_evidence", response_model=APIResponse)
 def delete_learning_evidence_endpoint(
     request: PanelDeleteLearningEvidenceRequest,
@@ -1735,10 +1904,11 @@ def delete_interface_workflow_endpoint(
     """删除一个流程资产，但保留可由其他流程复用的单界面证据。"""
 
     try:
-        result = delete_interface_workflow_review_candidate(
-            project_root=ROOT_DIR,
-            workflow_id=request.workflow_id,
-        )
+        with _interface_workflow_lock(request.workflow_id):
+            result = delete_interface_workflow_review_candidate(
+                project_root=ROOT_DIR,
+                workflow_id=request.workflow_id,
+            )
         result["trace_path"] = write_trace(
             category="panel",
             operation="delete-interface-workflow",
