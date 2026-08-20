@@ -85,6 +85,22 @@ def _transition(transition_id: str = "open_detail") -> dict:
         "display_name": "Open detail",
         "element_ref": "job_card",
         "preconditions": _capture_requirements(),
+        "reviewed_semantic_constraints": {
+            "preconditions": [
+                {
+                    "rule_id": f"rule_{transition_id}_precondition_1",
+                    "type": "source_semantic_precondition",
+                    "condition": "Reviewed source state is uniquely visible",
+                }
+            ],
+            "failure_conditions": [
+                {
+                    "rule_id": f"rule_{transition_id}_failure_1",
+                    "type": "source_semantic_failure_condition",
+                    "condition": "Unexpected destination is visible",
+                }
+            ],
+        },
         "expected_effect": {
             "semantic_success": {"target_state_id": "detail"},
         },
@@ -107,6 +123,7 @@ def _transition(transition_id: str = "open_detail") -> dict:
             "risk_level": "low",
             "requires_gate": True,
             "final_submit_forbidden": True,
+            "requires_user_confirmation": False,
         },
     }
 
@@ -135,6 +152,22 @@ def _asset() -> dict:
             },
         }
     )
+    transition2["reviewed_semantic_constraints"] = {
+        "preconditions": [
+            {
+                "rule_id": "rule_open_apply_flow_precondition_1",
+                "type": "source_semantic_precondition",
+                "condition": "Reviewed detail state is uniquely visible",
+            }
+        ],
+        "failure_conditions": [
+            {
+                "rule_id": "rule_open_apply_flow_failure_1",
+                "type": "source_semantic_failure_condition",
+                "condition": "External application flow is visible",
+            }
+        ],
+    }
     homepage["allowed_transition_ids"] = ["open_detail"]
     detail["allowed_transition_ids"] = ["open_apply_flow"]
     boundary["allowed_transition_ids"] = []
@@ -241,6 +274,33 @@ def test_canonical_hash_treats_human_approved_node_ids_as_a_semantic_set() -> No
     assert validate_reviewed_workflow_asset(first)["source_review_lineage"][
         "human_approved_node_ids"
     ] == ["node_detail", "node_homepage"]
+
+
+def test_canonical_hash_sorts_reviewed_semantic_constraint_rules() -> None:
+    from app.agent.reviewed_workflow_asset import content_sha256
+
+    first = _asset()
+    constraints = first["transitions"][0]["reviewed_semantic_constraints"]
+    constraints["preconditions"].append(
+        {
+            "rule_id": "rule_a_precondition",
+            "type": "source_semantic_precondition",
+            "condition": "A second reviewed precondition",
+        }
+    )
+    constraints["failure_conditions"].append(
+        {
+            "rule_id": "rule_a_failure",
+            "type": "source_semantic_failure_condition",
+            "condition": "A second reviewed failure condition",
+        }
+    )
+    second = copy.deepcopy(first)
+    second_constraints = second["transitions"][0]["reviewed_semantic_constraints"]
+    second_constraints["preconditions"].reverse()
+    second_constraints["failure_conditions"].reverse()
+
+    assert content_sha256(first) == content_sha256(second)
 
 
 def test_validator_accepts_synthetic_seek_three_state_asset() -> None:
@@ -561,6 +621,55 @@ def test_validator_requires_capture_grounding_gate_verification_success_and_reco
         validate_reviewed_workflow_asset(asset)
 
 
+def test_validator_rejects_stripped_reviewed_semantic_constraints() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    asset["transitions"][0].pop("reviewed_semantic_constraints")
+    with pytest.raises(ValueError, match="reviewed_semantic_constraints.*required"):
+        validate_reviewed_workflow_asset(asset)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "extra_constraint_key",
+        "preconditions_not_list",
+        "extra_rule_key",
+        "invalid_rule_id",
+        "wrong_rule_type",
+        "empty_condition",
+        "duplicate_rule_id",
+    ],
+)
+def test_validator_rejects_malformed_or_duplicate_reviewed_constraint_rules(
+    mutation: str,
+) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    constraints = asset["transitions"][0]["reviewed_semantic_constraints"]
+    if mutation == "extra_constraint_key":
+        constraints["notes"] = []
+    elif mutation == "preconditions_not_list":
+        constraints["preconditions"] = {}
+    elif mutation == "extra_rule_key":
+        constraints["preconditions"][0]["extra"] = True
+    elif mutation == "invalid_rule_id":
+        constraints["preconditions"][0]["rule_id"] = "invalid rule id"
+    elif mutation == "wrong_rule_type":
+        constraints["preconditions"][0]["type"] = "source_semantic_failure_condition"
+    elif mutation == "empty_condition":
+        constraints["preconditions"][0]["condition"] = "   "
+    elif mutation == "duplicate_rule_id":
+        constraints["failure_conditions"][0]["rule_id"] = constraints["preconditions"][0][
+            "rule_id"
+        ]
+
+    with pytest.raises(ValueError, match="reviewed_semantic_constraints|constraint rule"):
+        validate_reviewed_workflow_asset(asset)
+
+
 def test_gate_endpoint_is_required_and_exact() -> None:
     from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
 
@@ -573,6 +682,64 @@ def test_gate_endpoint_is_required_and_exact() -> None:
     wrong["transitions"][0]["preconditions"]["gate"]["endpoint"] = "POST /action/unsafe"
     with pytest.raises(ValueError, match="gate endpoint is invalid"):
         validate_reviewed_workflow_asset(wrong)
+
+
+def test_confirmation_required_transition_is_explicitly_non_automatic() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    missing_auto_false = _asset()
+    missing_auto_false["transitions"][0]["risk_policy"]["requires_user_confirmation"] = True
+    with pytest.raises(ValueError, match="automatic_execution_allowed.*false"):
+        validate_reviewed_workflow_asset(missing_auto_false)
+
+    automatic_true = _asset()
+    automatic_true["transitions"][0]["risk_policy"].update(
+        {
+            "requires_user_confirmation": True,
+            "automatic_execution_allowed": True,
+        }
+    )
+    with pytest.raises(ValueError, match="automatic_execution_allowed.*false"):
+        validate_reviewed_workflow_asset(automatic_true)
+
+    explicit_block = _asset()
+    explicit_block["transitions"][0]["risk_policy"].update(
+        {
+            "requires_user_confirmation": True,
+            "automatic_execution_allowed": False,
+        }
+    )
+    assert validate_reviewed_workflow_asset(explicit_block)["transitions"]
+
+
+def test_non_confirmation_risk_policy_accepts_optional_boolean_but_not_coercion() -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    no_automatic_flag = _asset()
+    assert validate_reviewed_workflow_asset(no_automatic_flag)["transitions"]
+
+    explicit_false = _asset()
+    explicit_false["transitions"][0]["risk_policy"]["automatic_execution_allowed"] = False
+    assert validate_reviewed_workflow_asset(explicit_false)["transitions"]
+
+    malformed = _asset()
+    malformed["transitions"][0]["risk_policy"]["automatic_execution_allowed"] = "false"
+    with pytest.raises(ValueError, match="automatic_execution_allowed.*boolean"):
+        validate_reviewed_workflow_asset(malformed)
+
+
+@pytest.mark.parametrize("value", [None, "false", 0])
+def test_risk_policy_requires_explicit_confirmation_boolean(value) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    risk = asset["transitions"][0]["risk_policy"]
+    if value is None:
+        risk.pop("requires_user_confirmation")
+    else:
+        risk["requires_user_confirmation"] = value
+    with pytest.raises(ValueError, match="requires_user_confirmation.*boolean"):
+        validate_reviewed_workflow_asset(asset)
 
 
 def test_stop_boundary_state_is_valid_without_grounding_or_action() -> None:

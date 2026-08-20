@@ -225,6 +225,14 @@ def canonicalize_reviewed_workflow_asset(asset: Mapping[str, Any]) -> dict[str, 
         if not isinstance(transition, dict):
             continue
         canonical_transition = _canonicalize_rule_lists(transition)
+        reviewed_constraints = canonical_transition.get("reviewed_semantic_constraints")
+        if isinstance(reviewed_constraints, dict):
+            for constraint_key in ("preconditions", "failure_conditions"):
+                if constraint_key in reviewed_constraints:
+                    reviewed_constraints[constraint_key] = _sort_identified(
+                        reviewed_constraints[constraint_key],
+                        id_keys=("rule_id",),
+                    )
         transition.clear()
         transition.update(canonical_transition)
     return value
@@ -495,6 +503,7 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         errors.append("transitions is required")
         transitions = []
     transition_ids: set[str] = set()
+    reviewed_constraint_rule_ids: set[str] = set()
     for index, transition in enumerate(transitions):
         label = f"transitions[{index}]"
         if not isinstance(transition, dict):
@@ -651,6 +660,54 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
                 elif endpoint != "POST /action/execute_recognition_plan":
                     errors.append(f"{label}.preconditions.gate endpoint is invalid")
 
+        reviewed_constraints = transition.get("reviewed_semantic_constraints")
+        constraints_label = f"{label}.reviewed_semantic_constraints"
+        if not isinstance(reviewed_constraints, dict):
+            errors.append(f"{constraints_label} is required")
+        else:
+            errors.extend(
+                _closed_policy_errors(
+                    reviewed_constraints,
+                    label=constraints_label,
+                    allowed_keys={"preconditions", "failure_conditions"},
+                )
+            )
+            for constraint_key, expected_rule_type in (
+                ("preconditions", "source_semantic_precondition"),
+                ("failure_conditions", "source_semantic_failure_condition"),
+            ):
+                rules = reviewed_constraints.get(constraint_key)
+                rules_label = f"{constraints_label}.{constraint_key}"
+                if not isinstance(rules, list):
+                    errors.append(f"{rules_label} must be a list")
+                    continue
+                for rule_index, rule in enumerate(rules):
+                    rule_label = f"{rules_label}[{rule_index}]"
+                    if not isinstance(rule, dict):
+                        errors.append(f"{rule_label} constraint rule must be an object")
+                        continue
+                    errors.extend(
+                        _closed_policy_errors(
+                            rule,
+                            label=f"{rule_label} constraint rule",
+                            allowed_keys={"rule_id", "type", "condition"},
+                        )
+                    )
+                    rule_id = _text(rule.get("rule_id"))
+                    if not rule_id or not _ID_RE.fullmatch(rule_id):
+                        errors.append(f"{rule_label} constraint rule_id is invalid")
+                    elif rule_id in reviewed_constraint_rule_ids:
+                        errors.append(f"duplicate reviewed constraint rule_id: {rule_id}")
+                    else:
+                        reviewed_constraint_rule_ids.add(rule_id)
+                    if rule.get("type") != expected_rule_type:
+                        errors.append(
+                            f"{rule_label} constraint rule type must be {expected_rule_type}"
+                        )
+                    condition = rule.get("condition")
+                    if not isinstance(condition, str) or not condition.strip():
+                        errors.append(f"{rule_label} constraint rule condition is required")
+
         expected = transition.get("expected_effect")
         if not isinstance(expected, dict) or not (
             expected.get("semantic_success") or expected.get("semantic_success_rules")
@@ -689,6 +746,24 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         risk = transition.get("risk_policy")
         if not isinstance(risk, dict) or risk.get("requires_gate") is not True or risk.get("final_submit_forbidden") is not True:
             errors.append(f"{label}.risk_policy safety gate is required")
+        if isinstance(risk, dict):
+            requires_confirmation = risk.get("requires_user_confirmation")
+            if type(requires_confirmation) is not bool:
+                errors.append(
+                    f"{label}.risk_policy.requires_user_confirmation must be boolean"
+                )
+            elif requires_confirmation is True:
+                if risk.get("automatic_execution_allowed") is not False:
+                    errors.append(
+                        f"{label}.risk_policy.automatic_execution_allowed must be false "
+                        "when user confirmation is required"
+                    )
+            elif "automatic_execution_allowed" in risk and type(
+                risk.get("automatic_execution_allowed")
+            ) is not bool:
+                errors.append(
+                    f"{label}.risk_policy.automatic_execution_allowed must be boolean"
+                )
         if action in {"fill_field", "continue_next_step"} and isinstance(risk, dict) and risk.get("automatic_execution_allowed") is True:
             errors.append(f"{label}.blocked semantic action cannot be automatically executed")
 
