@@ -70,6 +70,51 @@ def test_safe_click_apply_entry_allowed_but_submit_application_blocked() -> None
     assert blocked_reason == "potential_side_effect_action"
 
 
+def test_goal_identifier_narrows_duplicate_current_uia_exact_labels() -> None:
+    def candidate(automation_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            candidate_id=automation_id,
+            element=SimpleNamespace(
+                evidence={
+                    "screen_inventory_action": {
+                        "metadata": {"automation_id": automation_id},
+                    }
+                }
+            ),
+        )
+
+    matches, reason = vision_api._narrow_current_uia_matches_by_goal_identifier(
+        [candidate("job-title-11111111"), candidate("job-title-93615952")],
+        goal="Open SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE job 93615952 detail",
+    )
+
+    assert [item.candidate_id for item in matches] == ["job-title-93615952"]
+    assert reason == "goal_identifier_match:93615952"
+
+
+def test_goal_identifier_does_not_break_ambiguity_without_unique_automation_match() -> None:
+    def candidate(automation_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            candidate_id=automation_id,
+            element=SimpleNamespace(
+                evidence={
+                    "screen_inventory_action": {
+                        "metadata": {"automation_id": automation_id},
+                    }
+                }
+            ),
+        )
+
+    candidates = [candidate("job-title-11111111"), candidate("job-title-22222222")]
+    matches, reason = vision_api._narrow_current_uia_matches_by_goal_identifier(
+        candidates,
+        goal="Open SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE job 33333333 detail",
+    )
+
+    assert matches == candidates
+    assert reason is None
+
+
 def test_blocked_policy_low_risk_card_becomes_safe_click_candidate() -> None:
     risk_class, reasons = vision_api._risk_class_for_candidate(
         label="AI Product Engineer",

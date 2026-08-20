@@ -804,6 +804,33 @@ def _semantic_current_uia_candidate_matches_seed(
     return len(entity_tokens.intersection(goal_tokens)) / len(entity_tokens) >= 0.75
 
 
+def _narrow_current_uia_matches_by_goal_identifier(
+    candidates: list[RecognitionCandidate],
+    *,
+    goal: str,
+) -> tuple[list[RecognitionCandidate], str | None]:
+    """用目标中明确的长数字 ID 收窄重复的当前 UIA 文本命中。"""
+    if len(candidates) <= 1:
+        return candidates, None
+    goal_tokens = set(re.findall(r"(?<!\d)\d{6,}(?!\d)", str(goal or "")))
+    if not goal_tokens:
+        return candidates, None
+    matches: list[tuple[RecognitionCandidate, str]] = []
+    for candidate in candidates:
+        action = candidate.element.evidence.get("screen_inventory_action")
+        metadata = action.get("metadata") if isinstance(action, dict) else None
+        automation_id = metadata.get("automation_id") if isinstance(metadata, dict) else None
+        automation_id = str(automation_id or "")
+        for token in sorted(goal_tokens):
+            if re.search(rf"(?<!\d){re.escape(token)}(?!\d)", automation_id):
+                matches.append((candidate, token))
+                break
+    if len(matches) != 1:
+        return candidates, None
+    candidate, token = matches[0]
+    return [candidate], f"goal_identifier_match:{token}"
+
+
 def _candidate_freshness_decision_for_trace(
     seeded: dict[str, Any] | None,
     *,
@@ -2230,6 +2257,7 @@ def _recognition_plan_from_vista_point(
     seeded_primary_point_used = False
     vista_point_inside_selected_bbox = False
     vista_evaluated_candidate_ids: set[str] = set()
+    fast_grounding_identifier_reason: str | None = None
     if candidates:
         if allow_reviewed_seed_without_model and seed_candidate is not None:
             selected_candidate = seed_candidate
@@ -2260,6 +2288,20 @@ def _recognition_plan_from_vista_point(
                 in normalized_seed_text_anchors
             ]
             current_uia_seed_matches = exact_current_uia_candidates
+            (
+                current_uia_seed_matches,
+                fast_grounding_identifier_reason,
+            ) = _narrow_current_uia_matches_by_goal_identifier(
+                current_uia_seed_matches,
+                goal=goal,
+            )
+            if fast_grounding_identifier_reason:
+                current_uia_seed_matches[0].reasons = _unique_list(
+                    [
+                        *current_uia_seed_matches[0].reasons,
+                        "operational_memory_goal_identifier_match",
+                    ]
+                )
             surface_validation = (
                 request.metadata.get("operational_memory", {}).get("surface_validation", {})
                 if isinstance(request.metadata.get("operational_memory"), dict)
@@ -2631,6 +2673,7 @@ def _recognition_plan_from_vista_point(
             "operational_memory_fast_grounding_requested": fast_grounding_requested,
             "operational_memory_fast_grounding_used": fast_grounding_used,
             "operational_memory_fast_grounding_reason": fast_grounding_reason,
+            "operational_memory_goal_identifier_match": fast_grounding_identifier_reason,
             "current_uia_unique_match_count": fast_grounding_match_count,
             "vista_direct_uia_conflict_candidate_ids": vista_direct_uia_conflict_ids,
             "vista_roi_policy": vista_image_preprocess.get("roi_policy"),
@@ -2901,6 +2944,7 @@ def _recognition_plan_from_vista_point(
             "operational_memory_fast_grounding_requested": fast_grounding_requested,
             "operational_memory_fast_grounding_used": fast_grounding_used,
             "operational_memory_fast_grounding_reason": fast_grounding_reason,
+            "operational_memory_goal_identifier_match": fast_grounding_identifier_reason,
             "current_uia_unique_match_count": fast_grounding_match_count,
             "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
             "seeded_candidate_primary_point_used": seeded_primary_point_used,

@@ -266,6 +266,78 @@ def test_pre_click_decision_accepts_collapsed_ocr_spacing_for_long_memory_anchor
     assert "operational_memory_expected_effect_verified" in result.candidate_decisions[0].reasons
 
 
+def test_pre_click_decision_allows_actionable_uia_text_child_for_memory_open_detail() -> None:
+    title = "SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"
+    candidate = _candidate(
+        candidate_id="candidate_screen_inventory_action_uia_title",
+        element_id="screen_inventory_action_uia_title",
+        label=title,
+        role="text",
+        text_similarity=0.9,
+    )
+    candidate.element.description = title
+    candidate.element.text = title
+    candidate.element.evidence = {
+        "screen_inventory_action": {
+            "action_type": "click",
+            "metadata": {"patterns": ["Invoke", "Text"]},
+        }
+    }
+
+    result = decide_pre_click(
+        goal=f"Open {title} job detail.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(
+            candidate_id=candidate.candidate_id,
+            matched_text=title,
+        ),
+        expected_effect={
+            "contract_version": "operational_memory_expected_effect_v1",
+            "semantic_action": "open_detail",
+            "locator_evidence": {"text_anchors": [title]},
+        },
+    )
+
+    assert result.allowed is True
+    assert "operational_memory_expected_effect_verified" in result.candidate_decisions[0].reasons
+
+
+def test_pre_click_decision_rejects_non_actionable_uia_text_child_for_memory_open_detail() -> None:
+    title = "SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE"
+    candidate = _candidate(
+        candidate_id="candidate_screen_inventory_text_title",
+        element_id="screen_inventory_text_title",
+        label=title,
+        role="text",
+        text_similarity=0.9,
+    )
+    candidate.element.description = title
+    candidate.element.text = title
+    candidate.element.evidence = {
+        "screen_inventory_action": {
+            "action_type": "click",
+            "metadata": {"patterns": ["Text"]},
+        }
+    }
+
+    result = decide_pre_click(
+        goal=f"Open {title} job detail.",
+        candidates=_rank_result(candidate),
+        grounding=_grounding(
+            candidate_id=candidate.candidate_id,
+            matched_text=title,
+        ),
+        expected_effect={
+            "contract_version": "operational_memory_expected_effect_v1",
+            "semantic_action": "open_detail",
+            "locator_evidence": {"text_anchors": [title]},
+        },
+    )
+
+    assert result.allowed is False
+    assert "candidate_goal_action_mismatch" in result.candidate_decisions[0].reasons
+
+
 def test_pre_click_decision_does_not_trust_memory_open_detail_for_unmatched_link() -> None:
     candidate = _candidate(
         candidate_id="candidate_other_link",

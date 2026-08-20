@@ -542,7 +542,10 @@ def _verified_expected_effect_for_candidate(
         return False
     if not candidate.eligible or candidate.element.interaction_policy.ad_risk >= 0.6:
         return False
-    if _normalize_text(candidate.role) not in {"link", "card", "listitem", "button"}:
+    if _normalize_text(candidate.role) not in {"link", "card", "listitem", "button"} and not (
+        _normalize_text(candidate.role) == "text"
+        and _candidate_has_ui_invoke_evidence(candidate)
+    ):
         return False
     locator = expected_effect.get("locator_evidence") if isinstance(expected_effect, dict) else None
     locator = locator if isinstance(locator, dict) else {}
@@ -558,6 +561,16 @@ def _verified_expected_effect_for_candidate(
     if not anchors:
         return False
     return _anchor_matches_any(candidate.label, anchors) and _anchor_matches_any(local.matched_text, anchors)
+
+
+def _candidate_has_ui_invoke_evidence(candidate: RecognitionCandidate) -> bool:
+    """仅允许带 UIA Invoke 的当前 Text 节点继承已审核的动作语义。"""
+    evidence = candidate.element.evidence.get("screen_inventory_action")
+    if not isinstance(evidence, dict) or evidence.get("action_type") != "click":
+        return False
+    metadata = evidence.get("metadata")
+    patterns = metadata.get("patterns") if isinstance(metadata, dict) else None
+    return isinstance(patterns, list) and "Invoke" in patterns
 
 
 def _anchor_matches_any(value: str | None, anchors: list[str]) -> bool:
