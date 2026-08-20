@@ -1,0 +1,56 @@
+{
+  "profile_id": "learn_mode_omniparser_v2",
+  "label": "Learn Mode OmniParser V2 provider candidate",
+  "mode_scope": "learn_only",
+  "role": [
+    "learn_recognition_candidate",
+    "screen_parser_provider"
+  ],
+  "intended_pipeline_stage": "parser_provider",
+  "provider_mode": "metadata_only",
+  "model_family": "OmniParser",
+  "model_id": "microsoft/OmniParser-v2",
+  "max_parameters_b": 1.0,
+  "experiment_priority": 2,
+  "input_contract": "full_screen_screenshot",
+  "output_contract": "screen_inventory_interactable_boxes_v2",
+  "coordinate_output": "bbox_candidates_normalized_or_pixel_requires_adapter",
+  "parser_role": "ui_element_parser",
+  "grounding_role": "not_used_for_final_point",
+  "recommended_use": "Parser provider for interactable element boxes and icon captions before classifier and ROI grounding.",
+  "candidate_source_url": "https://github.com/microsoft/omniparser",
+  "download_status": "not_downloaded",
+  "model_path": "",
+  "launchable": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_action_requires_gate": true,
+  "final_submit_forbidden": true,
+  "notes": "Optional learn-only parser provider. The profile declares expected paths and a runtime probe, not installed-state truth. Output is review-only evidence and never click authorization.",
+  "provider_contract": "screen_parser_result_v1",
+  "runtime_probe": {
+    "required": true,
+    "installed_state": "probe_required",
+    "probe_command": "tools/omniparser-v2.0.1/.venv/Scripts/python.exe scripts/run_omniparser_learn_smoke.py --input artifacts/demos/seek_three_interface_contact_sheet.png",
+    "resource_group": "gpu_vision",
+    "minimum_free_gpu_gib": 8,
+    "offline_inference_required": true,
+    "minimum_warm_repetitions": 3,
+    "weight_manifest_required": true
+  },
+  "official_code": {
+    "repository": "https://github.com/microsoft/OmniParser.git",
+    "tag": "v.2.0.1",
+    "commit": "b0d5c9f5701f7e2be4771872e6e928da77759df3",
+    "license_url": "https://github.com/microsoft/OmniParser/blob/v.2.0.1/LICENSE"
+  },
+  "expected_paths": {
+    "code_path": "tools/omniparser-v2.0.1",
+    "weights_path": "models/omniparser/v2.0.1/weights",
+    "runtime_path": "tools/omniparser-v2.0.1/.venv"
+  },
+  "florence_offline_revisions": {
+    "processor": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
+    "model": "f6c1a25888ffc1d945ee8a1a77ac833c7303d46e"
+  }
+}

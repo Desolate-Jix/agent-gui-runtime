@@ -1,0 +1,30 @@
+{
+  "profile_id": "learn_mode_showui_2b",
+  "label": "Learn Mode ShowUI 2B candidate",
+  "mode_scope": "learn_only",
+  "role": [
+    "learn_recognition_candidate",
+    "lightweight_gui_grounding"
+  ],
+  "intended_pipeline_stage": "roi_grounding",
+  "provider_mode": "metadata_only",
+  "model_family": "ShowUI",
+  "model_id": "showlab/ShowUI-2B",
+  "max_parameters_b": 2.0,
+  "experiment_priority": 7,
+  "input_contract": "roi_crop_or_full_screen_plus_referring_expression",
+  "output_contract": "learn_grounding_result_v1",
+  "coordinate_output": "normalized_0_1_point_requires_coordinate_transform",
+  "parser_role": "none",
+  "grounding_role": "lightweight_grounding_baseline",
+  "recommended_use": "Lightweight GUI grounding/action-output baseline for speed and failure comparison.",
+  "candidate_source_url": "https://huggingface.co/showlab/ShowUI-2B",
+  "download_status": "not_downloaded",
+  "model_path": "",
+  "launchable": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "real_action_requires_gate": true,
+  "final_submit_forbidden": true,
+  "notes": "Metadata-only Learn Mode candidate. Treat output as candidate evidence only."
+}

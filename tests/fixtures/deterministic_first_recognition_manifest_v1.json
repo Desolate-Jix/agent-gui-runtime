@@ -1,0 +1,104 @@
+{
+  "contract_version": "deterministic_first_recognition_manifest_v1",
+  "source_type": "fixed_actual_observe_trace",
+  "source_root": "D:/agent-gui-runtime",
+  "require_stage1_gate": true,
+  "cases": [
+    {
+      "case_id": "media_catalog_apple_20260710",
+      "app_family": "apple_music",
+      "trace_path": "logs/traces/vision/20260714-123256-218155__learn-mode-fast-observe__apple-music-observe-screen-applemusic-full-window-20260710-032407-416762.json",
+      "trace_sha256": "02079bc6bae2add31895c15bab520305bfd27b69881e031c717f58a8369a5dff",
+      "screenshot_path": "artifacts/screenshots/apple-music__observe-screen__applemusic__full-window__20260710-032407-416762.png",
+      "screenshot_sha256": "f279540de64d55377b00dcaef19dcf581a577a41d7729ce0c449677b35611e4f",
+      "expected_root_zones": ["top_bar", "left_nav", "main_content"]
+    },
+    {
+      "case_id": "documentation_portal_python_home",
+      "app_family": "python_org",
+      "trace_path": "logs/traces/vision/20260714-185749-484245__learn-mode-fast-observe__python-org-live-model-regression-qwen8b.json",
+      "trace_sha256": "066a3c17f052cfc0b9209f69dccceae136c38d399daec54539c37bc0331e4c07",
+      "screenshot_path": "artifacts/learning-runs/new_site_python_org_20260702/python_org_home.png",
+      "screenshot_sha256": "356a9ce80f3b6039f8640db0fb292b37343f1b0b03218bb0fedb4d633b9b5515",
+      "expected_root_zones": ["top_bar", "main_content"]
+    },
+    {
+      "case_id": "settings_dashboard_windows_settings",
+      "app_family": "windows_settings",
+      "trace_path": "logs/traces/vision/20260714-123452-588871__learn-mode-fast-observe__7debf9cb-observe-screen-windows-settings-free-exploration-full-window-2-53a780f2.json",
+      "trace_sha256": "6e71d3002a6d6c0f2b52d8355cdb3d71b7eb9c7d570accc48d06734b3aae8572",
+      "screenshot_path": "artifacts/screenshots/-7debf9cb__observe-screen__windows-settings-free-exploration__full-window__20260711-121107-305728.png",
+      "screenshot_sha256": "7b274f7de16aab2bac59ff4fc0aca5f77bf1ee65a2467aa89970cdde572a6172",
+      "expected_root_zones": ["top_bar", "main_content"]
+    },
+    {
+      "case_id": "file_browser_system_drive",
+      "app_family": "file_explorer",
+      "trace_path": "logs/traces/vision/20260714-123557-369048__learn-mode-fast-observe__system-c-observe-screen-file-explorer-full-window-20260713-142602-464430.json",
+      "trace_sha256": "3139abf4042d6cdb3c425d4d0cc76d3f7a1c637a80f986fcbd7ad07c37227ecf",
+      "screenshot_path": "artifacts/screenshots/system-c__observe-screen__file-explorer__full-window__20260713-142602-464430.png",
+      "screenshot_sha256": "8c8cc5343e54a0427ab2db54534635d3fedfd0afa732fcc97f9cf49ba97ba658",
+      "expected_root_zones": ["top_bar", "left_nav", "main_content", "bottom_bar"],
+      "reference_note": "The visible ribbon and address controls form a full-width top region above the navigation tree and file list."
+    },
+    {
+      "case_id": "conversation_workspace_steam_20260713",
+      "app_family": "steam_friends",
+      "trace_path": "logs/traces/vision/20260714-122758-906278__learn-mode-fast-observe__4d54d04d-observe-screen-steam-friends-full-window-20260713-143514-950513.json",
+      "trace_sha256": "17099d8b7fa48ddbb2747bfb4dfc2c45c6594e4f310925e3800464b0f5ddbf93",
+      "screenshot_path": "artifacts/screenshots/-4d54d04d__observe-screen__steam-friends__full-window__20260713-143514-950513.png",
+      "screenshot_sha256": "1ba22b832e9eff6aca23f849e7c6b44b77099ff303ccd6aff3f7ed2e854de82e",
+      "expected_root_zones": ["top_bar", "main_content", "bottom_bar"]
+    },
+    {
+      "case_id": "conversation_workspace_whatsapp_20260715",
+      "app_family": "whatsapp",
+      "trace_path": "logs/traces/vision/20260715-071121-563865__learn-mode-fast-observe__whatsapp-class-recursive.json",
+      "trace_sha256": "a5e2d90c2d04ce095c5e3f23a0dd47654795705c8d775fe32c1978fac6b42640",
+      "screenshot_path": "artifacts/screenshots/whatsapp__capture__full-window__20260715-065241-026915.png",
+      "screenshot_sha256": "2fc272e5a4730b75ef88abddd89a22194216650c5f1f10b1d6971af04cfb57e4",
+      "expected_root_zones": ["left_nav", "top_bar", "main_content"]
+    },
+    {
+      "case_id": "generic_notepad_blank",
+      "app_family": "notepad",
+      "trace_path": "logs/traces/vision/20260714-153157-168716__learn-mode-fast-observe__notepad-blank.json",
+      "trace_sha256": "88882d4cb66f3d6e6af5deb3a3023ae83a75cc25be18da096220c6e90a10580f",
+      "screenshot_path": "artifacts/screenshots/-03faf5c9__observe-screen__notepad__full-window__20260713-162256-574364.png",
+      "screenshot_sha256": "85c3f065762d121dab32d501d39481ff11356552d1888fe2c7398f9a487bd8c9",
+      "expected_root_zones": ["top_bar", "main_content", "bottom_bar"]
+    },
+    {
+      "case_id": "conversation_workspace_wechat_20260715",
+      "app_family": "wechat",
+      "trace_path": "logs/traces/vision/20260715-210834-638363__learn-mode-fast-observe__weixin.json",
+      "trace_sha256": "3096d63da27ec6baee3f545d0ac6a193cf2a62ab2cf8a57dce8186d32f2c7d01",
+      "screenshot_path": "artifacts/screenshots/-68406df3__observe-screen__weixin__full-window__20260715-210809-909141.png",
+      "screenshot_sha256": "e43ef7b5cee40e6ff6f887174a53e131cc084c4961c2d3755359fbae27c9ee00",
+      "expected_root_zones": ["left_nav", "top_bar", "main_content"]
+    },
+    {
+      "case_id": "media_portal_bilibili_home_20260715",
+      "app_family": "bilibili_web",
+      "trace_path": "logs/traces/vision/20260715-210431-091554__learn-mode-fast-observe__target-9e7d4fc1.json",
+      "trace_sha256": "58cb9aa98a829ad20aa8c6bf276f35d878cf0141b9312e4bed11d9797955db80",
+      "screenshot_path": "artifacts/screenshots/bilibili-microsoft-edge__observe-screen__target-9e7d4fc1__full-window__20260715-210400-926615.png",
+      "screenshot_sha256": "8a32f688c1a12a3b607b2d4f23752501388ec3d963445b28e1b0fef01dfad667",
+      "expected_root_zones": ["top_bar", "main_content"],
+      "reference_note": "Browser chrome forms the root top bar; the site banner, navigation, cards, and visible popup remain inside the page main content."
+    }
+  ],
+  "excluded_cases": [
+    {
+      "case_id": "nvidia_overlay_stage1_blocker",
+      "reason": "wrong_surface_fixture",
+      "expected_app_family": "nvidia_overlay",
+      "observed_surface": "edge_local_panel",
+      "trace_path": "logs/traces/vision/20260711-153904-850265__learn-mode-fast-observe__nvidia-overlay.json",
+      "trace_sha256": "cd75b57496a1c394ba5677582acbfd1fb3563b5fdd6918cf1a2ca295a6488c18",
+      "screenshot_path": "artifacts/screenshots/nvidia-geforce-overlay-dt__observe-screen__nvidia-overlay__full-window__20260711-153834-588587.png",
+      "screenshot_sha256": "eb8909e549a018a1013fecd317dd5b400da1776d45e857a789ef0c0c4c4fbad8",
+      "counts_toward_positive_recognition": false
+    }
+  ]
+}

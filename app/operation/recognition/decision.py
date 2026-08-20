@@ -1,0 +1,652 @@
+from __future__ import annotations
+
+import re
+from difflib import SequenceMatcher
+
+from app.operation.recognition.schemas import (
+    CandidateRankResult,
+    LocalGroundingCandidateResult,
+    LocalGroundingResult,
+    PreClickCandidateDecision,
+    PreClickDecisionResult,
+    RecognitionCandidate,
+)
+from app.vision.schemas import BBox
+
+
+def decide_pre_click(
+    *,
+    goal: str,
+    candidates: CandidateRankResult,
+    grounding: LocalGroundingResult,
+    min_candidate_score: float = 0.45,
+    min_margin: float = 0.06,
+    min_local_text_similarity: float = 0.45,
+    allow_low_margin_when_grounded: bool = False,
+    expected_effect: dict[str, object] | None = None,
+) -> PreClickDecisionResult:
+    grounding_by_id = {item.candidate_id: item for item in grounding.results}
+    decisions: list[PreClickCandidateDecision] = []
+
+    for candidate in candidates.candidates:
+        local = grounding_by_id.get(candidate.candidate_id)
+        decisions.append(
+            _candidate_decision(
+                goal=goal,
+                candidate=candidate,
+                local=local,
+                min_candidate_score=min_candidate_score,
+                min_local_text_similarity=min_local_text_similarity,
+                expected_effect=expected_effect,
+            )
+        )
+
+    precision_review_top_blocked = bool(
+        decisions
+        and candidates.candidates[0].element.interaction_policy.zone_type in {"precise_visual_target", "precise_text_target"}
+        and not decisions[0].allowed
+    )
+    if precision_review_top_blocked:
+        review_zone = candidates.candidates[0].element.interaction_policy.zone_type
+        blocked_reason = (
+            "higher_ranked_precision_visual_target_requires_confirmation"
+            if review_zone == "precise_visual_target"
+            else "higher_ranked_precision_text_target_requires_confirmation"
+        )
+        for decision in decisions[1:]:
+            if decision.allowed:
+                decision.allowed = False
+                decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
+            if blocked_reason in decision.reasons:
+                continue
+            decision.reasons.append(blocked_reason)
+
+    raw_top_margin_ok = _top_margin_ok(candidates, min_margin=min_margin)
+    equivalent_duplicate_margin_override_used = (
+        not raw_top_margin_ok and _top_margin_equivalent_duplicate_ok(candidates, min_margin=min_margin)
+    )
+    effective_top_margin_ok = raw_top_margin_ok or equivalent_duplicate_margin_override_used
+    if not effective_top_margin_ok:
+        for index, decision in enumerate(decisions):
+            if allow_low_margin_when_grounded and index == 0 and decision.allowed and "pre_click_checks_passed" in decision.reasons:
+                decision.reasons.append("top_candidate_margin_reviewed_override")
+                continue
+            decision.allowed = False
+            decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
+            decision.reasons.append("top_candidate_margin_too_small")
+    elif equivalent_duplicate_margin_override_used:
+        top_candidate = candidates.candidates[0] if candidates.candidates else None
+        for index, decision in enumerate(decisions):
+            candidate = candidates.candidates[index]
+            is_equivalent_top = (
+                top_candidate is not None
+                and (index == 0 or _candidates_are_equivalent_duplicates(top_candidate, candidate))
+            )
+            if decision.allowed and is_equivalent_top:
+                decision.reasons.append("top_candidate_margin_equivalent_duplicate")
+                continue
+            decision.allowed = False
+            decision.reasons = [item for item in decision.reasons if item != "pre_click_checks_passed"]
+            decision.reasons.append("top_candidate_margin_too_small")
+
+    allowed = [item for item in decisions if item.allowed]
+    selected = allowed[0] if allowed else None
+    reasons = ["pre_click_candidate_allowed"] if selected is not None else ["no_candidate_passed_pre_click_checks"]
+    if equivalent_duplicate_margin_override_used and selected is not None:
+        reasons.append("top_candidate_margin_equivalent_duplicate")
+    elif not effective_top_margin_ok:
+        reasons.append("top_candidate_margin_reviewed_override" if selected is not None else "top_candidate_margin_too_small")
+
+    return PreClickDecisionResult(
+        allowed=selected is not None,
+        selected_candidate_id=selected.candidate_id if selected else None,
+        selected_element_id=selected.element_id if selected else None,
+        selected_click_point=selected.click_point if selected else None,
+        reasons=reasons,
+        candidate_decisions=decisions,
+        summary={
+            "candidate_count": len(candidates.candidates),
+            "allowed_candidate_count": len(allowed),
+            "top_margin_ok": effective_top_margin_ok,
+            "raw_top_margin_ok": raw_top_margin_ok,
+            "equivalent_duplicate_margin_override_used": equivalent_duplicate_margin_override_used,
+            "low_margin_reviewed_override_used": bool(
+                selected is not None
+                and not raw_top_margin_ok
+                and not equivalent_duplicate_margin_override_used
+                and allow_low_margin_when_grounded
+            ),
+            "margin_to_second": candidates.margin_to_second,
+        },
+    )
+
+
+def _candidate_decision(
+    *,
+    goal: str,
+    candidate: RecognitionCandidate,
+    local: LocalGroundingCandidateResult | None,
+    min_candidate_score: float,
+    min_local_text_similarity: float,
+    expected_effect: dict[str, object] | None,
+) -> PreClickCandidateDecision:
+    allowed = True
+    reasons: list[str] = []
+
+    if not candidate.eligible:
+        allowed = False
+        reasons.append("candidate_not_eligible")
+        if "vista_direct_conflicts_with_exact_uia_candidate_bbox" in candidate.reasons:
+            reasons.append("vista_direct_conflicts_with_exact_uia_candidate_bbox")
+    if candidate.score < min_candidate_score:
+        allowed = False
+        reasons.append("candidate_score_too_low")
+    requested_choice_role = _goal_explicit_choice_role(goal)
+    if requested_choice_role and _candidate_choice_role(candidate) != requested_choice_role:
+        allowed = False
+        reasons.append("candidate_goal_role_mismatch")
+    goal_action_terms = _explicit_goal_action_terms(goal)
+    expected_effect_verified = _verified_expected_effect_for_candidate(
+        expected_effect=expected_effect,
+        candidate=candidate,
+        local=local,
+    )
+    candidate_action_terms = _candidate_action_terms(candidate)
+    if goal_action_terms and not (candidate_action_terms & goal_action_terms):
+        expected_action_terms = _expected_effect_action_terms(expected_effect)
+        conflicting_candidate_terms = candidate_action_terms & {"apply", "continue", "submit", "save", "search", "filter"}
+        if (
+            expected_effect_verified
+            and not conflicting_candidate_terms
+            and goal_action_terms.issubset(expected_action_terms)
+        ):
+            reasons.append("operational_memory_expected_effect_verified")
+        else:
+            allowed = False
+            reasons.append("candidate_goal_action_mismatch")
+    goal_mentions_candidate_label = _goal_explicitly_requests_candidate_label(goal, candidate)
+    if candidate.score_breakdown.text_similarity < min_local_text_similarity and not goal_mentions_candidate_label:
+        allowed = False
+        reasons.append("candidate_goal_text_mismatch")
+    elif goal_mentions_candidate_label:
+        reasons.append("goal_explicitly_mentions_candidate_label")
+    policy = candidate.element.interaction_policy
+    if not policy.allowed:
+        allowed = False
+        reasons.append("interaction_policy_blocked")
+    if policy.zone_type == "precise_visual_target":
+        allowed = False
+        reasons.append("precision_visual_target_requires_confirmation")
+    if policy.zone_type == "precise_text_target":
+        allowed = False
+        reasons.append("precision_text_target_requires_confirmation")
+    if policy.zone_type == "ad_candidate" or policy.ad_risk >= 0.6:
+        allowed = False
+        reasons.append("ad_like_candidate")
+
+    click_point = dict(candidate.element.click_point)
+    resolved_click_point: dict[str, object] | None = None
+    if local is None:
+        allowed = False
+        reasons.append("missing_narrow_search_result")
+    else:
+        if local.status != "grounded":
+            allowed = False
+            reasons.append(f"narrow_search_status:{local.status}")
+        if local.refined_click_point is None:
+            allowed = False
+            reasons.append("missing_refined_click_point")
+        else:
+            bbox = _candidate_decision_bbox(candidate)
+            raw_point = dict(local.refined_click_point)
+            click_point, resolved_click_point = _resolve_click_point(candidate=candidate, bbox=bbox, raw_point=raw_point)
+            if resolved_click_point.get("chosen_point_source") == "bbox_safe_center":
+                reasons.append("bbox_safe_center_used")
+            if not resolved_click_point.get("raw_inside_bbox"):
+                allowed = False
+                reasons.append("refined_point_outside_candidate_bbox")
+            elif not _point_inside_bbox(click_point, bbox, padding=8):
+                allowed = False
+                reasons.append("refined_point_outside_candidate_bbox")
+        if local.matched_text:
+            similarity = _best_similarity(goal, local.matched_text, [candidate.label, candidate.text, candidate.element.description])
+            if similarity < min_local_text_similarity:
+                allowed = False
+                reasons.append("local_ocr_text_mismatch")
+            else:
+                reasons.append("local_ocr_text_match")
+        else:
+            allowed = False
+            reasons.append("missing_local_ocr_text")
+
+    if _verified_precision_text_candidate(
+        goal=goal,
+        candidate=candidate,
+        local=local,
+        min_local_text_similarity=min_local_text_similarity,
+    ):
+        reasons = [
+            reason
+            for reason in reasons
+            if reason not in {"interaction_policy_blocked", "precision_text_target_requires_confirmation"}
+        ]
+        hard_blockers = {
+            "candidate_not_eligible",
+            "candidate_score_too_low",
+            "candidate_goal_text_mismatch",
+            "ad_like_candidate",
+            "missing_narrow_search_result",
+            "missing_refined_click_point",
+            "refined_point_outside_candidate_bbox",
+            "local_ocr_text_mismatch",
+            "missing_local_ocr_text",
+        }
+        if not any(reason in hard_blockers or reason.startswith("narrow_search_status:") for reason in reasons):
+            allowed = True
+            reasons.append("precision_text_target_verified_by_local_ocr")
+
+    if allowed:
+        reasons.append("pre_click_checks_passed")
+    return PreClickCandidateDecision(
+        candidate_id=candidate.candidate_id,
+        element_id=candidate.element_id,
+        allowed=allowed,
+        score=candidate.score,
+        click_point=click_point if click_point else None,
+        reasons=_unique(reasons),
+        resolved_click_point=resolved_click_point,
+    )
+
+
+def _goal_explicit_choice_role(goal: str) -> str | None:
+    normalized = _normalize_text(goal)
+    if any(term in normalized for term in ("radio button", "radio", "\u5355\u9009\u6846")):
+        return "radio"
+    if any(term in normalized for term in ("checkbox", "check box", "\u590d\u9009\u6846")):
+        return "checkbox"
+    return None
+
+
+def _candidate_choice_role(candidate: RecognitionCandidate) -> str | None:
+    normalized = _normalize_text(candidate.role)
+    if normalized in {"radio", "radio button"}:
+        return "radio"
+    if normalized in {"checkbox", "check box"}:
+        return "checkbox"
+    return None
+
+
+def _top_margin_ok(candidates: CandidateRankResult, *, min_margin: float) -> bool:
+    if not candidates.candidates:
+        return False
+    if len(candidates.candidates) == 1:
+        return True
+    if candidates.margin_to_second is None:
+        return False
+    return float(candidates.margin_to_second) >= min_margin
+
+
+def _top_margin_equivalent_duplicate_ok(candidates: CandidateRankResult, *, min_margin: float) -> bool:
+    if len(candidates.candidates) < 2 or candidates.margin_to_second is None:
+        return False
+    if float(candidates.margin_to_second) >= min_margin:
+        return False
+    top = candidates.candidates[0]
+    runner_up = candidates.candidates[1]
+    return _candidates_are_equivalent_duplicates(top, runner_up)
+
+
+def _candidates_are_equivalent_duplicates(left: RecognitionCandidate, right: RecognitionCandidate) -> bool:
+    if left.element_id == right.element_id:
+        return False
+    if not _candidate_text_equivalent(left, right):
+        return False
+    return _candidate_geometry_equivalent(left, right)
+
+
+def _candidate_text_equivalent(left: RecognitionCandidate, right: RecognitionCandidate) -> bool:
+    left_values = [_normalize_text(value) for value in _candidate_label_values(left)]
+    right_values = [_normalize_text(value) for value in _candidate_label_values(right)]
+    left_values = [value for value in left_values if value]
+    right_values = [value for value in right_values if value]
+    for left_value in left_values:
+        for right_value in right_values:
+            if left_value == right_value:
+                return True
+            if min(len(left_value), len(right_value)) >= 10 and _text_similarity(left_value, right_value) >= 0.92:
+                return True
+    return False
+
+
+def _candidate_geometry_equivalent(left: RecognitionCandidate, right: RecognitionCandidate) -> bool:
+    left_bbox = _candidate_decision_bbox(left)
+    right_bbox = _candidate_decision_bbox(right)
+    if _bbox_iou(left_bbox, right_bbox) >= 0.55:
+        return True
+    left_point = left.element.click_point
+    right_point = right.element.click_point
+    if not left_point or not right_point:
+        return False
+    dx = int(left_point.get("x", 0)) - int(right_point.get("x", 0))
+    dy = int(left_point.get("y", 0)) - int(right_point.get("y", 0))
+    return (dx * dx + dy * dy) ** 0.5 <= 24
+
+
+def _bbox_iou(left: BBox, right: BBox) -> float:
+    left_x2 = left.x + left.w
+    left_y2 = left.y + left.h
+    right_x2 = right.x + right.w
+    right_y2 = right.y + right.h
+    intersection_w = max(0, min(left_x2, right_x2) - max(left.x, right.x))
+    intersection_h = max(0, min(left_y2, right_y2) - max(left.y, right.y))
+    intersection = intersection_w * intersection_h
+    if intersection <= 0:
+        return 0.0
+    left_area = max(0, left.w) * max(0, left.h)
+    right_area = max(0, right.w) * max(0, right.h)
+    union = left_area + right_area - intersection
+    if union <= 0:
+        return 0.0
+    return intersection / union
+
+
+def _point_inside_bbox(point: dict[str, int], bbox: BBox, *, padding: int = 0) -> bool:
+    x = int(point.get("x", -1))
+    y = int(point.get("y", -1))
+    return (
+        bbox.x - padding <= x <= bbox.x + bbox.w + padding
+        and bbox.y - padding <= y <= bbox.y + bbox.h + padding
+    )
+
+
+def _candidate_decision_bbox(candidate: RecognitionCandidate) -> BBox:
+    bbox = candidate.refined_bbox
+    if not bbox:
+        return candidate.element.bbox
+    return BBox(
+        x=int(bbox.get("x", 0)),
+        y=int(bbox.get("y", 0)),
+        w=int(bbox.get("w", bbox.get("width", 0))),
+        h=int(bbox.get("h", bbox.get("height", 0))),
+    )
+
+
+def _resolve_click_point(
+    *,
+    candidate: RecognitionCandidate,
+    bbox: BBox,
+    raw_point: dict[str, int],
+) -> tuple[dict[str, int], dict[str, object]]:
+    role = str(candidate.role or candidate.element.role or "").casefold()
+    raw = {"x": int(raw_point.get("x", 0)), "y": int(raw_point.get("y", 0))}
+    safe_center = _bbox_safe_center(bbox)
+    edge_margin = _point_edge_margin(raw, bbox)
+    min_margin = _safe_edge_margin(bbox)
+    bbox_payload = {"x": int(bbox.x), "y": int(bbox.y), "w": int(bbox.w), "h": int(bbox.h)}
+    raw_inside_bbox = _point_inside_bbox(raw, bbox)
+    should_use_center = _safe_center_role(role) and raw_inside_bbox and edge_margin < min_margin and _valid_bbox(bbox)
+    chosen = safe_center if should_use_center else raw
+    source = "bbox_safe_center" if should_use_center else "raw_grounding_point"
+    reason = "raw_model_point_near_edge" if should_use_center else "raw_grounding_point_within_safe_margin"
+    return chosen, {
+        "contract_version": "resolved_click_point_v1",
+        "target_text": candidate.text or candidate.label,
+        "target_role": role or None,
+        "bbox": bbox_payload,
+        "bbox_source": "candidate_refined_bbox" if candidate.refined_bbox else "candidate_element_bbox",
+        "raw_model_point": raw,
+        "chosen_point": chosen,
+        "chosen_point_source": source,
+        "adjustment_reason": reason,
+        "inside_bbox": _point_inside_bbox(chosen, bbox),
+        "raw_inside_bbox": raw_inside_bbox,
+        "edge_margin_px": int(edge_margin),
+        "min_edge_margin_px": int(min_margin),
+    }
+
+
+def _safe_center_role(role: str) -> bool:
+    return role in {"button", "menuitem", "checkbox", "radio", "tab", "toggle", "switch"}
+
+
+def _valid_bbox(bbox: BBox) -> bool:
+    return int(bbox.w) > 0 and int(bbox.h) > 0
+
+
+def _bbox_safe_center(bbox: BBox) -> dict[str, int]:
+    return {"x": int(round(bbox.x + bbox.w / 2)), "y": int(round(bbox.y + bbox.h / 2))}
+
+
+def _safe_edge_margin(bbox: BBox) -> int:
+    short_side = max(1, min(int(bbox.w), int(bbox.h)))
+    return max(4, min(10, int(round(short_side * 0.15))))
+
+
+def _point_edge_margin(point: dict[str, int], bbox: BBox) -> int:
+    x = int(point.get("x", 0))
+    y = int(point.get("y", 0))
+    return min(
+        abs(x - int(bbox.x)),
+        abs(int(bbox.x + bbox.w) - x),
+        abs(y - int(bbox.y)),
+        abs(int(bbox.y + bbox.h) - y),
+    )
+
+
+def _verified_precision_text_candidate(
+    *,
+    goal: str,
+    candidate: RecognitionCandidate,
+    local: LocalGroundingCandidateResult | None,
+    min_local_text_similarity: float,
+) -> bool:
+    policy = candidate.element.interaction_policy
+    if policy.zone_type != "precise_text_target" or policy.ad_risk >= 0.6:
+        return False
+    required_reasons = {"precision_text_target_matches_goal", "strong_goal_text_match", "supported_interaction"}
+    if not required_reasons.issubset(set(candidate.reasons)):
+        return False
+    if not candidate.eligible or local is None or local.status != "grounded":
+        return False
+    if local.refined_click_point is None or not local.matched_text:
+        return False
+    if not _point_inside_bbox(dict(local.refined_click_point), _candidate_decision_bbox(candidate), padding=8):
+        return False
+    similarity = _best_similarity(goal, local.matched_text, [candidate.label, candidate.text, candidate.element.description])
+    return similarity >= min_local_text_similarity
+
+
+def _best_similarity(goal: str, matched_text: str, values: list[str]) -> float:
+    targets = [_normalize_text(goal), *[_normalize_text(value) for value in values]]
+    text = _normalize_text(matched_text)
+    return max((_text_similarity(text, target) for target in targets if target), default=0.0)
+
+
+def _goal_explicitly_requests_candidate_label(goal: str, candidate: RecognitionCandidate) -> bool:
+    goal_text = _normalize_text(goal)
+    labels = _candidate_label_values(candidate)
+    for label in labels:
+        label_text = _normalize_text(label)
+        if len(label_text) < 3:
+            continue
+        for match in re.finditer(rf"(?<!\w){re.escape(label_text)}(?!\w)", goal_text):
+            before = goal_text[max(0, match.start() - 40) : match.start()].strip()
+            if _negates_next_click_target(before):
+                continue
+            return True
+    return False
+
+
+def _explicit_goal_action_terms(goal: str) -> set[str]:
+    goal_text = _normalize_text(goal)
+    term_groups = {
+        "open_detail": ["open detail", "job detail", "job listing", "listing card", "result card"],
+        "apply": ["apply", "quick apply", "申请"],
+        "continue": ["continue", "next", "下一步", "继续"],
+        "submit": ["submit", "send", "confirm", "提交", "发送", "确认"],
+        "save": ["save", "saved", "保存", "收藏"],
+        "search": ["search", "find", "搜索", "查找"],
+        "filter": ["filter", "refine", "pay", "date listed", "classification", "筛选"],
+    }
+    terms: set[str] = set()
+    for canonical, values in term_groups.items():
+        if any(_has_positive_goal_term(goal_text, _normalize_text(value)) for value in values):
+            terms.add(canonical)
+    return terms
+
+
+def _candidate_action_terms(candidate: RecognitionCandidate) -> set[str]:
+    text = _normalize_text(" ".join(_candidate_label_values(candidate) + [candidate.role, candidate.element.description]))
+    terms: set[str] = set()
+    term_groups = {
+        "open_detail": ["open detail", "job detail", "job listing", "listing card", "result card", "card"],
+        "apply": ["apply", "quick apply", "申请"],
+        "continue": ["continue", "next", "下一步", "继续"],
+        "submit": ["submit", "send", "confirm", "提交", "发送", "确认"],
+        "save": ["save", "saved", "保存", "收藏"],
+        "search": ["search", "find", "搜索", "查找"],
+        "filter": ["filter", "refine", "pay", "date listed", "classification", "筛选"],
+    }
+    for canonical, values in term_groups.items():
+        if any(_normalize_text(value) in text for value in values):
+            terms.add(canonical)
+    return terms
+
+
+def _expected_effect_action_terms(expected_effect: dict[str, object] | None) -> set[str]:
+    """把经 operational memory 验证的结构化动作映射为 gate 语义。"""
+    if not isinstance(expected_effect, dict):
+        return set()
+    if expected_effect.get("contract_version") != "operational_memory_expected_effect_v1":
+        return set()
+    action = _normalize_text(
+        str(expected_effect.get("semantic_action") or expected_effect.get("expected_effect") or "")
+    )
+    action_aliases = {
+        "open detail": {"open_detail"},
+        "open job detail": {"open_detail"},
+    }
+    return set(action_aliases.get(action, set()))
+
+
+def _verified_expected_effect_for_candidate(
+    *,
+    expected_effect: dict[str, object] | None,
+    candidate: RecognitionCandidate,
+    local: LocalGroundingCandidateResult | None,
+) -> bool:
+    """仅在 memory locator 与当前候选、当前窄定位文本同时吻合时信任动作语义。"""
+    if not _expected_effect_action_terms(expected_effect):
+        return False
+    if local is None or local.status != "grounded" or not local.matched_text:
+        return False
+    if not candidate.eligible or candidate.element.interaction_policy.ad_risk >= 0.6:
+        return False
+    if _normalize_text(candidate.role) not in {"link", "card", "listitem", "button"} and not (
+        _normalize_text(candidate.role) == "text"
+        and _candidate_has_ui_invoke_evidence(candidate)
+    ):
+        return False
+    locator = expected_effect.get("locator_evidence") if isinstance(expected_effect, dict) else None
+    locator = locator if isinstance(locator, dict) else {}
+    anchors = [str(item) for item in locator.get("text_anchors") or [] if str(item).strip()]
+    anchors.extend(
+        str(item)
+        for item in (
+            expected_effect.get("label") if isinstance(expected_effect, dict) else None,
+            expected_effect.get("target_label") if isinstance(expected_effect, dict) else None,
+        )
+        if str(item or "").strip()
+    )
+    if not anchors:
+        return False
+    return _anchor_matches_any(candidate.label, anchors) and _anchor_matches_any(local.matched_text, anchors)
+
+
+def _candidate_has_ui_invoke_evidence(candidate: RecognitionCandidate) -> bool:
+    """仅允许带 UIA Invoke 的当前 Text 节点继承已审核的动作语义。"""
+    evidence = candidate.element.evidence.get("screen_inventory_action")
+    if not isinstance(evidence, dict) or evidence.get("action_type") != "click":
+        return False
+    metadata = evidence.get("metadata")
+    patterns = metadata.get("patterns") if isinstance(metadata, dict) else None
+    return isinstance(patterns, list) and "Invoke" in patterns
+
+
+def _anchor_matches_any(value: str | None, anchors: list[str]) -> bool:
+    normalized_value = _normalize_text(value or "")
+    if not normalized_value:
+        return False
+    for anchor in anchors:
+        normalized_anchor = _normalize_text(anchor)
+        if normalized_value == normalized_anchor:
+            return True
+        # 长标题 OCR 可能吞掉词间空格；仅对高信息量多词锚点放宽。
+        tokens = normalized_anchor.split()
+        compact_anchor = "".join(character for character in normalized_anchor if character.isalnum())
+        compact_value = "".join(character for character in normalized_value if character.isalnum())
+        if len(tokens) >= 3 and len(compact_anchor) >= 20 and compact_value == compact_anchor:
+            return True
+    return False
+
+
+def _has_positive_goal_term(goal_text: str, term: str) -> bool:
+    if not term:
+        return False
+    for match in re.finditer(rf"(?<!\w){re.escape(term)}(?!\w)", goal_text):
+        before = goal_text[max(0, match.start() - 56) : match.start()].strip()
+        if _negates_next_click_target(before):
+            continue
+        return True
+    return False
+
+
+def _candidate_label_values(candidate: RecognitionCandidate) -> list[str]:
+    return _unique(
+        [
+            str(candidate.label or ""),
+            str(candidate.text or ""),
+            str(candidate.element.label or ""),
+            str(candidate.element.text or ""),
+        ]
+    )
+
+
+def _negates_next_click_target(preceding_text: str) -> bool:
+    words = preceding_text.split()
+    tail = " ".join(words[-5:])
+    return bool(
+        re.search(
+            r"\b(do not|don t|dont|never|not|avoid|exclude|excluding|forbid|forbidden)\b",
+            tail,
+        )
+    )
+
+
+def _text_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    if min(len(left), len(right)) >= 3 and (left in right or right in left):
+        return 0.9
+    left_tokens = set(left.split())
+    right_tokens = set(right.split())
+    token_score = 0.0
+    if left_tokens and right_tokens:
+        token_score = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+    return max(token_score, SequenceMatcher(None, left, right).ratio())
+
+
+def _normalize_text(value: str) -> str:
+    normalized = str(value or "").casefold()
+    normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def _unique(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result

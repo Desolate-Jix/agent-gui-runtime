@@ -1,0 +1,27 @@
+{
+  "id": "notepad_file_menu_dryrun",
+  "app": {
+    "app_name": "notepad",
+    "process_name": "notepad.exe"
+  },
+  "goal": "Click the File menu",
+  "mode": {
+    "dry_run_default": true,
+    "destructive": false
+  },
+  "expect": {
+    "action_type": "click",
+    "allow": true,
+    "max_attempt_count": 2,
+    "max_latency_ms": 5000,
+    "point_in_rect": {
+      "min_x": 0,
+      "max_x": 70,
+      "min_y": 20,
+      "max_y": 70
+    },
+    "post_click": {
+      "required": false
+    }
+  }
+}

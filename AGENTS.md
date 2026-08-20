@@ -1,0 +1,250 @@
+# AGENTS.md
+
+## Scope
+
+These instructions apply to the repository root `D:\agent-gui-runtime`.
+
+## Required Workflow
+
+When implementing or modifying code, follow the execution loop defined in:
+
+- `skills/code-implementation-loop/SKILL.md`
+
+That means:
+
+1. make the smallest meaningful change
+2. run the narrowest relevant verification
+3. inspect the result
+4. fix failures
+5. rerun until the path is verified or a real blocker remains
+
+Do not stop at draft code when a runtime or smoke check is possible.
+
+## Sub-agent Delegation Rule
+
+When a new task or requirement arrives, first assess whether bounded sub-agent delegation can reduce main-agent context and token use without reducing correctness.
+
+- Use the installed `subagent-delegation` skill whenever the task contains multiple independent investigations, repository-wide exploration, competing bug hypotheses, mechanical edits, isolated implementation work, or independent verification.
+- Prefer delegating read-only search, inventory, call-chain tracing, narrow mechanical changes, documentation work, and isolated test execution.
+- Prefer the cheapest suitable worker supported by the live tool: try Luna first for bounded low-complexity work, then escalate only when Luna is unavailable, fails, times out, or returns insufficient evidence.
+- Keep architecture decisions, ambiguous cross-cutting changes, security decisions, destructive operations, final integration, and acceptance with the Main Agent.
+- Give every worker a bounded contract covering objective, scope, allowed files, forbidden actions, deliverable, verification, and blocked behavior. Workers must not expand scope, commit, push, delete files, or spawn nested workers unless explicitly authorized.
+- The Main Agent must inspect worker evidence and actual diffs, resolve conflicts, run final verification, and remain responsible for the final answer. A sub-agent report is not proof by itself.
+- Do not delegate tiny questions, one-command tasks, or tightly coupled single-file edits when orchestration would cost more context than it saves.
+
+Delegation is an optimization, not a requirement to split every task. Correctness, safety, and evidence remain higher priority than token savings.
+
+## Root Cause Before Fallback
+
+When a feature fails, fix the primary failure path before adding fallback behavior.
+
+Required order:
+
+1. identify the exact failing layer with trace/log/screenshot evidence
+2. fix the broken primary path
+3. verify the primary path with the narrowest meaningful check
+4. only then add fallback/recovery behavior if it is still useful
+
+Do not add fallback behavior that hides:
+
+- model protocol errors
+- model service hangs
+- stale or duplicate model processes
+- bad JSON/model output contracts
+- screenshot/window binding drift
+- candidate generation bugs
+- coordinate transform bugs
+
+Fallback is acceptable only when the root cause is understood, the primary path remains intact, and the response clearly reports that fallback was used.
+
+## Failure To Runtime Contract Rule
+
+When a real GUI / agent run exposes a bug, do not keep fixing one-off site symptoms. First classify the failure as a reusable runtime invariant, then repair that invariant in the common layer whenever possible.
+
+Every real bug report must be closed with this structure:
+
+1. Failure: what visibly failed?
+2. Root invariant violated: which reusable contract was broken?
+3. Fix location: common runtime, app adapter, app profile, debug runner, or test?
+4. Why not app-only: how does this help other websites or Windows apps?
+5. Regression: what test or offline trace replay prevents recurrence?
+6. Safety impact: did this loosen safety, and can it mis-click submit/send/confirm/payment?
+
+Current mandatory runtime contracts:
+
+- Dataflow: any long-read / batch-read result that updates detail text must create the latest detail snapshot, and downstream match / cover-letter / apply decisions must read that latest snapshot only.
+- Candidate freshness: every action candidate must carry capture_id, viewport_size, source, bbox, click_point, and freshness. Execution must not mix old screenshot coordinates with a newer screenshot or recognition result.
+- Action taxonomy: distinguish open_detail, open_apply_flow, fill_field, continue_next_step, and final_submit / send / confirm / payment. Apply / Quick Apply opens an application flow; it is not final submit. Final submit remains hard-blocked.
+- Scoped danger detection: final submit detection must run inside the active application form / modal / flow container. Global search bars or navigation buttons such as Submit search must not trigger final_submit_visible.
+- Scroll scope: when scrolling a target container, target content should change and non-target panes should remain stable. If a non-target pane changes significantly, wrong_scope_detected must be true.
+- OCR canonicalization: short-token OCR confusions such as AIA / AlA can be normalized only in acronym or already-matched context. Do not globally replace characters or weaken all text matching.
+
+Do not run a full real-world flow after contract failures until the relevant contract has a regression test and the narrow verification path passes.
+
+## Code Search / Context Gathering Rule
+
+To reduce token usage and repeated file reads, prefer codegraph before raw text search when understanding code structure.
+
+Use codegraph first for:
+
+- architecture, flow, and "how does X reach Y" questions
+- locating symbols, definitions, callers, or callees
+- planning edits that depend on how several functions or files connect
+- understanding an area before changing code
+
+Use `rg` or direct file reads after codegraph only when:
+
+- confirming exact lines or nearby implementation details
+- checking plain text that codegraph does not index well
+- verifying generated files, docs, configs, or non-code assets
+
+If codegraph is unavailable or stale for the files being changed, fall back to `rg` and record that assumption when it matters.
+
+## ChatGPT Reporting / Consultation Rule
+
+When a task is substantial, architectural, risky, ambiguous, blocked, or explicitly requests outside review, report to or consult a visible ChatGPT web session through the `codex-chatgpt-control` skill/SDK when it is installed and a compatible browser bridge is available.
+
+Use this as a visible, user-directed workflow:
+
+- Treat the Codex in-app browser as reserved for ChatGPT consultation by default. Reuse the default ChatGPT conversation `https://chatgpt.com/c/6a3b7817-9624-83ec-98bf-3341c47a968d` unless the user gives a different session. Do not use the Codex in-app browser as the default test target for the local panel or real website automation; bind an external browser or application window instead. Use the in-app browser for panel testing only when external browser/window control is unavailable and clearly report that exception.
+- summarize the current user goal, plan, key evidence, blockers, and proposed next step
+- reuse the user's already-open ChatGPT thread when they say one is open
+- do not send secrets, credentials, private files, screenshots, traces, or externally sensitive data unless the user approved that specific content
+- if the ChatGPT window is already open but `globalThis.agent` / the browser bridge is missing, first attempt to restart or bootstrap the Chrome bridge instead of immediately reporting failure. In `node_repl`, load the Chrome plugin runtime with `setupBrowserRuntime({ globals: globalThis })`, then set `globalThis.browser = await agent.browsers.get("extension")`, rerun the ChatGPT Control doctor/bridge check, and retry the consult once.
+- if ChatGPT link/session control fails because the browser bridge, tab handle, or selected session link went stale, run this recovery before giving up:
+  1. record the selected ChatGPT conversation URL or session identifier from the current request/context
+  2. close the currently controlled ChatGPT tab/window completely through the bridge when possible
+  3. restart or re-bootstrap the Chrome bridge and reacquire `globalThis.agent` / `globalThis.browser`
+  4. reopen ChatGPT at the selected conversation URL instead of starting an unrelated new chat
+  5. run the ChatGPT Control doctor/bridge check, then retry the consult once against that same selected session
+  6. if the reopened session hits login, captcha, selector drift, rate limit, permission, or ambiguous confirmation blockers, stop and report the structured blocker
+- stop on login, captcha, selector drift, rate limit, upload/download permission, bridge bootstrap failure, or ambiguous confirmation blockers
+- report the structured blocker instead of retrying blindly or pretending ChatGPT was consulted
+
+This is a consultation/reporting layer only. It does not replace the local implementation loop, tests, trace evidence, GUI safety gates, or the user's final approval.
+
+## Documentation Sync Rule
+
+When code changes affect behavior, API shape, architecture, progress, or known limitations, update documentation in the same work session.
+
+At minimum, review and update the relevant files:
+
+- `README.md`
+- `PROJECT_SUMMARY.md`
+- `ARCHITECTURE.md`
+- `CURRENT_STATE.md`
+- `NEXT_STEPS.md`
+- `OPENCLAW_RECOVERY.md` when recovered OpenClaw history or migration notes change
+
+For bilingual design docs, keep both language versions in sync in the same work session:
+
+- `RUNTIME_STATE_GRAPH.md`
+- `RUNTIME_STATE_GRAPH.zh-CN.md`
+
+Update only the files impacted by the change, but do not leave `README.md` stale when public behavior changed.
+
+## UTF-8 / Chinese Text Rule
+
+This section is a highest-priority rule for any task that reads, writes, edits, tests, or documents Chinese-containing files, scripts, traces, prompts, or JSON. It is at the same priority level as the root-cause incident-review rules.
+
+All recognized Chinese text must be preserved as UTF-8 end to end. Do not introduce mojibake, replacement characters, or question-mark replacement sequences into source code, prompts, traces, tests, docs, or user-facing output.
+
+Rules:
+
+- All file reads and writes default to UTF-8. When editing files, preserve the original encoding, newline style, and unrelated content.
+- Read text and JSON with `encoding="utf-8"` or `encoding="utf-8-sig"` when BOM compatibility is needed.
+- Write JSON with `ensure_ascii=False` and `encoding="utf-8"` so Chinese remains readable in traces.
+- Before reading Chinese-containing files in PowerShell, run `chcp 65001`, set `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`, and set `$OutputEncoding = [System.Text.Encoding]::UTF8`.
+- Prefer `Get-Content -Raw -Encoding UTF8` when reading Chinese-containing files in PowerShell.
+- Do not use PowerShell here-strings, redirection, `Set-Content`, or `Out-File` to write Chinese-containing source, JSON, docs, or prompts.
+- Do not use `sed` or `awk` to process Chinese-containing files; use Python or Node.js with explicit UTF-8 reads and writes.
+- Do not rewrite, reformat, or broad string-replace an entire file merely to repair encoding.
+- Do not pass Chinese literals through a shell command that may use the Windows ANSI code page. For smoke scripts, prefer `uv run python` with UTF-8 source, a UTF-8 file, or Unicode escapes for test literals.
+- If PowerShell output shows mojibake, verify the actual file or payload with Python using `encoding="utf-8"` and `PYTHONIOENCODING=utf-8` before deciding the data is corrupt.
+- Never add hard-coded mojibake or replacement-marker literals as matching rules. Match the real Unicode string, use Unicode escapes in tests, or normalize/repair at the boundary with an explicit comment and test.
+- Model input/output trace must record the original UTF-8 prompt, OCR text, raw model text, parsed JSON, and parse errors without lossy replacement.
+- When a test covers Chinese recognition, assert on the real Chinese value or a Unicode-escaped equivalent, not on console-garbled output.
+- Code comments must use Chinese. Keep comments minimal and write them as real UTF-8 Chinese.
+
+## Definition Of Done
+
+A code task is not done unless both are true:
+
+- the changed path was verified with the narrowest meaningful check available
+- the affected documentation was brought back in sync
+
+If full execution is blocked, record:
+
+- what changed
+- what was verified
+- what remains blocked
+- what document state was updated despite the blocker
+
+## Error Handling
+
+Errors must be clear and actionable. Do not hide failures.
+
+Prefer:
+
+- explicit validation with meaningful exception messages
+- structured error responses (`APIResponse` + `ErrorModel`)
+- safe fallback only when justified
+
+Avoid:
+
+- broad `except Exception` without handling
+- returning `None` for unknown failure
+- logging only without surfacing failure
+- pretending success when an operation failed
+
+## GUI Agent Safety
+
+Safety is more important than speed.
+
+Before executing actions:
+
+- verify target window
+- verify target element
+- verify coordinates
+- verify confidence
+- reject ambiguous actions
+
+Every click action must produce evidence:
+
+- input goal → screenshot or OCR evidence → selected candidate → confidence score → click point → pre-click decision (`pre_click_decision_v1`) → post-click verification
+
+Do not click when:
+
+- target is ambiguous
+- candidate score gap is too small
+- OCR / local evidence disagrees with vision model
+- click point is outside target bbox
+- action could be destructive
+- validation is unavailable for a risky action
+
+Prefer controlled refusal over unsafe execution. All real clicks must go through the gated action API (`POST /action/execute_recognition_plan`).
+
+## Response Format
+
+After finishing a task, summarize:
+
+### Changed
+
+- concise list of what changed
+
+### Tested
+
+- commands actually run and their results
+
+### Notes
+
+- assumptions made
+- limitations
+- recommended next step
+
+Do not claim something works if it was not verified.
+
+## Notes
+
+- The summary/recovery docs are intentionally `.gitignore`d in this repo, but they still must be kept up to date locally.
+- Prefer evidence-based status notes over optimistic summaries.

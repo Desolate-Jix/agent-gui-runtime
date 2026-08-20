@@ -1,0 +1,61 @@
+{
+  "contract_version": "learning_surface_adapter_holdout_manifest_v1",
+  "used_for_rule_tuning": false,
+  "interpretation": "Fixed recorded traces reserved for adapter-routing regression; not recognition accuracy or general GUI reliability.",
+  "cases": [
+    {
+      "case_id": "holdout_qq_group_chat_20260720",
+      "source_type": "fixed_recorded_trace",
+      "trace_path": "logs/traces/vision/20260720-175055-082918__learn-mode-fast-observe__qq.json",
+      "trace_sha256": "588578d0c2c49c1777018b7f674405413426c98d46238c924aaf9c3381bd8013",
+      "screenshot_path": "artifacts/screenshots/qq__observe-screen__qq__full-window__20260720-175027-838262.png",
+      "screenshot_sha256": "3e0a5baeccff48da4553614654cd78b758f358680b09b8c0980d209ece9b00f3",
+      "expected_adapter_id": "chat"
+    },
+    {
+      "case_id": "holdout_github_desktop_changes_20260718",
+      "source_type": "fixed_recorded_trace",
+      "trace_path": "logs/traces/vision/20260718-163237-431888__learn-mode-fast-observe__githubdesktop.json",
+      "trace_sha256": "d20a11b329d2002a9bbda69b8211083edfded567383fc73b9e65b99e7d2057b8",
+      "screenshot_path": "artifacts/screenshots/github-desktop__observe-screen__githubdesktop__full-window__20260718-163211-323261.png",
+      "screenshot_sha256": "ba1bba1214182cc91f60301921f21ad795b287814fdb198bc7d1e313be783b71",
+      "expected_adapter_id": "generic"
+    },
+    {
+      "case_id": "holdout_calculator_standard_20260713",
+      "source_type": "fixed_recorded_trace",
+      "trace_path": "logs/traces/vision/20260713-141513-051590__learn-mode-fast-observe__calculator.json",
+      "trace_sha256": "1f7baeb7041bbafbfbf610700e0383b68a933f30944c0df9858c39a0c3083801",
+      "screenshot_path": "artifacts/screenshots/-bbbf3aed__observe-screen__calculator__full-window__20260713-141454-269214.png",
+      "screenshot_sha256": "a30e21e0e7f5b0fb1efc7f9f6c4afab0dfc441ed9251758880c6a4c2a671d3d1",
+      "expected_adapter_id": "generic"
+    },
+    {
+      "case_id": "holdout_nvidia_overlay_20260711",
+      "source_type": "fixed_recorded_trace",
+      "trace_path": "logs/traces/vision/20260711-153904-850265__learn-mode-fast-observe__nvidia-overlay.json",
+      "trace_sha256": "cd75b57496a1c394ba5677582acbfd1fb3563b5fdd6918cf1a2ca295a6488c18",
+      "screenshot_path": "artifacts/screenshots/nvidia-geforce-overlay-dt__observe-screen__nvidia-overlay__full-window__20260711-153834-588587.png",
+      "screenshot_sha256": "eb8909e549a018a1013fecd317dd5b400da1776d45e857a789ef0c0c4c4fbad8",
+      "expected_adapter_id": "generic"
+    },
+    {
+      "case_id": "holdout_bilibili_dynamic_20260720",
+      "source_type": "fixed_recorded_trace",
+      "trace_path": "logs/traces/vision/20260720-211609-460671__learn-mode-fast-observe__target-2d0e0de8.json",
+      "trace_sha256": "27edd11663368e494648ac9e3e5abd5a33d29e4a69955eb8829a13491aca9d9e",
+      "screenshot_path": "artifacts/screenshots/2-microsoft-edge__observe-screen__target-2d0e0de8__full-window__20260720-211536-786307.png",
+      "screenshot_sha256": "01556c6673f2e4c6aac4a4d961f51928ab47566385d83a641f6d397576c5202f",
+      "expected_adapter_id": "media_player"
+    },
+    {
+      "case_id": "holdout_apple_music_state_20260720",
+      "source_type": "fixed_recorded_trace",
+      "trace_path": "logs/traces/vision/20260720-174401-327923__learn-mode-fast-observe__applemusic.json",
+      "trace_sha256": "8f7e4679280ae617f18ce50271b6b0493ff298ed3a4988cbb04be23a2f646df2",
+      "screenshot_path": "artifacts/screenshots/apple-music__observe-screen__applemusic__full-window__20260720-174333-033437.png",
+      "screenshot_sha256": "e20b5a043534dae1d410b5ea6a40f5c408f4c4d267b78ffc5f55e9d0a3143b23",
+      "expected_adapter_id": "media_player"
+    }
+  ]
+}

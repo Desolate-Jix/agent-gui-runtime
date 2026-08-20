@@ -1,0 +1,14 @@
+{
+  "profile_id": "minicpm_v_4_6_transformers",
+  "label": "MiniCPM-V 4.6 Transformers",
+  "role": ["understanding", "fast_understanding"],
+  "provider_mode": "local_understanding",
+  "input_format": "transformers_direct_vision",
+  "runtime": "transformers_direct",
+  "model_name": "openbmb/MiniCPM-V-4.6",
+  "model_path": "models/minicpm-v-4.6-safetensors",
+  "supports_ocr_anchors": false,
+  "launchable": false,
+  "best_for": "Very small and fast direct screenshot understanding experiments.",
+  "limitations": "Current llama.cpp build cannot load its MiniCPM-V-4.6 projector; this profile is benchmark-only until a compatible server path is added."
+}

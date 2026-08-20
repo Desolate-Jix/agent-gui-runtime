@@ -1,0 +1,3248 @@
+from __future__ import annotations
+
+from pathlib import Path
+import json
+from types import SimpleNamespace
+
+from fastapi.testclient import TestClient
+from PIL import Image, ImageDraw
+import pytest
+
+from app.main import app
+from app.api import vision as vision_api
+
+
+def test_safe_dry_run_card_risk_can_be_relaxed_for_low_risk_navigation() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="AI Product Engineer",
+        role="news_card",
+        risk_class="safe_dry_run_only",
+    )
+
+    assert allowed is True
+    assert reason == "low_risk_navigation_policy_relaxed"
+
+
+def test_safe_dry_run_apply_or_submit_stays_blocked() -> None:
+    apply_allowed, apply_reason = vision_api._execution_allowed_for_risk_class(
+        label="Quick apply",
+        role="button",
+        risk_class="safe_dry_run_only",
+    )
+    submit_allowed, submit_reason = vision_api._execution_allowed_for_risk_class(
+        label="Submit application",
+        role="button",
+        risk_class="safe_dry_run_only",
+    )
+
+    assert apply_allowed is False
+    assert apply_reason == "potential_side_effect_action"
+    assert submit_allowed is False
+    assert submit_reason == "potential_side_effect_action"
+
+
+def test_payment_word_inside_job_title_does_not_block_safe_open_detail() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="Senior Software Engineer-Cards and Payments | Kiwibank",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+
+    assert allowed is True
+    assert reason == "risk_class_safe_click_allowed"
+
+
+def test_safe_click_apply_entry_allowed_but_submit_application_blocked() -> None:
+    allowed, reason = vision_api._execution_allowed_for_risk_class(
+        label="Apply",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+    blocked, blocked_reason = vision_api._execution_allowed_for_risk_class(
+        label="Submit application",
+        role="button",
+        risk_class="safe_click_allowed",
+    )
+
+    assert allowed is True
+    assert reason == "risk_class_safe_apply_entry"
+    assert blocked is False
+    assert blocked_reason == "potential_side_effect_action"
+
+
+def test_goal_identifier_narrows_duplicate_current_uia_exact_labels() -> None:
+    def candidate(automation_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            candidate_id=automation_id,
+            element=SimpleNamespace(
+                evidence={
+                    "screen_inventory_action": {
+                        "metadata": {"automation_id": automation_id},
+                    }
+                }
+            ),
+        )
+
+    matches, reason = vision_api._narrow_current_uia_matches_by_goal_identifier(
+        [candidate("job-title-11111111"), candidate("job-title-93615952")],
+        goal="Open SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE job 93615952 detail",
+    )
+
+    assert [item.candidate_id for item in matches] == ["job-title-93615952"]
+    assert reason == "goal_identifier_match:93615952"
+
+
+def test_goal_identifier_does_not_break_ambiguity_without_unique_automation_match() -> None:
+    def candidate(automation_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            candidate_id=automation_id,
+            element=SimpleNamespace(
+                evidence={
+                    "screen_inventory_action": {
+                        "metadata": {"automation_id": automation_id},
+                    }
+                }
+            ),
+        )
+
+    candidates = [candidate("job-title-11111111"), candidate("job-title-22222222")]
+    matches, reason = vision_api._narrow_current_uia_matches_by_goal_identifier(
+        candidates,
+        goal="Open SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE job 33333333 detail",
+    )
+
+    assert matches == candidates
+    assert reason is None
+
+
+def test_blocked_policy_low_risk_card_becomes_safe_click_candidate() -> None:
+    risk_class, reasons = vision_api._risk_class_for_candidate(
+        label="AI Product Engineer",
+        role="news_card",
+        policy={"allowed": False, "reasons": ["homepage_recommendation"]},
+    )
+
+    assert risk_class == "safe_click_allowed"
+    assert "low_risk_navigation_policy_relaxed" in reasons
+
+
+def test_blocked_policy_submit_still_requires_confirmation() -> None:
+    risk_class, reasons = vision_api._risk_class_for_candidate(
+        label="Submit application",
+        role="button",
+        policy={"allowed": False, "reasons": ["homepage_recommendation"]},
+    )
+
+    assert risk_class == "requires_user_confirmation"
+    assert "potential_side_effect_action" in reasons
+
+
+def test_vision_analyze_returns_artifact_metadata(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (120, 80), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import ImageSize, VisionAnalyzeResponse
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=120, height=80),
+                regions=[],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr(
+        "app.api.vision.save_region_artifacts",
+        lambda image_path, response: {
+            "bundle_dir": str(tmp_path / "bundle"),
+            "annotated_image_path": str(tmp_path / "bundle" / "annotated.png"),
+            "manifest_path": str(tmp_path / "bundle" / "regions.json"),
+            "region_count": 0,
+            "regions": [],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/analyze",
+        json={
+            "image_path": str(image_path),
+            "task": "analyze_ui",
+            "app_name": "demo",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert "artifacts" in result
+    assert result["artifacts"]["region_count"] == 0
+
+
+def test_vision_page_structure_returns_fused_elements(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start button",
+                        role="button",
+                        bbox=BBox(x=80, y=120, w=140, h=100),
+                        diagonal=Diagonal(x1=80, y1=120, x2=220, y2=220),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.2, ny2=0.2),
+                        description="Start button",
+                        ocr_text="Start",
+                        text_lines=["Start"],
+                        possible_destinations=["main"],
+                        confidence=0.9,
+                        layout_key="layout_start",
+                        content_key="content_start",
+                        match_key="layout_start:content_start",
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            if "recognition-crops" in str(image_path):
+                return OCRResult(
+                    image_path=image_path,
+                    metadata={"engine": "rapidocr_onnxruntime"},
+                    matches=[
+                        OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=24, y=24, width=96, height=16)),
+                    ],
+                )
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=77, y=68, width=24, height=13))],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "unavailable",
+            "reason": "no_bound_window",
+            "control_count": 0,
+            "controls": [],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/page_structure",
+        json={
+            "image_path": str(image_path),
+            "task": "analyze_ui",
+            "app_name": "demo",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["contract_version"] == "page_structure_v1"
+    assert len(result["elements"]) == 1
+    assert result["elements"][0]["interaction_type"] == "click"
+    assert result["elements"][0]["interaction_policy"]["allowed"] is True
+    assert result["elements"][0]["memory_key"]
+    assert result["links"][0]["relation"] == "semantic_text_binding"
+    assert result["learning_summary"]["allowed_element_count"] == 1
+
+
+def test_vision_screen_reading_returns_ui_provider_slots(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start",
+                        role="button",
+                        bbox=BBox(x=80, y=120, w=140, h=80),
+                        diagonal=Diagonal(x1=80, y1=120, x2=220, y2=200),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.5, nx2=0.5, ny2=0.9),
+                        description="Start button",
+                        ocr_text="Start",
+                        text_lines=["Start"],
+                        confidence=0.9,
+                        layout_key="layout_start",
+                        content_key="content_start",
+                        match_key="layout_start:content_start",
+                    ),
+                    VisionRegion(
+                        region_id="region_back",
+                        label="Back arrow",
+                        role="icon_button",
+                        bbox=BBox(x=12, y=50, w=34, h=34),
+                        diagonal=Diagonal(x1=12, y1=50, x2=46, y2=84),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.02, ny1=0.22, nx2=0.1, ny2=0.38),
+                        description="Left arrow icon in a toolbar",
+                        confidence=0.82,
+                        layout_key="toolbar_left",
+                        content_key="back_arrow",
+                        match_key="toolbar_left:back_arrow",
+                    ),
+                ],
+                raw_text='{"screen_summary":"dummy page"}',
+                raw_response={
+                    "contract_version": "provider_model_trace_v1",
+                    "provider": "dummy",
+                    "model_name": "dummy-model",
+                    "raw_text": '{"screen_summary":"dummy page"}',
+                    "attempts": [
+                        {
+                            "status": "success",
+                            "model_io": {
+                                "contract_version": "model_io_attempt_v1",
+                                "input": {"prompt": "read the screen", "image_path": str(image_path)},
+                                "output": {"raw_text": '{"screen_summary":"dummy page"}'},
+                            },
+                        }
+                    ],
+                },
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=112, y=150, width=44, height=18))],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "unavailable",
+            "reason": "no_bound_window",
+            "control_count": 0,
+            "controls": [],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/screen_reading",
+        json={
+            "image_path": str(image_path),
+            "task": "analyze_ui",
+            "app_name": "demo",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["contract_version"] == "screen_reading_v1"
+    assert result["ui"]["summary"]["element_count"] == 2
+    assert result["ui"]["summary"]["icon_candidate_count"] == 1
+    assert result["ui"]["provider_slots"]["uia"]["status"] == "connected"
+    assert result["ui"]["provider_slots"]["uia"]["last_scan_status"] == "unavailable"
+    assert "icon_library" not in result["ui"]["provider_slots"]
+    assert result["ui"]["icon_candidates"][0]["visual_recognition_status"] == "reserved_for_grounding"
+    assert "icon_library_match" not in result["ui"]["icon_candidates"][0]
+    assert result["execution_path"]["screen_reading_used"] is True
+    assert result["execution_path"]["uia_provider_connected"] is True
+    assert result["execution_path"]["uia_scan_status"] == "unavailable"
+    assert result["model_io"]["contract_version"] == "model_io_trace_v1"
+    assert result["model_io"]["raw_text"] == '{"screen_summary":"dummy page"}'
+    assert result["model_io"]["attempts"][0]["model_io"]["input"]["prompt"] == "read the screen"
+    assert Path(result["trace_path"]).exists()
+    trace_payload = json.loads(Path(result["trace_path"]).read_text(encoding="utf-8"))
+    assert trace_payload["result"]["model_io"]["raw_response"]["model_name"] == "dummy-model"
+
+
+def test_vision_screen_reading_failure_trace_keeps_model_io(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "bad-model-output.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class FailingProvider:
+        def analyze(self, req):
+            error = RuntimeError("local vision endpoint failed after 1 attempt(s): invalid json")
+            error.diagnostics = {
+                "contract_version": "model_io_trace_v1",
+                "status": "failed",
+                "provider": "local",
+                "model_name": "dummy-model",
+                "image_path": str(image_path),
+                "attempt_count": 1,
+                "attempts": [
+                    {
+                        "status": "failed",
+                        "model_io": {
+                            "contract_version": "model_io_attempt_v1",
+                            "input": {"prompt": "read the screen", "image_path": str(image_path)},
+                            "output": {"raw_text": "{bad json"},
+                            "raw_text": "{bad json",
+                        },
+                    }
+                ],
+            }
+            raise error
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: FailingProvider())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/screen_reading",
+        json={
+            "image_path": str(image_path),
+            "task": "observe_screen",
+            "app_name": "demo",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is False
+    model_io = payload["data"]["model_io"]
+    assert model_io["status"] == "failed"
+    assert model_io["attempts"][0]["model_io"]["output"]["raw_text"] == "{bad json"
+    trace_payload = json.loads(Path(payload["data"]["trace_path"]).read_text(encoding="utf-8"))
+    assert trace_payload["model_io"]["attempts"][0]["model_io"]["input"]["prompt"] == "read the screen"
+
+
+def test_vision_recognition_plan_returns_ranked_candidates(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            assert req.metadata["ocr_anchors"]["contract_version"] == "ocr_anchors_v1"
+            assert req.metadata["ocr_anchors"]["anchor_count"] == 2
+            assert req.metadata["ocr_anchors"]["anchors"][0]["text"] == "Start detection"
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start detection",
+                        role="button",
+                        bbox=BBox(x=40, y=40, w=180, h=80),
+                        diagonal=Diagonal(x1=40, y1=40, x2=220, y2=120),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.5, ny2=0.5),
+                        description="Start detection button",
+                        ocr_text="Start detection",
+                        text_lines=["Start detection"],
+                        possible_destinations=["test_running"],
+                        anchor_relations=[
+                            {
+                                "anchor_id": "ocr_anchor_1",
+                                "text": "Start detection",
+                                "relation": "inside",
+                                "axis": "both",
+                            }
+                        ],
+                        grounding_constraints={
+                            "text_inclusion_policy": "include_referenced_text",
+                            "text_anchor_frame": {"bottom_anchor_id": "ocr_anchor_1"},
+                        },
+                        confidence=0.9,
+                        layout_key="layout_start",
+                        content_key="content_start",
+                        match_key="layout_start:content_start",
+                    ),
+                    VisionRegion(
+                        region_id="region_help",
+                        label="Help",
+                        role="button",
+                        bbox=BBox(x=240, y=40, w=120, h=80),
+                        diagonal=Diagonal(x1=240, y1=40, x2=360, y2=120),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.6, ny1=0.1, nx2=0.8, ny2=0.5),
+                        description="Help button",
+                        ocr_text="Help",
+                        text_lines=["Help"],
+                        possible_destinations=["help"],
+                        confidence=0.8,
+                        layout_key="layout_help",
+                        content_key="content_help",
+                        match_key="layout_help:content_help",
+                    ),
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            if "recognition-crops" in str(image_path):
+                return OCRResult(
+                    image_path=image_path,
+                    metadata={"engine": "rapidocr_onnxruntime"},
+                    matches=[
+                        OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=24, y=24, width=96, height=16)),
+                    ],
+                )
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[
+                    OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=70, y=66, width=96, height=16)),
+                    OCRTextMatch(text="Help", score=0.95, bbox=OCRBoundingBox(x=270, y=66, width=40, height=16)),
+                ],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "task": "click_target",
+            "goal": "click start detection",
+            "app_name": "demo",
+            "top_k": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["contract_version"] == "recognition_plan_v1"
+    assert result["candidate_result"]["contract_version"] == "candidate_rank_v1"
+    assert result["recommended_target"]["element_id"].startswith("element_start")
+    assert result["parse_result"]["ocr_anchors"]["contract_version"] == "ocr_anchors_v1"
+    region_constraints = result["parse_result"]["vision_regions"]["regions"][0]["grounding_constraints"]
+    assert region_constraints["grounding_evaluation"]["contract_version"] == "anchor_grounding_evaluation_v1"
+    assert region_constraints["grounding_evaluation"]["ok"] is True
+    assert region_constraints["grounding_evaluation"]["included_anchor_ids"] == ["ocr_anchor_1"]
+    assert result["execution_path"]["ocr_anchor_grounding_used"] is True
+    assert result["execution_path"]["ocr_anchor_count"] == 2
+    assert result["parse_result"]["screen_reading"]["contract_version"] == "screen_reading_v1"
+    assert result["execution_path"]["candidate_rank_used"] is True
+    assert result["execution_path"]["screen_reading_used"] is True
+    assert result["execution_path"]["screen_reading_rank_evidence_used"] is True
+    assert result["execution_path"]["narrow_search_used"] is True
+    assert result["execution_path"]["pre_click_decision_used"] is True
+    assert result["execution_path"]["action_executed"] is False
+    assert result["narrow_search_result"]["contract_version"] == "narrow_search_v1"
+    assert result["narrow_search_result"]["results"][0]["status"] == "grounded"
+    assert result["pre_click_decision"]["contract_version"] == "pre_click_decision_v1"
+    assert result["pre_click_decision"]["allowed"] is True
+    assert Path(result["trace_path"]).exists()
+
+
+def test_vision_recognition_plan_retries_without_ocr_anchors_when_provider_rejects_them(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+    calls: list[dict] = []
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            calls.append(req.metadata)
+            if req.metadata.get("ocr_anchors"):
+                raise RuntimeError("prompt too large")
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start detection",
+                        role="button",
+                        bbox=BBox(x=40, y=40, w=180, h=80),
+                        diagonal=Diagonal(x1=40, y1=40, x2=220, y2=120),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.5, ny2=0.5),
+                        description="Start detection button",
+                        ocr_text="Start detection",
+                        text_lines=["Start detection"],
+                        possible_destinations=["test_running"],
+                        confidence=0.9,
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[
+                    OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=70, y=66, width=96, height=16)),
+                ],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "task": "click_target",
+            "goal": "click start detection",
+            "app_name": "demo",
+            "top_k": 1,
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    assert response.json()["success"] is True
+    assert len(calls) == 2
+    assert calls[0]["ocr_anchors"]["anchor_count"] == 1
+    assert "ocr_anchors" not in calls[1]
+    assert result["execution_path"]["ocr_anchor_grounding_used"] is False
+    assert result["execution_path"]["ocr_anchor_grounding_fallback_used"] is True
+    assert result["parse_result"]["ocr_anchors"] is None
+
+
+def test_vision_recognition_plan_recalls_path_graph_from_observe_trace(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+    trace_path = tmp_path / "observe.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "parse_result": {
+                        "ocr_anchors": {
+                            "contract_version": "ocr_anchors_v1",
+                            "image_path": str(image_path),
+                            "coordinate_space": "original_image",
+                            "anchor_count": 2,
+                            "anchors": [
+                                {
+                                    "anchor_id": "ocr_anchor_1",
+                                    "text": "Start detection",
+                                    "bbox": {"x": 70, "y": 66, "w": 96, "h": 16},
+                                    "center": {"x": 118, "y": 74},
+                                    "confidence": 0.99,
+                                },
+                                {
+                                    "anchor_id": "ocr_anchor_2",
+                                    "text": "Help",
+                                    "bbox": {"x": 270, "y": 66, "w": 40, "h": 16},
+                                    "center": {"x": 290, "y": 74},
+                                    "confidence": 0.95,
+                                },
+                            ],
+                        }
+                    },
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_demo",
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "start_btn",
+                                "label": "Start detection",
+                                "role": "button",
+                                "section_id": "main_content",
+                                "bbox": {"x": 40, "y": 40, "w": 180, "h": 80},
+                                "click_point": {"x": 130, "y": 80},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "test starts",
+                                "source": "screen_map",
+                            },
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "help_link",
+                                "label": "Help",
+                                "role": "link",
+                                "section_id": "page_header",
+                                "bbox": {"x": 260, "y": 40, "w": 80, "h": 80},
+                                "click_point": {"x": 300, "y": 80},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "help opens",
+                                "source": "screen_map",
+                            },
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    provider_metadata: list[dict] = []
+    ocr_scan_paths: list[str] = []
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            provider_metadata.append(req.metadata)
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start detection",
+                        role="button",
+                        bbox=BBox(x=40, y=40, w=180, h=80),
+                        diagonal=Diagonal(x1=40, y1=40, x2=220, y2=120),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.5, ny2=0.5),
+                        description="Start detection button",
+                        ocr_text="Start detection",
+                        text_lines=["Start detection"],
+                        possible_destinations=["test_running"],
+                        confidence=0.9,
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            ocr_scan_paths.append(image_path)
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "local_crop_ocr"},
+                matches=[
+                    OCRTextMatch(text="Start detection", score=0.99, bbox=OCRBoundingBox(x=30, y=26, width=96, height=16)),
+                ],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "observe_trace_path": str(trace_path),
+            "task": "click_target",
+            "goal": "click start detection",
+            "app_name": "demo",
+            "top_k": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert provider_metadata[0]["path_graph_recall"]["contract_version"] == "path_graph_recall_v1"
+    assert provider_metadata[0]["path_graph_recall"]["candidates"][0]["candidate_id"] == "start_btn"
+    assert provider_metadata[0]["ocr_anchors"]["anchor_count"] == 2
+    assert result["observe_trace_reuse"]["status"] == "ready"
+    assert result["path_graph_recall"]["status"] == "ready"
+    assert result["path_graph_recall"]["candidates"][0]["candidate_id"] == "start_btn"
+    assert result["path_graph_recall"]["candidates"][0]["local_ocr_roi"] == {"x": 16, "y": 16, "w": 228, "h": 128}
+    assert result["execution_path"]["path_graph_recall_used"] is True
+    assert result["execution_path"]["path_graph_recall_count"] == 2
+    assert result["execution_path"]["ocr_anchor_reused_from_observe"] is True
+    assert str(image_path) not in ocr_scan_paths
+
+
+def test_vision_recognition_plan_uses_path_graph_recall_as_grounding_candidate(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+    trace_path = tmp_path / "observe.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "parse_result": {
+                        "ocr_anchors": {
+                            "contract_version": "ocr_anchors_v1",
+                            "image_path": str(image_path),
+                            "coordinate_space": "original_image",
+                            "anchor_count": 1,
+                            "anchors": [
+                                {
+                                    "anchor_id": "ocr_anchor_help",
+                                    "text": "Help",
+                                    "bbox": {"x": 20, "y": 20, "w": 40, "h": 16},
+                                    "confidence": 0.95,
+                                }
+                            ],
+                        }
+                    },
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_dashboard",
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "launch_btn",
+                                "label": "Launch dashboard",
+                                "role": "button",
+                                "section_id": "main_content",
+                                "bbox": {"x": 180, "y": 110, "w": 160, "h": 56},
+                                "click_point": {"x": 260, "y": 138},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "dashboard opens",
+                                "source": "screen_map",
+                            }
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ocr_scan_paths: list[str] = []
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import ImageSize, VisionAnalyzeResponse
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dashboard shell",
+                state_guess="dashboard_home",
+                image_size=ImageSize(width=500, height=260),
+                regions=[],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            ocr_scan_paths.append(image_path)
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "local_crop_ocr"},
+                matches=[
+                    OCRTextMatch(text="Launch dashboard", score=0.99, bbox=OCRBoundingBox(x=40, y=24, width=120, height=18)),
+                ],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "observe_trace_path": str(trace_path),
+            "task": "click_target",
+            "goal": "click Launch dashboard",
+            "app_name": "demo",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    selected_id = result["pre_click_decision"]["selected_candidate_id"]
+    assert selected_id == "path_graph_launch_btn"
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["candidate_result"]["candidates"][0]["candidate_id"] == "path_graph_launch_btn"
+    assert result["candidate_result"]["candidates"][0]["element"]["sources"] == ["path_graph_recall_v1"]
+    assert result["candidate_result"]["summary"]["path_graph_recall_selected_count"] == 1
+    assert result["narrow_search_result"]["results"][0]["candidate_id"] == "path_graph_launch_btn"
+    assert result["narrow_search_result"]["results"][0]["status"] == "grounded"
+    assert result["execution_path"]["path_graph_recall_candidates_ranked"] is True
+    assert result["execution_path"]["path_graph_recall_selected_count"] == 1
+    assert str(image_path) not in ocr_scan_paths
+    assert ocr_scan_paths
+
+
+def test_vision_recognition_plan_uses_vista_point_grounding_with_path_graph(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+    trace_path = tmp_path / "observe.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "parse_result": {
+                        "ocr_anchors": {
+                            "contract_version": "ocr_anchors_v1",
+                            "image_path": str(image_path),
+                            "coordinate_space": "original_image",
+                            "anchor_count": 1,
+                            "anchors": [
+                                {
+                                    "anchor_id": "ocr_anchor_home",
+                                    "text": "Home",
+                                    "bbox": {"x": 34, "y": 136, "w": 44, "h": 16},
+                                    "confidence": 0.95,
+                                }
+                            ],
+                        }
+                    },
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_news",
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "home",
+                                "label": "Home",
+                                "role": "nav text action",
+                                "section_id": "top_navigation",
+                                "bbox": {"x": 30, "y": 120, "w": 80, "h": 60},
+                                "click_point": {"x": 56, "y": 150},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "home opens",
+                                "source": "screen_map",
+                            }
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": "Locate Home",
+            "raw_text": "[112, 577]",
+            "raw_response": {"choices": [{"message": {"content": "[112, 577]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 112.0, "y": 577.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 56, "y": 150},
+            "image_size": {"width": 900, "height": 760},
+        }
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "observe_trace_path": str(trace_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "click Home",
+            "app_name": "Google News",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert calls
+    assert result["execution_path"]["vista_point_grounding_used"] is True
+    assert result["execution_path"]["vista_point_inside_candidate_bbox"] is True
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 56, "y": 150}
+    assert result["narrow_search_result"]["results"][0]["coordinate_source"] == "vista_point_v1"
+    assert result["parse_result"]["vista_point_grounding"]["point"] == {"x": 56, "y": 150}
+    assert result["model_io"]["attempts"][0]["raw_text"] == "[112, 577]"
+
+
+def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+    trace_path = tmp_path / "observe.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "result": {
+                    "image_path": str(image_path),
+                    "parse_result": {
+                        "ocr_anchors": {
+                            "contract_version": "ocr_anchors_v1",
+                            "image_path": str(image_path),
+                            "coordinate_space": "original_image",
+                            "anchor_count": 1,
+                            "anchors": [
+                                {
+                                    "anchor_id": "ocr_anchor_start",
+                                    "text": "Start",
+                                    "bbox": {"x": 190, "y": 120, "w": 60, "h": 18},
+                                    "confidence": 0.95,
+                                }
+                            ],
+                        }
+                    },
+                    "screen_map": {
+                        "contract_version": "screen_map_v1",
+                        "state_id": "state_demo",
+                        "candidates": [
+                            {
+                                "contract_version": "screen_map_candidate_v1",
+                                "candidate_id": "start",
+                                "label": "Start",
+                                "role": "button",
+                                "section_id": "main_content",
+                                "bbox": {"x": 180, "y": 110, "w": 160, "h": 56},
+                                "click_point": {"x": 260, "y": 138},
+                                "risk_class": "safe_click_allowed",
+                                "expected_effect": "start",
+                                "source": "screen_map",
+                            }
+                        ],
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict] = []
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+
+    def fake_endpoint(self, request_image_path, prompt, max_tokens=32, request_timeout_seconds=None):
+        calls.append(
+            {
+                "image_path": Path(request_image_path),
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "request_timeout_seconds": request_timeout_seconds,
+            }
+        )
+        return {"choices": [{"message": {"content": "[500, 500]"}}]}
+
+    monkeypatch.setattr("app.api.vision.LocalVisionProvider._call_openai_compatible_endpoint", fake_endpoint)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "observe_trace_path": str(trace_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert len(calls) == 1
+    assert calls[0]["request_timeout_seconds"] == 600.0
+    assert calls[0]["image_path"] != image_path
+    assert "Candidate bboxes are in processed ROI image pixel coordinates" in calls[0]["prompt"]
+    assert "bbox=[32,84,160,56]" in calls[0]["prompt"]
+    vista = result["parse_result"]["vista_point_grounding"]
+    assert vista["vista_stage"] == "pathgraph_candidate_roi_refine"
+    assert vista["image_preprocess"]["locate_strategy"] == "pathgraph_candidate_roi_refine"
+    assert vista["image_preprocess"]["roi_source"] == "top1_only"
+    assert vista["image_preprocess"]["roi_policy"] == "compact_pathgraph_top1_roi_primary"
+    assert vista["image_preprocess"]["fallback_tier"] == "primary"
+    assert vista["image_preprocess"]["crop_bounds_original"] == {"x": 148, "y": 26, "w": 224, "h": 224}
+    assert vista["processed_point"] == {"x": 112, "y": 112}
+    assert vista["point"] == {"x": 260, "y": 138}
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["model_io"]["attempt_count"] == 1
+    assert result["model_io"]["attempts"][0]["vista_stage"] == "pathgraph_candidate_roi_refine"
+    assert result["execution_path"]["vista_roi_policy"] == "compact_pathgraph_top1_roi_primary"
+    assert result["execution_path"]["vista_roi_fallback_tier"] == "primary"
+
+
+def test_vision_recognition_plan_uses_seeded_candidate_roi_for_vista(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate seeded card",
+            "raw_text": "[500, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[500, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 500.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 220, "y": 510},
+            "image_size": {"width": 500, "height": 260},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click the SEEK job result card titled Software Engineer",
+            "app_name": "SEEK",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "seek-card-1",
+                    "source": "seek_job_card_v1",
+                    "label": "Software Engineer | Example Co",
+                    "role": "button",
+                    "bbox": {"x": 24, "y": 400, "w": 410, "h": 220},
+                    "click_point": {"x": 220, "y": 510},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "open SEEK job detail pane",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert calls
+    assert [candidate.candidate_id for candidate in calls[0]["candidates"]] == ["seeded_seek-card-1"]
+    assert calls[0]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    assert calls[0]["image_preprocess"]["roi_policy"] == "compact_seed_candidate_roi_primary"
+    assert calls[0]["image_preprocess"]["fallback_tier"] == "primary"
+    assert calls[0]["image_preprocess"]["max_edge"] == 448
+    assert calls[0]["image_preprocess"]["roi_padding_px"] == 16
+    assert calls[0]["image_preprocess"]["crop_bounds_original"] == {"x": 8, "y": 384, "w": 442, "h": 252}
+    candidate = result["candidate_result"]["candidates"][0]
+    assert candidate["candidate_id"] == "seeded_seek-card-1"
+    assert candidate["element"]["sources"] == ["seeded_candidate_v1"]
+    assert result["candidate_result"]["summary"]["seeded_candidate_used"] is True
+    assert result["execution_path"]["seeded_candidate_selected"] is True
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 220, "y": 510}
+    assert result["narrow_search_result"]["results"][0]["coordinate_source"] == "seeded_candidate_v1_validated_by_vista_point_v1"
+    assert result["parse_result"]["vista_point_grounding"]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    assert result["candidate_result"]["summary"]["vista_roi_policy"] == "compact_seed_candidate_roi_primary"
+    assert result["narrow_search_result"]["summary"]["vista_roi_fallback_tier"] == "primary"
+
+
+def test_vision_recognition_plan_visual_asset_fast_lane_skips_vista(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    template_path = tmp_path / "quick_apply_template.png"
+    image = Image.new("RGB", (900, 760), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    button_bbox = {"x": 620, "y": 210, "w": 150, "h": 46}
+    draw.rounded_rectangle(
+        (
+            button_bbox["x"],
+            button_bbox["y"],
+            button_bbox["x"] + button_bbox["w"],
+            button_bbox["y"] + button_bbox["h"],
+        ),
+        radius=8,
+        fill=(229, 0, 125),
+    )
+    draw.text((button_bbox["x"] + 28, button_bbox["y"] + 14), "Quick apply", fill="white")
+    image.save(image_path)
+    image.crop(
+        (
+            button_bbox["x"],
+            button_bbox["y"],
+            button_bbox["x"] + button_bbox["w"],
+            button_bbox["y"] + button_bbox["h"],
+        )
+    ).save(template_path)
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_grounding",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("VISTA should be skipped for visual asset fast lane")),
+    )
+    monkeypatch.setattr(
+        "app.api.vision._execute_fast_inventory_from_uia",
+        lambda **_kwargs: {"contract_version": "execute_fast_inventory_v1", "status": "skipped", "reason": "test"},
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "点击申请",
+            "app_name": "SEEK",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "visual_assets": {
+                    "contract_version": "visual_asset_store_v1",
+                    "assets": [
+                        {
+                            "contract_version": "visual_asset_v1",
+                            "asset_id": "seek.quick_apply.primary",
+                            "label": "Quick apply",
+                            "semantic_action": "open_apply_flow",
+                            "danger_level": "flow_entry",
+                            "requires_gate": True,
+                            "can_authorize_click": False,
+                            "source": {
+                                "capture_id": "learn-capture",
+                                "screenshot_size": {"width": 900, "height": 760},
+                            },
+                            "source_geometry": {
+                                "bbox": button_bbox,
+                                "click_point": {"x": 695, "y": 233},
+                            },
+                            "crop": {"tight_crop_ref": str(template_path)},
+                            "match_policy": {"scale_variants": [1.0], "min_score": 0.9, "min_score_gap": 0.0},
+                            "scope": {"allowed_container_ids": ["seek:job_detail"]},
+                        }
+                    ],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["visual_asset_recall"]["status"] == "matched"
+    assert result["visual_asset_recall"]["fast_lane_allowed"] is True
+    assert result["visual_asset_recall"]["matches"][0]["elapsed_ms"] < 1000
+    assert result["visual_asset_recall"]["matches"][0]["current_roi_ref"]
+    assert result["visual_asset_recall"]["matches"][0]["current_match_ref"]
+    assert result["execution_path"]["visual_asset_fast_lane_used"] is True
+    assert result["execution_path"]["vision_model_used"] is False
+    assert result["execution_path"]["coordinate_source"] == "seeded_candidate_v1.selected_click_point"
+    assert result["execution_path"]["reviewed_test_execution_used"] is True
+    assert result["candidate_result"]["summary"]["seeded_candidate_selected"] is True
+    assert result["candidate_result"]["summary"]["vista_point_grounding_used"] is False
+    assert result["model_io"]["status"] == "skipped"
+    assert result["model_io"]["attempt_count"] == 0
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 695, "y": 233}
+    assert result["narrow_search_result"]["results"][0]["coordinate_source"] == "seeded_candidate_v1_reviewed_local"
+
+
+def test_seeded_candidate_rejects_point_outside_bbox() -> None:
+    candidate = vision_api._recognition_candidate_from_seeded_candidate(
+        {
+            "contract_version": "seeded_candidate_v1",
+            "candidate_id": "bad-seed",
+            "label": "Bad seed",
+            "bbox": {"x": 100, "y": 100, "w": 50, "h": 50},
+            "click_point": {"x": 300, "y": 300},
+            "risk_class": "safe_click_allowed",
+        },
+        rank=1,
+    )
+
+    assert candidate is None
+
+
+def test_vista_roi_policy_marks_ambiguous_pathgraph_union_as_fallback() -> None:
+    assert vision_api._vista_candidate_roi_policy("seeded_candidate_v1") == {
+        "policy": "compact_seed_candidate_roi_primary",
+        "padding": 16,
+        "min_size": 192,
+        "max_edge": 448,
+        "fallback_tier": "primary",
+    }
+    assert vision_api._vista_candidate_roi_policy("top1_score_gap")["policy"] == "compact_pathgraph_top1_roi_primary"
+    union_policy = vision_api._vista_candidate_roi_policy("union_top_candidates")
+
+    assert union_policy["policy"] == "pathgraph_union_roi_fallback"
+    assert union_policy["fallback_tier"] == "fallback"
+    assert union_policy["max_edge"] == 640
+
+
+def test_large_ambiguous_union_roi_preserves_full_resolution() -> None:
+    image_size = vision_api.ImageSize(width=1154, height=1005)
+
+    assert vision_api._vista_union_roi_requires_full_resolution(
+        {"x": 28, "y": 50, "w": 1052, "h": 616},
+        image_size=image_size,
+        roi_source="union_top_candidates",
+    ) is True
+    assert vision_api._vista_union_roi_requires_full_resolution(
+        {"x": 90, "y": 80, "w": 320, "h": 260},
+        image_size=image_size,
+        roi_source="union_top_candidates",
+    ) is False
+    assert vision_api._vista_union_roi_requires_full_resolution(
+        {"x": 0, "y": 0, "w": 1154, "h": 1005},
+        image_size=image_size,
+        roi_source="top1_only",
+    ) is False
+
+
+def test_seeded_candidate_uses_seed_point_when_vista_roi_point_disagrees(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+
+    def fake_vista(**kwargs):
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate seeded button",
+            "raw_text": "[100, 100]",
+            "raw_response": {"choices": [{"message": {"content": "[100, 100]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 100.0, "y": 100.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 160, "y": 140},
+            "image_size": {"width": 500, "height": 260},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click search",
+            "app_name": "Docs",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "docs-search",
+                    "label": "search",
+                    "role": "button",
+                    "bbox": {"x": 497, "y": 272, "w": 57, "h": 22},
+                    "click_point": {"x": 525, "y": 283},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "search results visible",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    narrow = result["narrow_search_result"]
+    pre_click = result["pre_click_decision"]
+    assert narrow["results"][0]["status"] == "grounded"
+    assert narrow["results"][0]["coordinate_source"] == "seeded_candidate_v1_model_disagreed"
+    assert "vista_point_disagrees_with_seed_bbox" in narrow["results"][0]["reasons"]
+    assert narrow["summary"]["vista_point_inside_candidate_bbox"] is False
+    assert narrow["summary"]["seeded_candidate_primary_point_used"] is True
+    assert pre_click["allowed"] is True
+    assert pre_click["selected_click_point"] == {"x": 525, "y": 283}
+    assert result["execution_path"]["seeded_candidate_primary_point_used"] is True
+
+
+def test_operational_memory_seed_blocks_when_vista_disagrees_with_current_roi(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+
+    def fake_vista(**kwargs):
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate current target",
+            "raw_text": "[100, 100]",
+            "raw_response": {"choices": [{"message": {"content": "[100, 100]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 100.0, "y": 100.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 160, "y": 140},
+            "image_size": {"width": 500, "height": 260},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click search",
+            "app_name": "Docs",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-search",
+                    "label": "search",
+                    "role": "button",
+                    "bbox": {"x": 497, "y": 272, "w": 57, "h": 22},
+                    "click_point": {"x": 525, "y": 283},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "search results visible",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                }
+            },
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    narrow = result["narrow_search_result"]
+    pre_click = result["pre_click_decision"]
+    assert narrow["results"][0]["status"] == "point_outside_candidate"
+    assert narrow["summary"]["seeded_candidate_primary_point_used"] is False
+    assert pre_click["allowed"] is False
+    assert pre_click["selected_click_point"] is None
+    assert result["execution_path"]["seeded_candidate_primary_point_used"] is False
+
+
+def test_operational_memory_seed_uses_current_uia_candidate_for_vista_roi(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate current File menu item",
+            "raw_text": "[146, 396]",
+            "raw_response": {"choices": [{"message": {"content": "[146, 396]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 146.0, "y": 396.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 14, "y": 38},
+            "image_size": {"width": 96, "height": 96},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "system-menu",
+                    "name": "System",
+                    "control_type": "MenuItem",
+                    "automation_id": "SystemMenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "screen_bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click File (F)",
+            "app_name": "Notepad",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-file-menu",
+                    "label": "File (F)",
+                    "role": "menu_item",
+                    "bbox": {"x": 20, "y": 22, "w": 60, "h": 29},
+                    "click_point": {"x": 50, "y": 36},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "file menu opens",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                }
+            },
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    assert vista_calls
+    assert vista_calls[0]["image_preprocess"]["roi_source"] == "current_uia_candidate_v1"
+    assert vista_calls[0]["candidates"][0].label == "File (F)"
+    assert vista_calls[0]["candidates"][0].element.bbox.to_dict() == {"x": 8, "y": 31, "w": 52, "h": 19}
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 14, "y": 38}
+    assert result["pre_click_decision"]["selected_candidate_id"].startswith("candidate_screen_inventory_action_uia")
+    assert result["candidate_result"]["summary"]["vista_roi_source"] == "current_uia_candidate_v1"
+
+
+def test_seeded_candidate_current_text_anchors_prefer_visible_locator_text() -> None:
+    assert vision_api._seeded_candidate_current_text_anchors(
+        {
+            "label": "Apply entry button",
+            "locator_evidence": {
+                "text_anchors": ["Apply"],
+                "role_anchor": "button",
+            },
+        }
+    ) == ["Apply"]
+
+
+def test_semantic_current_uia_seed_matching_preserves_ambiguity_for_fail_closed_routing() -> None:
+    seeded = {
+        "expected_effect": "open_apply_flow",
+        "locator_evidence": {"text_anchors": ["Quick apply"]},
+    }
+    goal = "Open Quick apply for Software Engineer at TRV Trading and stop before form fill"
+
+    matches = [
+        candidate
+        for candidate in [
+            SimpleNamespace(label="Apply for Software Engineer at TRV Trading"),
+            SimpleNamespace(label="Apply for Software Engineer at TRV Trading now"),
+            SimpleNamespace(label="TRV Trading"),
+        ]
+        if vision_api._semantic_current_uia_candidate_matches_seed(
+            candidate,
+            seeded=seeded,
+            goal=goal,
+        )
+    ]
+
+    assert [candidate.label for candidate in matches] == [
+        "Apply for Software Engineer at TRV Trading",
+        "Apply for Software Engineer at TRV Trading now",
+    ]
+
+
+def test_operational_memory_seed_ignores_unrelated_uia_for_current_vista_roi(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Locate Apply",
+            "raw_text": "[500, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[500, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 500.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 525, "y": 283},
+            "image_size": {"width": 192, "height": 192},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    unrelated_candidate = vision_api._recognition_candidate_from_seeded_candidate(
+        {
+            "contract_version": "seeded_candidate_v1",
+            "candidate_id": "uia-submit-search",
+            "label": "Submit search",
+            "role": "button",
+            "bbox": {"x": 700, "y": 70, "w": 120, "h": 36},
+            "click_point": {"x": 760, "y": 88},
+            "risk_class": "safe_click_allowed",
+        },
+        rank=1,
+    )
+    assert unrelated_candidate is not None
+    monkeypatch.setattr(
+        "app.api.vision.rank_candidates",
+        lambda request: vision_api.CandidateRankResult(
+            goal=request.goal,
+            top_k=request.top_k,
+            candidates=[unrelated_candidate],
+            rejected=[],
+            recommended_candidate_id=unrelated_candidate.candidate_id,
+            margin_to_second=unrelated_candidate.score,
+            summary={"returned_count": 1, "has_recommendation": True},
+        ),
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "address-bar",
+                    "name": "https://example.test",
+                    "control_type": "Edit",
+                    "automation_id": "AddressBar",
+                    "class_name": "Edit",
+                    "bbox": {"x": 100, "y": 20, "w": 700, "h": 30},
+                    "screen_bbox": {"x": 100, "y": 20, "w": 700, "h": 30},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["ValuePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "submit-search",
+                    "name": "Submit search",
+                    "control_type": "Button",
+                    "automation_id": "submit-search",
+                    "class_name": "Button",
+                    "bbox": {"x": 700, "y": 70, "w": 120, "h": 36},
+                    "screen_bbox": {"x": 700, "y": 70, "w": 120, "h": 36},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Open the application flow by clicking Apply",
+            "app_name": "Browser",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-apply-entry",
+                    "label": "Apply entry button",
+                    "role": "button",
+                    "bbox": {"x": 497, "y": 272, "w": 57, "h": 22},
+                    "click_point": {"x": 525, "y": 283},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "open_apply_flow",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                    "locator_evidence": {"text_anchors": ["Apply"]},
+                }
+            },
+        },
+    )
+
+    result = response.json()["data"]["result"]
+    assert vista_calls
+    assert vista_calls[0]["image_preprocess"]["roi_source"] == "seeded_candidate_v1"
+    assert [candidate.candidate_id for candidate in vista_calls[0]["candidates"]] == ["seeded_memory-apply-entry"]
+    assert result["pre_click_decision"]["allowed"] is True
+
+
+def test_operational_memory_fast_grounding_uses_unique_current_uia_candidate_without_vista(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        raise AssertionError("唯一当前 UIA 命中不应调用 VISTA")
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "system-menu",
+                    "name": "System",
+                    "control_type": "MenuItem",
+                    "automation_id": "SystemMenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "screen_bbox": {"x": 8, "y": 8, "w": 22, "h": 22},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBar",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click File (F)",
+            "app_name": "Notepad",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "operational_memory_fast_grounding": {
+                    "enabled": True,
+                    "mode": "current_uia_unique_match_v1",
+                },
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-file-menu",
+                    "label": "File (F)",
+                    "role": "menu_item",
+                    "bbox": {"x": 20, "y": 22, "w": 60, "h": 29},
+                    "click_point": {"x": 50, "y": 36},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "file menu opens",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                },
+            },
+        },
+    )
+
+    assert response.json()["success"] is True
+    result = response.json()["data"]["result"]
+    assert vista_calls == []
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 34, "y": 40}
+    assert result["pre_click_decision"]["selected_candidate_id"].startswith("candidate_screen_inventory_action_uia")
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_used"] is True
+    assert result["candidate_result"]["summary"]["current_uia_unique_match_count"] == 1
+    assert result["execution_path"]["vision_model_used"] is False
+    assert result["candidate_freshness_decision"]["allowed"] is True
+    assert result["candidate_freshness_decision"]["candidate_id"] == result["pre_click_decision"]["selected_candidate_id"]
+    assert result["candidate_freshness_decision"]["candidate_freshness"] == {
+        "contract_version": "action_candidate_freshness_v1",
+        "capture_id": str(image_path),
+        "viewport_size": {"width": 900, "height": 760},
+        "source": "current_uia_unique_match_v1",
+        "freshness": "current_capture",
+    }
+
+
+def test_operational_memory_fast_grounding_matches_unique_current_uia_accessible_apply_label(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (1403, 931), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        raise AssertionError("唯一语义一致的当前 UIA Apply 控件不应回退到历史坐标或 VISTA")
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "company",
+                    "name": "TRV Trading",
+                    "control_type": "Button",
+                    "automation_id": "Company",
+                    "class_name": "Button",
+                    "bbox": {"x": 272, "y": 362, "w": 121, "h": 14},
+                    "screen_bbox": {"x": 272, "y": 362, "w": 121, "h": 14},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "quick-apply",
+                    "name": "Apply for SOFTWARE ENGINEER SUMMER INTERNSHIP/GRADUATE at TRV Trading",
+                    "control_type": "Hyperlink",
+                    "automation_id": "QuickApply",
+                    "class_name": "Hyperlink",
+                    "bbox": {"x": 272, "y": 574, "w": 146, "h": 49},
+                    "screen_bbox": {"x": 272, "y": 574, "w": 146, "h": 49},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": (
+                "Open the SEEK-hosted Quick apply flow for SOFTWARE ENGINEER "
+                "SUMMER INTERNSHIP/GRADUATE at TRV Trading and stop before any form fill."
+            ),
+            "app_name": "msedge.exe",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "operational_memory_fast_grounding": {
+                    "enabled": True,
+                    "mode": "current_uia_unique_match_v1",
+                },
+                "operational_memory": {
+                    "surface_validation": {
+                        "allowed": True,
+                        "matched_text_anchors": ["Quick apply"],
+                    }
+                },
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-quick-apply",
+                    "label": "Quick apply",
+                    "role": "button",
+                    "bbox": {"x": 106, "y": 230, "w": 214, "h": 9},
+                    "click_point": {"x": 213, "y": 234},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "open_apply_flow",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                    "locator_evidence": {
+                        "text_anchors": ["Quick apply"],
+                        "reference_bbox_is_prior_only": True,
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.json()["success"] is True
+    result = response.json()["data"]["result"]
+    assert vista_calls == []
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 345, "y": 598}
+    assert result["pre_click_decision"]["selected_candidate_id"].startswith(
+        "candidate_screen_inventory_action_uia"
+    )
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_used"] is True
+    assert result["candidate_result"]["summary"]["current_uia_unique_match_count"] == 1
+    assert result["candidate_result"]["summary"]["seeded_candidate_selected"] is False
+    assert result["candidate_freshness_decision"]["candidate_freshness"]["source"] == (
+        "current_uia_unique_match_v1"
+    )
+
+
+def test_operational_memory_fast_grounding_conflict_falls_back_to_vista_with_current_candidates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (900, 760), color=(255, 255, 255)).save(image_path)
+    vista_calls: list[dict] = []
+
+    def fake_vista(**kwargs):
+        vista_calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": "vista_point_grounding",
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(kwargs["image_path"]),
+            "goal": kwargs["goal"],
+            "prompt": "Disambiguate current File menu items",
+            "raw_text": "[34, 40]",
+            "raw_response": {"choices": [{"message": {"content": "[34, 40]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 34.0, "y": 40.0, "coordinate_space": "pixel"},
+            },
+            "point": {"x": 34, "y": 40},
+            "image_size": {"width": 900, "height": 760},
+            "image_preprocess": kwargs["image_preprocess"],
+        }
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_grounding", fake_vista)
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu-primary",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBarPrimary",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 8, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "file-menu-secondary",
+                    "name": "File (F)",
+                    "control_type": "MenuItem",
+                    "automation_id": "MenuBarSecondary",
+                    "class_name": "MenuItem",
+                    "bbox": {"x": 108, "y": 31, "w": 52, "h": 19},
+                    "screen_bbox": {"x": 108, "y": 31, "w": 52, "h": 19},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click File (F)",
+            "app_name": "Notepad",
+            "agent_mode": "execute",
+            "top_k": 5,
+            "metadata": {
+                "operational_memory_fast_grounding": {
+                    "enabled": True,
+                    "mode": "current_uia_unique_match_v1",
+                },
+                "seeded_candidate": {
+                    "contract_version": "seeded_candidate_v1",
+                    "candidate_id": "memory-file-menu",
+                    "label": "File (F)",
+                    "role": "menu_item",
+                    "bbox": {"x": 20, "y": 22, "w": 60, "h": 29},
+                    "click_point": {"x": 50, "y": 36},
+                    "risk_class": "safe_click_allowed",
+                    "expected_effect": "file menu opens",
+                    "require_current_grounding": True,
+                    "historical_click_point_reused": False,
+                },
+            },
+        },
+    )
+
+    assert response.json()["success"] is True
+    result = response.json()["data"]["result"]
+    assert len(vista_calls) == 1
+    assert vista_calls[0]["image_preprocess"]["roi_source"] == "current_uia_candidates_v1"
+    assert len(vista_calls[0]["candidates"]) == 2
+    assert all(candidate.candidate_id.startswith("candidate_screen_inventory_action_uia") for candidate in vista_calls[0]["candidates"])
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_used"] is False
+    assert result["candidate_result"]["summary"]["operational_memory_fast_grounding_reason"] == "current_uia_match_not_unique"
+    assert result["candidate_result"]["summary"]["current_uia_unique_match_count"] == 2
+    assert result["execution_path"]["vision_model_used"] is True
+    assert result["candidate_freshness_decision"]["allowed"] is True
+    assert result["candidate_freshness_decision"]["candidate_id"] == result["pre_click_decision"]["selected_candidate_id"]
+    assert result["candidate_freshness_decision"]["candidate_freshness"]["source"] == "current_uia_vista_grounded_v1"
+
+
+def test_parse_vista_point_text_accepts_pixel_bbox_quad() -> None:
+    parsed = vision_api._parse_vista_point_text("[36, 48, 426, 350]")
+
+    assert parsed == {
+        "contract_version": "vista_point_v1",
+        "point": {"x": 249.0, "y": 223.0, "coordinate_space": "pixel"},
+    }
+
+
+def test_parse_vista_point_text_accepts_wrapped_unparsed_bbox_quad() -> None:
+    parsed = vision_api._parse_vista_point_text(
+        json.dumps(
+            {
+                "contract_version": "vista_point_v1",
+                "status": "unparsed",
+                "point": None,
+                "raw_text": "[36, 48, 426, 350]",
+            }
+        )
+    )
+
+    assert parsed["point"] == {"x": 249.0, "y": 223.0, "coordinate_space": "pixel"}
+    assert parsed["wrapped_unparsed_payload"]["status"] == "unparsed"
+
+
+def test_vista_pixel_point_outside_inference_image_is_not_clamped() -> None:
+    parsed = {
+        "contract_version": "vista_point_v1",
+        "point": {"x": 9999.0, "y": 120.0, "coordinate_space": "pixel"},
+    }
+
+    with pytest.raises(ValueError, match="outside inference image bounds"):
+        vision_api._vista_point_to_original_pixel(parsed, image_size=vision_api.ImageSize(width=640, height=480))
+
+
+def test_execute_recognition_plan_uses_vista_direct_grounding_without_path_graph(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+    calls: list[dict] = []
+
+    def fake_vista_point_prompt(**kwargs):
+        calls.append(kwargs)
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[400, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[400, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 400.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 200, "y": 130},
+            "image_size": {"width": 500, "height": 260},
+        }
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_prompt", fake_vista_point_prompt)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert calls
+    assert calls[0]["provider_name"] == "vista_direct_point_grounding"
+    assert result["path_graph_recall"]["status"] == "unavailable"
+    assert result["execution_path"]["vista_direct_point_grounding_used"] is True
+    assert result["pre_click_decision"]["allowed"] is True
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 200, "y": 130}
+    candidate = result["candidate_result"]["candidates"][0]
+    assert candidate["candidate_id"].startswith("vista_direct_")
+    assert candidate["element"]["sources"] == ["vista_point_v1_direct"]
+    assert result["narrow_search_result"]["results"][0]["reasons"] == ["vista_direct_point_grounding"]
+
+
+def test_execute_recognition_plan_builds_fast_inventory_from_uia_for_vista_direct(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_prompt",
+        lambda **kwargs: {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[400, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[400, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 400.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 200, "y": 130},
+            "image_size": {"width": 500, "height": 260},
+        },
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "btn_start",
+                    "name": "Start",
+                    "control_type": "Button",
+                    "automation_id": "startButton",
+                    "class_name": "Button",
+                    "bbox": {"x": 170, "y": 112, "w": 80, "h": 36},
+                    "screen_bbox": {"x": 170, "y": 112, "w": 80, "h": 36},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "txt_status",
+                    "name": "Ready",
+                    "control_type": "Text",
+                    "automation_id": "statusText",
+                    "class_name": "Text",
+                    "bbox": {"x": 20, "y": 20, "w": 100, "h": 20},
+                    "screen_bbox": {"x": 20, "y": 20, "w": 100, "h": 20},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": [],
+                },
+            ],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["screen_inventory"]["contract_version"] == "screen_inventory_v1"
+    assert result["screen_inventory"]["available_actions"][0]["label"] == "Start"
+    assert result["screen_inventory"]["page_elements"][0]["text"] == "Ready"
+    assert result["parse_result"]["screen_reading"]["contract_version"] == "screen_reading_v1"
+    assert result["parse_result"]["execute_fast_inventory"]["status"] == "ready"
+    assert result["execution_path"]["screen_inventory_source"] == "execute_fast_inventory_uia"
+    assert result["execution_path"]["screen_inventory_available_action_count"] == 1
+    assert result["execution_path"]["screen_inventory_page_element_count"] == 1
+    assert result["execution_path"]["uia_scan_status"] == "ok"
+
+
+def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disagrees(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_prompt",
+        lambda **kwargs: {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[200, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[200, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 200.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 100, "y": 130},
+            "image_size": {"width": 500, "height": 260},
+        },
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 1,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "resume_radio",
+                    "name": "EXAMPLE_USER.pdf",
+                    "control_type": "RadioButton",
+                    "automation_id": "resumeRadio",
+                    "class_name": "RadioButton",
+                    "bbox": {"x": 300, "y": 110, "w": 44, "h": 44},
+                    "screen_bbox": {"x": 300, "y": 110, "w": 44, "h": 44},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["TogglePattern"],
+                }
+            ],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Select EXAMPLE_USER.pdf resume radio button",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["result"]
+    assert result["pre_click_decision"]["allowed"] is False
+    direct_decision = next(
+        item
+        for item in result["pre_click_decision"]["candidate_decisions"]
+        if item["candidate_id"].startswith("vista_direct_")
+    )
+    assert "vista_direct_conflicts_with_exact_uia_candidate_bbox" in direct_decision["reasons"]
+
+
+def test_execute_recognition_plan_does_not_treat_context_labels_as_explicit_target(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_prompt",
+        lambda **kwargs: {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[840, 500]",
+            "raw_response": {"choices": [{"message": {"content": "[840, 500]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 840.0, "y": 500.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 420, "y": 130},
+            "image_size": {"width": 500, "height": 260},
+        },
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 2,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "seek_logo",
+                    "name": "SEEK",
+                    "control_type": "Hyperlink",
+                    "bbox": {"x": 20, "y": 20, "w": 80, "h": 30},
+                    "screen_bbox": {"x": 20, "y": 20, "w": 80, "h": 30},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+                {
+                    "provider": "windows_uia",
+                    "control_id": "job_title",
+                    "name": "Digital Forensic Technician",
+                    "control_type": "Hyperlink",
+                    "bbox": {"x": 120, "y": 70, "w": 180, "h": 30},
+                    "screen_bbox": {"x": 120, "y": 70, "w": 180, "h": 30},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                },
+            ],
+        },
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click the Quick apply button for Digital Forensic Technician on SEEK",
+            "app_name": "seek",
+            "agent_mode": "execute",
+            "top_k": 3,
+            "metadata": {
+                "target_text": "Quick apply",
+                "observed_text": "Quick apply",
+                "semantic_action": "open_apply_flow",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["result"]
+    direct_decision = next(
+        item
+        for item in result["pre_click_decision"]["candidate_decisions"]
+        if item["candidate_id"].startswith("vista_direct_")
+    )
+    assert "vista_direct_conflicts_with_exact_uia_candidate_bbox" not in direct_decision["reasons"]
+
+
+def test_execute_fast_inventory_filters_browser_chrome_controls() -> None:
+    controls = [
+        {
+            "name": "Back",
+            "control_type": "Button",
+            "bbox": {"x": 12, "y": 44, "w": 32, "h": 32},
+            "enabled": True,
+            "visible": True,
+            "patterns": ["InvokePattern"],
+        },
+        {
+            "name": "https://nz.seek.com/software-engineer-jobs",
+            "control_type": "Edit",
+            "bbox": {"x": 112, "y": 48, "w": 600, "h": 24},
+            "enabled": True,
+            "visible": True,
+            "patterns": ["ValuePattern"],
+        },
+        {
+            "name": "Pay",
+            "control_type": "Button",
+            "bbox": {"x": 52, "y": 256, "w": 78, "h": 41},
+            "enabled": True,
+            "visible": True,
+            "patterns": ["InvokePattern"],
+        },
+        {
+            "name": "Software engineer",
+            "control_type": "Hyperlink",
+            "bbox": {"x": 52, "y": 532, "w": 280, "h": 36},
+            "enabled": True,
+            "visible": True,
+            "patterns": ["InvokePattern"],
+        },
+        {
+            "name": "",
+            "control_type": "Pane",
+            "bbox": {"x": 8, "y": 0, "w": 1230, "h": 1186},
+            "enabled": True,
+            "visible": True,
+            "patterns": [],
+        },
+    ]
+
+    filtered = vision_api._filter_execute_fast_inventory_controls(
+        controls,
+        image_size=vision_api.ImageSize(width=1246, height=1194),
+        app_name="edge",
+    )
+
+    assert [item["name"] for item in filtered] == ["Pay", "Software engineer"]
+
+
+def test_execute_recognition_plan_blocks_vista_direct_point_in_browser_chrome(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "browser_capture.png"
+    Image.new("RGB", (1265, 1380), color=(255, 255, 255)).save(image_path)
+
+    def fake_vista_point_prompt(**kwargs):
+        return {
+            "contract_version": "vista_point_grounding_v1",
+            "status": "ready",
+            "provider": kwargs["provider_name"],
+            "model_name": "inclusionAI/VISTA-4B",
+            "output_contract": "vista_point_v1",
+            "image_path": str(image_path),
+            "goal": kwargs["goal"],
+            "prompt": kwargs["prompt"],
+            "raw_text": "[569, 42]",
+            "raw_response": {"choices": [{"message": {"content": "[569, 42]"}}]},
+            "parsed": {
+                "contract_version": "vista_point_v1",
+                "point": {"x": 569.0, "y": 42.0, "coordinate_space": "normalized_0_1000"},
+            },
+            "point": {"x": 720, "y": 58},
+            "image_size": {"width": 1265, "height": 1380},
+        }
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_prompt", fake_vista_point_prompt)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click the Date filter",
+            "app_name": "edge",
+            "agent_mode": "execute",
+            "metadata": {"vista_direct_grounding": {"enabled": True, "refine": False}},
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["candidate_result"]["candidates"] == []
+    assert result["narrow_search_result"]["summary"]["error"] == "vista_direct_point_in_browser_chrome"
+    assert result["parse_result"]["vista_point_grounding"]["blocked_reason"] == "vista_direct_point_in_browser_chrome"
+    assert result["pre_click_decision"]["allowed"] is False
+    assert result["execution_path"]["vista_direct_point_grounding_attempted"] is True
+    assert result["execution_path"]["vista_direct_point_grounding_used"] is False
+
+
+def test_execute_recognition_plan_resizes_vista_direct_image_and_maps_point(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "large_capture.png"
+    Image.new("RGB", (1265, 1380), color=(255, 255, 255)).save(image_path)
+    calls: list[dict] = []
+
+    monkeypatch.setattr("app.api.vision.VISTA_DIRECT_IMAGES_DIR", tmp_path / "vista-direct")
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+
+    def fake_endpoint(self, request_image_path, prompt, max_tokens=32, request_timeout_seconds=None):
+        calls.append(
+            {
+                "image_path": Path(request_image_path),
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "request_timeout_seconds": request_timeout_seconds,
+            }
+        )
+        return {"choices": [{"message": {"content": "[500, 500]"}}]}
+
+    monkeypatch.setattr("app.api.vision.LocalVisionProvider._call_openai_compatible_endpoint", fake_endpoint)
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "metadata": {"vista_direct_grounding": {"enabled": True, "timeout_seconds": 45.0, "max_edge": 640, "refine": True}},
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert len(calls) == 2
+    assert [call["request_timeout_seconds"] for call in calls] == [45.0, 45.0]
+    assert calls[0]["image_path"] != image_path
+    assert calls[0]["image_path"].exists()
+    assert calls[1]["image_path"] != image_path
+    assert calls[1]["image_path"].exists()
+    vista = result["parse_result"]["vista_point_grounding"]
+    assert vista["vista_stage"] == "final_refine_roi"
+    assert vista["image_path"] == str(calls[1]["image_path"])
+    assert vista["image_preprocess"]["status"] == "processed"
+    assert vista["image_preprocess"]["strategy"] == "crop_roi"
+    assert vista["image_preprocess"]["crop_bounds_original"] == {"x": 378, "y": 434, "w": 512, "h": 512}
+    assert vista["image_preprocess"]["processed_size"] == {"width": 512, "height": 512}
+    assert vista["processed_point"] == {"x": 256, "y": 256}
+    assert vista["point"] == {"x": 634, "y": 690}
+    assert vista["image_size"] == {"width": 1265, "height": 1380}
+    assert vista["inference_image_size"] == {"width": 512, "height": 512}
+    assert vista["coarse_vista_point_grounding"]["processed_point"] == {"x": 294, "y": 320}
+    assert vista["coarse_vista_point_grounding"]["inference_image_size"] == {"width": 587, "height": 640}
+    assert vista["refine_vista_point_grounding"]["point"] == {"x": 634, "y": 690}
+    assert result["model_io"]["attempt_count"] == 2
+    assert result["model_io"]["attempts"][0]["vista_stage"] == "coarse_full"
+    assert result["model_io"]["attempts"][1]["vista_stage"] == "refine_roi"
+    assert result["pre_click_decision"]["selected_click_point"] == {"x": 634, "y": 690}
+    assert result["recommended_target"]["element"]["bbox"] == {"x": 610, "y": 666, "w": 48, "h": 48}
+
+
+def test_execute_recognition_plan_blocks_when_vista_direct_grounding_times_out(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr("app.api.vision._call_vista_point_prompt", lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("timed out")))
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["execution_path"]["vista_direct_point_grounding_attempted"] is True
+    assert result["execution_path"]["vista_direct_point_grounding_used"] is False
+    assert result["pre_click_decision"]["allowed"] is False
+    assert result["model_io"]["status"] == "failed"
+    assert result["narrow_search_result"]["summary"]["error"] == "vista_direct_point_grounding_failed: timed out"
+
+
+def test_vision_layer_trace_returns_each_layer_result_and_validation(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start button",
+                        role="button",
+                        bbox=BBox(x=80, y=120, w=140, h=100),
+                        diagonal=Diagonal(x1=80, y1=120, x2=220, y2=220),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.2, ny2=0.2),
+                        description="Start button",
+                        ocr_text="Start",
+                        text_lines=["Start"],
+                        possible_destinations=["main"],
+                        confidence=0.9,
+                        layout_key="layout_start",
+                        content_key="content_start",
+                        match_key="layout_start:content_start",
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=77, y=68, width=24, height=13))],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/layer_trace",
+        json={
+            "image_path": str(image_path),
+            "task": "analyze_ui",
+            "app_name": "demo",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    assert result["contract_version"] == "vision_layer_trace_v1"
+    assert result["final_ok"] is True
+
+    layers = {item["layer"]: item for item in result["layers"]}
+    assert set(layers) == {"input_image", "vision_provider_raw", "vision_regions_v1", "ocr_result", "page_structure_v1"}
+    assert layers["input_image"]["validation"]["ok"] is True
+    assert layers["vision_regions_v1"]["summary"]["region_count"] == 1
+    assert layers["ocr_result"]["summary"]["texts"] == ["Start"]
+    assert layers["page_structure_v1"]["summary"]["element_count"] == 1
+    assert layers["page_structure_v1"]["summary"]["allowed_element_count"] == 1
+    assert layers["page_structure_v1"]["result"]["elements"][0]["memory_key"]
+
+
+def test_vision_layer_trace_can_add_ocr_refined_region_layer(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)
+
+    class DummyProvider:
+        def analyze(self, req):
+            from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+
+            return VisionAnalyzeResponse(
+                provider="dummy",
+                screen_summary="dummy page",
+                state_guess="dummy_state",
+                image_size=ImageSize(width=420, height=220),
+                regions=[
+                    VisionRegion(
+                        region_id="region_start",
+                        label="Start button",
+                        role="button",
+                        bbox=BBox(x=80, y=120, w=140, h=100),
+                        diagonal=Diagonal(x1=80, y1=120, x2=220, y2=220),
+                        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.2, ny2=0.2),
+                        description="Start button",
+                        ocr_text="Start",
+                        text_lines=["Start"],
+                        possible_destinations=["main"],
+                        confidence=0.9,
+                        layout_key="layout_start",
+                        content_key="content_start",
+                        match_key="layout_start:content_start",
+                    )
+                ],
+            )
+
+    class DummyOCR:
+        def scan_image(self, image_path):
+            from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+            return OCRResult(
+                image_path=image_path,
+                metadata={"engine": "rapidocr_onnxruntime"},
+                matches=[OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=77, y=68, width=24, height=13))],
+            )
+
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.load_config", lambda: {"vision": {"mode": "local"}})
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: DummyProvider())
+    monkeypatch.setattr("app.api.vision.ocr_service", DummyOCR())
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/layer_trace",
+        json={
+            "image_path": str(image_path),
+            "task": "analyze_ui",
+            "app_name": "demo",
+            "metadata": {"ocr_region_refine": True},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+
+    layers = {item["layer"]: item for item in result["layers"]}
+    assert "vision_regions_refined_v1" in layers
+    refined = layers["vision_regions_refined_v1"]["result"]
+    assert refined["regions"][0]["bbox"] == {"x": 61, "y": 52, "w": 140, "h": 100}
+    assert refined["artifacts"]["ocr_region_refine"]["adjusted_region_count"] == 1
+    assert result["execution_path"]["ocr_region_refine_used"] is True
+
+
+def test_render_review_overlay_returns_output_image(tmp_path) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (240, 160), color=(255, 255, 255)).save(image_path)
+
+    trace_path = tmp_path / "trace.json"
+    trace_payload = {
+        "result": {
+            "image_path": str(image_path),
+            "layers": [
+                {
+                    "layer": "vision_provider_raw",
+                    "result": {
+                        "regions": [
+                            {
+                                "region_id": "region_1",
+                                "label": "Start Button",
+                                "diagonal": {"x1": 20, "y1": 30, "x2": 120, "y2": 90},
+                            }
+                        ]
+                    },
+                },
+                {
+                    "layer": "page_structure_v1",
+                    "result": {
+                        "regions": [
+                            {
+                                "region_id": "region_1",
+                                "label": "Start Button Refined",
+                                "bbox": {"x": 28, "y": 40, "w": 52, "h": 22},
+                            }
+                        ]
+                    },
+                },
+                {
+                    "layer": "ocr_result",
+                    "result": {
+                        "matches": [
+                            {
+                                "text": "Start",
+                                "bbox": {"x": 30, "y": 42, "width": 40, "height": 14},
+                            }
+                        ]
+                    },
+                },
+            ],
+        }
+    }
+    trace_path.write_text(json.dumps(trace_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/render_review_overlay",
+        json={
+            "trace_path": str(trace_path),
+            "region_layer": "page_structure_v1",
+            "include_regions": True,
+            "include_ocr": True,
+            "label_regions": True,
+            "label_ocr": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    output_path = Path(result["output_path"])
+    assert output_path.exists()
+    assert result["region_count"] == 1
+    assert result["ocr_count"] == 1
+    assert result["region_layer"] == "page_structure_v1"
+
+
+def test_render_recognition_plan_overlay_returns_output_image(tmp_path) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (240, 160), color=(255, 255, 255)).save(image_path)
+
+    trace_path = tmp_path / "recognition-plan.json"
+    trace_payload = {
+        "result": {
+            "contract_version": "recognition_plan_v1",
+            "image_path": str(image_path),
+            "candidate_result": {
+                "candidates": [
+                    {
+                        "candidate_id": "candidate_start",
+                        "rank": 1,
+                        "element_id": "element_start",
+                        "label": "Start",
+                        "score": 0.91,
+                        "eligible": True,
+                        "element": {
+                            "bbox": {"x": 30, "y": 40, "w": 80, "h": 40},
+                        },
+                    }
+                ],
+                "rejected": [
+                    {
+                        "candidate_id": "candidate_ad",
+                        "rank": 1,
+                        "element_id": "element_ad",
+                        "label": "Ad",
+                        "score": 0.2,
+                        "eligible": False,
+                        "element": {
+                            "bbox": {"x": 130, "y": 40, "w": 70, "h": 40},
+                        },
+                    }
+                ],
+            },
+            "narrow_search_result": {
+                "results": [
+                    {
+                        "candidate_id": "candidate_start",
+                        "refined_click_point": {"x": 70, "y": 60},
+                        "coordinate_source": "local_ocr_text_center",
+                        "matched_text": "Start",
+                    }
+                ]
+            },
+            "pre_click_decision": {
+                "selected_candidate_id": "candidate_start",
+                "candidate_decisions": [
+                    {
+                        "candidate_id": "candidate_start",
+                        "allowed": True,
+                        "reasons": ["pre_click_checks_passed"],
+                    },
+                    {
+                        "candidate_id": "candidate_ad",
+                        "allowed": False,
+                        "reasons": ["ad_like_candidate"],
+                    },
+                ],
+            },
+        }
+    }
+    trace_path.write_text(json.dumps(trace_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    client = TestClient(app)
+    response = client.post(
+        "/vision/render_recognition_plan_overlay",
+        json={
+            "trace_path": str(trace_path),
+            "include_rejected": True,
+            "include_points": True,
+            "label_candidates": True,
+            "label_reasons": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    result = payload["data"]["result"]
+    output_path = Path(result["output_path"])
+    assert output_path.exists()
+    assert result["candidate_count"] == 2
+    assert result["decision_count"] == 2
+    assert result["selected_candidate_id"] == "candidate_start"

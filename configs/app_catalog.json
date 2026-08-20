@@ -1,0 +1,51 @@
+{
+  "contract_version": "app_catalog_v1",
+  "apps": [
+    {
+      "app_id": "edge",
+      "name": "Microsoft Edge",
+      "description": "Web browser for website and web-app tasks.",
+      "launch_command": ["msedge.exe"],
+      "executable_candidates": [
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
+      ],
+      "process_name": "msedge.exe",
+      "title_hint": "Microsoft Edge",
+      "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"]
+    },
+    {
+      "app_id": "chrome",
+      "name": "Google Chrome",
+      "description": "Chrome browser for website and web-app tasks.",
+      "launch_command": ["chrome.exe"],
+      "executable_candidates": [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe"
+      ],
+      "process_name": "chrome.exe",
+      "title_hint": "Google Chrome",
+      "capabilities": ["open_url", "web_navigation", "web_forms", "browser_ui"]
+    },
+    {
+      "app_id": "notepad",
+      "name": "Notepad",
+      "description": "Plain text editor for simple local text editing tasks.",
+      "launch_command": ["notepad.exe"],
+      "process_name": "notepad.exe",
+      "title_hint": "Notepad",
+      "capabilities": ["text_editing", "file_text_review"]
+    },
+    {
+      "app_id": "calculator",
+      "name": "Calculator",
+      "description": "Windows Calculator for desktop GUI recognition and learning tasks.",
+      "launch_command": ["calc.exe"],
+      "process_name": "ApplicationFrameHost.exe",
+      "title_hints": ["Calculator", "计算器"],
+      "require_title_match": true,
+      "capabilities": ["calculation", "desktop_ui"]
+    }
+  ]
+}

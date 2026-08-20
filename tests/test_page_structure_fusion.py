@@ -1,0 +1,351 @@
+from __future__ import annotations
+
+from app.operation.page_structure import build_page_structure
+from app.vision.schemas import BBox, Diagonal, ImageSize, NormalizedDiagonal, VisionAnalyzeResponse, VisionRegion
+from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+
+
+def _region(region_id: str, label: str, role: str, x: int, y: int, w: int, h: int) -> VisionRegion:
+    return VisionRegion(
+        region_id=region_id,
+        label=label,
+        role=role,
+        bbox=BBox(x=x, y=y, w=w, h=h),
+        diagonal=Diagonal(x1=x, y1=y, x2=x + w, y2=y + h),
+        normalized_diagonal=NormalizedDiagonal(nx1=0.1, ny1=0.1, nx2=0.2, ny2=0.2),
+        description=f"{label} {role}",
+        ocr_text=label,
+        text_lines=[label],
+        possible_destinations=[f"{label.casefold()}_page"],
+        confidence=0.92,
+        layout_key=f"layout_{region_id}",
+        content_key=f"content_{region_id}",
+        match_key=f"layout_{region_id}:content_{region_id}",
+    )
+
+
+def test_build_page_structure_binds_ocr_text_to_supported_regions() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=420, height=220),
+        screen_summary="main menu",
+        state_guess="home",
+        regions=[
+            _region("region_start", "Start button", "button", 80, 120, 140, 100),
+            _region("region_settings", "Settings tab", "tab", 280, 120, 140, 100),
+            _region("region_panel", "Main content", "content", 0, 0, 420, 220),
+        ],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="Start", score=0.99, bbox=OCRBoundingBox(x=77, y=68, width=24, height=13)),
+            OCRTextMatch(text="Settings", score=0.98, bbox=OCRBoundingBox(x=256, y=67, width=41, height=16)),
+        ],
+    )
+
+    structure = build_page_structure(vision, ocr)
+    result = structure.to_dict()
+
+    assert result["contract_version"] == "page_structure_v1"
+    assert result["image_size"] == {"width": 420, "height": 220}
+    assert len(result["texts"]) == 2
+    assert len(result["elements"]) == 2
+    assert len(result["raw_vision_regions"]) == 3
+
+    start = next(item for item in result["elements"] if item["text"] == "Start")
+    assert start["role"] == "button"
+    assert start["interaction_type"] == "click"
+    assert start["click_strategy"] == "ocr_text_center"
+    assert start["click_point"] == {"x": 89, "y": 74}
+    assert start["coordinate_confidence"] == "high"
+    assert start["verification_hints"] == {
+        "expected_changes": ["state_change", "new_region", "content_change"],
+        "target_scope": "page",
+    }
+    assert start["interaction_policy"]["allowed"] is True
+    assert start["interaction_policy"]["zone_type"] == "general_action"
+    assert "role:button" in start["memory_key"]
+    assert start["source_region_ids"] == ["region_start"]
+    assert start["source_text_ids"] == ["text_1"]
+
+    settings = next(item for item in result["elements"] if item["text"] == "Settings")
+    assert settings["role"] == "tab"
+    assert settings["verification_hints"]["expected_changes"] == ["selection_change", "content_change"]
+    assert settings["interaction_policy"]["allowed"] is True
+
+    bound_links = [item for item in result["links"] if item["relation"] == "semantic_text_binding"]
+    assert len(bound_links) == 2
+    assert bound_links[0]["text_ids"]
+    assert result["learning_summary"]["allowed_element_count"] == 2
+    assert result["learning_summary"]["blocked_element_count"] == 0
+
+
+def test_build_page_structure_marks_ad_like_action_as_blocked() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=420, height=220),
+        screen_summary="download area",
+        state_guess="tool_recommendations",
+        regions=[_region("region_download", "CPU-Z 涓嬭浇", "button", 80, 40, 180, 90)],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[OCRTextMatch(text="绔嬪嵆璁块棶 CPU-Z", score=0.99, bbox=OCRBoundingBox(x=90, y=60, width=96, height=18))],
+    )
+
+    structure = build_page_structure(vision, ocr)
+    result = structure.to_dict()
+
+    assert len(result["elements"]) == 1
+    download = result["elements"][0]
+    assert download["interaction_policy"]["allowed"] is False
+    assert download["interaction_policy"]["zone_type"] == "ad_candidate"
+    assert download["interaction_policy"]["priority"] == "blocked"
+    assert result["learning_summary"]["blocked_element_count"] == 1
+    assert result["learning_summary"]["ad_like_element_ids"] == [download["element_id"]]
+
+
+def test_build_page_structure_does_not_bind_far_duplicate_short_texts() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1500, height=900),
+        screen_summary="mouse tester",
+        state_guess="test_page",
+        regions=[_region("region_double_click", "C E Click here", "button", 980, 500, 120, 90)],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="C", score=0.93, bbox=OCRBoundingBox(x=56, y=52, width=18, height=16)),
+            OCRTextMatch(text="E", score=0.81, bbox=OCRBoundingBox(x=1282, y=104, width=46, height=25)),
+            OCRTextMatch(text="Click here", score=0.99, bbox=OCRBoundingBox(x=1008, y=532, width=70, height=17)),
+        ],
+    )
+
+    structure = build_page_structure(vision, ocr)
+    result = structure.to_dict()
+
+    element = result["elements"][0]
+    assert element["text"] == "Click here"
+    assert element["source_text_ids"] == ["text_3"]
+    assert element["bbox"] == {"x": 1008, "y": 532, "w": 70, "h": 17}
+
+
+def test_build_page_structure_rejects_far_ambiguous_short_text_binding() -> None:
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1500, height=900),
+        screen_summary="mouse tester",
+        state_guess="test_page",
+        regions=[_region("region_icon", "C E", "button", 980, 500, 120, 90)],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[OCRTextMatch(text="C", score=0.93, bbox=OCRBoundingBox(x=56, y=52, width=18, height=16))],
+    )
+
+    structure = build_page_structure(vision, ocr)
+    result = structure.to_dict()
+
+    element = result["elements"][0]
+    assert element["text"] == "C E"
+    assert element["source_text_ids"] == []
+    assert element["bbox"] == {"x": 980, "y": 500, "w": 120, "h": 90}
+    assert result["links"][0]["relation"] == "semantic_only"
+
+
+def test_build_page_structure_keeps_precisely_grounded_visual_icon_for_review() -> None:
+    icon = _region("region_search", "Search Icon", "icon", 638, 30, 20, 28)
+    icon.ocr_text = ""
+    icon.text_lines = []
+    icon.grounding_constraints = {
+        "text_inclusion_policy": "exclude_text",
+        "edge_constraints": {
+            "top": "top edge of glyph",
+            "bottom": "bottom edge of glyph",
+            "left": "left edge of glyph",
+            "right": "before nearby label",
+        },
+        "final_bbox_reason": "Tightly covers only the magnifying-glass glyph.",
+    }
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1000, height=690),
+        screen_summary="toolbar",
+        state_guess="search",
+        regions=[icon],
+    )
+
+    structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={"engine": "rapidocr_onnxruntime"}, matches=[]))
+    result = structure.to_dict()
+
+    assert len(result["elements"]) == 1
+    target = result["elements"][0]
+    assert target["role"] == "icon"
+    assert target["text"] == ""
+    assert target["bbox"] == {"x": 638, "y": 30, "w": 20, "h": 28}
+    assert target["click_strategy"] == "vision_grounded_icon_center"
+    assert target["interaction_policy"]["allowed"] is False
+    assert target["interaction_policy"]["zone_type"] == "precise_visual_target"
+    assert result["links"][0]["relation"] == "precise_visual_grounding"
+
+
+def test_build_page_structure_keeps_precisely_grounded_visual_close_button_for_review() -> None:
+    close = _region("region_close", "close window button", "button", 792, 13, 16, 26)
+    close.ocr_text = ""
+    close.text_lines = []
+    close.grounding_constraints = {
+        "text_inclusion_policy": "exclude_text",
+        "edge_constraints": {
+            "top": "titlebar top",
+            "bottom": "titlebar bottom",
+            "left": "after maximize",
+            "right": "window right",
+        },
+        "final_bbox_reason": "Tightly covers only the close X.",
+    }
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=820, height=1303),
+        screen_summary="QQ window",
+        state_guess="open",
+        regions=[close],
+    )
+
+    structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={}, matches=[]))
+    result = structure.to_dict()
+
+    assert len(result["elements"]) == 1
+    assert result["elements"][0]["role"] == "button"
+    assert result["elements"][0]["interaction_policy"]["zone_type"] == "precise_visual_target"
+    assert result["elements"][0]["click_point"] == {"x": 800, "y": 26}
+
+
+def test_build_page_structure_does_not_promote_unproven_visual_icon() -> None:
+    icon = _region("region_search", "Search Icon", "icon", 638, 30, 20, 28)
+    icon.grounding_constraints = {"text_inclusion_policy": "exclude_text"}
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1000, height=690),
+        screen_summary="toolbar",
+        state_guess="search",
+        regions=[icon],
+    )
+
+    structure = build_page_structure(vision, OCRResult(image_path="screen.png", metadata={}, matches=[]))
+
+    assert structure.elements == []
+
+
+def test_build_page_structure_keeps_clickable_text_card_for_review_using_ocr_bbox() -> None:
+    card = _region("region_serato", "Serato Job Listing", "card", 35, 543, 556, 206)
+    card.ocr_text = "Junior Software Engineer C++ Serato Limited"
+    card.text_lines = ["Junior Software Engineer C++", "Serato Limited"]
+    card.possible_destinations = ["Job detail page"]
+    card.grounding_constraints = {
+        "text_inclusion_policy": "include_referenced_text",
+        "edge_constraints": {
+            "top": "top edge of card",
+            "bottom": "bottom edge of card",
+            "left": "left edge of card",
+            "right": "right edge of card",
+        },
+        "final_bbox_reason": "Clickable listing card containing the target employer text.",
+    }
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1294, height=1164),
+        screen_summary="job list",
+        state_guess="recommended jobs",
+        regions=[card],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="Blackpepper", score=0.99, bbox=OCRBoundingBox(x=60, y=590, width=112, height=20)),
+            OCRTextMatch(text="Junior Software Engineer C++", score=0.99, bbox=OCRBoundingBox(x=60, y=652, width=245, height=22)),
+            OCRTextMatch(text="Serato Limited", score=0.99, bbox=OCRBoundingBox(x=60, y=681, width=122, height=20)),
+        ],
+    )
+
+    result = build_page_structure(vision, ocr).to_dict()
+
+    assert len(result["elements"]) == 1
+    target = result["elements"][0]
+    assert target["role"] == "card"
+    assert target["bbox"] == {"x": 60, "y": 652, "w": 245, "h": 49}
+    assert target["semantic_bbox"] == {"x": 35, "y": 543, "w": 556, "h": 206}
+    assert target["click_point"] == {"x": 182, "y": 676}
+    assert target["click_strategy"] == "ocr_text_center_review"
+    assert target["interaction_policy"]["allowed"] is False
+    assert target["interaction_policy"]["zone_type"] == "precise_text_target"
+    assert result["links"][0]["relation"] == "precise_text_grounding"
+    assert target["evidence"]["unreferenced_text_contamination"]["count"] == 1
+    assert target["evidence"]["unreferenced_text_contamination"]["examples"][0]["text"] == "Blackpepper"
+    assert "unreferenced_text_contamination" in result["links"][0]["reasons"]
+    assert "above_exclusion_boundary" not in target["evidence"]
+    assert "semantic_bbox_violations" not in target["evidence"]
+    assert "above_exclusion_boundary_applied" not in result["links"][0]["reasons"]
+    assert "semantic_bbox_crossed_above_exclusion_boundary" not in result["links"][0]["reasons"]
+
+
+def test_build_page_structure_does_not_promote_unproven_card() -> None:
+    card = _region("region_card", "Serato Job Listing", "card", 35, 543, 556, 206)
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1294, height=1164),
+        screen_summary="job list",
+        state_guess="recommended jobs",
+        regions=[card],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[OCRTextMatch(text="Serato Limited", score=0.99, bbox=OCRBoundingBox(x=60, y=681, width=122, height=20))],
+    )
+
+    structure = build_page_structure(vision, ocr)
+
+    assert structure.elements == []
+
+
+def test_build_page_structure_does_not_apply_above_boundary_to_supported_text_click_target() -> None:
+    target = _region("region_serato", "Serato Job Listing", "nav", 35, 543, 556, 206)
+    target.ocr_text = "Junior Software Engineer C++ Serato Limited"
+    target.text_lines = ["Junior Software Engineer C++", "Serato Limited"]
+    target.grounding_constraints = {"text_inclusion_policy": "include_referenced_text"}
+    vision = VisionAnalyzeResponse(
+        provider="local",
+        image_size=ImageSize(width=1294, height=1164),
+        screen_summary="job list",
+        state_guess="recommended jobs",
+        regions=[target],
+    )
+    ocr = OCRResult(
+        image_path="screen.png",
+        metadata={"engine": "rapidocr_onnxruntime"},
+        matches=[
+            OCRTextMatch(text="9d ago", score=0.98, bbox=OCRBoundingBox(x=60, y=590, width=60, height=18)),
+            OCRTextMatch(text="Junior Software Engineer C++", score=0.99, bbox=OCRBoundingBox(x=60, y=652, width=245, height=22)),
+            OCRTextMatch(text="Serato Limited", score=0.99, bbox=OCRBoundingBox(x=60, y=681, width=122, height=20)),
+        ],
+    )
+
+    result = build_page_structure(vision, ocr).to_dict()
+    element = result["elements"][0]
+
+    assert element["role"] == "menu_item"
+    assert element["bbox"] == {"x": 60, "y": 652, "w": 245, "h": 49}
+    assert element["interaction_policy"]["allowed"] is False
+    assert element["interaction_policy"]["zone_type"] == "precise_text_target"
+    assert element["click_strategy"] == "ocr_text_center_review"
+    assert element["evidence"]["unreferenced_text_contamination"]["examples"][0]["text"] == "9d ago"
+    assert "unreferenced_text_contamination" in result["links"][0]["reasons"]
+    assert "above_exclusion_boundary" not in element["evidence"]
+    assert "semantic_bbox_violations" not in element["evidence"]

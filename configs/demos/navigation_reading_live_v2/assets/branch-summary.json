@@ -1,0 +1,65 @@
+{
+  "contract_version": "single_interface_asset_v1",
+  "interface_id": "branch_summary",
+  "application_identity_key": "web:navigation-branching-lab",
+  "display_name": "Workflow Summary",
+  "surface_type": "read_only_summary",
+  "state_signature": "branch_summary:reviewed",
+  "artifact_is_authorization": false,
+  "fixed_anchors": [
+    {
+      "content_id": "summary_identity",
+      "label": "Workflow Summary Interface",
+      "source_kind": "state",
+      "source_id": "branch_summary",
+      "content_behavior": "fixed_label",
+      "agent_usage": "identity_anchor",
+      "read_policy": "on_interface_match",
+      "agent_description": "Confirm the final read-only summary and stop safely."
+    }
+  ],
+  "dynamic_slots": [
+    {
+      "content_id": "summary_body",
+      "label": "Current workflow summary",
+      "source_kind": "region",
+      "source_id": "summary_body",
+      "content_behavior": "dynamic_value",
+      "agent_usage": "decision_signal",
+      "read_policy": "on_demand",
+      "read_strategy": "finite_detail",
+      "completion_policy": "reached_bottom_required",
+      "max_scrolls": 1,
+      "max_items": 0,
+      "bottom_markers": [
+        "BRANCHING WORKFLOW SAFE STOP"
+      ],
+      "agent_description": "Read the final workflow summary and then stop safely."
+    }
+  ],
+  "controls": [],
+  "action_candidates": [],
+  "verification_rules": [
+    {
+      "rule_id": "safe_stop_marker_visible",
+      "description": "BRANCHING WORKFLOW SAFE STOP is visible."
+    }
+  ],
+  "blockers": [
+    {
+      "blocker_id": "branching_workflow_complete",
+      "description": "The requested branching read-only workflow is complete. Stop safely."
+    }
+  ],
+  "review": {
+    "status": "human_approved",
+    "manual_revision": {
+      "semantic_description": "No more GUI action is required on this summary."
+    },
+    "reviewed_by_human": true,
+    "reviewed_revision_hash": "3a9a52473052dcc76e24d16c0b47aee9d3d20ed33e72f979e9cda530708dfd4f",
+    "current_revision_hash": "3a9a52473052dcc76e24d16c0b47aee9d3d20ed33e72f979e9cda530708dfd4f"
+  },
+  "evidence": {},
+  "execute_binding_enabled": false
+}

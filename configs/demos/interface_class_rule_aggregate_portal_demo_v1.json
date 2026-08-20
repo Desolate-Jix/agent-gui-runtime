@@ -1,0 +1,97 @@
+{
+  "contract_version": "interface_class_rule_demo_manifest_v1",
+  "class_rule_id": "aggregate_portal",
+  "description": "聚合门户类规则的离线只读演示：两个正样本和三个近邻/负样本。",
+  "cases": [
+    {
+      "case_id": "protopage_aggregate_portal",
+      "case_role": "positive",
+      "source_type": "recorded_model_output",
+      "trace_path": "logs\\traces\\vision\\20260730-160048-492361__learn-mode-fast-observe__protopage-v2.json",
+      "trace_sha256": "f40f0792759497c00a872ed126599b952cf4a632b75f438abf43b86fc1fd191d",
+      "screenshot_path": "artifacts\\screenshots\\browser-class-aggregate-holdout-20260730\\protopage-home.png",
+      "screenshot_sha256": "e57b0c4aefcefc85e66ab91921819532108c95174dd6281d18729c34abeda084",
+      "expected": {
+        "interface_category": "aggregate_portal",
+        "primary_content_strategy": "independent_content_modules",
+        "root_roles": [
+          "top_bar",
+          "main_content"
+        ],
+        "stage1_gate_status": "passed"
+      }
+    },
+    {
+      "case_id": "msn_aggregate_portal",
+      "case_role": "positive",
+      "source_type": "recorded_model_output",
+      "trace_path": "logs\\traces\\vision\\20260730-142653-790426__learn-mode-fast-observe__msn-portal.json",
+      "trace_sha256": "6f111411ed2b64b7908cdfd3479f84a13dced173fe14fa693f7955add65323ae",
+      "screenshot_path": "artifacts\\screenshots\\microsoft-edge__capture__full-window__20260730-035722-297980.png",
+      "screenshot_sha256": "b71f2b7719b9143aecffe1b1e94f64bcf844844e99a57210f58ae04df0c2a3d8",
+      "expected": {
+        "interface_category": "aggregate_portal",
+        "primary_content_strategy": "independent_content_modules",
+        "root_roles": [
+          "top_bar",
+          "main_content"
+        ],
+        "stage1_gate_status": "passed"
+      }
+    },
+    {
+      "case_id": "yahoo_nz_feed_workspace",
+      "case_role": "near_negative",
+      "source_type": "recorded_model_output",
+      "trace_path": "logs\\traces\\vision\\20260730-160104-345580__learn-mode-fast-observe__yahoo-nz-v2.json",
+      "trace_sha256": "bd56c25b502dbae6ef1f1c4d84d3ed138d5d6e9bd4f8f2b28f4448518ae5e87b",
+      "screenshot_path": "artifacts\\screenshots\\browser-class-aggregate-holdout-20260730\\yahoo-nz-home.png",
+      "screenshot_sha256": "4ed4d04f308688cc9c3483bbf02b8e7227a6bc49a2140ed714e69be56d2c8395",
+      "expected": {
+        "interface_category": "feed_workspace",
+        "primary_content_strategy": "feed_items",
+        "root_roles": [
+          "top_bar",
+          "main_content"
+        ],
+        "stage1_gate_status": "passed"
+      }
+    },
+    {
+      "case_id": "google_news_feed_workspace",
+      "case_role": "negative",
+      "source_type": "recorded_model_output",
+      "trace_path": "logs\\traces\\vision\\20260730-160124-673122__learn-mode-fast-observe__google-news-v2.json",
+      "trace_sha256": "2f8f67712c85154d2a5d9e430376fb7d2d77cfe3228cda106c6c42b475908d1d",
+      "screenshot_path": "artifacts\\screenshots\\browser-class-night-20260730\\google-news-home.png",
+      "screenshot_sha256": "c2fd0aff22973909b7d9e38f2812044d90a1fa4a1bc85c21a84f171907bf5a9e",
+      "expected": {
+        "interface_category": "feed_workspace",
+        "primary_content_strategy": "feed_items",
+        "root_roles": [
+          "top_bar",
+          "main_content"
+        ],
+        "stage1_gate_status": "passed"
+      }
+    },
+    {
+      "case_id": "youtube_search_workspace",
+      "case_role": "negative",
+      "source_type": "recorded_model_output",
+      "trace_path": "logs\\traces\\vision\\20260730-160152-646579__learn-mode-fast-observe__youtube-search-v2.json",
+      "trace_sha256": "df78c88dd3374bc9426d48eb9056cc61e02d9948b9eba093dc0e62a07cae1c5b",
+      "screenshot_path": "artifacts\\screenshots\\browser-class-night-20260730\\youtube-search-results.png",
+      "screenshot_sha256": "69baee40617fb58392695956275283710e87272930ba1e4c94eff1ca517f3d1f",
+      "expected": {
+        "interface_category": "search_workspace",
+        "primary_content_strategy": "search_results",
+        "root_roles": [
+          "top_bar",
+          "main_content"
+        ],
+        "stage1_gate_status": "passed"
+      }
+    }
+  ]
+}

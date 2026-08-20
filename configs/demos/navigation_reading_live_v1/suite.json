@@ -1,0 +1,176 @@
+{
+  "contract_version": "navigation_reading_live_suite_v1",
+  "suite_id": "navigation_reading_live_v1",
+  "goal": "Open the Atlas Reliability Report, read it completely, continue to the implementation notes, read them completely, open the decision summary, read it, and stop safely.",
+  "app_name": "Navigation Reading Lab",
+  "initial_interface_id": "lab_feed",
+  "interface_specs": [
+    {
+      "interface_id": "lab_feed",
+      "surface_type": "content_collection",
+      "identity_markers": [
+        "Navigation Reading Lab",
+        "Research Feed Interface",
+        "Atlas Reliability Report"
+      ]
+    },
+    {
+      "interface_id": "lab_atlas",
+      "surface_type": "finite_detail",
+      "identity_markers": [
+        "Navigation Reading Lab",
+        "Atlas Reliability Report Interface",
+        "Atlas section 1"
+      ],
+      "identity_marker_sets": [
+        [
+          "Atlas Reliability Report Interface",
+          "Atlas section 1"
+        ],
+        [
+          "Atlas section"
+        ],
+        [
+          "stage=atlas"
+        ]
+      ],
+      "read_target": {
+        "content_id": "atlas_body",
+        "scroll_scope": "page",
+        "target_pane": "page",
+        "wheel_clicks": 5,
+        "bottom_markers": [
+          "ATLAS REPORT END"
+        ]
+      }
+    },
+    {
+      "interface_id": "lab_notes",
+      "surface_type": "finite_detail",
+      "identity_markers": [
+        "Navigation Reading Lab",
+        "Implementation Notes Interface",
+        "Implementation section 1"
+      ],
+      "identity_marker_sets": [
+        [
+          "Implementation Notes Interface",
+          "Implementation section 1"
+        ],
+        [
+          "Implementation section"
+        ],
+        [
+          "stage=notes"
+        ]
+      ],
+      "read_target": {
+        "content_id": "notes_body",
+        "scroll_scope": "page",
+        "target_pane": "page",
+        "wheel_clicks": 5,
+        "bottom_markers": [
+          "IMPLEMENTATION NOTES END"
+        ]
+      }
+    },
+    {
+      "interface_id": "lab_summary",
+      "surface_type": "read_only_summary",
+      "identity_markers": [
+        "Navigation Reading Lab",
+        "Decision Summary Interface",
+        "WORKFLOW COMPLETE SAFE STOP"
+      ],
+      "identity_marker_sets": [
+        [
+          "Decision Summary Interface",
+          "WORKFLOW COMPLETE SAFE STOP"
+        ],
+        [
+          "stage=summary"
+        ]
+      ],
+      "read_target": {
+        "content_id": "summary_body",
+        "scroll_scope": "page",
+        "target_pane": "page",
+        "wheel_clicks": 3,
+        "bottom_markers": [
+          "WORKFLOW COMPLETE SAFE STOP"
+        ]
+      }
+    }
+  ],
+  "interface_assets": [
+    {
+      "interface_id": "lab_feed",
+      "path": "assets/lab-feed.json",
+      "sha256": "b13e3ad94d851bbc6c73b805956ee14609235b20e8dfc37213000ae24ca43f21"
+    },
+    {
+      "interface_id": "lab_atlas",
+      "path": "assets/lab-atlas.json",
+      "sha256": "d33a20ee92bb382ab82effc5fba28a29437531083572dba65f077547521891dd"
+    },
+    {
+      "interface_id": "lab_notes",
+      "path": "assets/lab-notes.json",
+      "sha256": "01d1c2b7cd7f095bd8ccd0e8f0ae891f588e0fa3f06e70d33205f1a281c73afe"
+    },
+    {
+      "interface_id": "lab_summary",
+      "path": "assets/lab-summary.json",
+      "sha256": "af23d063f9c9e9620fe034c5f44c29e98b368b479f68b21bdebabe075a842abf"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "feed_to_atlas",
+      "source_interface_id": "lab_feed",
+      "target_interface_id": "lab_atlas",
+      "source_control_id": "open_atlas",
+      "action_type": "open_detail",
+      "display_name": "Open Atlas report",
+      "agent_description": "Open the Atlas Reliability Report selected by the task.",
+      "operation_goal": "Click the button labeled Open Atlas report",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "success_conditions": [
+        "Atlas Reliability Report Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "atlas_to_notes",
+      "source_interface_id": "lab_atlas",
+      "target_interface_id": "lab_notes",
+      "source_control_id": "open_notes",
+      "action_type": "continue_next_step",
+      "display_name": "Open implementation notes",
+      "agent_description": "Continue to the implementation notes only after the Atlas report has been read completely.",
+      "operation_goal": "Click the button labeled Open implementation notes",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "requires_completed_read": "atlas_body",
+      "success_conditions": [
+        "Implementation Notes Interface is visible"
+      ]
+    },
+    {
+      "transition_id": "notes_to_summary",
+      "source_interface_id": "lab_notes",
+      "target_interface_id": "lab_summary",
+      "source_control_id": "open_summary",
+      "action_type": "continue_next_step",
+      "display_name": "Open decision summary",
+      "agent_description": "Continue to the read-only decision summary only after the implementation notes have been read completely.",
+      "operation_goal": "Click the button labeled Open decision summary",
+      "risk_level": "low",
+      "review_status": "human_reviewed",
+      "requires_completed_read": "notes_body",
+      "success_conditions": [
+        "Decision Summary Interface is visible"
+      ]
+    }
+  ]
+}

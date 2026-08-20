@@ -1,0 +1,22 @@
+{
+  "result": {
+    "app_name": "protocol fixture",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1200, "height": 800},
+    "interface_classification": {
+      "category": "conversation_workspace",
+      "confidence": 0.95,
+      "structure_signals": {
+        "people_or_conversation_rows": true,
+        "message_thread": true,
+        "message_composer": true
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "address", "role": "address_bar", "label": "https://example.test/chat", "bbox": {"x": 0, "y": 0, "w": 1200, "h": 48}},
+      {"item_id": "conversation_row_1", "role": "conversation_row", "bbox": {"x": 0, "y": 48, "w": 280, "h": 56}},
+      {"item_id": "thread", "role": "message_thread", "bbox": {"x": 280, "y": 48, "w": 920, "h": 660}},
+      {"item_id": "composer", "role": "composer", "bbox": {"x": 280, "y": 708, "w": 920, "h": 92}}
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "result": {
+    "app_name": "protocol holdout",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1000, "height": 700},
+    "interface_classification": {
+      "category": "file_browser",
+      "confidence": 0.94,
+      "structure_signals": {
+        "file_or_folder_rows": true
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "address", "role": "address_bar", "label": "https://stale.example.test", "bbox": {"x": 0, "y": 0, "w": 1000, "h": 44}},
+      {"item_id": "file_row_1", "role": "file_row", "label": "Document.txt", "bbox": {"x": 200, "y": 100, "w": 760, "h": 40}}
+    ]
+  }
+}

@@ -1,0 +1,498 @@
+from __future__ import annotations
+
+import argparse
+import base64
+import io
+import json
+import os
+import re
+import sys
+import threading
+import time
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+
+MODEL: Any = None
+PROCESSOR: Any = None
+MODEL_NAME = "inclusionAI/VISTA-4B"
+MAX_NEW_TOKENS = 32
+GENERATE_LOCK = threading.Lock()
+ACTIVE_REQUEST: dict[str, Any] | None = None
+ACTIVE_REQUEST_LOCK = threading.Lock()
+ACTIVE_CANCEL_EVENT: threading.Event | None = None
+
+
+class ModelRequestCancelled(RuntimeError):
+    """当前 VISTA 推理请求已收到匹配的取消信号。"""
+
+
+def _activate_request(
+    *,
+    request_id: str,
+    cancel_event: threading.Event,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    global ACTIVE_REQUEST, ACTIVE_CANCEL_EVENT
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        raise ValueError("request_id is required")
+    active = {
+        "request_id": normalized_request_id,
+        **dict(metadata),
+    }
+    with ACTIVE_REQUEST_LOCK:
+        ACTIVE_REQUEST = active
+        ACTIVE_CANCEL_EVENT = cancel_event
+    return dict(active)
+
+
+def _active_request_snapshot() -> dict[str, Any] | None:
+    with ACTIVE_REQUEST_LOCK:
+        return dict(ACTIVE_REQUEST) if isinstance(ACTIVE_REQUEST, dict) else None
+
+
+def _cancel_active_request(request_id: str) -> dict[str, Any]:
+    normalized_request_id = str(request_id or "").strip()
+    with ACTIVE_REQUEST_LOCK:
+        active_request_id = str((ACTIVE_REQUEST or {}).get("request_id") or "")
+        if not active_request_id:
+            return {
+                "contract_version": "model_request_cancel_response_v1",
+                "status": "request_not_active",
+                "request_id": normalized_request_id or None,
+            }
+        if normalized_request_id != active_request_id:
+            return {
+                "contract_version": "model_request_cancel_response_v1",
+                "status": "request_id_mismatch",
+                "request_id": normalized_request_id or None,
+                "active_request_id": active_request_id,
+            }
+        if ACTIVE_CANCEL_EVENT is None:
+            return {
+                "contract_version": "model_request_cancel_response_v1",
+                "status": "cancel_failed",
+                "request_id": normalized_request_id,
+                "reason": "active_cancel_event_missing",
+            }
+        ACTIVE_CANCEL_EVENT.set()
+        return {
+            "contract_version": "model_request_cancel_response_v1",
+            "status": "cancellation_acknowledged",
+            "request_id": normalized_request_id,
+        }
+
+
+def _clear_active_request(request_id: str) -> bool:
+    global ACTIVE_REQUEST, ACTIVE_CANCEL_EVENT
+    normalized_request_id = str(request_id or "").strip()
+    with ACTIVE_REQUEST_LOCK:
+        active_request_id = str((ACTIVE_REQUEST or {}).get("request_id") or "")
+        if normalized_request_id != active_request_id:
+            return False
+        ACTIVE_REQUEST = None
+        ACTIVE_CANCEL_EVENT = None
+        return True
+
+
+def _load_image(url: str):
+    from PIL import Image
+
+    if url.startswith("data:"):
+        _, payload = url.split(",", 1)
+        return Image.open(io.BytesIO(base64.b64decode(payload))).convert("RGB")
+    if url.startswith("http://") or url.startswith("https://"):
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return Image.open(io.BytesIO(response.read())).convert("RGB")
+    return Image.open(url).convert("RGB")
+
+
+def _message_text_and_image(messages: list[dict[str, Any]]) -> tuple[str, Any | None]:
+    text_parts: list[str] = []
+    image = None
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            text_parts.append(content)
+            continue
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "text" and isinstance(item.get("text"), str):
+                text_parts.append(item["text"])
+            elif item.get("type") == "image_url":
+                image_url = item.get("image_url")
+                if isinstance(image_url, dict) and isinstance(image_url.get("url"), str):
+                    image = _load_image(image_url["url"])
+            elif item.get("type") == "image" and isinstance(item.get("image"), str):
+                image = _load_image(item["image"])
+    return "\n".join(part for part in text_parts if part.strip()).strip(), image
+
+
+def _vista_prompt(instruction: str) -> str:
+    official_prefix = "Output the center point of the position corresponding to the instruction:"
+    cleaned = str(instruction or "").strip()
+    if cleaned.startswith(official_prefix):
+        return cleaned
+    goal_match = re.search(r"(?im)^\s*Goal\s*:\s*(.+?)\s*$", cleaned)
+    target_instruction = goal_match.group(1).strip() if goal_match else cleaned
+    target_instruction = target_instruction.rstrip(" .")
+    return (
+        f"{official_prefix} {target_instruction}. "
+        "The output should just be the coordinates of a point, in the format [x,y]."
+    )
+
+
+def _coordinate_output_complete(text: str) -> bool:
+    return re.search(r"\[\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\]", str(text or "")) is not None
+
+
+def _request_timeout_seconds(payload: dict[str, Any], *, default: float) -> float:
+    try:
+        requested = float(payload.get("request_timeout_seconds") or 0)
+    except (TypeError, ValueError):
+        requested = 0.0
+    return min(300.0, requested) if requested > 0 else max(1.0, float(default))
+
+
+def _point_payload(text: str, *, instruction: str = "") -> dict[str, Any]:
+    match = re.search(r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]", text)
+    parse_repair = {"applied": False, "reason": None}
+    if match is None:
+        match = re.fullmatch(r"\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*", text)
+        if match is not None:
+            parse_repair = {"applied": True, "reason": "missing_closing_bracket"}
+    point = None
+    if match:
+        point = {
+            "x": float(match.group(1)),
+            "y": float(match.group(2)),
+            "coordinate_space": _requested_coordinate_space(instruction),
+        }
+    return {
+        "contract_version": "vista_point_v1",
+        "status": "ready" if point else "unparsed",
+        "point": point,
+        "raw_text": text,
+        "parse_repair": parse_repair,
+    }
+
+
+def _requested_coordinate_space(instruction: str) -> str:
+    text = str(instruction or "").casefold()
+    if "coordinate_space=roi_local_point" in text or "roi_local_point" in text:
+        return "roi_local_point"
+    if "coordinate_space=normalized_0_1" in text or "normalized_0_1" in text:
+        return "normalized_0_1"
+    return "normalized_0_1000"
+
+
+def _generate(
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int,
+    temperature: float,
+    timeout_seconds: float,
+    cancel_event: threading.Event | None = None,
+) -> str:
+    import torch
+    from transformers import StoppingCriteria, StoppingCriteriaList
+
+    if MODEL is None or PROCESSOR is None:
+        raise RuntimeError("model is not loaded")
+    instruction, image = _message_text_and_image(messages)
+    if image is None:
+        raise ValueError("VISTA-4B requires an image")
+    if not instruction:
+        raise ValueError("VISTA-4B requires an instruction")
+    prompt = _vista_prompt(instruction)
+    chat_messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+    text = PROCESSOR.apply_chat_template(chat_messages, tokenize=False, add_generation_prompt=True)
+    inputs = PROCESSOR(text=[text], images=[image], padding=True, return_tensors="pt")
+    target_device = next(MODEL.parameters()).device
+    inputs = inputs.to(target_device)
+    generate_kwargs: dict[str, Any] = {
+        "max_new_tokens": max(1, min(int(max_tokens or MAX_NEW_TOKENS), MAX_NEW_TOKENS)),
+        "do_sample": temperature > 0,
+        "max_time": max(1.0, float(timeout_seconds)),
+    }
+
+    class CoordinateCompleteStoppingCriteria(StoppingCriteria):
+        def __call__(self, input_ids, scores, **kwargs):
+            if cancel_event is not None and cancel_event.is_set():
+                return True
+            generated_ids = input_ids[:, inputs["input_ids"].shape[1] :]
+            generated_text = PROCESSOR.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            return _coordinate_output_complete(generated_text)
+
+    generate_kwargs["stopping_criteria"] = StoppingCriteriaList([CoordinateCompleteStoppingCriteria()])
+    if temperature > 0:
+        generate_kwargs["temperature"] = float(temperature)
+    with torch.inference_mode():
+        generated = MODEL.generate(**inputs, **generate_kwargs)
+    if cancel_event is not None and cancel_event.is_set():
+        raise ModelRequestCancelled("VISTA model request was cancelled")
+    new_tokens = generated[:, inputs["input_ids"].shape[1] :]
+    return PROCESSOR.batch_decode(new_tokens, skip_special_tokens=True)[0].strip()
+
+
+class VistaHandler(BaseHTTPRequestHandler):
+    server_version = "VistaOpenAIServer/0.1"
+
+    def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            print("client disconnected before response could be sent", flush=True)
+
+    def do_GET(self) -> None:
+        if self.path.rstrip("/") in {"/health", "/v1/health"}:
+            self._send_json(
+                200,
+                {
+                    "status": "busy" if GENERATE_LOCK.locked() else "ok",
+                    "model": MODEL_NAME,
+                    "pid": os.getpid(),
+                    "active_request": _active_request_snapshot(),
+                },
+            )
+            return
+        if self.path.rstrip("/") in {"/v1/models", "/models"}:
+            self._send_json(
+                200,
+                {
+                    "object": "list",
+                    "data": [
+                        {
+                            "id": MODEL_NAME,
+                            "object": "model",
+                            "owned_by": "local",
+                        }
+                    ],
+                },
+            )
+            return
+        self._send_json(404, {"error": {"message": f"unknown route: {self.path}"}})
+
+    def do_POST(self) -> None:
+        if self.path.rstrip("/") in {"/v1/cancel", "/cancel"}:
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                request_id = str(payload.get("request_id") or "").strip()
+                if not request_id:
+                    self._send_json(
+                        400,
+                        {
+                            "contract_version": "model_request_cancel_response_v1",
+                            "status": "invalid_request",
+                            "error": {"message": "request_id is required"},
+                        },
+                    )
+                    return
+                result = _cancel_active_request(request_id)
+                status_code = 200 if result["status"] != "request_id_mismatch" else 409
+                self._send_json(status_code, result)
+            except (ValueError, json.JSONDecodeError) as exc:
+                self._send_json(
+                    400,
+                    {
+                        "contract_version": "model_request_cancel_response_v1",
+                        "status": "invalid_request",
+                        "error": {"message": str(exc)},
+                    },
+                )
+            return
+        if self.path.rstrip("/") not in {"/v1/chat/completions", "/chat/completions"}:
+            self._send_json(404, {"error": {"message": f"unknown route: {self.path}"}})
+            return
+        acquired = GENERATE_LOCK.acquire(blocking=False)
+        if not acquired:
+            self._send_json(
+                503,
+                {
+                    "error": {
+                        "message": "VISTA model is already processing another request",
+                        "type": "model_busy",
+                        "active_request": _active_request_snapshot(),
+                    }
+                },
+            )
+            return
+        request_id = ""
+        try:
+            length = int(self.headers.get("Content-Length") or "0")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            request_timeout_seconds = _request_timeout_seconds(payload, default=30.0)
+            request_id = str(
+                payload.get("request_id")
+                or self.headers.get("X-Agent-GUI-Request-ID")
+                or f"vista-unmanaged-{int(time.time() * 1000)}"
+            ).strip()
+            cancel_event = threading.Event()
+            _activate_request(
+                request_id=request_id,
+                cancel_event=cancel_event,
+                metadata={
+                    "started_at": time.time(),
+                    "client": self.client_address[0] if self.client_address else None,
+                    "max_tokens": int(payload.get("max_tokens") or MAX_NEW_TOKENS),
+                    "request_timeout_seconds": request_timeout_seconds,
+                },
+            )
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            instruction, _ = _message_text_and_image(messages)
+            text = _generate(
+                messages,
+                max_tokens=int(payload.get("max_tokens") or MAX_NEW_TOKENS),
+                temperature=float(payload.get("temperature") or 0.0),
+                timeout_seconds=request_timeout_seconds,
+                cancel_event=cancel_event,
+            )
+            wants_json = (payload.get("response_format") or {}).get("type") == "json_object"
+            content = json.dumps(_point_payload(text, instruction=instruction), ensure_ascii=False) if wants_json else text
+            self._send_json(
+                200,
+                {
+                    "id": f"vista-{int(time.time() * 1000)}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": MODEL_NAME,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                },
+            )
+        except ModelRequestCancelled as exc:
+            self._send_json(
+                409,
+                {
+                    "contract_version": "model_request_cancel_response_v1",
+                    "status": "cancelled",
+                    "request_id": request_id or None,
+                    "error": {"message": str(exc), "type": exc.__class__.__name__},
+                },
+            )
+        except Exception as exc:
+            self._send_json(500, {"error": {"message": str(exc), "type": exc.__class__.__name__}})
+        finally:
+            if request_id:
+                _clear_active_request(request_id)
+            GENERATE_LOCK.release()
+
+    def log_message(self, format: str, *args: Any) -> None:
+        print(f"{self.address_string()} - {format % args}", flush=True)
+
+
+def _torch_dtype(dtype: str):
+    import torch
+
+    normalized = dtype.casefold()
+    if normalized in {"auto", ""}:
+        return "auto"
+    if normalized in {"bf16", "bfloat16"}:
+        return torch.bfloat16
+    if normalized in {"fp16", "float16"}:
+        return torch.float16
+    if normalized in {"fp32", "float32"}:
+        return torch.float32
+    raise ValueError(f"unsupported dtype: {dtype}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="OpenAI-compatible VISTA-4B point-grounding server")
+    parser.add_argument("--model-path", required=True)
+    parser.add_argument("--model-name", default="inclusionAI/VISTA-4B")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=13244)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--max-new-tokens", type=int, default=32)
+    parser.add_argument("--gpu-memory-gib", type=int, default=0)
+    parser.add_argument("--cpu-memory-gib", type=int, default=0)
+    args = parser.parse_args()
+
+    global MODEL, PROCESSOR, MODEL_NAME, MAX_NEW_TOKENS
+    MODEL_NAME = args.model_name
+    MAX_NEW_TOKENS = int(args.max_new_tokens)
+    model_path = str(Path(args.model_path).resolve())
+
+    try:
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+    except Exception as exc:
+        print(
+            "Missing VISTA runtime dependencies. Install with: uv sync --group vista "
+            "or install torch transformers accelerate safetensors. "
+            f"Original error: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
+
+    dtype = _torch_dtype(args.dtype)
+    device_map = "auto" if args.device == "auto" else None
+    model_kwargs: dict[str, Any] = {
+        "trust_remote_code": True,
+        "low_cpu_mem_usage": True,
+        "offload_state_dict": True,
+    }
+    if dtype != "auto":
+        model_kwargs["torch_dtype"] = dtype
+    if device_map:
+        model_kwargs["device_map"] = device_map
+        max_memory: dict[Any, str] = {}
+        if args.gpu_memory_gib > 0:
+            max_memory[0] = f"{args.gpu_memory_gib}GiB"
+        if args.cpu_memory_gib > 0:
+            max_memory["cpu"] = f"{args.cpu_memory_gib}GiB"
+        if max_memory:
+            model_kwargs["max_memory"] = max_memory
+    print(f"Loading VISTA model from {model_path} on device={args.device} dtype={args.dtype}", flush=True)
+    try:
+        PROCESSOR = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+        MODEL = AutoModelForImageTextToText.from_pretrained(model_path, **model_kwargs)
+    except OSError as exc:
+        message = str(exc)
+        if getattr(exc, "winerror", None) == 1455 or "os error 1455" in message.casefold():
+            print(
+                "VISTA model load failed because Windows reported insufficient virtual memory "
+                "(WinError/os error 1455: page file is too small). Close memory-heavy apps or "
+                "increase the Windows page file, then start VISTA again.",
+                file=sys.stderr,
+                flush=True,
+            )
+        raise
+    if args.device != "auto":
+        MODEL = MODEL.to(args.device)
+    MODEL.eval()
+    print(f"VISTA OpenAI-compatible server listening on {args.host}:{args.port}", flush=True)
+    ThreadingHTTPServer((args.host, args.port), VistaHandler).serve_forever()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

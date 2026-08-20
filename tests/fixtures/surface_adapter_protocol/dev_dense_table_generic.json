@@ -1,0 +1,19 @@
+{
+  "result": {
+    "app_name": "protocol fixture",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1200, "height": 800},
+    "interface_classification": {
+      "category": "generic",
+      "confidence": 0.84,
+      "structure_signals": {
+        "dense_table": true
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "table_row_1", "role": "table_row", "label": "Process A 10%", "bbox": {"x": 0, "y": 80, "w": 1200, "h": 36}},
+      {"item_id": "table_row_2", "role": "table_row", "label": "Process B 20%", "bbox": {"x": 0, "y": 116, "w": 1200, "h": 36}},
+      {"item_id": "table_row_3", "role": "table_row", "label": "Process C 30%", "bbox": {"x": 0, "y": 152, "w": 1200, "h": 36}}
+    ]
+  }
+}

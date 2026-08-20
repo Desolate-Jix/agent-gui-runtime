@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Navigation Reading Lab</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #17212b;
+      background: #eef2f4;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef2f4; }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 68px;
+      padding: 0 36px;
+      border-bottom: 1px solid #c8d2d8;
+      background: #ffffff;
+    }
+    header strong { font-size: 19px; }
+    header span { color: #52636f; }
+    main {
+      width: min(920px, calc(100% - 48px));
+      margin: 32px auto 80px;
+    }
+    h1 { margin: 0 0 12px; font-size: 34px; letter-spacing: 0; }
+    .lede { margin: 0 0 28px; color: #52636f; font-size: 17px; line-height: 1.6; }
+    .card, article {
+      border: 1px solid #c8d2d8;
+      border-radius: 6px;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgb(23 33 43 / 8%);
+    }
+    .card {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 22px;
+      align-items: center;
+      margin: 14px 0;
+      padding: 24px;
+    }
+    .card h2 { margin: 0 0 8px; font-size: 22px; }
+    .card p { margin: 0; color: #52636f; line-height: 1.5; }
+    article { padding: 36px 48px; }
+    article h2 { margin-top: 36px; font-size: 24px; }
+    article p { font-size: 17px; line-height: 1.75; }
+    .callout {
+      margin: 30px 0;
+      padding: 18px 20px;
+      border-left: 4px solid #1f7a72;
+      background: #eaf6f4;
+    }
+    button {
+      min-width: 180px;
+      min-height: 48px;
+      padding: 12px 18px;
+      border: 1px solid #175b56;
+      border-radius: 6px;
+      background: #1f7a72;
+      color: #ffffff;
+      font: 600 16px "Segoe UI", Arial, sans-serif;
+      cursor: pointer;
+    }
+    button:hover { background: #175b56; }
+    .footer-action {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 40px;
+      padding-top: 28px;
+      border-top: 1px solid #c8d2d8;
+    }
+    .end-marker {
+      margin-top: 28px;
+      padding: 14px 18px;
+      border: 1px solid #7aa59f;
+      border-radius: 4px;
+      background: #f4fbfa;
+      font-weight: 700;
+      text-align: center;
+    }
+    .summary-list { font-size: 18px; line-height: 1.8; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Navigation Reading Lab</strong>
+    <span id="stage-label"></span>
+  </header>
+  <main id="app"></main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const stage = params.get("stage") || "feed";
+    const app = document.getElementById("app");
+    const stageLabel = document.getElementById("stage-label");
+    const go = (next) => { window.location.href = `?stage=${next}`; };
+    const paragraphs = (topic, count) => Array.from({ length: count }, (_, index) => `
+      <h2>${topic} section ${index + 1}</h2>
+      <p>${topic} evidence block ${index + 1}. This paragraph contains distinct information
+      for scroll verification, current-screen reading, and deduplication. The system must
+      preserve the latest detail snapshot and must not treat a dispatched scroll as a
+      successful read unless new content appears or the page bottom is reached.</p>
+      <p>Operational note ${index + 1}: decisions remain semantic. Current coordinates are
+      resolved from the current capture, every real action passes Gate, and Trace records
+      the before and after evidence.</p>
+    `).join("");
+
+    if (stage === "feed") {
+      stageLabel.textContent = "Research feed";
+      app.innerHTML = `
+        <h1>Research Feed Interface</h1>
+        <p class="lede">Choose the Atlas report, read its complete detail, continue through
+        implementation notes, and finish at the decision summary.</p>
+        <section class="card">
+          <div>
+            <h2>Atlas Reliability Report</h2>
+            <p>A long report about evidence freshness, scoped scrolling, and safe GUI actions.</p>
+          </div>
+          <button id="open-atlas" onclick="go('atlas')">Open Atlas report</button>
+        </section>
+        <section class="card">
+          <div>
+            <h2>Unrelated Design Notes</h2>
+            <p>A distractor item that is not part of the requested workflow.</p>
+          </div>
+          <button onclick="go('distractor')">Open design notes</button>
+        </section>`;
+    } else if (stage === "atlas") {
+      stageLabel.textContent = "Atlas report";
+      app.innerHTML = `
+        <article>
+          <h1>Atlas Reliability Report Interface</h1>
+          <p class="lede">Finite detail. Read every section before continuing.</p>
+          <div class="callout">Required result: distinguish scroll dispatch from scroll effect.</div>
+          ${paragraphs("Atlas", 7)}
+          <div id="atlas-end" class="end-marker">ATLAS REPORT END</div>
+          <div class="footer-action">
+            <button id="open-notes" onclick="go('notes')">Open implementation notes</button>
+          </div>
+        </article>`;
+    } else if (stage === "notes") {
+      stageLabel.textContent = "Implementation notes";
+      app.innerHTML = `
+        <article>
+          <h1>Implementation Notes Interface</h1>
+          <p class="lede">Read the notes to the explicit bottom marker.</p>
+          ${paragraphs("Implementation", 5)}
+          <div id="notes-end" class="end-marker">IMPLEMENTATION NOTES END</div>
+          <div class="footer-action">
+            <button id="open-summary" onclick="go('summary')">Open decision summary</button>
+          </div>
+        </article>`;
+    } else if (stage === "summary") {
+      stageLabel.textContent = "Decision summary";
+      app.innerHTML = `
+        <article>
+          <h1>Decision Summary Interface</h1>
+          <p class="lede">The continuous low-risk workflow reached its final read-only page.</p>
+          <ul class="summary-list">
+            <li>All transitions used current screenshot grounding.</li>
+            <li>Long details required explicit bottom evidence.</li>
+            <li>No form filling or final submission was attempted.</li>
+          </ul>
+          <div class="end-marker">WORKFLOW COMPLETE SAFE STOP</div>
+        </article>`;
+    } else {
+      stageLabel.textContent = "Distractor";
+      app.innerHTML = `<h1>Unrelated Design Notes Interface</h1>`;
+    }
+  </script>
+</body>
+</html>

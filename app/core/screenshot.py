@@ -1,0 +1,225 @@
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any, Optional, Protocol
+
+from loguru import logger
+
+MSS_BACKEND_AVAILABLE = False
+MSS_BACKEND_IMPORT_ERROR: Optional[str] = None
+
+try:
+    from mss import mss
+    from PIL import Image
+
+    MSS_BACKEND_AVAILABLE = True
+except Exception as exc:  # pragma: no cover - depends on runtime platform/environment
+    mss = None  # type: ignore[assignment]
+    Image = None  # type: ignore[assignment]
+    MSS_BACKEND_IMPORT_ERROR = str(exc)
+
+from app.core.window_manager import window_manager
+from app.core.runtime_artifacts import SCREENSHOTS_DIR, build_screenshot_path
+
+
+class ROIValue(Protocol):
+    x: int
+    y: int
+    width: int
+    height: int
+
+    def model_dump(self) -> dict[str, Any]: ...
+
+
+class ScreenshotService:
+    """Capture screenshots for the currently bound window using MSS."""
+
+    def __init__(self) -> None:
+        self._capture_dir = SCREENSHOTS_DIR
+        self._capture_dir.mkdir(parents=True, exist_ok=True)
+        self._capture_keep_limit = 40
+        self._focus_settle_seconds = 0.5
+
+    def capture_window(
+        self,
+        roi: Optional[ROIValue] = None,
+        save_image: bool = True,
+        *,
+        purpose: str = "capture",
+        name_hint: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Capture a screenshot for the bound window or a sub-region."""
+        self._ensure_capture_backend()
+
+        bound = window_manager.focus_bound_window()
+        self._wait_after_focus()
+
+        capture_rect = self._resolve_capture_rect(
+            left=bound.rect.left,
+            top=bound.rect.top,
+            right=bound.rect.right,
+            bottom=bound.rect.bottom,
+            roi=roi,
+        )
+
+        monitor = {
+            "left": capture_rect["left"],
+            "top": capture_rect["top"],
+            "width": capture_rect["width"],
+            "height": capture_rect["height"],
+        }
+
+        logger.info("Capturing bound window: handle={}, monitor={}", bound.handle, monitor)
+
+        with mss() as sct:  # type: ignore[operator]
+            raw = sct.grab(monitor)
+            image = Image.frombytes("RGB", raw.size, raw.rgb)  # type: ignore[union-attr]
+
+        image_path: Optional[str] = None
+        if save_image:
+            output_path = build_screenshot_path(
+                title=bound.title,
+                process_name=bound.process_name,
+                handle=bound.handle,
+                purpose=purpose,
+                roi=capture_rect["roi"],
+                name_hint=name_hint,
+            )
+            image_path = str(output_path.resolve())
+            image.save(image_path)
+            logger.info("Saved screenshot to {}", image_path)
+            self._cleanup_old_captures()
+
+        return {
+            "image_path": image_path,
+            "image_width": image.width,
+            "image_height": image.height,
+            "roi": capture_rect["roi"],
+            "roi_adjusted": capture_rect["roi_adjusted"],
+            "capture_purpose": purpose,
+            "window_size": {
+                "width": capture_rect["window_width"],
+                "height": capture_rect["window_height"],
+            },
+        }
+
+    def _resolve_capture_rect(
+        self,
+        left: int,
+        top: int,
+        right: int,
+        bottom: int,
+        roi: Optional[ROIValue],
+    ) -> dict[str, Any]:
+        """Resolve full-window or ROI-relative capture coordinates."""
+        window_width = max(1, right - left)
+        window_height = max(1, bottom - top)
+
+        if roi is None:
+            return {
+                "left": left,
+                "top": top,
+                "width": window_width,
+                "height": window_height,
+                "roi": None,
+                "roi_adjusted": False,
+                "window_width": window_width,
+                "window_height": window_height,
+            }
+
+        requested = roi.model_dump()
+        roi_x = min(max(0, roi.x), window_width - 1)
+        roi_y = min(max(0, roi.y), window_height - 1)
+        max_width = max(1, window_width - roi_x)
+        max_height = max(1, window_height - roi_y)
+        roi_width = min(roi.width, max_width)
+        roi_height = min(roi.height, max_height)
+        adjusted = (
+            roi_x != roi.x or
+            roi_y != roi.y or
+            roi_width != roi.width or
+            roi_height != roi.height
+        )
+
+        if roi_width < 1 or roi_height < 1:
+            raise ValueError("ROI is outside the bound window")
+
+        return {
+            "left": left + roi_x,
+            "top": top + roi_y,
+            "width": roi_width,
+            "height": roi_height,
+            "roi": {
+                "x": roi_x,
+                "y": roi_y,
+                "width": roi_width,
+                "height": roi_height,
+                "requested": requested,
+            },
+            "roi_adjusted": adjusted,
+            "window_width": window_width,
+            "window_height": window_height,
+        }
+
+    def _cleanup_old_captures(self) -> None:
+        protected = _benchmark_protected_screenshot_paths(self._capture_dir)
+        captures = sorted(
+            (path for path in self._capture_dir.glob("*.png") if path.resolve() not in protected),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+        for stale in captures[self._capture_keep_limit:]:
+            try:
+                stale.unlink()
+                logger.info("Removed old capture {}", stale)
+            except Exception as exc:  # pragma: no cover - cleanup should be best effort
+                logger.warning("Failed to remove old capture {}: {}", stale, exc)
+
+    def _ensure_capture_backend(self) -> None:
+        """Ensure screenshot capture dependencies are available."""
+        if not MSS_BACKEND_AVAILABLE:
+            raise RuntimeError(
+                "Screenshot backend is unavailable. "
+                f"Import error: {MSS_BACKEND_IMPORT_ERROR}"
+            )
+
+    def _wait_after_focus(self) -> None:
+        if self._focus_settle_seconds > 0:
+            time.sleep(self._focus_settle_seconds)
+
+
+screenshot_service = ScreenshotService()
+
+
+def _benchmark_protected_screenshot_paths(capture_dir: Path) -> set[Path]:
+    artifact_dir = capture_dir.parent
+    project_root = artifact_dir.parent
+    benchmark_dir = artifact_dir / "benchmarks"
+    protected: set[Path] = set()
+    if not benchmark_dir.exists():
+        return protected
+
+    def collect(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                collect(child_value, str(child_key))
+            return
+        if isinstance(value, list):
+            for child in value:
+                collect(child, key)
+            return
+        if key not in {"screenshot_path", "source_image_path"} or not isinstance(value, str) or not value.strip():
+            return
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        protected.add(candidate.resolve())
+
+    for manifest_path in benchmark_dir.glob("*.json"):
+        try:
+            collect(json.loads(manifest_path.read_text(encoding="utf-8-sig")))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read benchmark screenshot references from {}: {}", manifest_path, exc)
+    return protected

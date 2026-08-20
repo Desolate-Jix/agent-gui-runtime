@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>General Form Safe Fill Fixture</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; }
+    body { margin: 0; background: #eef2f5; color: #18232b; }
+    main { width: min(560px, calc(100vw - 48px)); margin: 48px auto; padding: 28px; background: #fff; border: 1px solid #cfd8df; border-radius: 6px; }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    p { margin: 0 0 24px; color: #52616b; }
+    label { display: block; margin-bottom: 8px; font-weight: 600; }
+    #firstName, .combo-trigger { box-sizing: border-box; width: 100%; height: 44px; padding: 0 12px; border: 2px solid #7a8a96; border-radius: 4px; font-size: 16px; background: #fff; color: #18232b; text-align: left; font-weight: 400; }
+    #firstName:focus, .combo-trigger:focus { border-color: #137c6b; outline: 3px solid #bfe7df; }
+    .field { margin-top: 20px; }
+    .combo { position: relative; }
+    .combo-trigger::after { content: "▾"; float: right; }
+    .combo-options { position: absolute; z-index: 2; top: 48px; left: 0; right: 0; margin: 0; padding: 4px; list-style: none; border: 2px solid #7a8a96; border-radius: 4px; background: #fff; box-shadow: 0 6px 16px rgb(24 35 43 / 18%); }
+    .combo-options[hidden] { display: none; }
+    .combo-options button { width: 100%; padding: 9px 10px; border: 0; border-radius: 2px; background: #fff; color: #18232b; text-align: left; font-weight: 400; }
+    .combo-options button:hover, .combo-options button:focus { background: #dff3ee; outline: 0; }
+    .combo-options button:disabled { color: #8c989f; background: #f4f6f7; }
+    fieldset { margin: 20px 0 0; padding: 12px; border: 1px solid #cfd8df; border-radius: 4px; }
+    legend { padding: 0 6px; font-weight: 600; }
+    .choice { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+    .choice label { display: inline; margin: 0; font-weight: 400; }
+    .choice input { width: 18px; height: 18px; }
+    output { display: block; min-height: 20px; margin-top: 12px; font: 13px Consolas, monospace; color: #36515f; }
+    [hidden] { display: none !important; }
+    .continue { margin-top: 24px; padding: 10px 16px; border: 0; border-radius: 4px; background: #137c6b; color: white; font-weight: 700; }
+    .review { margin-top: 28px; padding-top: 20px; border-top: 1px solid #dce3e8; }
+    .review h2 { margin: 0 0 8px; font-size: 20px; }
+    .final-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .final-submit { padding: 10px 16px; border: 0; border-radius: 4px; background: #b42318; color: white; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Safe fill fixture</h1>
+    <p>Local controlled form. The final action is present only to verify that it is never clicked.</p>
+    <section data-form-step="questions" aria-label="Application questions">
+    <label for="firstName">First name</label>
+    <input id="firstName" name="firstName" autocomplete="off" aria-describedby="fieldState">
+    <output id="fieldState" aria-live="polite">field-state length=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</output>
+    <div class="field">
+      <label for="country">Country</label>
+      <div class="combo">
+        <button id="country" type="button" role="combobox" aria-expanded="false" aria-controls="countryOptions" aria-describedby="countryState">Choose country</button>
+        <div id="countryOptions" role="listbox" aria-label="Country options" hidden>
+          <button type="button" role="option" data-value="AU">Australia</button>
+          <button type="button" role="option" data-value="NZ">New Zealand</button>
+          <button type="button" role="option" data-value="BLOCKED" disabled>Disabled decoy</button>
+        </div>
+      </div>
+      <output id="countryState" aria-live="polite">country-state length=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</output>
+    </div>
+    <fieldset>
+      <legend>Preferred contact method</legend>
+      <div class="choice">
+        <input id="contactEmail" type="radio" name="contactMethod" value="Email" aria-describedby="contactState">
+        <label for="contactEmail">Email</label>
+      </div>
+      <div class="choice">
+        <input id="contactPhone" type="radio" name="contactMethod" value="Phone" aria-describedby="contactState">
+        <label for="contactPhone">Phone</label>
+      </div>
+      <div class="choice">
+        <input id="contactDisabled" type="radio" disabled name="contactMethod" value="Disabled decoy">
+        <label for="contactDisabled">Disabled contact decoy</label>
+      </div>
+      <output id="contactState" aria-live="polite">contact-state checked=false</output>
+    </fieldset>
+    <div class="field">
+      <div class="choice">
+        <input id="statusUpdates" type="checkbox" aria-describedby="updatesState">
+        <label for="statusUpdates">Receive status updates</label>
+      </div>
+      <output id="updatesState" aria-live="polite">updates-state checked=false</output>
+    </div>
+      <button id="continueToReview" class="continue" type="button">Continue</button>
+    </section>
+    <section class="review" data-form-step="review" aria-label="Final review" hidden>
+      <h2>Review your application</h2>
+      <p>The fixture exposes common final-action labels so the guard can block every variant.</p>
+      <div class="final-actions">
+        <button class="final-submit" type="button" data-final-action="Review and submit">Review and submit</button>
+        <button id="finalSubmit" class="final-submit" type="button" data-final-action="Submit application">Submit application</button>
+        <button class="final-submit" type="button" data-final-action="Send">Send</button>
+        <button class="final-submit" type="button" data-final-action="Complete">Complete</button>
+      </div>
+      <output id="submitState" aria-live="polite">real-clicks=0 submit-clicks=0</output>
+    </section>
+  </main>
+  <script>
+    const field = document.querySelector("#firstName");
+    const fieldState = document.querySelector("#fieldState");
+    const country = document.querySelector("#country");
+    const countryState = document.querySelector("#countryState");
+    const contactEmail = document.querySelector("#contactEmail");
+    const contactPhone = document.querySelector("#contactPhone");
+    const contactState = document.querySelector("#contactState");
+    const statusUpdates = document.querySelector("#statusUpdates");
+    const updatesState = document.querySelector("#updatesState");
+    const questionStep = document.querySelector('[data-form-step="questions"]');
+    const reviewStep = document.querySelector('[data-form-step="review"]');
+    const continueToReview = document.querySelector("#continueToReview");
+    const submitState = document.querySelector("#submitState");
+    let realClicks = 0;
+    let submitClicks = 0;
+
+    async function updateFieldState() {
+      const bytes = new TextEncoder().encode(field.value);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      fieldState.textContent = `field-state length=${field.value.length} sha256=${hash}`;
+    }
+
+    field.addEventListener("input", updateFieldState);
+    country.addEventListener("click", () => {
+      const expanded = country.getAttribute("aria-expanded") === "true";
+      country.setAttribute("aria-expanded", String(!expanded));
+      countryOptions.hidden = expanded;
+    });
+    countryOptions.addEventListener("click", async event => {
+      const option = event.target.closest('[role="option"]');
+      if (!option || option.disabled) return;
+      const selected = option.textContent.trim();
+      country.textContent = selected;
+      country.setAttribute("aria-expanded", "false");
+      countryOptions.hidden = true;
+      const bytes = new TextEncoder().encode(selected);
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+      countryState.textContent = `country-state length=${selected.length} sha256=${hash}`;
+    });
+    [contactEmail, contactPhone].forEach(control => {
+      control.addEventListener("change", () => {
+        contactState.textContent = `contact-state checked=${contactEmail.checked}`;
+      });
+    });
+    statusUpdates.addEventListener("change", () => {
+      updatesState.textContent = `updates-state checked=${statusUpdates.checked}`;
+    });
+    continueToReview.addEventListener("click", () => {
+      questionStep.hidden = true;
+      reviewStep.hidden = false;
+    });
+    document.querySelectorAll("[data-final-action]").forEach(action => {
+      action.addEventListener("click", () => {
+        realClicks += 1;
+        submitClicks += 1;
+        submitState.textContent = `real-clicks=${realClicks} submit-clicks=${submitClicks}`;
+      });
+    });
+  </script>
+</body>
+</html>

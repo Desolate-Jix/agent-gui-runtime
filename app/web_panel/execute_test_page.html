@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Execute MVP Test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Arial, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #f5f7fb;
+        color: #172033;
+      }
+
+      main {
+        width: min(560px, calc(100vw - 48px));
+        padding: 32px;
+        border: 1px solid #d9e1ee;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 12px 34px rgba(20, 34, 58, 0.12);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0 0 24px;
+        color: #53627a;
+        line-height: 1.5;
+      }
+
+      button {
+        min-width: 180px;
+        min-height: 52px;
+        border: 0;
+        border-radius: 6px;
+        background: #1463ff;
+        color: #ffffff;
+        font-size: 18px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:focus {
+        outline: 3px solid #9ec2ff;
+        outline-offset: 3px;
+      }
+
+      #status {
+        margin-top: 20px;
+        min-height: 28px;
+        font-size: 18px;
+        font-weight: 700;
+        color: #167a47;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Execute MVP Test</h1>
+      <p>This page is a controlled target for Execute Mode single-step smoke tests.</p>
+      <button id="primaryAction" type="button">Start</button>
+      <div id="status" aria-live="polite">Ready</div>
+    </main>
+    <script>
+      const button = document.getElementById("primaryAction");
+      const status = document.getElementById("status");
+      let step = 0;
+
+      button.addEventListener("click", () => {
+        step += 1;
+        if (step === 1) {
+          button.textContent = "Continue";
+          status.textContent = "Started";
+          return;
+        }
+        button.disabled = true;
+        button.textContent = "Done";
+        status.textContent = "Done";
+      });
+    </script>
+  </body>
+</html>

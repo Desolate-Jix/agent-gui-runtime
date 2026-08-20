@@ -1,0 +1,493 @@
+from __future__ import annotations
+
+from app.vision.normalizer import VisionResultNormalizer, normalizer
+from app.vision.prompting import build_region_analysis_prompt
+from app.vision.schemas import ImageSize, VisionAnalyzeRequest
+
+
+def test_normalizer_builds_region_from_diagonal_and_generates_match_keys() -> None:
+    raw = {
+        "provider": "local",
+        "contract_version": "vision_regions_v1",
+        "image_size": {"width": 1000, "height": 500},
+        "screen_summary": "Sample page",
+        "state_guess": "dashboard",
+        "regions": [
+            {
+                "region_id": "region_nav_orders",
+                "label": "Orders",
+                "role": "nav",
+                "diagonal": {"x1": 100, "y1": 50, "x2": 400, "y2": 250},
+                "description": "Orders navigation item that likely opens the orders page.",
+                "ocr_text": "Orders",
+                "text_lines": ["Orders"],
+                "possible_destinations": ["orders_page"],
+                "anchor_relations": [
+                    {
+                        "anchor_id": "ocr_anchor_1",
+                        "text": "Orders",
+                        "relation": "inside",
+                        "axis": "both",
+                        "target_edge": "center_x",
+                        "anchor_edge": "center_x",
+                        "gap_px": {"x": 0, "y": 0},
+                        "overlap_ratio": {"x": 0.9, "y": 0.8},
+                        "confidence": 0.91,
+                        "evidence": "The region surrounds the Orders text.",
+                    }
+                ],
+                "grounding_constraints": {
+                    "reference_frame": {
+                        "type": "nav",
+                        "anchor_ids": ["ocr_anchor_1"],
+                        "evidence": "Orders is inside the nav rail.",
+                    },
+                    "edge_constraints": {
+                        "left": {"source": "visual_edge", "confidence": 0.8},
+                        "right": {"source": "anchor", "anchor_id": "ocr_anchor_1", "relation": "contains_anchor"},
+                    },
+                    "center_constraints": {
+                        "x": {"anchor_ids": ["ocr_anchor_1"], "alignment": "aligned_to", "confidence": 0.9}
+                    },
+                    "size_constraints": {"expected_aspect_ratio": "wide nav item"},
+                    "negative_constraints": [{"anchor_id": "ocr_anchor_2", "rule": "must_not_include_text_anchor"}],
+                    "final_bbox_reason": "Visual nav item encloses the text anchor with horizontal padding.",
+                },
+                "confidence": 0.92,
+            }
+        ],
+    }
+
+    result = normalizer.normalize(raw, "local")
+
+    assert result.contract_version == "vision_regions_v1"
+    assert result.image_size is not None
+    assert result.image_size.to_dict() == {"width": 1000, "height": 500}
+    assert len(result.regions) == 1
+
+    region = result.regions[0]
+    assert region.bbox.to_dict() == {"x": 100, "y": 50, "w": 300, "h": 200}
+    assert region.diagonal.to_dict() == {"x1": 100, "y1": 50, "x2": 400, "y2": 250}
+    assert region.normalized_diagonal.to_dict() == {"nx1": 0.1, "ny1": 0.1, "nx2": 0.4, "ny2": 0.5}
+    assert region.layout_key
+    assert region.content_key
+    assert region.match_key == f"{region.layout_key}:{region.content_key}"
+    assert region.anchor_relations == [
+        {
+            "anchor_id": "ocr_anchor_1",
+            "text": "Orders",
+            "relation": "inside",
+            "axis": "both",
+            "target_edge": "center_x",
+            "anchor_edge": "center_x",
+            "gap_px": {"x": 0, "y": 0},
+            "overlap_ratio": {"x": 0.9, "y": 0.8},
+            "confidence": 0.91,
+            "evidence": "The region surrounds the Orders text.",
+        }
+    ]
+    assert region.to_dict()["anchor_relations"][0]["relation"] == "inside"
+    assert region.to_dict()["anchor_relations"][0]["gap_px"] == {"x": 0, "y": 0}
+    assert region.grounding_constraints["edge_constraints"]["right"]["anchor_id"] == "ocr_anchor_1"
+    assert region.to_dict()["grounding_constraints"]["final_bbox_reason"].startswith("Visual nav item")
+
+
+def test_normalizer_derives_regions_from_target_only_provider_output() -> None:
+    raw = {
+        "provider": "api",
+        "screen_summary": "Simple page",
+        "state_guess": "list",
+        "image_size": {"width": 800, "height": 600},
+        "targets": [
+            {
+                "target_id": "target_submit",
+                "label": "Submit",
+                "bbox": {"x": 200, "y": 300, "w": 120, "h": 40},
+                "kind": "button",
+                "clickable_confidence": 0.88,
+                "expected_effect": "submit_dialog",
+            }
+        ],
+    }
+
+    result = normalizer.normalize(raw, "api")
+
+    assert len(result.targets) == 1
+    assert len(result.regions) == 1
+    region = result.regions[0]
+    assert region.region_id == "target_submit"
+    assert region.role == "button"
+    assert region.possible_destinations == ["submit_dialog"]
+
+
+def test_normalizer_scales_unit_1000_diagonal_when_model_ignores_small_image_size() -> None:
+    raw = {
+        "provider": "local",
+        "contract_version": "vision_regions_v1",
+        "image_size": {"width": 420, "height": 220},
+        "screen_summary": "Single button",
+        "state_guess": "idle",
+        "regions": [
+            {
+                "region_id": "r1",
+                "label": "Start Button",
+                "role": "button",
+                "diagonal": {"x1": 283, "y1": 363, "x2": 717, "y2": 637},
+                "description": "Start button",
+                "ocr_text": "Start",
+                "confidence": 0.9,
+            }
+        ],
+    }
+
+    result = normalizer.normalize(raw, "local")
+
+    assert len(result.regions) == 1
+    assert result.regions[0].bbox.to_dict() == {"x": 119, "y": 80, "w": 182, "h": 60}
+
+
+def test_prompt_builder_includes_resolution_and_required_schema() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="demo.png",
+            app_name="DemoApp",
+            goal="understand navigation",
+            state_hint="home",
+        ),
+        ImageSize(width=1440, height=900),
+    )
+
+    assert "image width = 1440" in prompt
+    assert "image height = 900" in prompt
+    assert 'contract_version must be "vision_regions_v1"' in prompt
+    assert "interface_classification" in prompt
+    assert "media_catalog" in prompt
+    assert "documentation_portal" in prompt
+    assert "settings_dashboard" in prompt
+    assert "conversation_workspace" in prompt
+    assert "possible_destinations" in prompt
+    assert "anchor_relations" in prompt
+    assert "grounding_constraints" in prompt
+    assert "before finalizing a region diagonal" in prompt
+    assert "edge_constraints" in prompt
+    assert "negative_constraints" in prompt
+    assert "text_anchor_frame" in prompt
+    assert "text_inclusion_policy" in prompt
+    assert "relative_frame_position" in prompt
+    assert 'Case A, visual icon/object has no text inside it' in prompt
+    assert 'Case B, the target visually includes text' in prompt
+
+
+def test_normalizer_preserves_model_interface_classification() -> None:
+    raw = {
+        "provider": "local",
+        "contract_version": "vision_regions_v1",
+        "image_size": {"width": 640, "height": 480},
+        "screen_summary": "Media library with album rows",
+        "state_guess": "library home",
+        "interface_classification": {
+            "category": "media_catalog",
+            "confidence": 0.88,
+            "reason": "repeated visual media cards",
+        },
+        "regions": [],
+    }
+
+    result = normalizer.normalize(raw, "local")
+
+    assert result.interface_classification == raw["interface_classification"]
+    assert result.to_dict()["interface_classification"] == raw["interface_classification"]
+
+
+def test_prompt_builder_strengthens_grid_coordinate_guidance() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="demo.png",
+            app_name="DemoApp",
+            goal="segment modules precisely",
+            state_hint="dashboard",
+        ),
+        ImageSize(width=1440, height=900),
+        grid_overlay_spacing=100,
+    )
+
+    assert "major grid spacing is 100 pixels" in prompt
+    assert "first estimate each bbox edge against the nearest visible grid lines" in prompt
+    assert "prefer tight boxes around the visible module itself" in prompt
+
+
+def test_prompt_builder_includes_ocr_anchor_guidance() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="demo.png",
+            app_name="DemoApp",
+            goal="click search",
+            metadata={
+                "ocr_anchors": {
+                    "contract_version": "ocr_anchors_v1",
+                    "coordinate_space": "inference_image",
+                    "image_size": {"width": 400, "height": 200},
+                    "anchor_count": 1,
+                    "anchors": [
+                        {
+                            "anchor_id": "ocr_anchor_1",
+                            "text": "Search",
+                            "bbox": {"x": 120, "y": 20, "w": 50, "h": 18},
+                            "center": {"x": 145, "y": 29},
+                            "confidence": 0.97,
+                            "goal_similarity": 0.9,
+                        }
+                    ],
+                }
+            },
+        ),
+        ImageSize(width=400, height=200),
+    )
+
+    assert "OCR anchor hints" in prompt
+    assert "use them as spatial anchors for nearby icons" in prompt
+    assert "id=anchor_id, t=text, b=[x,y,w,h]" in prompt
+    assert "first choose the relevant anchor_ids" in prompt
+    assert "write grounding_constraints" in prompt
+    assert "reference_frame" in prompt
+    assert "edge_constraints" in prompt
+    assert "negative_constraints" in prompt
+    assert "nearest OCR text boxes as boundary-line rulers" in prompt
+    assert 'text_inclusion_policy="exclude_text"' in prompt
+    assert 'text_inclusion_policy="include_referenced_text"' in prompt
+    assert "use the label anchors as bottom negative/edge constraints" in prompt
+    assert '"t":"Search"' in prompt
+    assert '"b":[120,20,50,18]' in prompt
+    assert '"coordinate_space":"inference_image"' in prompt
+
+
+def test_prompt_builder_includes_all_ocr_anchors_without_truncation() -> None:
+    anchors = [
+        {
+            "anchor_id": f"ocr_anchor_{index}",
+            "text": f"Text {index}",
+            "bbox": {"x": index, "y": index + 1, "w": 10, "h": 6},
+            "center": {"x": index + 5, "y": index + 4},
+            "confidence": 0.9,
+            "goal_similarity": 0.1,
+        }
+        for index in range(30)
+    ]
+
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="demo.png",
+            app_name="DemoApp",
+            goal="use all text anchors",
+            metadata={
+                "ocr_anchors": {
+                    "contract_version": "ocr_anchors_v1",
+                    "coordinate_space": "inference_image",
+                    "image_size": {"width": 400, "height": 200},
+                    "total_detected_count": 30,
+                    "anchor_count": 30,
+                    "anchors": anchors,
+                }
+            },
+        ),
+        ImageSize(width=400, height=200),
+    )
+
+    assert '"anchor_count":30' in prompt
+    assert '"t":"Text 0"' in prompt
+    assert '"t":"Text 29"' in prompt
+
+
+def test_precise_target_prompt_projects_ocr_as_compact_text_coordinate_matrix() -> None:
+    anchors = [
+        {
+            "anchor_id": f"ocr_anchor_{index}",
+            "text": "Search" if index == 1 else f"message {index}",
+            "bbox": {"x": index * 8, "y": 12 if index == 2 else index * 10, "w": 20, "h": 14},
+            "center": {"x": index * 8 + 10, "y": index * 10 + 7},
+            "confidence": 0.98,
+            "goal_similarity": 0.9 if index == 1 else 0.0,
+        }
+        for index in range(1, 41)
+    ]
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="click_target",
+            goal="click Search",
+            metadata={
+                "ocr_anchors": {
+                    "coordinate_space": "inference_image",
+                    "image_size": {"width": 820, "height": 1303},
+                    "prompt_max_anchors": 8,
+                    "anchors": anchors,
+                }
+            },
+        ),
+        ImageSize(width=820, height=1303),
+    )
+
+    assert "compact text-coordinate relation matrix" in prompt
+    assert "cite at least one anchor in anchor_relations" in prompt
+    assert '"contract_version":"ocr_prompt_matrix_v1"' in prompt
+    assert '"profile":"relation_matrix_compact"' in prompt
+    assert '"source_anchor_count":40' in prompt
+    assert '"anchor_count":8' in prompt
+    assert '"columns":["i","t","x","y","w","h","m"]' in prompt
+    assert '[1,"Search",8,10,20,14,1]' in prompt
+    assert '"text_anchor_count":8' in prompt
+    assert '"goal_match_count":1' in prompt
+    assert '"focus_relation_rows":' in prompt
+    assert '"message 40"' not in prompt
+    assert '"c":' not in prompt
+    assert '"s":' not in prompt
+    assert '"g":' not in prompt
+
+
+def test_prompt_builder_includes_custom_prompt_rules() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="click_target",
+            goal="find home icon",
+            metadata={"prompt_overrides": {"additional_rules": "Prefer the leftmost logo mark in the navigation bar."}},
+        ),
+        ImageSize(width=800, height=600),
+    )
+
+    assert "Additional user-configured grounding rules" in prompt
+    assert "Prefer the leftmost logo mark in the navigation bar." in prompt
+    assert "precise target-localization stage" in prompt
+    assert "Return exactly one best target region" in prompt
+    assert "do not enumerate other controls" in prompt
+    assert "every important interactive area should become a region" not in prompt
+
+
+def test_observe_prompt_uses_compact_candidate_contract_without_grounding_proof() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="observe_screen",
+            metadata={
+                "ocr_anchors": {
+                    "coordinate_space": "inference_image",
+                    "anchors": [
+                        {
+                            "anchor_id": "ocr_anchor_1",
+                            "text": "Home",
+                            "bbox": {"x": 12, "y": 16, "w": 40, "h": 16},
+                            "center": {"x": 32, "y": 24},
+                            "confidence": 0.95,
+                        }
+                    ],
+                }
+            },
+        ),
+        ImageSize(width=800, height=600),
+        max_regions=12,
+    )
+
+    assert "fast screen-understanding stage" in prompt
+    assert '"interface_classification"' in prompt
+    assert '"category": "media_catalog|documentation_portal|settings_dashboard|conversation_workspace|mail_workspace|feed_workspace|aggregate_portal|search_workspace|file_browser|form_workflow|employment_workflow|generic"' in prompt
+    assert '"confidence": 0.0' in prompt
+    assert '"reason": "short visible evidence"' in prompt
+    assert "at most 12 independently clickable candidate controls" in prompt
+    assert "later POST /vision/locate_target state_hint field" in prompt
+    assert "do not emit ocr_text" in prompt
+    assert "never copy this list" in prompt
+    assert '"t":"Home"' in prompt
+    assert "anchor_relations must be a list" not in prompt
+    assert "grounding_constraints must be an object" not in prompt
+
+
+def test_observe_prompt_distinguishes_people_lists_from_file_browser_rows() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="observe_screen",
+        ),
+        ImageSize(width=800, height=600),
+        max_regions=12,
+    )
+
+    assert '"structure_signals"' in prompt
+    assert '"file_or_folder_rows"' in prompt
+    assert '"people_or_conversation_rows"' in prompt
+    assert "friend, contact, participant, presence, or online-status rows are conversation_workspace" in prompt
+    assert "they are not file_browser merely because they form a dense list" in prompt
+
+
+def test_observe_prompt_requires_topology_evidence_for_content_classification() -> None:
+    prompt = build_region_analysis_prompt(
+        VisionAnalyzeRequest(
+            image_path="screen.png",
+            task="observe_screen",
+        ),
+        ImageSize(width=800, height=600),
+        max_regions=12,
+    )
+
+    for signal in (
+        "message_thread",
+        "message_composer",
+        "mail_or_email_rows",
+        "mailbox_navigation",
+        "mail_toolbar",
+        "feed_items",
+        "mixed_content_modules",
+        "news_items",
+        "video_items",
+        "search_controls",
+        "search_results",
+        "playback_controls",
+        "media_library_navigation",
+        "employment_workflow",
+        "job_result_cards",
+        "job_detail_content",
+        "application_fields",
+        "application_review",
+    ):
+        assert f'"{signal}"' in prompt
+    assert "email rows are mail_workspace, not conversation_workspace" in prompt
+    assert "feed posts are feed_workspace, not media_catalog" in prompt
+    assert "aggregate_portal requires multiple peer content modules" in prompt
+    assert "classify by container organization before counting repeated articles" in prompt
+    assert "independently framed widgets remain peer modules even when several contain news" in prompt
+    assert "feed_workspace requires one dominant ordered stream under shared controls" in prompt
+    assert "a page with news inside one module is not automatically feed_workspace" in prompt
+    assert "search_workspace requires a visible search control and repeated result items" in prompt
+    assert "news_items and video_items describe visible content structure, not a site name" in prompt
+    assert "search_workspace can still contain news_items or video_items" in prompt
+    assert "employment_workflow covers job results, job details, application forms, and application review" in prompt
+    assert "ordinary surveys, registration forms, and checkout reviews are not employment_workflow" in prompt
+    assert "use generic when the visible topology does not disambiguate the class" in prompt
+
+
+def test_normalizer_skips_non_object_region_target_and_observer_items() -> None:
+    normalizer = VisionResultNormalizer()
+
+    result = normalizer.normalize(
+        {
+            "provider": "internvl",
+            "image_size": {"width": 420, "height": 220},
+            "screen_summary": "synthetic ui",
+            "regions": [
+                "bad region",
+                {
+                    "region_id": "region_start",
+                    "label": "Start",
+                    "role": "button",
+                    "bbox": {"x": 120, "y": 82, "w": 180, "h": 60},
+                    "confidence": 0.8,
+                },
+            ],
+            "targets": ["bad target"],
+            "observers": ["bad observer"],
+        },
+        "local",
+    )
+
+    assert [region.region_id for region in result.regions] == ["region_start"]
+    assert result.targets == []
+    assert result.observers == []

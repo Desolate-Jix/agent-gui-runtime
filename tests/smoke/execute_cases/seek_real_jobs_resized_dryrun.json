@@ -1,0 +1,118 @@
+{
+  "cases": [
+    {
+      "id": "seek_real_resized_first_job_title_dryrun",
+      "app": {
+        "app_name": "edge",
+        "app_id": "edge",
+        "url": "https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland",
+        "window_title_contains": "SEEK",
+        "open_before": true,
+        "wait_seconds": 4.0,
+        "resize_before": {
+          "left": 20,
+          "top": 20,
+          "width": 1100,
+          "height": 900
+        }
+      },
+      "goal": "Click the first job result title",
+      "state_hint": "SEEK software engineer jobs list in Auckland at a smaller browser window size",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 45,
+          "max_x": 360,
+          "min_y": 500,
+          "max_y": 625
+        },
+        "post_click": {
+          "required": false
+        }
+      }
+    },
+    {
+      "id": "seek_real_resized_pay_filter_dryrun",
+      "app": {
+        "app_name": "edge",
+        "app_id": "edge",
+        "url": "https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland",
+        "window_title_contains": "SEEK",
+        "open_before": true,
+        "wait_seconds": 4.0,
+        "resize_before": {
+          "left": 20,
+          "top": 20,
+          "width": 1100,
+          "height": 900
+        }
+      },
+      "goal": "Click the Pay filter",
+      "state_hint": "SEEK software engineer jobs list in Auckland at a smaller browser window size",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 45,
+          "max_x": 130,
+          "min_y": 250,
+          "max_y": 305
+        },
+        "post_click": {
+          "required": false
+        }
+      }
+    },
+    {
+      "id": "seek_real_resized_listing_time_filter_dryrun",
+      "app": {
+        "app_name": "edge",
+        "app_id": "edge",
+        "url": "https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland",
+        "window_title_contains": "SEEK",
+        "open_before": true,
+        "wait_seconds": 4.0,
+        "resize_before": {
+          "left": 20,
+          "top": 20,
+          "width": 1100,
+          "height": 900
+        }
+      },
+      "goal": "Click the Listing time filter",
+      "state_hint": "SEEK software engineer jobs list in Auckland at a smaller browser window size",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 500,
+          "max_x": 665,
+          "min_y": 250,
+          "max_y": 305
+        },
+        "post_click": {
+          "required": false
+        }
+      }
+    }
+  ]
+}

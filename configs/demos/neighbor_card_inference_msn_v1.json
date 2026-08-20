@@ -1,0 +1,40 @@
+{
+  "contract_version": "learn_neighbor_card_inference_experiment_manifest_v1",
+  "description": "Checksum-pinned read-only comparison for one-hop same-class card inference.",
+  "cases": [
+    {
+      "case_id": "msn_third_row_neighbor_cards",
+      "source_image_path": "artifacts/screenshots/microsoft-edge__capture__full-window__20260730-035722-297980.png",
+      "source_image_sha256": "b71f2b7719b9143aecffe1b1e94f64bcf844844e99a57210f58ae04df0c2a3d8",
+      "replay_report_path": "logs/benchmarks/interface_class_rule_aggregate_portal_demo_v1/msn_aggregate_portal/learn_two_stage_replay_report_20260730-165407.json",
+      "minimum_group_size": 3,
+      "minimum_visual_support": 0.45,
+      "expected_card_bboxes": [
+        {
+          "x": 505,
+          "y": 914,
+          "w": 304,
+          "h": 308
+        },
+        {
+          "x": 817,
+          "y": 914,
+          "w": 304,
+          "h": 308
+        },
+        {
+          "x": 1129,
+          "y": 914,
+          "w": 616,
+          "h": 308
+        },
+        {
+          "x": 1754,
+          "y": 914,
+          "w": 304,
+          "h": 308
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "contract_version": "single_interface_asset_v1",
+  "interface_id": "lab_atlas",
+  "application_identity_key": "web:navigation-reading-lab",
+  "display_name": "Atlas Reliability Report",
+  "surface_type": "finite_detail",
+  "state_signature": "lab_atlas:reviewed",
+  "artifact_is_authorization": false,
+  "fixed_anchors": [
+    {
+      "content_id": "atlas_identity",
+      "label": "Atlas Reliability Report Interface",
+      "source_kind": "state",
+      "source_id": "lab_atlas",
+      "content_behavior": "fixed_label",
+      "agent_usage": "identity_anchor",
+      "read_policy": "on_interface_match",
+      "agent_description": "Confirm the reviewed Atlas report interface."
+    }
+  ],
+  "dynamic_slots": [
+    {
+      "content_id": "atlas_body",
+      "label": "Current Atlas report body",
+      "source_kind": "region",
+      "source_id": "atlas_body",
+      "content_behavior": "dynamic_value",
+      "agent_usage": "decision_signal",
+      "read_policy": "on_demand",
+      "read_strategy": "finite_detail",
+      "completion_policy": "reached_bottom_required",
+      "agent_description": "Read the current Atlas report to the explicit ATLAS REPORT END marker."
+    }
+  ],
+  "controls": [
+    {
+      "control_id": "open_notes",
+      "label": "Open implementation notes",
+      "role": "button",
+      "agent_description": "Continue to the implementation notes after the report is complete.",
+      "review_status": "human_reviewed"
+    }
+  ],
+  "action_candidates": [],
+  "verification_rules": [
+    {
+      "rule_id": "notes_interface_visible",
+      "description": "Implementation Notes Interface is visible after the action."
+    }
+  ],
+  "blockers": [],
+  "review": {
+    "status": "human_reviewed",
+    "manual_revision": {
+      "semantic_description": "Read the finite Atlas report completely, then continue."
+    }
+  },
+  "evidence": {},
+  "execute_binding_enabled": false
+}

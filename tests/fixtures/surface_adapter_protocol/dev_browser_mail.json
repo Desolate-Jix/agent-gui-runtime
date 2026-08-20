@@ -1,0 +1,21 @@
+{
+  "result": {
+    "app_name": "protocol fixture",
+    "image_path": "tests/fixtures/surface_adapter_protocol/screen.ppm",
+    "image_size": {"width": 1200, "height": 800},
+    "interface_classification": {
+      "category": "mail_workspace",
+      "confidence": 0.94,
+      "structure_signals": {
+        "mail_or_email_rows": true,
+        "mailbox_navigation": true
+      }
+    },
+    "screen_inventory": [
+      {"item_id": "address", "role": "address_bar", "label": "https://mail.example.test/inbox", "bbox": {"x": 0, "y": 0, "w": 1200, "h": 48}},
+      {"item_id": "mailbox_nav", "role": "mailbox_navigation", "label": "Inbox", "bbox": {"x": 0, "y": 48, "w": 220, "h": 752}},
+      {"item_id": "mail_1", "role": "mail_row", "label": "First message", "bbox": {"x": 220, "y": 80, "w": 980, "h": 48}},
+      {"item_id": "mail_2", "role": "mail_row", "label": "Second message", "bbox": {"x": 220, "y": 128, "w": 980, "h": 48}}
+    ]
+  }
+}

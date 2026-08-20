@@ -1,0 +1,92 @@
+{
+  "cases": [
+    {
+      "id": "seek_real_first_job_title_dryrun",
+      "app": {
+        "app_name": "edge",
+        "app_id": "edge",
+        "url": "https://www.seek.co.nz/software-engineer-jobs/in-All-Auckland",
+        "window_title_contains": "SEEK",
+        "open_before": true,
+        "wait_seconds": 4.0
+      },
+      "goal": "Click the first job result title",
+      "state_hint": "SEEK software engineer jobs list in Auckland",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 50,
+          "max_x": 330,
+          "min_y": 520,
+          "max_y": 595
+        },
+        "post_click": {
+          "required": false
+        }
+      }
+    },
+    {
+      "id": "seek_real_pay_filter_dryrun",
+      "app": {
+        "app_name": "edge",
+        "window_title_contains": "SEEK"
+      },
+      "goal": "Click the Pay filter",
+      "state_hint": "SEEK software engineer jobs list in Auckland",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 45,
+          "max_x": 130,
+          "min_y": 250,
+          "max_y": 305
+        },
+        "post_click": {
+          "required": false
+        }
+      }
+    },
+    {
+      "id": "seek_real_listing_time_filter_dryrun",
+      "app": {
+        "app_name": "edge",
+        "window_title_contains": "SEEK"
+      },
+      "goal": "Click the Listing time filter",
+      "state_hint": "SEEK software engineer jobs list in Auckland",
+      "mode": {
+        "dry_run_default": true,
+        "destructive": false
+      },
+      "expect": {
+        "action_type": "click",
+        "allow": true,
+        "max_attempt_count": 2,
+        "max_latency_ms": 10000,
+        "point_in_rect": {
+          "min_x": 510,
+          "max_x": 660,
+          "min_y": 250,
+          "max_y": 305
+        },
+        "post_click": {
+          "required": false
+        }
+      }
+    }
+  ]
+}

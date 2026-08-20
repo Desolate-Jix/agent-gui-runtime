@@ -1,0 +1,1861 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenClaw Console</title>
+    <link rel="stylesheet" href="/panel/assets/panel.css?v=20260815-learning-screenshot-visibility-1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">OC</div>
+          <div>
+            <h1>OpenClaw Console</h1>
+            <p id="runtimeState">checking runtime</p>
+          </div>
+        </div>
+        <div class="language-row">
+          <span data-i18n="language">Language</span>
+          <div class="language-toggle" role="group" aria-label="Language">
+            <button type="button" class="language-option" data-language="zh-CN">中文</button>
+            <button type="button" class="language-option" data-language="en-US">EN</button>
+          </div>
+        </div>
+        <div class="workspace-switch">
+          <span data-i18n="workspace_switch">Workspace</span>
+          <div class="workspace-toggle" role="group" aria-label="Workspace">
+            <button id="agentModeLearnBtn" type="button" class="workspace-option active" data-mode="learn" data-i18n="learn_mode">Learn Mode</button>
+            <button id="agentModeExecuteBtn" type="button" class="workspace-option" data-mode="execute" data-i18n="execute_mode">Execute Mode</button>
+          </div>
+          <p class="workspace-hint workspace-hint-learn" data-i18n="workspace_hint_learn">Build and calibrate the map</p>
+          <p class="workspace-hint workspace-hint-execute" data-i18n="workspace_hint_execute">Locate, gate, act, verify</p>
+        </div>
+        <nav class="stage-nav" aria-label="Workflow workspaces">
+          <div class="nav-group nav-group-system" data-workflow="system">
+            <div class="nav-group-title" data-i18n="nav_group_system">Session / System</div>
+            <button class="stage" data-stage="open_bind" data-step="1" data-i18n="nav_open_bind">Open / Bind</button>
+            <button class="stage" data-stage="capture" data-step="2" data-i18n="nav_capture">Capture</button>
+          </div>
+          <div class="nav-group nav-group-learn" data-workflow="learn">
+            <div class="nav-group-title" data-i18n="nav_group_learn">Learn Mode</div>
+            <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Recognize one interface, review it, then connect it to the software workflow</p>
+            <button class="stage active" data-stage="learn_interface" data-step="1" data-i18n="nav_learn_interface">Learning workspace</button>
+          </div>
+          <div class="nav-group nav-group-execute" data-workflow="execute">
+            <div class="nav-group-title" data-i18n="nav_group_execute">Execute Mode</div>
+            <p class="nav-group-subtitle" data-i18n="nav_group_execute_flow">Available actions -> locate -> gate -> action evidence</p>
+            <button class="stage" data-stage="execute_actions" data-step="1" data-i18n="nav_execute_actions">Available Actions</button>
+            <button class="stage" data-stage="execute_locate" data-step="2" data-i18n="nav_execute_locate">Precise Locate</button>
+            <button class="stage" data-stage="execute" data-step="3" data-i18n="nav_execute_gate">Click Gate</button>
+            <button class="stage" data-stage="input" data-step="4" data-i18n="nav_execute_input">Input</button>
+          </div>
+        </nav>
+        <div class="settings-entry">
+          <button id="settingsBtn" type="button" class="settings-gear" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
+              <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.2a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.2a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 .9-1.5V3a2 2 0 0 1 4 0v.2a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5.9h.2a2 2 0 0 1 0 4h-.2a1.6 1.6 0 0 0-1.5 1Z"></path>
+            </svg>
+            <span data-i18n="settings">Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <!-- Flow diagram: ALL stages visible from start, completed ones change color -->
+        <section class="flow-diagram-strip" aria-label="Request flow diagram">
+          <div class="flow-strip-head">
+            <h3 data-i18n="action_path_graph">Flow Diagram</h3>
+            <span id="graphMeta">trace stages</span>
+          </div>
+          <svg id="flowDiagram" viewBox="0 0 960 72" role="img" aria-label="Request flow diagram" preserveAspectRatio="xMidYMid meet"></svg>
+        </section>
+
+        <section class="topbar">
+          <div>
+            <h2 id="stageTitle">Open / Bind</h2>
+            <p id="stageSubtitle">Open software, refresh the window dropdown, and bind the target window</p>
+            <div class="page-meta-strip" id="pageMetaStrip" aria-label="Page API and risk">
+              <span id="pageWorkspaceBadge">System</span>
+              <span id="pageApiBadge">API: -</span>
+              <span id="pageSideEffectBadge">No real action</span>
+              <a class="meta-action interface-workflow-jump-link" href="#interfaceWorkflowThreeColumnWorkbench">三栏审核</a>
+              <button id="resetLayoutBtn" type="button" class="meta-action" data-i18n="reset_layout">Reset layout</button>
+            </div>
+          </div>
+          <div class="status-pill" id="requestStatus">idle</div>
+        </section>
+
+        <section class="mode-strip policy-strip" aria-label="Write policy">
+          <div class="write-policy-row">
+            <label><input id="writePathGraph" type="checkbox" checked /> <span data-i18n="write_path_graph">PathGraph</span></label>
+            <label><input id="writeElementMemory" type="checkbox" /> <span data-i18n="write_element_memory">ElementMemory</span></label>
+            <label><input id="writeTrace" type="checkbox" checked /> <span data-i18n="write_trace">Trace</span></label>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <div class="control-surface">
+            <section class="panel stage-page" data-page="model_test">
+              <h3 data-i18n="model_test_title">Model Test</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="profile">Profile</span>
+                  <select id="modelTestProfile"></select>
+                </label>
+                <label>
+                  <span data-i18n="model_stage">Stage</span>
+                  <select id="modelTestStage">
+                    <option value="observe">observe</option>
+                    <option value="locate">locate</option>
+                  </select>
+                </label>
+                <label class="checkline">
+                  <input id="modelTestUseImage" type="checkbox" checked />
+                  <span data-i18n="model_test_use_image">Attach current image</span>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="model_test_image_path">Image path</span>
+                  <input id="modelTestImagePath" placeholder="optional; defaults to current screenshot" />
+                </label>
+              </div>
+              <label class="wide-label">
+                <span data-i18n="model_test_prompt">Prompt</span>
+                <textarea id="modelTestPrompt" rows="4">Describe this interface. What can the user do here? List the main interactive elements.</textarea>
+              </label>
+              <div class="button-row">
+                <button id="healthBtn" data-i18n="health">Health</button>
+                <button id="modelTestSendBtn" data-i18n="model_test_send">Send</button>
+              </div>
+              <div class="model-test-response" id="modelTestResponse">
+                <p class="trace-idle">Send a prompt to see the model response</p>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="open_bind">
+              <h3 data-i18n="open_bind">Open / Bind</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="app_id">App ID</span>
+                  <input id="appId" value="" list="appCatalogOptions" />
+                  <datalist id="appCatalogOptions"></datalist>
+                </label>
+                <label>
+                  <span data-i18n="url">URL</span>
+                  <input id="appUrl" value="" />
+                </label>
+                <label>
+                  <span data-i18n="app_catalog">Launchable apps</span>
+                  <select id="appCatalogSelect"></select>
+                  <small class="form-help" data-i18n="app_catalog_help">Configured apps that can be opened by the runtime.</small>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="window_candidates">Bindable windows</span>
+                  <select id="windowSelect"></select>
+                  <small class="form-help" data-i18n="window_candidates_help">Already-open windows; screenshots and actions use the bound window.</small>
+                </label>
+                <label>
+                  <span data-i18n="process_name">Process name</span>
+                  <input id="bindProcess" value="msedge.exe" />
+                </label>
+                <label>
+                  <span data-i18n="title_contains">Title contains</span>
+                  <input id="bindTitle" value="MouseTester" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="listAppsBtn" data-i18n="list_apps">List apps</button>
+                <button id="openAppBtn" data-i18n="open_app">Open app</button>
+                <button id="listWindowsBtn" data-i18n="list_windows">List windows</button>
+                <button id="bindWindowBtn" data-i18n="bind_window">Bind window</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="capture">
+              <h3 data-i18n="screenshot_saved_image">Screenshot and Saved Image</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="image_path">Image path</span>
+                  <input id="imagePath" value="" placeholder="capture or upload an image" />
+                </label>
+                <label>
+                  <span>ROI X</span>
+                  <input id="roiX" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>ROI Y</span>
+                  <input id="roiY" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>ROI W</span>
+                  <input id="roiW" type="number" min="1" value="" />
+                </label>
+                <label>
+                  <span>ROI H</span>
+                  <input id="roiH" type="number" min="1" value="" />
+                </label>
+                <label class="checkline">
+                  <input id="captureSave" type="checkbox" checked />
+                  <span data-i18n="save_screenshot">Save screenshot</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="captureBtn" data-i18n="capture_bound_window">Capture bound window</button>
+                <button id="useImagePathBtn" data-i18n="use_image_path">Use image path</button>
+              </div>
+              <div id="dropZone" class="drop-zone">
+                <input id="imageFile" type="file" accept="image/*" />
+                <span data-i18n="drop_image">Drop or choose a screenshot image</span>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="observe">
+              <h3 data-i18n="observe_screen">Observe Screen</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_workbench_hint">Learn Mode: Observe builds the fast map, Locate calibrates every child path control; no real click.</div>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="observeApp" value="" />
+                </label>
+                <label>
+                  <span data-i18n="state_hint">State hint</span>
+                  <input id="observeState" value="" />
+                </label>
+                <label>
+                  <span data-i18n="model_profile">Model profile</span>
+                  <select id="observeModelProfile"></select>
+                </label>
+                <label>
+                  <span data-i18n="provider_mode">Provider mode</span>
+                  <input id="observeProvider" value="local" />
+                </label>
+                <label class="checkline">
+                  <input id="observeLive" type="checkbox" checked />
+                  <span data-i18n="capture_live">Capture live</span>
+                </label>
+              </div>
+              <label class="wide-label">
+                <span data-i18n="observe_prompt">Observe prompt rules</span>
+                <textarea id="observePrompt" rows="7">Screen-understanding stage only:
+- Explain the interface purpose briefly in screen_summary.
+- Make state_guess the best concise hint to pass into the next precise localization state_hint field, for example top navigation bar, job results list, chat title bar, left sidebar, settings dialog, or main content list.
+- Return a compact index of independently clickable controls: navigation, buttons, icon-only buttons, tabs, inputs, toggles, menus, and title-bar controls.
+- Include small or uncertain icon controls with lower confidence rather than long explanations.
+- Keep every label and likely action short; this is a fast discovery pass before precise localization.
+- OCR coordinates are reference-only input: do not repeat OCR boxes, anchor relations, or detailed grounding evidence in the response.
+- This stage describes available actions for agent planning; it must not choose or execute a click.</textarea>
+              </label>
+              <div class="button-row">
+                <button id="observeBtn" data-i18n="learn_fast_build_path">Fast map build</button>
+                <button id="analyzeBtn" data-i18n="analyze_api">API direct analyze</button>
+                <button id="applyObserveModelBtn" data-i18n="apply_model_profile">Apply profile</button>
+                <button id="startObserveModelBtn" data-i18n="start_model">Start model</button>
+                <button id="stopObserveModelBtn" data-i18n="stop_model">Stop model</button>
+                <button id="testObserveModelBtn" data-i18n="test_model">Check model service</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="locate">
+              <h3 data-i18n="locate_target">Locate Target</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_workbench_hint">Learn Mode: Observe builds the fast map, Locate calibrates every child path control; no real click.</div>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_workbench_hint">Execute Mode: preview the click plan and coordinate overlay first, then reuse the approved_plan_id for the real click.</div>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="goal">Goal</span>
+                  <input id="locateGoal" value="点击此处测试" />
+                </label>
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="locateApp" value="" />
+                </label>
+                <label>
+                  <span data-i18n="state_hint">State hint</span>
+                  <input id="locateState" value="" />
+                </label>
+                <label>
+                  <span data-i18n="model_profile">Model profile</span>
+                  <select id="locateModelProfile"></select>
+                </label>
+                <label>
+                  <span data-i18n="top_k">Top K</span>
+                  <input id="locateTopK" type="number" min="1" max="20" value="5" />
+                </label>
+                <label class="checkline">
+                  <input id="locateLive" type="checkbox" checked />
+                  <span data-i18n="capture_live">Capture live</span>
+                </label>
+              </div>
+              <label class="wide-label">
+                <span data-i18n="locate_prompt">Locate prompt rules</span>
+                <textarea id="locatePrompt" rows="9">Precision-localization stage only:
+- Locate only the target named in goal; do not enumerate unrelated controls.
+- First decide whether the clickable target is visual-only or includes visible text.
+- If the goal names text next to a small icon, first identify the text target and its adjacent icon as a paired reference, then localize only the requested clickable target. For a visual-only adjacent icon, the final icon bbox must not overlap the text bbox; use the text bbox only as an anchor, boundary, and negative constraint.
+- Case A, visual-only icon: set text_inclusion_policy="exclude_text"; use nearby OCR boxes only as boundary rulers and negative constraints. The final diagonal must tightly cover the icon pixels, never the nearby label.
+- Case B, text-bearing control: set text_inclusion_policy="include_referenced_text"; the final diagonal must include the referenced OCR text boxes and the visible clickable control surface.
+- Select the nearest useful top, bottom, left, and right OCR anchors when available. Use them to form text_anchor_frame and anchor_relations before choosing coordinates.
+- Justify all four final bbox edges in grounding_constraints.edge_constraints. Also provide center_constraints, size_constraints, negative_constraints, and final_bbox_reason.
+- For small toolbar or navigation icons, prefer a tight box around the visible shape and reject boxes that drift into adjacent labels or neighboring controls.
+- If multiple visual candidates remain plausible, keep confidence lower and state the ambiguity; do not invent a precise target.</textarea>
+              </label>
+              <div class="button-row">
+                <button id="locateBtn" data-i18n="learn_deep_calibrate_path">Deep path calibration</button>
+                <button id="overlayBtn" data-i18n="render_overlay">Render overlay</button>
+                <button id="applyLocateModelBtn" data-i18n="apply_model_profile">Apply profile</button>
+                <button id="startLocateModelBtn" data-i18n="start_model">Start model</button>
+                <button id="stopLocateModelBtn" data-i18n="stop_model">Stop model</button>
+                <button id="testLocateModelBtn" data-i18n="test_model">Check model service</button>
+              </div>
+              <div class="subpanel">
+                <h4 data-i18n="manual_box">Candidate box review</h4>
+                <div class="form-grid">
+                  <label>
+                    <span>BBox X</span>
+                    <input id="bboxX" type="number" min="0" value="" />
+                  </label>
+                  <label>
+                    <span>BBox Y</span>
+                    <input id="bboxY" type="number" min="0" value="" />
+                  </label>
+                  <label>
+                    <span>BBox W</span>
+                    <input id="bboxW" type="number" min="1" value="" />
+                  </label>
+                  <label>
+                    <span>BBox H</span>
+                    <input id="bboxH" type="number" min="1" value="" />
+                  </label>
+                  <label>
+                    <span data-i18n="label">Label</span>
+                    <input id="reviewLabel" value="target" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="manualBoxBtn" data-i18n="manual_box_button">Generate candidate box</button>
+                  <button id="previewBoxBtn" data-i18n="preview_box">Preview box</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="execute_actions">
+              <h3 data-i18n="execute_actions_title">Current State / Available Actions</h3>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_actions_hint">Execute Mode first observes the current state through learned artifacts, then lists safe action candidates without running full Learn Mode.</div>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="executeActionsApp" value="" />
+                </label>
+                <label>
+                  <span data-i18n="state_hint">State hint</span>
+                  <input id="executeActionsState" value="" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="executeActionsGraphPath" value="" placeholder="artifacts/.../runtime_path_graph.json" />
+                </label>
+                <label class="wide-label">
+                  <span data-i18n="runtime_path_graph_json">Runtime PathGraph JSON</span>
+                  <textarea id="executeActionsGraphJson" rows="7" placeholder='{"contract_version":"runtime_path_graph_v1", ...}'></textarea>
+                </label>
+                <label class="wide-label">
+                  <span data-i18n="screen_inventory_json">Screen inventory JSON</span>
+                  <textarea id="executeActionsInventoryJson" rows="4" placeholder='{"available_actions":[],"page_elements":[]}'></textarea>
+                </label>
+                <label class="checkline">
+                  <input id="executeActionsAllowApply" type="checkbox" />
+                  <span data-i18n="allow_apply_entry">Allow apply entry</span>
+                </label>
+                <small class="form-help form-help-wide" data-i18n="allow_apply_entry_help">Allows opening Apply / Quick Apply only. Final submit remains blocked.</small>
+              </div>
+              <div class="button-row">
+                <button id="executeObserveBtn" data-i18n="execute_observe_current_screen">Understand current screen</button>
+                <button id="availableActionsBtn" data-i18n="refresh_available_actions">Refresh available actions</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="learn_validation">
+              <h3 data-i18n="learn_validation_title">PathGraph Safe Validation</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_validation_hint">Validate candidate PathGraph with read-only/no-write safe actions. Input, Apply, Submit, and write actions are filtered out.</div>
+              <div class="form-grid">
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="learnValidationGraphPath" value="" placeholder="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
+                </label>
+                <label>
+                  <span data-i18n="safety_mode">Safety mode</span>
+                  <select id="learnValidationSafetyMode">
+                    <option value="read_only">read_only</option>
+                    <option value="no_write">no_write</option>
+                    <option value="no_submit">no_submit</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="current_state_id">Current state ID</span>
+                  <input id="learnValidationStateId" value="" placeholder="optional" />
+                </label>
+                <label class="checkline">
+                  <input id="learnValidationDispatch" type="checkbox" />
+                  <span data-i18n="dispatch_low_level">Dispatch low level</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="learnValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
+                <button id="learnValidationPreviewBtn" data-i18n="dry_run_next_step">Dry-run next step</button>
+                <button id="learnValidationStepBtn" data-i18n="execute_next_safe_action">Execute next safe action</button>
+                <button id="learnValidationResetBtn" data-i18n="reset_timeline">Reset timeline</button>
+              </div>
+              <div class="run-summary" id="learnValidationSummary"></div>
+              <div class="action-table" id="learnValidationActions"></div>
+              <div class="run-timeline" id="learnValidationTimeline"></div>
+            </section>
+
+            <section class="panel stage-page active" data-page="learn_replay">
+              <h3 data-i18n="learn_replay_title">Learning workspace</h3>
+              <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="learn_replay_hint">Recognize and review one interface, then connect approved interfaces into a reusable software workflow. Learning assets never authorize execution.</div>
+              <section class="learn-replay-subview" data-learn-replay-panel="template">
+              <div class="form-grid">
+                <div class="form-section-label wide-control">
+                  <strong data-i18n="template_replay_section">Template Replay</strong>
+                  <span data-i18n="template_replay_section_hint">Load runtime PathGraph and Interface Map artifacts only. Learning drafts are reviewed separately.</span>
+                </div>
+                <label>
+                  <span data-i18n="artifact_preset">Artifact preset</span>
+                  <select id="replayPreset">
+                    <option value="seek">SEEK</option>
+                    <option value="wikipedia">Wikipedia</option>
+                    <option value="github_issues">GitHub Issues</option>
+                    <option value="python_docs_search">Python Docs Search</option>
+                    <option value="table_directory">Table Directory</option>
+                    <option value="input_demo">Input demo</option>
+                  </select>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="replayGraphPath" value="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="interface_map_path">Interface Map path</span>
+                  <input id="replayInterfaceMapPath" value="artifacts/visual-match-smoke/live_seek_20260624/learned_interface_map_calibrated_real_crops.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="interface_calibration_report_path">Calibration report path</span>
+                  <input id="replayInterfaceCalibrationPath" value="artifacts/visual-match-smoke/live_seek_20260624/visual_asset_calibration_report.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="model_artifact_trial_path">Model artifact trial path</span>
+                  <input id="replayModelArtifactPath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="interface_map_save_name">Edited Interface Map file</span>
+                  <input id="replayInterfaceMapSaveName" value="learned_interface_map_edited.json" />
+                </label>
+                <label>
+                  <span data-i18n="task_template">Task template</span>
+                  <select id="replayTaskTemplate">
+                    <option value="read_n_list_details">read_n_list_details</option>
+                    <option value="read_article_page">read_article_page</option>
+                    <option value="read_issue_thread">read_issue_thread</option>
+                    <option value="input_dry_run_demo">input_dry_run_demo</option>
+                    <option value="model_artifact_single_step">model_artifact_single_step</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="current_state_id">Current state ID</span>
+                  <input id="replayStateId" value="" placeholder="optional" />
+                </label>
+                <label>
+                  <span data-i18n="app_profile_id">App Profile</span>
+                  <input id="replayAppProfileId" value="seek" />
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_id">Agent Prompt</span>
+                  <input id="replayAgentPromptId" value="job_suitability_full_jd_v1" />
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_version">Prompt version</span>
+                  <input id="replayAgentPromptVersion" value="" placeholder="new version id" />
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_version_select">Existing version</span>
+                  <select id="replayAgentPromptVersionSelect"></select>
+                </label>
+                <label>
+                  <span data-i18n="agent_prompt_compare_version">Compare to</span>
+                  <input id="replayAgentPromptCompareVersion" value="2026-06-29.base" />
+                </label>
+              </div>
+              <div class="button-row replay-template-actions">
+                <button id="replayLoadBtn" data-i18n="load_artifact">Load artifact</button>
+                <button id="replayInterfaceMapLoadBtn" data-i18n="load_interface_map">Load interface map</button>
+                <button id="replayInterfaceCalibrationLoadBtn" data-i18n="load_interface_calibration">Load calibration</button>
+                <button id="replayUseValidationBtn" data-i18n="use_for_safe_validation">Use for safe validation</button>
+                <button id="replayUseTaskBtn" data-i18n="use_for_task_run">Use for task run</button>
+              </div>
+              <details class="replay-action-disclosure">
+                <summary>
+                  <span data-i18n="replay_advanced_actions">Advanced actions</span>
+                  <small data-i18n="replay_advanced_actions_hint">Prompt, profile, save, and debug-run tools.</small>
+                </summary>
+                <div class="button-row replay-template-advanced-actions">
+                  <button id="replayModelArtifactLoadBtn" data-i18n="load_model_artifact">Load model artifact</button>
+                  <button id="replayAppProfileLoadBtn" data-i18n="load_app_profile">Load app profile</button>
+                  <button id="replayAgentPromptLoadBtn" data-i18n="load_agent_prompt">Load agent prompt</button>
+                  <button id="replayAgentPromptVersionsBtn" data-i18n="load_agent_prompt_versions">Load versions</button>
+                  <button id="replayAgentPromptLoadVersionBtn" data-i18n="load_agent_prompt_version">Load selected version</button>
+                  <button id="replayAgentPromptDiffBtn" data-i18n="diff_agent_prompt_versions">Diff versions</button>
+                  <button id="replayAgentPromptSaveBtn" data-i18n="save_agent_prompt_version">Save prompt version</button>
+                  <button id="replayAgentPromptRollbackBtn" data-i18n="rollback_agent_prompt_version">Rollback as new version</button>
+                  <button id="replayUseCurrentAppMapBtn" data-i18n="use_current_app_map">Use current app map</button>
+                  <button id="replayInterfaceMapSaveBtn" data-i18n="save_interface_map">Save interface map</button>
+                  <button id="replayValidationPlanBtn" data-i18n="generate_validation_plan">Generate validation plan</button>
+                  <button id="replayTaskStepBtn" data-i18n="execute_next_step">Execute next step</button>
+                </div>
+              </details>
+              <div class="artifact-summary" id="replayGraphSummary"></div>
+              <div class="run-summary app-profile-summary" id="replayAppProfileSummary"></div>
+              <div class="run-summary agent-prompt-summary" id="replayAgentPromptSummary"></div>
+              <textarea id="replayAgentPromptTemplate" class="agent-prompt-editor" rows="10" placeholder="Agent prompt template"></textarea>
+              <pre id="replayAgentPromptDiff" class="agent-prompt-diff"></pre>
+              <div class="interface-map-panel" id="replayInterfaceMapPanel"></div>
+              <div class="action-table" id="replayGraphActions"></div>
+              </section>
+              <section class="learn-replay-subview active" data-learn-replay-panel="draft">
+              <section class="learning-interface-prep-card" id="learningInterfacePrepCard" aria-label="Learning interface preparation">
+                <div>
+                  <strong data-i18n="learning_interface_prep_title">Open, bind, and screenshot</strong>
+                  <p data-i18n="learning_interface_prep_hint">Use the same bound-window and screenshot controls here before learning. This step only prepares evidence; it does not click the target app.</p>
+                </div>
+                <div class="form-grid learning-interface-prep-grid">
+                  <label>
+                    <span data-i18n="learning_interface_app_catalog">Launch target</span>
+                    <select id="learningInterfaceAppCatalogSelect"></select>
+                  </label>
+                  <label>
+                    <span data-i18n="learning_interface_window">Target window</span>
+                    <select id="learningInterfaceWindowSelect"></select>
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="learning_interface_image_path">Latest screenshot</span>
+                    <input id="learningInterfaceImagePath" value="" readonly placeholder="capture bound window first" />
+                  </label>
+                </div>
+                <section class="learning-capture-strategy" aria-label="Learning capture strategy">
+                  <div class="learning-capture-strategy-heading"><strong>截图策略</strong><span id="learningCaptureRecommendation">模型建议：未评估，人工选择为准</span></div>
+                  <div class="learning-capture-mode-options" role="radiogroup" aria-label="截图策略">
+                    <label><input id="learningCaptureModeNormal" type="radio" name="learningCaptureMode" value="normal" checked /> 普通截图</label>
+                    <label><input id="learningCaptureModeScopedLong" type="radio" name="learningCaptureMode" value="scoped_long" /> 区域长截图</label>
+                  </div>
+                  <div id="learningScopedCaptureFields" hidden>
+                    <label class="learning-scoped-confirm"><input id="learningScopedCaptureConfirmed" type="checkbox" /> 我确认使用区域长截图</label>
+                    <div class="form-grid learning-scoped-capture-grid">
+                      <label><span>ROI x</span><input id="learningScopedCaptureRoiX" type="number" min="0" step="1" value="0" /></label><label><span>ROI y</span><input id="learningScopedCaptureRoiY" type="number" min="0" step="1" value="0" /></label><label><span>ROI width</span><input id="learningScopedCaptureRoiWidth" type="number" min="1" step="1" value="640" /></label><label><span>ROI height</span><input id="learningScopedCaptureRoiHeight" type="number" min="1" step="1" value="480" /></label>
+                      <label><span>scroll scope</span><select id="learningScopedCaptureScrollScope"><option value="container" selected>container</option><option value="page">page</option></select></label><label><span>target pane</span><select id="learningScopedCaptureTargetPane"><option value="unknown" selected>unknown</option><option value="page">page</option><option value="results_list">results_list</option><option value="job_detail">job_detail</option><option value="filter_panel">filter_panel</option><option value="modal">modal</option><option value="dropdown">dropdown</option></select></label>
+                      <label><span>target container id</span><input id="learningScopedCaptureTargetContainerId" value="" placeholder="optional" /></label><label><span>wheel clicks</span><input id="learningScopedCaptureWheelClicks" type="number" min="1" max="20" step="1" value="4" /></label><label><span>max segments</span><input id="learningScopedCaptureMaxSegments" type="number" min="2" max="12" step="1" value="6" /></label>
+                    </div>
+                  </div>
+                  <div class="learning-scoped-capture-progress-panel"><span id="learningScopedCaptureStatus">阶段：normal · 已接受片段：0 · 停止：pending</span><ol id="learningScopedCaptureProgress"></ol><input id="learningScopedCaptureCompositePath" readonly placeholder="final composite path" /><input id="learningScopedCaptureManifestPath" readonly placeholder="final manifest path" /><span id="learningScopedCaptureArtifactPolicy"></span><img id="learningScopedCapturePreview" hidden alt="Scoped learning composite preview" /></div>
+                </section>
+                <div class="button-row learning-interface-prep-actions">
+                  <button id="learningInterfaceListAppsBtn" type="button" data-i18n="list_apps">List apps</button>
+                  <button id="learningInterfaceOpenAppBtn" type="button" data-i18n="open_app">Open app</button>
+                  <button id="learningInterfaceListWindowsBtn" type="button" data-i18n="list_windows">List windows</button>
+                  <button id="learningInterfaceBindWindowBtn" type="button" data-i18n="bind_window">Bind window</button>
+                  <button id="learningInterfaceCaptureBtn" type="button" data-i18n="capture_bound_window">Capture window</button>
+                  <span id="learningInterfacePrepStatus" class="learning-interface-flow-status" data-i18n="learning_interface_prep_idle">ready · no live click</span>
+                </div>
+              </section>
+              <section class="learning-interface-flow-card" aria-label="Learning interface workflow">
+                <div>
+                  <strong data-i18n="learning_interface_flow_title">Learn current interface</strong>
+                  <p data-i18n="learning_interface_flow_hint">Bind and screenshot, understand the full screen, number regions, calibrate with the execute locator chain, then save the fused learning result and a read-only PathGraph.</p>
+                </div>
+                <div class="button-row learning-interface-flow-actions">
+                  <button id="learningInterfaceRunBtn" type="button" class="primary" data-i18n="learning_interface_run">Learn current interface</button>
+                  <button id="learningInterfaceCancelBtn" type="button" disabled data-i18n="learning_interface_cancel">Cancel current stage</button>
+                  <span id="learningInterfaceFlowStatus" class="learning-interface-flow-status" data-i18n="learning_interface_flow_idle">idle · no live click</span>
+                </div>
+                <ol class="learning-interface-flow-progress" id="learningInterfaceFlowProgress">
+                  <li data-learning-flow-step="bind_capture"><span>1</span><strong data-i18n="learning_flow_bind_capture">Bind / screenshot</strong></li>
+                  <li data-learning-flow-step="screen_understanding"><span>2</span><strong data-i18n="learning_flow_screen_understanding">Full-screen understanding</strong></li>
+                  <li data-learning-flow-step="numbered_map"><span>3</span><strong data-i18n="learning_flow_numbered_map">Numbered selection map</strong></li>
+                  <li data-learning-flow-step="precise_calibration"><span>4</span><strong data-i18n="learning_flow_precise_calibration">Precise calibration</strong></li>
+                  <li data-learning-flow-step="review_repair"><span>5</span><strong data-i18n="learning_flow_review_repair">Model review / repair</strong></li>
+                  <li data-learning-flow-step="fusion"><span>6</span><strong data-i18n="learning_flow_fusion">Fusion</strong></li>
+                  <li data-learning-flow-step="page_details"><span>7</span><strong data-i18n="learning_flow_page_details">Interface details</strong></li>
+                  <li data-learning-flow-step="pathgraph_draft"><span>8</span><strong data-i18n="learning_flow_pathgraph_draft">Interface paths</strong></li>
+                  <li data-learning-flow-step="complete"><span>9</span><strong data-i18n="learning_flow_complete">Complete</strong></li>
+                </ol>
+              </section>
+              <details class="replay-action-disclosure" id="learningDraftAdvancedDiagnostics">
+                <summary>
+                  <span data-i18n="learning_draft_advanced_diagnostics">Advanced diagnostics</span>
+                  <small data-i18n="learning_draft_advanced_diagnostics_hint">Old split-step tools and artifact paths; keep closed for demo.</small>
+                </summary>
+                <div class="learning-draft-advanced-body">
+              <div class="form-grid">
+                <div class="form-section-label wide-control learning-studio-section-label">
+                  <strong data-i18n="learning_studio_section">Learning Studio</strong>
+                  <span data-i18n="learning_studio_section_hint">Load and edit the model learning draft as a non-executable reviewed candidate.</span>
+                </div>
+                <label>
+                  <span data-i18n="learning_trial_app">Learning app</span>
+                  <input id="learningTrialApp" value="" placeholder="optional app id" />
+                </label>
+                <label>
+                  <span data-i18n="learning_trial_state">Learning state</span>
+                  <input id="learningTrialState" value="" placeholder="optional state hint" />
+                </label>
+                <label>
+                  <span data-i18n="learning_trial_max_attempts">Trial attempts</span>
+                  <input id="learningTrialMaxAttempts" type="number" min="1" max="5" value="2" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_trial_goal">Learning trial goal</span>
+                  <input id="learningTrialGoal" value="learn a reusable UI workflow template from this screen" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_trial_image_path">Learning trial image</span>
+                  <input id="learningTrialImagePath" value="" placeholder="capture bound window or use current image" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_trial_result_path">Latest learning trial result</span>
+                  <input id="learningTrialResultPath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_draft_review_source_path">Learning draft review source</span>
+                  <input id="learningDraftReviewSourcePath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_draft_freshness_demo_case">Freshness demo case</span>
+                  <select id="learningDraftFreshnessDemoCase">
+                    <option value="freshness_matched">checksum matched</option>
+                    <option value="freshness_missing_file">source file missing</option>
+                    <option value="freshness_checksum_mismatch">checksum mismatch</option>
+                  </select>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_pathgraph_candidate_path">PathGraph candidate</span>
+                  <input id="learningPathGraphCandidatePath" value="" placeholder="artifacts/.../pathgraph_candidate.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_pathgraph_validation_path">Candidate validation report</span>
+                  <input id="learningPathGraphValidationPath" value="" placeholder="artifacts/.../promotion_validation_report.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_assisted_template_package_path">Assisted template review package</span>
+                  <input id="learningAssistedTemplatePackagePath" value="" placeholder="artifacts/.../assisted_template_review_package.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_assisted_template_asset_candidate_path">Assisted template asset candidate</span>
+                  <input id="learningAssistedTemplateAssetCandidatePath" value="" placeholder="artifacts/.../assisted_template_asset_candidate.json" readonly />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="learning_assisted_template_graph_draft_path">Assisted template graph draft</span>
+                  <input id="learningAssistedTemplateGraphDraftPath" value="" placeholder="artifacts/.../assisted_template_graph_draft.json" readonly />
+                </label>
+              </div>
+              <div class="button-row replay-learning-actions">
+                <button id="learningTrialCaptureBtn" data-i18n="learning_trial_capture">Capture for draft</button>
+                <button id="learningTrialRunBtn" data-i18n="learning_trial_run">Run draft trial</button>
+                <button id="learningDraftReviewLoadBtn" data-i18n="learning_draft_review">Load learning draft review</button>
+                <button id="learningDraftRecommendedLoadBtn" class="secondary" data-i18n="learning_draft_recommended_load">Load recommended current draft</button>
+                <button id="learningDraftFreshnessDemoBtn" data-i18n="learning_draft_load_freshness_demo">Load freshness demo</button>
+                <button id="learningDraftReviewSaveBtn" data-i18n="learning_draft_review_save">Save reviewed candidate</button>
+                <button id="learningPathGraphCandidateBtn" data-i18n="learning_pathgraph_candidate_generate">Generate PathGraph candidate</button>
+                <button id="learningModelStartApprovalPacketBtn" class="secondary" data-i18n="learning_model_start_approval_packet_create">Create model-start approval packet</button>
+                <button id="learningCalibrationPreRunCheckBtn" class="secondary" data-i18n="learning_calibration_pre_run_check_create">Create calibration pre-run check</button>
+                <button id="learningPathGraphIntegrationReadinessBtn" class="secondary" data-i18n="learning_pathgraph_integration_readiness_create">Create integration readiness</button>
+                <button id="learningCurrentEvidencePacketBtn" class="secondary" data-i18n="learning_current_evidence_packet_create">Create current evidence packet</button>
+                <button id="learningPreciseUnderstandingCandidateBtn" class="secondary" data-i18n="learning_precise_understanding_candidate_create">Create precise understanding candidate</button>
+                <button id="learningPageDetailCandidateBtn" class="secondary" data-i18n="learning_page_detail_candidate_create">Create page detail candidate</button>
+                <button id="learningDemoScaffoldBtn" class="secondary" data-i18n="learning_demo_scaffold_create">Create demo scaffold</button>
+                <button id="learningDemoGoalReadinessBtn" class="secondary" data-i18n="learning_demo_goal_readiness_create">Create demo goal audit</button>
+                <button id="learningAssistedTemplatePackageBtn" data-i18n="learning_assisted_template_package_create">Create review package</button>
+                <button id="learningAssistedTemplatePackageLoadBtn" data-i18n="learning_assisted_template_package_load">Load review package</button>
+                <button id="learningAssistedTemplateSuggestionsBtn" data-i18n="learning_assisted_template_suggestions_create">Create acceptance suggestions</button>
+                <button id="learningAssistedTemplateAcceptanceSimulationBtn" data-i18n="learning_assisted_template_acceptance_simulation_create">Simulate accepted suggestions</button>
+                <button id="learningAssistedTemplateAssetCandidateBtn" data-i18n="learning_assisted_template_asset_candidate_create">Create asset candidate</button>
+                <button id="learningAssistedTemplateGraphDraftBtn" data-i18n="learning_assisted_template_graph_draft_create">Create graph draft</button>
+                <button id="learningAssistedTemplatePromotionPreflightBtn" data-i18n="learning_assisted_template_promotion_preflight_create">Create promotion preflight</button>
+                <button id="learningAssistedTemplateAuditedPromotionRequestBtn" data-i18n="learning_assisted_template_audited_promotion_request_create">Create audit request preview</button>
+              </div>
+                </div>
+              </details>
+              <section class="learning-draft-review-workspace" aria-label="Learning draft replay workspace">
+                <section class="interface-workflow-review-panel" id="interfaceWorkflowReviewPanel">
+                  <div class="panel-header compact">
+                    <div>
+                      <strong data-i18n="interface_workflow_review_title">软件界面学习</strong>
+                      <p class="interface-workflow-review-subtitle" data-i18n="interface_workflow_review_hint">一个软件对应一张完整界面图；选择节点后在中间查看证据，在右侧修改名称、结构和跳转。</p>
+                    </div>
+                    <span id="interfaceWorkflowStatus">尚未加载</span>
+                  </div>
+                  <div class="interface-workflow-summary">
+                    <div>
+                      <small data-i18n="interface_workflow_goal">目标</small>
+                      <strong id="interfaceWorkflowGoal">--</strong>
+                    </div>
+                    <div>
+                      <small data-i18n="interface_workflow_application">软件</small>
+                      <strong id="interfaceWorkflowApplication">--</strong>
+                    </div>
+                    <div>
+                      <small data-i18n="interface_workflow_safety">执行边界</small>
+                      <strong data-i18n="interface_workflow_draft_only">正式保存，执行仍需实时验证</strong>
+                    </div>
+                  </div>
+                  <label class="interface-workflow-identity-field">
+                    <span data-i18n="interface_workflow_identity">软件 / 网站身份</span>
+                    <input
+                      id="interfaceWorkflowIdentityInput"
+                      type="text"
+                      placeholder="网站填域名或 URL；Windows 软件填产品名"
+                      data-i18n-placeholder="interface_workflow_identity_placeholder"
+                      autocomplete="off"
+                    />
+                    <small data-i18n="interface_workflow_identity_help">浏览器页面必须按网站归档，不会使用 Edge 进程代替网站身份。</small>
+                  </label>
+                  <div class="interface-asset-page-tabs" role="tablist" aria-label="学习成果页面">
+                    <button
+                      id="interfaceAssetUnreviewedTab"
+                      type="button"
+                      role="tab"
+                      aria-controls="interfaceAssetUnreviewedPage"
+                      aria-selected="true"
+                      class="is-active"
+                    data-i18n="interface_asset_unreviewed">未审核界面</button>
+                    <button
+                      id="interfaceAssetReviewedTab"
+                      type="button"
+                      role="tab"
+                      aria-controls="interfaceAssetReviewedPage"
+                      aria-selected="false"
+                    data-i18n="interface_asset_reviewed">已审核界面</button>
+                    <button
+                      id="interfaceWorkflowLibraryTab"
+                      type="button"
+                      role="tab"
+                      aria-controls="interfaceWorkflowLibraryPage"
+                      aria-selected="false"
+                    data-i18n="interface_asset_workflows">软件流程</button>
+                  </div>
+                  <section class="interface-asset-workspace" id="interfaceAssetWorkspace">
+                    <aside class="interface-asset-catalog" aria-label="单界面资产">
+                      <section
+                        class="interface-asset-page interface-asset-page-unreviewed"
+                        id="interfaceAssetUnreviewedPage"
+                        role="tabpanel"
+                        aria-labelledby="interfaceAssetUnreviewedTab"
+                      >
+                        <div class="interface-asset-page-heading">
+                          <div>
+                            <strong data-i18n="interface_asset_unreviewed">未审核界面</strong>
+                            <small data-i18n="interface_asset_unreviewed_help">未审核界面不会提供给 Agent 直接使用</small>
+                          </div>
+                          <span id="interfaceWorkflowUnreviewedCount">0</span>
+                        </div>
+                        <div id="interfaceWorkflowUnreviewedList" class="interface-asset-list"></div>
+                      </section>
+                      <section
+                        class="interface-asset-page interface-asset-page-reviewed"
+                        id="interfaceAssetReviewedPage"
+                        role="tabpanel"
+                        aria-labelledby="interfaceAssetReviewedTab"
+                        hidden
+                      >
+                        <div class="interface-asset-page-heading">
+                          <div>
+                            <strong data-i18n="interface_asset_reviewed">已审核界面</strong>
+                            <small data-i18n="interface_asset_reviewed_help">审核通过仍不是执行授权</small>
+                          </div>
+                          <span id="interfaceWorkflowReviewedCount">0</span>
+                        </div>
+                        <div id="interfaceWorkflowReviewedList" class="interface-asset-list"></div>
+                      </section>
+                    </aside>
+                    <section class="interface-asset-shared-evidence" id="interfaceAssetSharedEvidence">
+                      <div class="interface-asset-shared-evidence-empty" id="interfaceAssetSharedEvidenceEmpty">
+                        <strong data-i18n="interface_asset_single_evidence">单界面证据</strong>
+                        <span data-i18n="interface_asset_single_evidence_help">从左侧选择界面后，在这里查看带框图、审核状态和 Agent 可读说明。</span>
+                      </div>
+                    </section>
+                  </section>
+                  <section
+                    class="interface-workflow-library-page"
+                    id="interfaceWorkflowLibraryPage"
+                    role="tabpanel"
+                    aria-labelledby="interfaceWorkflowLibraryTab"
+                    hidden
+                  >
+                  <div class="interface-workflow-library-manager">
+                    <div class="interface-workflow-existing-selector">
+                      <label>
+                        <span data-i18n="interface_workflow_library_select">选择已有软件 / 网站流程</span>
+                        <select id="interfaceWorkflowLibrarySelect">
+                          <option value="" data-i18n="interface_workflow_library_choose">-- 请选择已有流程 --</option>
+                        </select>
+                      </label>
+                      <button id="interfaceWorkflowLoadSavedBtn" type="button" data-i18n="interface_workflow_library_open">打开所选流程</button>
+                      <button id="interfaceWorkflowDeleteBtn" type="button" class="danger" data-i18n="interface_workflow_library_delete">删除流程</button>
+                    </div>
+                    <label>
+                      <span data-i18n="interface_workflow_library_new_name">新流程名称</span>
+                      <input id="interfaceWorkflowNewNameInput" type="text" placeholder="例如：岗位浏览与申请" data-i18n-placeholder="interface_workflow_library_new_placeholder" />
+                    </label>
+                    <button id="interfaceWorkflowCreateBtn" type="button" data-i18n="interface_workflow_library_create">新建软件 / 网站流程</button>
+                    <button id="interfaceWorkflowOpenAttachDialogBtn" type="button" data-i18n="interface_workflow_library_attach">加入单界面</button>
+                    <button id="interfaceWorkflowOpenFolderBtn" type="button" class="secondary" data-i18n="interface_workflow_library_folder">打开源文件夹</button>
+                    <span id="interfaceWorkflowLibraryStatus" data-i18n="interface_workflow_library_loading">正在读取流程库…</span>
+                  </div>
+                  <div class="interface-workflow-workbench-heading">
+                    <div>
+                       <strong data-i18n="interface_workflow_workbench_title">路径图与界面证据</strong>
+                       <small data-i18n="interface_workflow_workbench_help">上方选择界面和连接关系，下方核对带框证据；需要修改时再展开工具。</small>
+                    </div>
+                     <span data-i18n="interface_workflow_read_only">只读验证 · 不会点击目标软件</span>
+                  </div>
+                  <div class="interface-workflow-node-workspace" id="interfaceWorkflowThreeColumnWorkbench">
+                    <section class="interface-workflow-path-panel" id="interfaceWorkflowPathColumn">
+                      <div class="panel-header compact">
+                         <strong data-i18n="interface_workflow_graph_title">界面与路径</strong>
+                         <small data-i18n="interface_workflow_graph_help">圆点代表界面，连线代表操作与跳转</small>
+                      </div>
+                      <div class="interface-workflow-graph" id="interfaceWorkflowGraph">
+                        <div class="interface-workflow-graph-legend" id="interfaceWorkflowGraphLegend">
+                           <span><i class="interface-workflow-legend-node is-reviewed"></i><span data-i18n="interface_workflow_graph_reviewed">已审核界面</span></span>
+                           <span><i class="interface-workflow-legend-node is-unreviewed"></i><span data-i18n="interface_workflow_graph_unreviewed">未审核界面</span></span>
+                           <span><i class="interface-workflow-legend-node is-invalid"></i><span data-i18n="interface_workflow_graph_invalid">证据无效</span></span>
+                           <span><i class="interface-workflow-legend-link"></i><span data-i18n="interface_workflow_graph_reviewed_path">已审核操作路径</span></span>
+                           <span><i class="interface-workflow-legend-link is-unreviewed"></i><span data-i18n="interface_workflow_graph_unreviewed_path">橙色虚线路径需要人工审核</span></span>
+                           <span data-i18n="interface_workflow_graph_gesture_help">点击界面查看证据，滚轮缩放，拖动画布</span>
+                        </div>
+                        <div class="interface-workflow-graph-toolbar" aria-label="路径图视图控制">
+                           <button id="interfaceWorkflowGraphBack" type="button" class="secondary" data-i18n="interface_workflow_graph_fit">适合画布</button>
+                          <button id="interfaceWorkflowGraphZoomOut" type="button" title="缩小" aria-label="缩小路径图">−</button>
+                          <button id="interfaceWorkflowGraphZoomIn" type="button" title="放大" aria-label="放大路径图">+</button>
+                           <button id="interfaceWorkflowGraphReset" type="button" data-i18n="interface_workflow_graph_reset">重置</button>
+                        </div>
+                        <div class="interface-workflow-graph-stage">
+                          <canvas id="interfaceWorkflowGraphCanvas" aria-label="界面操作路径图"></canvas>
+                          <div
+                            class="interface-workflow-graph-tooltip"
+                            id="interfaceWorkflowGraphTooltip"
+                            role="status"
+                            hidden
+                          ></div>
+                          <div class="interface-workflow-graph-context-menu" id="interfaceWorkflowGraphContextMenu" hidden>
+                            <button type="button" data-interface-workflow-context-action="start-link" data-i18n="interface_workflow_context_start_link">从此界面创建连接</button>
+                            <div id="interfaceWorkflowGraphContextEdges"></div>
+                            <button type="button" data-interface-workflow-context-action="cancel-link" data-i18n="interface_workflow_context_cancel_link">取消连接</button>
+                          </div>
+                           <p class="trace-idle" id="interfaceWorkflowGraphEmpty" data-i18n="interface_workflow_graph_empty">加入已保存界面后显示软件的完整界面与跳转关系。</p>
+                        </div>
+                         <p class="interface-workflow-graph-link-status" id="interfaceWorkflowGraphLinkStatus" data-i18n="interface_workflow_graph_link_hint">右键界面可快速创建连接。</p>
+                      </div>
+                    </section>
+                    <section class="interface-workflow-evidence-panel" id="interfaceWorkflowEvidenceColumn">
+                      <div class="panel-header compact">
+                        <div>
+                          <strong id="interfaceWorkflowEvidenceTitle" data-i18n="interface_workflow_evidence">当前界面证据</strong>
+                          <div class="interface-workflow-evidence-mode" role="group" aria-label="证据来源">
+                             <button id="interfaceWorkflowEvidenceModeWorkflow" type="button" class="is-active" data-i18n="interface_workflow_evidence_workflow">流程界面</button>
+                             <button id="interfaceWorkflowEvidenceModePreview" type="button" disabled data-i18n="interface_workflow_evidence_preview">单界面预览</button>
+                          </div>
+                        </div>
+                        <div class="interface-workflow-evidence-header-actions">
+                          <div class="interface-workflow-layer-tabs" id="interfaceWorkflowLayerTabs"></div>
+                           <button id="interfaceWorkflowRefreshEvidenceBtn" type="button" class="secondary" data-i18n="interface_workflow_refresh_evidence">刷新当前证据</button>
+                           <button id="interfaceWorkflowReviewToolsToggle" type="button" class="secondary" data-i18n="interface_workflow_edit_current">修正当前界面</button>
+                          <span
+                            class="interface-workflow-box-editor-status"
+                            id="interfaceWorkflowBoxEditorStatus"
+                            role="status"
+                            aria-live="polite"
+                            hidden
+                          ></span>
+                        </div>
+                      </div>
+                      <div id="interfaceWorkflowEvidenceAnchor" hidden></div>
+                      <div class="interface-workflow-evidence" id="interfaceWorkflowEvidence">
+                        <p class="trace-idle" data-i18n="interface_workflow_evidence_empty">尚未选择界面。</p>
+                      </div>
+                      <section class="interface-workflow-step-audit" id="interfaceWorkflowStepAudit" aria-live="polite">
+                        <p class="trace-idle">当前界面尚无运行验证记录。</p>
+                      </section>
+                      <details class="interface-workflow-preflight-loader">
+                        <summary>加载单字段执行前预检</summary>
+                        <div class="interface-workflow-preflight-loader-row">
+                          <input
+                            id="interfaceWorkflowSafeFillPreflightPath"
+                            type="text"
+                            placeholder="artifacts/.../live_safe_fill_preflight.json"
+                          />
+                          <button id="interfaceWorkflowSafeFillPreflightLoadBtn" type="button" class="secondary">加载审查</button>
+                        </div>
+                        <small id="interfaceWorkflowSafeFillPreflightStatus">只读取脱敏证据，不执行填写。</small>
+                      </details>
+                      <section
+                        class="interface-workflow-safe-fill-preflight"
+                        id="interfaceWorkflowSafeFillPreflight"
+                        aria-live="polite"
+                        hidden
+                      ></section>
+                    </section>
+                    <section class="interface-workflow-inspector-panel" id="interfaceWorkflowReviewToolsColumn" hidden>
+                      <div class="panel-header compact">
+                        <div>
+                          <strong>审核工具</strong>
+                          <small>结构、常规操作与规定跳转</small>
+                        </div>
+                      </div>
+                      <div class="interface-workflow-editor">
+                        <label>
+                          <span data-i18n="interface_workflow_node_name">界面名称</span>
+                          <input id="interfaceWorkflowNodeName" type="text" />
+                        </label>
+                        <label>
+                          <span data-i18n="interface_workflow_surface_type">界面类型</span>
+                          <input id="interfaceWorkflowSurfaceType" type="text" placeholder="list / detail / form / dialog" />
+                        </label>
+                        <label>
+                          <span data-i18n="interface_workflow_review_status">审核状态</span>
+                          <select id="interfaceWorkflowNodeReviewStatus">
+                            <option value="needs_human_review">needs_human_review</option>
+                            <option value="reviewed_candidate">reviewed_candidate</option>
+                            <option value="human_approved">human_approved（需显式确认）</option>
+                            <option value="rejected">rejected</option>
+                          </select>
+                        </label>
+                        <label class="learning-scoped-confirm">
+                          <input id="interfaceWorkflowNodeHumanReviewConfirmed" type="checkbox" />
+                          <span>确认当前 revision 已人工审核</span>
+                        </label>
+                        <small>一次性确认；修改证据、语义、控件、动作、规则或来源后必须重新确认。</small>
+                        <div hidden>
+                          <input id="interfaceWorkflowTransitionAction" type="text" />
+                          <select id="interfaceWorkflowTransitionTarget">
+                            <option value="">没有已观察到的下一界面</option>
+                          </select>
+                        </div>
+                        <section class="interface-workflow-content-editor" id="interfaceWorkflowContentEditor">
+                          <div class="interface-workflow-operation-heading">
+                            <div>
+                              <strong>框与内容语义</strong>
+                              <small>先在下方带框图选择具体控件，再说明它是什么、Agent 如何使用。</small>
+                            </div>
+                            <span id="interfaceWorkflowContentStatus">尚未选择控件</span>
+                          </div>
+                          <label>
+                            <span>当前控件</span>
+                            <input id="interfaceWorkflowContentTarget" type="text" readonly />
+                          </label>
+                          <div class="interface-workflow-operation-grid">
+                            <label>
+                              <span>内容变化方式</span>
+                              <select id="interfaceWorkflowContentBehavior">
+                                <option value="fixed_structure">固定结构</option>
+                                <option value="fixed_label">固定文字</option>
+                                <option value="dynamic_value">动态值</option>
+                                <option value="dynamic_collection">动态列表</option>
+                                <option value="user_input">用户输入</option>
+                                <option value="ephemeral">临时内容</option>
+                                <option value="sensitive_dynamic">敏感动态内容</option>
+                                <option value="ignore">忽略</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>Agent 用途</span>
+                              <select id="interfaceWorkflowContentAgentUsage">
+                                <option value="identity_anchor">识别当前界面</option>
+                                <option value="action_target">操作目标</option>
+                                <option value="decision_signal">决策信息</option>
+                                <option value="display_only">仅展示</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>读取时机</span>
+                              <select id="interfaceWorkflowContentReadPolicy">
+                                <option value="on_interface_match">匹配界面时读取</option>
+                                <option value="on_demand">需要时读取</option>
+                                <option value="never">不读取</option>
+                              </select>
+                            </label>
+                          </div>
+                          <label>
+                            <span>给 Agent 的描述</span>
+                            <textarea
+                              id="interfaceWorkflowContentDescription"
+                              rows="3"
+                              placeholder="例如：这是岗位卡片，读取当前标题和公司；点击后进入岗位详情。"
+                            ></textarea>
+                          </label>
+                          <div class="interface-workflow-operation-actions">
+                            <button id="interfaceWorkflowContentSaveBtn" type="button">保存内容说明</button>
+                          </div>
+                          <small>固定结构进入记忆；Agent 只在当前观察中读取动态值，历史文字不会当作最新内容。</small>
+                        </section>
+                        <div id="interfaceWorkflowOperationToolbarAnchor" hidden></div>
+                        <section
+                          class="interface-workflow-operation-toolbar"
+                          id="interfaceWorkflowOperationToolbar"
+                          aria-label="Agent 操作与跳转路径"
+                          hidden
+                        >
+                          <div class="interface-workflow-operation-heading">
+                            <div>
+                              <strong>3. 用当前框连接下一个界面</strong>
+                              <small>人工定义操作和目标界面；验证只做 dry-run，不点击目标软件。</small>
+                            </div>
+                            <span id="interfaceWorkflowOperationStatus">尚未选择操作</span>
+                          </div>
+                          <label>
+                            <span>当前界面的操作</span>
+                            <select id="interfaceWorkflowOperationList">
+                              <option value="">新增操作</option>
+                            </select>
+                          </label>
+                          <div class="interface-workflow-operation-grid">
+                            <label>
+                              <span>操作类型</span>
+                              <select id="interfaceWorkflowOperationType">
+                                <option value="read">读取</option>
+                                <option value="open_detail">打开详情</option>
+                                <option value="open_apply_flow">进入申请流程</option>
+                                <option value="fill_field">填写字段</option>
+                                <option value="select_option">选择选项</option>
+                                <option value="scroll">滚动</option>
+                                <option value="back">返回</option>
+                                <option value="close_modal">关闭弹窗</option>
+                                <option value="wait">等待</option>
+                                <option value="continue_next_step">继续下一步</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>显示名称</span>
+                              <input id="interfaceWorkflowOperationLabel" type="text" placeholder="例如：打开岗位详情" />
+                            </label>
+                            <label class="interface-workflow-operation-description">
+                              <span>给 Agent 的操作说明</span>
+                              <textarea
+                                id="interfaceWorkflowOperationDescription"
+                                rows="2"
+                                placeholder="例如：点击当前卡片，进入详情后确认标题与所选条目一致。"
+                              ></textarea>
+                            </label>
+                            <div class="interface-workflow-control-picker">
+                              <label>
+                                <span>目标控件</span>
+                                <select id="interfaceWorkflowOperationTargetControl">
+                                  <option value="">不指定控件</option>
+                                </select>
+                              </label>
+                              <button id="interfaceWorkflowOperationPickControlBtn" type="button" class="secondary">在证据图选择</button>
+                            </div>
+                            <label>
+                              <span>风险级别</span>
+                              <select id="interfaceWorkflowOperationRisk">
+                                <option value="low">低</option>
+                                <option value="medium">中</option>
+                                <option value="high">高</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>成功后进入</span>
+                              <select id="interfaceWorkflowOperationTargetNode">
+                                <option value="">请选择目标界面</option>
+                              </select>
+                            </label>
+                            <label>
+                              <span>或创建待学习界面</span>
+                              <input id="interfaceWorkflowOperationPlaceholderName" type="text" placeholder="例如：Quick Apply 表单" />
+                            </label>
+                          </div>
+                          <label class="interface-workflow-operation-confirmation">
+                            <input id="interfaceWorkflowOperationConfirmation" type="checkbox" />
+                            <span>执行前需要用户确认</span>
+                          </label>
+                          <div class="interface-workflow-operation-actions">
+                            <button id="interfaceWorkflowOperationAddBtn" type="button">添加</button>
+                            <button id="interfaceWorkflowOperationUpdateBtn" type="button" class="secondary">更新</button>
+                            <button id="interfaceWorkflowOperationDeleteBtn" type="button" class="secondary">删除</button>
+                            <button id="interfaceWorkflowOperationDryRunBtn" type="button">安全验证</button>
+                          </div>
+                        </section>
+                        <div class="interface-workflow-editor-actions">
+                          <button id="interfaceWorkflowEditBoxesBtn" type="button" data-i18n="interface_workflow_edit_boxes">修改当前界面框</button>
+                          <button id="interfaceWorkflowSaveBtn" type="button" data-i18n="interface_workflow_save_draft">保存学习结果</button>
+                          <button id="interfaceWorkflowMemoryBtn" type="button" class="secondary" data-i18n="interface_workflow_memory_handoff">发布与执行验证</button>
+                        </div>
+                        <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>
+                      </div>
+                      <div class="interface-workflow-inspector" id="interfaceWorkflowInspector">
+                        <p class="trace-idle" data-i18n="interface_workflow_inspector_empty">选择节点后显示区域、控件、候选操作、阻碍条件和前后界面。</p>
+                      </div>
+                    </section>
+                  </div>
+                  </section>
+                </section>
+                <section class="learning-review-section learning-draft-history-panel legacy-learning-review-panel" hidden>
+                  <strong data-i18n="learning_draft_history_title">Saved learning history</strong>
+                  <div id="learningDraftHistoryList">
+                    <p class="trace-idle" data-i18n="learning_draft_history_empty">Load recent results or run learning to show history.</p>
+                  </div>
+                </section>
+                <section class="learning-review-section learning-draft-screenshot-panel legacy-learning-review-panel" id="learningDraftScreenshotPanel" hidden>
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_draft_screenshot_title">Screenshot / numbered map</strong>
+                    <button id="learningDraftOpenBoxEditorBtn" type="button">Edit boxes</button>
+                  </div>
+                  <div id="learningDraftScreenshotPreview">
+                    <p class="trace-idle" data-i18n="learning_draft_screenshot_empty">No learning screenshot loaded.</p>
+                  </div>
+                </section>
+              <section class="learning-review-panel legacy-learning-review-panel" id="learningDraftReviewPanel" hidden>
+                <div class="panel-header compact">
+                  <h4 data-i18n="learning_draft_review_title">Learning result review</h4>
+                  <span id="learningDraftReviewStatus">needs_human_review</span>
+                </div>
+                <div class="mode-help" data-i18n="learning_draft_review_hint">Display and edit a saved learning result. Real actions still require live localization, Gate, and Trace.</div>
+                <div class="learning-review-summary" id="learningDraftReviewSummary"></div>
+                <section class="learning-review-section learning-provider-summary" id="learningDraftProviderSummary" hidden aria-label="Parser provider status">
+                  <strong>Parser provider status (read-only)</strong>
+                  <div id="learningDraftProviderSummaryBody"></div>
+                </section>
+                <details class="learning-review-section learning-screen-preview-section" id="learningDraftScreenUnderstandingDiagnostics">
+                  <summary>
+                    <strong data-i18n="screen_understanding_preview_title">Screen Understanding Preview</strong>
+                    <span id="screenUnderstandingPreviewStatus" data-i18n="screen_understanding_preview_not_available">not available</span>
+                  </summary>
+                  <div class="mode-help" data-i18n="screen_understanding_preview_hint">Read-only parser/classifier preview. Review-only regions are not clickable; grounded candidates still require ROI grounding and Gate.</div>
+                  <div class="screen-understanding-preview" id="screenUnderstandingPreview"></div>
+                </details>
+                <section class="learning-review-section learning-draft-manual-edit-panel" id="learningDraftManualEditPanel">
+                  <strong data-i18n="learning_draft_manual_edit_title">Manual draft edit</strong>
+                  <div class="form-grid">
+                    <label>
+                      <span data-i18n="learning_draft_manual_region_label">Region label</span>
+                      <input id="learningDraftManualRegionLabel" value="" placeholder="search bar / result card / detail area" />
+                    </label>
+                    <label>
+                      <span data-i18n="learning_draft_manual_region_role">Role</span>
+                      <select id="learningDraftManualRegionRole">
+                        <option value="review_only">review_only</option>
+                        <option value="input">input</option>
+                        <option value="button">button</option>
+                        <option value="card">card</option>
+                        <option value="filter">filter</option>
+                        <option value="detail">detail</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_draft_manual_region_section">Section</span>
+                      <input id="learningDraftManualRegionSection" value="" placeholder="header / results / detail / form" />
+                    </label>
+                    <label>
+                      <span data-i18n="learning_draft_manual_operation">Possible operation</span>
+                      <select id="learningDraftManualOperation">
+                        <option value="read_only">read_only</option>
+                        <option value="fill_field">fill_field</option>
+                        <option value="submit_search">submit_search</option>
+                        <option value="open_detail">open_detail</option>
+                        <option value="open_filter">open_filter</option>
+                        <option value="open_apply_flow">open_apply_flow</option>
+                      </select>
+                    </label>
+                    <label class="checkline">
+                      <input id="learningDraftManualEnterPathGraph" type="checkbox" />
+                      <span data-i18n="learning_draft_manual_enter_pathgraph">May enter PathGraph draft</span>
+                    </label>
+                    <label class="checkline">
+                      <input id="learningDraftManualNeedsRecalibration" type="checkbox" checked />
+                      <span data-i18n="learning_draft_manual_needs_recalibration">Needs recalibration</span>
+                    </label>
+                    <label class="wide-control">
+                      <span data-i18n="learning_draft_manual_notes">Notes</span>
+                      <textarea id="learningDraftManualNotes" rows="3" placeholder="why this region should be changed"></textarea>
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learningDraftManualSaveBtn" type="button" data-i18n="learning_draft_manual_save">Save manual edit</button>
+                  </div>
+                </section>
+
+                <section class="learning-review-section learning-correction-memory-panel" id="learningCorrectionMemoryPanel">
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_correction_memory_title">CorrectionMemory candidates</strong>
+                    <button id="learningCorrectionMemoryRefreshBtn" type="button" class="secondary" data-i18n="learning_correction_memory_refresh">Refresh</button>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_correction_memory_hint">Human corrections are stored as non-production candidates. Only separately verified, human-approved active rules may affect later learning runs.</div>
+                  <div id="learningCorrectionMemorySummary" class="learning-correction-memory-summary"></div>
+                  <div id="learningCorrectionMemoryList" class="learning-correction-memory-list">
+                    <p class="trace-idle" data-i18n="learning_correction_memory_empty">No correction candidates recorded.</p>
+                  </div>
+                </section>
+                <details class="learning-draft-raw-details">
+                  <summary data-i18n="learning_draft_raw_details">Raw draft fields</summary>
+                <div class="learning-review-grid">
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_states">states</strong>
+                    <div id="learningDraftReviewStates"></div>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_regions">regions</strong>
+                    <div id="learningDraftReviewRegions"></div>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_actions">action_templates</strong>
+                    <div id="learningDraftReviewActions"></div>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_blockers">blockers</strong>
+                    <textarea id="learningDraftReviewBlockers" rows="4" placeholder="one blocker per line"></textarea>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_verification_rules">verification_rules</strong>
+                    <textarea id="learningDraftReviewVerificationRules" rows="4" placeholder="one verification rule per line"></textarea>
+                  </div>
+                  <div class="learning-review-section">
+                    <strong data-i18n="learning_draft_safety_status">safety/status</strong>
+                    <div id="learningDraftReviewSafety"></div>
+                    <label>
+                      <span data-i18n="learning_draft_review_status">Review status</span>
+                      <select id="learningDraftReviewStatusSelect">
+                        <option value="needs_human_review">needs_human_review</option>
+                        <option value="approved_as_assisted_template">approved_as_assisted_template (candidate only, not executable)</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                </details>
+              </section>
+                <section class="learning-review-section" id="learningOperationalMemoryPanel" hidden>
+                  <div class="panel-header compact">
+                    <strong data-i18n="learning_memory_title">Agent operational memory</strong>
+                    <span id="learningMemoryStatus">not_published</span>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_memory_hint">Publish only a human-approved reviewed candidate. Preview and execution always recapture, re-ground, pass Gate, and verify the result; old click coordinates are never reused.</div>
+                  <div class="form-grid">
+                    <label>
+                      <span data-i18n="learning_memory_interface_id">Interface memory ID</span>
+                      <input id="learningMemoryInterfaceId" value="" placeholder="python_org_documentation" />
+                    </label>
+                    <label class="wide-control">
+                      <span data-i18n="learning_memory_reviewed_candidate_path">Reviewed candidate path</span>
+                      <input id="learningMemoryReviewedCandidatePath" value="" placeholder="artifacts/learning-draft-review/.../reviewed_template_candidate.json" />
+                      <small class="form-help" data-i18n="learning_memory_reviewed_candidate_path_help">Publishing accepts only a human-approved reviewed_template_candidate_v1 artifact. Workflow node review sources cannot be published.</small>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_memory_action">Action (optional override)</span>
+                      <select id="learningMemoryActionSelect">
+                        <option value="">-- Agent resolves from goal --</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span data-i18n="learning_memory_goal">Execution goal</span>
+                      <input id="learningMemoryGoal" value="" placeholder="Open Documentation" />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learningMemoryPublishBtn" type="button" data-i18n="learning_memory_publish">Publish reviewed memory</button>
+                    <button id="learningMemoryLoadBtn" type="button" class="secondary" data-i18n="learning_memory_load">Load active memory</button>
+                    <button id="learningMemoryDryRunBtn" type="button" data-i18n="learning_memory_preview">Preview in Execute</button>
+                    <button id="learningMemoryExecuteBtn" type="button" class="danger" data-i18n="learning_memory_execute">Execute low-risk action</button>
+                    <button id="learningMemoryReturnToEditBtn" type="button" class="secondary" data-i18n="learning_memory_return_to_edit">Return to edit boxes</button>
+                  </div>
+                </section>
+              <section class="learning-draft-pathgraph-panel" id="learningDraftPathGraphPanel">
+              <section class="learning-draft-path-preview" id="learningDraftPathPreview">
+                <div class="panel-header compact">
+                  <h4 data-i18n="learning_draft_path_preview_title">Draft PathGraph preview</h4>
+                  <div class="learning-draft-path-header-actions">
+                    <button id="learningDraftPathLayoutResetBtn" type="button" class="secondary">Reset layout</button>
+                    <span id="learningDraftPathPreviewStatus" data-i18n="learning_draft_not_executable">candidate / not executable</span>
+                  </div>
+                </div>
+                <div class="mode-help" data-i18n="learning_draft_path_preview_hint">Read-only preview generated from the learning draft. It does not load Template Replay, Execute, or click authorization.</div>
+                <section class="learning-draft-hierarchy-panel">
+                  <div class="panel-header compact">
+                    <h5 data-i18n="learning_ui_hierarchy_title">UI hierarchy</h5>
+                    <span id="learningDraftHierarchySummary"></span>
+                  </div>
+                  <div class="mode-help" data-i18n="learning_ui_hierarchy_hint">Screen, regions, sections, groups, components, and content are shown with their resolved parent-child ownership.</div>
+                  <div class="learning-draft-hierarchy-tree" id="learningDraftHierarchyTree"></div>
+                </section>
+                <div class="learning-draft-path-grid">
+                  <div class="learning-draft-path-map" id="learningDraftPathMap"></div>
+                  <div
+                    class="learning-draft-path-resizer"
+                    id="learningDraftPathResizer"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize draft PathGraph preview"
+                    tabindex="0"
+                  ></div>
+                  <div class="learning-draft-interface-detail-panel" id="learningDraftInterfaceDetailPanel">
+                    <div class="learning-draft-path-detail" id="learningDraftPathDetail"></div>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label class="wide-control">
+                    <span data-i18n="learning_detail_observe_candidate_path">PathGraph candidate</span>
+                    <input id="learningDetailObserveCandidatePath" value="" placeholder="artifacts/learning-draft-review/.../pathgraph_candidate.json" />
+                  </label>
+                  <label>
+                    <span data-i18n="learning_detail_observe_request_select">Pending request</span>
+                    <select id="learningDetailObserveRequestSelect">
+                      <option value="">--</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span data-i18n="learning_detail_observe_request_id">Detail observe request</span>
+                    <input id="learningDetailObserveRequestId" value="" placeholder="detail_observe:action_1" />
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="learning_detail_observe_source_select">Recent detail draft</span>
+                    <select id="learningDetailObserveSourceSelect">
+                      <option value="">--</option>
+                    </select>
+                  </label>
+                  <label class="wide-control">
+                    <span data-i18n="learning_detail_observe_source_path">Detail draft source</span>
+                    <input id="learningDetailObserveSourcePath" value="" placeholder="artifacts/learning-runs/.../trial_result.json" />
+                  </label>
+                </div>
+                <div class="button-row">
+                  <button id="learningDetailObserveSourcesBtn" data-i18n="learning_detail_observe_sources">Load recent drafts</button>
+                  <button id="learningDetailObserveAttachBtn" data-i18n="learning_detail_observe_attach">Attach detail observe</button>
+                  <button id="learningAssistedTemplateDecisionsSaveBtn" data-i18n="learning_assisted_template_decisions_save">Save checklist decisions</button>
+                  <button id="learningAssistedTemplateDecisionsSaveExportBtn" data-i18n="learning_assisted_template_decisions_save_export">Save + create asset candidate</button>
+                  <button id="learningAssistedTemplateDecisionsSaveGraphPreviewBtn" data-i18n="learning_assisted_template_decisions_save_graph_preview">Save + build graph draft preview</button>
+                  <button id="learningAssistedTemplateDecisionsSaveAuditPreviewBtn" data-i18n="learning_assisted_template_decisions_save_audit_preview">Save + build audit preview</button>
+                </div>
+                <section class="learning-review-section" id="learningAssistedTemplatePackagePanel">
+                  <strong data-i18n="learning_assisted_template_checklist">Assisted template checklist</strong>
+                  <div id="learningAssistedTemplateSuggestionsSummary"></div>
+                  <div id="learningAssistedTemplateAcceptanceSimulationSummary"></div>
+                  <div id="learningAssistedTemplateAssetCandidateSummary"></div>
+                  <div id="learningAssistedTemplateGraphDraftSummary"></div>
+                  <div id="learningAssistedTemplatePromotionPreflightSummary"></div>
+                  <div id="learningAssistedTemplateAuditedPromotionRequestSummary"></div>
+                  <div id="learningAssistedTemplateChecklist">
+                    <p class="trace-idle" data-i18n="learning_assisted_template_empty">No review package loaded.</p>
+                  </div>
+                </section>
+              </section>
+              </section>
+              </section>
+              </section>
+              <details class="replay-advanced-tools">
+                <summary>
+                  <span data-i18n="learn_replay_advanced_tools">Advanced diagnostics</span>
+                  <small data-i18n="learn_replay_advanced_tools_hint">Optional tools for debugging traces, replay reports, and learned samples. Daily map review can stay closed.</small>
+                </summary>
+                <div class="replay-advanced-grid">
+                  <div class="subpanel">
+                    <h4 data-i18n="seek_application_evidence">Application fill check</h4>
+                    <div class="mode-help mode-help-learn" data-mode-scope="learn" data-i18n="seek_application_evidence_hint">Optional: inspect what was filled, what the final review saw, and whether the flow stopped before final submit.</div>
+                    <div class="form-grid">
+                      <label class="wide-control">
+                        <span data-i18n="application_fill_record_path">Filled form record</span>
+                        <input id="seekApplicationRecordPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/application_fill_record.json" />
+                      </label>
+                      <label class="wide-control">
+                        <span data-i18n="final_review_audit_path">Final review file</span>
+                        <input id="seekApplicationAuditPath" value="logs/smoke/seek_apply_live_92822270_20260620_b/final_review_audit.json" />
+                      </label>
+                      <label class="wide-control">
+                        <span data-i18n="application_flow_artifact_path">Application flow map</span>
+                        <input id="seekApplicationArtifactPath" value="artifacts/seek/learned_seek_application_flow_92822270_20260620.json" />
+                      </label>
+                    </div>
+                    <div class="button-row">
+                      <button id="seekApplicationEvidenceLoadBtn" data-i18n="load_application_evidence">Load fill check</button>
+                    </div>
+                    <div class="run-summary" id="seekApplicationEvidenceSummary"></div>
+                    <div class="action-table" id="seekApplicationFilledFields"></div>
+                  </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="regression_suite">Regression check</h4>
+                    <div class="form-grid">
+                      <label class="wide-control">
+                        <span data-i18n="regression_report_path">Regression report file</span>
+                        <input id="replayRegressionPath" value="logs/smoke/artifact_replay_regression_20260619.json" />
+                      </label>
+                    </div>
+                    <div class="button-row">
+                      <button id="replayRegressionLoadBtn" data-i18n="load_regression_report">Load regression check</button>
+                    </div>
+                    <div class="run-summary" id="replayRegressionSummary"></div>
+                    <div class="action-table" id="replayRegressionBaselines"></div>
+                  </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="learn_sample_gate">New sample check</h4>
+                  <div class="form-grid">
+                    <label class="wide-control">
+                      <span data-i18n="learn_sample_gate_path">Sample check file</span>
+                      <input id="learnSampleGatePath" value="logs/smoke/learn_sample_readiness_gate_20260619.json" />
+                    </label>
+                  </div>
+                  <div class="button-row">
+                    <button id="learnSampleGateLoadBtn" data-i18n="load_learn_sample_gate">Load sample check</button>
+                  </div>
+                  <div class="run-summary" id="learnSampleGateSummary"></div>
+                </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="safe_validation_replay">Safety replay result</h4>
+                    <div class="run-summary" id="replayValidationSummary"></div>
+                    <div class="action-table" id="replayValidationActions"></div>
+                    <div class="run-timeline" id="replayValidationTimeline"></div>
+                  </div>
+                  <div class="subpanel">
+                    <h4 data-i18n="task_run_replay">Task replay result</h4>
+                    <div class="run-summary" id="replayTaskRunSummary"></div>
+                    <div class="run-timeline" id="replayTaskRunTimeline"></div>
+                  </div>
+                </div>
+              </details>
+            </section>
+
+            <section class="panel stage-page" data-page="execute_task_run">
+              <h3 data-i18n="execute_task_run_title">PathGraph Task Run</h3>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_task_run_hint">A test harness that simulates an agent loop. Each step still calls Execute Mode once; input demo is dry-run only.</div>
+              <div class="form-grid">
+                <label class="wide-control">
+                  <span data-i18n="goal">Goal</span>
+                  <input id="taskRunGoal" value="读取 3 个列表项详情" />
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="runtime_graph_path">Runtime PathGraph path</span>
+                  <input id="taskRunGraphPath" value="" placeholder="artifacts/seek/runtime_path_graph_seek_mvp_20260617.json" />
+                </label>
+                <label>
+                  <span data-i18n="task_template">Task template</span>
+                  <select id="taskRunTemplate">
+                    <option value="read_n_list_details">read_n_list_details</option>
+                    <option value="read_article_page">read_article_page</option>
+                    <option value="read_issue_thread">read_issue_thread</option>
+                    <option value="input_dry_run_demo">input_dry_run_demo</option>
+                    <option value="model_artifact_single_step">model_artifact_single_step</option>
+                  </select>
+                </label>
+                <label>
+                  <span data-i18n="max_items">Max items</span>
+                  <input id="taskRunMaxItems" type="number" min="1" max="20" value="3" />
+                </label>
+                <label>
+                  <span data-i18n="max_steps">Max steps</span>
+                  <input id="taskRunMaxSteps" type="number" min="1" max="50" value="20" />
+                </label>
+                <label>
+                  <span data-i18n="demo_input_text">Demo input text</span>
+                  <input id="taskRunInputText" value="software engineer" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="taskRunStartBtn" data-i18n="start_task_run">Start task run</button>
+                <button id="taskRunNextBtn" data-i18n="execute_next_step">Execute next step</button>
+                <button id="taskRunStopBtn" data-i18n="stop">Stop</button>
+                <button id="taskRunResetBtn" data-i18n="reset_timeline">Reset timeline</button>
+              </div>
+              <div class="run-summary" id="taskRunSummary"></div>
+              <div class="run-timeline" id="taskRunTimeline"></div>
+            </section>
+
+            <section class="panel stage-page" data-page="input">
+              <h3 data-i18n="type_text">Type Text</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="text">Text</span>
+                  <input id="typeTextValue" value="ai 最新进展" />
+                </label>
+                <label>
+                  <span>X</span>
+                  <input id="typeX" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>Y</span>
+                  <input id="typeY" type="number" min="0" value="" />
+                </label>
+                <label class="checkline">
+                  <input id="typeClickFirst" type="checkbox" />
+                  <span data-i18n="click_before_typing">Click before typing</span>
+                </label>
+                <label class="checkline">
+                  <input id="typeClear" type="checkbox" />
+                  <span data-i18n="clear_existing">Clear existing</span>
+                </label>
+                <label class="checkline">
+                  <input id="typeSubmit" type="checkbox" />
+                  <span data-i18n="submit_enter">Submit Enter</span>
+                </label>
+                <label class="checkline">
+                  <input id="typeDryRun" type="checkbox" checked />
+                  <span data-i18n="dry_run">Dry run</span>
+                </label>
+              </div>
+              <div class="button-row">
+                <button id="typeTextBtn" data-i18n="type_text">Type text</button>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="trace" style="max-width:none;">
+              <h3 data-i18n="nav_trace">Trace Inspector</h3>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="trace_mode_filter">Trace mode</span>
+                  <select id="traceModeFilter">
+                    <option value="">All</option>
+                    <option value="learn">Learn</option>
+                    <option value="execute">Execute</option>
+                  </select>
+                </label>
+                <label class="wide-control">
+                  <span data-i18n="trace_file">Trace file</span>
+                  <div style="display:flex;gap:6px;">
+                    <select id="traceFileSelect" style="flex:1;min-width:0;">
+                      <option value="">-- auto latest --</option>
+                    </select>
+                    <button id="refreshTracesBtn" title="Refresh trace list">Refresh</button>
+                    <button id="openTraceFolderBtn" title="Open trace folder">Open</button>
+                  </div>
+                </label>
+              </div>
+              <div class="trace-detail" id="traceDetail">
+                <p class="trace-idle">Select a trace file or run an API request to auto-load the latest trace</p>
+              </div>
+            </section>
+
+            <section class="panel stage-page" data-page="execute">
+              <h3 data-i18n="execute_recognition_plan">Execute Recognition Plan</h3>
+              <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_workbench_hint">Execute Mode: preview the click plan and coordinate overlay first, then reuse the approved_plan_id for the real click.</div>
+              <div class="execute-evidence-note">
+                <strong>Evidence:</strong> dry-run returns action trace, recognition trace, pre-click gate, selected point, and a coordinate preview image.
+              </div>
+              <div class="form-grid">
+                <label>
+                  <span data-i18n="goal">Goal</span>
+                  <input id="executeGoal" value="点击此处测试" />
+                </label>
+                <label>
+                  <span data-i18n="app_name">App name</span>
+                  <input id="executeApp" value="" />
+                </label>
+                <label>
+                  <span>Point X</span>
+                  <input id="pointX" type="number" min="0" value="" />
+                </label>
+                <label>
+                  <span>Point Y</span>
+                  <input id="pointY" type="number" min="0" value="" />
+                </label>
+              </div>
+              <input id="approvedPlanId" type="hidden" value="" />
+              <input id="learnedInstructionId" type="hidden" value="" />
+              <input id="learningMode" type="checkbox" hidden />
+              <div class="button-row">
+                <button id="dryRunBtn" data-i18n="plan_click_preview">Plan Click Preview</button>
+                <button id="executeBtn" class="danger" data-i18n="plan_execute_click">Plan Execute Click</button>
+                <button id="confirmedDryRunBtn" data-i18n="point_click_preview">Point Click Preview</button>
+                <button id="confirmedClickBtn" class="danger" data-i18n="point_execute_click">Point Execute Click</button>
+              </div>
+            </section>
+            <!-- Navigation path graph: multi-click page transition web -->
+            <section class="panel nav-path-panel" id="navPathPanel">
+              <div class="panel-heading">
+                <h3 data-i18n="path_graph_title">Navigation Path</h3>
+                <div class="path-status-strip">
+                  <span id="pathGraphModeBadge">live</span>
+                  <span id="pathGraphStateBadge">idle</span>
+                </div>
+              </div>
+              <div class="runtime-architecture-strip" id="runtimeArchitectureStrip">
+                <strong data-i18n="runtime_architecture_title">Agentic Loop</strong>
+                <span data-i18n="runtime_architecture_summary" data-runtime-architecture-summary>Agent decides -> Gate checks -> Operation acts -> Trace records; PathGraph is guidance.</span>
+                <div>
+                  <i>Agent</i>
+                  <i>Operation</i>
+                  <i>Gate</i>
+                  <i>Trace</i>
+                  <i>PathGraph asset</i>
+                </div>
+              </div>
+              <div class="path-toolbar">
+                <div class="path-toolbar-left">
+                  <select id="pathHistorySelect" class="path-history-select" title="Select saved path">
+                    <option value="">-- live session --</option>
+                  </select>
+                  <span class="path-app-label" id="pathAppLabel"></span>
+                </div>
+                <div class="path-toolbar-center">
+                  <button id="pathZoomOutBtn" title="Zoom out">-</button>
+                  <span class="path-zoom-label" id="pathZoomLabel">100%</span>
+                  <button id="pathZoomInBtn" title="Zoom in">+</button>
+                  <button id="pathZoomResetBtn" title="Reset zoom">Reset</button>
+                </div>
+                <div class="path-toolbar-right">
+                  <button class="path-save-btn" id="savePathBtn" data-i18n="save_path">Save Path</button>
+                  <button class="path-folder-btn" id="openPathFolderBtn" title="Open path save folder">Open</button>
+                </div>
+              </div>
+              <div class="path-canvas-wrap" id="pathCanvasWrap">
+                <canvas id="navPathCanvas" aria-label="Navigation path graph"></canvas>
+                <div class="path-empty-overlay" id="pathEmptyOverlay" data-i18n="path_empty_hint">Observe a screen to start building the navigation path</div>
+              </div>
+            </section>
+            <section class="panel preview-panel">
+              <div class="panel-heading">
+                <h3 data-i18n="screenshot_preview">Screenshot Preview</h3>
+                <span id="previewMeta">no image</span>
+              </div>
+              <div class="image-preview" id="imagePreview">
+                <img id="previewImage" alt="" />
+                <div id="bboxOverlay" class="bbox-overlay"></div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="response-surface">
+            <section class="panel path-detail-panel" id="pathDetailPanel">
+              <div class="panel-heading">
+                <h3 data-i18n="nav_path_detail">Page Detail</h3>
+                <span id="pathDetailMeta"></span>
+              </div>
+              <div id="pathDetailContent">
+                <p class="path-detail-empty" data-i18n="path_detail_empty">Click a page node in the navigation path to view its observe summary</p>
+              </div>
+            </section>
+            <section class="panel response-panel">
+              <div class="panel-heading">
+                <h3 data-i18n="api_response">API Response</h3>
+                <button id="copyResponseBtn" data-i18n="copy">Copy</button>
+              </div>
+              <pre id="responseText">{}</pre>
+            </section>
+            <section class="panel trace-full-view" id="traceFullView" style="display:none;">
+              <div class="panel-heading">
+                <h3>Trace Flow</h3>
+                <span id="traceFullMeta"></span>
+              </div>
+              <div id="traceFullContent">
+                <p class="trace-idle">Select a trace file to inspect</p>
+              </div>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <!-- Save-As dialog -->
+    <div class="save-as-overlay" id="saveAsOverlay" style="display:none">
+      <div class="save-as-dialog">
+        <h3 data-i18n="save_path_as">Save Path As</h3>
+        <label>
+          <span data-i18n="save_file_name">File name</span>
+          <div class="save-as-input-row">
+            <input id="saveAsFileName" type="text" placeholder="my_app_path_graph" />
+            <span class="save-as-ext">.json</span>
+          </div>
+        </label>
+        <p class="save-as-folder" id="saveAsFolder">artifacts/path-graphs/</p>
+        <div class="save-as-actions">
+          <button id="saveAsCancelBtn" data-i18n="cancel">Cancel</button>
+          <button id="saveAsConfirmBtn" class="primary" data-i18n="save">Save</button>
+        </div>
+      </div>
+    </div>
+    <div class="image-inspector-overlay" id="imageInspectorOverlay" style="display:none">
+      <div class="image-inspector-dialog" role="dialog" aria-modal="true" aria-label="Image inspector">
+        <div class="image-inspector-header">
+          <div>
+            <strong id="imageInspectorTitle">Image preview</strong>
+            <span id="imageInspectorMeta"></span>
+          </div>
+          <button id="imageInspectorCloseBtn" type="button" data-i18n="close">Close</button>
+        </div>
+        <div class="image-inspector-body" id="imageInspectorBody">
+          <div class="image-inspector-stage" id="imageInspectorStage">
+            <img id="imageInspectorImage" alt="" />
+            <div class="image-inspector-draft-boxes" id="imageInspectorDraftBoxes"></div>
+            <div class="image-inspector-box" id="imageInspectorBox"></div>
+            <div class="image-inspector-point" id="imageInspectorPoint"></div>
+          </div>
+        </div>
+        <div class="image-inspector-footer" id="imageInspectorFooter" style="display:none">
+          <span id="imageInspectorEditHint"></span>
+          <div class="image-inspector-editor-controls" id="imageInspectorEditorControls" style="display:none">
+            <button id="imageInspectorCompactBoxesBtn" type="button" aria-pressed="true">显示全部框</button>
+            <button id="imageInspectorAddRegionBtn" type="button">Add</button>
+            <button id="imageInspectorDeleteBoxBtn" type="button">Delete</button>
+            <button id="imageInspectorUndoBtn" type="button">Undo</button>
+            <button id="imageInspectorRedoBtn" type="button">Redo</button>
+            <section class="image-inspector-ownership-review" id="imageInspectorOwnershipReview" hidden></section>
+            <label class="image-inspector-label-control">
+              <span>Name</span>
+              <input id="imageInspectorLabel" type="text" placeholder="Search button" />
+            </label>
+            <label class="image-inspector-description-control">
+              <span>Agent description</span>
+              <input id="imageInspectorDescription" type="text" placeholder="What this control does" />
+            </label>
+            <label>
+              <span>Role</span>
+              <select id="imageInspectorRoleSelect">
+                <option value="review_only">review_only</option>
+                <option value="input">input</option>
+                <option value="button">button</option>
+                <option value="card">card</option>
+                <option value="filter">filter</option>
+                <option value="detail">detail</option>
+              </select>
+            </label>
+            <label>
+              <span>Action</span>
+              <select id="imageInspectorActionTypeSelect">
+                <option value="read_only">read_only</option>
+                <option value="click">click</option>
+                <option value="open_detail">open_detail</option>
+                <option value="open_apply_flow">open_apply_flow</option>
+                <option value="open_external_apply">open_external_apply (blocked)</option>
+                <option value="fill_field">fill_field</option>
+                <option value="type_text">type_text</option>
+                <option value="select_option">select_option</option>
+                <option value="scroll">scroll</option>
+                <option value="continue_next_step">continue_next_step</option>
+                <option value="final_submit">final_submit (blocked)</option>
+              </select>
+            </label>
+            <label>
+              <span>Input</span>
+              <input id="imageInspectorInputSemantics" type="text" placeholder="email, query, free text..." />
+            </label>
+            <label>
+              <span>Parent</span>
+              <select id="imageInspectorParentSelect"><option value="">none</option></select>
+            </label>
+            <label>
+              <span>Destination</span>
+              <select id="imageInspectorDestinationKind">
+                <option value="none">none</option>
+                <option value="interface">interface</option>
+                <option value="url">URL</option>
+              </select>
+            </label>
+            <label class="image-inspector-destination-control">
+              <span>Target</span>
+              <input id="imageInspectorDestinationValue" type="text" placeholder="interface ID or URL" />
+            </label>
+            <label class="image-inspector-verification-control">
+              <span>Verify</span>
+              <input id="imageInspectorVerificationRule" type="text" placeholder="What should change after the action" />
+            </label>
+            <label>
+              <span>Risk</span>
+              <select id="imageInspectorRiskLevel">
+                <option value="normal">normal</option>
+                <option value="review_required">review required</option>
+                <option value="dangerous">dangerous</option>
+              </select>
+            </label>
+            <label class="image-inspector-reason-control">
+              <span>Reason</span>
+              <input id="imageInspectorReason" type="text" placeholder="why this box changed" />
+            </label>
+          </div>
+          <button id="imageInspectorApplyBoxBtn" type="button" data-i18n="learning_draft_apply_selected_bbox">Use selected box</button>
+        </div>
+      </div>
+    </div>
+    <dialog class="interface-workflow-link-dialog interface-asset-attach-dialog" id="interfaceAssetAttachDialog">
+      <div class="interface-workflow-link-dialog-shell">
+        <header>
+          <div>
+            <strong>加入软件流程</strong>
+            <span>加入节点不会自动建立连接；未审核界面不会提供给 Agent 直接使用。</span>
+          </div>
+          <button id="interfaceAssetAttachDialogCloseBtn" type="button" class="secondary" aria-label="关闭">关闭</button>
+        </header>
+        <div class="interface-asset-attach-dialog-body">
+          <label class="interface-workflow-source-picker">
+            <span>单界面</span>
+            <select id="interfaceWorkflowSourceSelect">
+              <option value="">--</option>
+            </select>
+          </label>
+          <button id="interfaceWorkflowSourcePreviewBtn" type="button" class="secondary">预览单界面</button>
+          <div class="interface-workflow-source-preview" id="interfaceWorkflowSourcePreview" hidden>
+            <div class="interface-workflow-source-preview-media" id="interfaceWorkflowSourcePreviewMedia"></div>
+            <label>
+              <span>单界面名称</span>
+              <input id="interfaceWorkflowSourceNameInput" type="text" placeholder="例如：岗位搜索首页" />
+            </label>
+          </div>
+          <label>
+            <span>加入哪个软件流程</span>
+            <select id="interfaceWorkflowAttachWorkflowSelect">
+              <option value="">当前打开流程</option>
+            </select>
+          </label>
+          <p class="interface-asset-attach-warning" id="interfaceAssetAttachWarning">
+            请选择单界面。审核状态只决定 Agent 是否可读取，不构成执行授权。
+          </p>
+          <span id="interfaceWorkflowSourceStatus">请选择单界面和目标流程。</span>
+        </div>
+        <footer>
+          <button id="interfaceWorkflowRemoveSourceBtn" type="button" class="secondary">从当前流程移除</button>
+          <div>
+            <button id="interfaceAssetAttachOnlyBtn" type="button">仅加入节点</button>
+            <button id="interfaceAssetAttachAndConnectBtn" type="button">加入并连接</button>
+            <button id="interfaceWorkflowAddSourceBtn" type="button" hidden>加入流程</button>
+          </div>
+        </footer>
+      </div>
+    </dialog>
+    <dialog class="interface-workflow-link-dialog" id="interfaceWorkflowLinkDialog">
+      <div class="interface-workflow-link-dialog-shell">
+        <header>
+          <div>
+            <strong>连接两个界面</strong>
+            <span>选择来源界面的控件和操作；保存后路径图会建立连接。</span>
+          </div>
+          <button id="interfaceWorkflowLinkDialogCloseBtn" type="button" class="secondary" aria-label="关闭">关闭</button>
+        </header>
+        <div class="interface-workflow-link-endpoints" aria-label="连接端点">
+          <div>
+            <span>来源界面</span>
+            <strong id="interfaceWorkflowLinkDialogSource">尚未选择</strong>
+          </div>
+          <span aria-hidden="true">→</span>
+          <div>
+            <span>目标界面</span>
+            <strong id="interfaceWorkflowLinkDialogTarget">尚未选择</strong>
+          </div>
+        </div>
+        <div class="interface-workflow-link-dialog-body" id="interfaceWorkflowLinkDialogBody"></div>
+        <footer>
+          <span id="interfaceWorkflowLinkDialogStatus">连接尚未保存</span>
+          <div>
+            <button id="interfaceWorkflowLinkDialogCancelBtn" type="button" class="secondary">取消</button>
+            <button id="interfaceWorkflowLinkDialogSaveBtn" type="button">保存连接</button>
+          </div>
+        </footer>
+      </div>
+    </dialog>
+    <dialog class="interface-workflow-link-dialog interface-workflow-control-picker-dialog" id="interfaceWorkflowControlPickerDialog">
+      <div class="interface-workflow-link-dialog-shell">
+        <header>
+          <div>
+            <strong>选择跳转控件</strong>
+            <span>点击证据图中的具体框；选择后会自动返回连接编辑器。</span>
+          </div>
+          <button id="interfaceWorkflowControlPickerDialogCancelBtn" type="button" class="secondary" aria-label="返回连接编辑器">返回</button>
+        </header>
+        <div class="interface-workflow-control-picker-dialog-body" id="interfaceWorkflowControlPickerDialogBody"></div>
+      </div>
+    </dialog>
+    <script src="/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1"></script>
+    <script src="/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4"></script>
+    <script src="/panel/assets/interface_workflow_graph.js?v=20260815-workflow-layout-bounds-1"></script>
+    <script src="/panel/assets/panel.js?v=20260815-learning-screenshot-visibility-2"></script>
+  </body>
+</html>
