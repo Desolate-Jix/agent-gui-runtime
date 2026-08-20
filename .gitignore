@@ -24,10 +24,14 @@ __pycache__/
 htmlcov/
 /logs/
 /artifacts/
+/reports/
 /runtime_state/
 /models/
 /tools/
+/.learnings/
+/.locus/
 .runtime-*.pid
+demo.mp4
 tmp_*.ps1
 logs/*.log
 logs/*.json
@@ -43,3 +47,6 @@ ARCHITECTURE.md
 CURRENT_STATE.md
 NEXT_STEPS.md
 OPENCLAW_RECOVERY.md
+PROJECT_HANDOFF_CONVERSATION_HISTORY.zh-CN.md
+PROJECT_ITERATION_HISTORY.md
+WORKLOG.md
