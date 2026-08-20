@@ -14768,17 +14768,17 @@ function renderLearningDraftProviderSummary(summary) {
     ? `${summary.provider_error.code || "provider_error"}: ${summary.provider_error.details || ""}`.trim()
     : "";
   const rows = [
-    ["Provider success", `status=${summary.provider_status || "unknown"} �� provider=${summary.provider || "omniparser"}`],
-    ["Candidates generated", `elements=${Number(summary.element_total || 0)} �� interactive_evidence=${Number(summary.interactive_evidence_count || 0)}`],
-    ["Grounding eligibility", `eligible=${Number(summary.grounding_eligible_count || 0)} �� review_only=${Number(summary.review_only_count || 0)} �� invalid_bbox=${Number(summary.invalid_bbox_count || 0)}`],
-    ["Execution authorization", `authorized=${summary.execution_authorized === true ? "true" : "false"} �� no execution action available`],
-    ["Lineage", `complete=${summary.lineage_complete === true ? "true" : "false"} �� capture_present=${summary.capture_id_present === true ? "true" : "false"} �� sha_present=${summary.screenshot_sha256_present === true ? "true" : "false"}${warnings.length ? ` �� warnings=${warnings.join(",")}` : ""}`],
-    ["Provider revision", `profile=${summary.profile_id || "-"} �� model=${summary.model_revision || "-"}`],
+    ["供应商成功", `status=${summary.provider_status || "unknown"} · provider=${summary.provider || "omniparser"}`],
+    ["已生成候选", `elements=${Number(summary.element_total || 0)} · interactive_evidence=${Number(summary.interactive_evidence_count || 0)}`],
+    ["Grounding 资格", `eligible=${Number(summary.grounding_eligible_count || 0)} · review_only=${Number(summary.review_only_count || 0)} · invalid_bbox=${Number(summary.invalid_bbox_count || 0)}`],
+    ["执行授权", `authorized=${summary.execution_authorized === true ? "true" : "false"} · 未提供执行动作`],
+    ["证据谱系", `complete=${summary.lineage_complete === true ? "true" : "false"} · capture_present=${summary.capture_id_present === true ? "true" : "false"} · sha_present=${summary.screenshot_sha256_present === true ? "true" : "false"}${warnings.length ? ` · warnings=${warnings.join(",")}` : ""}`],
+    ["供应商版本", `profile=${summary.profile_id || "-"} · model=${summary.model_revision || "-"}`],
   ];
   panel.hidden = false;
   target.innerHTML = `<div class="learning-review-safety">${rows.map(([label, value]) => (
     `<span><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</span>`
-  )).join("")}</div>${providerError ? `<p class="trace-idle"><strong>Provider error:</strong> ${escapeHtml(providerError)}</p>` : ""}`;
+  )).join("")}</div>${providerError ? `<p class="trace-idle"><strong>供应商错误:</strong> ${escapeHtml(providerError)}</p>` : ""}`;
 }
 
 function renderScreenUnderstandingPreview(preview) {

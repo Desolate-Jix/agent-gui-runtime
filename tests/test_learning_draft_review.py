@@ -734,11 +734,17 @@ def test_panel_learning_recognition_trial_loads_as_review_and_candidate() -> Non
             "observation_evidence": {
                 "contract_version": "panel_learning_draft_observation_evidence_v1",
                 "screen_size": {"width": 1200, "height": 800},
+                "capture_id": "python-home-capture-1",
+                "source_run_id": "python-home-observe-1",
+                "screenshot_sha256": "c" * 64,
                 "current_image_path": "artifacts/screenshots/sample_python_homepage.png",
                 "coordinate_overlay_path": "logs/overlays/sample_python_homepage_overlay.png",
                 "calibrated_targets": [
                     {
                         "candidate_id": "search_input",
+                        "capture_id": "python-home-capture-1",
+                        "source_run_id": "python-home-observe-1",
+                        "screenshot_sha256": "c" * 64,
                         "label": "Search input",
                         "role": "input",
                         "bbox": {"x": 800, "y": 120, "w": 240, "h": 36},
@@ -770,7 +776,10 @@ def test_panel_learning_recognition_trial_loads_as_review_and_candidate() -> Non
     assert data["summary"]["draft_section_counts"]["action_templates"] == 1
 
     trial_path = data["trial_path"]
-    review_response = client.post("/panel/load_learning_draft_review", json={"source_path": trial_path})
+    review_response = client.post(
+        "/panel/load_learning_draft_review",
+        json={"source_path": trial_path, "discover_related_sidecars": False},
+    )
     assert review_response.status_code == 200
     review_body = review_response.json()
     assert review_body["success"] is True
@@ -5921,4 +5930,83 @@ def test_recognition_task_exposes_read_only_omniparser_provider_summary(tmp_path
     assert failed_summary["provider_error"]["code"] == "weights_missing"
     assert failed_summary["lineage_complete"] is False
     assert "missing_screenshot_sha256" in failed_summary["lineage_warnings"]
+    assert "missing_profile_id" in failed_summary["lineage_warnings"]
+    assert "missing_model_revision" in failed_summary["lineage_warnings"]
+    assert "missing_source_run_id" in failed_summary["lineage_warnings"]
+    assert "invalid_image_size" in failed_summary["lineage_warnings"]
+    assert "invalid_coordinate_space" in failed_summary["lineage_warnings"]
+    assert "provider_status_failed" in failed_summary["lineage_warnings"]
     assert failed_summary["execution_authorized"] is False
+
+    mismatched_summary = _omniparser_provider_summary(
+        observe_bundle={
+            "capture_id": "current-capture",
+            "screenshot_sha256": "b" * 64,
+            "sources": {
+                "omniparser": {
+                    **parser_result,
+                    "capture_id": "stale-capture",
+                    "stale": True,
+                }
+            },
+        },
+        result={},
+    )
+    assert mismatched_summary["lineage_complete"] is False
+    assert "capture_id_mismatch" in mismatched_summary["lineage_warnings"]
+    assert "screenshot_sha256_mismatch" in mismatched_summary["lineage_warnings"]
+    assert "provider_stale" in mismatched_summary["lineage_warnings"]
+
+
+
+def test_recognition_provider_summary_survives_review_load(tmp_path: Path) -> None:
+    from app.learn.workflow_contracts import RecognitionTaskInput
+    from app.learn.workflow_tasks.recognition import run_recognition_task
+
+    parser_result = {
+        "contract_version": "screen_parser_result_v1",
+        "provider": "omniparser",
+        "status": "success",
+        "profile_id": "omniparser_v2",
+        "model_revision": "v.2.0.1",
+        "capture_id": "capture-18",
+        "source_run_id": "omni-run-18",
+        "screenshot_sha256": "c" * 64,
+        "image_size": {"width": 800, "height": 600},
+        "coordinate_space": "image_normalized_xyxy",
+        "elements": [],
+        "timing": {},
+        "resource_usage": {},
+        "provenance": {"runner": "local_smoke"},
+    }
+    result = run_recognition_task(
+        RecognitionTaskInput(
+            app_name="sample_app",
+            observation_evidence={
+                "screen_size": {"width": 800, "height": 600},
+                "capture_id": "capture-18",
+                "source_run_id": "omni-run-18",
+                "screenshot_sha256": "c" * 64,
+                "omniparser": parser_result,
+            },
+        ),
+        project_root=tmp_path,
+        trial_builder=lambda **_kwargs: {
+            "status": "ready",
+            "screen_inventory": [],
+            "classification": {"summary": {}},
+            "learning_draft": {
+                "workflow_draft": {"states": [], "action_templates": [], "verification_rules": []},
+                "interface_draft": {"regions": []},
+                "blockers": [],
+                "safety": {},
+            },
+        },
+        grounding_adapter=lambda **_kwargs: {},
+        trace_writer=lambda **_kwargs: "logs/traces/recognition.json",
+    )
+
+    review = load_learning_draft_review(result.payload["trial_path"], project_root=tmp_path)
+
+    assert review["draft"]["page_details"]["provider_summary"] == result.payload["provider_summary"]
+    assert review["draft"]["page_details"]["provider_summary"]["execution_authorized"] is False

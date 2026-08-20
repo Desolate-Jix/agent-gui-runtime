@@ -793,3 +793,9 @@ The verified demo artifact is `artifacts/live-verification/seek_same_site_quick_
 Execution used fresh current-UIA grounding (`current_uia_unique_match_v1`), one click, no retry, and no VISTA. Same-origin/new-tab navigation was enforced: the same UIA runtime/tab moved from `https://nz.seek.com/job/93615952` to `/apply`. The semantic action was `open_apply_flow`; the verified action trace is `logs/traces/actions/20260815-122136-377469__execute-mode-click__msedge-exe.json`.
 
 The run stopped at the SEEK apply entry. No field fill, typing, upload, Continue/Next, or final submit/send/confirm/payment occurred. The apply-form placeholder remains unreviewed and not agent-ready; user acceptance and demo recording are still pending. This artifact is evidence, not authorization.
+
+## OmniParser Learning Shadow Checkpoint (2026-08-19)
+
+Learn Mode may preserve a canonical OmniParser `screen_parser_result_v1` as read-only observation evidence and displays provider success, generated candidates, grounding eligibility, and execution authorization as separate states. It adds no OmniParser execute action: `interactivity=true` is evidence only, and provider failures or incomplete lineage remain visible for human review.
+
+The pinned offline smoke is `artifacts/omniparser-smoke/task2-round2-code-revision-final.json` (SHA-256 `dce1d24fbbf74d17292eebf600328e33815ca871f8a5bad6b741fa438b01ba5a`): cold `1520.17 ms`; warm P50/P95 `463.84/465.58 ms`; `43` elements, `35` interactive, and `0` invalid bbox. This was a contact-sheet-only smoke, not UI-accuracy, live-capture, or live-click evidence. License handling remains blocked on the repository-root CC-BY-4.0 versus README MIT ambiguity; the detector is AGPL, caption is MIT, and the exact component manifest must be enforced.

@@ -1060,11 +1060,22 @@ def _omniparser_provider_summary(
         else {}
     )
     coordinate_space = _text(provider_result.get("coordinate_space"))
+    current_capture_id = _text(observe_bundle.get("capture_id"))
+    current_screenshot_sha256 = _text(observe_bundle.get("screenshot_sha256"))
+    provider_status = _text(provider_result.get("status")) or "not_available"
+    provider_stale = provider_result.get("stale") is True or (
+        isinstance(provider_result.get("freshness"), dict)
+        and provider_result["freshness"].get("stale") is True
+    )
     warnings: list[str] = []
     if not provider_result:
         warnings.append("provider_result_unavailable")
     if provider_result and provider_result.get("contract_version") != "screen_parser_result_v1":
         warnings.append("provider_contract_invalid")
+    if provider_status != "success":
+        warnings.append(f"provider_status_{provider_status}")
+    if provider_stale:
+        warnings.append("provider_stale")
     for field, value in (
         ("profile_id", profile_id),
         ("model_revision", model_revision),
@@ -1074,6 +1085,14 @@ def _omniparser_provider_summary(
     ):
         if not value:
             warnings.append(f"missing_{field}")
+    if not current_capture_id:
+        warnings.append("missing_current_capture_id")
+    elif capture_id and capture_id != current_capture_id:
+        warnings.append("capture_id_mismatch")
+    if not current_screenshot_sha256:
+        warnings.append("missing_current_screenshot_sha256")
+    elif screenshot_sha256 and screenshot_sha256 != current_screenshot_sha256:
+        warnings.append("screenshot_sha256_mismatch")
     if (
         _positive_int(image_size.get("width")) <= 0
         or _positive_int(image_size.get("height")) <= 0
@@ -1108,7 +1127,7 @@ def _omniparser_provider_summary(
     return {
         "contract_version": "learning_recognition_provider_summary_v1",
         "provider": _text(provider_result.get("provider")) or "omniparser",
-        "provider_status": _text(provider_result.get("status")) or "not_available",
+        "provider_status": provider_status,
         "profile_id": profile_id,
         "model_revision": model_revision,
         "capture_id_present": bool(capture_id),
