@@ -88,6 +88,10 @@ let interfaceWorkflowSelectedOperationId = "";
 let interfaceWorkflowSavedReviewPath = "";
 let interfaceWorkflowHasUnsavedChanges = false;
 let interfaceWorkflowSafeFillPreflight = null;
+let interfaceWorkflowAssetV2State = null;
+let interfaceWorkflowAssetV2Binding = { key: "", generation: 0, loaded: false };
+let interfaceWorkflowAssetV2Pending = { compile: false, publish: false, preview: false };
+let interfaceWorkflowAssetV2LastResponse = null;
 let interfaceWorkflowControlPickMode = false;
 let interfaceWorkflowControlPickDestination = "attach";
 const interfaceAssetWorkspaceState = {
@@ -10909,14 +10913,16 @@ async function loadInterfaceWorkflowLibraryRegistry({
 }
 
 async function loadSavedInterfaceWorkflowReview() {
+  beginInterfaceWorkflowAssetV2Load();
   const loadToken = interfaceWorkflowLoadGuard.begin();
+  const expectedBinding = interfaceWorkflowAssetV2BindingCandidate();
   const select = $("interfaceWorkflowLibrarySelect");
   const status = $("interfaceWorkflowLibraryStatus");
   const workflowId = String(select?.value || "").trim();
   const identityKey = String(
     select?.selectedOptions?.[0]?.dataset?.applicationIdentityKey || "",
   ).trim();
-  if (!workflowId || !identityKey) {
+  if (!workflowId || !identityKey || !expectedBinding) {
     if (status) status.textContent = "请选择一个已学习流程";
     return null;
   }
@@ -10935,8 +10941,9 @@ async function loadSavedInterfaceWorkflowReview() {
     && String(response.data?.workflow?.workflow_id || "") === workflowId
     ? response.data
     : null;
-  if (!interfaceWorkflowLoadGuard.isCurrent(loadToken)) return null;
+  if (!interfaceWorkflowLoadGuard.isCurrent(loadToken) || interfaceWorkflowAssetV2BindingCandidate()?.key !== expectedBinding.key) return null;
   if (!response?.success || !review) {
+    invalidateInterfaceWorkflowAssetV2Binding();
     if (status) status.textContent = response?.message || "已学习流程读取失败";
     return null;
   }
@@ -10951,6 +10958,7 @@ async function loadSavedInterfaceWorkflowReview() {
     interfaceWorkflowLibraryRegistry?.workflows?.[workflowId]?.path || "",
   ).trim();
   interfaceWorkflowHasUnsavedChanges = false;
+  completeInterfaceWorkflowAssetV2Load(expectedBinding.key);
   if (status) {
     status.textContent = currentLanguage === "en-US"
       ? `Opened · ${interfaceWorkflowApplicationLabel(review.workflow?.application_identity)} · ${review.nodes?.length || 0} interfaces`
@@ -18145,6 +18153,7 @@ function clearInterfaceWorkflowReview(reason = "") {
   interfaceWorkflowSelectedOperationId = "";
   interfaceWorkflowSavedReviewPath = "";
   interfaceWorkflowHasUnsavedChanges = false;
+  resetInterfaceWorkflowAssetV2State();
   interfaceWorkflowControlPickMode = false;
   interfaceWorkflowWorkbenchState.clearLink();
   interfaceWorkflowWorkbenchState.setCorrectionOpen(false);
@@ -18538,6 +18547,132 @@ async function loadInterfaceWorkflowSafeFillPreflight() {
   return interfaceWorkflowSafeFillPreflight;
 }
 
+function handleInterfaceWorkflowEditorMutation({ clearConfirmation = true } = {}) {
+  if (clearConfirmation && typeof clearInterfaceWorkflowNodeHumanReviewConfirmation === "function") clearInterfaceWorkflowNodeHumanReviewConfirmation();
+  markInterfaceWorkflowUnsaved();
+}
+
+function interfaceWorkflowAssetV2BindingCandidate() {
+  const select = $("interfaceWorkflowLibrarySelect");
+  const workflowId = String(select?.value || "").trim();
+  const applicationIdentityKey = String(select?.selectedOptions?.[0]?.dataset?.applicationIdentityKey || "").trim();
+  const record = interfaceWorkflowLibraryRegistry?.workflows?.[workflowId];
+  const sourceSha = String(record?.source_asset_sha256 || "").trim().toLowerCase();
+  if (!workflowId || !applicationIdentityKey || !/^[0-9a-f]{64}$/.test(sourceSha)) return null;
+  return { application_identity_key: applicationIdentityKey, workflow_id: workflowId, expected_source_workflow_sha256: sourceSha, key: `${applicationIdentityKey}\u0000${workflowId}\u0000${sourceSha}` };
+}
+
+function invalidateInterfaceWorkflowAssetV2Binding() {
+  interfaceWorkflowAssetV2Binding = { key: "", generation: Number(interfaceWorkflowAssetV2Binding?.generation || 0) + 1, loaded: false };
+  interfaceWorkflowAssetV2Pending = { compile: false, publish: false, preview: false };
+  interfaceWorkflowAssetV2LastResponse = null;
+  interfaceWorkflowAssetV2State = null;
+  renderInterfaceWorkflowAssetV2State();
+}
+
+function beginInterfaceWorkflowAssetV2Load() { invalidateInterfaceWorkflowAssetV2Binding(); }
+function completeInterfaceWorkflowAssetV2Load(expectedKey = "") {
+  const candidate = interfaceWorkflowAssetV2BindingCandidate();
+  if (!candidate || candidate.key !== expectedKey) { invalidateInterfaceWorkflowAssetV2Binding(); return false; }
+  interfaceWorkflowAssetV2Binding = { key: candidate.key, generation: Number(interfaceWorkflowAssetV2Binding?.generation || 0) + 1, loaded: true };
+  interfaceWorkflowAssetV2State = null;
+  renderInterfaceWorkflowAssetV2State();
+  return true;
+}
+function handleInterfaceWorkflowLibrarySelectionChanged() { interfaceWorkflowLoadGuard.begin(); invalidateInterfaceWorkflowAssetV2Binding(); }
+
+function resetInterfaceWorkflowAssetV2State(published = null) {
+  if (!published || typeof published !== "object" || published.published !== true) {
+    invalidateInterfaceWorkflowAssetV2Binding();
+    return;
+  }
+  interfaceWorkflowAssetV2State = { asset_id: String(published.asset_id || "").trim(), content_sha256: String(published.content_sha256 || "").trim().toLowerCase(), published: true, compile: null, preview: null, binding_key: interfaceWorkflowAssetV2Binding?.key || "" };
+  renderInterfaceWorkflowAssetV2State();
+}
+
+function interfaceWorkflowAssetV2RequestBinding() {
+  const candidate = interfaceWorkflowAssetV2BindingCandidate();
+  if (!candidate || interfaceWorkflowAssetV2Binding?.loaded !== true || candidate.key !== interfaceWorkflowAssetV2Binding.key) return null;
+  return candidate;
+}
+
+function interfaceWorkflowAssetV2BlockedCodes(response = {}) {
+  const data = response?.data && typeof response.data === "object" ? response.data : {};
+  const result = data.result || data.compile_result || {};
+  const codes = [response?.error?.code, data?.state_resolution?.failure_code, ...(Array.isArray(data?.blocked_reason_codes) ? data.blocked_reason_codes : []), ...(Array.isArray(result?.blocked_reasons) ? result.blocked_reasons.map((item) => typeof item === "string" ? item : item?.code) : [])];
+  return [...new Set(codes.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function interfaceWorkflowAssetV2Busy() { return Object.values(interfaceWorkflowAssetV2Pending || {}).some(Boolean); }
+
+function interfaceWorkflowAssetV2OperationCurrent(operation, generation, bindingKey) {
+  return Number(interfaceWorkflowAssetV2Binding?.generation) === generation && interfaceWorkflowAssetV2Binding?.loaded === true && interfaceWorkflowAssetV2Binding?.key === bindingKey && interfaceWorkflowAssetV2Pending?.[operation] === true;
+}
+
+function renderInterfaceWorkflowAssetV2State(response = null) {
+  if (interfaceWorkflowHasUnsavedChanges && interfaceWorkflowAssetV2State) interfaceWorkflowAssetV2State = null;
+  const state = interfaceWorkflowAssetV2State;
+  const visibleResponse = response || state?.last_response || interfaceWorkflowAssetV2LastResponse;
+  const binding = interfaceWorkflowAssetV2RequestBinding();
+  const compileButton = $("interfaceWorkflowCompileV2Btn"), publishButton = $("interfaceWorkflowPublishV2Btn"), previewButton = $("interfaceWorkflowReplayPreviewV2Btn");
+  const status = $("interfaceWorkflowAssetV2Status"), hash = $("interfaceWorkflowAssetV2Hash"), blocked = $("interfaceWorkflowAssetV2BlockedReasons");
+  const compiled = state?.compile?.result?.status === "compiled" && state?.compile?.binding_key === binding?.key;
+  const published = state?.published === true && state?.binding_key === binding?.key && state.asset_id && /^[0-9a-f]{64}$/.test(state.content_sha256 || "");
+  const busy = interfaceWorkflowAssetV2Busy();
+  if (compileButton) compileButton.disabled = !binding || interfaceWorkflowHasUnsavedChanges || busy;
+  if (publishButton) publishButton.disabled = !compiled || !binding || interfaceWorkflowHasUnsavedChanges || busy;
+  if (previewButton) previewButton.disabled = !published || interfaceWorkflowHasUnsavedChanges || busy;
+  if (hash) hash.textContent = published ? `sha256=${state.content_sha256}` : "--";
+  const codes = interfaceWorkflowAssetV2BlockedCodes(visibleResponse || {});
+  if (blocked) blocked.textContent = codes.length ? codes.join(", ") : "--";
+  if (status) status.textContent = interfaceWorkflowHasUnsavedChanges ? "流程有未保存修改；v2 编译、发布和只读预览已失效。" : (visibleResponse?.data?.execution_authorized === false || state?.preview?.execution_authorized === false) ? "只读预览结果不构成执行授权。" : published ? "已发布 reviewed workflow v2；仅可使用显式观察 JSON 进行只读预览。" : compiled ? "已编译，等待 CAS 发布；发布时服务端会重新编译。" : "先打开已保存流程，再编译 reviewed workflow v2。";
+}
+
+async function compileReviewedWorkflowAssetV2() {
+  if (interfaceWorkflowAssetV2Busy() || interfaceWorkflowHasUnsavedChanges) return null;
+  const binding = interfaceWorkflowAssetV2RequestBinding();
+  if (!binding) { renderInterfaceWorkflowAssetV2State({ success: false, data: { blocked_reason_codes: ["workflow_registry_binding_required"] } }); return null; }
+  const generation = interfaceWorkflowAssetV2Binding.generation;
+  interfaceWorkflowAssetV2Pending.compile = true; renderInterfaceWorkflowAssetV2State();
+  try {
+    const response = await api("POST", "/panel/compile_reviewed_workflow_asset", { application_identity_key: binding.application_identity_key, workflow_id: binding.workflow_id, expected_source_workflow_sha256: binding.expected_source_workflow_sha256 }, { summary: "compile reviewed workflow v2", workflowStep: "compile_reviewed_workflow_asset_v2", skipRender: true });
+    if (!interfaceWorkflowAssetV2OperationCurrent("compile", generation, binding.key)) return response;
+    interfaceWorkflowAssetV2LastResponse = response;
+    const result = response?.data?.result;
+    interfaceWorkflowAssetV2State = response?.success && result?.status === "compiled" && result?.asset ? { asset_id: "", content_sha256: "", published: false, binding_key: binding.key, compile: { result, registry_revision: response.data.registry_revision, binding_key: binding.key }, preview: null, last_response: response } : null;
+    renderInterfaceWorkflowAssetV2State(response); return response;
+  } finally { if (interfaceWorkflowAssetV2OperationCurrent("compile", generation, binding.key)) { interfaceWorkflowAssetV2Pending.compile = false; renderInterfaceWorkflowAssetV2State(); } }
+}
+
+async function publishReviewedWorkflowAssetV2() {
+  if (interfaceWorkflowAssetV2Busy() || interfaceWorkflowHasUnsavedChanges) return null;
+  const state = interfaceWorkflowAssetV2State, binding = interfaceWorkflowAssetV2RequestBinding(), revision = state?.compile?.registry_revision;
+  if (!binding || state?.compile?.binding_key !== binding.key || state?.compile?.result?.status !== "compiled" || !Number.isInteger(revision)) { renderInterfaceWorkflowAssetV2State(); return null; }
+  const generation = interfaceWorkflowAssetV2Binding.generation;
+  interfaceWorkflowAssetV2Pending.publish = true; renderInterfaceWorkflowAssetV2State();
+  try {
+    const response = await api("POST", "/panel/publish_reviewed_workflow_asset", { application_identity_key: binding.application_identity_key, workflow_id: binding.workflow_id, expected_source_workflow_sha256: binding.expected_source_workflow_sha256, expected_registry_revision: revision }, { summary: "publish reviewed workflow v2", workflowStep: "publish_reviewed_workflow_asset_v2", skipRender: true });
+    if (!interfaceWorkflowAssetV2OperationCurrent("publish", generation, binding.key)) return response;
+    interfaceWorkflowAssetV2LastResponse = response;
+    const publish = response?.data?.publish_result || response?.data?.result?.asset || response?.data?.asset || {}, asset = publish?.asset || publish;
+    if (response?.success && String(asset?.asset_id || "").trim() && /^[0-9a-f]{64}$/.test(String(asset?.content_sha256 || "").trim().toLowerCase())) interfaceWorkflowAssetV2State = { asset_id: String(asset.asset_id).trim(), content_sha256: String(asset.content_sha256).trim().toLowerCase(), published: true, binding_key: binding.key, compile: state.compile, preview: null, last_response: response };
+    else if (!response?.success && interfaceWorkflowAssetV2State?.binding_key === binding.key) interfaceWorkflowAssetV2State = null;
+    renderInterfaceWorkflowAssetV2State(response); return response;
+  } finally { if (interfaceWorkflowAssetV2OperationCurrent("publish", generation, binding.key)) { interfaceWorkflowAssetV2Pending.publish = false; renderInterfaceWorkflowAssetV2State(); } }
+}
+
+async function previewReviewedWorkflowReplayV2() {
+  if (interfaceWorkflowAssetV2Busy()) return null;
+  const state = interfaceWorkflowAssetV2State, binding = interfaceWorkflowAssetV2RequestBinding(), rawObservation = String($("interfaceWorkflowReplayObservationV2")?.value || "").trim();
+  if (!binding || !state?.published || state?.binding_key !== binding.key || !state.asset_id || !/^[0-9a-f]{64}$/.test(state.content_sha256 || "")) { renderInterfaceWorkflowAssetV2State(); return null; }
+  if (!rawObservation) { renderInterfaceWorkflowAssetV2State({ success: false, data: { blocked_reason_codes: ["current_observation_json_required"] } }); return null; }
+  let observation; try { observation = JSON.parse(rawObservation); } catch (_error) { renderInterfaceWorkflowAssetV2State({ success: false, data: { blocked_reason_codes: ["current_observation_json_invalid"] } }); return null; }
+  if (!observation || typeof observation !== "object" || Array.isArray(observation)) { renderInterfaceWorkflowAssetV2State({ success: false, data: { blocked_reason_codes: ["current_observation_json_invalid"] } }); return null; }
+  const generation = interfaceWorkflowAssetV2Binding.generation; interfaceWorkflowAssetV2Pending.preview = true; renderInterfaceWorkflowAssetV2State();
+  try { const response = await api("POST", "/panel/preview_reviewed_workflow_replay", { asset_id: state.asset_id, expected_content_sha256: state.content_sha256, current_observation: observation }, { summary: "preview reviewed workflow replay v2", workflowStep: "preview_reviewed_workflow_replay_v2", skipRender: true }); if (!interfaceWorkflowAssetV2OperationCurrent("preview", generation, binding.key)) return response; interfaceWorkflowAssetV2LastResponse = response; interfaceWorkflowAssetV2State = { ...state, preview: response?.data || null, last_response: response }; renderInterfaceWorkflowAssetV2State(response); return response; }
+  finally { if (interfaceWorkflowAssetV2OperationCurrent("preview", generation, binding.key)) { interfaceWorkflowAssetV2Pending.preview = false; renderInterfaceWorkflowAssetV2State(); } }
+}
+
 function currentInterfaceWorkflowOperation(view = null) {
   const currentView = view || interfaceWorkflowReviewState?.current();
   const operations = Array.isArray(currentView?.outgoing_edges) ? currentView.outgoing_edges : [];
@@ -18559,6 +18694,7 @@ function interfaceWorkflowOperationPatch() {
 
 function markInterfaceWorkflowUnsaved(message = "有未保存的操作或路径修改") {
   interfaceWorkflowHasUnsavedChanges = true;
+  invalidateInterfaceWorkflowAssetV2Binding();
   if ($("interfaceWorkflowOperationStatus")) {
     $("interfaceWorkflowOperationStatus").textContent = message;
   }
@@ -18986,6 +19122,7 @@ function clearInterfaceWorkflowNodeHumanReviewConfirmation() {
     $("interfaceWorkflowNodeHumanReviewConfirmed").checked = false;
   }
 }
+
 
 function renderInterfaceWorkflowReview(review) {
   const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
@@ -22123,9 +22260,11 @@ function bindEvents() {
     if (event.target === $("interfaceAssetAttachDialog")) closeInterfaceAssetAttachDialog();
   });
   on("interfaceWorkflowRemoveSourceBtn", "click", removeCurrentInterfaceWorkflowSource);
-  on("interfaceWorkflowNodeName", "input", clearInterfaceWorkflowNodeHumanReviewConfirmation);
-  on("interfaceWorkflowSurfaceType", "input", clearInterfaceWorkflowNodeHumanReviewConfirmation);
-  on("interfaceWorkflowNodeReviewStatus", "change", clearInterfaceWorkflowNodeHumanReviewConfirmation);
+  on("interfaceWorkflowNodeName", "input", handleInterfaceWorkflowEditorMutation);
+  on("interfaceWorkflowSurfaceType", "input", handleInterfaceWorkflowEditorMutation);
+  on("interfaceWorkflowNodeReviewStatus", "change", handleInterfaceWorkflowEditorMutation);
+  on("interfaceWorkflowNodeHumanReviewConfirmed", "change", () => handleInterfaceWorkflowEditorMutation({ clearConfirmation: false }));
+  on("interfaceWorkflowLibrarySelect", "change", handleInterfaceWorkflowLibrarySelectionChanged);
   for (const [id, eventName] of [
     ["interfaceWorkflowOperationType", "change"],
     ["interfaceWorkflowOperationLabel", "input"],
@@ -22136,9 +22275,18 @@ function bindEvents() {
     ["interfaceWorkflowOperationPlaceholderName", "input"],
     ["interfaceWorkflowOperationConfirmation", "change"],
   ]) {
-    on(id, eventName, clearInterfaceWorkflowNodeHumanReviewConfirmation);
+    on(id, eventName, handleInterfaceWorkflowEditorMutation);
   }
+  for (const [id, eventName] of [
+    ["interfaceWorkflowContentBehavior", "change"],
+    ["interfaceWorkflowContentAgentUsage", "change"],
+    ["interfaceWorkflowContentReadPolicy", "change"],
+    ["interfaceWorkflowContentDescription", "input"],
+  ]) on(id, eventName, handleInterfaceWorkflowEditorMutation);
   on("interfaceWorkflowSaveBtn", "click", saveInterfaceWorkflowReview);
+  on("interfaceWorkflowCompileV2Btn", "click", compileReviewedWorkflowAssetV2);
+  on("interfaceWorkflowPublishV2Btn", "click", publishReviewedWorkflowAssetV2);
+  on("interfaceWorkflowReplayPreviewV2Btn", "click", previewReviewedWorkflowReplayV2);
   on("interfaceWorkflowMemoryBtn", "click", openInterfaceWorkflowMemoryVerification);
   showInterfaceAssetPage(interfaceAssetWorkspaceState.activePage);
   on("replayLoadBtn", "click", loadReplayArtifact);

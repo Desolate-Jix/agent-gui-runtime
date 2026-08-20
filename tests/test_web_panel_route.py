@@ -4617,7 +4617,7 @@ def test_panel_learning_review_assets_use_current_cache_key() -> None:
     assert "/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1" in panel_html
     assert "/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4" in panel_html
     assert "/panel/assets/interface_workflow_graph.js?v=20260815-workflow-layout-bounds-1" in panel_html
-    assert "/panel/assets/panel.js?v=20260815-learning-screenshot-visibility-2" in panel_html
+    assert "/panel/assets/panel.js?v=20260821-reviewed-workflow-v2-panel-1" in panel_html
 
 
 def test_learning_draft_history_visibly_separates_current_and_pinned_sources() -> None:

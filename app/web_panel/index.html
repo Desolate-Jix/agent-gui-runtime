@@ -1089,6 +1089,22 @@
                           <button id="interfaceWorkflowMemoryBtn" type="button" class="secondary" data-i18n="interface_workflow_memory_handoff">发布与执行验证</button>
                         </div>
                         <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>
+                        <section class="interface-workflow-v2-panel" aria-label="Reviewed workflow v2">
+                          <strong>Reviewed workflow v2</strong>
+                          <small>编译和发布只使用服务端流程库绑定；只读预览不会捕获屏幕、不会调用动作接口，也不构成执行授权。</small>
+                          <div class="interface-workflow-operation-actions">
+                            <button id="interfaceWorkflowCompileV2Btn" type="button" disabled>编译 v2</button>
+                            <button id="interfaceWorkflowPublishV2Btn" type="button" class="secondary" disabled>发布到 CAS</button>
+                            <button id="interfaceWorkflowReplayPreviewV2Btn" type="button" class="secondary" disabled>只读预览</button>
+                          </div>
+                          <label class="wide-label">
+                            <span>当前观察 JSON（必须显式提供）</span>
+                            <textarea id="interfaceWorkflowReplayObservationV2" rows="5" placeholder='{"capture_id":"..."}'></textarea>
+                          </label>
+                          <small id="interfaceWorkflowAssetV2Status">先保存流程，再编译 reviewed workflow v2。</small>
+                          <small id="interfaceWorkflowAssetV2Hash">--</small>
+                          <small id="interfaceWorkflowAssetV2BlockedReasons">--</small>
+                        </section>
                       </div>
                       <div class="interface-workflow-inspector" id="interfaceWorkflowInspector">
                         <p class="trace-idle" data-i18n="interface_workflow_inspector_empty">选择节点后显示区域、控件、候选操作、阻碍条件和前后界面。</p>
@@ -1856,6 +1872,6 @@
     <script src="/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1"></script>
     <script src="/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4"></script>
     <script src="/panel/assets/interface_workflow_graph.js?v=20260815-workflow-layout-bounds-1"></script>
-    <script src="/panel/assets/panel.js?v=20260815-learning-screenshot-visibility-2"></script>
+    <script src="/panel/assets/panel.js?v=20260821-reviewed-workflow-v2-panel-1"></script>
   </body>
 </html>
