@@ -44,8 +44,9 @@ def _server_asset(tmp_path: Path, *, blocker: bool = False) -> tuple[dict, Path]
     return asset, source
 
 
-def _adapt(tmp_path: Path, asset: dict, *, anchors: tuple[str, ...] | None = None):
-    state = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
+def _adapt(tmp_path: Path, asset: dict, *, anchors: tuple[str, ...] | None = None, state_id: str | None = None):
+    requested_state = state_id or asset["entry_state_id"]
+    state = next(item for item in asset["states"] if item["state_id"] == requested_state)
     anchor_ids = tuple(item["anchor_id"] for item in state["identity_anchors"])
     current = _observation(asset, "capture-current", "e" * 64, *(anchor_ids if anchors is None else anchors), origin="https://example.test")
     resolution = resolve_current_state(asset, current)
@@ -54,7 +55,6 @@ def _adapt(tmp_path: Path, asset: dict, *, anchors: tuple[str, ...] | None = Non
         observation_id="observation-current", session_id="session-current", workflow_id="workflow_agent_evidence",
         reviewed_asset=asset, current_observation=current, state_resolution=resolution,
         project_root=tmp_path, application_identity_key="web:example.test",
-        state_resolution_ref="state-resolution:current", current_capture_evidence_ref="capture:current",
     )
 
 
@@ -72,6 +72,8 @@ def test_actual_server_loaded_workflow_projects_real_semantic_action(tmp_path: P
 def test_adapter_api_cannot_accept_caller_context() -> None:
     from app.agent.agent_observation_adapter import adapt_reviewed_context_to_agent_observation_v1
     assert "interface_workflow_agent_context" not in inspect.signature(adapt_reviewed_context_to_agent_observation_v1).parameters
+    assert "state_resolution_ref" not in inspect.signature(adapt_reviewed_context_to_agent_observation_v1).parameters
+    assert "current_capture_evidence_ref" not in inspect.signature(adapt_reviewed_context_to_agent_observation_v1).parameters
 
 
 def test_valid_current_interface_ignores_global_agent_ready_false(tmp_path: Path, monkeypatch) -> None:
@@ -99,7 +101,7 @@ def test_application_identity_mismatch_and_not_found_reject(tmp_path: Path) -> N
     resolution = resolve_current_state(asset, current)
     from app.agent.agent_observation_adapter import adapt_reviewed_context_to_agent_observation_v1
     with pytest.raises(ValueError):
-        adapt_reviewed_context_to_agent_observation_v1(observation_id="o", session_id="s", workflow_id="workflow_agent_evidence", reviewed_asset=asset, current_observation=current, state_resolution=resolution, project_root=tmp_path, application_identity_key="web:missing.test", state_resolution_ref="state:1", current_capture_evidence_ref="capture:1")
+        adapt_reviewed_context_to_agent_observation_v1(observation_id="o", session_id="s", workflow_id="workflow_agent_evidence", reviewed_asset=asset, current_observation=current, state_resolution=resolution, project_root=tmp_path, application_identity_key="web:missing.test")
 
 
 def test_source_tampering_after_persistence_rejects(tmp_path: Path) -> None:
@@ -134,6 +136,52 @@ def test_reviewed_blocker_is_preserved_and_forces_safe_stop(tmp_path: Path) -> N
     assert [item.action_id for item in observation.available_actions] == ["runtime.safe_stop"]
 
 
+def test_stale_current_redacted_fact_cannot_rebind_to_new_capture(tmp_path: Path, monkeypatch) -> None:
+    asset, _ = _server_asset(tmp_path)
+    import app.agent.agent_observation_adapter as adapter_module
+    original = adapter_module.load_interface_workflow_agent_context
+
+    def load_stale(*, project_root, application_identity_key):
+        context = original(project_root=project_root, application_identity_key=application_identity_key)
+        interface = context["agent_evidence_workflows"][0]["interfaces"][0]
+        interface["dynamic_content"][0].update({"observation_status": "current_redacted", "capture_id": "capture-old", "value": None, "value_sha256": "d" * 64})
+        return context
+
+    monkeypatch.setattr(adapter_module, "load_interface_workflow_agent_context", load_stale)
+    observation = _adapt(tmp_path, asset)
+    fact = next(item for item in observation.semantic_facts if item.fact_type == "current_content")
+    assert fact.observation_status == "requires_observation"
+    assert fact.capture_id is None
+    assert fact.value_sha256 is None
+
+
+def test_real_stop_boundary_preserves_stop_reason(tmp_path: Path) -> None:
+    asset, _ = _server_asset(tmp_path)
+    boundary = next(item for item in asset["states"] if item["state_id"] != asset["entry_state_id"])
+    boundary["availability"] = "stop_boundary"
+    boundary["allowed_transition_ids"] = []
+    boundary.pop("grounding_profile", None)
+    observation = _adapt(tmp_path, asset, state_id=boundary["state_id"])
+    assert observation.state.status == "stop_boundary"
+    assert observation.safe_stop.reason_code == "stop_boundary"
+
+
+@pytest.mark.parametrize("bad_blocker", ["not-an-object", {"blocker_id": "bad", "description": "Bad", "safe_stop_required": "yes"}])
+def test_malformed_reviewed_blocker_fails_closed(tmp_path: Path, monkeypatch, bad_blocker) -> None:
+    asset, _ = _server_asset(tmp_path)
+    import app.agent.agent_observation_adapter as adapter_module
+    original = adapter_module.load_interface_workflow_agent_context
+
+    def load_malformed(*, project_root, application_identity_key):
+        context = original(project_root=project_root, application_identity_key=application_identity_key)
+        context["workflows"][0]["nodes"][0]["blockers"] = [bad_blocker]
+        return context
+
+    monkeypatch.setattr(adapter_module, "load_interface_workflow_agent_context", load_malformed)
+    with pytest.raises(ValueError, match="blocker"):
+        _adapt(tmp_path, asset)
+
+
 def test_projection_has_no_geometry_path_or_authority_payload(tmp_path: Path) -> None:
     asset, _ = _server_asset(tmp_path)
     payload = _adapt(tmp_path, asset).model_dump()
@@ -141,3 +189,5 @@ def test_projection_has_no_geometry_path_or_authority_payload(tmp_path: Path) ->
     encoded = json.dumps(payload, ensure_ascii=False).casefold()
     for token in ("bbox", "click_point", "coordinates", "viewport", "_path", "provider_native", "approved_to_click", "direct_dispatch"):
         assert token not in encoded
+    assert "evidence:capture-current" not in encoded
+    assert all(ref.startswith("content-sha256:") for ref in payload["evidence_refs"])

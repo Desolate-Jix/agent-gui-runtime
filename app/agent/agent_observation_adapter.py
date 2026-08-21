@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import hashlib
+import json
 from pathlib import Path
 import re
 from typing import Any
@@ -67,6 +68,48 @@ def _stable_suffix(value: str, fallback: str) -> str:
     return normalized[:96] or fallback
 
 
+def _capture_bound_refs(
+    asset_sha: str,
+    current_observation: Mapping[str, Any],
+    resolution: Mapping[str, Any],
+) -> tuple[str, str, list[str]]:
+    capture_id = str(current_observation.get("capture_id") or "")
+    screenshot_sha = str(current_observation.get("screenshot_sha256") or "")
+    viewport = current_observation.get("viewport_size")
+    capture_ref = _content_ref(
+        asset_sha,
+        "capture",
+        capture_id,
+        screenshot_sha,
+        json.dumps(viewport, sort_keys=True, separators=(",", ":")),
+    )
+    anchor_bindings = sorted(
+        (
+            str(item.get("anchor_id") or ""),
+            str(item.get("matched")),
+            str(item.get("confidence")),
+        )
+        for item in current_observation.get("observed_anchor_evidence") or []
+        if isinstance(item, Mapping)
+    )
+    resolution_binding = {
+        key: value
+        for key, value in resolution.items()
+        if key not in {"evidence_refs", "resolution_sha256"}
+    }
+    resolution_ref = _content_ref(
+        asset_sha,
+        "state-resolution",
+        json.dumps(resolution_binding, sort_keys=True, separators=(",", ":")),
+        json.dumps(anchor_bindings, separators=(",", ":")),
+    )
+    anchor_refs = [
+        _content_ref(asset_sha, "anchor", capture_id, screenshot_sha, *binding)
+        for binding in anchor_bindings
+    ]
+    return resolution_ref, capture_ref, anchor_refs
+
+
 def _fact_payloads(
     interface: Mapping[str, Any],
     *,
@@ -85,7 +128,7 @@ def _fact_payloads(
                 status = "reviewed"
             elif status not in {"current", "current_redacted", "requires_observation"}:
                 status = "requires_observation"
-            if status == "current" and str(item.get("capture_id") or "") != current_capture_id:
+            if status in {"current", "current_redacted"} and str(item.get("capture_id") or "") != current_capture_id:
                 status = "requires_observation"
             value = item.get("value")
             if fact_type == "identity_anchor" and not isinstance(value, str):
@@ -135,6 +178,46 @@ def _find_interface(context: Mapping[str, Any], *, workflow_id: str, source_node
     return matches[0] if matches else None
 
 
+def _trusted_reviewed_blockers(
+    context: Mapping[str, Any],
+    *,
+    workflow_id: str,
+    source_node_id: str,
+    projected: object,
+) -> list[Mapping[str, Any]]:
+    workflow_matches = [
+        item
+        for item in _as_list(context.get("workflows"))
+        if str((item.get("workflow") or {}).get("workflow_id") or "") == workflow_id
+    ]
+    if len(workflow_matches) != 1:
+        raise ValueError("reviewed blocker workflow integrity mismatch")
+    workflow = workflow_matches[0]
+    if workflow.get("contract_version") != "single_application_workflow_review_v1":
+        raise ValueError("reviewed blocker workflow contract mismatch")
+    node_matches = [
+        item
+        for item in _as_list(workflow.get("nodes"))
+        if str(item.get("node_id") or "") == source_node_id
+    ]
+    if len(node_matches) != 1:
+        raise ValueError("reviewed blocker node integrity mismatch")
+    raw = node_matches[0].get("blockers")
+    if not isinstance(raw, list):
+        raise ValueError("reviewed blockers must be an array")
+    blockers: list[Mapping[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ValueError("reviewed blocker must be an object")
+        if type(item.get("safe_stop_required")) is not bool:
+            raise ValueError("reviewed blocker safe_stop_required must be boolean")
+        blockers.append(item)
+    projected_items = _as_list(projected)
+    if len(projected_items) != len(blockers):
+        raise ValueError("reviewed blocker projection integrity mismatch")
+    return blockers
+
+
 def adapt_reviewed_context_to_agent_observation_v1(
     *,
     observation_id: str,
@@ -145,8 +228,6 @@ def adapt_reviewed_context_to_agent_observation_v1(
     state_resolution: Mapping[str, Any],
     project_root: str | Path,
     application_identity_key: str,
-    state_resolution_ref: str,
-    current_capture_evidence_ref: str,
 ) -> AgentObservationV1:
     """Build a geometry-free web observation from canonical reviewed evidence only."""
     asset = validate_reviewed_workflow_asset(reviewed_asset)
@@ -177,8 +258,12 @@ def adapt_reviewed_context_to_agent_observation_v1(
         "reviewed_revision_hash": lineage["reviewed_revision_hash"],
     }
     capture = _mapping(expected_resolution.get("capture_lineage"), "state resolution capture lineage")
-    evidence_refs = [state_resolution_ref, current_capture_evidence_ref]
-    evidence_refs.extend(str(ref) for ref in expected_resolution.get("evidence_refs") or [] if isinstance(ref, str) and ref)
+    state_resolution_ref, current_capture_evidence_ref, anchor_refs = _capture_bound_refs(
+        asset_hash,
+        current_observation,
+        expected_resolution,
+    )
+    evidence_refs = [state_resolution_ref, current_capture_evidence_ref, *anchor_refs]
 
     resolved = expected_resolution.get("status") == "resolved"
     state_id = str(expected_resolution.get("state_id") or "") if resolved else ""
@@ -211,10 +296,10 @@ def adapt_reviewed_context_to_agent_observation_v1(
     if not resolved:
         failure = str(expected_resolution.get("failure_code") or "current_state_unresolved")
         safe_reason = "state_ambiguous" if failure == "current_state_ambiguous" else "state_unknown"
+    elif state is not None and state.get("availability") == "stop_boundary":
+        safe_reason = "stop_boundary"
     elif state is None or interface is None:
         safe_reason = "human_review_required"
-    elif state.get("availability") == "stop_boundary":
-        safe_reason = "stop_boundary"
     else:
         facts, fact_refs = _fact_payloads(
             interface,
@@ -222,7 +307,13 @@ def adapt_reviewed_context_to_agent_observation_v1(
         )
         evidence_refs.extend(fact_refs)
         source_sha = str(interface.get("source_asset_sha256") or "")
-        for index, item in enumerate(_as_list(interface.get("blockers"))):
+        reviewed_blockers = _trusted_reviewed_blockers(
+            context,
+            workflow_id=workflow_id,
+            source_node_id=str(state.get("source_node_id") or ""),
+            projected=interface.get("blockers"),
+        )
+        for index, item in enumerate(reviewed_blockers):
             raw_blocker_id = str(item.get("blocker_id") or item.get("rule_id") or f"reviewed.{index}")
             blocker_id = _stable_suffix(raw_blocker_id, f"reviewed.{index}")
             description = " ".join(str(item.get("description") or item.get("reason") or "Reviewed workflow blocker.").split())
