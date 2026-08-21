@@ -101,6 +101,7 @@ class Gate(Protocol):
         *,
         selection: dict[str, Any],
         grounding: dict[str, Any],
+        **context: Any,
     ) -> Mapping[str, Any]: ...
 
 
@@ -354,7 +355,38 @@ class LiveController:
                 selection=selection,
             )
         grounding = dict(grounding_value)
-        gate = dict(self._gate.evaluate(selection=selection, grounding=grounding))
+        gate_context_value = resolution.get("gate_context", {})
+        if not isinstance(gate_context_value, Mapping):
+            return self._blocked_receipt(
+                session=session,
+                intent=intent,
+                reason_code="pre_click_rejected",
+                selection=selection,
+                grounding=grounding,
+            )
+        try:
+            gate_value = self._gate.evaluate(
+                selection=selection,
+                grounding=grounding,
+                **dict(gate_context_value),
+            )
+        except (TypeError, ValueError):
+            return self._blocked_receipt(
+                session=session,
+                intent=intent,
+                reason_code="pre_click_rejected",
+                selection=selection,
+                grounding=grounding,
+            )
+        if not isinstance(gate_value, Mapping):
+            return self._blocked_receipt(
+                session=session,
+                intent=intent,
+                reason_code="pre_click_rejected",
+                selection=selection,
+                grounding=grounding,
+            )
+        gate = dict(gate_value)
         validation = validate_current_grounding(
             session.asset,
             selection,
