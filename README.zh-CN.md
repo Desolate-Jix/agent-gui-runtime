@@ -61,6 +61,12 @@ screenshot → model → coordinate → click
 8. **Execute**：通过位于 Runtime Authority 下方、planned 的内部 Desktop I/O backend seam 执行动作。
 9. **Verify**：验证效果并生成 live receipt，或带诊断信息安全停止。当前 receipt schemas/adapters 只有离线 Contract Proof；live loop 仍未完成。
 
+### 历史私有原型面板 · Learn Mode
+
+[![历史私有原型 Learn Mode 面板](docs/media/private-prototype-learn-mode.png)](docs/media/private-prototype-learn-mode.png)
+
+*历史私有原型 — Learn Mode。* 这个早期 UI 展示了 interface evidence 审核，以及如何把已批准状态连接成 workflow graph。它只作为设计沿革证据，**不是当前 Portfolio v1 live proof**；当前界面和 runtime 行为可能不同。
+
 ## Target authority architecture
 
 公开架构冻结四个合同：
@@ -105,6 +111,12 @@ Computer-Use Agent ◄── Observation / Receipt
 
 Desktop I/O Backend SPI 是位于 Runtime Authority 下方的 **Planned** 内部实现边界。它不是第五个公开 Contract，今天也尚未实现。未来更换 backend 时不得扩大 Authority。
 
+### 历史私有原型面板 · Execute Mode
+
+[![历史私有原型 Execute Mode 面板](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
+
+*历史私有原型 — Execute Mode。* 这个早期控制面展示了 runtime state、available actions、PathGraph context，以及进入 application flow 与 final submission 之间受 Gate 约束的区别。它是历史设计证据，**不是当前 Portfolio v1 execution trace**；当前界面可能不同。
+
 ## 诚实状态矩阵
 
 | 能力 | 状态 | 这一状态实际表示什么 |
@@ -122,7 +134,24 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的 **Planned** 内部
 | Live external Computer-Use Agent adapters | **Planned** | 今天没有任何 live-integrated 实现。 |
 | 生产可靠性或陌生站点泛化 | **Not claimed** | 不提供全站点覆盖或无人值守可靠性承诺。 |
 
-## 历史视觉证据
+## 历史原型证据
+
+> **历史私有原型证据。** 以下截图来自早期私有原型，仅用于展示设计沿革。它们**不是当前 Portfolio v1 live proof**，当前界面可能不同。SEEK 以及所有雇主名称和标识均归其各自权利人所有；这里不暗示任何关联或背书。
+
+### SEEK reference states · 历史截图
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-results.png"><img src="docs/media/private-prototype-seek-results.png" alt="历史私有原型中的 SEEK results 识别" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-job-detail.png"><img src="docs/media/private-prototype-seek-job-detail.png" alt="历史私有原型中的 SEEK job-detail 状态" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-application.png"><img src="docs/media/private-prototype-seek-application.png" alt="历史私有原型中经过脱敏的 SEEK application entry" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Results</strong><br>搜索控件、结果区域和 job-card evidence。</td>
+    <td align="center"><strong>Job Detail</strong><br>详情抽屉、metadata、description 和独立的 Quick apply 入口。</td>
+    <td align="center"><strong>Application Entry</strong><br>个人内容已脱敏。这里只展示 document-selection entry，不证明表单完成、Continue/Next 或 submission。</td>
+  </tr>
+</table>
 
 ### SEEK reference recording · Partial historical visual corroboration
 

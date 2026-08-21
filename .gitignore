@@ -36,6 +36,11 @@ tmp_*.ps1
 logs/*.log
 logs/*.json
 *.png
+!docs/media/private-prototype-learn-mode.png
+!docs/media/private-prototype-execute-mode.png
+!docs/media/private-prototype-seek-results.png
+!docs/media/private-prototype-seek-job-detail.png
+!docs/media/private-prototype-seek-application.png
 *.jpg
 *.jpeg
 *.webp

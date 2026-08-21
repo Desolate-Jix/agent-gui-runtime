@@ -61,6 +61,12 @@ Required end state—the live loop is not complete today:
 8. **Execute** through a planned internal Desktop I/O seam beneath Runtime Authority.
 9. **Verify** or Safe Stop. Receipt schemas have offline Contract Proof; the live loop is incomplete.
 
+### Historical private-prototype panel · Learn Mode
+
+[![Historical private-prototype Learn Mode panel](docs/media/private-prototype-learn-mode.png)](docs/media/private-prototype-learn-mode.png)
+
+*Historical private prototype — Learn Mode.* This earlier UI shows interface-evidence review and approved states being connected into a workflow graph. It is design-lineage evidence only—not current Portfolio v1 live proof—and the current interface and runtime behavior may differ.
+
 ## Target authority architecture
 
 The public architecture freezes four contracts:
@@ -107,6 +113,12 @@ Future external Agents receive observations/actions and return observation-bound
 
 The Desktop I/O Backend SPI is **Planned** beneath Runtime Authority—not a fifth public contract or current implementation. Replacement must not expand authority.
 
+### Historical private-prototype panel · Execute Mode
+
+[![Historical private-prototype Execute Mode panel](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
+
+*Historical private prototype — Execute Mode.* This earlier control surface shows runtime state, available actions, PathGraph context, and the gated distinction between entering an application flow and final submission. It is historical design evidence—not a current Portfolio v1 execution trace—and the current interface may differ.
+
 ## Honest status
 
 | Capability | Status | What the claim means |
@@ -124,7 +136,24 @@ The Desktop I/O Backend SPI is **Planned** beneath Runtime Authority—not a fif
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
 | Production or unfamiliar-site reliability | **Not claimed** | No all-site or unattended claim. |
 
-## Historical visual evidence
+## Historical prototype evidence
+
+> **Historical private-prototype evidence.** The screenshots below come from an earlier private prototype and are included to show design lineage. They are **not current Portfolio v1 live proof**, and the current interface may differ. SEEK and all employer names and marks belong to their respective owners; no affiliation or endorsement is implied.
+
+### SEEK reference states · Historical screenshots
+
+<table>
+  <tr>
+    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-results.png"><img src="docs/media/private-prototype-seek-results.png" alt="Historical private prototype showing SEEK results recognition" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-job-detail.png"><img src="docs/media/private-prototype-seek-job-detail.png" alt="Historical private prototype showing the SEEK job-detail state" width="100%"></a></td>
+    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-application.png"><img src="docs/media/private-prototype-seek-application.png" alt="Historical private prototype showing redacted SEEK application entry" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Results</strong><br>Search controls, result regions, and job-card evidence.</td>
+    <td align="center"><strong>Job Detail</strong><br>Detail drawer, metadata, description, and separate Quick apply entry.</td>
+    <td align="center"><strong>Application Entry</strong><br>Personal content is redacted. This shows document-selection entry only—not form completion, Continue/Next, or submission.</td>
+  </tr>
+</table>
 
 ### SEEK reference recording · Partial historical visual corroboration
 
