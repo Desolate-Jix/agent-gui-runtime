@@ -9,6 +9,7 @@ import json
 import re
 from typing import Any
 
+from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
 from app.agent.reviewed_workflow_replay import verify_transition_result
 from app.agent.runtime_contracts import (
     AgentIntentV1,
@@ -60,6 +61,30 @@ def _require_operation_refs(operation: Mapping[str, Any], refs: ReplayReceiptRef
     _require(expected_refs.issubset(actual_refs), "receipt refs must be members of operation evidence")
 
 
+def _require_reviewed_asset_application(
+    asset: Mapping[str, Any],
+    observation: AgentObservationV1,
+) -> tuple[str, str | None]:
+    application = _mapping(asset.get("application"), "reviewed asset application")
+    kind = application.get("kind")
+    _require(kind in {"web", "native"}, "reviewed asset application kind is invalid")
+    if kind == "web":
+        identity = application.get("canonical_domain")
+        origin = application.get("canonical_origin")
+        _require(isinstance(identity, str) and identity, "reviewed asset application identity is invalid")
+        _require(isinstance(origin, str) and origin, "reviewed asset application origin is invalid")
+    else:
+        identity = application.get("product_identity") or application.get("executable")
+        origin = None
+        _require(isinstance(identity, str) and identity, "reviewed asset application identity is invalid")
+    _require(observation.application.kind == kind, "reviewed asset application kind mismatch")
+    _require(
+        observation.application.identity_ref == f"application:{kind}:{identity}",
+        "reviewed asset application identity mismatch",
+    )
+    return kind, origin
+
+
 def _require_selection_observation_lineage(selection: Mapping[str, Any], observation: AgentObservationV1) -> None:
     workflow = observation.workflow
     for key, value in (
@@ -79,6 +104,7 @@ def _require_next_observation(
     *,
     observation: AgentObservationV1,
     verification: Mapping[str, Any],
+    expected_application_kind: str,
 ) -> AgentObservationV1:
     _require(isinstance(next_observation, AgentObservationV1), "verified replay requires an AgentObservationV1 next observation")
     post_resolution = _mapping(verification.get("post_state_resolution"), "verification post state")
@@ -89,6 +115,7 @@ def _require_next_observation(
     _require(next_observation.session_id == observation.session_id, "next observation session mismatch")
     _require(next_observation.workflow == observation.workflow, "next observation workflow mismatch")
     _require(next_observation.application == observation.application, "next observation application mismatch")
+    _require(next_observation.application.kind == expected_application_kind, "next observation reviewed asset application mismatch")
     _require(next_observation.state.status == expected_status, "next observation status mismatch")
     _require(next_observation.state.state_id == post_resolution.get("state_id"), "next observation destination mismatch")
     _require(next_observation.state.state_availability == availability, "next observation availability mismatch")
@@ -117,7 +144,8 @@ def adapt_replay_verification_to_runtime_receipt_v1(
     selected_action = next((item for item in observation.available_actions if item.action_id == intent.action_id), None)
     _require(selected_action is not None and selected_action.semantic_action != "safe_stop", "intent cannot select synthetic safe_stop")
 
-    asset = _mapping(reviewed_asset, "reviewed asset")
+    asset = validate_reviewed_workflow_asset(_mapping(reviewed_asset, "reviewed asset"))
+    application_kind, expected_origin = _require_reviewed_asset_application(asset, observation)
     selection = _mapping(selection, "selection")
     operation = _mapping(operation_result, "operation")
     post = _mapping(post_observation, "post observation")
@@ -132,8 +160,15 @@ def adapt_replay_verification_to_runtime_receipt_v1(
         _require(verification.get("source_state_id") == observation.state.state_id, "recomputed verification source mismatch")
         _require(verification.get("target_state_id") == selected_action.target_state_id, "recomputed verification destination mismatch")
         _require(verification.get("state_advanced") is True, "recomputed verification must advance state")
-        next_value = _require_next_observation(next_observation, observation=observation, verification=verification)
+        next_value = _require_next_observation(
+            next_observation,
+            observation=observation,
+            verification=verification,
+            expected_application_kind=application_kind,
+        )
         post_resolution = _mapping(verification.get("post_state_resolution"), "verification post state")
+        if expected_origin is not None:
+            _require(post_resolution.get("observed_origin") == expected_origin, "recomputed post origin mismatch")
         availability = post_resolution.get("state_availability")
         outcome = "SAFE_STOP" if availability == "stop_boundary" else "VERIFIED"
         reason = "stop_boundary" if outcome == "SAFE_STOP" else "none"
@@ -144,6 +179,12 @@ def adapt_replay_verification_to_runtime_receipt_v1(
         _require(verification.get("status") == "blocked" and verification.get("state_advanced") is False, "recomputed verification outcome is uncertain")
         _require(failure in {"post_capture_not_new", "destination_mismatch", "post_action_failure"}, "recomputed verification outcome cannot be mapped safely")
         _require(next_observation is None, "verification failure cannot advance next observation")
+        if failure == "post_action_failure":
+            gate = _mapping(operation.get("gate_result"), "operation gate result")
+            _require(
+                operation.get("action_executed") is True and gate.get("allowed") is True,
+                "unproven dispatch cannot map to verification failure",
+            )
         outcome, reason, next_id, safe_required = "VERIFICATION_FAILED", failure, None, True
         effect = "not_verified"
         destination = "not_evaluated" if failure == "post_capture_not_new" else "not_verified"

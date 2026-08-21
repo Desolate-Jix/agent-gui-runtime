@@ -316,3 +316,44 @@ def test_synthetic_safe_stop_and_geometry_or_native_payloads_remain_rejected_or_
     encoded = str(receipt.model_dump()).casefold()
     for token in ("bbox", "click_point", "viewport", "approved_plan", "operation_result"):
         assert token not in encoded
+
+
+@pytest.mark.parametrize("operation_update", [
+    {"action_executed": False},
+    {"gate_result": {"allowed": False, "reason": "pre_click_rejected"}},
+])
+def test_unproven_operation_cannot_map_to_dispatched_verification_failure(operation_update: dict) -> None:
+    asset, observation, intent, selection, operation, post, _ = _case()
+    operation = deepcopy(operation)
+    operation.update(operation_update)
+    with pytest.raises(ValueError, match="unproven dispatch|cannot be mapped safely"):
+        _adapt(
+            reviewed_asset=asset,
+            observation=observation,
+            intent=intent,
+            selection=selection,
+            operation_result=operation,
+            post_observation=post,
+            next_observation=None,
+        )
+
+
+def test_source_and_next_application_must_match_reviewed_asset_identity() -> None:
+    asset, observation, intent, selection, operation, post, next_observation = _case()
+    assert next_observation is not None
+    forged_application = observation.application.model_copy(update={
+        "identity_ref": "application:web:forged.example",
+        "display_name": "forged.example",
+    })
+    forged_source = observation.model_copy(update={"application": forged_application})
+    forged_next = next_observation.model_copy(update={"application": forged_application})
+    with pytest.raises(ValueError, match="reviewed asset application"):
+        _adapt(
+            reviewed_asset=asset,
+            observation=forged_source,
+            intent=intent,
+            selection=selection,
+            operation_result=operation,
+            post_observation=post,
+            next_observation=forged_next,
+        )
