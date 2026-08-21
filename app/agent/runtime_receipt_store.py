@@ -26,6 +26,7 @@ from app.agent.runtime_contracts import RuntimeResultReceiptV1
 
 STORE_CONTRACT_VERSION = "runtime_receipt_record_v1"
 POINTER_CONTRACT_VERSION = "runtime_receipt_pointer_v1"
+INTENT_POINTER_CONTRACT_VERSION = "runtime_receipt_intent_pointer_v1"
 STORE_ROOT = Path("runtime_state/runtime-receipts-v1")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -128,6 +129,7 @@ class RuntimeReceiptStore:
         self.root = self.project_root / STORE_ROOT
         self.objects_root = self.root / "objects"
         self.receipt_ids_root = self.root / "receipt-ids"
+        self.intent_ids_root = self.root / "intent-ids"
         self._ensure_layout()
 
     def put(
@@ -168,6 +170,28 @@ class RuntimeReceiptStore:
             raise RuntimeReceiptStoreError(
                 f"runtime receipt identity conflict: {validated.receipt_id}"
             ) from exc
+        intent_pointer = {
+            "store_contract_version": INTENT_POINTER_CONTRACT_VERSION,
+            "session_id": validated.session_id,
+            "observation_id": validated.observation_id,
+            "intent_id": validated.intent_id,
+            "receipt_id": validated.receipt_id,
+            "content_sha256": content_sha256,
+        }
+        intent_pointer_path = self._intent_pointer_path(
+            session_id=validated.session_id,
+            observation_id=validated.observation_id,
+            intent_id=validated.intent_id,
+        )
+        try:
+            self._publish_bytes(
+                intent_pointer_path,
+                _canonical_json_bytes(intent_pointer),
+            )
+        except _PublishedBytesConflict as exc:
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent identity conflict"
+            ) from exc
         return {
             "receipt_id": validated.receipt_id,
             "content_sha256": content_sha256,
@@ -193,7 +217,9 @@ class RuntimeReceiptStore:
             raise RuntimeReceiptStoreError(
                 "runtime receipt identity pointer does not match immutable ref"
             )
-        return self._get_object(receipt_id=receipt_id, digest=digest)
+        record = self._get_object(receipt_id=receipt_id, digest=digest)
+        self._require_intent_pointer(record)
+        return record
 
     def _get_object(self, *, receipt_id: str, digest: str) -> RuntimeReceiptRecord:
         """读取 CAS object；调用方必须先证明 receipt identity 已提交。"""
@@ -228,7 +254,47 @@ class RuntimeReceiptStore:
         if not isinstance(receipt_id, str) or not receipt_id:
             raise RuntimeReceiptStoreError("receipt_id is required")
         digest = self._load_pointer_digest(receipt_id)
-        return self._get_object(receipt_id=receipt_id, digest=digest)
+        record = self._get_object(receipt_id=receipt_id, digest=digest)
+        self._require_intent_pointer(record)
+        return record
+
+    def find_for_intent(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+        intent_id: str,
+    ) -> RuntimeReceiptRecord | None:
+        """查找已经同时提交 receipt 与 intent identity 的权威结果。"""
+
+        pointer_path = self._intent_pointer_path(
+            session_id=session_id,
+            observation_id=observation_id,
+            intent_id=intent_id,
+        )
+        if not pointer_path.exists():
+            return None
+        pointer = self._load_intent_pointer(
+            session_id=session_id,
+            observation_id=observation_id,
+            intent_id=intent_id,
+        )
+        record = self.get(
+            {
+                "receipt_id": pointer["receipt_id"],
+                "content_sha256": pointer["content_sha256"],
+            }
+        )
+        receipt = record.runtime_receipt
+        if (
+            receipt.session_id != session_id
+            or receipt.observation_id != observation_id
+            or receipt.intent_id != intent_id
+        ):
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent lookup identity mismatch"
+            )
+        return record
 
     def _load_pointer_digest(self, receipt_id: str) -> str:
         pointer_path = self._pointer_path(receipt_id)
@@ -249,6 +315,82 @@ class RuntimeReceiptStore:
         if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
             raise RuntimeReceiptStoreError("runtime receipt pointer checksum is invalid")
         return digest
+
+    def _require_intent_pointer(self, record: RuntimeReceiptRecord) -> None:
+        receipt = record.runtime_receipt
+        pointer = self._load_intent_pointer(
+            session_id=receipt.session_id,
+            observation_id=receipt.observation_id,
+            intent_id=receipt.intent_id,
+        )
+        if (
+            pointer["receipt_id"] != receipt.receipt_id
+            or pointer["content_sha256"] != record.content_sha256
+        ):
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent authority pointer mismatch"
+            )
+
+    def _load_intent_pointer(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+        intent_id: str,
+    ) -> dict[str, str]:
+        path = self._intent_pointer_path(
+            session_id=session_id,
+            observation_id=observation_id,
+            intent_id=intent_id,
+        )
+        if not path.exists():
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent authority pointer is missing"
+            )
+        _, pointer = self._read_canonical_json(path, label="intent pointer")
+        expected_keys = {
+            "store_contract_version",
+            "session_id",
+            "observation_id",
+            "intent_id",
+            "receipt_id",
+            "content_sha256",
+        }
+        if (
+            set(pointer) != expected_keys
+            or pointer.get("store_contract_version")
+            != INTENT_POINTER_CONTRACT_VERSION
+        ):
+            raise RuntimeReceiptStoreError(
+                "invalid runtime receipt intent pointer contract"
+            )
+        expected_identity = (session_id, observation_id, intent_id)
+        actual_identity = (
+            pointer.get("session_id"),
+            pointer.get("observation_id"),
+            pointer.get("intent_id"),
+        )
+        if actual_identity != expected_identity:
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent pointer identity mismatch"
+            )
+        receipt_id = pointer.get("receipt_id")
+        digest = pointer.get("content_sha256")
+        if not isinstance(receipt_id, str) or not receipt_id:
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent pointer receipt identity is invalid"
+            )
+        if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent pointer checksum is invalid"
+            )
+        return {
+            "session_id": session_id,
+            "observation_id": observation_id,
+            "intent_id": intent_id,
+            "receipt_id": receipt_id,
+            "content_sha256": digest,
+        }
 
     @staticmethod
     def _validate_runtime_receipt(
@@ -333,6 +475,7 @@ class RuntimeReceiptStore:
             expected,
             expected / "objects",
             expected / "receipt-ids",
+            expected / "intent-ids",
         ):
             if path.exists() and self._is_reparse(path):
                 raise RuntimeReceiptStoreError(
@@ -341,11 +484,17 @@ class RuntimeReceiptStore:
         try:
             self.objects_root.mkdir(parents=True, exist_ok=True)
             self.receipt_ids_root.mkdir(parents=True, exist_ok=True)
+            self.intent_ids_root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise RuntimeReceiptStoreError(
                 f"runtime receipt store layout is unavailable: {exc}"
             ) from exc
-        for path in (self.root, self.objects_root, self.receipt_ids_root):
+        for path in (
+            self.root,
+            self.objects_root,
+            self.receipt_ids_root,
+            self.intent_ids_root,
+        ):
             if not path.is_dir() or self._is_reparse(path):
                 raise RuntimeReceiptStoreError("runtime receipt store layout is invalid")
             try:
@@ -370,6 +519,28 @@ class RuntimeReceiptStore:
         identity_hash = hashlib.sha256(receipt_id.encode("utf-8")).hexdigest()
         path = self.receipt_ids_root / f"{identity_hash}.json"
         self._assert_direct_child(path, self.receipt_ids_root)
+        return path
+
+    def _intent_pointer_path(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+        intent_id: str,
+    ) -> Path:
+        identity = {
+            "session_id": session_id,
+            "observation_id": observation_id,
+            "intent_id": intent_id,
+        }
+        if any(not isinstance(value, str) or not value for value in identity.values()):
+            raise RuntimeReceiptStoreError(
+                "runtime receipt intent identity is invalid"
+            )
+        self._ensure_layout()
+        identity_hash = hashlib.sha256(_canonical_json_bytes(identity)).hexdigest()
+        path = self.intent_ids_root / f"{identity_hash}.json"
+        self._assert_direct_child(path, self.intent_ids_root)
         return path
 
     def _assert_direct_child(self, path: Path, parent: Path) -> None:

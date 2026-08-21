@@ -148,6 +148,11 @@ def test_store_reloads_validated_receipt_after_restart(
     pointer_name = hashlib.sha256(_receipt(outcome).receipt_id.encode("utf-8")).hexdigest()
     assert (restarted.root / "receipt-ids" / f"{pointer_name}.json").is_file()
     assert not (restarted.root / "receipt-ids" / "receipt:runtime:1.json").exists()
+    assert restarted.find_for_intent(
+        session_id=_receipt(outcome).session_id,
+        observation_id=_receipt(outcome).observation_id,
+        intent_id=_receipt(outcome).intent_id,
+    ) == record
 
 
 @pytest.mark.parametrize(
@@ -261,6 +266,39 @@ def test_same_receipt_is_idempotent_but_conflicting_identity_never_overwrites(
     assert store.get(first).runtime_receipt.issued_at == "2026-08-22T01:02:03Z"
 
 
+def test_same_intent_cannot_bind_a_second_receipt_identity(tmp_path: Path) -> None:
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore, RuntimeReceiptStoreError
+
+    store = RuntimeReceiptStore(project_root=tmp_path)
+    first = store.put(_receipt(), backend_receipt=_backend())
+    second_payload = _receipt_payload()
+    second_payload["receipt_id"] = "receipt:runtime:2"
+    second_payload["issued_at"] = "2026-08-22T01:02:04Z"
+    second = RuntimeResultReceiptV1.model_validate(second_payload)
+
+    with pytest.raises(RuntimeReceiptStoreError, match="intent identity conflict"):
+        store.put(second, backend_receipt=_backend())
+
+    assert store.find_for_intent(
+        session_id=second.session_id,
+        observation_id=second.observation_id,
+        intent_id=second.intent_id,
+    ) == store.get(first)
+    second_objects = [
+        path
+        for path in store.objects_root.glob("*.json")
+        if path.stem != first["content_sha256"]
+    ]
+    assert len(second_objects) == 1
+    with pytest.raises(RuntimeReceiptStoreError, match="intent|authority"):
+        store.get(
+            {
+                "receipt_id": second.receipt_id,
+                "content_sha256": second_objects[0].stem,
+            }
+        )
+
+
 @pytest.mark.parametrize("target", ["object", "pointer"])
 def test_store_rejects_tampered_object_or_pointer(tmp_path: Path, target: str) -> None:
     from app.agent.runtime_receipt_store import RuntimeReceiptStore, RuntimeReceiptStoreError
@@ -303,6 +341,86 @@ def test_exact_get_requires_matching_canonical_receipt_identity_pointer(
 
     with pytest.raises(RuntimeReceiptStoreError, match="pointer|identity"):
         store.get(ref)
+
+
+def test_exact_get_rejects_tampered_intent_identity_pointer(tmp_path: Path) -> None:
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore, RuntimeReceiptStoreError
+
+    store = RuntimeReceiptStore(project_root=tmp_path)
+    receipt = _receipt()
+    ref = store.put(receipt, backend_receipt=_backend())
+    intent_path = store._intent_pointer_path(
+        session_id=receipt.session_id,
+        observation_id=receipt.observation_id,
+        intent_id=receipt.intent_id,
+    )
+    pointer = json.loads(intent_path.read_text(encoding="utf-8"))
+    pointer["receipt_id"] = "receipt:runtime:other"
+    intent_path.write_text(
+        json.dumps(
+            pointer,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeReceiptStoreError, match="intent|authority"):
+        store.get(ref)
+
+
+def test_find_for_intent_rejects_canonical_pointer_cross_linked_to_other_intent(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore, RuntimeReceiptStoreError
+
+    store = RuntimeReceiptStore(project_root=tmp_path)
+    first = _receipt()
+    first_ref = store.put(first, backend_receipt=_backend())
+    second_payload = _receipt_payload()
+    second_payload.update(
+        receipt_id="receipt:runtime:other",
+        issued_at="2026-08-22T01:02:04Z",
+        session_id="session-other",
+        observation_id="observation-other",
+        intent_id="intent.other",
+    )
+    second = RuntimeResultReceiptV1.model_validate(second_payload)
+    second_ref = store.put(second, backend_receipt=_backend())
+
+    first_intent_path = store._intent_pointer_path(
+        session_id=first.session_id,
+        observation_id=first.observation_id,
+        intent_id=first.intent_id,
+    )
+    cross_link = {
+        "store_contract_version": "runtime_receipt_intent_pointer_v1",
+        "session_id": first.session_id,
+        "observation_id": first.observation_id,
+        "intent_id": first.intent_id,
+        "receipt_id": second_ref["receipt_id"],
+        "content_sha256": second_ref["content_sha256"],
+    }
+    first_intent_path.write_text(
+        json.dumps(
+            cross_link,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeReceiptStoreError, match="intent|identity"):
+        store.find_for_intent(
+            session_id=first.session_id,
+            observation_id=first.observation_id,
+            intent_id=first.intent_id,
+        )
+    assert store.get(second_ref).runtime_receipt == second
+    with pytest.raises(RuntimeReceiptStoreError):
+        store.get(first_ref)
 
 
 def test_failed_partial_object_write_is_cleaned_and_retry_succeeds(
@@ -393,6 +511,45 @@ def test_durable_publish_failure_before_identity_commit_keeps_orphan_nonauthorit
     assert store.get(committed_ref).runtime_receipt == _receipt()
 
 
+def test_intent_pointer_failure_keeps_receipt_nonauthoritative_until_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore, RuntimeReceiptStoreError
+
+    store = RuntimeReceiptStore(project_root=tmp_path)
+    original_publish = store._durable_publish_no_replace
+
+    def fail_intent_commit(temporary: Path, target: Path) -> None:
+        if target.parent == store.intent_ids_root:
+            raise OSError("injected durable intent commit failure")
+        original_publish(temporary, target)
+
+    monkeypatch.setattr(store, "_durable_publish_no_replace", fail_intent_commit)
+    with pytest.raises(RuntimeReceiptStoreError, match="write failed"):
+        store.put(_receipt(), backend_receipt=_backend())
+
+    objects = list(store.objects_root.glob("*.json"))
+    receipt_pointers = list(store.receipt_ids_root.glob("*.json"))
+    assert len(objects) == len(receipt_pointers) == 1
+    assert list(store.intent_ids_root.glob("*.json")) == []
+    incomplete_ref = {
+        "receipt_id": _receipt().receipt_id,
+        "content_sha256": objects[0].stem,
+    }
+    with pytest.raises(RuntimeReceiptStoreError, match="intent|authority"):
+        store.get(incomplete_ref)
+    assert store.find_for_intent(
+        session_id=_receipt().session_id,
+        observation_id=_receipt().observation_id,
+        intent_id=_receipt().intent_id,
+    ) is None
+
+    monkeypatch.undo()
+    assert store.put(_receipt(), backend_receipt=_backend()) == incomplete_ref
+    assert store.get(incomplete_ref).runtime_receipt == _receipt()
+
+
 @pytest.mark.parametrize(
     "use_windows,expected_helper",
     [
@@ -433,7 +590,7 @@ def test_durable_publish_selects_platform_specific_no_replace_helper(
 
     store.put(_receipt(), backend_receipt=_backend())
 
-    assert calls == [expected_helper, expected_helper]
+    assert calls == [expected_helper, expected_helper, expected_helper]
 
 
 def test_concurrent_identical_puts_converge(tmp_path: Path) -> None:
