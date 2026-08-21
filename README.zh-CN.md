@@ -10,13 +10,13 @@
 
 **感知可以替换。经审核的知识可以持久复用。**
 
-**目标不变量：** Runtime Authority 必须不可绕过。**负责强制执行该不变量的端到端 live controller 尚未完成。**
+**目标不变量：** Runtime Authority 必须不可绕过。**当前已有受限 live-controller core 强制保护 Windows 输入边界；production composition、动作后语义验证和 durable receipt 持久化仍未完成。**
 
 > **目标 Authority 模型：** Provider 只提出 evidence。Agent 只提出 semantic intent。只有 Runtime 能授予受限的执行权限。
 
-- **Today：** 离线合同基础，以及一段有界的历史 live GUI 录屏。
+- **Today：** 离线合同基础、内部 server-owned controller / desktop-backend 纵向切片，以及历史 live GUI 证据。
 - **Target：** 在一个 Runtime Authority 下完成当前界面重新定位、Gate、受限执行、语义验证和可审计 receipt。
-- **Not yet：** 完整 live controller、外部/远程 Provider 集成、live 外部 Agent adapter，以及 planned Desktop I/O backend seam。
+- **Not yet：** production-composed 端到端闭环、durable live receipt、外部/远程 Provider 集成，以及 live 外部 Agent adapter。
 
 ## 为什么需要这个 Runtime
 
@@ -36,6 +36,23 @@ screenshot → model → coordinate → click
 ```
 
 本项目**不与** Qwen、OpenAI、Anthropic、OmniParser 或其他 foundation-model/parser 团队竞争感知更新速度。更强的新感知能力可以接入 evidence boundary。仓库内置的 screenshot、UIA、OCR 和 recognition 是可用的 baseline/fallback，不是项目的 moat，也不代表已经具备通用视觉理解能力。
+
+## 产品界面导览
+
+> **历史私有原型证据。** 以下面板来自早期公开展示仓库，用于直观说明产品工作流。它们只展示设计沿革，**不是当前 Portfolio v1 live proof**；当前界面和 runtime 行为可能不同。
+
+<table>
+  <tr>
+    <td width="50%" align="center"><a href="docs/media/private-prototype-learn-mode.png"><img src="docs/media/private-prototype-learn-mode.png" alt="历史私有原型 Learn Mode 面板" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/media/private-prototype-execute-mode.png"><img src="docs/media/private-prototype-execute-mode.png" alt="历史私有原型 Execute Mode 面板" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Learn Mode</strong><br>审核界面 evidence，批准 semantic state，并把它们连接成可复用的 workflow graph。</td>
+    <td valign="top"><strong>Execute Mode</strong><br>检查 runtime state 和可用 semantic action，同时严格区分 application entry 与 final submission。</td>
+  </tr>
+</table>
+
+这些面板用于说明 **Learn → Human Review → Runtime** 的目标交接方式，不证明 current relocation、Gate lineage、semantic verification 或 autonomous replay 已完成。
 
 ## 与常见方案的区别
 
@@ -58,14 +75,8 @@ screenshot → model → coordinate → click
 5. **Observe again**：Agent 请求语义动作时重新观察。
 6. **Relocate**：针对当前界面重新定位已审核目标；历史坐标只能作为 hint。
 7. **Gate**：结合当前窗口、候选、lineage、歧义和危险检查，最多开放一次受限尝试。
-8. **Execute**：通过位于 Runtime Authority 下方、planned 的内部 Desktop I/O backend seam 执行动作。
+8. **Execute**：通过位于 Runtime Authority 下方的内部 Desktop I/O backend seam 执行动作。当前切片已有 Windows adapter 和 deterministic fake backend；production composition 仍未完成。
 9. **Verify**：验证效果并生成 live receipt，或带诊断信息安全停止。当前 receipt schemas/adapters 只有离线 Contract Proof；live loop 仍未完成。
-
-### 历史私有原型面板 · Learn Mode
-
-[![历史私有原型 Learn Mode 面板](docs/media/private-prototype-learn-mode.png)](docs/media/private-prototype-learn-mode.png)
-
-*历史私有原型 — Learn Mode。* 这个早期 UI 展示了 interface evidence 审核，以及如何把已批准状态连接成 workflow graph。它只作为设计沿革证据，**不是当前 Portfolio v1 live proof**；当前界面和 runtime 行为可能不同。
 
 ## Target authority architecture
 
@@ -76,7 +87,7 @@ screenshot → model → coordinate → click
 3. **Agent Runtime Contract** — Runtime 暴露 Observation 和可用语义动作；Agent 返回与 Observation 绑定的 semantic intent。
 4. **Runtime Result & Verification Receipt Contract** — outcome 明确区分 Gate、dispatch、observed effect、next state 和 Safe Stop。
 
-下图是 Target composition，不表示 live controller 或 planned Desktop I/O seam 已完成：
+下图是 Target composition。受限 controller/backend 内部切片已经存在，但 production composition、durable receipt 和动作后 semantic verification 仍未完成：
 
 ```text
 内置 fallback 或受信 perception provider
@@ -98,7 +109,7 @@ Computer-Use Agent ◄── Observation / Receipt
                                       │
                               Gate + 受限尝试
                                       │
-                   [planned internal Desktop I/O backend seam]
+                       [internal Desktop I/O backend seam]
                                       │
                             Verify / Safe Stop / Receipt
 ```
@@ -109,13 +120,7 @@ Computer-Use Agent ◄── Observation / Receipt
 
 在未来设计中，外部 Agent 接收 Observation 和可用语义动作，再返回与该 Observation 绑定的 semantic intent。它无权提交历史坐标、绕过 Gate 或把效果标记为已验证。今天没有任何外部/远程 Provider 或外部 Agent adapter 完成 live integration。
 
-Desktop I/O Backend SPI 是位于 Runtime Authority 下方的 **Planned** 内部实现边界。它不是第五个公开 Contract，今天也尚未实现。未来更换 backend 时不得扩大 Authority。
-
-### 历史私有原型面板 · Execute Mode
-
-[![历史私有原型 Execute Mode 面板](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
-
-*历史私有原型 — Execute Mode。* 这个早期控制面展示了 runtime state、available actions、PathGraph context，以及进入 application flow 与 final submission 之间受 Gate 约束的区别。它是历史设计证据，**不是当前 Portfolio v1 execution trace**；当前界面可能不同。
+Desktop I/O Backend SPI 是位于 Runtime Authority 下方、**已部分集成**的内部实现边界，不是第五个公开 Contract。当前实现包装了 Windows input，并提供 deterministic fake backend 用于测试；未来更换 backend 时不得扩大 Authority。
 
 ## 诚实状态矩阵
 
@@ -123,13 +128,13 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的 **Planned** 内部
 | --- | --- | --- |
 | UEI schemas、immutable refs、trusted registration 和静态 projection | **Current — Contract Proof** | 已有 canonical、保留 provenance、不可授权动作的 evidence boundary。 |
 | Reviewed Workflow v2 compiler 和内容寻址持久化 | **Current — Contract Proof** | 可离线编译、保存、检查并重新加载已审核语义资产；发布资产不等于执行许可。 |
-| Agent Observation / Intent / Receipt schemas 和 strict adapters | **Current — Contract Proof** | 已有 geometry-free northbound contracts 和 fail-closed 离线校验；live controller 尚未完整接入。 |
+| Agent Observation / Intent / Receipt schemas 和 strict adapters | **Current — Contract Proof** | 已有 geometry-free、fail-closed boundary；内部 live controller 已消费 observation-bound intent，但 production composition 和 durable receipt storage 仍未完成。 |
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
 | 人工审核和应用范围 workflow 创建 | **Partial** | 已有 review UI、候选、revision 和 workflow graph；Portfolio v1 证据包尚未完成。 |
-| 强制 current relocation、唯一 Gate dispatch、semantic verification 和 durable live receipt | **Partial** | 已有离线 schemas 和部分受控组件，但尚未合并成一个不可绕过的 live controller。 |
-| Desktop I/O Backend SPI | **Planned** | 位于 Runtime Authority 下方的 planned 内部 seam；不是公开 Contract，今天尚未实现。 |
+| 强制 current relocation、唯一 Gate dispatch、semantic verification 和 durable live receipt | **Partial** | 内部 controller slice 已有 current re-grounding、Gate adaptation、one-shot authority 和唯一 Windows dispatch ownership；动作后验证、持久化和 production composition 仍待完成。 |
+| Desktop I/O Backend SPI | **Partial** | 已有内部 SPI、deterministic fake backend 和受 Authority 保护的 Windows adapter；不声称已有第二个真实 backend 或 production wiring。 |
 | Primary / Assist / Automatic provider routing 和远程 Provider | **Planned** | 仅为 Target State；尚未实现自动 Provider fallback。 |
 | Live external Computer-Use Agent adapters | **Planned** | 今天没有任何 live-integrated 实现。 |
 | 生产可靠性或陌生站点泛化 | **Not claimed** | 不提供全站点覆盖或无人值守可靠性承诺。 |
@@ -194,8 +199,8 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 以下内容均为 **Planned**，不是当前能力：
 
 1. 闭合 Built-in/Omni → UEI → provider-neutral Review proof。
-2. 把现有离线 Observation/Intent/Receipt contracts 接入唯一、由服务端持有的 live controller。
-3. 让 current capture、re-grounding、Gate dispatch、semantic verification 和 durable receipt lineage 成为每条 reviewed transition 的强制路径。
+2. 把 server-owned controller 与 session/intent consumption、backend receipt 和 durable receipt storage 完成 production composition。
+3. 增加动作后 capture 与 semantic effect/destination verification，让每条 reviewed transition 都以 durable verified receipt 或 Safe Stop 结束。
 4. 为 Apply-entry safe-stop slice 发布匹配的正向和 zero-click negative-control receipts。
 5. 完成以上目标后，再考虑更多 Provider、外部 Agent adapter 和受限 workflow class。
 

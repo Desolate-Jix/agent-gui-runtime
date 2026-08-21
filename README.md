@@ -10,13 +10,13 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 **Perception is replaceable. Reviewed knowledge is durable.**
 
-**Target invariant:** Runtime Authority must be non-bypassable. **The end-to-end live controller enforcing it is not yet complete.**
+**Target invariant:** Runtime Authority must be non-bypassable. **A bounded live-controller core now enforces the Windows input boundary; production composition, post-action semantic verification, and durable receipt persistence remain incomplete.**
 
 > **Target authority model:** Providers propose evidence. Agents propose semantic intent. The runtime alone grants bounded execution authority.
 
-- **Today:** offline contract foundations plus a historical live GUI recording.
+- **Today:** offline contract foundations, an internal server-owned controller/desktop-backend slice, and historical live GUI evidence.
 - **Target:** current-interface relocation, Gate, bounded execution, semantic verification, and an auditable receipt under one Runtime Authority.
-- **Not yet:** the live controller, external/remote Provider integration, live external Agent adapters, or the planned Desktop I/O backend seam.
+- **Not yet:** the production-composed end-to-end loop, durable live receipts, external/remote Provider integration, or live external Agent adapters.
 
 ## Why this runtime exists
 
@@ -36,6 +36,23 @@ uncertain exploration → evidence → human review → durable semantic workflo
 ```
 
 This project does **not** race the perception releases of Qwen, OpenAI, Anthropic, OmniParser, or similar teams. New perception belongs behind the evidence boundary. Bundled screenshot, UIA, OCR, and recognition are a baseline/fallback—not the moat or proof of general visual understanding.
+
+## Visual product tour
+
+> **Historical private-prototype evidence.** These panels come from the earlier public showcase repository and are included to make the product workflow visible. They show design lineage—not current Portfolio v1 live proof—and the current interface and runtime behavior may differ.
+
+<table>
+  <tr>
+    <td width="50%" align="center"><a href="docs/media/private-prototype-learn-mode.png"><img src="docs/media/private-prototype-learn-mode.png" alt="Historical private-prototype Learn Mode panel" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/media/private-prototype-execute-mode.png"><img src="docs/media/private-prototype-execute-mode.png" alt="Historical private-prototype Execute Mode panel" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Learn Mode</strong><br>Review interface evidence, approve semantic states, and connect them into a reusable workflow graph.</td>
+    <td valign="top"><strong>Execute Mode</strong><br>Inspect runtime state and available semantic actions while keeping application entry separate from final submission.</td>
+  </tr>
+</table>
+
+The panels illustrate the intended **Learn → Human Review → Runtime** handoff. They do not prove current relocation, Gate lineage, semantic verification, or autonomous replay.
 
 ## How it differs
 
@@ -58,14 +75,8 @@ Required end state—the live loop is not complete today:
 5. **Observe again** for an Agent intent.
 6. **Relocate** on the current interface; old coordinates are hints only.
 7. **Gate** one attempt using current evidence and danger checks.
-8. **Execute** through a planned internal Desktop I/O seam beneath Runtime Authority.
+8. **Execute** through the internal Desktop I/O backend seam beneath Runtime Authority. The current slice includes a Windows adapter and deterministic fake backend; production composition remains incomplete.
 9. **Verify** or Safe Stop. Receipt schemas have offline Contract Proof; the live loop is incomplete.
-
-### Historical private-prototype panel · Learn Mode
-
-[![Historical private-prototype Learn Mode panel](docs/media/private-prototype-learn-mode.png)](docs/media/private-prototype-learn-mode.png)
-
-*Historical private prototype — Learn Mode.* This earlier UI shows interface-evidence review and approved states being connected into a workflow graph. It is design-lineage evidence only—not current Portfolio v1 live proof—and the current interface and runtime behavior may differ.
 
 ## Target authority architecture
 
@@ -76,7 +87,7 @@ The public architecture freezes four contracts:
 3. **Agent Runtime Contract** — Runtime exposes Observation/actions; Agent returns observation-bound semantic intent.
 4. **Runtime Result & Verification Receipt Contract** — distinguishes Gate, dispatch, effect, next state, and Safe Stop.
 
-Target composition; the live controller and Desktop I/O seam are incomplete:
+Target composition; the bounded controller/backend slice exists internally, but production composition, durable receipts, and post-action semantic verification are incomplete:
 
 ```text
 Built-in fallback or trusted perception provider
@@ -98,7 +109,7 @@ Computer-Use Agent ◄── Observation / Receipt
                                       │
                                Gate + bounded attempt
                                       │
-                   [planned internal Desktop I/O backend seam]
+                       [internal Desktop I/O backend seam]
                                       │
                             Verify / Safe Stop / Receipt
 ```
@@ -111,13 +122,7 @@ The current OmniParser path is a **review-only provider/shadow** prototype; it c
 
 Future external Agents receive observations/actions and return observation-bound semantic intent. They cannot submit old coordinates, bypass Gate, or verify effects. No external/remote Provider or external Agent adapter is live-integrated today.
 
-The Desktop I/O Backend SPI is **Planned** beneath Runtime Authority—not a fifth public contract or current implementation. Replacement must not expand authority.
-
-### Historical private-prototype panel · Execute Mode
-
-[![Historical private-prototype Execute Mode panel](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
-
-*Historical private prototype — Execute Mode.* This earlier control surface shows runtime state, available actions, PathGraph context, and the gated distinction between entering an application flow and final submission. It is historical design evidence—not a current Portfolio v1 execution trace—and the current interface may differ.
+The Desktop I/O Backend SPI is an **internal, partially integrated** boundary beneath Runtime Authority—not a fifth public contract. The current implementation wraps Windows input and provides a deterministic fake backend for tests. Replacement must not expand authority.
 
 ## Honest status
 
@@ -125,13 +130,13 @@ The Desktop I/O Backend SPI is **Planned** beneath Runtime Authority—not a fif
 | --- | --- | --- |
 | UEI schemas, refs, registration, static projections | **Current — Contract Proof** | Canonical, provenance-preserving, non-authorizing evidence boundary. |
 | Reviewed Workflow v2 compiler and persistence | **Current — Contract Proof** | Offline compile/store/reload; publication grants no authority. |
-| Agent Observation / Intent / Receipt schemas and adapters | **Current — Contract Proof** | Geometry-free, fail-closed offline boundary; live integration incomplete. |
+| Agent Observation / Intent / Receipt schemas and adapters | **Current — Contract Proof** | Geometry-free, fail-closed boundary; the internal live controller consumes observation-bound intents, while production composition and durable receipt storage remain incomplete. |
 | Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
 | Built-in and OmniParser output entering one provider-neutral review model | **Partial** | UEI and Shadow foundations exist; the release vertical slice is not closed. |
 | Human review and workflow creation | **Partial** | Review UI, revisions, and graphs exist; v1 proof is incomplete. |
-| Mandatory current relocation, unique Gate dispatch, semantic verification, and durable live receipt | **Partial** | Offline schemas and controlled components exist, but not yet as one non-bypassable live controller. |
-| Desktop I/O Backend SPI | **Planned** | Planned internal seam beneath Runtime Authority; not a public contract and not implemented today. |
+| Mandatory current relocation, unique Gate dispatch, semantic verification, and durable live receipt | **Partial** | Current re-grounding, Gate adaptation, one-shot authority, and unique Windows dispatch ownership exist in the internal controller slice; post-action verification, persistence, and production composition remain open. |
+| Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded Windows adapter exist; a second real backend and production wiring are not claimed. |
 | Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
 | Production or unfamiliar-site reliability | **Not claimed** | No all-site or unattended claim. |
@@ -196,8 +201,8 @@ Model weights and optional vision services are not distributed. Do not commit pr
 These items are **Planned**, not current capability:
 
 1. Close the Built-in/Omni → UEI → provider-neutral Review proof.
-2. Connect the existing offline Observation/Intent/Receipt contracts to one server-owned live controller.
-3. Make current capture, re-grounding, Gate dispatch, semantic verification, and durable receipt lineage mandatory for every reviewed transition.
+2. Production-compose the server-owned controller with session/intent consumption, backend receipts, and durable receipt storage.
+3. Add post-action capture and semantic effect/destination verification so every reviewed transition ends in a durable verified receipt or Safe Stop.
 4. Publish matched positive and zero-click negative-control receipts for the Apply-entry safe-stop slice.
 5. Only then consider more providers, Agent adapters, and workflow classes.
 
