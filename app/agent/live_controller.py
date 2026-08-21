@@ -81,6 +81,7 @@ class ObservationSource(Protocol):
         *,
         session_id: str,
         workflow: dict[str, Any],
+        asset: dict[str, Any],
         target_window_handle: int,
     ) -> AgentObservationV1 | Mapping[str, object]: ...
 
@@ -252,6 +253,7 @@ class LiveController:
             projected = self._observation_source.create_initial(
                 session_id=session_id,
                 workflow=workflow.model_dump(mode="json"),
+                asset=asset,
                 target_window_handle=self._binding.target_window_handle,
             )
             observation = (

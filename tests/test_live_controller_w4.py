@@ -103,11 +103,20 @@ class _ObservationSource:
         self.current = current or _current_observation(asset)
         self.initial_calls = 0
         self.current_calls = 0
+        self.initial_assets: list[dict] = []
         self.initial_window_handles: list[int] = []
         self.current_window_handles: list[int] = []
 
-    def create_initial(self, *, session_id: str, workflow: dict, target_window_handle: int) -> object:
+    def create_initial(
+        self,
+        *,
+        session_id: str,
+        workflow: dict,
+        asset: dict,
+        target_window_handle: int,
+    ) -> object:
         self.initial_calls += 1
+        self.initial_assets.append(asset)
         self.initial_window_handles.append(target_window_handle)
         return validate_agent_observation_v1(_agent_observation(session_id, workflow))
 
@@ -277,6 +286,40 @@ def test_session_is_server_created_and_pins_workflow_revision(tmp_path) -> None:
     assert session.workflow.asset_content_sha256 == content_sha256(_asset())
     assert source.initial_calls == 1
     assert source.initial_window_handles == [4242]
+
+
+def test_start_session_hands_exact_validated_asset_to_initial_observation_source(tmp_path) -> None:
+    from app.agent.desktop_backend import DeterministicFakeBackend
+    from app.agent.live_controller import LiveController, ServerWorkflowBinding
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    asset = _asset()
+    asset_loader = _TrustedAssetLoader(asset)
+    source = _ObservationSource(asset)
+    controller = LiveController(
+        binding=ServerWorkflowBinding(
+            workflow_id="workflow.seek.portfolio",
+            asset_id=asset["asset_id"],
+            application_identity_key="web:nz.seek.com",
+            target_window_handle=4242,
+        ),
+        asset_loader=asset_loader,
+        observation_source=source,
+        target_resolver=_TargetResolver(),
+        gate=_Gate(),
+        window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4242),
+        backend=DeterministicFakeBackend(),
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
+        grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
+    )
+
+    session = controller.start_session()
+
+    assert source.initial_assets[0] is controller._sessions[session.session_id].asset
 
 
 def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
@@ -513,7 +556,14 @@ def test_start_session_rejects_binding_identity_not_owned_by_reviewed_asset(tmp_
 
 def test_start_session_rejects_observation_application_identity_mismatch(tmp_path) -> None:
     class ForgedObservationSource(_ObservationSource):
-        def create_initial(self, *, session_id: str, workflow: dict, target_window_handle: int) -> object:
+        def create_initial(
+            self,
+            *,
+            session_id: str,
+            workflow: dict,
+            asset: dict,
+            target_window_handle: int,
+        ) -> object:
             payload = _agent_observation(session_id, workflow)
             payload["application"]["identity_ref"] = "application:web:forged.example"
             return validate_agent_observation_v1(payload)
