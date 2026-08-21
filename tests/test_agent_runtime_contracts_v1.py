@@ -397,6 +397,19 @@ def test_intent_rejects_unknown_action_or_wrong_binding(mutation) -> None:
 def _valid_outcome_case(outcome: str):
     if outcome == "VERIFIED":
         return _validated_pair(), _receipt_payload()
+    if outcome == "DISPATCHED":
+        pair = _validated_pair()
+        payload = _receipt_payload()
+        payload.update(
+            outcome="DISPATCHED",
+            reason_code="verification_pending",
+            effect_status="not_evaluated",
+            destination_status="not_evaluated",
+            next_observation_id=None,
+            safe_stop={"required": True, "reason_code": "verification_pending"},
+        )
+        payload["evidence"]["verification_ref"] = None
+        return pair, payload
     if outcome == "BLOCKED":
         pair = _validated_pair()
         payload = _receipt_payload()
@@ -493,6 +506,7 @@ def _valid_outcome_case(outcome: str):
 
 @pytest.mark.parametrize("outcome", [
     "VERIFIED",
+    "DISPATCHED",
     "BLOCKED",
     "SAFE_STOP",
     "NEEDS_REVIEW",
@@ -508,6 +522,31 @@ def test_each_receipt_outcome_has_one_valid_fail_closed_shape(outcome: str) -> N
         intent=intent,
     )
     assert receipt.outcome == outcome
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update(reason_code="none", safe_stop={"required": False, "reason_code": "none"}),
+        lambda value: value.update(attempt_count=0),
+        lambda value: value.update(gate_status="not_evaluated"),
+        lambda value: value.update(dispatch_status="not_started"),
+        lambda value: value.update(effect_status="verified"),
+        lambda value: value.update(destination_status="verified"),
+        lambda value: value["evidence"].update(backend_receipt_ref=None),
+        lambda value: value["evidence"].update(verification_ref="verification:unexpected"),
+        lambda value: value.update(next_observation_id="observation-2"),
+    ],
+)
+def test_dispatched_receipt_rejects_verification_claims_or_incomplete_dispatch(mutation) -> None:
+    (observation, intent), payload = _valid_outcome_case("DISPATCHED")
+    mutation(payload)
+    with pytest.raises(ValueError):
+        validate_runtime_result_receipt_v1(
+            payload,
+            observation=observation,
+            intent=intent,
+        )
 
 
 @pytest.mark.parametrize(

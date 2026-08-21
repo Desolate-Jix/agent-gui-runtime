@@ -141,6 +141,7 @@
         "reason_code": {
           "enum": [
             "none",
+            "verification_pending",
             "policy_blocked",
             "human_confirmation_required",
             "current_state_unresolved",
@@ -323,6 +324,7 @@
     "outcome": {
       "enum": [
         "VERIFIED",
+        "DISPATCHED",
         "BLOCKED",
         "SAFE_STOP",
         "NEEDS_REVIEW",
@@ -336,6 +338,7 @@
     "reason_code": {
       "enum": [
         "none",
+        "verification_pending",
         "policy_blocked",
         "human_confirmation_required",
         "current_state_unresolved",

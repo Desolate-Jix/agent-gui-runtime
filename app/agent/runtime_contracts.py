@@ -42,6 +42,7 @@ SemanticActionV1 = Literal[
 ]
 RuntimeOutcomeV1 = Literal[
     "VERIFIED",
+    "DISPATCHED",
     "BLOCKED",
     "SAFE_STOP",
     "NEEDS_REVIEW",
@@ -51,6 +52,7 @@ RuntimeOutcomeV1 = Literal[
 ]
 RuntimeReasonCodeV1 = Literal[
     "none",
+    "verification_pending",
     "policy_blocked",
     "human_confirmation_required",
     "current_state_unresolved",
@@ -595,6 +597,8 @@ class RuntimeResultReceiptV1(_StrictContractModel):
         )
         if self.outcome == "VERIFIED":
             self._require_verified()
+        elif self.outcome == "DISPATCHED":
+            self._require_dispatched()
         elif self.outcome == "BLOCKED":
             self._require_blocked()
         elif self.outcome == "SAFE_STOP":
@@ -626,6 +630,25 @@ class RuntimeResultReceiptV1(_StrictContractModel):
         _require(self.evidence.verification_ref is not None, "verification_ref is required")
         _require(self.next_observation_id is not None, "VERIFIED requires next observation")
         _require(not self.safe_stop.required, "VERIFIED cannot require safe stop")
+
+    def _require_dispatched(self) -> None:
+        _require(
+            self.reason_code == "verification_pending",
+            "DISPATCHED reason must be verification_pending",
+        )
+        _require(self.attempt_count == 1, "DISPATCHED requires one attempt")
+        _require(self.gate_status == "allowed", "DISPATCHED requires allowed Gate")
+        _require(self.dispatch_status == "dispatched", "DISPATCHED requires dispatch")
+        _require(self.effect_status == "not_evaluated", "DISPATCHED cannot claim effect verification")
+        _require(
+            self.destination_status == "not_evaluated",
+            "DISPATCHED cannot claim destination verification",
+        )
+        self._require_common_execution_refs()
+        _require(self.evidence.backend_receipt_ref is not None, "backend_receipt_ref is required")
+        _require(self.evidence.verification_ref is None, "DISPATCHED cannot have verification ref")
+        _require(self.next_observation_id is None, "DISPATCHED cannot advance observation")
+        _require(self.safe_stop.required, "DISPATCHED requires safe stop pending verification")
 
     def _require_blocked(self) -> None:
         _require(
