@@ -7,7 +7,7 @@
     "screen_parser_provider"
   ],
   "intended_pipeline_stage": "parser_provider",
-  "provider_mode": "metadata_only",
+  "provider_mode": "Shadow",
   "model_family": "OmniParser",
   "model_id": "microsoft/OmniParser-v2",
   "max_parameters_b": 1.0,
@@ -19,14 +19,14 @@
   "grounding_role": "not_used_for_final_point",
   "recommended_use": "Parser provider for interactable element boxes and icon captions before classifier and ROI grounding.",
   "candidate_source_url": "https://github.com/microsoft/omniparser",
-  "download_status": "not_downloaded",
-  "model_path": "",
-  "launchable": false,
+  "download_status": "downloaded",
+  "model_path": "models/omniparser/v2.0.1/weights",
+  "launchable": true,
   "artifact_is_authorization": false,
   "execute_binding_enabled": false,
   "real_action_requires_gate": true,
   "final_submit_forbidden": true,
-  "notes": "Optional learn-only parser provider. The profile declares expected paths and a runtime probe, not installed-state truth. Output is review-only evidence and never click authorization.",
+  "notes": "Installed local-only Shadow parser assets. Output is review-only evidence and never click authorization.",
   "provider_contract": "screen_parser_result_v1",
   "runtime_probe": {
     "required": true,
@@ -47,7 +47,8 @@
   "expected_paths": {
     "code_path": "tools/omniparser-v2.0.1",
     "weights_path": "models/omniparser/v2.0.1/weights",
-    "runtime_path": "tools/omniparser-v2.0.1/.venv"
+    "runtime_path": "tools/omniparser-v2.0.1/.venv",
+    "huggingface_cache_path": "~/.cache/huggingface/hub"
   },
   "florence_offline_revisions": {
     "processor": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",

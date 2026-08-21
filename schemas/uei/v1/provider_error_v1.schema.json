@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "provider_error_v1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "error_id",
+    "request_ref",
+    "requested_provider_id",
+    "requested_profile_id",
+    "registration_resolution",
+    "manifest_resolution",
+    "provider_id",
+    "profile_id",
+    "stage",
+    "code",
+    "retryable",
+    "message",
+    "safe_details",
+    "capture_lineage_ref",
+    "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "provider_error_v1"
+    },
+    "error_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "request_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "requested_provider_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "requested_profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "registration_resolution": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "not_found",
+        "invalid",
+        "not_reached"
+      ]
+    },
+    "manifest_resolution": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "not_found",
+        "invalid",
+        "not_reached"
+      ]
+    },
+    "registration_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "manifest_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "registration",
+        "manifest",
+        "request",
+        "projection",
+        "redaction",
+        "coordinate",
+        "store"
+      ]
+    },
+    "code": {
+      "type": "string",
+      "enum": [
+        "provider_unregistered",
+        "profile_unregistered",
+        "capability_intersection_empty",
+        "egress_disallowed",
+        "privacy_disallowed",
+        "payload_limit_exceeded",
+        "wire_payload_forbidden",
+        "fixture_invalid",
+        "provider_fixture_schema_invalid",
+        "lineage_mismatch",
+        "artifact_missing",
+        "content_hash_mismatch",
+        "coordinate_invalid",
+        "projection_failed"
+      ]
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "safe_details": {
+      "type": "object",
+      "required": [
+        "reason_class"
+      ],
+      "properties": {
+        "reason_class": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "capture_lineage_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "content_sha256": {
+      "$ref": "#/$defs/sha"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "immutable_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "content_sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      },
+      "additionalProperties": false
+    },
+    "size": {
+      "type": "object",
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        }
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "bbox": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "opaque_string": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "opaque_scalar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 4096
+        },
+        {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "opaque_value": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/opaque_scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaque_value"
+          },
+          "maxItems": 256
+        },
+        {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/opaque_value"
+          }
+        }
+      ]
+    }
+  }
+}

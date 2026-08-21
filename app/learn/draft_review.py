@@ -11,6 +11,10 @@ from typing import Any
 from PIL import Image, ImageDraw, UnidentifiedImageError
 
 from app.learn.correction_memory import record_human_review_correction
+from app.learn.recognition.uei.learning_shadow import (
+    load_uei_shadow_provider_summary,
+    strip_uei_shadow_review_cache,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -73,6 +77,11 @@ def load_learning_draft_review(
         "readonly": True,
     }
     normalized_draft = _normalized_draft(draft)
+    shadow_summary = load_uei_shadow_provider_summary(
+        normalized_draft, project_root=root,
+        current_capture_lineage_ref=_server_capture_lineage_ref(payload, normalized_draft),
+    )
+    strip_uei_shadow_review_cache(normalized_draft)
     _bind_review_source_image(normalized_draft, root)
     result = {
         "contract_version": REVIEW_CONTRACT,
@@ -92,6 +101,8 @@ def load_learning_draft_review(
         "audit": deepcopy(payload.get("audit")) if isinstance(payload.get("audit"), dict) else {},
         "safety": _review_safety(),
     }
+    if shadow_summary is not None:
+        result["uei_shadow_provider_summary"] = shadow_summary
     if workflow_node_identity:
         result["workflow_node_identity"] = workflow_node_identity
     if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT:
@@ -110,6 +121,16 @@ def load_learning_draft_review(
         if demo_artifact_review:
             result["pathgraph_candidate_review"] = demo_artifact_review
     return result
+
+
+def _server_capture_lineage_ref(payload: dict[str, Any], draft: dict[str, Any]) -> dict[str, str] | None:
+    """只接受已加载服务器产物中精确的当前 capture 引用。"""
+    for value in (payload.get("capture_lineage_ref"), draft.get("capture_lineage_ref"),
+                  draft.get("page_details", {}).get("capture_lineage_ref") if isinstance(draft.get("page_details"), dict) else None):
+        if (isinstance(value, dict) and set(value) == {"id", "content_sha256"}
+                and all(isinstance(value.get(name), str) for name in ("id", "content_sha256"))):
+            return {"id": value["id"], "content_sha256": value["content_sha256"]}
+    return None
 
 
 def _workflow_node_identity(payload: dict[str, Any], root: Path) -> dict[str, str]:

@@ -1,0 +1,60 @@
+{
+  "capture_lineage_ref": {
+    "content_sha256": "cde385c6f6d1ebce03aa0f53016d6f793739d096fed4694c68628b8a0da1a63c",
+    "id": "capture/local.runtime/omniparser/static"
+  },
+  "contract_version": "provider_safe_result_v1",
+  "items": [
+    {
+      "capture_bbox": null,
+      "coordinate_transform_ref": null,
+      "kind": "text",
+      "opaque_attributes": {
+        "source": "synthetic"
+      },
+      "provider_confidence": null,
+      "safe_role": "text",
+      "safe_states": [
+        "interactable"
+      ],
+      "safe_text": "Synthetic Search",
+      "source_bbox": [
+        12,
+        24,
+        112,
+        56
+      ],
+      "source_coordinate_space": "image_pixel_xyxy",
+      "source_id_origin": "provider",
+      "source_item_id": "omniparser_0001_synthetic"
+    }
+  ],
+  "manifest_ref": {
+    "content_sha256": "e76d9509e0d6dc1f840437ac8c1c089d7668d3c2ff0e0953afca97799a613f90",
+    "id": "manifest/local.runtime/omniparser/static"
+  },
+  "manifest_resolution": "resolved",
+  "profile_id": "local.runtime/omniparser/static",
+  "provider_id": "local.runtime/omniparser",
+  "provider_version": "1.0",
+  "redaction_summary": {
+    "redacted_field_count": 0,
+    "redacted_item_count": 0,
+    "secret_detected": false,
+    "sensitive_categories": []
+  },
+  "registration_ref": {
+    "content_sha256": "82df3f1fd3bcf80f48083d9c3ebbd8029490d43b715b07f78824dfc3da24ca09",
+    "id": "registration/local.runtime/omniparser/static"
+  },
+  "registration_resolution": "resolved",
+  "request_ref": {
+    "content_sha256": "112be01cd0cd98748908ae3e00ce66f2aca8d2e652bec7e2a58b0d9dfb56bf3b",
+    "id": "request/local.runtime/omniparser/static"
+  },
+  "requested_profile_id": "local.runtime/omniparser/static",
+  "requested_provider_id": "local.runtime/omniparser",
+  "result_id": "result/65b55d2ad0f354dc23c1a795163d7ec23f4171e439b142053e3f0dad6e32b1b1",
+  "review_only": true,
+  "status": "success"
+}

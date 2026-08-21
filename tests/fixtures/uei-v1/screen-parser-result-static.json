@@ -1,0 +1,43 @@
+{
+  "contract_version": "screen_parser_result_v1",
+  "provider": "omniparser",
+  "status": "success",
+  "profile_id": "local.runtime/omniparser/static",
+  "model_revision": "synthetic-v1",
+  "capture_id": "capture/local.runtime/omniparser/static",
+  "source_run_id": "synthetic-run",
+  "screenshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "image_size": {
+    "width": 640,
+    "height": 480
+  },
+  "coordinate_space": "image_pixel_xyxy",
+  "timing": {
+    "inference_ms": 1.0
+  },
+  "resource_usage": {
+    "gpu_available": false
+  },
+  "provenance": {
+    "source": "synthetic"
+  },
+  "elements": [
+    {
+      "element_id": "omniparser_0001_synthetic",
+      "type": "text",
+      "content": "Synthetic Search",
+      "bbox": [
+        12,
+        24,
+        112,
+        56
+      ],
+      "interactivity": true,
+      "source": "synthetic"
+    }
+  ],
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "review_only": true,
+  "grounding_eligible": false
+}

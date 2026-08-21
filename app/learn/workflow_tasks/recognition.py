@@ -86,6 +86,7 @@ def run_recognition_task(
             result=result,
         )
         _attach_provider_summary_to_draft(result, provider_summary)
+        _attach_uei_shadow_result_ref_to_draft(result, task_input.observation_evidence)
         model_provenance = _model_provenance(
             observe_bundle,
             project_root=root,
@@ -1025,6 +1026,22 @@ def _attach_provider_summary_to_draft(
         else {}
     )
     page_details["provider_summary"] = deepcopy(provider_summary)
+    draft["page_details"] = page_details
+
+
+def _attach_uei_shadow_result_ref_to_draft(
+    result: dict[str, Any], observation_evidence: dict[str, Any],
+) -> None:
+    """仅缓存不可变 UEI Shadow 引用，绝不投影条目或坐标。"""
+    draft = result.get("learning_draft")
+    reference = observation_evidence.get("uei_shadow_result_ref") if isinstance(observation_evidence, dict) else None
+    if (not isinstance(draft, dict) or not isinstance(reference, dict)
+            or set(reference) != {"id", "content_sha256"}
+            or not isinstance(reference.get("id"), str)
+            or not isinstance(reference.get("content_sha256"), str)):
+        return
+    page_details = deepcopy(draft.get("page_details")) if isinstance(draft.get("page_details"), dict) else {}
+    page_details["uei_shadow_result_ref"] = {"id": reference["id"], "content_sha256": reference["content_sha256"]}
     draft["page_details"] = page_details
 
 

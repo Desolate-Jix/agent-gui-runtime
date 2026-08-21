@@ -63,6 +63,7 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'data-stage="execute_locate" data-step="2"' in response.text
     assert 'id="pageMetaStrip"' in response.text
     assert 'id="pageApiBadge"' in response.text
+    assert 'id="learningDraftUeiShadowProviderSummary"' in response.text
     assert 'id="pageSideEffectBadge"' in response.text
     assert 'id="resetLayoutBtn"' in response.text
     assert 'data-mode-scope="learn"' in response.text

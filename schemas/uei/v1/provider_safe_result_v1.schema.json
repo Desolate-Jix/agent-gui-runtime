@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "provider_safe_result_v1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "result_id",
+    "request_ref",
+    "requested_provider_id",
+    "requested_profile_id",
+    "registration_resolution",
+    "manifest_resolution",
+    "provider_id",
+    "profile_id",
+    "provider_version",
+    "capture_lineage_ref",
+    "status",
+    "review_only",
+    "items",
+    "redaction_summary",
+    "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "provider_safe_result_v1"
+    },
+    "result_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "request_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "requested_provider_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "requested_profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "registration_resolution": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "not_found",
+        "invalid",
+        "not_reached"
+      ]
+    },
+    "manifest_resolution": {
+      "type": "string",
+      "enum": [
+        "resolved",
+        "not_found",
+        "invalid",
+        "not_reached"
+      ]
+    },
+    "registration_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "manifest_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "provider_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "capture_lineage_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "failed"
+      ]
+    },
+    "review_only": {
+      "type": "boolean"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_item_id",
+          "source_id_origin",
+          "kind",
+          "safe_text",
+          "safe_role",
+          "safe_states",
+          "source_bbox",
+          "capture_bbox",
+          "source_coordinate_space",
+          "coordinate_transform_ref",
+          "opaque_attributes",
+          "provider_confidence"
+        ],
+        "properties": {
+          "source_item_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "source_id_origin": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "uei_deterministic_projection"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "element",
+              "text",
+              "role",
+              "state",
+              "icon",
+              "structure"
+            ]
+          },
+          "safe_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 4096
+          },
+          "safe_role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "safe_states": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "maxItems": 64,
+            "uniqueItems": true
+          },
+          "source_bbox": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "capture_bbox": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "source_coordinate_space": {
+            "type": "string",
+            "enum": [
+              "screen_pixel_xyxy",
+              "window_outer_pixel_xyxy",
+              "window_client_pixel_xyxy",
+              "capture_pixel_xyxy",
+              "image_pixel_xyxy",
+              "image_normalized_xyxy"
+            ]
+          },
+          "coordinate_transform_ref": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/immutable_ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opaque_attributes": {
+            "type": "object",
+            "maxProperties": 64,
+            "additionalProperties": {
+              "$ref": "#/$defs/opaque_value"
+            }
+          },
+          "provider_confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "additionalProperties": false,
+        "if": {
+          "properties": {
+            "source_coordinate_space": {
+              "const": "image_normalized_xyxy"
+            }
+          },
+          "required": [
+            "source_coordinate_space"
+          ]
+        },
+        "then": {
+          "properties": {
+            "source_bbox": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "source_bbox": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          }
+        }
+      },
+      "maxItems": 10000,
+      "uniqueItems": true
+    },
+    "redaction_summary": {
+      "type": "object",
+      "required": [
+        "redacted_item_count",
+        "redacted_field_count",
+        "secret_detected",
+        "sensitive_categories"
+      ],
+      "properties": {
+        "redacted_item_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "redacted_field_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576
+        },
+        "secret_detected": {
+          "type": "boolean"
+        },
+        "sensitive_categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 64,
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "error_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "content_sha256": {
+      "$ref": "#/$defs/sha"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "immutable_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "content_sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      },
+      "additionalProperties": false
+    },
+    "size": {
+      "type": "object",
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        }
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "bbox": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "opaque_string": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "opaque_scalar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 4096
+        },
+        {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "opaque_value": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/opaque_scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaque_value"
+          },
+          "maxItems": 256
+        },
+        {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/opaque_value"
+          }
+        }
+      ]
+    },
+    "normalized_bbox": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "minItems": 4,
+      "maxItems": 4
+    }
+  },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "failed"
+      }
+    },
+    "required": [
+      "status"
+    ]
+  },
+  "then": {
+    "required": [
+      "error_ref"
+    ],
+    "properties": {
+      "items": {
+        "type": "array",
+        "maxItems": 0
+      },
+      "review_only": {
+        "const": true
+      }
+    }
+  }
+}

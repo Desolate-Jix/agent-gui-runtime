@@ -4,95 +4,178 @@
 
 [中文](README.md)
 
-Turn uncertain computer interaction into reviewed, replayable, stoppable runtime behavior. This project is not positioned as “better OCR”; it compiles learned interface evidence into semantic, freshness-bound, verifiable, recoverable workflows.
+## Hero
 
-## The mainline
+> **The workflow reliability layer after GUI perception.**
+>
+> **A Windows GUI agent runtime that turns uncertain exploration into reusable, human-reviewed, runtime-relocated, and verifiable semantic workflows.**
 
-```text
-Learn → Review → Compile → Verified Replay → Recovery
-```
+Start with built-in Windows perception—screenshots, UIA, OCR, and local recognition—or bring an external provider. Provider-native output must pass through a trusted adapter into canonical UEI evidence before it can enter learning and review.
 
-- **Learn**: collect screenshot, UIA, OCR, vision-model, and optional parser evidence from the current window.
-- **Review**: correct boxes, page responsibilities, candidate actions, and transitions in the panel. Learning output is not authorization.
-- **Compile**: turn reviewed interfaces and transitions into a workflow with semantic actions, preconditions, evidence lineage, risk levels, and verification rules.
-- **Verified Replay**: capture the current UI again before every action, check window binding, coordinate space, capture identity, and the Gate, then use the shared action API.
-- **Recovery**: verify the effect after an action; on drift, timeout, error, or stale evidence, stop with diagnosable state instead of blindly retrying.
+Foundation GUI models are evolving quickly; built-in perception is not this project's moat. The focus is durable, reviewed workflow knowledge: evidence that can be reused, relocated on the current interface, gated, and verified.
 
-## Positioning and safety boundary
+![SEEK recorded gated Agent path](docs/media/seek-three-interface-real-agent-demo.gif)
 
-This is a local Windows runtime and learning panel, not an unattended job-submission service. The default boundary is:
+**Evidence grade: public, redacted, controlled SEEK Agent recording.** It shows only SEEK home → job detail → same-site Apply / Quick Apply entry: no form filling, typing, upload, Continue/Next, or final submission. It is not proof of autonomous end-to-end traversal of a saved workflow graph.
 
-- Learning drafts, reviews, and runtime evidence are non-authorizing: `artifact_is_authorization=false`, `execute_binding_enabled=false`.
-- `final_submit`, `send`, `confirm`, `payment`, and `delete` remain forbidden. Real clicks require current-window, candidate, confidence, `pre_click_decision_v1`, and post-action evidence.
-- Low-risk navigation may be displayed or dry-run, but model output, old coordinates, or a panel button cannot bypass the current-UI Gate.
-- `artifacts/`, `logs/`, `models/`, and `runtime_state/` are local runtime output or model resources, not clone-time public resources.
+## Why GUI Agents Break
 
-## What is currently verified
+Perception can propose what may be on screen, but cannot alone prove that a click is correct, allowed, and effective in the current window. Interfaces change, windows switch, scrolling can affect the wrong container, and neither old coordinates nor one model response is execution authority.
 
-### SEEK Quick Apply (controlled entry path)
+## Core Lifecycle
 
-The controlled evidence covers **SEEK home → job detail → same-site Apply/Quick Apply entry**. It stops at the application entry: no field fill, typing, upload, Continue/Next, `Review and submit`, `Submit application`, `Send`, `Complete`, payment, or other final action. This validates reviewed replay, current-UI grounding, the Gate, and post-action verification; it does not claim ATS E2E, live safe-fill, or unattended reliability.
+    Explore → Capture Evidence → Human Review → Compile Semantic Workflow
+    → Runtime Relocation → Safety Gate → Execute → Verify
 
-### Learning workspace
+1. **Explore** uncertain paths.
+2. **Capture Evidence** with lineage.
+3. **Human Review** semantics, candidates, transitions, scope, and risk.
+4. **Compile Semantic Workflow** as a reusable asset, not a coordinate script.
+5. **Runtime Relocation** against the current capture.
+6. **Safety Gate** for a bounded allowed attempt.
+7. **Execute** only through the gated action path.
+8. **Verify** observed effect, or retain diagnostics and stop safely.
 
-The panel provides one workspace for capture/understanding, numbering and calibration, human correction, evidence review, fusion, page details, and read-only PathGraph. The backend owns workflow state; the panel renders state, starts review, and presents results without reconstructing execution authorization.
+## What Makes This Different
 
-Reviewed interfaces can be saved as application-scoped workflow drafts. Nodes retain source-capture identity, evidence hashes, page responsibility, candidate actions, and verification rules. Cross-capture, cross-window, or lineage-less candidates fail closed. New reviewed content is the priority; old runtime assets are not migrated.
+- **Reviewed knowledge is durable** — reuse reviewed semantics, conditions, verification rules, and evidence lineage, not screenshot coordinates.
+- **Evidence is not authority** — providers, models, old coordinates, and panel buttons cannot bypass the current Gate.
+- **Relocation is runtime work** — saved geometry is only a prior.
+- **Verification is part of the asset** — dispatch is not completion.
+- **Perception is replaceable** — learning, review, compilation, and reuse keep a stable semantic boundary.
 
-## OmniParser status
+## Replaceable Perception, Durable Reviewed Knowledge
 
-OmniParser is an **optional learning shadow/contact-sheet provider** exposed through `screen_parser_result_v1`:
+**Perception is replaceable. Reviewed knowledge is durable.**
 
-- It may add review-only element and icon-semantic hints. It does not grant click authorization and does not replace UIA, OCR, or the current-capture Gate.
-- The current smoke input is a privacy-reviewed contact sheet, not proof of general UI recognition, live-window capture, or clickability.
-- OmniParser source, weights, virtual environment, and dependencies are not distributed in this repository. Users who enable it must obtain the components themselves and accept their licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+A provider may use UIA, OCR, a parser, or a vision model. Learning need not know its internal output format or identity: trusted adapters convert native output into canonical, safe UEI evidence, which is reviewed before it can contribute to a semantic workflow.
 
-## Install and start
+### Provider Resolver (target modes)
 
-Requirements: Windows 10/11, Python `>=3.11,<3.12`, and [`uv`](https://docs.astral.sh/uv/).
+| Mode | Intended role | Current status |
+| --- | --- | --- |
+| **Built-in** | Windows perception baseline. | **Partial**: baseline input, not proof of general live grounding. |
+| **Primary** | Preferred main provider. | **Planned** |
+| **Assist** | Supplemental/cross-check provider. | **Planned** |
+| **Shadow** | Observe provider output without affecting execution. | **Prototype**: trusted local Shadow runtime only; review-only summary. |
+| **Automatic** | Policy, health, and capability routing/fallback. | **Planned** |
 
-```powershell
-git clone https://github.com/Desolate-Jix/agent-gui-runtime.git
-cd agent-gui-runtime
-uv sync
-.\start_test_panel.bat
-```
+This is not arbitrary API plug-and-play. There are no external/remote API adapters and no production Primary, Assist, or Automatic routing. UEI / OmniParser is a supporting Prototype, not the product protagonist.
 
-The launcher reuses or selects a local port and opens the panel. Manual startup is also available:
+### Provider Manifest + Evidence Contract
 
-```powershell
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+A Provider Manifest declares namespaced identity, version, profile, declared output kinds, coordinate spaces, capture support, privacy capabilities, and modes. The Evidence Contract records request/profile resolution, capture lineage, source/capture bounding boxes, proven transform references, safe text/roles/states, confidence, bounded attributes, redaction, immutable references, and runtime receipts.
 
-Optional local vision models require separate resources. Model services and weights are not part of this release. Confirm GPU memory and ports in the panel model manager before starting a profile. Do not force-add personal screenshots, browser sessions, tokens, runtime logs, or model weights to Git.
+Provider-specific extensions can enter only as bounded attributes; they cannot become action instructions. If coordinates cannot be proven to map to the **same exact capture**, the result remains review-only evidence.
 
-## Code entry points
+> **A provider proposes evidence; it never authorizes action.**
 
-- `app/learn/`: learning tasks, evidence contracts, recognition, and review projections.
-- `app/operation/`: window binding, observation, localization, action candidates, and execution API.
-- `app/gate/`: shared safety, dataflow, and final-submit blocking.
-- `app/web_panel/`: learning, review, and replay panel.
-- `configs/model_profiles/`: declarative model and shadow-provider profiles.
-- `scripts/`: offline smoke, reports, and maintenance tools.
-- `tests/`: contract, regression, and safety-boundary tests.
+It cannot click, choose a workflow node, bypass Gate, or mark an action verified.
 
-The reusable runtime contract comes before site-specific patches: candidates carry `capture_id`, viewport, source, bbox, click point, and freshness; scrolling is bound to a target container; detail updates consume only the latest snapshot; and final-submit detection is scoped to the active form or modal.
+### Minimal adapter shape (illustrative pseudocode)
 
-## Next mainline
+    class ExampleParserAdapter:
+        provider_id = "example.parser"
+        profile_id = "example.parser/screen-v1"
+        provider_version = "1.0"
 
-1. The `reviewed_workflow_asset_v2` contract, immutable CAS store, semantic compiler, verified replay coordinator, and bounded recovery path are implemented; old content is not migrated.
-2. Backend APIs and panel controls now support `Compile → CAS Publish → read-only Preview`; source workflows and assets are resolved and verified server-side, and preview never captures the screen or calls the action API.
-3. A synthetic three-state SEEK E2E path (home → detail → application entry stop) is verified with the real compiler, CAS, panel API, replay coordinator, and navigation adapter envelope. It uses fakes for external dependencies and makes no real GUI, network, or action claim; controlled local current-observation smoke is next.
-4. Benchmark generic window/coordinate mapping, long screenshots, and scroll-container replay; executable `read`/`scroll` remains deferred until a typed effect verifier exists.
-5. An externally checksum-pinned offline contract benchmark now compares immutable recorded Bare events with Runtime replay classification, stop quality, bounded recovery, latency, and derived evidence digests. It is not a live Bare Agent, model capability, perception-accuracy, or real-click success benchmark.
+        def invoke(self, *, capture, budget, invocation_id):
+            native = parser.inspect(capture.local_path)
+            return normalized_safe_evidence(native, capture, budget)
 
-Production live replay orchestration and server-side current-observation capture are still missing; Preview cannot execute. Replay requests are limited to one action attempt, while `read`, `scroll`, `fill_field`, `continue_next_step`, upload, and every final-submit class remain fail closed. This milestone does not include an authoritative recovery-feedback persistence store; recovery evidence remains the structured `recovery_decision_v1` plus offline replay reports.
+Target integration: declare a Manifest → implement a budgeted trusted adapter → project to canonical evidence while rejecting/redacting unsafe fields → provide coordinates only with a proven exact-capture transform → keep compilation, relocation, Gate, and Verify outside the adapter.
 
-## Release information
+## SEEK Reference Workflow
 
-- Version: `0.3.0`
-- Root project license: [`ISC`](LICENSE).
-- Optional third-party component boundaries: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-- Changes: [`CHANGELOG.md`](CHANGELOG.md).
+SEEK is the **reference implementation**, not the product identity: **SEEK home → job detail → same-site Apply / Quick Apply entry**. It stops at application entry; it does not claim ATS end-to-end behavior, live safe-fill, unattended job application, or autonomous traversal of a saved workflow graph.
 
-“Verified” in this document means that the corresponding controlled path or narrow smoke has evidence; it is not a claim of universal website, application, or unattended reliability. Narrow checks and known limitations are recorded in `CHANGELOG.md` and the design documents in this repository.
+## Current Status
+
+| Capability | Status | Evidence today | Not claimed |
+| --- | --- | --- | --- |
+| Reviewed workflow assets, revisions, and persistence | **Stable** | Reviewed assets, lineage, compilation, controlled persistence/tamper checks. | Published asset equals action authority. |
+| Learning, human review, workflow creation | **Partial** | Display-only drafts, reviewed candidates, application-scoped review. | General visual understanding or real multi-window success rates. |
+| Built-in perception baseline | **Partial** | Screenshots, UIA, OCR, local recognition as baseline evidence. | Reliable grounding on every current UI. |
+| Gate and terminal-action handling | **Partial** | Terminal actions default fail closed; structured-authorization branch exists. | Globally Stable Gate for every site, control, or long flow. |
+| Relocation, execution, verification, Agent integration | **Partial** | Controlled SEEK and offline/controlled replay cover parts. | Mandatory current grounding across every replay; verification cannot be disabled; complete live orchestration. |
+| Scroll wrong-scope effect verification | **Partial** | Detection contract and regression path. | Closed effect-verification gap. |
+| Trusted local Universal Evidence Interface v1 (UEI) / OmniParser Shadow | **Prototype** | Review-only summary projection. | Arbitrary API plug-and-play, external adapters, or complete UEI → Learn/Review/Compile/action wiring. |
+| Deterministic synthetic demo | **Prototype** | Harness can click and observe a synthetic result. | Live GUI, real Agent behavior, model accuracy, or saved-workflow replay. |
+| Primary / Assist / Automatic resolver, remote providers | **Planned** | Target design is explicit. | Implementation or validation today. |
+
+## Architecture
+
+    Built-in or trusted-provider perception
+                ↓ canonical evidence + capture lineage
+                ↓ learning workspace + human review
+                ↓ reviewed semantic workflow + immutable refs
+                ↓ current capture → relocation → Safety Gate
+                ↓ bounded attempt → observation → Verify / safe stop
+
+Learning, review, compiled assets, and stable reuse are central; perception is replaceable input. Runtime must prove conditions in the **current** target window.
+
+## Engineering Highlights
+
+1. Capture freshness and lineage prevent mixed old/new coordinates.
+2. Revision-bound human review revokes stale approval.
+3. Application-scoped review retains evidence per learned interface.
+4. The canonical evidence boundary validates, bounds, and redacts provider output.
+5. Current-UI relocation rebinds candidates instead of replaying geometry.
+6. Gate-first execution defaults dangerous terminal classes to refusal.
+7. Post-action evidence records a diagnosable safe stop when effect is unproven.
+
+## Demo and Evidence
+
+### Deterministic synthetic harness · synthetic depiction (15.0 s)
+
+![Deterministic synthetic framework demo](docs/media/demo.gif)
+
+demo.gif proves only that the deterministic synthetic framework/harness has click capability and can observe a synthetic result. It is a depiction; it proves neither live GUI reliability, real Agent behavior, model accuracy, human review, nor end-to-end replay of a saved workflow.
+
+Public source: [demo.gif](https://github.com/Desolate-Jix/windows-gui-agent-runtime/blob/main/docs/demo.gif); SHA-256: 302e049140bc0a2868258ea55b25aec7d22279bfc0d27e46b04efa4d318e73c0.
+
+### SEEK recorded gated Agent path · public redacted recording (16.0 s)
+
+This GIF is in the Hero. Public source: [seek-three-interface-real-agent-demo.gif](https://github.com/Desolate-Jix/windows-gui-agent-runtime/blob/main/docs/seek-three-interface-real-agent-demo.gif); SHA-256: 80ab0a5055d0e700f009642bd414ffdbfef1426307537dfd976c822de9d88b4f. Its scope and no-form-action wording come from that public source repository; this repository does not independently claim complete frame-to-trace lineage or autonomous saved-workflow traversal.
+
+## Run Locally
+
+Requirements: Windows 10/11, Python >=3.11,<3.12, and [uv](https://docs.astral.sh/uv/).
+
+    git clone https://github.com/Desolate-Jix/agent-gui-runtime.git
+    cd agent-gui-runtime
+    uv sync
+    .\start_test_panel.bat
+
+Or run: uv run uvicorn app.main:app --host 127.0.0.1 --port 8000.
+
+## Target End State
+
+Not yet implemented: provider routing/fallback receipts; external adapters; complete UEI → Learn → Review → Compile wiring; mandatory current grounding/verification across replay; live saved-workflow orchestration with a server-owned current-observation bridge; and closed-loop scroll wrong-scope effect verification.
+
+## Safety and Non-goals
+
+- This is not an unattended job-submission service; plausible model output is never execution permission.
+- Learning drafts, PathGraphs, review outputs, and published workflows are non-authorizing assets.
+- final_submit, send, confirm, payment, and delete default fail closed; structured authorization is not blanket permission.
+- Generic requests use a bounded execution-attempt budget (default: at most 2); reviewed-workflow replay forces 1.
+- No claim covers all sites, Windows applications, models, providers, or unattended workflows.
+
+## Repository Map and Deep Dives
+
+- app/learn/ — learning tasks, evidence contracts, recognition, review projections.
+- app/operation/ — window binding, observation, localization, candidates, runtime action interfaces.
+- app/gate/ — Safety Gate, dataflow contracts, terminal-action handling.
+- app/web_panel/ — local learning, review, replay panel.
+- app/learn/recognition/uei/ and schemas/uei/v1/ — provider manifests, canonical evidence, trusted adapters, Shadow prototype.
+- tests/ — contract, regression, safety-boundary tests.
+- [CHANGELOG.md](CHANGELOG.md) — narrow verification and limitations.
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — optional components and license boundaries.
+
+## Release and License
+
+- Version: 0.3.0
+- Root project license: [ISC](LICENSE)
+- Changes: [CHANGELOG.md](CHANGELOG.md)
+
+“Stable,” “Partial,” “Prototype,” “Planned,” and “Evidence” describe the current controlled scope, not a CI-backed production-reliability promise or general live-GUI success claim.

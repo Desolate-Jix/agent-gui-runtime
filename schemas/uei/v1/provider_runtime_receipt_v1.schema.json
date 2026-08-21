@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "provider_runtime_receipt_v1",
+  "type": "object",
+  "required": ["contract_version", "receipt_id", "request_ref", "capture_lineage_ref", "artifact_ref", "provider_id", "profile_id", "mode", "status", "reason_class", "retryable", "metrics", "cleanup_status", "content_sha256"],
+  "properties": {
+    "contract_version": {"const": "provider_runtime_receipt_v1"},
+    "receipt_id": {"type": "string", "minLength": 1, "maxLength": 512},
+    "request_ref": {"$ref": "#/$defs/immutable_ref"},
+    "capture_lineage_ref": {"$ref": "#/$defs/immutable_ref"},
+    "artifact_ref": {"$ref": "#/$defs/immutable_ref"},
+    "provider_id": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"},
+    "profile_id": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"},
+    "mode": {"const": "Shadow"},
+    "status": {"type": "string", "enum": ["succeeded", "failed", "rejected"]},
+    "reason_class": {"type": "string", "enum": ["none", "policy_rejected", "resource_rejected", "runtime_unavailable", "runtime_timeout", "runtime_worker_invalid", "runtime_worker_failed", "runtime_provider_failed", "runtime_cleanup_failed"]},
+    "retryable": {"type": "boolean"},
+    "metrics": {"type": "object", "required": ["duration_ms", "resource_units", "output_item_count"], "properties": {"duration_ms": {"type": "integer", "minimum": 0, "maximum": 86400000}, "resource_units": {"type": "integer", "minimum": 0, "maximum": 1048576}, "output_item_count": {"type": "integer", "minimum": 0, "maximum": 10000}}, "additionalProperties": false},
+    "result_ref": {"$ref": "#/$defs/immutable_ref"},
+    "error_ref": {"$ref": "#/$defs/immutable_ref"},
+    "cleanup_status": {"type": "string", "enum": ["not_required", "clean", "failed"]},
+    "content_sha256": {"$ref": "#/$defs/sha"}
+  },
+  "additionalProperties": false,
+  "if": {"properties": {"status": {"const": "succeeded"}}, "required": ["status"]},
+  "then": {"required": ["result_ref"], "properties": {"reason_class": {"const": "none"}, "retryable": {"const": false}, "cleanup_status": {"const": "clean"}}},
+  "else": {
+    "if": {"properties": {"status": {"const": "failed"}}, "required": ["status"]},
+    "then": {"required": ["result_ref", "error_ref"], "properties": {"reason_class": {"enum": ["runtime_timeout", "runtime_worker_invalid", "runtime_worker_failed", "runtime_provider_failed", "runtime_cleanup_failed"]}}},
+    "else": {"properties": {"reason_class": {"enum": ["policy_rejected", "resource_rejected", "runtime_unavailable"]}, "cleanup_status": {"const": "not_required"}}}
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "immutable_ref": {"type": "object", "required": ["id", "content_sha256"], "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 512}, "content_sha256": {"$ref": "#/$defs/sha"}}, "additionalProperties": false}
+  }
+}

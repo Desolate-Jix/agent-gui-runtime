@@ -1,0 +1,65 @@
+{
+  "capture_lineage_ref": {
+    "content_sha256": "e7587238058c1c4861954562175802d5b04c60a0a19e24146745a8d43ee997ea",
+    "id": "capture/local.runtime/windows-uia/static"
+  },
+  "contract_version": "provider_safe_result_v1",
+  "items": [
+    {
+      "capture_bbox": null,
+      "coordinate_transform_ref": null,
+      "kind": "element",
+      "opaque_attributes": {
+        "automation_id": "synthetic-search",
+        "class_name": "ButtonClass",
+        "patterns": [
+          "Invoke"
+        ]
+      },
+      "provider_confidence": null,
+      "safe_role": "Button",
+      "safe_states": [
+        "enabled",
+        "visible"
+      ],
+      "safe_text": "Synthetic Search",
+      "source_bbox": [
+        12,
+        24,
+        112,
+        56
+      ],
+      "source_coordinate_space": "window_outer_pixel_xyxy",
+      "source_id_origin": "provider",
+      "source_item_id": "uia_0_synthetic_search"
+    }
+  ],
+  "manifest_ref": {
+    "content_sha256": "0c5da80795268edc11845efe79cc97acae18ffbc0b23b7694ebba80d78e4ef4f",
+    "id": "manifest/local.runtime/windows-uia/static"
+  },
+  "manifest_resolution": "resolved",
+  "profile_id": "local.runtime/windows-uia/static",
+  "provider_id": "local.runtime/windows-uia",
+  "provider_version": "1.0",
+  "redaction_summary": {
+    "redacted_field_count": 1,
+    "redacted_item_count": 0,
+    "secret_detected": false,
+    "sensitive_categories": []
+  },
+  "registration_ref": {
+    "content_sha256": "0406e27907a5632cca56bb10b985c29a4c8ff490b0f2e80b9d20a52481db8110",
+    "id": "registration/local.runtime/windows-uia/static"
+  },
+  "registration_resolution": "resolved",
+  "request_ref": {
+    "content_sha256": "3fa3fc459a321d62789709f73e7cfc7e064efb62a274c008ce409da8bdef4761",
+    "id": "request/local.runtime/windows-uia/static"
+  },
+  "requested_profile_id": "local.runtime/windows-uia/static",
+  "requested_provider_id": "local.runtime/windows-uia",
+  "result_id": "result/5e29b08804b56fcd6075b827773b207a648991c475610394b88991fb729bcd93",
+  "review_only": true,
+  "status": "success"
+}

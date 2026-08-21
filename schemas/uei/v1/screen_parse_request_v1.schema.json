@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "screen_parse_request_v1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "request_id",
+    "capture_lineage_ref",
+    "requested_profiles",
+    "privacy_policy",
+    "requester_id",
+    "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "screen_parse_request_v1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "capture_lineage_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "requested_profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider_id",
+          "profile_id",
+          "mode"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+          },
+          "profile_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "Primary",
+              "Shadow",
+              "Assist",
+              "Advisory",
+              "Disabled"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true
+    },
+    "privacy_policy": {
+      "type": "string",
+      "enum": [
+        "minimal",
+        "redacted_for_review",
+        "restricted"
+      ]
+    },
+    "requester_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "content_sha256": {
+      "$ref": "#/$defs/sha"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "immutable_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "content_sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      },
+      "additionalProperties": false
+    },
+    "size": {
+      "type": "object",
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        }
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "bbox": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "opaque_string": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "opaque_scalar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 4096
+        },
+        {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "opaque_value": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/opaque_scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaque_value"
+          },
+          "maxItems": 256
+        },
+        {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/opaque_value"
+          }
+        }
+      ]
+    }
+  }
+}

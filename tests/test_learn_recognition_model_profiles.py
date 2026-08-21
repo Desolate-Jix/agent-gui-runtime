@@ -18,7 +18,10 @@ LEARN_PROFILE_IDS = {
 }
 
 LOCAL_LEARN_PROFILE_IDS = {"learn_mode_qwen3_vl_8b", "learn_mode_uground_2b"}
-METADATA_ONLY_LEARN_PROFILE_IDS = LEARN_PROFILE_IDS - LOCAL_LEARN_PROFILE_IDS
+INSTALLED_SHADOW_PROFILE_IDS = {"learn_mode_omniparser_v2"}
+METADATA_ONLY_LEARN_PROFILE_IDS = (
+    LEARN_PROFILE_IDS - LOCAL_LEARN_PROFILE_IDS - INSTALLED_SHADOW_PROFILE_IDS
+)
 
 
 def test_learn_mode_model_profiles_are_learn_only_and_under_12b() -> None:
@@ -105,8 +108,9 @@ def test_learn_mode_model_profiles_separate_parser_and_grounding_roles() -> None
     assert len(omniparser["official_code"]["commit"]) == 40
     assert omniparser["expected_paths"]["code_path"].startswith("tools/")
     assert omniparser["expected_paths"]["weights_path"].startswith("models/")
-    assert omniparser["launchable"] is False
-    assert omniparser["download_status"] == "not_downloaded"
+    assert omniparser["provider_mode"] == "Shadow"
+    assert omniparser["launchable"] is True
+    assert omniparser["download_status"] == "downloaded"
     assert profiles["learn_mode_uground_2b"]["grounding_role"] == "roi_point_grounding"
     assert profiles["learn_mode_uground_7b"]["grounding_role"] == "roi_point_grounding"
     assert profiles["learn_mode_showui_2b"]["coordinate_output"] == "normalized_0_1_point_requires_coordinate_transform"

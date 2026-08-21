@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "capture_lineage_v1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "capture_id",
+    "artifact_ref",
+    "artifact_sha256",
+    "image_size",
+    "capture_coordinate_space",
+    "captured_at",
+    "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "capture_lineage_v1"
+    },
+    "capture_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "artifact_ref": {
+      "$ref": "#/$defs/immutable_ref"
+    },
+    "artifact_sha256": {
+      "$ref": "#/$defs/sha"
+    },
+    "image_size": {
+      "$ref": "#/$defs/size"
+    },
+    "capture_coordinate_space": {
+      "const": "capture_pixel_xyxy"
+    },
+    "captured_at": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 64,
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "content_sha256": {
+      "$ref": "#/$defs/sha"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "immutable_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "content_sha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "content_sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      },
+      "additionalProperties": false
+    },
+    "size": {
+      "type": "object",
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        }
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "bbox": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "opaque_string": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "opaque_scalar": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 4096
+        },
+        {
+          "type": "number",
+          "minimum": -1000000000,
+          "maximum": 1000000000
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "opaque_value": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/opaque_scalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/opaque_value"
+          },
+          "maxItems": 256
+        },
+        {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": {
+            "$ref": "#/$defs/opaque_value"
+          }
+        }
+      ]
+    }
+  }
+}

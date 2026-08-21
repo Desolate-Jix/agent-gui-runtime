@@ -1,0 +1,405 @@
+{
+  "contract_version": "uei_static_projection_sidecar_v1",
+  "rollout": {
+    "state": "Disabled",
+    "enabled": false,
+    "egress_policy": "disabled"
+  },
+  "cases": {
+    "ocr": {
+      "objects": [
+        {
+          "contract_version": "artifact_ref_v1",
+          "artifact_id": "artifact/local.runtime/ocr/static",
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_type": "image/png",
+          "byte_length": 128,
+          "restricted": true,
+          "content_sha256": "a671ab97a716256b7afbbdcc9e5397f840d8ec9bf7ed12d0c36c973d3d7a6754"
+        },
+        {
+          "contract_version": "capture_lineage_v1",
+          "capture_id": "capture/local.runtime/ocr/static",
+          "artifact_ref": {
+            "id": "artifact/local.runtime/ocr/static",
+            "content_sha256": "a671ab97a716256b7afbbdcc9e5397f840d8ec9bf7ed12d0c36c973d3d7a6754"
+          },
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image_size": {
+            "width": 640,
+            "height": 480
+          },
+          "capture_coordinate_space": "capture_pixel_xyxy",
+          "captured_at": "2026-08-21T00:00:00Z",
+          "content_sha256": "95feb536dc67ca7a498383aa5c15e559eb2298e472e6903ca99e902872572456"
+        },
+        {
+          "contract_version": "screen_parse_request_v1",
+          "request_id": "request/local.runtime/ocr/static",
+          "capture_lineage_ref": {
+            "id": "capture/local.runtime/ocr/static",
+            "content_sha256": "95feb536dc67ca7a498383aa5c15e559eb2298e472e6903ca99e902872572456"
+          },
+          "requested_profiles": [
+            {
+              "provider_id": "local.runtime/ocr",
+              "profile_id": "local.runtime/ocr/static",
+              "mode": "Advisory"
+            }
+          ],
+          "privacy_policy": "minimal",
+          "requester_id": "synthetic-test",
+          "content_sha256": "18554db2a31fed0b81f14ab5b9711c2c3c28c8e47c107ca95669cdafd0eab950"
+        },
+        {
+          "contract_version": "trusted_provider_registration_v1",
+          "registration_id": "registration/local.runtime/ocr/static",
+          "provider_id": "local.runtime/ocr",
+          "profile_ids": [
+            "local.runtime/ocr/static"
+          ],
+          "enabled": true,
+          "allowed_modes": [
+            "Advisory"
+          ],
+          "allowed_privacy_policies": [
+            "minimal"
+          ],
+          "egress_policy": "local_only",
+          "wire_payload_policy": "restricted_store_only",
+          "safe_payload_limits": {
+            "max_json_bytes": 65536,
+            "max_depth": 8,
+            "max_array_items": 256,
+            "max_object_properties": 64,
+            "max_string_chars": 4096,
+            "allowed_json_types": [
+              "object",
+              "array",
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "required_conformance_suite": "uei-v1-static-projection",
+          "content_sha256": "8ce69d7d385f7ccb404353716b43bece5751a5bf674c4a515760878ce13aba85"
+        },
+        {
+          "contract_version": "provider_manifest_v1",
+          "manifest_id": "manifest/local.runtime/ocr/static",
+          "provider_id": "local.runtime/ocr",
+          "provider_version": "1.0",
+          "profiles": [
+            {
+              "profile_id": "local.runtime/ocr/static",
+              "operation": "screen_parse",
+              "input_contract": "screen_parse_request_v1",
+              "output_contract": "provider_safe_result_v1",
+              "declared_output_kinds": [
+                "text"
+              ],
+              "supported_coordinate_spaces": [
+                "image_pixel_xyxy"
+              ],
+              "supports_capture_artifact": true,
+              "privacy_capabilities": [
+                "minimal"
+              ],
+              "mode_allowlist": [
+                "Advisory"
+              ]
+            }
+          ],
+          "content_sha256": "fc25b8a1653ed20015eea3a9c46626fa1abb4dea34e1b3a24d8f7ac52e7dc10f"
+        }
+      ],
+      "request_ref": {
+        "id": "request/local.runtime/ocr/static",
+        "content_sha256": "18554db2a31fed0b81f14ab5b9711c2c3c28c8e47c107ca95669cdafd0eab950"
+      },
+      "registration_ref": {
+        "id": "registration/local.runtime/ocr/static",
+        "content_sha256": "8ce69d7d385f7ccb404353716b43bece5751a5bf674c4a515760878ce13aba85"
+      },
+      "manifest_ref": {
+        "id": "manifest/local.runtime/ocr/static",
+        "content_sha256": "fc25b8a1653ed20015eea3a9c46626fa1abb4dea34e1b3a24d8f7ac52e7dc10f"
+      },
+      "provider_id": "local.runtime/ocr",
+      "profile_id": "local.runtime/ocr/static",
+      "fixture_binding": {
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image_size": {
+          "width": 640,
+          "height": 480
+        }
+      },
+      "transform_ref": null
+    },
+    "uia": {
+      "objects": [
+        {
+          "contract_version": "artifact_ref_v1",
+          "artifact_id": "artifact/local.runtime/windows-uia/static",
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_type": "image/png",
+          "byte_length": 128,
+          "restricted": true,
+          "content_sha256": "9eb5ebf27621605b9fa396f616392de5ca0bdfa57b6589db8feb99aca4ac66a0"
+        },
+        {
+          "contract_version": "capture_lineage_v1",
+          "capture_id": "capture/local.runtime/windows-uia/static",
+          "artifact_ref": {
+            "id": "artifact/local.runtime/windows-uia/static",
+            "content_sha256": "9eb5ebf27621605b9fa396f616392de5ca0bdfa57b6589db8feb99aca4ac66a0"
+          },
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image_size": {
+            "width": 640,
+            "height": 480
+          },
+          "capture_coordinate_space": "capture_pixel_xyxy",
+          "captured_at": "2026-08-21T00:00:00Z",
+          "content_sha256": "e7587238058c1c4861954562175802d5b04c60a0a19e24146745a8d43ee997ea"
+        },
+        {
+          "contract_version": "screen_parse_request_v1",
+          "request_id": "request/local.runtime/windows-uia/static",
+          "capture_lineage_ref": {
+            "id": "capture/local.runtime/windows-uia/static",
+            "content_sha256": "e7587238058c1c4861954562175802d5b04c60a0a19e24146745a8d43ee997ea"
+          },
+          "requested_profiles": [
+            {
+              "provider_id": "local.runtime/windows-uia",
+              "profile_id": "local.runtime/windows-uia/static",
+              "mode": "Advisory"
+            }
+          ],
+          "privacy_policy": "minimal",
+          "requester_id": "synthetic-test",
+          "content_sha256": "3fa3fc459a321d62789709f73e7cfc7e064efb62a274c008ce409da8bdef4761"
+        },
+        {
+          "contract_version": "trusted_provider_registration_v1",
+          "registration_id": "registration/local.runtime/windows-uia/static",
+          "provider_id": "local.runtime/windows-uia",
+          "profile_ids": [
+            "local.runtime/windows-uia/static"
+          ],
+          "enabled": true,
+          "allowed_modes": [
+            "Advisory"
+          ],
+          "allowed_privacy_policies": [
+            "minimal"
+          ],
+          "egress_policy": "local_only",
+          "wire_payload_policy": "restricted_store_only",
+          "safe_payload_limits": {
+            "max_json_bytes": 65536,
+            "max_depth": 8,
+            "max_array_items": 256,
+            "max_object_properties": 64,
+            "max_string_chars": 4096,
+            "allowed_json_types": [
+              "object",
+              "array",
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "required_conformance_suite": "uei-v1-static-projection",
+          "content_sha256": "0406e27907a5632cca56bb10b985c29a4c8ff490b0f2e80b9d20a52481db8110"
+        },
+        {
+          "contract_version": "provider_manifest_v1",
+          "manifest_id": "manifest/local.runtime/windows-uia/static",
+          "provider_id": "local.runtime/windows-uia",
+          "provider_version": "1.0",
+          "profiles": [
+            {
+              "profile_id": "local.runtime/windows-uia/static",
+              "operation": "screen_parse",
+              "input_contract": "screen_parse_request_v1",
+              "output_contract": "provider_safe_result_v1",
+              "declared_output_kinds": [
+                "element"
+              ],
+              "supported_coordinate_spaces": [
+                "window_outer_pixel_xyxy"
+              ],
+              "supports_capture_artifact": true,
+              "privacy_capabilities": [
+                "minimal"
+              ],
+              "mode_allowlist": [
+                "Advisory"
+              ]
+            }
+          ],
+          "content_sha256": "0c5da80795268edc11845efe79cc97acae18ffbc0b23b7694ebba80d78e4ef4f"
+        }
+      ],
+      "request_ref": {
+        "id": "request/local.runtime/windows-uia/static",
+        "content_sha256": "3fa3fc459a321d62789709f73e7cfc7e064efb62a274c008ce409da8bdef4761"
+      },
+      "registration_ref": {
+        "id": "registration/local.runtime/windows-uia/static",
+        "content_sha256": "0406e27907a5632cca56bb10b985c29a4c8ff490b0f2e80b9d20a52481db8110"
+      },
+      "manifest_ref": {
+        "id": "manifest/local.runtime/windows-uia/static",
+        "content_sha256": "0c5da80795268edc11845efe79cc97acae18ffbc0b23b7694ebba80d78e4ef4f"
+      },
+      "provider_id": "local.runtime/windows-uia",
+      "profile_id": "local.runtime/windows-uia/static",
+      "fixture_binding": {
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image_size": {
+          "width": 640,
+          "height": 480
+        }
+      },
+      "transform_ref": null
+    },
+    "screen-parser": {
+      "objects": [
+        {
+          "contract_version": "artifact_ref_v1",
+          "artifact_id": "artifact/local.runtime/omniparser/static",
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "media_type": "image/png",
+          "byte_length": 128,
+          "restricted": true,
+          "content_sha256": "67fbc0a5b53313698fae51dc9c6a28879e1edca4e57c7021541adf734e3d0f43"
+        },
+        {
+          "contract_version": "capture_lineage_v1",
+          "capture_id": "capture/local.runtime/omniparser/static",
+          "artifact_ref": {
+            "id": "artifact/local.runtime/omniparser/static",
+            "content_sha256": "67fbc0a5b53313698fae51dc9c6a28879e1edca4e57c7021541adf734e3d0f43"
+          },
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "image_size": {
+            "width": 640,
+            "height": 480
+          },
+          "capture_coordinate_space": "capture_pixel_xyxy",
+          "captured_at": "2026-08-21T00:00:00Z",
+          "content_sha256": "cde385c6f6d1ebce03aa0f53016d6f793739d096fed4694c68628b8a0da1a63c"
+        },
+        {
+          "contract_version": "screen_parse_request_v1",
+          "request_id": "request/local.runtime/omniparser/static",
+          "capture_lineage_ref": {
+            "id": "capture/local.runtime/omniparser/static",
+            "content_sha256": "cde385c6f6d1ebce03aa0f53016d6f793739d096fed4694c68628b8a0da1a63c"
+          },
+          "requested_profiles": [
+            {
+              "provider_id": "local.runtime/omniparser",
+              "profile_id": "local.runtime/omniparser/static",
+              "mode": "Advisory"
+            }
+          ],
+          "privacy_policy": "minimal",
+          "requester_id": "synthetic-test",
+          "content_sha256": "112be01cd0cd98748908ae3e00ce66f2aca8d2e652bec7e2a58b0d9dfb56bf3b"
+        },
+        {
+          "contract_version": "trusted_provider_registration_v1",
+          "registration_id": "registration/local.runtime/omniparser/static",
+          "provider_id": "local.runtime/omniparser",
+          "profile_ids": [
+            "local.runtime/omniparser/static"
+          ],
+          "enabled": true,
+          "allowed_modes": [
+            "Advisory"
+          ],
+          "allowed_privacy_policies": [
+            "minimal"
+          ],
+          "egress_policy": "local_only",
+          "wire_payload_policy": "restricted_store_only",
+          "safe_payload_limits": {
+            "max_json_bytes": 65536,
+            "max_depth": 8,
+            "max_array_items": 256,
+            "max_object_properties": 64,
+            "max_string_chars": 4096,
+            "allowed_json_types": [
+              "object",
+              "array",
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "required_conformance_suite": "uei-v1-static-projection",
+          "content_sha256": "82df3f1fd3bcf80f48083d9c3ebbd8029490d43b715b07f78824dfc3da24ca09"
+        },
+        {
+          "contract_version": "provider_manifest_v1",
+          "manifest_id": "manifest/local.runtime/omniparser/static",
+          "provider_id": "local.runtime/omniparser",
+          "provider_version": "1.0",
+          "profiles": [
+            {
+              "profile_id": "local.runtime/omniparser/static",
+              "operation": "screen_parse",
+              "input_contract": "screen_parse_request_v1",
+              "output_contract": "provider_safe_result_v1",
+              "declared_output_kinds": [
+                "element",
+                "text",
+                "icon"
+              ],
+              "supported_coordinate_spaces": [
+                "image_pixel_xyxy"
+              ],
+              "supports_capture_artifact": true,
+              "privacy_capabilities": [
+                "minimal"
+              ],
+              "mode_allowlist": [
+                "Advisory"
+              ]
+            }
+          ],
+          "content_sha256": "e76d9509e0d6dc1f840437ac8c1c089d7668d3c2ff0e0953afca97799a613f90"
+        }
+      ],
+      "request_ref": {
+        "id": "request/local.runtime/omniparser/static",
+        "content_sha256": "112be01cd0cd98748908ae3e00ce66f2aca8d2e652bec7e2a58b0d9dfb56bf3b"
+      },
+      "registration_ref": {
+        "id": "registration/local.runtime/omniparser/static",
+        "content_sha256": "82df3f1fd3bcf80f48083d9c3ebbd8029490d43b715b07f78824dfc3da24ca09"
+      },
+      "manifest_ref": {
+        "id": "manifest/local.runtime/omniparser/static",
+        "content_sha256": "e76d9509e0d6dc1f840437ac8c1c089d7668d3c2ff0e0953afca97799a613f90"
+      },
+      "provider_id": "local.runtime/omniparser",
+      "profile_id": "local.runtime/omniparser/static",
+      "fixture_binding": {
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image_size": {
+          "width": 640,
+          "height": 480
+        }
+      },
+      "transform_ref": null
+    }
+  }
+}

@@ -4,50 +4,105 @@
 
 [English](README.en.md)
 
-把不确定的计算机操作变成可复核、可重放、可停止的运行时。这个项目的重点不是宣称“更好的 OCR”，而是把学习到的界面证据编译成有语义、有新鲜度约束、可验证且可恢复的操作流程。
+## Hero
 
-## 主线
+> 一个 Windows GUI Agent 运行时：把不确定的界面探索转化为可复用、经人工审核、在运行时重新定位并可验证的语义工作流。
+
+这不是重复点击旧截图坐标的工具。每次尝试都绑定当前窗口、当前证据和明确 Gate；证据不足时安全停止，而不是猜测。
+
+![SEEK recorded gated Agent path](docs/media/seek-three-interface-real-agent-demo.gif)
+
+公开、脱敏的 SEEK **recorded gated Agent path**：没有表单填写、输入、上传、Continue/Next 或提交。它展示受控 gated path，不证明 Agent 可以自主端到端遍历已保存 workflow 图。
+
+## Why GUI Agents Break
+
+GUI 会变化、窗口会切换、滚动可能作用到错误容器；模型或 OCR 猜测也不等于可执行目标。历史学习结果只是**语义和证据先验**：真实操作必须在当前 UI 重新定位、通过 Gate，并验证效果。
+
+## Core Workflow
 
 ```text
-Learn → Review → Compile → Verified Replay → Recovery
+Uncertain exploration → evidence → human-reviewed reusable workflow
+→ runtime relocation on the current UI → Gate → bounded execution-attempt budget
+→ Verify, recover safely, or stop
 ```
 
-- **Learn**：从当前窗口获得截图、UIA、OCR、视觉模型和可选 parser 的证据。
-- **Review**：在面板中修正框、页面职责、候选操作和转移关系；学习结果不是授权。
-- **Compile**：把审核后的界面和转移编译为带语义动作、前置条件、证据 lineage、风险等级和验证规则的流程。
-- **Verified Replay**：每次操作重新捕获当前界面，检查窗口、坐标空间、截图身份和 Gate，再通过统一 action API。
-- **Recovery**：点击后验证效果；发生漂移、超时、错误或证据过期时停止并保留可诊断状态，不盲目重试。
+1. **Explore**：收集当前窗口的截图、UIA、OCR、视觉和可选 parser 证据。
+2. **Review**：人工修正界面、候选操作和转移；学习结果本身从不授权执行。
+3. **Reuse**：保存审核后的语义状态、条件和验证规则。
+4. **Relocate**：重新捕获并在当前窗口重新 grounding；历史坐标不能直接执行。
+5. **Gate and execute**：只对低风险、当前证据充分的单个动作开放受限的执行尝试预算。
+6. **Verify or stop**：检查效果；漂移、歧义、失败或风险升级时保存诊断证据并停止。
 
-## 当前定位与边界
+## What Makes This Different
 
-这是一个本地 Windows 运行时和学习面板，不是无人值守的求职提交器。默认安全边界为：
+- **Evidence is not authority**：模型输出、旧坐标和面板按钮都不能绕过当前 UI Gate。
+- **Human review is revision-bound**：语义或证据变化会撤销旧的人审事实。
+- **Semantic replay, not coordinate replay**：复用状态、目标语义、条件和验证规则；runtime 仍须重新定位。
+- **Gate-first safety**：终端提交、发送、确认、付款和删除保持禁止。
+- **Verification is first-class**：未能证明效果的尝试不会被包装成成功。
 
-- 学习草稿、审核结果和运行时 evidence 都是非授权资料：`artifact_is_authorization=false`、`execute_binding_enabled=false`。
-- `final_submit`、`send`、`confirm`、`payment`、`delete` 等终端动作保持禁止；真实点击必须经过当前窗口、候选、置信度、`pre_click_decision_v1` 和事后验证。
-- 运行时可以展示或 dry-run 低风险导航，但不会因为模型输出、旧坐标或面板按钮而自动放行危险动作。
-- `artifacts/`、`logs/`、`models/`、`runtime_state/` 是本地运行输出或模型资源，不作为克隆仓库后即可获得的公开资源。
+## SEEK Reference Workflow
 
-## 当前已验证的路径
+SEEK 是**参考实现**，不是产品身份。受控路径覆盖：**SEEK 首页 → 岗位详情 → 同站点 Apply / Quick Apply 入口**。
 
-### SEEK Quick Apply（受控入口）
+路径在申请入口停止：没有表单填写、输入、上传、Continue/Next 或提交。它检验的是“当前 UI 重新定位 → Gate → 操作后验证”的受控切片；不代表 ATS 端到端、live safe-fill、无人值守求职，或已保存 workflow 图的自主遍历。
 
-当前受控证据覆盖：**SEEK 首页 → 岗位详情 → 同站点 Apply/Quick Apply 入口**。流程在申请入口处停止；没有填字段、输入、上传、Continue/Next，也没有 `Review and submit`、`Submit application`、`Send`、`Complete` 或付款等最终动作。这是用于验证学习回放、当前界面 grounding、Gate 和 post-action verification 的受控路径，不代表 ATS E2E、live safe-fill 或 unattended reliability。
+## Evidence and Current Status
 
-### Learning workspace
+下表是能力边界，不是“全部测试通过”或生产可靠性徽章。
 
-面板把学习过程集中到一个工作台：截图/理解、编号和校准、人工修正、证据复核、融合、页面详情和只读 PathGraph。流程状态由后端合同持有；面板只展示状态、发起审核和呈现结果，不自行拼接下游授权。
+| Capability | Status | Evidence today | Not claimed |
+| --- | --- | --- | --- |
+| Bounded Gate contract and terminal-action blocking | **Stable** | 在受限合同范围内约束单步动作；危险终端动作 fail closed。 | 不表示任意网站、控件或长流程都可自动执行。 |
+| Reviewed workflow assets and persistence | **Stable** | 人审 revision、evidence lineage、编译和内容寻址发布拥有受控持久化与篡改检查。 | 已发布资产不是操作授权；仍需当前捕获、重新定位、Gate 和验证。 |
+| Learning evidence, human review, and workflow creation | **Partial** | 面板可生成 display-only 学习草稿、审核候选和应用范围 workflow review。 | 不证明泛化视觉理解、人工审阅质量或真实多窗口成功率。 |
+| Runtime relocation, execution, verification, and Agent integration | **Partial** | 受控 SEEK 入口路径与离线/受控 replay 覆盖部分重新定位、Gate 和停止行为。 | Production live workflow orchestrator 与 server-owned current-observation bridge 尚未完成。 |
+| Scroll wrong-scope effect verification | **Partial** | 有显式错误作用域检测合同和回归路径。 | effect-verification 缺口尚未关闭；不声称滚动验证完整。 |
+| Deterministic framework demo | **Prototype** | 公共 synthetic framework/harness 的 click 能力和 synthetic-result observation。 | 不证明 live GUI、真实 Agent、模型准确率或已保存 workflow 的端到端 replay。 |
+| Universal Evidence Interface v1 (UEI) / OmniParser Shadow support | **Prototype** | 离线、review-only provider/shadow 基础设施和受限摘要投影。 | 不是主叙事，也不是生产 Learn、GUI、replay 或 Execute 集成。 |
 
-已审核的界面可以保存为应用范围的流程草稿。流程节点保存源截图身份、证据哈希、页面职责、候选动作和验证规则；跨窗口、跨截图或缺 lineage 的旧候选会 fail closed。当前实现优先支持新内容的审核和回放，不迁移旧运行资产。
+## Architecture
 
-## OmniParser 状态
+```text
+Window / screenshot / UIA / OCR / vision evidence
+                    ↓
+         Learning and human review workspace
+                    ↓
+      Reviewed semantic workflow + evidence lineage
+                    ↓
+  Current-window capture → relocation / grounding → Gate
+                    ↓
+      bounded execution-attempt budget → post-action observation
+                    ↓
+              verified effect, safe recovery, or safe stop
+```
 
-OmniParser 是**可选的 learning shadow/contact-sheet provider**，通过 `screen_parser_result_v1` 接入观察证据：
+审核资产描述“要找什么、为什么可尝试、如何判断效果”；runtime 负责证明这些条件在**此刻**的目标窗口仍成立。
 
-- 只能补充 review-only 的元素和图标语义提示，不能生成点击授权，也不能替代 UIA、OCR 或当前截图 Gate。
-- 当前 smoke 输入是脱敏 contact sheet；这不是通用 UI 识别、实时窗口捕获或可点击性证明。
-- OmniParser 代码、权重、虚拟环境和其依赖不随本仓库分发。用户如需启用，必须自行获取并接受对应组件许可；边界见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+## Engineering Highlights
 
-## 安装与启动
+1. **Capture freshness and lineage**：候选带 capture identity、viewport、来源、bbox、point 和 freshness，防止新旧截图坐标混用。
+2. **Bounded human correction**：受限编辑证据框、语义、操作和转移，并让变化撤销过期批准。
+3. **Application-scoped workflow review**：多个学习界面可组成应用范围图；每个节点保留自己的证据。
+4. **Current-UI relocation**：保存几何只作先验；runtime 重新捕获、重新定位并绑定当前候选。
+5. **Gate-first execution**：真实点击应经过统一 gated action API；final-submit 类动作硬阻断。
+6. **Post-action evidence and recovery**：dispatch 不是完成；无新证据证明效果时记录可诊断 safe stop。
+
+## Demo and Evidence
+
+### Deterministic synthetic harness — synthetic (15.0 s)
+
+![Deterministic synthetic framework demo](docs/media/demo.gif)
+
+`demo.gif` 唯一主张的证据是：确定性 synthetic framework/harness 具备 click 能力，并能观察 synthetic 结果。它不证明 live GUI 可靠性、真实 Agent 行为、模型准确率、人工审核，或已保存 workflow 的端到端 replay。
+
+公共来源：[`demo.gif`](https://github.com/Desolate-Jix/windows-gui-agent-runtime/blob/main/docs/demo.gif)；SHA-256：`302e049140bc0a2868258ea55b25aec7d22279bfc0d27e46b04efa4d318e73c0`。
+
+### SEEK recorded gated Agent path — public redacted recording (16.0 s)
+
+该 GIF 已置于 Hero。公共来源：[`seek-three-interface-real-agent-demo.gif`](https://github.com/Desolate-Jix/windows-gui-agent-runtime/blob/main/docs/seek-three-interface-real-agent-demo.gif)；SHA-256：`80ab0a5055d0e700f009642bd414ffdbfef1426307537dfd976c822de9d88b4f`。上文的范围和“无表单动作”说明来自该公开源仓库；本仓库不独立主张完整 frame-to-trace lineage，也不主张 autonomous saved-workflow traversal。
+
+## Run Locally
 
 要求：Windows 10/11、Python `>=3.11,<3.12`、[`uv`](https://docs.astral.sh/uv/)。
 
@@ -58,41 +113,41 @@ uv sync
 .\start_test_panel.bat
 ```
 
-启动脚本会复用或选择本地端口，并打开面板。也可以手动启动：
+也可手动启动：`uv run uvicorn app.main:app --host 127.0.0.1 --port 8000`。
 
-```powershell
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+模型权重和可选本地视觉服务不随仓库分发。请勿将个人截图、浏览器会话、token、运行日志或模型权重提交到 Git。
 
-可选的本地视觉模型需要额外资源；模型服务和权重不属于本仓库的发布内容。请先在面板模型管理器中确认显存与端口，再按对应 profile 启动。不要把个人截图、浏览器会话、token、运行日志或模型权重强制加入 Git。
+## Near-term Roadmap
 
-## 代码入口
+1. 完成 production live workflow orchestrator 与 server-owned current-observation bridge，并以受控本地窗口验证。
+2. 关闭 scroll wrong-scope effect-verification 缺口，再扩展 read/scroll 类动作。
+3. 扩展受控跨应用/跨界面 evidence corpus，同时保持人工审核、重新定位和 Gate 边界。
 
-- `app/learn/`：学习任务、证据合同、识别与审核投影。
-- `app/operation/`：窗口绑定、观察、定位、操作候选和执行接口。
-- `app/gate/`：共享安全 Gate、数据流和最终提交阻断。
-- `app/web_panel/`：学习/审核/回放面板。
-- `configs/model_profiles/`：模型和 shadow provider 的声明式 profile。
-- `scripts/`：离线 smoke、报告和维护工具。
-- `tests/`：合同、回归和安全边界测试。
+## Safety and Non-goals
 
-关键原则是**通用运行时合同优先于站点补丁**：候选必须带 `capture_id`、viewport、source、bbox、click point 和 freshness；滚动必须绑定目标容器；观察结果更新详情文本时，下游只能读取最新 snapshot；最终提交检测必须限定在活动表单/模态范围内。
+- 不是无人值守的求职提交器；“模型看起来合理”不是执行许可。
+- 学习草稿、PathGraph、审阅结果和已发布 workflow 都是非授权资产；执行仍需要当前证据与 Gate。
+- `final_submit`、`send`、`confirm`、`payment`、`delete` 保持禁止。
+- 通用请求使用受限 execution-attempt budget（默认最多 2 次）；reviewed-workflow replay 强制为 1 次。未知、过期、歧义、错误窗口或高风险目标优先停止。
+- 不声称全网站、全 Windows 应用、所有模型或无人值守流程可靠性。
 
-## 后续主线
+## Repository Map and Deep Dives
 
-1. 已建立 `reviewed_workflow_asset_v2`：把人工审核结果、语义状态、转移、前置条件、预期效果、验证和恢复策略放进一个不可变、可追溯的资产；不迁移旧内容。
-2. 后端已提供 `POST /panel/compile_reviewed_workflow_asset`、`/panel/publish_reviewed_workflow_asset` 和 `/panel/preview_reviewed_workflow_replay`：源工作流和资产均由服务端解析；发布前即时重编译并以 CAS revision/最终 SHA 做保护；预览为只读、非授权且必须提供 current observation，不会捕获屏幕或调用 action API。
-3. 现有面板已提供明确的 Compile → CAS Publish → read-only Preview 控件：操作绑定已保存且 SHA 精确匹配的工作流，并要求 current observation；工作流编辑或切换会使状态失效，且不授予 action/capture 授权。纯离线 synthetic SEEK 三状态 E2E 已完成（首页 → 详情 → 申请入口停止），使用真实 compiler/CAS、面板 API、replay coordinator 和 navigation adapter envelope，仅替换依赖为 fake；已覆盖错误 origin、stale、ambiguous 和 recovery 负例，但没有真实 GUI、网络或 action。下一步是受控本地面板/current-observation smoke，经操作者批准后再做真实外部窗口 Demo；v2 当前仍不覆盖 `read`/`scroll` 的可执行回放。
-4. 做通用窗口/坐标映射、长截图和滚动容器回放的性能基线；以可验证的稳定性优先，不把 OmniParser 当作授权层。
-5. 已新增外部 checksum manifest 固定的纯离线合同基准：用不可变的 recorded Bare events 与 Runtime replay 比较分类、停止质量、有限恢复、延迟和派生 evidence digest。它不是实时 Bare Agent、模型能力、感知准确率或真实点击成功率测试。
+- `app/learn/` — 学习任务、证据合同、识别和审核投影。
+- `app/operation/` — 窗口绑定、观察、定位、候选和 runtime 操作接口。
+- `app/gate/` — 共享安全 Gate、数据流合同与最终提交阻断。
+- `app/web_panel/` — 本地学习、审核和 replay 面板。
+- `tests/` — 合同、回归和安全边界测试。
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — 架构与边界深入说明。
+- [`CHANGELOG.md`](CHANGELOG.md) — 窄验证与已知限制。
+- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — 可选第三方组件、获取与许可证边界。
 
-生产级 live replay orchestrator 和服务器采集 current observation 的接线仍未完成；当前 preview 不能执行。Replay 模式已把单次动作请求限制为一次 attempt，`read`、`scroll`、`fill_field`、`continue_next_step`、上传和所有 final-submit 类动作仍 fail closed。本里程碑没有合入 recovery-feedback 持久化权威层，恢复证据仅来自结构化 `recovery_decision_v1` 和离线回放报告。
+UEI / OmniParser 是支持性 Prototype：它可提供受限、review-only parser evidence summary，不能成为点击授权或产品主线。
 
-## 发布信息
+## Release and License
 
-- 版本：`0.3.0`
-- 根项目许可证：[`ISC`](LICENSE)。
-- 可选第三方组件的许可和获取边界：[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
-- 本版本变更：[`CHANGELOG.md`](CHANGELOG.md)。
+- Version: `0.3.0`
+- Root project license: [`ISC`](LICENSE)
+- Changes: [`CHANGELOG.md`](CHANGELOG.md)
 
-文档中的“已验证”只表示对应的受控路径或窄 smoke 已有证据；它不扩展为全软件、全网站或无人值守可靠性承诺。窄验证和已知限制见 `CHANGELOG.md` 及仓库内的设计文档。
+本文中的“Stable”“Partial”“Prototype”和“Evidence”均描述当前受控范围；它们不是 CI-backed 生产可靠性承诺，也不扩展为通用 live GUI 或自动化成功率声明。

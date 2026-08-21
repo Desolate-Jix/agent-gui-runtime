@@ -1,0 +1,56 @@
+{
+  "capture_lineage_ref": {
+    "content_sha256": "95feb536dc67ca7a498383aa5c15e559eb2298e472e6903ca99e902872572456",
+    "id": "capture/local.runtime/ocr/static"
+  },
+  "contract_version": "provider_safe_result_v1",
+  "items": [
+    {
+      "capture_bbox": null,
+      "coordinate_transform_ref": null,
+      "kind": "text",
+      "opaque_attributes": {},
+      "provider_confidence": 0.93,
+      "safe_role": null,
+      "safe_states": [],
+      "safe_text": "Synthetic Search",
+      "source_bbox": [
+        12,
+        24,
+        112,
+        56
+      ],
+      "source_coordinate_space": "image_pixel_xyxy",
+      "source_id_origin": "uei_deterministic_projection",
+      "source_item_id": "sha256:50b4598d2cbcb84065236d12a80bf631850ca87dd13efd408e52dcbef17ed01a"
+    }
+  ],
+  "manifest_ref": {
+    "content_sha256": "fc25b8a1653ed20015eea3a9c46626fa1abb4dea34e1b3a24d8f7ac52e7dc10f",
+    "id": "manifest/local.runtime/ocr/static"
+  },
+  "manifest_resolution": "resolved",
+  "profile_id": "local.runtime/ocr/static",
+  "provider_id": "local.runtime/ocr",
+  "provider_version": "1.0",
+  "redaction_summary": {
+    "redacted_field_count": 0,
+    "redacted_item_count": 0,
+    "secret_detected": false,
+    "sensitive_categories": []
+  },
+  "registration_ref": {
+    "content_sha256": "8ce69d7d385f7ccb404353716b43bece5751a5bf674c4a515760878ce13aba85",
+    "id": "registration/local.runtime/ocr/static"
+  },
+  "registration_resolution": "resolved",
+  "request_ref": {
+    "content_sha256": "18554db2a31fed0b81f14ab5b9711c2c3c28c8e47c107ca95669cdafd0eab950",
+    "id": "request/local.runtime/ocr/static"
+  },
+  "requested_profile_id": "local.runtime/ocr/static",
+  "requested_provider_id": "local.runtime/ocr",
+  "result_id": "result/e9deaec6bfd6b3a0baa07420c5a81ec9740415bf9a87e496b65d83c2b3518ccd",
+  "review_only": true,
+  "status": "success"
+}

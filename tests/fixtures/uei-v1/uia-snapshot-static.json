@@ -1,0 +1,45 @@
+{
+  "provider": "windows_uia",
+  "provider_version": "windows_uia_provider_v1",
+  "status": "ok",
+  "window": {
+    "handle": 123,
+    "title": "Synthetic window",
+    "process_id": 456,
+    "process_name": "synthetic.exe",
+    "bbox": {
+      "x": 0,
+      "y": 0,
+      "w": 640,
+      "h": 480
+    }
+  },
+  "control_count": 1,
+  "controls": [
+    {
+      "provider": "windows_uia",
+      "control_id": "uia_0_synthetic_search",
+      "name": "Synthetic Search",
+      "control_type": "Button",
+      "automation_id": "synthetic-search",
+      "class_name": "ButtonClass",
+      "bbox": {
+        "x": 12,
+        "y": 24,
+        "w": 100,
+        "h": 32
+      },
+      "screen_bbox": {
+        "x": 112,
+        "y": 224,
+        "w": 100,
+        "h": 32
+      },
+      "enabled": true,
+      "visible": true,
+      "patterns": [
+        "Invoke"
+      ]
+    }
+  ]
+}

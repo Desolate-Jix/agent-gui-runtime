@@ -9919,8 +9919,18 @@ function learningDraftReviewSourcePath() {
   return candidates[0] || "";
 }
 
+function invalidateLearningDraftReviewSource() {
+  learningDraftReviewLoadRequestToken += 1;
+  clearLearningDraftReviewDisplay("source changed");
+}
+
 function setLearningDraftReviewSourcePath(path) {
-  if ($("learningDraftReviewSourcePath")) $("learningDraftReviewSourcePath").value = String(path || "");
+  const nextPath = String(path || "");
+  const currentPath = String($("learningDraftReviewSourcePath")?.value || "");
+  if (currentPath !== nextPath) {
+    invalidateLearningDraftReviewSource();
+  }
+  if ($("learningDraftReviewSourcePath")) $("learningDraftReviewSourcePath").value = nextPath;
 }
 
 async function loadLearningDraftFreshnessDemo() {
@@ -14789,6 +14799,32 @@ function renderLearningDraftProviderSummary(summary) {
   )).join("")}</div>${providerError ? `<p class="trace-idle"><strong>供应商错误:</strong> ${escapeHtml(providerError)}</p>` : ""}`;
 }
 
+function renderUeiShadowProviderSummary(summary) {
+  const panel = $("learningDraftUeiShadowProviderSummary");
+  const target = $("learningDraftUeiShadowProviderSummaryBody");
+  if (!panel || !target) return;
+  if (!summary || typeof summary !== "object") {
+    panel.hidden = true;
+    target.innerHTML = "";
+    return;
+  }
+  const candidates = Array.isArray(summary.action_candidates) ? summary.action_candidates : [];
+  const redaction = summary.redaction && typeof summary.redaction === "object" ? summary.redaction : {};
+  const safeError = summary.safe_error && typeof summary.safe_error === "object" ? summary.safe_error : null;
+  const rows = [
+    ["状态", String(summary.status || "unknown")],
+    ["提供方", `${String(summary.provider_id || "-")} · ${String(summary.profile_id || "-")} · ${String(summary.provider_version || "-")}`],
+    ["审阅", `items=${Number(summary.item_count || 0)} · capture=${String(summary.capture_match_status || "unknown")} · identity=${String(summary.immutable_identity || "-")}`],
+    ["解析", `registration=${String(summary.registration_resolution || "-")} · manifest=${String(summary.manifest_resolution || "-")}`],
+    ["脱敏", `items=${Number(redaction.redacted_item_count || 0)} · fields=${Number(redaction.redacted_field_count || 0)} · secret=${redaction.secret_detected === true}`],
+    ["执行", `display_only=${summary.display_only === true} · review_only=${summary.review_only === true} · authorized=false · candidates=${candidates.length}`],
+  ];
+  panel.hidden = false;
+  target.innerHTML = `<div class="learning-review-safety">${rows.map(([label, value]) => (
+    `<span><strong>${escapeHtml(label)}</strong>${escapeHtml(value)}</span>`
+  )).join("")}</div>${safeError ? `<p class="trace-idle"><strong>安全错误:</strong> ${escapeHtml(`${String(safeError.stage || "-")}/${String(safeError.code || "-")}`)}</p>` : ""}`;
+}
+
 function renderScreenUnderstandingPreview(preview) {
   const target = $("screenUnderstandingPreview");
   const status = $("screenUnderstandingPreviewStatus");
@@ -19535,11 +19571,16 @@ function renderLearningDraftReview(review) {
       `<span><strong>${escapeHtml(key)}</strong>${escapeHtml(String(value))}</span>`
     )).join("")}</div>`;
   }
-  renderLearningDraftProviderSummary(
-    review?.provider_summary
-    || review?.draft?.page_details?.provider_summary
-    || learningDraftProviderSummary,
-  );
+  if (typeof renderLearningDraftProviderSummary === "function") {
+    renderLearningDraftProviderSummary(
+      review?.provider_summary
+      || review?.draft?.page_details?.provider_summary
+      || learningDraftProviderSummary,
+    );
+  }
+  if (typeof renderUeiShadowProviderSummary === "function") {
+    renderUeiShadowProviderSummary(review?.uei_shadow_provider_summary);
+  }
   renderScreenUnderstandingPreview(review?.screen_understanding_preview);
   renderLearningDraftScreenshotPanel(review);
   renderLearningDraftManualEditPanel(review);
@@ -19567,6 +19608,7 @@ function clearLearningDraftReviewDisplay(reason = "", options = {}) {
   }
   if ($("learningDraftReviewStatusSelect")) $("learningDraftReviewStatusSelect").value = "needs_human_review";
   clearLearningDraftSimpleReviewPanels(reason);
+  if (typeof renderUeiShadowProviderSummary === "function") renderUeiShadowProviderSummary(null);
   renderScreenUnderstandingPreview(null);
   clearLearningDraftPathPreview(reason);
 }
@@ -19825,6 +19867,10 @@ async function loadLearningDraftReview(options = {}) {
       }
       const data = response.data || {};
       if (loadRequestToken !== learningDraftReviewLoadRequestToken) return null;
+      const ueiShadowSummary = data.uei_shadow_provider_summary;
+      if (ueiShadowSummary !== undefined && (ueiShadowSummary === null || typeof ueiShadowSummary !== "object")) {
+        data.uei_shadow_provider_summary = null;
+      }
       learningDraftReviewBboxEdits = { regions: {}, actions: {} };
       learningDraftReview = data;
       resetLearningDraftEditorState(data);
@@ -22035,6 +22081,7 @@ function bindEvents() {
   bindLearningDraftPathResize();
   on("learningTrialCaptureBtn", "click", captureLearningDraftWindow);
   on("learningTrialRunBtn", "click", runLearningDraftTrial);
+  on("learningDraftReviewSourcePath", "input", invalidateLearningDraftReviewSource);
   on("learningDraftReviewLoadBtn", "click", loadLearningDraftReview);
   on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);
   on("learningDraftFreshnessDemoBtn", "click", loadLearningDraftFreshnessDemo);

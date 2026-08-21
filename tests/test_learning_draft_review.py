@@ -19,6 +19,115 @@ def _write_json(path: Path, payload: dict) -> Path:
     return path
 
 
+def _shadow_capture_ref(store) -> dict[str, str]:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    artifact_ref = store.put(seal_immutable({
+        "contract_version": "artifact_ref_v1", "artifact_id": "artifact/shadow", "artifact_sha256": "a" * 64,
+        "media_type": "image/png", "byte_length": 1, "restricted": True,
+    }))
+    return store.put(seal_immutable({
+        "contract_version": "capture_lineage_v1", "capture_id": "capture/shadow", "artifact_ref": artifact_ref,
+        "artifact_sha256": "a" * 64, "image_size": {"width": 1, "height": 1},
+        "capture_coordinate_space": "capture_pixel_xyxy", "captured_at": "2026-08-21T00:00:00Z",
+    }))
+
+
+def test_uei_shadow_summary_revalidates_fixed_store_ref_and_never_exposes_items(tmp_path: Path) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn.recognition.uei.store import UEIObjectStore
+    from tests.uei_v1_helpers import minimal_provider_safe_result
+
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    result = minimal_provider_safe_result()
+    result["capture_lineage_ref"] = _shadow_capture_ref(store)
+    result["review_only"] = True
+    result["items"][0]["safe_text"] = "hidden source text"
+    result_ref = store.put(seal_immutable(result))
+    source = _write_json(tmp_path / "artifacts" / "learning-runs" / "shadow" / "trial.json", {
+        "contract_version": "learning_template_draft_v1", "states": [], "regions": [], "action_templates": [],
+        "page_details": {"uei_shadow_result_ref": result_ref},
+    })
+
+    review = load_learning_draft_review(source, project_root=tmp_path)
+
+    summary = review["uei_shadow_provider_summary"]
+    assert summary["contract_version"] == "uei_shadow_provider_summary_v1"
+    assert summary["status"] == "success" and summary["item_count"] == 1
+    assert summary["display_only"] is True and summary["execution_authorized"] is False
+    assert summary["action_candidates"] == []
+    rendered = json.dumps(review, ensure_ascii=False)
+    assert result_ref["content_sha256"] not in rendered
+    assert "hidden source text" not in rendered and "source_bbox" not in rendered
+
+
+def test_uei_shadow_failed_result_exposes_only_safe_error_summary(tmp_path: Path) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn.recognition.uei.store import UEIObjectStore
+    from tests.uei_v1_helpers import minimal_provider_safe_result
+
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    capture_ref = _shadow_capture_ref(store)
+    reference = {"id": "synthetic/ref", "content_sha256": "a" * 64}
+    error_ref = store.put(seal_immutable({
+        "contract_version": "provider_error_v1", "error_id": "error/synthetic/1",
+        "request_ref": reference, "requested_provider_id": "local.synthetic/provider",
+        "requested_profile_id": "local.synthetic/provider/profile", "registration_resolution": "resolved",
+        "manifest_resolution": "resolved", "provider_id": "local.synthetic/provider",
+        "profile_id": "local.synthetic/provider/profile", "stage": "projection", "code": "projection_failed",
+        "retryable": False, "message": "secret provider diagnostics", "safe_details": {"reason_class": "projection"},
+        "registration_ref": reference, "manifest_ref": reference, "capture_lineage_ref": reference,
+    }))
+    failed = minimal_provider_safe_result()
+    failed.update({"status": "failed", "review_only": True, "items": [], "error_ref": error_ref,
+                   "capture_lineage_ref": capture_ref})
+    result_ref = store.put(seal_immutable(failed))
+    source = _write_json(tmp_path / "artifacts" / "learning-runs" / "shadow" / "failed.json", {
+        "contract_version": "learning_template_draft_v1", "states": [], "regions": [], "action_templates": [],
+        "page_details": {"uei_shadow_result_ref": result_ref},
+    })
+
+    review = load_learning_draft_review(source, project_root=tmp_path)
+
+    summary = review["uei_shadow_provider_summary"]
+    assert summary["status"] == "failed" and summary["safe_error"] == {"stage": "projection", "code": "projection_failed"}
+    assert "secret provider diagnostics" not in json.dumps(review)
+
+
+def test_uei_shadow_corrupt_ref_replaces_cached_summary_with_invalid_state(tmp_path: Path) -> None:
+    source = _write_json(tmp_path / "artifacts" / "learning-runs" / "shadow" / "trial.json", {
+        "contract_version": "learning_template_draft_v1", "states": [], "regions": [], "action_templates": [],
+        "page_details": {"uei_shadow_result_ref": {"id": "result/missing", "content_sha256": "0" * 64},
+                         "uei_shadow_provider_summary": {"status": "success", "item_count": 99}},
+    })
+
+    review = load_learning_draft_review(source, project_root=tmp_path)
+
+    summary = review["uei_shadow_provider_summary"]
+    assert summary["status"] == "unavailable" and summary["action_candidates"] == []
+    assert "uei_shadow_result_ref" not in json.dumps(review)
+
+
+def test_uei_shadow_capture_mismatch_remains_historical_review_only(tmp_path: Path) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn.recognition.uei.learning_shadow import load_uei_shadow_provider_summary
+    from app.learn.recognition.uei.store import UEIObjectStore
+    from tests.uei_v1_helpers import minimal_provider_safe_result
+
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    result = minimal_provider_safe_result()
+    result["capture_lineage_ref"] = _shadow_capture_ref(store)
+    result["review_only"] = True
+    result_ref = store.put(seal_immutable(result))
+    summary = load_uei_shadow_provider_summary(
+        {"uei_shadow_result_ref": result_ref}, project_root=tmp_path,
+        current_capture_lineage_ref={"id": "capture/current", "content_sha256": "f" * 64},
+    )
+
+    assert summary is not None and summary["capture_match_status"] == "mismatch"
+    assert summary["review_only"] is True and summary["action_candidates"] == []
+
+
 def test_model_review_route_preserves_legacy_response_and_safety(monkeypatch) -> None:
     import app.api.panel as panel_api
 
