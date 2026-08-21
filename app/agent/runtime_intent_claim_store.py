@@ -20,6 +20,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import app.agent.runtime_receipt_store as durable_store
+from app.agent.desktop_backend import BackendDispatchReceipt
 from app.agent.runtime_contracts import (
     AgentIntentV1,
     AgentObservationV1,
@@ -272,6 +273,74 @@ class RuntimeIntentClaimStore:
                 session_id=session_id,
                 observation_id=observation_id,
             )
+
+    def find_for_observation(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+    ) -> RuntimeIntentClaimSnapshot | None:
+        """只在 canonical claim 确实不存在时返回 None。"""
+
+        identity_hash = self._identity_hash(session_id, observation_id)
+        if not self._claim_path(identity_hash).exists():
+            return None
+        return self.get_for_observation(
+            session_id=session_id,
+            observation_id=observation_id,
+        )
+
+    def persist_terminal(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+        receipt: RuntimeResultReceiptV1,
+        backend_receipt: BackendDispatchReceipt | None = None,
+    ) -> RuntimeResultReceiptV1:
+        """先封存 Receipt record，再提交 terminal marker 并重读精确结果。"""
+
+        with _PHASE_LOCK:
+            base = self._load_claim(session_id, observation_id)
+            self._validate_receipt_lineage(base, receipt)
+            try:
+                receipt_ref = self._receipt_store.put(
+                    receipt,
+                    backend_receipt=backend_receipt,
+                )
+            except RuntimeReceiptStoreError as exc:
+                raise RuntimeIntentClaimStoreError(
+                    f"runtime receipt persistence failed: {exc}"
+                ) from exc
+            record = self._resolve_receipt(base, receipt_ref)
+            self._commit_terminal(base, record)
+            return self.load_terminal_receipt(
+                session_id=session_id,
+                observation_id=observation_id,
+            )
+
+    def load_terminal_receipt(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+    ) -> RuntimeResultReceiptV1:
+        """解析 terminal marker 指向的权威 Receipt。"""
+
+        with _PHASE_LOCK:
+            snapshot = self.get_for_observation(
+                session_id=session_id,
+                observation_id=observation_id,
+            )
+            if snapshot.phase != "terminal" or snapshot.terminal_receipt_ref is None:
+                raise RuntimeIntentClaimStoreError(
+                    "runtime intent claim has no terminal receipt"
+                )
+            base = self._load_claim(session_id, observation_id)
+            return self._resolve_receipt(
+                base,
+                snapshot.terminal_receipt_ref,
+            ).runtime_receipt
 
     def get_for_observation(
         self,

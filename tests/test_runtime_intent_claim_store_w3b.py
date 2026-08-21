@@ -127,6 +127,76 @@ def test_claim_reloads_exact_phase_after_restart(tmp_path: Path) -> None:
     assert recovered.terminal_receipt_ref is None
 
 
+def test_find_for_observation_returns_none_only_when_claim_is_absent(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    )
+
+    assert store.find_for_observation(
+        session_id=_observation().session_id,
+        observation_id=_observation().observation_id,
+    ) is None
+
+    claimed = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    assert store.find_for_observation(
+        session_id=claimed.observation.session_id,
+        observation_id=claimed.observation.observation_id,
+    ) == claimed
+
+
+def test_persist_terminal_seals_backend_and_loads_exact_receipt_after_restart(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    receipt_store = RuntimeReceiptStore(project_root=tmp_path)
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=receipt_store,
+    )
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    receipt_payload = _receipt_payload("DISPATCHED")
+    receipt_payload["intent_id"] = claim.intent.intent_id
+    receipt = RuntimeResultReceiptV1.model_validate(receipt_payload)
+    backend = _backend_for("DISPATCHED")
+
+    persisted = store.persist_terminal(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        receipt=receipt,
+        backend_receipt=backend,
+    )
+
+    assert persisted == receipt
+    restarted = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    )
+    assert restarted.load_terminal_receipt(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    ) == receipt
+
+
 def test_claim_store_rejects_receipt_store_from_another_project_root(
     tmp_path: Path,
 ) -> None:

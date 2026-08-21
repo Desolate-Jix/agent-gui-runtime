@@ -6,15 +6,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from threading import RLock
 from typing import Any, Protocol
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from app.agent.desktop_backend import (
+    BackendDispatchReceipt,
     DesktopBackend,
     DesktopDispatchCommand,
     _mint_execution_authority,
+)
+from app.agent.runtime_intent_claim_store import (
+    RuntimeIntentClaimSnapshot,
+    RuntimeIntentClaimStore,
+    RuntimeIntentClaimStoreError,
 )
 from app.agent.reviewed_workflow_asset import (
     ReviewedWorkflowAssetStore,
@@ -169,6 +176,7 @@ class _WindowLease:
 
 _WINDOW_LEASES: WeakValueDictionary[int, _WindowLease] = WeakValueDictionary()
 _WINDOW_LEASE_LOCK = RLock()
+_OPAQUE_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
 
 
 @dataclass(slots=True)
@@ -177,6 +185,12 @@ class _LiveSession:
     asset: dict[str, Any]
     window_lease: _WindowLease
     consumed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class _ExecutionResult:
+    receipt: RuntimeResultReceiptV1
+    backend_receipt: BackendDispatchReceipt | None = None
 
 
 class LiveController:
@@ -189,6 +203,7 @@ class LiveController:
         gate: Gate,
         window_visibility_checker: WindowVisibilityChecker | None = None,
         backend: DesktopBackend,
+        intent_claim_store: RuntimeIntentClaimStore,
         grounding_policy: Mapping[str, Any],
         asset_loader: AssetLoader | None = None,
         project_root: str | Path | None = None,
@@ -197,6 +212,8 @@ class LiveController:
             if project_root is None:
                 raise ValueError("project_root is required when no trusted asset loader is provided")
             asset_loader = ReviewedWorkflowAssetStore(project_root=project_root)
+        if not isinstance(intent_claim_store, RuntimeIntentClaimStore):
+            raise ValueError("intent_claim_store is required")
         self._binding = binding
         self._asset_loader = asset_loader
         self._observation_source = observation_source
@@ -206,6 +223,7 @@ class LiveController:
             window_visibility_checker or ExistingWindowManagerVisibilityChecker()
         )
         self._backend = backend
+        self._intent_claim_store = intent_claim_store
         self._grounding_policy = dict(grounding_policy)
         self._sessions: dict[str, _LiveSession] = {}
         self._lock = RLock()
@@ -271,12 +289,47 @@ class LiveController:
         payload: Mapping[str, object],
     ) -> RuntimeResultReceiptV1 | LiveControllerDecision:
         session_id = payload.get("session_id") if isinstance(payload, Mapping) else None
+        observation_id = (
+            payload.get("observation_id") if isinstance(payload, Mapping) else None
+        )
         with self._lock:
             session = self._sessions.get(session_id) if isinstance(session_id, str) else None
             if session is None:
+                if isinstance(session_id, str) and isinstance(observation_id, str):
+                    try:
+                        existing = self._intent_claim_store.find_for_observation(
+                            session_id=session_id,
+                            observation_id=observation_id,
+                        )
+                    except RuntimeIntentClaimStoreError:
+                        return LiveControllerDecision(
+                            "RECOVERY_REQUIRED",
+                            "claim_integrity_failed",
+                        )
+                    if existing is not None:
+                        return self._recover_existing_claim(payload, existing)
                 return LiveControllerDecision("REJECTED", "unknown_session")
-            if session.consumed:
-                return LiveControllerDecision("REJECTED", "observation_consumed")
+            try:
+                existing = self._intent_claim_store.find_for_observation(
+                    session_id=session.snapshot.session_id,
+                    observation_id=session.snapshot.current_observation.observation_id,
+                )
+            except RuntimeIntentClaimStoreError:
+                was_consumed = session.consumed
+                session.consumed = True
+                if not was_consumed:
+                    self._release_window_lease(session.window_lease)
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "claim_integrity_failed",
+                )
+            if existing is not None:
+                was_consumed = session.consumed
+                session.consumed = True
+                result = self._recover_existing_claim(payload, existing)
+                if not was_consumed or existing.phase == "terminal":
+                    self._release_window_lease(session.window_lease)
+                return result
             try:
                 intent = validate_agent_intent_v1(
                     payload,
@@ -284,55 +337,199 @@ class LiveController:
                 )
             except (TypeError, ValueError):
                 return LiveControllerDecision("REJECTED", "invalid_intent")
+            if session.consumed:
+                self._release_window_lease(session.window_lease)
+                return LiveControllerDecision("REJECTED", "observation_consumed")
+            try:
+                self._intent_claim_store.claim(
+                    observation=session.snapshot.current_observation,
+                    intent=intent,
+                    server_binding={
+                        "workflow_id": self._binding.workflow_id,
+                        "asset_id": self._binding.asset_id,
+                        "application_identity_key": self._binding.application_identity_key,
+                        "target_window_handle": self._binding.target_window_handle,
+                    },
+                )
+            except RuntimeIntentClaimStoreError:
+                try:
+                    committed = self._intent_claim_store.find_for_observation(
+                        session_id=session.snapshot.session_id,
+                        observation_id=session.snapshot.current_observation.observation_id,
+                    )
+                except RuntimeIntentClaimStoreError:
+                    session.consumed = True
+                    self._release_window_lease(session.window_lease)
+                    return LiveControllerDecision(
+                        "RECOVERY_REQUIRED",
+                        "claim_integrity_failed",
+                    )
+                if committed is not None:
+                    session.consumed = True
+                    result = self._recover_existing_claim(payload, committed)
+                    self._release_window_lease(session.window_lease)
+                    return result
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "claim_persistence_failed",
+                )
             session.consumed = True
 
         try:
-            return self._execute_accepted_intent(session, intent)
+            result = self._execute_accepted_intent(session, intent)
+            if isinstance(result, LiveControllerDecision):
+                return result
+            try:
+                return self._intent_claim_store.persist_terminal(
+                    session_id=session.snapshot.session_id,
+                    observation_id=session.snapshot.current_observation.observation_id,
+                    receipt=result.receipt,
+                    backend_receipt=result.backend_receipt,
+                )
+            except RuntimeIntentClaimStoreError:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "receipt_persistence_failed",
+                )
         finally:
             self._release_window_lease(session.window_lease)
+
+    def _recover_existing_claim(
+        self,
+        payload: Mapping[str, object],
+        claim: RuntimeIntentClaimSnapshot,
+    ) -> RuntimeResultReceiptV1 | LiveControllerDecision:
+        try:
+            intent = validate_agent_intent_v1(payload, observation=claim.observation)
+        except (TypeError, ValueError):
+            return LiveControllerDecision("REJECTED", "observation_consumed")
+        if intent != claim.intent:
+            return LiveControllerDecision("REJECTED", "observation_consumed")
+        if claim.phase == "terminal":
+            try:
+                return self._intent_claim_store.load_terminal_receipt(
+                    session_id=claim.observation.session_id,
+                    observation_id=claim.observation.observation_id,
+                )
+            except RuntimeIntentClaimStoreError:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "receipt_integrity_failed",
+                )
+        if claim.phase == "dispatch_started":
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "dispatch_indeterminate",
+            )
+        return LiveControllerDecision("RECOVERY_REQUIRED", "observation_consumed")
 
     def _execute_accepted_intent(
         self,
         session: _LiveSession,
         intent: AgentIntentV1,
-    ) -> RuntimeResultReceiptV1 | LiveControllerDecision:
+    ) -> _ExecutionResult | LiveControllerDecision:
         observation = session.snapshot.current_observation
         if intent.action_id == "runtime.safe_stop":
-            return LiveControllerDecision("SAFE_STOP", "safe_stop_boundary")
-
-        current = dict(
-            self._observation_source.capture_current(
-                session_id=session.snapshot.session_id,
-                asset=session.asset,
-                target_window_handle=session.snapshot.target_window_handle,
+            return _ExecutionResult(
+                self._receipt(
+                    session=session,
+                    intent=intent,
+                    outcome="SAFE_STOP",
+                    reason_code="safe_stop_boundary",
+                    attempt_count=0,
+                    gate_status="not_evaluated",
+                    dispatch_status="not_started",
+                    selection_ref=None,
+                    candidate_ref=None,
+                    gate_ref=None,
+                    backend_ref=None,
+                )
             )
-        )
-        if current.get("capture_id") == observation.current_capture.capture_id:
-            return LiveControllerDecision("BLOCKED", "stale_candidate")
 
-        state_resolution = resolve_current_state(session.asset, current)
-        if state_resolution.get("status") != "resolved":
+        try:
+            current = dict(
+                self._observation_source.capture_current(
+                    session_id=session.snapshot.session_id,
+                    asset=session.asset,
+                    target_window_handle=session.snapshot.target_window_handle,
+                )
+            )
+        except Exception:
             return LiveControllerDecision(
-                "BLOCKED",
-                str(state_resolution.get("failure_code") or "current_state_unresolved"),
+                "RECOVERY_REQUIRED",
+                "current_capture_failed",
             )
-        selection = select_verified_transition(
-            session.asset,
-            state_resolution,
-            transition_id=intent.action_id,
-            current_observation=current,
-        )
-        if selection.get("status") != "selected":
-            failure = str(selection.get("failure_code") or "target_unresolved")
-            status = "NEEDS_REVIEW" if failure == "human_review_required" else "BLOCKED"
-            return LiveControllerDecision(status, failure)
+        if current.get("capture_id") == observation.current_capture.capture_id:
+            return _ExecutionResult(
+                self._early_receipt(
+                    session=session,
+                    intent=intent,
+                    outcome="BLOCKED",
+                    reason_code="stale_candidate",
+                )
+            )
 
-        resolution = dict(
-            self._target_resolver.resolve(
-                selection=selection,
+        try:
+            state_resolution = resolve_current_state(session.asset, current)
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "state_resolution_failed",
+            )
+        if state_resolution.get("status") != "resolved":
+            # 冻结 Contract 不允许把非 safe_stop intent 投影成 non-dispatch SAFE_STOP。
+            return _ExecutionResult(
+                self._early_receipt(
+                    session=session,
+                    intent=intent,
+                    outcome="BLOCKED",
+                    reason_code="target_unresolved",
+                )
+            )
+        try:
+            selection = select_verified_transition(
+                session.asset,
+                state_resolution,
+                transition_id=intent.action_id,
                 current_observation=current,
             )
-        )
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "transition_selection_failed",
+            )
+        if selection.get("status") != "selected":
+            failure = str(selection.get("failure_code") or "target_unresolved")
+            if failure == "human_review_required":
+                return _ExecutionResult(
+                    self._early_receipt(
+                        session=session,
+                        intent=intent,
+                        outcome="NEEDS_REVIEW",
+                        reason_code="needs_human_review",
+                    )
+                )
+            return _ExecutionResult(
+                self._early_receipt(
+                    session=session,
+                    intent=intent,
+                    outcome="BLOCKED",
+                    reason_code="target_unresolved",
+                )
+            )
+
+        try:
+            resolution = dict(
+                self._target_resolver.resolve(
+                    selection=selection,
+                    current_observation=current,
+                )
+            )
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "target_resolution_failed",
+            )
         resolution_status = resolution.get("status")
         if resolution_status != "resolved":
             reason = {
@@ -378,6 +575,11 @@ class LiveController:
                 selection=selection,
                 grounding=grounding,
             )
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "gate_evaluation_failed",
+            )
         if not isinstance(gate_value, Mapping):
             return self._blocked_receipt(
                 session=session,
@@ -386,14 +588,26 @@ class LiveController:
                 selection=selection,
                 grounding=grounding,
             )
-        gate = dict(gate_value)
-        validation = validate_current_grounding(
-            session.asset,
-            selection,
-            grounding,
-            gate,
-            policy=self._grounding_policy,
-        )
+        try:
+            gate = dict(gate_value)
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "gate_evaluation_failed",
+            )
+        try:
+            validation = validate_current_grounding(
+                session.asset,
+                selection,
+                grounding,
+                gate,
+                policy=self._grounding_policy,
+            )
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "grounding_validation_failed",
+            )
         if validation.get("status") != "validated":
             failure_code = self._normalize_block_reason(
                 str(validation.get("failure_code") or "pre_click_rejected")
@@ -410,12 +624,18 @@ class LiveController:
 
         point = grounding["click_point"]
         click_point = (float(point["x"]), float(point["y"]))
-        visibility = dict(
-            self._window_visibility_checker.check(
-                target_window_handle=session.snapshot.target_window_handle,
-                click_point=click_point,
+        try:
+            visibility = dict(
+                self._window_visibility_checker.check(
+                    target_window_handle=session.snapshot.target_window_handle,
+                    click_point=click_point,
+                )
             )
-        )
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "visibility_check_failed",
+            )
         bound_handle = visibility.get("bound_window_handle")
         point_visibility = visibility.get("point_visibility")
         reason = None
@@ -455,15 +675,44 @@ class LiveController:
             gate_decision_ref=gate_ref,
         )
         try:
+            self._intent_claim_store.mark_dispatch_started(
+                session_id=session.snapshot.session_id,
+                observation_id=observation.observation_id,
+            )
+        except RuntimeIntentClaimStoreError:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "dispatch_marker_failed",
+            )
+        try:
             backend_receipt = self._backend.dispatch(command, authority=authority)
         except Exception:
+            backend_receipt = BackendDispatchReceipt(
+                receipt_ref=f"backend-receipt:exception:{uuid4().hex}",
+                status="indeterminate",
+                reason_code="backend_result_lost",
+            )
             return self._indeterminate_receipt(
                 session=session,
                 intent=intent,
                 selection=selection,
                 grounding=grounding,
                 gate_ref=gate_ref,
-                backend_receipt_ref=f"backend-receipt:exception:{uuid4().hex}",
+                backend_receipt=backend_receipt,
+            )
+        if not self._is_valid_backend_receipt(backend_receipt):
+            backend_receipt = BackendDispatchReceipt(
+                receipt_ref=f"backend-receipt:invalid:{uuid4().hex}",
+                status="indeterminate",
+                reason_code="backend_result_lost",
+            )
+            return self._indeterminate_receipt(
+                session=session,
+                intent=intent,
+                selection=selection,
+                grounding=grounding,
+                gate_ref=gate_ref,
+                backend_receipt=backend_receipt,
             )
         if backend_receipt.status == "indeterminate":
             return self._indeterminate_receipt(
@@ -472,7 +721,7 @@ class LiveController:
                 selection=selection,
                 grounding=grounding,
                 gate_ref=gate_ref,
-                backend_receipt_ref=backend_receipt.receipt_ref,
+                backend_receipt=backend_receipt,
             )
         if backend_receipt.status != "dispatched":
             return self._execution_failed_receipt(
@@ -481,20 +730,61 @@ class LiveController:
                 selection=selection,
                 grounding=grounding,
                 gate_ref=gate_ref,
-                backend_receipt_ref=backend_receipt.receipt_ref,
+                backend_receipt=backend_receipt,
             )
+        return _ExecutionResult(
+            self._receipt(
+                session=session,
+                intent=intent,
+                outcome="DISPATCHED",
+                reason_code="verification_pending",
+                attempt_count=1,
+                gate_status="allowed",
+                dispatch_status="dispatched",
+                selection_ref=f"selection:{selection['selection_sha256']}",
+                candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
+                gate_ref=gate_ref,
+                backend_ref=backend_receipt.receipt_ref,
+            ),
+            backend_receipt,
+        )
+
+    @staticmethod
+    def _is_valid_backend_receipt(value: object) -> bool:
+        if (
+            not isinstance(value, BackendDispatchReceipt)
+            or not isinstance(value.receipt_ref, str)
+            or not (1 <= len(value.receipt_ref) <= 256)
+            or _OPAQUE_REF_PATTERN.fullmatch(value.receipt_ref) is None
+        ):
+            return False
+        expected = {
+            "dispatched": "none",
+            "not_started": "backend_failed",
+            "indeterminate": "backend_result_lost",
+        }
+        return expected.get(value.status) == value.reason_code
+
+    def _early_receipt(
+        self,
+        *,
+        session: _LiveSession,
+        intent: AgentIntentV1,
+        outcome: str,
+        reason_code: str,
+    ) -> RuntimeResultReceiptV1:
         return self._receipt(
             session=session,
             intent=intent,
-            outcome="DISPATCHED",
-            reason_code="verification_pending",
-            attempt_count=1,
-            gate_status="allowed",
-            dispatch_status="dispatched",
-            selection_ref=f"selection:{selection['selection_sha256']}",
-            candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
-            gate_ref=gate_ref,
-            backend_ref=backend_receipt.receipt_ref,
+            outcome=outcome,
+            reason_code=reason_code,
+            attempt_count=0,
+            gate_status="not_evaluated",
+            dispatch_status="not_started",
+            selection_ref=None,
+            candidate_ref=None,
+            gate_ref=None,
+            backend_ref=None,
         )
 
     def _blocked_receipt(
@@ -507,24 +797,26 @@ class LiveController:
         grounding: Mapping[str, Any] | None = None,
         gate: Mapping[str, Any] | None = None,
         gate_blocked: bool = False,
-    ) -> RuntimeResultReceiptV1:
+    ) -> _ExecutionResult:
         selection_ref = f"selection:{selection['selection_sha256']}"
         candidate_ref = None
         if grounding is not None and grounding.get("candidate_id"):
             candidate_ref = f"candidate:{grounding.get('capture_id')}:{grounding['candidate_id']}"
         gate_ref = self._first_ref(gate.get("evidence_refs") if gate else None, "gate") if gate_blocked else None
-        return self._receipt(
-            session=session,
-            intent=intent,
-            outcome="BLOCKED",
-            reason_code=reason_code,
-            attempt_count=0,
-            gate_status="blocked" if gate_blocked else "not_evaluated",
-            dispatch_status="not_started",
-            selection_ref=selection_ref,
-            candidate_ref=candidate_ref,
-            gate_ref=gate_ref,
-            backend_ref=None,
+        return _ExecutionResult(
+            self._receipt(
+                session=session,
+                intent=intent,
+                outcome="BLOCKED",
+                reason_code=reason_code,
+                attempt_count=0,
+                gate_status="blocked" if gate_blocked else "not_evaluated",
+                dispatch_status="not_started",
+                selection_ref=selection_ref,
+                candidate_ref=candidate_ref,
+                gate_ref=gate_ref,
+                backend_ref=None,
+            )
         )
 
     def _execution_failed_receipt(
@@ -535,20 +827,23 @@ class LiveController:
         selection: Mapping[str, Any],
         grounding: Mapping[str, Any],
         gate_ref: str,
-        backend_receipt_ref: str,
-    ) -> RuntimeResultReceiptV1:
-        return self._receipt(
-            session=session,
-            intent=intent,
-            outcome="EXECUTION_FAILED",
-            reason_code="backend_failed",
-            attempt_count=1,
-            gate_status="allowed",
-            dispatch_status="not_started",
-            selection_ref=f"selection:{selection['selection_sha256']}",
-            candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
-            gate_ref=gate_ref,
-            backend_ref=backend_receipt_ref,
+        backend_receipt: BackendDispatchReceipt,
+    ) -> _ExecutionResult:
+        return _ExecutionResult(
+            self._receipt(
+                session=session,
+                intent=intent,
+                outcome="EXECUTION_FAILED",
+                reason_code="backend_failed",
+                attempt_count=1,
+                gate_status="allowed",
+                dispatch_status="not_started",
+                selection_ref=f"selection:{selection['selection_sha256']}",
+                candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
+                gate_ref=gate_ref,
+                backend_ref=backend_receipt.receipt_ref,
+            ),
+            backend_receipt,
         )
 
     def _indeterminate_receipt(
@@ -559,22 +854,25 @@ class LiveController:
         selection: Mapping[str, Any],
         grounding: Mapping[str, Any],
         gate_ref: str,
-        backend_receipt_ref: str,
-    ) -> RuntimeResultReceiptV1:
-        return self._receipt(
-            session=session,
-            intent=intent,
-            outcome="INDETERMINATE",
-            reason_code="backend_result_lost",
-            attempt_count=1,
-            gate_status="allowed",
-            dispatch_status="indeterminate",
-            effect_status="indeterminate",
-            destination_status="indeterminate",
-            selection_ref=f"selection:{selection['selection_sha256']}",
-            candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
-            gate_ref=gate_ref,
-            backend_ref=backend_receipt_ref,
+        backend_receipt: BackendDispatchReceipt,
+    ) -> _ExecutionResult:
+        return _ExecutionResult(
+            self._receipt(
+                session=session,
+                intent=intent,
+                outcome="INDETERMINATE",
+                reason_code="backend_result_lost",
+                attempt_count=1,
+                gate_status="allowed",
+                dispatch_status="indeterminate",
+                effect_status="indeterminate",
+                destination_status="indeterminate",
+                selection_ref=f"selection:{selection['selection_sha256']}",
+                candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
+                gate_ref=gate_ref,
+                backend_ref=backend_receipt.receipt_ref,
+            ),
+            backend_receipt,
         )
 
     def _receipt(

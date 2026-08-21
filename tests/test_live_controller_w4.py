@@ -209,6 +209,7 @@ class _WindowVisibilityChecker:
 
 
 def _controller(
+    tmp_path,
     *,
     resolver_status: str = "resolved",
     gate_allowed: bool = True,
@@ -220,6 +221,8 @@ def _controller(
 ):
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset = _asset()
     asset_loader = _TrustedAssetLoader(asset)
@@ -243,6 +246,10 @@ def _controller(
         gate=gate,
         window_visibility_checker=visibility,
         backend=backend,
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
     return controller, source, resolver, gate, backend
@@ -259,8 +266,8 @@ def _intent(session) -> dict:
     }
 
 
-def test_session_is_server_created_and_pins_workflow_revision() -> None:
-    controller, source, _, _, _ = _controller()
+def test_session_is_server_created_and_pins_workflow_revision(tmp_path) -> None:
+    controller, source, _, _, _ = _controller(tmp_path)
 
     session = controller.start_session()
 
@@ -276,6 +283,8 @@ def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
     from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset = _asset()
     ReviewedWorkflowAssetStore(project_root=tmp_path).publish(
@@ -296,6 +305,10 @@ def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
         gate=_Gate(),
         window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4343),
         backend=DeterministicFakeBackend(),
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
 
@@ -320,8 +333,8 @@ def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
         lambda payload: payload.update(target_window_handle=9999),
     ],
 )
-def test_invalid_or_authority_injected_intent_has_zero_dispatch(mutation) -> None:
-    controller, source, resolver, gate, backend = _controller()
+def test_invalid_or_authority_injected_intent_has_zero_dispatch(mutation, tmp_path) -> None:
+    controller, source, resolver, gate, backend = _controller(tmp_path)
     session = controller.start_session()
     payload = _intent(session)
     mutation(payload)
@@ -335,13 +348,13 @@ def test_invalid_or_authority_injected_intent_has_zero_dispatch(mutation) -> Non
     assert gate.calls == 0
 
 
-def test_accepted_intent_uses_fresh_current_evidence_before_gate_and_dispatch() -> None:
+def test_accepted_intent_uses_fresh_current_evidence_before_gate_and_dispatch(tmp_path) -> None:
     from app.agent.runtime_contracts import (
         validate_agent_intent_v1,
         validate_runtime_result_receipt_v1,
     )
 
-    controller, source, resolver, gate, backend = _controller()
+    controller, source, resolver, gate, backend = _controller(tmp_path)
     session = controller.start_session()
     payload = _intent(session)
 
@@ -374,8 +387,8 @@ def test_accepted_intent_uses_fresh_current_evidence_before_gate_and_dispatch() 
         ("wrong_context", "BLOCKED", "capture_lineage_mismatch"),
     ],
 )
-def test_unresolved_current_target_never_reaches_gate_or_backend(resolver_status, expected_status, expected_reason) -> None:
-    controller, _, _, gate, backend = _controller(resolver_status=resolver_status)
+def test_unresolved_current_target_never_reaches_gate_or_backend(resolver_status, expected_status, expected_reason, tmp_path) -> None:
+    controller, _, _, gate, backend = _controller(tmp_path, resolver_status=resolver_status)
     session = controller.start_session()
 
     result = controller.submit_intent(_intent(session))
@@ -385,21 +398,23 @@ def test_unresolved_current_target_never_reaches_gate_or_backend(resolver_status
     assert backend.attempt_count == 0
 
 
-def test_unresolved_or_ambiguous_current_state_has_zero_dispatch() -> None:
+def test_unresolved_or_ambiguous_current_state_has_zero_dispatch(tmp_path) -> None:
     asset = _asset()
     current = _current_observation(asset, anchors=())
-    controller, _, resolver, gate, backend = _controller(current=current)
+    controller, _, resolver, gate, backend = _controller(tmp_path, current=current)
     session = controller.start_session()
 
     result = controller.submit_intent(_intent(session))
 
-    assert result.status == "BLOCKED"
-    assert result.reason_code == "current_state_unresolved"
+    # 冻结 Receipt Contract 只允许 safe_stop intent 生成 non-dispatch SAFE_STOP；
+    # 非 safe_stop intent 的 state drift 必须投影成 action-level target_unresolved。
+    assert result.outcome == "BLOCKED"
+    assert result.reason_code == "target_unresolved"
     assert resolver.calls == gate.calls == backend.attempt_count == 0
 
 
-def test_gate_block_has_zero_dispatch() -> None:
-    controller, _, _, gate, backend = _controller(gate_allowed=False)
+def test_gate_block_has_zero_dispatch(tmp_path) -> None:
+    controller, _, _, gate, backend = _controller(tmp_path, gate_allowed=False)
     session = controller.start_session()
 
     result = controller.submit_intent(_intent(session))
@@ -410,8 +425,8 @@ def test_gate_block_has_zero_dispatch() -> None:
     assert backend.attempt_count == 0
 
 
-def test_replay_of_consumed_intent_is_rejected_and_total_dispatch_remains_one() -> None:
-    controller, _, _, _, backend = _controller()
+def test_replay_of_consumed_intent_is_rejected_and_total_dispatch_remains_one(tmp_path) -> None:
+    controller, _, _, _, backend = _controller(tmp_path)
     session = controller.start_session()
     payload = _intent(session)
 
@@ -419,13 +434,12 @@ def test_replay_of_consumed_intent_is_rejected_and_total_dispatch_remains_one() 
     second = controller.submit_intent(payload)
 
     assert first.outcome == "DISPATCHED"
-    assert second.status == "REJECTED"
-    assert second.reason_code == "observation_consumed"
+    assert second == first
     assert backend.dispatch_count == 1
 
 
-def test_backend_failure_is_execution_failed_and_never_verified() -> None:
-    controller, _, _, _, backend = _controller(backend_fail=True)
+def test_backend_failure_is_execution_failed_and_never_verified(tmp_path) -> None:
+    controller, _, _, _, backend = _controller(tmp_path, backend_fail=True)
     session = controller.start_session()
 
     result = controller.submit_intent(_intent(session))
@@ -437,7 +451,7 @@ def test_backend_failure_is_execution_failed_and_never_verified() -> None:
     assert backend.dispatch_count == 0
 
 
-def test_backend_indeterminate_result_never_becomes_execution_failed_or_verified() -> None:
+def test_backend_indeterminate_result_never_becomes_execution_failed_or_verified(tmp_path) -> None:
     from app.agent.desktop_backend import BackendDispatchReceipt
 
     class IndeterminateBackend:
@@ -453,7 +467,7 @@ def test_backend_indeterminate_result_never_becomes_execution_failed_or_verified
             )
 
     backend = IndeterminateBackend()
-    controller, _, _, _, _ = _controller(backend_override=backend)
+    controller, _, _, _, _ = _controller(tmp_path, backend_override=backend)
     session = controller.start_session()
 
     result = controller.submit_intent(_intent(session))
@@ -466,9 +480,11 @@ def test_backend_indeterminate_result_never_becomes_execution_failed_or_verified
     assert backend.calls == 1
 
 
-def test_start_session_rejects_binding_identity_not_owned_by_reviewed_asset() -> None:
+def test_start_session_rejects_binding_identity_not_owned_by_reviewed_asset(tmp_path) -> None:
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset = _asset()
     controller = LiveController(
@@ -484,6 +500,10 @@ def test_start_session_rejects_binding_identity_not_owned_by_reviewed_asset() ->
         gate=_Gate(),
         window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4444),
         backend=DeterministicFakeBackend(),
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
 
@@ -491,7 +511,7 @@ def test_start_session_rejects_binding_identity_not_owned_by_reviewed_asset() ->
         controller.start_session()
 
 
-def test_start_session_rejects_observation_application_identity_mismatch() -> None:
+def test_start_session_rejects_observation_application_identity_mismatch(tmp_path) -> None:
     class ForgedObservationSource(_ObservationSource):
         def create_initial(self, *, session_id: str, workflow: dict, target_window_handle: int) -> object:
             payload = _agent_observation(session_id, workflow)
@@ -500,6 +520,8 @@ def test_start_session_rejects_observation_application_identity_mismatch() -> No
 
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset = _asset()
     controller = LiveController(
@@ -515,6 +537,10 @@ def test_start_session_rejects_observation_application_identity_mismatch() -> No
         gate=_Gate(),
         window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4545),
         backend=DeterministicFakeBackend(),
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
 
@@ -522,8 +548,8 @@ def test_start_session_rejects_observation_application_identity_mismatch() -> No
         controller.start_session()
 
 
-def test_second_mutating_session_for_same_window_is_rejected() -> None:
-    controller, _, _, _, _ = _controller(target_window_handle=4646)
+def test_second_mutating_session_for_same_window_is_rejected(tmp_path) -> None:
+    controller, _, _, _, _ = _controller(tmp_path, target_window_handle=4646)
     first = controller.start_session()
 
     with pytest.raises(RuntimeError, match="window lease"):
@@ -532,9 +558,9 @@ def test_second_mutating_session_for_same_window_is_rejected() -> None:
     assert first.current_observation.session_id == first.session_id
 
 
-def test_window_lease_is_shared_across_live_controller_instances() -> None:
-    first_controller, _, _, _, _ = _controller(target_window_handle=4696)
-    second_controller, _, _, _, _ = _controller(target_window_handle=4696)
+def test_window_lease_is_shared_across_live_controller_instances(tmp_path) -> None:
+    first_controller, _, _, _, _ = _controller(tmp_path / "first", target_window_handle=4696)
+    second_controller, _, _, _, _ = _controller(tmp_path / "second", target_window_handle=4696)
     first_controller.start_session()
 
     with pytest.raises(RuntimeError, match="window lease"):
@@ -548,8 +574,9 @@ def test_window_lease_is_shared_across_live_controller_instances() -> None:
         (_WindowVisibilityChecker(bound_window_handle=4747, visible=False), "target_occluded"),
     ],
 )
-def test_runtime_visibility_block_after_gate_has_zero_dispatch(visibility, expected_reason) -> None:
+def test_runtime_visibility_block_after_gate_has_zero_dispatch(visibility, expected_reason, tmp_path) -> None:
     controller, _, _, gate, backend = _controller(
+        tmp_path,
         target_window_handle=4747,
         visibility_checker=visibility,
     )
@@ -563,8 +590,8 @@ def test_runtime_visibility_block_after_gate_has_zero_dispatch(visibility, expec
     assert backend.attempt_count == 0
 
 
-def test_valid_dispatch_is_bound_to_server_target_window_exactly_once() -> None:
-    controller, _, _, _, backend = _controller(target_window_handle=4848)
+def test_valid_dispatch_is_bound_to_server_target_window_exactly_once(tmp_path) -> None:
+    controller, _, _, _, backend = _controller(tmp_path, target_window_handle=4848)
     session = controller.start_session()
     payload = _intent(session)
 
@@ -572,7 +599,7 @@ def test_valid_dispatch_is_bound_to_server_target_window_exactly_once() -> None:
     second = controller.submit_intent(payload)
 
     assert first.outcome == "DISPATCHED"
-    assert second.status == "REJECTED"
+    assert second == first
     assert backend.dispatch_count == 1
     assert backend.commands[0].target_window_handle == 4848
 

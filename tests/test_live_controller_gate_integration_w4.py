@@ -34,7 +34,10 @@ class _ResolverWithCurrentGateEvidence(_TargetResolver):
         return result
 
 
-def test_live_controller_uses_existing_pre_click_policy_before_dispatch() -> None:
+def test_live_controller_uses_existing_pre_click_policy_before_dispatch(tmp_path) -> None:
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
     asset = _asset()
     backend = DeterministicFakeBackend()
     controller = LiveController(
@@ -52,6 +55,10 @@ def test_live_controller_uses_existing_pre_click_policy_before_dispatch() -> Non
             bound_window_handle=4545,
         ),
         backend=backend,
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
     session = controller.start_session()
@@ -63,7 +70,10 @@ def test_live_controller_uses_existing_pre_click_policy_before_dispatch() -> Non
     assert backend.dispatch_count == 1
 
 
-def test_existing_pre_click_policy_block_produces_zero_dispatch() -> None:
+def test_existing_pre_click_policy_block_produces_zero_dispatch(tmp_path) -> None:
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
     asset = _asset()
     backend = DeterministicFakeBackend()
     controller = LiveController(
@@ -81,6 +91,10 @@ def test_existing_pre_click_policy_block_produces_zero_dispatch() -> None:
             bound_window_handle=4747,
         ),
         backend=backend,
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
     session = controller.start_session()
@@ -92,7 +106,10 @@ def test_existing_pre_click_policy_block_produces_zero_dispatch() -> None:
     assert backend.attempt_count == 0
 
 
-def test_missing_server_gate_context_fails_closed_for_reviewed_gate() -> None:
+def test_missing_server_gate_context_fails_closed_for_reviewed_gate(tmp_path) -> None:
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
     asset = _asset()
     backend = DeterministicFakeBackend()
     controller = LiveController(
@@ -110,6 +127,10 @@ def test_missing_server_gate_context_fails_closed_for_reviewed_gate() -> None:
             bound_window_handle=4646,
         ),
         backend=backend,
+        intent_claim_store=RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
     session = controller.start_session()
