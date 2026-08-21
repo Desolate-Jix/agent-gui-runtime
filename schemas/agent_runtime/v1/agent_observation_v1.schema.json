@@ -1,6 +1,39 @@
 {
   "$comment": "Closed structural transport schema. Pydantic validators are authoritative for cross-field semantics.",
   "$defs": {
+    "AgentApplicationIdentityV1": {
+      "additionalProperties": false,
+      "properties": {
+        "identity_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Identity Ref",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "web",
+            "native"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity_ref",
+        "kind",
+        "display_name"
+      ],
+      "title": "AgentApplicationIdentityV1",
+      "type": "object"
+    },
     "AgentAvailableActionV1": {
       "additionalProperties": false,
       "properties": {
@@ -9,25 +42,6 @@
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "title": "Action Id",
-          "type": "string"
-        },
-        "description": {
-          "maxLength": 512,
-          "minLength": 1,
-          "title": "Description",
-          "type": "string"
-        },
-        "requires_user_confirmation": {
-          "title": "Requires User Confirmation",
-          "type": "boolean"
-        },
-        "risk_level": {
-          "enum": [
-            "low",
-            "medium",
-            "high"
-          ],
-          "title": "Risk Level",
           "type": "string"
         },
         "semantic_action": {
@@ -39,6 +53,12 @@
             "safe_stop"
           ],
           "title": "Semantic Action",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Description",
           "type": "string"
         },
         "target_state_id": {
@@ -54,6 +74,36 @@
             }
           ],
           "title": "Target State Id"
+        },
+        "expected_effect": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Expected Effect",
+          "type": "string"
+        },
+        "verification_rule_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Verification Rule Refs",
+          "type": "array"
+        },
+        "risk_level": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Risk Level",
+          "type": "string"
+        },
+        "requires_user_confirmation": {
+          "title": "Requires User Confirmation",
+          "type": "boolean"
         }
       },
       "required": [
@@ -61,10 +111,65 @@
         "semantic_action",
         "description",
         "target_state_id",
+        "expected_effect",
+        "verification_rule_refs",
         "risk_level",
         "requires_user_confirmation"
       ],
       "title": "AgentAvailableActionV1",
+      "type": "object"
+    },
+    "AgentBlockerV1": {
+      "additionalProperties": false,
+      "properties": {
+        "blocker_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Blocker Id",
+          "type": "string"
+        },
+        "blocker_type": {
+          "enum": [
+            "state",
+            "review",
+            "policy",
+            "action"
+          ],
+          "title": "Blocker Type",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "safe_stop_required": {
+          "title": "Safe Stop Required",
+          "type": "boolean"
+        },
+        "evidence_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "blocker_id",
+        "blocker_type",
+        "description",
+        "safe_stop_required",
+        "evidence_refs"
+      ],
+      "title": "AgentBlockerV1",
       "type": "object"
     },
     "AgentCaptureRefV1": {
@@ -77,16 +182,16 @@
           "title": "Capture Id",
           "type": "string"
         },
+        "screenshot_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Screenshot Sha256",
+          "type": "string"
+        },
         "evidence_ref": {
           "maxLength": 256,
           "minLength": 1,
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
           "title": "Evidence Ref",
-          "type": "string"
-        },
-        "screenshot_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Screenshot Sha256",
           "type": "string"
         }
       },
@@ -101,6 +206,10 @@
     "AgentSafeStopBoundaryV1": {
       "additionalProperties": false,
       "properties": {
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
         "reason_code": {
           "enum": [
             "none",
@@ -113,10 +222,6 @@
           ],
           "title": "Reason Code",
           "type": "string"
-        },
-        "required": {
-          "title": "Required",
-          "type": "boolean"
         }
       },
       "required": [
@@ -126,20 +231,104 @@
       "title": "AgentSafeStopBoundaryV1",
       "type": "object"
     },
-    "AgentStateMatchV1": {
+    "AgentSemanticFactV1": {
       "additionalProperties": false,
       "properties": {
-        "resolution_sha256": {
+        "fact_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "fact_type": {
+          "enum": [
+            "identity_anchor",
+            "current_content",
+            "reviewed_context"
+          ],
+          "title": "Fact Type",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
           "anyOf": [
             {
-              "pattern": "^[0-9a-f]{64}$",
+              "maxLength": 512,
+              "minLength": 1,
               "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "title": "Resolution Sha256"
+          "title": "Value"
+        },
+        "observation_status": {
+          "enum": [
+            "reviewed",
+            "current",
+            "current_redacted",
+            "requires_observation"
+          ],
+          "title": "Observation Status",
+          "type": "string"
+        },
+        "evidence_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fact_id",
+        "fact_type",
+        "label",
+        "value",
+        "observation_status",
+        "evidence_refs"
+      ],
+      "title": "AgentSemanticFactV1",
+      "type": "object"
+    },
+    "AgentStateMatchV1": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "matched",
+            "ambiguous",
+            "unknown",
+            "stop_boundary"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "state_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "State Id"
         },
         "state_availability": {
           "anyOf": [
@@ -156,29 +345,17 @@
           ],
           "title": "State Availability"
         },
-        "state_id": {
+        "resolution_sha256": {
           "anyOf": [
             {
-              "maxLength": 128,
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "title": "State Id"
-        },
-        "status": {
-          "enum": [
-            "matched",
-            "ambiguous",
-            "unknown",
-            "stop_boundary"
-          ],
-          "title": "Status",
-          "type": "string"
+          "title": "Resolution Sha256"
         }
       },
       "required": [
@@ -193,9 +370,11 @@
     "WorkflowRefV1": {
       "additionalProperties": false,
       "properties": {
-        "asset_content_sha256": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Asset Content Sha256",
+        "workflow_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Workflow Id",
           "type": "string"
         },
         "asset_id": {
@@ -205,9 +384,9 @@
           "title": "Asset Id",
           "type": "string"
         },
-        "reviewed_revision_hash": {
+        "asset_content_sha256": {
           "pattern": "^[0-9a-f]{64}$",
-          "title": "Reviewed Revision Hash",
+          "title": "Asset Content Sha256",
           "type": "string"
         },
         "source_workflow_sha256": {
@@ -215,11 +394,9 @@
           "title": "Source Workflow Sha256",
           "type": "string"
         },
-        "workflow_id": {
-          "maxLength": 128,
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-          "title": "Workflow Id",
+        "reviewed_revision_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reviewed Revision Hash",
           "type": "string"
         }
       },
@@ -236,10 +413,71 @@
   },
   "additionalProperties": false,
   "properties": {
-    "artifact_is_authorization": {
-      "const": false,
-      "title": "Artifact Is Authorization",
-      "type": "boolean"
+    "contract_version": {
+      "const": "agent_observation_v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "observation_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "workflow": {
+      "$ref": "#/$defs/WorkflowRefV1"
+    },
+    "application": {
+      "$ref": "#/$defs/AgentApplicationIdentityV1"
+    },
+    "state_resolution_ref": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+      "title": "State Resolution Ref",
+      "type": "string"
+    },
+    "current_capture": {
+      "$ref": "#/$defs/AgentCaptureRefV1"
+    },
+    "state": {
+      "$ref": "#/$defs/AgentStateMatchV1"
+    },
+    "semantic_facts": {
+      "items": {
+        "$ref": "#/$defs/AgentSemanticFactV1"
+      },
+      "maxItems": 64,
+      "title": "Semantic Facts",
+      "type": "array"
+    },
+    "evidence_refs": {
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+        "type": "string"
+      },
+      "maxItems": 128,
+      "minItems": 2,
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "blockers": {
+      "items": {
+        "$ref": "#/$defs/AgentBlockerV1"
+      },
+      "maxItems": 32,
+      "title": "Blockers",
+      "type": "array"
     },
     "available_actions": {
       "items": {
@@ -250,43 +488,13 @@
       "title": "Available Actions",
       "type": "array"
     },
-    "contract_version": {
-      "const": "agent_observation_v1",
-      "title": "Contract Version",
-      "type": "string"
-    },
-    "current_capture": {
-      "$ref": "#/$defs/AgentCaptureRefV1"
-    },
-    "observation_id": {
-      "maxLength": 128,
-      "minLength": 1,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-      "title": "Observation Id",
-      "type": "string"
-    },
     "safe_stop": {
       "$ref": "#/$defs/AgentSafeStopBoundaryV1"
     },
-    "session_id": {
-      "maxLength": 128,
-      "minLength": 1,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-      "title": "Session Id",
-      "type": "string"
-    },
-    "state": {
-      "$ref": "#/$defs/AgentStateMatchV1"
-    },
-    "state_resolution_ref": {
-      "maxLength": 256,
-      "minLength": 1,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
-      "title": "State Resolution Ref",
-      "type": "string"
-    },
-    "workflow": {
-      "$ref": "#/$defs/WorkflowRefV1"
+    "artifact_is_authorization": {
+      "const": false,
+      "title": "Artifact Is Authorization",
+      "type": "boolean"
     }
   },
   "required": [
@@ -294,9 +502,13 @@
     "observation_id",
     "session_id",
     "workflow",
+    "application",
     "state_resolution_ref",
     "current_capture",
     "state",
+    "semantic_facts",
+    "evidence_refs",
+    "blockers",
     "available_actions",
     "safe_stop",
     "artifact_is_authorization"

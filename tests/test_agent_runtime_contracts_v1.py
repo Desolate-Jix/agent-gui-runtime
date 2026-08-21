@@ -38,6 +38,11 @@ def _observation_payload() -> dict[str, object]:
         "observation_id": "observation-1",
         "session_id": "session-1",
         "workflow": _workflow(),
+        "application": {
+            "identity_ref": "application:web:nz.seek.com",
+            "kind": "web",
+            "display_name": "nz.seek.com",
+        },
         "state_resolution_ref": "state-resolution:1",
         "current_capture": {
             "capture_id": "capture-1",
@@ -50,12 +55,30 @@ def _observation_payload() -> dict[str, object]:
             "state_availability": "reviewed",
             "resolution_sha256": SHA_B,
         },
+        "semantic_facts": [
+            {
+                "fact_id": "fact.current-job-title",
+                "fact_type": "current_content",
+                "label": "Current job title",
+                "value": "Software Engineer",
+                "observation_status": "current",
+                "evidence_refs": ["evidence:job-title"],
+            }
+        ],
+        "evidence_refs": [
+            "state-resolution:1",
+            "capture:1",
+            "evidence:job-title",
+        ],
+        "blockers": [],
         "available_actions": [
             {
                 "action_id": "transition.open-detail",
                 "semantic_action": "open_detail",
                 "description": "Open the reviewed job detail.",
                 "target_state_id": "job-detail-2",
+                "expected_effect": "Reach the reviewed job detail state.",
+                "verification_rule_refs": ["workflow-rule:detail-visible"],
                 "risk_level": "low",
                 "requires_user_confirmation": False,
             },
@@ -64,6 +87,8 @@ def _observation_payload() -> dict[str, object]:
                 "semantic_action": "open_apply_flow",
                 "description": "Open the reviewed application entry.",
                 "target_state_id": "apply-entry",
+                "expected_effect": "Reach the reviewed application entry state.",
+                "verification_rule_refs": ["workflow-rule:apply-entry-visible"],
                 "risk_level": "medium",
                 "requires_user_confirmation": True,
             },
@@ -72,6 +97,8 @@ def _observation_payload() -> dict[str, object]:
                 "semantic_action": "safe_stop",
                 "description": "Stop without dispatching another action.",
                 "target_state_id": None,
+                "expected_effect": "Stop without dispatching another action.",
+                "verification_rule_refs": [],
                 "risk_level": "low",
                 "requires_user_confirmation": False,
             },
@@ -168,8 +195,82 @@ def test_non_actionable_state_exposes_only_safe_stop(status: str, reason: str) -
     }
     payload["available_actions"] = [deepcopy(payload["available_actions"][-1])]
     payload["safe_stop"] = {"required": True, "reason_code": reason}
+    payload["semantic_facts"] = []
+    payload["blockers"] = [
+        {
+            "blocker_id": f"blocker.{reason}",
+            "blocker_type": "state",
+            "description": f"Runtime requires safe stop: {reason}.",
+            "safe_stop_required": True,
+            "evidence_refs": ["state-resolution:1"],
+        }
+    ]
     observation = validate_agent_observation_v1(payload)
     assert [item.action_id for item in observation.available_actions] == ["runtime.safe_stop"]
+
+
+def test_observation_exposes_application_facts_blockers_and_action_contracts() -> None:
+    observation = validate_agent_observation_v1(_observation_payload())
+    assert observation.application.identity_ref == "application:web:nz.seek.com"
+    assert observation.semantic_facts[0].observation_status == "current"
+    assert observation.semantic_facts[0].evidence_refs == ["evidence:job-title"]
+    action = observation.available_actions[0]
+    assert action.expected_effect == "Reach the reviewed job detail state."
+    assert action.verification_rule_refs == ["workflow-rule:detail-visible"]
+
+
+def test_observation_requires_current_fact_and_capture_lineage_to_be_declared() -> None:
+    payload = _observation_payload()
+    payload["evidence_refs"].remove("evidence:job-title")
+    with pytest.raises(ValueError, match="semantic fact evidence"):
+        validate_agent_observation_v1(payload)
+
+    payload = _observation_payload()
+    payload["evidence_refs"].remove("capture:1")
+    with pytest.raises(ValueError, match="capture evidence"):
+        validate_agent_observation_v1(payload)
+
+
+def test_safe_stop_boundary_requires_a_safe_stop_blocker() -> None:
+    payload = _observation_payload()
+    payload["state"] = {
+        "status": "unknown",
+        "state_id": None,
+        "state_availability": None,
+        "resolution_sha256": None,
+    }
+    payload["semantic_facts"] = []
+    payload["available_actions"] = [deepcopy(payload["available_actions"][-1])]
+    payload["safe_stop"] = {"required": True, "reason_code": "state_unknown"}
+    with pytest.raises(ValueError, match="safe-stop blocker"):
+        validate_agent_observation_v1(payload)
+
+
+def test_safe_stop_blocker_cannot_coexist_with_semantic_actions() -> None:
+    payload = _observation_payload()
+    payload["blockers"] = [
+        {
+            "blocker_id": "blocker.policy",
+            "blocker_type": "policy",
+            "description": "Policy requires a safe stop.",
+            "safe_stop_required": True,
+            "evidence_refs": ["state-resolution:1"],
+        }
+    ]
+    with pytest.raises(ValueError, match="safe-stop blocker requires safe stop"):
+        validate_agent_observation_v1(payload)
+
+
+def test_non_safe_action_requires_effect_and_verification_information() -> None:
+    payload = _observation_payload()
+    payload["available_actions"][0]["verification_rule_refs"] = []
+    with pytest.raises(ValueError, match="verification rule"):
+        validate_agent_observation_v1(payload)
+
+    payload = _observation_payload()
+    payload["available_actions"][0]["expected_effect"] = ""
+    with pytest.raises(ValueError):
+        validate_agent_observation_v1(payload)
 
 
 def test_duplicate_action_ids_are_rejected() -> None:
@@ -215,6 +316,10 @@ def test_observation_rejects_nested_authority_or_geometry_injection(container, k
         ("parameters", {}),
         ("confirmation", True),
         ("human_confirmation", True),
+        ("approved", True),
+        ("provider_native_candidate", {"id": "candidate-1"}),
+        ("historical_target", "target-1"),
+        ("direct_dispatch", {"type": "click"}),
     ],
 )
 def test_intent_rejects_authority_or_geometry_injection(field: str, value: object) -> None:

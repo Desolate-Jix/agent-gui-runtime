@@ -104,6 +104,12 @@ _PROHIBITED_KEYS = {
     "authorization",
     "confirmation",
     "human_confirmation",
+    "approved",
+    "provider_candidate",
+    "provider_native_candidate",
+    "historical_target",
+    "direct_dispatch",
+    "dispatch_instruction",
 }
 _RFC3339_UTC_PATTERN = (
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$"
@@ -222,6 +228,8 @@ class AgentAvailableActionV1(_StrictContractModel):
     semantic_action: SemanticActionV1
     description: Description
     target_state_id: StableId | None
+    expected_effect: Description
+    verification_rule_refs: Annotated[list[OpaqueRef], Field(max_length=32)]
     risk_level: Literal["low", "medium", "high"]
     requires_user_confirmation: bool
 
@@ -234,6 +242,10 @@ class AgentAvailableActionV1(_StrictContractModel):
 
     @model_validator(mode="after")
     def _validate_action_shape(self) -> "AgentAvailableActionV1":
+        _require(
+            len(self.verification_rule_refs) == len(set(self.verification_rule_refs)),
+            "verification_rule_refs must be unique",
+        )
         if self.semantic_action == "safe_stop":
             _require(
                 self.action_id == "runtime.safe_stop",
@@ -245,10 +257,18 @@ class AgentAvailableActionV1(_StrictContractModel):
                 self.requires_user_confirmation is False,
                 "safe_stop cannot require confirmation",
             )
+            _require(
+                not self.verification_rule_refs,
+                "safe_stop has no verification rules",
+            )
         else:
             _require(
                 self.target_state_id is not None,
                 "non-safe action requires target_state_id",
+            )
+            _require(
+                self.verification_rule_refs,
+                "non-safe action requires a verification rule",
             )
         if self.semantic_action == "open_apply_flow":
             _require(
@@ -260,6 +280,53 @@ class AgentAvailableActionV1(_StrictContractModel):
                 "open_apply_flow risk must be medium or high",
             )
         return self
+
+
+class AgentApplicationIdentityV1(_StrictContractModel):
+    identity_ref: OpaqueRef
+    kind: Literal["web", "native"]
+    display_name: Description
+
+
+class AgentSemanticFactV1(_StrictContractModel):
+    fact_id: StableId
+    fact_type: Literal["identity_anchor", "current_content", "reviewed_context"]
+    label: Description
+    value: Description | None
+    observation_status: Literal[
+        "reviewed",
+        "current",
+        "current_redacted",
+        "requires_observation",
+    ]
+    evidence_refs: Annotated[list[OpaqueRef], Field(min_length=1, max_length=32)]
+
+    @model_validator(mode="after")
+    def _validate_fact_shape(self) -> "AgentSemanticFactV1":
+        _require(
+            len(self.evidence_refs) == len(set(self.evidence_refs)),
+            "semantic fact evidence refs must be unique",
+        )
+        if self.observation_status in {"reviewed", "current"}:
+            _require(self.value is not None, "readable semantic fact requires value")
+        else:
+            _require(self.value is None, "unreadable semantic fact must not expose value")
+        return self
+
+
+class AgentBlockerV1(_StrictContractModel):
+    blocker_id: StableId
+    blocker_type: Literal["state", "review", "policy", "action"]
+    description: Description
+    safe_stop_required: bool
+    evidence_refs: Annotated[list[OpaqueRef], Field(min_length=1, max_length=32)]
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def _unique_evidence_refs(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("blocker evidence refs must be unique")
+        return value
 
 
 class AgentSafeStopBoundaryV1(_StrictContractModel):
@@ -295,9 +362,13 @@ class AgentObservationV1(_StrictContractModel):
     observation_id: StableId
     session_id: StableId
     workflow: WorkflowRefV1
+    application: AgentApplicationIdentityV1
     state_resolution_ref: OpaqueRef
     current_capture: AgentCaptureRefV1
     state: AgentStateMatchV1
+    semantic_facts: Annotated[list[AgentSemanticFactV1], Field(max_length=64)]
+    evidence_refs: Annotated[list[OpaqueRef], Field(min_length=2, max_length=128)]
+    blockers: Annotated[list[AgentBlockerV1], Field(max_length=32)]
     available_actions: Annotated[
         list[AgentAvailableActionV1],
         Field(min_length=1, max_length=32),
@@ -307,6 +378,35 @@ class AgentObservationV1(_StrictContractModel):
 
     @model_validator(mode="after")
     def _validate_projection(self) -> "AgentObservationV1":
+        _require(
+            len(self.evidence_refs) == len(set(self.evidence_refs)),
+            "evidence_refs must be unique",
+        )
+        evidence_refs = set(self.evidence_refs)
+        _require(
+            self.state_resolution_ref in evidence_refs,
+            "state resolution evidence must be declared",
+        )
+        _require(
+            self.current_capture.evidence_ref in evidence_refs,
+            "capture evidence must be declared",
+        )
+        fact_ids = [item.fact_id for item in self.semantic_facts]
+        _require(len(fact_ids) == len(set(fact_ids)), "fact_id must be unique")
+        for fact in self.semantic_facts:
+            _require(
+                set(fact.evidence_refs).issubset(evidence_refs),
+                "semantic fact evidence must be declared",
+            )
+        blocker_ids = [item.blocker_id for item in self.blockers]
+        _require(len(blocker_ids) == len(set(blocker_ids)), "blocker_id must be unique")
+        for blocker in self.blockers:
+            _require(
+                set(blocker.evidence_refs).issubset(evidence_refs),
+                "blocker evidence must be declared",
+            )
+        if any(item.safe_stop_required for item in self.blockers):
+            _require(self.safe_stop.required, "safe-stop blocker requires safe stop")
         action_ids = [item.action_id for item in self.available_actions]
         _require(len(action_ids) == len(set(action_ids)), "action_id must be unique")
         safe_actions = [
@@ -322,6 +422,10 @@ class AgentObservationV1(_StrictContractModel):
         if non_actionable_state:
             _require(self.safe_stop.required, "non-actionable state requires safe stop")
         if self.safe_stop.required:
+            _require(
+                any(item.safe_stop_required for item in self.blockers),
+                "safe-stop boundary requires a safe-stop blocker",
+            )
             _require(
                 action_ids == ["runtime.safe_stop"],
                 "safe-stop boundary exposes only runtime.safe_stop",
