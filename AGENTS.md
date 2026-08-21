@@ -9,6 +9,7 @@ These instructions apply to the repository root `D:\agent-gui-runtime`.
 When implementing or modifying code, follow the execution loop defined in:
 
 - `skills/code-implementation-loop/SKILL.md`
+- `skills/small-step-git-checkpoints/SKILL.md` when automatic per-slice commits or rollback checkpoints are authorized
 
 That means:
 

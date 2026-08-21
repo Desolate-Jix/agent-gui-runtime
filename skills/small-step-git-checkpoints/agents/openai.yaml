@@ -1,0 +1,4 @@
+interface:
+  display_name: "Small-Step Git Checkpoints"
+  short_description: "Verified per-slice commits and safe rollback points"
+  default_prompt: "Use the small-step-git-checkpoints skill to create verified commits without staging unrelated dirty work."
