@@ -1,0 +1,97 @@
+{
+  "$comment": "Closed structural transport schema. Pydantic validators are authoritative for cross-field semantics.",
+  "$defs": {
+    "WorkflowRefV1": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Asset Content Sha256",
+          "type": "string"
+        },
+        "asset_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "reviewed_revision_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reviewed Revision Hash",
+          "type": "string"
+        },
+        "source_workflow_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Workflow Sha256",
+          "type": "string"
+        },
+        "workflow_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "asset_id",
+        "asset_content_sha256",
+        "source_workflow_sha256",
+        "reviewed_revision_hash"
+      ],
+      "title": "WorkflowRefV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "action_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Action Id",
+      "type": "string"
+    },
+    "contract_version": {
+      "const": "agent_intent_v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "intent_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Intent Id",
+      "type": "string"
+    },
+    "observation_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "workflow": {
+      "$ref": "#/$defs/WorkflowRefV1"
+    }
+  },
+  "required": [
+    "contract_version",
+    "intent_id",
+    "session_id",
+    "observation_id",
+    "workflow",
+    "action_id"
+  ],
+  "title": "AgentIntentV1",
+  "type": "object"
+}

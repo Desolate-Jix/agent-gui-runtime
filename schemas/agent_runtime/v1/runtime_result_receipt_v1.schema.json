@@ -1,0 +1,407 @@
+{
+  "$comment": "Closed structural transport schema. Pydantic validators are authoritative for cross-field semantics.",
+  "$defs": {
+    "RuntimeReceiptActionV1": {
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Action Id",
+          "type": "string"
+        },
+        "semantic_action": {
+          "enum": [
+            "open_detail",
+            "open_apply_flow",
+            "back",
+            "close_modal",
+            "safe_stop"
+          ],
+          "title": "Semantic Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action_id",
+        "semantic_action"
+      ],
+      "title": "RuntimeReceiptActionV1",
+      "type": "object"
+    },
+    "RuntimeReceiptEvidenceV1": {
+      "additionalProperties": false,
+      "properties": {
+        "backend_receipt_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Backend Receipt Ref"
+        },
+        "candidate_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Ref"
+        },
+        "gate_decision_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gate Decision Ref"
+        },
+        "selection_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Selection Ref"
+        },
+        "state_resolution_ref": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "State Resolution Ref",
+          "type": "string"
+        },
+        "trace_refs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Trace Refs",
+          "type": "array"
+        },
+        "verification_ref": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Verification Ref"
+        }
+      },
+      "required": [
+        "state_resolution_ref",
+        "selection_ref",
+        "candidate_ref",
+        "gate_decision_ref",
+        "backend_receipt_ref",
+        "verification_ref",
+        "trace_refs"
+      ],
+      "title": "RuntimeReceiptEvidenceV1",
+      "type": "object"
+    },
+    "RuntimeReceiptSafeStopV1": {
+      "additionalProperties": false,
+      "properties": {
+        "reason_code": {
+          "enum": [
+            "none",
+            "policy_blocked",
+            "human_confirmation_required",
+            "current_state_unresolved",
+            "current_state_ambiguous",
+            "stop_boundary",
+            "capture_lineage_mismatch",
+            "stale_candidate",
+            "grounding_ambiguous",
+            "target_unresolved",
+            "pre_click_rejected",
+            "foreground_window_changed",
+            "target_occluded",
+            "backend_not_started",
+            "backend_failed",
+            "backend_result_lost",
+            "post_capture_not_new",
+            "post_action_failure",
+            "destination_mismatch",
+            "safe_stop_boundary",
+            "needs_human_review"
+          ],
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "required",
+        "reason_code"
+      ],
+      "title": "RuntimeReceiptSafeStopV1",
+      "type": "object"
+    },
+    "WorkflowRefV1": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Asset Content Sha256",
+          "type": "string"
+        },
+        "asset_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Asset Id",
+          "type": "string"
+        },
+        "reviewed_revision_hash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reviewed Revision Hash",
+          "type": "string"
+        },
+        "source_workflow_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Workflow Sha256",
+          "type": "string"
+        },
+        "workflow_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "asset_id",
+        "asset_content_sha256",
+        "source_workflow_sha256",
+        "reviewed_revision_hash"
+      ],
+      "title": "WorkflowRefV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "$ref": "#/$defs/RuntimeReceiptActionV1"
+    },
+    "artifact_is_authorization": {
+      "const": false,
+      "title": "Artifact Is Authorization",
+      "type": "boolean"
+    },
+    "attempt_count": {
+      "enum": [
+        0,
+        1
+      ],
+      "title": "Attempt Count",
+      "type": "integer"
+    },
+    "contract_version": {
+      "const": "runtime_result_receipt_v1",
+      "title": "Contract Version",
+      "type": "string"
+    },
+    "destination_status": {
+      "enum": [
+        "not_evaluated",
+        "verified",
+        "not_verified",
+        "indeterminate"
+      ],
+      "title": "Destination Status",
+      "type": "string"
+    },
+    "dispatch_status": {
+      "enum": [
+        "not_started",
+        "dispatched",
+        "indeterminate"
+      ],
+      "title": "Dispatch Status",
+      "type": "string"
+    },
+    "effect_status": {
+      "enum": [
+        "not_evaluated",
+        "verified",
+        "not_verified",
+        "indeterminate"
+      ],
+      "title": "Effect Status",
+      "type": "string"
+    },
+    "evidence": {
+      "$ref": "#/$defs/RuntimeReceiptEvidenceV1"
+    },
+    "gate_status": {
+      "enum": [
+        "not_evaluated",
+        "allowed",
+        "blocked"
+      ],
+      "title": "Gate Status",
+      "type": "string"
+    },
+    "intent_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Intent Id",
+      "type": "string"
+    },
+    "issued_at": {
+      "maxLength": 32,
+      "minLength": 20,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$",
+      "title": "Issued At",
+      "type": "string"
+    },
+    "next_observation_id": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Next Observation Id"
+    },
+    "observation_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Observation Id",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "VERIFIED",
+        "BLOCKED",
+        "SAFE_STOP",
+        "NEEDS_REVIEW",
+        "EXECUTION_FAILED",
+        "VERIFICATION_FAILED",
+        "INDETERMINATE"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "reason_code": {
+      "enum": [
+        "none",
+        "policy_blocked",
+        "human_confirmation_required",
+        "current_state_unresolved",
+        "current_state_ambiguous",
+        "stop_boundary",
+        "capture_lineage_mismatch",
+        "stale_candidate",
+        "grounding_ambiguous",
+        "target_unresolved",
+        "pre_click_rejected",
+        "foreground_window_changed",
+        "target_occluded",
+        "backend_not_started",
+        "backend_failed",
+        "backend_result_lost",
+        "post_capture_not_new",
+        "post_action_failure",
+        "destination_mismatch",
+        "safe_stop_boundary",
+        "needs_human_review"
+      ],
+      "title": "Reason Code",
+      "type": "string"
+    },
+    "receipt_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Receipt Id",
+      "type": "string"
+    },
+    "safe_stop": {
+      "$ref": "#/$defs/RuntimeReceiptSafeStopV1"
+    },
+    "session_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Session Id",
+      "type": "string"
+    },
+    "workflow": {
+      "$ref": "#/$defs/WorkflowRefV1"
+    }
+  },
+  "required": [
+    "contract_version",
+    "receipt_id",
+    "issued_at",
+    "session_id",
+    "observation_id",
+    "intent_id",
+    "workflow",
+    "action",
+    "outcome",
+    "reason_code",
+    "attempt_count",
+    "gate_status",
+    "dispatch_status",
+    "effect_status",
+    "destination_status",
+    "evidence",
+    "next_observation_id",
+    "safe_stop",
+    "artifact_is_authorization"
+  ],
+  "title": "RuntimeResultReceiptV1",
+  "type": "object"
+}
