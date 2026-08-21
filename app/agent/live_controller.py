@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Protocol
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from app.agent.desktop_backend import (
     DesktopBackend,
@@ -39,10 +40,14 @@ from app.agent.runtime_contracts import (
 class ServerWorkflowBinding:
     workflow_id: str
     asset_id: str
+    application_identity_key: str
+    target_window_handle: int
 
     def __post_init__(self) -> None:
-        if not self.workflow_id or not self.asset_id:
-            raise ValueError("server workflow binding requires workflow_id and asset_id")
+        if not self.workflow_id or not self.asset_id or not self.application_identity_key:
+            raise ValueError("server workflow binding requires workflow, asset, and application identity")
+        if type(self.target_window_handle) is not int or self.target_window_handle <= 0:
+            raise ValueError("server workflow binding requires a positive target window handle")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +55,7 @@ class LiveSessionSnapshot:
     session_id: str
     workflow: WorkflowRefV1
     current_observation: AgentObservationV1
+    target_window_handle: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +74,7 @@ class ObservationSource(Protocol):
         *,
         session_id: str,
         workflow: dict[str, Any],
+        target_window_handle: int,
     ) -> AgentObservationV1 | Mapping[str, object]: ...
 
     def capture_current(
@@ -75,6 +82,7 @@ class ObservationSource(Protocol):
         *,
         session_id: str,
         asset: dict[str, Any],
+        target_window_handle: int,
     ) -> Mapping[str, Any]: ...
 
 
@@ -96,10 +104,77 @@ class Gate(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class WindowVisibilityChecker(Protocol):
+    def check(
+        self,
+        *,
+        target_window_handle: int,
+        click_point: tuple[float, float],
+    ) -> Mapping[str, Any]: ...
+
+
+class ExistingWindowManagerVisibilityChecker:
+    """把 WindowManager 事实投影给 Runtime；不拥有允许执行的判断权。"""
+
+    def __init__(self, *, window_manager: Any | None = None) -> None:
+        if window_manager is None:
+            from app.core.window_manager import window_manager as active_window_manager
+
+            window_manager = active_window_manager
+        self._window_manager = window_manager
+
+    def check(
+        self,
+        *,
+        target_window_handle: int,
+        click_point: tuple[float, float],
+    ) -> Mapping[str, Any]:
+        try:
+            bound = self._window_manager.get_bound_window()
+        except Exception as exc:
+            return {
+                "bound_window_handle": None,
+                "point_visibility": None,
+                "error": str(exc),
+            }
+        if bound is None or int(bound.handle) != target_window_handle:
+            return {
+                "bound_window_handle": int(bound.handle) if bound is not None else None,
+                "point_visibility": None,
+            }
+        try:
+            fact = self._window_manager.validate_bound_point_visibility(
+                bound=bound,
+                x=int(click_point[0]),
+                y=int(click_point[1]),
+            )
+        except Exception as exc:
+            return {
+                "bound_window_handle": target_window_handle,
+                "point_visibility": None,
+                "error": str(exc),
+            }
+        return {
+            "bound_window_handle": target_window_handle,
+            "point_visibility": dict(fact),
+        }
+
+
+@dataclass(slots=True, weakref_slot=True)
+class _WindowLease:
+    target_window_handle: int
+    session_id: str
+
+
+_WINDOW_LEASES: WeakValueDictionary[int, _WindowLease] = WeakValueDictionary()
+_WINDOW_LEASE_LOCK = RLock()
+
+
 @dataclass(slots=True)
 class _LiveSession:
     snapshot: LiveSessionSnapshot
     asset: dict[str, Any]
+    window_lease: _WindowLease
     consumed: bool = False
 
 
@@ -111,6 +186,7 @@ class LiveController:
         observation_source: ObservationSource,
         target_resolver: TargetResolver,
         gate: Gate,
+        window_visibility_checker: WindowVisibilityChecker | None = None,
         backend: DesktopBackend,
         grounding_policy: Mapping[str, Any],
         asset_loader: AssetLoader | None = None,
@@ -125,6 +201,9 @@ class LiveController:
         self._observation_source = observation_source
         self._target_resolver = target_resolver
         self._gate = gate
+        self._window_visibility_checker = (
+            window_visibility_checker or ExistingWindowManagerVisibilityChecker()
+        )
         self._backend = backend
         self._grounding_policy = dict(grounding_policy)
         self._sessions: dict[str, _LiveSession] = {}
@@ -136,6 +215,9 @@ class LiveController:
         )
         if asset["asset_id"] != self._binding.asset_id:
             raise ValueError("active reviewed asset identity does not match server binding")
+        expected_application_key = self._asset_application_identity_key(asset)
+        if expected_application_key != self._binding.application_identity_key:
+            raise ValueError("reviewed asset application identity does not match server binding")
         workflow = WorkflowRefV1.model_validate(
             {
                 "workflow_id": self._binding.workflow_id,
@@ -146,26 +228,41 @@ class LiveController:
             }
         )
         session_id = f"session.{uuid4().hex}"
-        projected = self._observation_source.create_initial(
-            session_id=session_id,
-            workflow=workflow.model_dump(mode="json"),
-        )
-        observation = (
-            projected
-            if isinstance(projected, AgentObservationV1)
-            else validate_agent_observation_v1(projected)
-        )
-        if observation.session_id != session_id or observation.workflow != workflow:
-            raise ValueError("server observation does not match pinned session workflow")
-        if observation.application.kind != asset["application"]["kind"]:
-            raise ValueError("server observation application does not match reviewed asset")
+        lease = self._acquire_window_lease(session_id)
+        try:
+            projected = self._observation_source.create_initial(
+                session_id=session_id,
+                workflow=workflow.model_dump(mode="json"),
+                target_window_handle=self._binding.target_window_handle,
+            )
+            observation = (
+                projected
+                if isinstance(projected, AgentObservationV1)
+                else validate_agent_observation_v1(projected)
+            )
+            if observation.session_id != session_id or observation.workflow != workflow:
+                raise ValueError("server observation does not match pinned session workflow")
+            if (
+                observation.application.kind != asset["application"]["kind"]
+                or observation.application.identity_ref
+                != f"application:{self._binding.application_identity_key}"
+            ):
+                raise ValueError("server observation application identity does not match reviewed asset")
+        except Exception:
+            self._release_window_lease(lease)
+            raise
         snapshot = LiveSessionSnapshot(
             session_id=session_id,
             workflow=workflow,
             current_observation=observation,
+            target_window_handle=self._binding.target_window_handle,
         )
         with self._lock:
-            self._sessions[session_id] = _LiveSession(snapshot=snapshot, asset=asset)
+            self._sessions[session_id] = _LiveSession(
+                snapshot=snapshot,
+                asset=asset,
+                window_lease=lease,
+            )
         return snapshot
 
     def submit_intent(
@@ -188,7 +285,10 @@ class LiveController:
                 return LiveControllerDecision("REJECTED", "invalid_intent")
             session.consumed = True
 
-        return self._execute_accepted_intent(session, intent)
+        try:
+            return self._execute_accepted_intent(session, intent)
+        finally:
+            self._release_window_lease(session.window_lease)
 
     def _execute_accepted_intent(
         self,
@@ -203,6 +303,7 @@ class LiveController:
             self._observation_source.capture_current(
                 session_id=session.snapshot.session_id,
                 asset=session.asset,
+                target_window_handle=session.snapshot.target_window_handle,
             )
         )
         if current.get("capture_id") == observation.current_capture.capture_id:
@@ -276,11 +377,36 @@ class LiveController:
             )
 
         point = grounding["click_point"]
+        click_point = (float(point["x"]), float(point["y"]))
+        visibility = dict(
+            self._window_visibility_checker.check(
+                target_window_handle=session.snapshot.target_window_handle,
+                click_point=click_point,
+            )
+        )
+        bound_handle = visibility.get("bound_window_handle")
+        point_visibility = visibility.get("point_visibility")
+        reason = None
+        if bound_handle != session.snapshot.target_window_handle:
+            reason = "foreground_window_changed"
+        elif not isinstance(point_visibility, Mapping) or point_visibility.get("allowed") is not True:
+            reason = "target_occluded"
+        if reason is not None:
+            return self._blocked_receipt(
+                session=session,
+                intent=intent,
+                reason_code=reason,
+                selection=selection,
+                grounding=grounding,
+                gate=gate,
+                gate_blocked=True,
+            )
         command = DesktopDispatchCommand(
             semantic_action=selection["semantic_action"],
             capture_id=grounding["capture_id"],
             candidate_id=grounding["candidate_id"],
-            click_point=(float(point["x"]), float(point["y"])),
+            click_point=click_point,
+            target_window_handle=session.snapshot.target_window_handle,
         )
         gate_ref = self._first_ref(gate.get("evidence_refs"), "gate")
         authority = _mint_execution_authority(
@@ -291,6 +417,7 @@ class LiveController:
             capture_id=command.capture_id,
             candidate_id=command.candidate_id,
             click_point=command.click_point,
+            target_window_handle=command.target_window_handle,
             gate_decision_ref=gate_ref,
         )
         try:
@@ -496,10 +623,47 @@ class LiveController:
             return "capture_lineage_mismatch"
         return "target_unresolved"
 
+    @staticmethod
+    def _asset_application_identity_key(asset: Mapping[str, Any]) -> str:
+        application = asset.get("application")
+        if not isinstance(application, Mapping):
+            raise ValueError("reviewed asset application identity is missing")
+        kind = application.get("kind")
+        if kind == "web":
+            identity = application.get("canonical_domain")
+        elif kind == "native":
+            identity = application.get("product_identity") or application.get("executable")
+        else:
+            identity = None
+        if not isinstance(kind, str) or not isinstance(identity, str) or not identity:
+            raise ValueError("reviewed asset application identity is unsupported")
+        return f"{kind}:{identity}"
+
+    def _acquire_window_lease(self, session_id: str) -> _WindowLease:
+        handle = self._binding.target_window_handle
+        lease = _WindowLease(target_window_handle=handle, session_id=session_id)
+        with _WINDOW_LEASE_LOCK:
+            current = _WINDOW_LEASES.get(handle)
+            if current is not None:
+                raise RuntimeError(
+                    f"target window lease is already held by session {current.session_id}"
+                )
+            _WINDOW_LEASES[handle] = lease
+        return lease
+
+    @staticmethod
+    def _release_window_lease(lease: _WindowLease) -> None:
+        with _WINDOW_LEASE_LOCK:
+            current = _WINDOW_LEASES.get(lease.target_window_handle)
+            if current is lease:
+                _WINDOW_LEASES.pop(lease.target_window_handle, None)
+
 
 __all__ = [
     "LiveController",
     "LiveControllerDecision",
     "LiveSessionSnapshot",
+    "ExistingWindowManagerVisibilityChecker",
     "ServerWorkflowBinding",
+    "WindowVisibilityChecker",
 ]

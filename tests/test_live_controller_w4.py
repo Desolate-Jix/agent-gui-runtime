@@ -103,13 +103,17 @@ class _ObservationSource:
         self.current = current or _current_observation(asset)
         self.initial_calls = 0
         self.current_calls = 0
+        self.initial_window_handles: list[int] = []
+        self.current_window_handles: list[int] = []
 
-    def create_initial(self, *, session_id: str, workflow: dict) -> object:
+    def create_initial(self, *, session_id: str, workflow: dict, target_window_handle: int) -> object:
         self.initial_calls += 1
+        self.initial_window_handles.append(target_window_handle)
         return validate_agent_observation_v1(_agent_observation(session_id, workflow))
 
-    def capture_current(self, *, session_id: str, asset: dict) -> dict:
+    def capture_current(self, *, session_id: str, asset: dict, target_window_handle: int) -> dict:
         self.current_calls += 1
+        self.current_window_handles.append(target_window_handle)
         return deepcopy(self.current)
 
 
@@ -180,7 +184,40 @@ class _Gate:
         }
 
 
-def _controller(*, resolver_status: str = "resolved", gate_allowed: bool = True, backend_fail: bool = False, current: dict | None = None, backend_override=None):
+class _WindowVisibilityChecker:
+    def __init__(
+        self,
+        *,
+        bound_window_handle: int = 4242,
+        visible: bool = True,
+    ) -> None:
+        self.bound_window_handle = bound_window_handle
+        self.visible = visible
+        self.calls: list[tuple[int, tuple[float, float]]] = []
+
+    def check(self, *, target_window_handle: int, click_point: tuple[float, float]) -> dict:
+        self.calls.append((target_window_handle, click_point))
+        if self.bound_window_handle != target_window_handle:
+            return {
+                "bound_window_handle": self.bound_window_handle,
+                "point_visibility": None,
+            }
+        return {
+            "bound_window_handle": self.bound_window_handle,
+            "point_visibility": {"allowed": self.visible},
+        }
+
+
+def _controller(
+    *,
+    resolver_status: str = "resolved",
+    gate_allowed: bool = True,
+    backend_fail: bool = False,
+    current: dict | None = None,
+    backend_override=None,
+    target_window_handle: int = 4242,
+    visibility_checker=None,
+):
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
 
@@ -190,15 +227,21 @@ def _controller(*, resolver_status: str = "resolved", gate_allowed: bool = True,
     resolver = _TargetResolver(resolver_status)
     gate = _Gate(allowed=gate_allowed)
     backend = backend_override or DeterministicFakeBackend(fail=backend_fail)
+    visibility = visibility_checker or _WindowVisibilityChecker(
+        bound_window_handle=target_window_handle,
+    )
     controller = LiveController(
         binding=ServerWorkflowBinding(
             workflow_id="workflow.seek.portfolio",
             asset_id=asset["asset_id"],
+            application_identity_key="web:nz.seek.com",
+            target_window_handle=target_window_handle,
         ),
         asset_loader=asset_loader,
         observation_source=source,
         target_resolver=resolver,
         gate=gate,
+        window_visibility_checker=visibility,
         backend=backend,
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
@@ -226,6 +269,7 @@ def test_session_is_server_created_and_pins_workflow_revision() -> None:
     assert session.current_observation.workflow == session.workflow
     assert session.workflow.asset_content_sha256 == content_sha256(_asset())
     assert source.initial_calls == 1
+    assert source.initial_window_handles == [4242]
 
 
 def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
@@ -243,11 +287,14 @@ def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
         binding=ServerWorkflowBinding(
             workflow_id="workflow.seek.portfolio",
             asset_id=asset["asset_id"],
+            application_identity_key="web:nz.seek.com",
+            target_window_handle=4343,
         ),
         project_root=tmp_path,
         observation_source=source,
         target_resolver=_TargetResolver(),
         gate=_Gate(),
+        window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4343),
         backend=DeterministicFakeBackend(),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
     )
@@ -270,6 +317,7 @@ def test_start_session_can_load_the_server_active_asset_store(tmp_path) -> None:
         lambda payload: payload.update(skip_gate=True),
         lambda payload: payload.update(dispatch_token="forged"),
         lambda payload: payload.update(authority={"dispatch": True}),
+        lambda payload: payload.update(target_window_handle=9999),
     ],
 )
 def test_invalid_or_authority_injected_intent_has_zero_dispatch(mutation) -> None:
@@ -305,6 +353,7 @@ def test_accepted_intent_uses_fresh_current_evidence_before_gate_and_dispatch() 
     assert result.destination_status == "not_evaluated"
     assert result.evidence.verification_ref is None
     assert source.current_calls == resolver.calls == gate.calls == 1
+    assert source.current_window_handles == [4242]
     assert backend.dispatch_count == 1
     assert backend.commands[0].capture_id == "capture-current"
     assert backend.commands[0].click_point == (220.0, 240.0)
@@ -415,3 +464,146 @@ def test_backend_indeterminate_result_never_becomes_execution_failed_or_verified
     assert result.effect_status == "indeterminate"
     assert result.destination_status == "indeterminate"
     assert backend.calls == 1
+
+
+def test_start_session_rejects_binding_identity_not_owned_by_reviewed_asset() -> None:
+    from app.agent.desktop_backend import DeterministicFakeBackend
+    from app.agent.live_controller import LiveController, ServerWorkflowBinding
+
+    asset = _asset()
+    controller = LiveController(
+        binding=ServerWorkflowBinding(
+            workflow_id="workflow.seek.portfolio",
+            asset_id=asset["asset_id"],
+            application_identity_key="web:forged.example",
+            target_window_handle=4444,
+        ),
+        asset_loader=_TrustedAssetLoader(asset),
+        observation_source=_ObservationSource(asset),
+        target_resolver=_TargetResolver(),
+        gate=_Gate(),
+        window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4444),
+        backend=DeterministicFakeBackend(),
+        grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
+    )
+
+    with pytest.raises(ValueError, match="application identity"):
+        controller.start_session()
+
+
+def test_start_session_rejects_observation_application_identity_mismatch() -> None:
+    class ForgedObservationSource(_ObservationSource):
+        def create_initial(self, *, session_id: str, workflow: dict, target_window_handle: int) -> object:
+            payload = _agent_observation(session_id, workflow)
+            payload["application"]["identity_ref"] = "application:web:forged.example"
+            return validate_agent_observation_v1(payload)
+
+    from app.agent.desktop_backend import DeterministicFakeBackend
+    from app.agent.live_controller import LiveController, ServerWorkflowBinding
+
+    asset = _asset()
+    controller = LiveController(
+        binding=ServerWorkflowBinding(
+            workflow_id="workflow.seek.portfolio",
+            asset_id=asset["asset_id"],
+            application_identity_key="web:nz.seek.com",
+            target_window_handle=4545,
+        ),
+        asset_loader=_TrustedAssetLoader(asset),
+        observation_source=ForgedObservationSource(asset),
+        target_resolver=_TargetResolver(),
+        gate=_Gate(),
+        window_visibility_checker=_WindowVisibilityChecker(bound_window_handle=4545),
+        backend=DeterministicFakeBackend(),
+        grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
+    )
+
+    with pytest.raises(ValueError, match="application identity"):
+        controller.start_session()
+
+
+def test_second_mutating_session_for_same_window_is_rejected() -> None:
+    controller, _, _, _, _ = _controller(target_window_handle=4646)
+    first = controller.start_session()
+
+    with pytest.raises(RuntimeError, match="window lease"):
+        controller.start_session()
+
+    assert first.current_observation.session_id == first.session_id
+
+
+def test_window_lease_is_shared_across_live_controller_instances() -> None:
+    first_controller, _, _, _, _ = _controller(target_window_handle=4696)
+    second_controller, _, _, _, _ = _controller(target_window_handle=4696)
+    first_controller.start_session()
+
+    with pytest.raises(RuntimeError, match="window lease"):
+        second_controller.start_session()
+
+
+@pytest.mark.parametrize(
+    "visibility,expected_reason",
+    [
+        (_WindowVisibilityChecker(bound_window_handle=9999), "foreground_window_changed"),
+        (_WindowVisibilityChecker(bound_window_handle=4747, visible=False), "target_occluded"),
+    ],
+)
+def test_runtime_visibility_block_after_gate_has_zero_dispatch(visibility, expected_reason) -> None:
+    controller, _, _, gate, backend = _controller(
+        target_window_handle=4747,
+        visibility_checker=visibility,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert result.outcome == "BLOCKED"
+    assert result.reason_code == expected_reason
+    assert gate.calls == 1
+    assert backend.attempt_count == 0
+
+
+def test_valid_dispatch_is_bound_to_server_target_window_exactly_once() -> None:
+    controller, _, _, _, backend = _controller(target_window_handle=4848)
+    session = controller.start_session()
+    payload = _intent(session)
+
+    first = controller.submit_intent(payload)
+    second = controller.submit_intent(payload)
+
+    assert first.outcome == "DISPATCHED"
+    assert second.status == "REJECTED"
+    assert backend.dispatch_count == 1
+    assert backend.commands[0].target_window_handle == 4848
+
+
+def test_window_manager_visibility_adapter_returns_facts_not_authority() -> None:
+    from app.agent.live_controller import ExistingWindowManagerVisibilityChecker
+
+    class Bound:
+        handle = 4949
+
+    class WindowManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int, int]] = []
+
+        def get_bound_window(self):
+            return Bound()
+
+        def validate_bound_point_visibility(self, *, bound, x: int, y: int) -> dict:
+            self.calls.append((bound.handle, x, y))
+            return {"allowed": True, "reason": "target_point_owned_by_bound_window"}
+
+    manager = WindowManager()
+    checker = ExistingWindowManagerVisibilityChecker(window_manager=manager)
+
+    facts = checker.check(target_window_handle=4949, click_point=(220.0, 240.0))
+
+    assert facts == {
+        "bound_window_handle": 4949,
+        "point_visibility": {
+            "allowed": True,
+            "reason": "target_point_owned_by_bound_window",
+        },
+    }
+    assert manager.calls == [(4949, 220, 240)]

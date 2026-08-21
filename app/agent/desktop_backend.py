@@ -14,12 +14,15 @@ class DesktopDispatchCommand:
     capture_id: str
     candidate_id: str
     click_point: tuple[float, float]
+    target_window_handle: int
 
     def __post_init__(self) -> None:
         if not self.semantic_action or not self.capture_id or not self.candidate_id:
             raise ValueError("dispatch command requires semantic and current target identity")
         if len(self.click_point) != 2:
             raise ValueError("dispatch command requires one click point")
+        if type(self.target_window_handle) is not int or self.target_window_handle <= 0:
+            raise ValueError("dispatch command requires a positive server target window handle")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,7 @@ class _ExecutionAuthority:
         "capture_id",
         "candidate_id",
         "click_point",
+        "target_window_handle",
         "gate_decision_ref",
         "_consumed",
         "_lock",
@@ -66,6 +70,7 @@ class _ExecutionAuthority:
         capture_id: str,
         candidate_id: str,
         click_point: tuple[float, float],
+        target_window_handle: int,
         gate_decision_ref: str,
     ) -> None:
         if mint_key is not _AUTHORITY_MINT_KEY:
@@ -77,6 +82,7 @@ class _ExecutionAuthority:
         self.capture_id = capture_id
         self.candidate_id = candidate_id
         self.click_point = click_point
+        self.target_window_handle = target_window_handle
         self.gate_decision_ref = gate_decision_ref
         self._consumed = False
         self._lock = Lock()
@@ -100,6 +106,7 @@ def _mint_execution_authority(
     capture_id: str,
     candidate_id: str,
     click_point: tuple[float, float],
+    target_window_handle: int,
     gate_decision_ref: str,
 ) -> _ExecutionAuthority:
     return _ExecutionAuthority(
@@ -111,6 +118,7 @@ def _mint_execution_authority(
         capture_id=capture_id,
         candidate_id=candidate_id,
         click_point=click_point,
+        target_window_handle=target_window_handle,
         gate_decision_ref=gate_decision_ref,
     )
 
@@ -125,6 +133,7 @@ def _consume_authority(
         authority.capture_id != command.capture_id
         or authority.candidate_id != command.candidate_id
         or authority.click_point != command.click_point
+        or authority.target_window_handle != command.target_window_handle
     ):
         raise PermissionError("dispatch command does not match execution authority")
     authority.consume()
@@ -163,12 +172,22 @@ class DeterministicFakeBackend:
 
 
 class ExistingWindowsBackendAdapter:
-    def __init__(self, *, input_controller: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        input_controller: Any | None = None,
+        window_manager: Any | None = None,
+    ) -> None:
         if input_controller is None:
             from app.core.input_controller import InputController
 
             input_controller = InputController()
+        if window_manager is None:
+            from app.core.window_manager import window_manager as active_window_manager
+
+            window_manager = active_window_manager
         self._input_controller = input_controller
+        self._window_manager = window_manager
 
     def dispatch(
         self,
@@ -178,6 +197,16 @@ class ExistingWindowsBackendAdapter:
     ) -> BackendDispatchReceipt:
         _consume_authority(authority, command)
         receipt_ref = f"backend-receipt:{uuid4().hex}"
+        try:
+            bound = self._window_manager.get_bound_window()
+        except Exception:
+            bound = None
+        if bound is None or int(bound.handle) != command.target_window_handle:
+            return BackendDispatchReceipt(
+                receipt_ref=receipt_ref,
+                status="not_started",
+                reason_code="backend_failed",
+            )
         try:
             from app.core.input_controller import _runtime_backend_input_scope
 
