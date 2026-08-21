@@ -1,6 +1,6 @@
 ---
 name: small-step-git-checkpoints
-description: Use when a Git-backed implementation should advance through automatic, verified, rollback-friendly commits while preserving unrelated dirty work and keeping push as a separate authorization boundary.
+description: Use when a Git-backed implementation has independently verifiable slices and automatic per-slice commits or rollback checkpoints are authorized.
 ---
 
 # Small-Step Git Checkpoints
@@ -95,13 +95,14 @@ Branch:   git branch recovery/<name> <commit>
 
 ## Forbidden shortcuts
 
-未经用户针对该操作明确授权，不得使用：
+在本 Skill 的自动 checkpoint 流程中绝不执行下列 destructive 或 history-rewriting 操作。若用户另行要求其中任一操作，停止 checkpoint 流程并将其作为独立任务处理；不得把它作为 checkpoint 的实现细节：
 
 - `git reset --hard`
 - `git clean`
 - 强制 checkout/restore 覆盖工作树
 - rebase/history rewrite
-- `git push --force` / `--force-with-lease`
+- `git push --force`
+- `git push --force-with-lease`
 - 自动 push
 
 不要用 WIP commit 冒充测试通过的完成 checkpoint。用户明确要求保存失败现场时，可以创建清楚标记的 WIP commit，但它不能计入已完成 slice。
