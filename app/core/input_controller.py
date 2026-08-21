@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
+from contextvars import ContextVar
 from io import BytesIO
 from pathlib import Path
 import time
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from loguru import logger
 
@@ -53,6 +55,23 @@ CLIPBOARD_OPEN_RETRY_SECONDS = 0.03
 CLIPBOARD_OPEN_ATTEMPTS = 8
 CLIPBOARD_VERIFY_TIMEOUT_SECONDS = 0.5
 CLIPBOARD_VERIFY_RETRY_SECONDS = 0.03
+
+
+_RUNTIME_BACKEND_INPUT_ACTIVE: ContextVar[bool] = ContextVar(
+    "runtime_backend_input_active",
+    default=False,
+)
+
+
+@contextmanager
+def _runtime_backend_input_scope() -> Iterator[None]:
+    """仅供受 LiveController 授权的内部 DesktopBackend 短时放行输入。"""
+
+    token = _RUNTIME_BACKEND_INPUT_ACTIVE.set(True)
+    try:
+        yield
+    finally:
+        _RUNTIME_BACKEND_INPUT_ACTIVE.reset(token)
 
 
 class TargetPointOccludedError(RuntimeError):
@@ -543,6 +562,10 @@ class InputController:
         ) from last_exc
 
     def _ensure_windows_input(self) -> None:
+        if not _RUNTIME_BACKEND_INPUT_ACTIVE.get():
+            raise PermissionError(
+                "Windows input requires one-time LiveController authority via DesktopBackend"
+            )
         if not WINDOWS_INPUT_AVAILABLE:
             raise RuntimeError(
                 "Windows input backend is unavailable. "
