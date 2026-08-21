@@ -118,8 +118,8 @@ Fixture、recorded replay、synthetic harness 和 live GUI 证据必须分别标
 | UEI → Learning | Prototype | Draft 可显示 compact `uei_shadow_provider_summary_v1` | 未进入完整 review/compile/action-candidate 主链 |
 | Learn Mode / human review / workflow graph | Partial | review workspace、节点/边编辑、人工确认和历史工作流 UI 存在 | 当前资产链条较多，release 纵向 slice 尚未统一 |
 | Reviewed Workflow v2 compiler/store | Stable — offline contract | fail-closed compile、CAS-style immutable storage、preview/reload tests | production live replay orchestrator 缺失 |
-| Agent-facing Observation / Intent contract | Stable — offline contract; live integration pending | `agent_observation_v1` / `agent_intent_v1` closed schemas、strict validators，以及 server-trusted reviewed context → geometry-free Observation adapter 已通过 conformance | 尚未接入唯一 live controller、Session mutation ledger 或真实 dispatch owner |
-| Runtime Result & Verification Receipt Contract | Stable — offline contract; live persistence pending | `runtime_result_receipt_v1` 七类 outcome matrix 已冻结；existing reviewed replay verification → typed Receipt adapter 已通过 conformance | 尚未接入 durable receipt store、live backend receipt 与端到端 semantic verification owner |
+| Agent-facing Observation / Intent contract | Stable — offline contract; live integration pending | `agent_observation_v1` / `agent_intent_v1` closed schemas、strict validators，以及 server-owned/server-loaded reviewed context → Observation adapter，绑定 current capture/state/fact freshness 与 integrity，输出 geometry-free action projection，并对 blocker/state fail closed；已通过 conformance | 尚未接入唯一 live controller、Session mutation ledger 或真实 dispatch owner |
+| Runtime Result & Verification Receipt Contract | Stable — offline contract; live persistence pending | `runtime_result_receipt_v1` 七类 outcome matrix 已冻结；Receipt adapter 从 validated reviewed asset + strict post observation 内部重算 existing replay verifier，绑定 canonical application/source/next-observation lineage，并拒绝 unproven dispatch/Gate 与 arbitrary operation refs；不声称 durable/sealed resolvability | 尚未接入 durable receipt store、live backend receipt 与端到端 semantic verification owner |
 | Current capture / runtime relocation | Partial | 某些 live 与 approved-plan 路径能 current capture | `require_current_grounding` 仍为条件分支；旧 reuse path 可保留历史 point |
 | Gate / zero-click rejection | Partial | 正式 gated action API、窗口/候选/危险动作检查已存在 | 尚未证明 Portfolio replay 每一步都不可绕过且默认强制 |
 | Semantic effect verification | Partial | 若启用可记录 post-action verification | 当前 SEEK 证据主要是像素/焦点变化；禁用时不能提升为 verified |
@@ -131,7 +131,7 @@ Fixture、recorded replay、synthetic harness 和 live GUI 证据必须分别标
 
 - **Release-focused UEI conformance:** `109 passed, 1 failed`。唯一失败是 README 缺少 `Universal Evidence Interface v1` 文案；因此 UEI release conformance 尚未全绿。
 - **Last full offline repository baseline:** Python `2762 passed, 1 skipped`；JavaScript `128 passed, 0 failed`。这是完整离线回归基线，不是 live SEEK 或 Portfolio v1 live-controller 证明。
-- **Portfolio v1 Contract Foundation:** schema/validator、server-loaded reviewed-context Observation adapter、reviewed replay Receipt adapter 组成的 focused suite 为 `193 passed, 1 skipped`。它证明 offline contract 与真实代码边界映射，不证明 Live Controller、GUI dispatch 或 durable runtime persistence。
+- **Portfolio v1 Contract Foundation:** schema/validator、server-owned/server-loaded reviewed-context Observation adapter（current capture/state/fact freshness 与 integrity bindings、geometry-free action projection、blocker/state fail-closed）、reviewed replay Receipt adapter（validated reviewed asset + strict post observation 内部重算 existing replay verifier、canonical application/source/next-observation lineage、拒绝 unproven dispatch/Gate 与 arbitrary operation refs）组成的 focused combined suite 为 `394 passed, 2 skipped`。它证明 offline Contract Foundation 与真实代码边界映射，不证明 Live Controller、Session mutation ledger、唯一 Gate dispatch、GUI dispatch、backend receipt、semantic verification owner 或 durable runtime persistence。
 
 ## 5. Portfolio v1 Proofs
 
@@ -207,9 +207,9 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 
 | ID | Contract gate | Current | Minimal v1 proof | Estimate |
 |---|---|---|---|---|
-| N1 | `agent_observation_v1` | Stable — offline complete | 版本化 schema 已包含 workflow/revision、application/current-state identity、current capture、semantic facts/evidence、blockers、eligible reviewed actions、expected effect、verification、risk/safe-stop boundary；历史 geometry/authority injection 被拒绝 | 已纳入 W3a |
-| N2 | `agent_intent_v1` | Stable — offline complete | Agent 只提交 observation-bound semantic action id；unknown/stale/cross-workflow intent、raw coordinate authority 与越权 parameters 均拒绝 | 已纳入 W3a |
-| N3 | `runtime_result_receipt_v1` | Stable — offline complete | 七类 outcome matrix 严格区分 Gate、dispatch、effect、destination；verified reviewed replay、stop-boundary safe stop 与确认后的 verification failure 可映射，未知 dispatch 不猜测 | 已纳入 W3a；live persistence 留在 W3b/W5 |
+| N1 | `agent_observation_v1` | Stable — offline contract; live integration pending | 版本化 schema 包含 workflow/revision、application/current-state identity、current capture、semantic facts/evidence、blockers、eligible reviewed actions、expected effect、verification、risk/safe-stop boundary；Observation adapter 使用 server-owned/server-loaded reviewed context，绑定 current capture/state/fact freshness 与 integrity，输出 geometry-free action projection，并对 blocker/state fail closed | 已纳入 W3a；live integration pending |
+| N2 | `agent_intent_v1` | Stable — offline contract; live integration pending | Agent 只提交 observation-bound semantic action id；unknown/stale/cross-workflow intent、raw coordinate authority 与越权 parameters 均拒绝 | 已纳入 W3a；live integration pending |
+| N3 | `runtime_result_receipt_v1` | Stable — offline contract; live persistence pending | 七类 outcome matrix 严格区分 Gate、dispatch、effect、destination；Receipt adapter 从 validated reviewed asset + strict post observation 内部重算 existing replay verifier，绑定 canonical application/source/next-observation lineage，拒绝 unproven dispatch/Gate 与 arbitrary operation refs；不声称 durable/sealed resolvability | 已纳入 W3a；live persistence 留在 W3b/W5 |
 | N4 | Current internal adapter conformance | Partial — offline mapping complete | server-loaded reviewed context → Observation 与 existing replay verification → Receipt adapters 已通过 conformance；下一步把同一边界接到 W4 唯一 live controller、Session/intent consumption 与 durable receipt | W3b remaining |
 
 **Stretch only:** 第二个 Computer-Use adapter。<br>
@@ -236,7 +236,7 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 ### W3a — Agent-side schemas and offline validation
 
 先完成 N1–N3 的 versioned schema、strict validation 与 offline conformance。不得新增第二个 Computer-Use Agent adapter。<br>
-**2026-08-22 update:** N1–N3 schema/validator 已冻结；server-trusted reviewed context → Observation 与 reviewed replay verification → Receipt 的最小真实 adapter boundary 已完成。focused Contract Foundation 为 `193 passed, 1 skipped`；不含 Live Controller、Gate 行为修改、真实 SEEK 点击或 durable receipt store。<br>
+**2026-08-22 update:** N1–N3 schema/validator 已冻结；server-owned/server-loaded reviewed context → Observation 已绑定 current capture/state/fact freshness 与 integrity，输出 geometry-free action projection，并对 blocker/state fail closed；validated reviewed asset + strict post observation → Receipt 会内部重算 existing replay verifier，绑定 canonical application/source/next-observation lineage，并拒绝 unproven dispatch/Gate 与 arbitrary operation refs。focused Contract Foundation 为 `394 passed, 2 skipped`；仅为 offline Contract Foundation，不含 Live Controller、Session mutation ledger、唯一 Gate dispatch、Gate 行为修改、真实 SEEK 点击、backend receipt、semantic verification owner 或 durable receipt store。<br>
 **Can start with W1; feeds W4.**
 
 ### W4 — Mandatory current relocation and Gate
