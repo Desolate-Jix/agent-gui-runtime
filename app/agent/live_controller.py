@@ -445,6 +445,8 @@ class LiveController:
             session_id=session.snapshot.session_id,
             observation_id=observation.observation_id,
             intent_id=intent.intent_id,
+            workflow_revision_hash=session.snapshot.workflow.reviewed_revision_hash,
+            semantic_action=command.semantic_action,
             selection_sha256=selection["selection_sha256"],
             capture_id=command.capture_id,
             candidate_id=command.candidate_id,

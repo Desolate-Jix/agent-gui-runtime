@@ -49,6 +49,8 @@ class _ExecutionAuthority:
         "session_id",
         "observation_id",
         "intent_id",
+        "workflow_revision_hash",
+        "semantic_action",
         "selection_sha256",
         "capture_id",
         "candidate_id",
@@ -66,6 +68,8 @@ class _ExecutionAuthority:
         session_id: str,
         observation_id: str,
         intent_id: str,
+        workflow_revision_hash: str,
+        semantic_action: str,
         selection_sha256: str,
         capture_id: str,
         candidate_id: str,
@@ -78,6 +82,8 @@ class _ExecutionAuthority:
         self.session_id = session_id
         self.observation_id = observation_id
         self.intent_id = intent_id
+        self.workflow_revision_hash = workflow_revision_hash
+        self.semantic_action = semantic_action
         self.selection_sha256 = selection_sha256
         self.capture_id = capture_id
         self.candidate_id = candidate_id
@@ -102,6 +108,8 @@ def _mint_execution_authority(
     session_id: str,
     observation_id: str,
     intent_id: str,
+    workflow_revision_hash: str,
+    semantic_action: str,
     selection_sha256: str,
     capture_id: str,
     candidate_id: str,
@@ -114,6 +122,8 @@ def _mint_execution_authority(
         session_id=session_id,
         observation_id=observation_id,
         intent_id=intent_id,
+        workflow_revision_hash=workflow_revision_hash,
+        semantic_action=semantic_action,
         selection_sha256=selection_sha256,
         capture_id=capture_id,
         candidate_id=candidate_id,
@@ -130,7 +140,8 @@ def _consume_authority(
     if not isinstance(authority, _ExecutionAuthority):
         raise PermissionError("valid execution authority is required")
     if (
-        authority.capture_id != command.capture_id
+        authority.semantic_action != command.semantic_action
+        or authority.capture_id != command.capture_id
         or authority.candidate_id != command.candidate_id
         or authority.click_point != command.click_point
         or authority.target_window_handle != command.target_window_handle

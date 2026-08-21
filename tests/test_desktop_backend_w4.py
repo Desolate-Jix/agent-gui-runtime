@@ -1,8 +1,49 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
+
+
+def test_authority_binds_workflow_revision_and_semantic_action() -> None:
+    from app.agent.desktop_backend import (
+        DesktopDispatchCommand,
+        DeterministicFakeBackend,
+        _mint_execution_authority,
+    )
+
+    backend = DeterministicFakeBackend()
+    command = DesktopDispatchCommand(
+        semantic_action="open_detail",
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+    )
+    authority = _mint_execution_authority(
+        session_id="session-1",
+        observation_id="observation-1",
+        intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
+        selection_sha256="a" * 64,
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+        gate_decision_ref="gate:current",
+    )
+    assert authority.workflow_revision_hash == "b" * 64
+    assert authority.semantic_action == "open_detail"
+
+    with pytest.raises(PermissionError, match="does not match"):
+        backend.dispatch(
+            replace(command, semantic_action="open_apply_flow"),
+            authority=authority,
+        )
+
+    assert backend.attempt_count == 0
 
 
 class _BoundWindow:
@@ -58,6 +99,8 @@ def test_fake_backend_consumes_private_authority_exactly_once() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
@@ -81,6 +124,8 @@ def test_internal_authority_is_not_json_serializable() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
@@ -105,6 +150,8 @@ def test_fake_backend_rejects_command_not_bound_to_authority() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
@@ -146,6 +193,8 @@ def test_fake_backend_failure_confirms_no_dispatch() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
@@ -197,6 +246,8 @@ def test_windows_backend_adapter_calls_existing_input_controller_once() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
@@ -243,6 +294,8 @@ def test_windows_backend_exception_is_indeterminate_not_safe_to_retry() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
@@ -289,6 +342,8 @@ def test_windows_backend_rechecks_server_bound_window_before_input() -> None:
         session_id="session-1",
         observation_id="observation-1",
         intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
         selection_sha256="a" * 64,
         capture_id="capture-current",
         candidate_id="candidate-current",
