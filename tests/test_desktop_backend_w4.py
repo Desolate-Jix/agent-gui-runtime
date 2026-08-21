@@ -175,12 +175,10 @@ def test_windows_backend_adapter_calls_existing_input_controller_once() -> None:
             self.runtime_scopes: list[bool] = []
 
         def click_point(self, x: int, y: int) -> dict[str, object]:
-            from app.core import input_controller as input_controller_module
+            from app.core.runtime_input_authority import runtime_backend_input_is_active
 
             self.calls.append((x, y))
-            self.runtime_scopes.append(
-                input_controller_module._RUNTIME_BACKEND_INPUT_ACTIVE.get()
-            )
+            self.runtime_scopes.append(runtime_backend_input_is_active())
             return {"clicked": True}
 
     input_controller = SpyInputController()

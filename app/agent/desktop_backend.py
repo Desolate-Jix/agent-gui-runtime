@@ -208,7 +208,7 @@ class ExistingWindowsBackendAdapter:
                 reason_code="backend_failed",
             )
         try:
-            from app.core.input_controller import _runtime_backend_input_scope
+            from app.core.runtime_input_authority import _runtime_backend_input_scope
 
             with _runtime_backend_input_scope():
                 result = self._input_controller.click_point(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.core.runtime_input_authority import _runtime_backend_input_scope
 from app.core.window_manager import BoundWindow, WindowManager, WindowRect
 import app.core.window_manager as window_manager_module
 
@@ -602,7 +603,8 @@ def test_activate_window_retries_foreground_with_alt_unlock_after_access_denied(
     monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
     monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
 
-    manager._activate_window(777)
+    with _runtime_backend_input_scope():
+        manager._activate_window(777)
 
     assert foreground_calls == [777, 777]
     assert key_calls == [
@@ -670,7 +672,8 @@ def test_activate_window_cycles_past_shell_notification_after_foreground_retry_f
     monkeypatch.setattr(manager, "_get_process_name", lambda process_id: "ShellExperienceHost.exe" if process_id == 42 else "msedge.exe")
     monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
 
-    manager._activate_window(777)
+    with _runtime_backend_input_scope():
+        manager._activate_window(777)
 
     assert foreground["handle"] == 777
     assert key_calls[-4:] == [
@@ -689,3 +692,24 @@ def test_activate_window_cycles_past_shell_notification_after_foreground_retry_f
             0,
         ),
     ]
+
+
+def test_foreground_keyboard_fallback_requires_runtime_authority(monkeypatch) -> None:
+    manager = WindowManager()
+    key_calls = []
+
+    class FocusWin32Gui:
+        @staticmethod
+        def SetForegroundWindow(_handle):
+            return None
+
+    class FocusWin32Api:
+        @staticmethod
+        def keybd_event(key, scan, flags, extra):
+            key_calls.append((key, scan, flags, extra))
+
+    monkeypatch.setattr(window_manager_module, "win32gui", FocusWin32Gui)
+    monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
+
+    assert manager._retry_foreground_activation_with_alt_unlock(777) is False
+    assert key_calls == []

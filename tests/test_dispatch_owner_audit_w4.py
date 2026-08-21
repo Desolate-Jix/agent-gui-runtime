@@ -12,7 +12,9 @@ def test_only_desktop_backend_enters_runtime_input_scope() -> None:
     marker = "_runtime_backend_input_scope"
     for root_name in ("app", "scripts"):
         for path in sorted((REPO_ROOT / root_name).rglob("*.py")):
-            if path.as_posix().endswith("app/core/input_controller.py"):
+            if path.as_posix().endswith(
+                ("app/core/input_controller.py", "app/core/runtime_input_authority.py")
+            ):
                 continue
             if marker in path.read_text(encoding="utf-8-sig"):
                 callers.append(path.relative_to(REPO_ROOT).as_posix())
@@ -55,3 +57,32 @@ def test_all_public_input_actions_pass_the_common_authority_guard() -> None:
             and node.func.attr == "_ensure_windows_input"
         ]
         assert calls, f"{name} bypasses the common LiveController authority guard"
+
+
+def test_raw_keyboard_fallbacks_check_the_same_authority_context() -> None:
+    path = REPO_ROOT / "app" / "core" / "window_manager.py"
+    module = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+    keyboard_functions = []
+    for node in ast.walk(module):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        has_raw_keyboard_call = any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Attribute)
+            and child.func.attr == "keybd_event"
+            for child in ast.walk(node)
+        )
+        if has_raw_keyboard_call:
+            keyboard_functions.append(node)
+
+    assert keyboard_functions
+    for function in keyboard_functions:
+        has_authority_check = any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "runtime_backend_input_is_active"
+            for child in ast.walk(function)
+        )
+        assert has_authority_check, (
+            f"{function.name} dispatches raw keyboard input without LiveController authority"
+        )

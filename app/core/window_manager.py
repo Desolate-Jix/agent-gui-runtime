@@ -7,6 +7,8 @@ from typing import Optional
 
 from loguru import logger
 
+from app.core.runtime_input_authority import runtime_backend_input_is_active
+
 WINDOWS_BACKEND_AVAILABLE = False
 WINDOWS_BACKEND_IMPORT_ERROR: Optional[str] = None
 
@@ -485,6 +487,12 @@ class WindowManager:
 
     def _retry_foreground_activation_with_alt_unlock(self, handle: int) -> bool:
         """Retry foreground activation after a bounded synthetic Alt press."""
+        if not runtime_backend_input_is_active():
+            logger.warning(
+                "Skipping synthetic Alt foreground retry without LiveController authority: {}",
+                handle,
+            )
+            return False
         alt_pressed = False
         activated = False
         try:
@@ -509,6 +517,12 @@ class WindowManager:
 
     def _cycle_past_shell_notification_foreground(self, handle: int) -> bool:
         """Cycle away from an OS notification overlay and verify the bound target wins foreground."""
+        if not runtime_backend_input_is_active():
+            logger.warning(
+                "Skipping synthetic Alt-Tab foreground cycle without LiveController authority: {}",
+                handle,
+            )
+            return False
         foreground_handle = int(win32gui.GetForegroundWindow() or 0)  # type: ignore[union-attr]
         if not foreground_handle or foreground_handle == handle:
             return foreground_handle == handle
