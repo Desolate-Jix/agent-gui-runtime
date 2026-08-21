@@ -279,6 +279,32 @@
           "title": "Observation Status",
           "type": "string"
         },
+        "capture_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Capture Id"
+        },
+        "value_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value Sha256"
+        },
         "evidence_refs": {
           "items": {
             "maxLength": 256,
@@ -298,6 +324,8 @@
         "label",
         "value",
         "observation_status",
+        "capture_id",
+        "value_sha256",
         "evidence_refs"
       ],
       "title": "AgentSemanticFactV1",
@@ -356,13 +384,70 @@
             }
           ],
           "title": "Resolution Sha256"
+        },
+        "source_interface_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Interface Id"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Display Name"
+        },
+        "surface_type": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Surface Type"
+        },
+        "responsibility": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Responsibility"
         }
       },
       "required": [
         "status",
         "state_id",
         "state_availability",
-        "resolution_sha256"
+        "resolution_sha256",
+        "source_interface_id",
+        "display_name",
+        "surface_type",
+        "responsibility"
       ],
       "title": "AgentStateMatchV1",
       "type": "object"

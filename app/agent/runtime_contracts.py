@@ -187,6 +187,10 @@ class AgentStateMatchV1(_StrictContractModel):
     state_id: StableId | None
     state_availability: Literal["reviewed", "stop_boundary"] | None
     resolution_sha256: Sha256 | None
+    source_interface_id: StableId | None
+    display_name: Description | None
+    surface_type: Description | None
+    responsibility: Description | None
 
     @model_validator(mode="after")
     def _validate_state_shape(self) -> "AgentStateMatchV1":
@@ -200,6 +204,7 @@ class AgentStateMatchV1(_StrictContractModel):
                 self.resolution_sha256 is not None,
                 "matched state requires resolution_sha256",
             )
+            self._require_readable_identity()
         elif self.status == "stop_boundary":
             _require(self.state_id is not None, "stop boundary requires state_id")
             _require(
@@ -210,6 +215,7 @@ class AgentStateMatchV1(_StrictContractModel):
                 self.resolution_sha256 is not None,
                 "stop boundary requires resolution_sha256",
             )
+            self._require_readable_identity()
         else:
             _require(self.state_id is None, "unresolved state must not expose state_id")
             _require(
@@ -220,7 +226,25 @@ class AgentStateMatchV1(_StrictContractModel):
                 self.resolution_sha256 is None,
                 "unresolved state must not expose resolution_sha256",
             )
+            _require(
+                all(
+                    value is None
+                    for value in (
+                        self.source_interface_id,
+                        self.display_name,
+                        self.surface_type,
+                        self.responsibility,
+                    )
+                ),
+                "unresolved state must not expose readable identity",
+            )
         return self
+
+    def _require_readable_identity(self) -> None:
+        _require(self.source_interface_id is not None, "state requires source_interface_id")
+        _require(self.display_name is not None, "state requires display_name")
+        _require(self.surface_type is not None, "state requires surface_type")
+        _require(self.responsibility is not None, "state requires responsibility")
 
 
 class AgentAvailableActionV1(_StrictContractModel):
@@ -299,6 +323,8 @@ class AgentSemanticFactV1(_StrictContractModel):
         "current_redacted",
         "requires_observation",
     ]
+    capture_id: StableId | None
+    value_sha256: Sha256 | None
     evidence_refs: Annotated[list[OpaqueRef], Field(min_length=1, max_length=32)]
 
     @model_validator(mode="after")
@@ -307,10 +333,22 @@ class AgentSemanticFactV1(_StrictContractModel):
             len(self.evidence_refs) == len(set(self.evidence_refs)),
             "semantic fact evidence refs must be unique",
         )
-        if self.observation_status in {"reviewed", "current"}:
+        if self.observation_status == "reviewed":
             _require(self.value is not None, "readable semantic fact requires value")
+            _require(self.capture_id is None, "reviewed semantic fact must not expose capture_id")
+            _require(self.value_sha256 is None, "reviewed semantic fact must not expose value_sha256")
+        elif self.observation_status == "current":
+            _require(self.value is not None, "current semantic fact requires value")
+            _require(self.capture_id is not None, "current semantic fact requires capture_id")
+            _require(self.value_sha256 is None, "current semantic fact must not expose value_sha256")
+        elif self.observation_status == "current_redacted":
+            _require(self.value is None, "current_redacted semantic fact must not expose value")
+            _require(self.capture_id is not None, "current_redacted semantic fact requires capture_id")
+            _require(self.value_sha256 is not None, "current_redacted semantic fact requires value_sha256")
         else:
-            _require(self.value is None, "unreadable semantic fact must not expose value")
+            _require(self.value is None, "requires_observation semantic fact must not expose value")
+            _require(self.capture_id is None, "requires_observation semantic fact must not expose capture_id")
+            _require(self.value_sha256 is None, "requires_observation semantic fact must not expose value_sha256")
         return self
 
 
@@ -398,6 +436,11 @@ class AgentObservationV1(_StrictContractModel):
                 set(fact.evidence_refs).issubset(evidence_refs),
                 "semantic fact evidence must be declared",
             )
+            if fact.observation_status in {"current", "current_redacted"}:
+                _require(
+                    fact.capture_id == self.current_capture.capture_id,
+                    "semantic fact capture_id must match current capture",
+                )
         blocker_ids = [item.blocker_id for item in self.blockers]
         _require(len(blocker_ids) == len(set(blocker_ids)), "blocker_id must be unique")
         for blocker in self.blockers:

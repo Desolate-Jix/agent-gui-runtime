@@ -54,6 +54,10 @@ def _observation_payload() -> dict[str, object]:
             "state_id": "job-detail",
             "state_availability": "reviewed",
             "resolution_sha256": SHA_B,
+            "source_interface_id": "interface.job-detail",
+            "display_name": "Job detail",
+            "surface_type": "web_page",
+            "responsibility": "Review the current job detail.",
         },
         "semantic_facts": [
             {
@@ -62,6 +66,8 @@ def _observation_payload() -> dict[str, object]:
                 "label": "Current job title",
                 "value": "Software Engineer",
                 "observation_status": "current",
+                "capture_id": "capture-1",
+                "value_sha256": None,
                 "evidence_refs": ["evidence:job-title"],
             }
         ],
@@ -192,6 +198,10 @@ def test_non_actionable_state_exposes_only_safe_stop(status: str, reason: str) -
         "state_id": "apply-entry" if status == "stop_boundary" else None,
         "state_availability": "stop_boundary" if status == "stop_boundary" else None,
         "resolution_sha256": SHA_B if status == "stop_boundary" else None,
+        "source_interface_id": "interface.apply-entry" if status == "stop_boundary" else None,
+        "display_name": "Apply entry" if status == "stop_boundary" else None,
+        "surface_type": "web_page" if status == "stop_boundary" else None,
+        "responsibility": "Stop before application mutation." if status == "stop_boundary" else None,
     }
     payload["available_actions"] = [deepcopy(payload["available_actions"][-1])]
     payload["safe_stop"] = {"required": True, "reason_code": reason}
@@ -219,6 +229,38 @@ def test_observation_exposes_application_facts_blockers_and_action_contracts() -
     assert action.verification_rule_refs == ["workflow-rule:detail-visible"]
 
 
+def test_matched_state_requires_readable_interface_identity() -> None:
+    payload = _observation_payload()
+    payload["state"]["source_interface_id"] = None
+    with pytest.raises(ValueError, match="requires source_interface_id"):
+        validate_agent_observation_v1(payload)
+
+
+@pytest.mark.parametrize(
+    "status,mutation,match",
+    [
+        ("reviewed", {"capture_id": "capture-1"}, "reviewed semantic fact must not expose capture_id"),
+        ("current", {"capture_id": None}, "current semantic fact requires capture_id"),
+        ("current_redacted", {"value": None, "capture_id": "capture-1", "value_sha256": None}, "current_redacted semantic fact requires value_sha256"),
+        ("requires_observation", {"value": None, "capture_id": "capture-1", "value_sha256": None}, "requires_observation semantic fact must not expose capture_id"),
+    ],
+)
+def test_semantic_fact_readability_and_capture_matrix(status, mutation, match: str) -> None:
+    payload = _observation_payload()
+    fact = payload["semantic_facts"][0]
+    fact["observation_status"] = status
+    fact.update(mutation)
+    with pytest.raises(ValueError, match=match):
+        validate_agent_observation_v1(payload)
+
+
+def test_current_semantic_fact_must_bind_to_current_capture() -> None:
+    payload = _observation_payload()
+    payload["semantic_facts"][0]["capture_id"] = "capture-older"
+    with pytest.raises(ValueError, match="semantic fact capture_id must match current capture"):
+        validate_agent_observation_v1(payload)
+
+
 def test_observation_requires_current_fact_and_capture_lineage_to_be_declared() -> None:
     payload = _observation_payload()
     payload["evidence_refs"].remove("evidence:job-title")
@@ -238,6 +280,10 @@ def test_safe_stop_boundary_requires_a_safe_stop_blocker() -> None:
         "state_id": None,
         "state_availability": None,
         "resolution_sha256": None,
+        "source_interface_id": None,
+        "display_name": None,
+        "surface_type": None,
+        "responsibility": None,
     }
     payload["semantic_facts"] = []
     payload["available_actions"] = [deepcopy(payload["available_actions"][-1])]
