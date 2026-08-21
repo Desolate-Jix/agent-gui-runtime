@@ -10,13 +10,13 @@
 
 **感知可以替换。经审核的知识可以持久复用。**
 
-**目标不变量：** Runtime Authority 必须不可绕过。**当前已有受限 live-controller core 强制保护 Windows 输入边界；production composition、动作后语义验证和 durable receipt 持久化仍未完成。**
+**目标不变量：** Runtime Authority 必须不可绕过。**当前受限 live-controller core 已保护 Windows 输入边界，并持久化消费 observation-bound intent；production composition 和动作后语义验证仍未完成。**
 
 > **目标 Authority 模型：** Provider 只提出 evidence。Agent 只提出 semantic intent。只有 Runtime 能授予受限的执行权限。
 
-- **Today：** 离线合同基础、内部 server-owned controller / desktop-backend 纵向切片，以及历史 live GUI 证据。
+- **Today：** 离线合同基础、带 durable intent/receipt records 的内部 server-owned controller / desktop-backend 纵向切片，以及历史 live GUI 证据。
 - **Target：** 在一个 Runtime Authority 下完成当前界面重新定位、Gate、受限执行、语义验证和可审计 receipt。
-- **Not yet：** production-composed 端到端闭环、durable live receipt、外部/远程 Provider 集成，以及 live 外部 Agent adapter。
+- **Not yet：** production-composed 端到端闭环、动作后验证完成的 live receipt、外部/远程 Provider 集成，以及 live 外部 Agent adapter。
 
 ## 为什么需要这个 Runtime
 
@@ -76,7 +76,7 @@ screenshot → model → coordinate → click
 6. **Relocate**：针对当前界面重新定位已审核目标；历史坐标只能作为 hint。
 7. **Gate**：结合当前窗口、候选、lineage、歧义和危险检查，最多开放一次受限尝试。
 8. **Execute**：通过位于 Runtime Authority 下方的内部 Desktop I/O backend seam 执行动作。当前切片已有 Windows adapter 和 deterministic fake backend；production composition 仍未完成。
-9. **Verify**：验证效果并生成 live receipt，或带诊断信息安全停止。当前 receipt schemas/adapters 只有离线 Contract Proof；live loop 仍未完成。
+9. **Verify**：验证效果并生成 live receipt，或带诊断信息安全停止。内部 controller 已持久化 typed dispatch/recovery receipt；动作后的 semantic effect 与 destination verification 仍未完成。
 
 ## Target authority architecture
 
@@ -87,7 +87,7 @@ screenshot → model → coordinate → click
 3. **Agent Runtime Contract** — Runtime 暴露 Observation 和可用语义动作；Agent 返回与 Observation 绑定的 semantic intent。
 4. **Runtime Result & Verification Receipt Contract** — outcome 明确区分 Gate、dispatch、observed effect、next state 和 Safe Stop。
 
-下图是 Target composition。受限 controller/backend 内部切片已经存在，但 production composition、durable receipt 和动作后 semantic verification 仍未完成：
+下图是 Target composition。受限 controller/backend 内部切片以及 durable intent/receipt stores 已经存在，但 production composition 和动作后 semantic verification 仍未完成：
 
 ```text
 内置 fallback 或受信 perception provider
@@ -128,12 +128,12 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方、**已部分集成**
 | --- | --- | --- |
 | UEI schemas、immutable refs、trusted registration 和静态 projection | **Current — Contract Proof** | 已有 canonical、保留 provenance、不可授权动作的 evidence boundary。 |
 | Reviewed Workflow v2 compiler 和内容寻址持久化 | **Current — Contract Proof** | 可离线编译、保存、检查并重新加载已审核语义资产；发布资产不等于执行许可。 |
-| Agent Observation / Intent / Receipt schemas 和 strict adapters | **Current — Contract Proof** | 已有 geometry-free、fail-closed boundary；内部 live controller 已消费 observation-bound intent，但 production composition 和 durable receipt storage 仍未完成。 |
+| Agent Observation / Intent / Receipt schemas 和 strict adapters | **Current — Contract Proof** | 已有 geometry-free、fail-closed boundary；内部 live controller 已持久化消费 observation-bound intent，并记录精确 terminal receipt。production composition 仍未完成。 |
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
 | 人工审核和应用范围 workflow 创建 | **Partial** | 已有 review UI、候选、revision 和 workflow graph；Portfolio v1 证据包尚未完成。 |
-| 强制 current relocation、唯一 Gate dispatch、semantic verification 和 durable live receipt | **Partial** | 内部 controller slice 已有 current re-grounding、Gate adaptation、one-shot authority 和唯一 Windows dispatch ownership；动作后验证、持久化和 production composition 仍待完成。 |
+| 强制 current relocation、唯一 Gate dispatch、semantic verification 和 durable live receipt | **Partial** | 内部 controller slice 已有 current re-grounding、Gate adaptation、one-shot authority、唯一 Windows dispatch ownership，以及 durable claim/receipt records；动作后 semantic verification 和 production composition 仍待完成。 |
 | Desktop I/O Backend SPI | **Partial** | 已有内部 SPI、deterministic fake backend 和受 Authority 保护的 Windows adapter；不声称已有第二个真实 backend 或 production wiring。 |
 | Primary / Assist / Automatic provider routing 和远程 Provider | **Planned** | 仅为 Target State；尚未实现自动 Provider fallback。 |
 | Live external Computer-Use Agent adapters | **Planned** | 今天没有任何 live-integrated 实现。 |
@@ -173,7 +173,7 @@ SEEK 只是 **reference workflow**，不是产品定位。Portfolio v1 的目标
 - **可持久化但不授权的资产：** workflow revision 和 hash 保存经审核知识，但 storage 不能变成权限。
 - **Semantic action taxonomy：** `open_detail`、`open_apply_flow` 与字段修改、继续流程和终端提交严格区分。
 - **Fail-closed ambiguity：** stale observation、错误窗口、identity 不匹配、unknown intent 和 ambiguous candidate 都是 zero-click outcome。
-- **离线 receipt contract：** 当前 schemas 可区分 Gate、dispatch、effect、destination 和 Safe Stop；live semantic receipt persistence 仍未完成，dispatch 永远不等于完成。
+- **Durable runtime receipts：** 内部 controller 会持久化精确的 dispatch/recovery outcome，并在 duplicate/restart lookup 后返回同一 terminal receipt；effect 与 destination proof 仍是独立且尚未完成的一步。
 
 ## 本地运行
 
@@ -199,7 +199,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 以下内容均为 **Planned**，不是当前能力：
 
 1. 闭合 Built-in/Omni → UEI → provider-neutral Review proof。
-2. 把 server-owned controller 与 session/intent consumption、backend receipt 和 durable receipt storage 完成 production composition。
+2. 围绕现有 session/intent consumption、backend receipt 与 durable claim/receipt stores 完成 server-owned controller 的 production composition。
 3. 增加动作后 capture 与 semantic effect/destination verification，让每条 reviewed transition 都以 durable verified receipt 或 Safe Stop 结束。
 4. 为 Apply-entry safe-stop slice 发布匹配的正向和 zero-click negative-control receipts。
 5. 完成以上目标后，再考虑更多 Provider、外部 Agent adapter 和受限 workflow class。

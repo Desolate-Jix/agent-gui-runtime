@@ -10,13 +10,13 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 **Perception is replaceable. Reviewed knowledge is durable.**
 
-**Target invariant:** Runtime Authority must be non-bypassable. **A bounded live-controller core now enforces the Windows input boundary; production composition, post-action semantic verification, and durable receipt persistence remain incomplete.**
+**Target invariant:** Runtime Authority must be non-bypassable. **A bounded live-controller core now enforces the Windows input boundary and durably consumes observation-bound intents; production composition and post-action semantic verification remain incomplete.**
 
 > **Target authority model:** Providers propose evidence. Agents propose semantic intent. The runtime alone grants bounded execution authority.
 
-- **Today:** offline contract foundations, an internal server-owned controller/desktop-backend slice, and historical live GUI evidence.
+- **Today:** offline contract foundations, an internal server-owned controller/desktop-backend slice with durable intent and receipt records, and historical live GUI evidence.
 - **Target:** current-interface relocation, Gate, bounded execution, semantic verification, and an auditable receipt under one Runtime Authority.
-- **Not yet:** the production-composed end-to-end loop, durable live receipts, external/remote Provider integration, or live external Agent adapters.
+- **Not yet:** the production-composed end-to-end loop, post-action verified live receipts, external/remote Provider integration, or live external Agent adapters.
 
 ## Why this runtime exists
 
@@ -76,7 +76,7 @@ Required end state—the live loop is not complete today:
 6. **Relocate** on the current interface; old coordinates are hints only.
 7. **Gate** one attempt using current evidence and danger checks.
 8. **Execute** through the internal Desktop I/O backend seam beneath Runtime Authority. The current slice includes a Windows adapter and deterministic fake backend; production composition remains incomplete.
-9. **Verify** or Safe Stop. Receipt schemas have offline Contract Proof; the live loop is incomplete.
+9. **Verify** or Safe Stop. The internal controller now persists typed dispatch/recovery receipts; post-action semantic effect and destination verification remain incomplete.
 
 ## Target authority architecture
 
@@ -87,7 +87,7 @@ The public architecture freezes four contracts:
 3. **Agent Runtime Contract** — Runtime exposes Observation/actions; Agent returns observation-bound semantic intent.
 4. **Runtime Result & Verification Receipt Contract** — distinguishes Gate, dispatch, effect, next state, and Safe Stop.
 
-Target composition; the bounded controller/backend slice exists internally, but production composition, durable receipts, and post-action semantic verification are incomplete:
+Target composition; the bounded controller/backend slice and durable intent/receipt stores exist internally, but production composition and post-action semantic verification are incomplete:
 
 ```text
 Built-in fallback or trusted perception provider
@@ -130,12 +130,12 @@ The Desktop I/O Backend SPI is an **internal, partially integrated** boundary be
 | --- | --- | --- |
 | UEI schemas, refs, registration, static projections | **Current — Contract Proof** | Canonical, provenance-preserving, non-authorizing evidence boundary. |
 | Reviewed Workflow v2 compiler and persistence | **Current — Contract Proof** | Offline compile/store/reload; publication grants no authority. |
-| Agent Observation / Intent / Receipt schemas and adapters | **Current — Contract Proof** | Geometry-free, fail-closed boundary; the internal live controller consumes observation-bound intents, while production composition and durable receipt storage remain incomplete. |
+| Agent Observation / Intent / Receipt schemas and adapters | **Current — Contract Proof** | Geometry-free, fail-closed boundary; the internal live controller durably consumes observation-bound intents and records exact terminal receipts. Production composition remains incomplete. |
 | Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
 | Built-in and OmniParser output entering one provider-neutral review model | **Partial** | UEI and Shadow foundations exist; the release vertical slice is not closed. |
 | Human review and workflow creation | **Partial** | Review UI, revisions, and graphs exist; v1 proof is incomplete. |
-| Mandatory current relocation, unique Gate dispatch, semantic verification, and durable live receipt | **Partial** | Current re-grounding, Gate adaptation, one-shot authority, and unique Windows dispatch ownership exist in the internal controller slice; post-action verification, persistence, and production composition remain open. |
+| Mandatory current relocation, unique Gate dispatch, semantic verification, and durable live receipt | **Partial** | Current re-grounding, Gate adaptation, one-shot authority, unique Windows dispatch ownership, and durable claim/receipt records exist internally; post-action semantic verification and production composition remain open. |
 | Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded Windows adapter exist; a second real backend and production wiring are not claimed. |
 | Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
@@ -175,7 +175,7 @@ SEEK is a **reference workflow**, not the product. The v1 target is **Job Detail
 - **Non-authorizing assets:** revisions preserve knowledge without becoming permission.
 - **Semantic actions:** `open_detail` and `open_apply_flow` are distinct from field mutation, continuation, and terminal submission.
 - **Fail-closed ambiguity:** stale/wrong/unknown/ambiguous states are zero-click outcomes.
-- **Offline receipt contract:** schemas distinguish Gate, dispatch, effect, destination, and Safe Stop; live persistence is incomplete.
+- **Durable runtime receipts:** the internal controller persists exact dispatch/recovery outcomes and returns the same terminal receipt after duplicate/restart lookup; effect and destination proof remain a separate unfinished step.
 
 ## Run locally
 
@@ -201,7 +201,7 @@ Model weights and optional vision services are not distributed. Do not commit pr
 These items are **Planned**, not current capability:
 
 1. Close the Built-in/Omni → UEI → provider-neutral Review proof.
-2. Production-compose the server-owned controller with session/intent consumption, backend receipts, and durable receipt storage.
+2. Production-compose the server-owned controller around the existing session/intent consumption, backend receipt, and durable claim/receipt stores.
 3. Add post-action capture and semantic effect/destination verification so every reviewed transition ends in a durable verified receipt or Safe Stop.
 4. Publish matched positive and zero-click negative-control receipts for the Apply-entry safe-stop slice.
 5. Only then consider more providers, Agent adapters, and workflow classes.
