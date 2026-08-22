@@ -38,7 +38,7 @@ from app.agent.runtime_receipt_store import (
 
 CLAIM_CONTRACT_VERSION = "runtime_intent_claim_v1"
 DISPATCH_MARKER_CONTRACT_VERSION = "runtime_intent_dispatch_started_v1"
-VERIFICATION_PENDING_CONTRACT_VERSION = "runtime_intent_verification_pending_v1"
+VERIFICATION_PENDING_CONTRACT_VERSION = "runtime_intent_verification_pending_v2"
 TERMINAL_MARKER_CONTRACT_VERSION = "runtime_intent_terminal_v1"
 STORE_ROOT = Path("runtime_state/runtime-intent-claims-v1")
 _STABLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -140,6 +140,7 @@ class RuntimeVerificationPendingCheckpoint:
     claim_content_sha256: str
     checkpoint_sha256: str
     gate_decision_ref: str
+    target_process_id: int
     backend_receipt: BackendDispatchReceipt
     _current_observation_json: bytes = field(repr=False)
     _selection_json: bytes = field(repr=False)
@@ -342,6 +343,7 @@ class RuntimeIntentClaimStore:
         gate: Mapping[str, object],
         gate_decision_ref: str,
         backend_receipt: BackendDispatchReceipt,
+        target_process_id: int,
     ) -> RuntimeIntentClaimSnapshot:
         """封存 definitive dispatch 后只读 verification 所需的 server evidence。"""
 
@@ -370,6 +372,7 @@ class RuntimeIntentClaimStore:
                 gate=gate,
                 gate_decision_ref=gate_decision_ref,
                 backend_receipt=backend_receipt,
+                target_process_id=target_process_id,
             )
             try:
                 self._publish_bytes(
@@ -780,6 +783,7 @@ class RuntimeIntentClaimStore:
         gate: Mapping[str, object],
         gate_decision_ref: str,
         backend_receipt: BackendDispatchReceipt,
+        target_process_id: int,
     ) -> dict[str, object]:
         mappings = {
             "current_observation": self._checkpoint_mapping(
@@ -790,6 +794,7 @@ class RuntimeIntentClaimStore:
             "gate": self._checkpoint_mapping(gate, label="gate"),
         }
         self._validate_definitive_backend_receipt(backend_receipt)
+        self._validate_target_process_id(target_process_id)
         if (
             not isinstance(gate_decision_ref, str)
             or _OPAQUE_REF_PATTERN.fullmatch(gate_decision_ref) is None
@@ -811,6 +816,7 @@ class RuntimeIntentClaimStore:
             **mappings,
             "gate_decision_ref": gate_decision_ref,
             "backend_receipt": asdict(backend_receipt),
+            "target_process_id": target_process_id,
             "artifact_is_authorization": False,
             "grants_action_authority": False,
         }
@@ -840,6 +846,7 @@ class RuntimeIntentClaimStore:
             "gate",
             "gate_decision_ref",
             "backend_receipt",
+            "target_process_id",
             "artifact_is_authorization",
             "grants_action_authority",
             "checkpoint_sha256",
@@ -875,6 +882,8 @@ class RuntimeIntentClaimStore:
             reason_code=backend_payload.get("reason_code"),  # type: ignore[arg-type]
         )
         self._validate_definitive_backend_receipt(backend_receipt)
+        target_process_id = marker.get("target_process_id")
+        self._validate_target_process_id(target_process_id)
         mappings = {}
         for field_name in ("current_observation", "selection", "grounding", "gate"):
             mappings[field_name] = self._checkpoint_mapping(
@@ -967,6 +976,13 @@ class RuntimeIntentClaimStore:
         ):
             raise RuntimeIntentClaimStoreError(
                 "verification_pending requires a definitive dispatched backend receipt"
+            )
+
+    @staticmethod
+    def _validate_target_process_id(value: object) -> None:
+        if type(value) is not int or value <= 0:
+            raise RuntimeIntentClaimStoreError(
+                "verification_pending target_process_id must be a positive integer"
             )
 
     @staticmethod
@@ -1076,6 +1092,7 @@ class RuntimeIntentClaimStore:
             claim_content_sha256=marker["claim_content_sha256"],
             checkpoint_sha256=marker["checkpoint_sha256"],
             gate_decision_ref=marker["gate_decision_ref"],
+            target_process_id=marker["target_process_id"],
             backend_receipt=BackendDispatchReceipt(
                 receipt_ref=backend["receipt_ref"],
                 status=backend["status"],

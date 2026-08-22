@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 from threading import Barrier, Thread
@@ -138,6 +139,7 @@ def _verification_checkpoint_inputs() -> dict[str, object]:
         "gate": gate,
         "gate_decision_ref": "gate:1",
         "backend_receipt": _backend_for("DISPATCHED"),
+        "target_process_id": 9001,
     }
 
 
@@ -803,6 +805,7 @@ def test_verification_pending_persists_exact_immutable_checkpoint_after_restart(
     assert checkpoint.gate == inputs["gate"]
     assert checkpoint.gate_decision_ref == "gate:1"
     assert checkpoint.backend_receipt == inputs["backend_receipt"]
+    assert checkpoint.target_process_id == 9001
     assert checkpoint.artifact_is_authorization is False
     assert checkpoint.grants_action_authority is False
     mutated = checkpoint.selection
@@ -811,6 +814,7 @@ def test_verification_pending_persists_exact_immutable_checkpoint_after_restart(
 
     marker_path = next(first.verification_pending_root.glob("*.json"))
     marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert marker["store_contract_version"] == "runtime_intent_verification_pending_v2"
     assert set(marker) == {
         "store_contract_version",
         "claim_id",
@@ -822,6 +826,7 @@ def test_verification_pending_persists_exact_immutable_checkpoint_after_restart(
         "gate",
         "gate_decision_ref",
         "backend_receipt",
+        "target_process_id",
         "artifact_is_authorization",
         "grants_action_authority",
         "checkpoint_sha256",
@@ -959,6 +964,100 @@ def test_verification_pending_requires_dispatch_started_and_definitive_dispatch(
                 **invalid,
             )
     assert list(store.verification_pending_root.glob("*.json")) == []
+
+
+@pytest.mark.parametrize("target_process_id", [0, -1, True])
+def test_verification_pending_rejects_invalid_target_process_id(
+    tmp_path: Path,
+    target_process_id: object,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    )
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    inputs = _verification_checkpoint_inputs()
+    inputs["target_process_id"] = target_process_id
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="target_process_id|process"):
+        store.mark_verification_pending(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+            **inputs,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["tamper", "missing", "legacy_v1"])
+def test_verification_pending_rejects_pid_marker_tamper_or_legacy_v1(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    )
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    store.mark_verification_pending(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        **_verification_checkpoint_inputs(),
+    )
+    path = next(store.verification_pending_root.glob("*.json"))
+    marker = json.loads(path.read_text(encoding="utf-8"))
+    if mutation == "tamper":
+        marker["target_process_id"] = 9002
+    else:
+        marker.pop("target_process_id")
+        if mutation == "legacy_v1":
+            marker["store_contract_version"] = "runtime_intent_verification_pending_v1"
+            payload = dict(marker)
+            payload.pop("checkpoint_sha256")
+            raw = json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            marker["checkpoint_sha256"] = hashlib.sha256(raw).hexdigest()
+    path.write_text(
+        json.dumps(marker, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="tampered|invalid"):
+        store.get_for_observation(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+        )
 
 
 def test_verification_pending_rejects_c1_reusing_claim_c0_capture(
