@@ -1171,6 +1171,403 @@ class _Visibility:
         }
 
 
+def _synthetic_portfolio_apply_entry_asset(tmp_path: Path) -> tuple[dict, Path]:
+    from app.agent.reviewed_workflow_compiler import (
+        _GRANULAR_CONFIRMATION_CONTRACTS,
+        _granular_review_revision,
+        compile_reviewed_workflow_asset_v2,
+    )
+    from app.learn.interface_workflow_review import (
+        build_interface_node_review_revision,
+        save_interface_workflow_review_candidate,
+    )
+    from tests.test_agent_evidence import _persist_reviewed_workflow
+
+    base = _persist_reviewed_workflow(tmp_path)
+    review = json.loads(Path(base["path"]).read_text(encoding="utf-8"))
+    job_detail = deepcopy(review["nodes"][0])
+    for key in (
+        "human_review_confirmation",
+        "reviewed_revision_hash",
+        "current_revision_hash",
+        "editable_review_source_path",
+    ):
+        job_detail.pop(key, None)
+    job_detail.update(
+        {
+            "node_id": "job_detail",
+            "display_name": "Job Detail",
+            "surface_type": "detail",
+            "state_signature": "synthetic-portfolio-job-detail-v1",
+            "agent_description": (
+                "Identify the current synthetic Job Detail and expose only the reviewed "
+                "application-entry action."
+            ),
+            "source_paths": [],
+            "evidence": {},
+            "content_descriptors": [
+                {
+                    "content_id": "job_detail_identity",
+                    "label": "Job Detail",
+                    "source_kind": "control",
+                    "source_id": "quick_apply",
+                    "content_behavior": "fixed_label",
+                    "agent_usage": "identity_anchor",
+                    "read_policy": "on_interface_match",
+                    "agent_description": "Identify the synthetic Job Detail surface.",
+                },
+                {
+                    "content_id": "job_detail_content",
+                    "label": "Current job detail",
+                    "source_kind": "region",
+                    "source_id": "job_detail_content",
+                    "content_behavior": "dynamic_document",
+                    "agent_usage": "decision_signal",
+                    "read_policy": "on_demand",
+                    "agent_description": "Read only the current synthetic job detail.",
+                },
+            ],
+            "regions": [
+                {
+                    "region_id": "job_detail_content",
+                    "label": "Current job detail",
+                    "semantic_name": "Current job detail",
+                    "purpose": "Contains the current synthetic job description.",
+                    "role": "document",
+                    "review_status": "needs_human_review",
+                }
+            ],
+            "controls": [
+                {
+                    "control_id": "quick_apply",
+                    "label": "Quick apply",
+                    "semantic_name": "Quick apply",
+                    "purpose": "Open application entry without form mutation.",
+                    "role": "button",
+                    "visible_text_anchors": ["Quick apply"],
+                    "risk_class": "medium",
+                    "review_status": "needs_human_review",
+                }
+            ],
+            "action_candidates": [
+                {
+                    "action_template_id": "open_apply_flow",
+                    "semantic_action": "open_apply_flow",
+                    "action_type": "open_apply_flow",
+                    "source_control_id": "quick_apply",
+                    "target_control_id": "quick_apply",
+                    "target_interface_id": "apply_entry",
+                    "agent_description": "Open the synthetic application entry once.",
+                    "operation_goal": "Activate the current Quick apply control once.",
+                    "verification_rule_ids": ["apply_entry_visible"],
+                    "risk_level": "medium",
+                    "review_status": "needs_human_review",
+                }
+            ],
+            "verification_rules": [
+                {
+                    "rule_id": "apply_entry_visible",
+                    "description": "The synthetic Apply Entry surface is visible.",
+                }
+            ],
+            "blockers": [],
+            "review_status": "needs_human_review",
+            "reviewed_by_human": False,
+        }
+    )
+    apply_entry = {
+        "node_id": "apply_entry",
+        "display_name": "Apply Entry",
+        "surface_type": "application_entry",
+        "state_signature": "synthetic-portfolio-apply-entry-stop-v1",
+        "agent_description": "Recognize the synthetic application entry and stop.",
+        "source_paths": [],
+        "evidence": {},
+        "content_descriptors": [
+            {
+                "content_id": "apply_entry_identity",
+                "label": "Apply Entry",
+                "source_kind": "region",
+                "source_id": "apply_entry_surface",
+                "content_behavior": "fixed_structure",
+                "agent_usage": "identity_anchor",
+                "read_policy": "on_interface_match",
+                "agent_description": "Identify the synthetic application-entry boundary.",
+            }
+        ],
+        "regions": [
+            {
+                "region_id": "apply_entry_surface",
+                "label": "Apply Entry",
+                "semantic_name": "Apply Entry",
+                "purpose": "Marks the boundary where execution must stop.",
+                "role": "document",
+                "review_status": "needs_learning",
+            }
+        ],
+        "controls": [],
+        "action_candidates": [],
+        "verification_rules": [
+            {
+                "rule_id": "apply_entry_visible",
+                "description": "The synthetic Apply Entry surface is visible.",
+            }
+        ],
+        "blockers": [
+            {
+                "blocker_id": "synthetic_apply_entry_stop",
+                "description": "Stop before any form mutation or final submission.",
+                "safe_stop_required": True,
+            }
+        ],
+        "review_status": "needs_learning",
+        "reviewed_by_human": False,
+    }
+    edge = {
+        "edge_id": "open_apply_flow",
+        "operation_id": "open_apply_flow",
+        "display_name": "Open synthetic application entry",
+        "agent_description": "Open the synthetic application entry and stop.",
+        "source_node_id": "job_detail",
+        "target_node_id": "apply_entry",
+        "action_type": "open_apply_flow",
+        "semantic_action": "open_apply_flow",
+        "action_template_id": "open_apply_flow",
+        "source_control_id": "quick_apply",
+        "target_control_id": "quick_apply",
+        "target_region_id": "",
+        "risk_level": "medium",
+        "requires_user_confirmation": True,
+        "preconditions": ["Job Detail is uniquely visible."],
+        "success_conditions": ["Apply Entry is visible."],
+        "failure_conditions": ["An unexpected destination is visible."],
+        "review_status": "needs_human_review",
+    }
+    review["workflow"].update(
+        {
+            "workflow_id": "synthetic_portfolio_apply_entry",
+            "goal": "Open the synthetic application entry and stop.",
+            "application_identity": {"url": "https://nz.seek.com/jobs"},
+            "entry_node_id": "job_detail",
+            "node_ids": ["job_detail", "apply_entry"],
+            "edge_ids": ["open_apply_flow"],
+            "review_status": "human_approved",
+        }
+    )
+    review["nodes"] = [job_detail, apply_entry]
+    review["edges"] = [edge]
+    draft = save_interface_workflow_review_candidate(review, project_root=tmp_path)
+    review = json.loads(Path(draft["path"]).read_text(encoding="utf-8"))
+    job_detail = next(node for node in review["nodes"] if node["node_id"] == "job_detail")
+    target_control = next(
+        item for item in job_detail["controls"] if item["control_id"] == "quick_apply"
+    )
+    action_candidate = next(
+        item
+        for item in job_detail["action_candidates"]
+        if item["action_template_id"] == "open_apply_flow"
+    )
+    edge = next(item for item in review["edges"] if item["edge_id"] == "open_apply_flow")
+    # 以下批准仅属于 tmp_path 合成一致性夹具，不是 Portfolio 人审或 live 证据。
+    for subject, subject_kind in (
+        (target_control, "target_control"),
+        (action_candidate, "action_candidate"),
+        (edge, "edge"),
+    ):
+        subject.update(
+            {
+                "review_status": "human_approved",
+                "reviewed_by_human": True,
+                "display_only": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        subject["human_review_confirmation"] = {
+            "contract_version": _GRANULAR_CONFIRMATION_CONTRACTS[subject_kind],
+            "revision": _granular_review_revision(subject),
+        }
+    job_detail.update(
+        {
+            "review_status": "human_approved",
+            "reviewed_by_human": True,
+        }
+    )
+    job_detail["human_review_confirmation"] = {
+        "contract_version": "interface_node_human_review_confirmation_v1",
+        "revision": build_interface_node_review_revision(review, node_id="job_detail"),
+    }
+    saved = save_interface_workflow_review_candidate(review, project_root=tmp_path)
+    source = Path(saved["path"])
+    compiled = compile_reviewed_workflow_asset_v2(
+        project_root=tmp_path,
+        source_workflow_path=source.relative_to(tmp_path),
+        expected_source_workflow_sha256=sha256(source.read_bytes()).hexdigest(),
+    )
+    assert compiled["status"] == "compiled", compiled
+    return compiled["asset"], source
+
+
+def test_synthetic_portfolio_production_composition_stops_once_at_apply_entry(
+    tmp_path: Path,
+) -> None:
+    from app.agent.desktop_backend import DeterministicFakeBackend
+    from app.agent.live_controller import LiveController, ServerWorkflowBinding
+    from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore
+    from app.agent.reviewed_workflow_gate import ReviewedWorkflowGateAdapter
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    asset, source = _synthetic_portfolio_apply_entry_asset(tmp_path)
+    assert source.resolve().is_relative_to(tmp_path.resolve())
+    asset_store = ReviewedWorkflowAssetStore(project_root=tmp_path)
+    assert asset_store.publish(asset, expected_registry_revision=0)["status"] == "published"
+    states = {item["source_node_id"]: item for item in asset["states"]}
+    detail_state = states["job_detail"]
+    apply_entry_state = states["apply_entry"]
+    screenshot = _SequencedScreenshotService(
+        tmp_path,
+        colors=[
+            (1, 20, 30),
+            (2, 20, 30),
+            (3, 20, 30),
+            (3, 20, 30),
+            (4, 20, 30),
+        ],
+    )
+    runner = _SequencedRecognitionRunner(
+        [
+            _state_payloads(asset, detail_state["state_id"]),
+            _state_payloads(asset, detail_state["state_id"]),
+            _state_payloads(asset, detail_state["state_id"]),
+            _state_payloads(asset, apply_entry_state["state_id"]),
+        ]
+    )
+    manager = _WindowManager(*[_bound() for _ in range(24)])
+    adapter = ExistingWindowsCurrentEvidenceAdapter(
+        project_root=tmp_path,
+        application_identity_key="web:nz.seek.com",
+        screenshot_service=screenshot,
+        origin_reader=_OriginReader(origin="https://nz.seek.com"),
+        window_manager=manager,
+        recognition_runner=runner,
+        uia_provider=_UIAProvider(),
+    )
+    binding = ServerWorkflowBinding(
+        workflow_id=asset["source_review_lineage"]["source_workflow_id"],
+        asset_id=asset["asset_id"],
+        application_identity_key="web:nz.seek.com",
+        target_window_handle=4242,
+    )
+
+    def controller(backend: DeterministicFakeBackend) -> LiveController:
+        return LiveController(
+            binding=binding,
+            asset_loader=ReviewedWorkflowAssetStore(project_root=tmp_path),
+            observation_source=adapter,
+            target_resolver=adapter,
+            gate=ReviewedWorkflowGateAdapter(),
+            window_visibility_checker=ExistingWindowsCurrentEvidenceVisibilityChecker(
+                evidence_adapter=adapter,
+                delegate=_Visibility(),
+            ),
+            backend=backend,
+            intent_claim_store=RuntimeIntentClaimStore(
+                project_root=tmp_path,
+                receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+            ),
+            grounding_policy={"minimum_confidence": 0.45, "minimum_score_margin": 0.06},
+        )
+
+    first_backend = DeterministicFakeBackend()
+    first = controller(first_backend)
+    session = first.start_session()
+    observation = session.current_observation
+    assert session.workflow.workflow_id == asset["source_review_lineage"]["source_workflow_id"]
+    assert session.workflow.workflow_id != session.workflow.asset_id
+    assert observation.state.source_interface_id == "job_detail"
+    assert [item.semantic_action for item in observation.available_actions] == [
+        "open_apply_flow",
+        "safe_stop",
+    ]
+    action = observation.available_actions[0]
+    intent = {
+        "contract_version": "agent_intent_v1",
+        "intent_id": "intent.synthetic-portfolio-open-apply",
+        "session_id": session.session_id,
+        "observation_id": observation.observation_id,
+        "workflow": session.workflow.model_dump(mode="json"),
+        "action_id": action.action_id,
+    }
+
+    pending = first.submit_intent(intent)
+    assert (pending.status, pending.reason_code) == (
+        "CONFIRMATION_REQUIRED",
+        "human_confirmation_required",
+    )
+    assert first_backend.attempt_count == first_backend.dispatch_count == 0
+    approved = first.record_confirmation_decision(
+        confirmation_id=pending.confirmation_id,
+        decision="approved",
+    )
+    assert (approved.status, approved.reason_code) == (
+        "APPROVED",
+        "confirmation_approved",
+    )
+
+    execution_backend = DeterministicFakeBackend()
+    result = controller(execution_backend).submit_intent(intent)
+    assert result.outcome == "SAFE_STOP"
+    assert result.reason_code == "stop_boundary"
+    assert result.action.semantic_action == "open_apply_flow"
+    assert result.attempt_count == 1
+    assert result.gate_status == "allowed"
+    assert result.dispatch_status == "dispatched"
+    assert result.effect_status == "verified"
+    assert result.destination_status == "verified"
+    assert result.safe_stop.required is True
+    assert result.next_observation_id is not None
+    assert execution_backend.attempt_count == execution_backend.dispatch_count == 1
+    persisted = RuntimeReceiptStore(project_root=tmp_path).load_by_receipt_id(
+        result.receipt_id
+    )
+    assert persisted.runtime_receipt == result
+    assert persisted.backend_receipt is not None
+    assert persisted.verification_evidence is not None
+    assert persisted.next_observation is not None
+    assert persisted.next_observation.observation_id == result.next_observation_id
+    assert persisted.next_observation.state.status == "stop_boundary"
+    assert persisted.next_observation.state.state_id == apply_entry_state["state_id"]
+    assert [
+        item.semantic_action for item in persisted.next_observation.available_actions
+    ] == ["safe_stop"]
+
+    before_duplicate = (
+        len(screenshot.calls),
+        len(runner.calls),
+        execution_backend.attempt_count,
+        execution_backend.dispatch_count,
+    )
+    recovery_backend = DeterministicFakeBackend()
+    duplicate = controller(recovery_backend).submit_intent(intent)
+    assert duplicate == result
+    assert recovery_backend.attempt_count == recovery_backend.dispatch_count == 0
+    assert (
+        len(screenshot.calls),
+        len(runner.calls),
+        execution_backend.attempt_count,
+        execution_backend.dispatch_count,
+    ) == before_duplicate
+    assert [item["purpose"] for item in screenshot.calls] == [
+        "runtime-observation",
+        "runtime-observation",
+        "runtime-observation",
+        "runtime-pre-dispatch-freshness",
+        "runtime-observation",
+    ]
+    assert len(runner.capture_paths) == 4
+
+
 @pytest.mark.parametrize(
     ("gate_score", "expected_outcome", "dispatches"),
     [(0.45, "VERIFIED", 1), (0.99, "BLOCKED", 0)],
