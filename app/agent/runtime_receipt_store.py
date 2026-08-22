@@ -13,24 +13,84 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import stat
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from app.agent.desktop_backend import BackendDispatchReceipt
-from app.agent.runtime_contracts import RuntimeResultReceiptV1
+from app.agent.runtime_contracts import AgentObservationV1, RuntimeResultReceiptV1
 
 
 STORE_CONTRACT_VERSION = "runtime_receipt_record_v1"
+STORE_CONTRACT_VERSION_V2 = "runtime_receipt_record_v2"
 POINTER_CONTRACT_VERSION = "runtime_receipt_pointer_v1"
 INTENT_POINTER_CONTRACT_VERSION = "runtime_receipt_intent_pointer_v1"
 STORE_ROOT = Path("runtime_state/runtime-receipts-v1")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _IS_WINDOWS = os.name == "nt"
+_VERIFIED_VERIFICATION_KEYS = {
+    "contract_version",
+    "status",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "state_advanced",
+    "asset_content_sha256",
+    "selection_sha256",
+    "transition_id",
+    "source_state_id",
+    "target_state_id",
+    "post_capture_lineage",
+    "post_state_resolution",
+    "evidence_refs",
+}
+_BLOCKED_VERIFICATION_BASE_KEYS = {
+    "contract_version",
+    "status",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "failure_code",
+    "state_advanced",
+}
+_CAPTURE_LINEAGE_KEYS = {"capture_id", "screenshot_sha256", "viewport_size"}
+_RESOLVED_STATE_KEYS = {
+    "contract_version",
+    "status",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "asset_id",
+    "asset_content_sha256",
+    "source_workflow_sha256",
+    "reviewed_revision_hash",
+    "canonical_origin",
+    "state_id",
+    "state_availability",
+    "score",
+    "capture_lineage",
+    "observed_origin",
+    "matched_anchor_ids",
+    "evidence_refs",
+    "resolution_sha256",
+}
+_BLOCKED_STATE_BASE_KEYS = {
+    "contract_version",
+    "status",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "failure_code",
+    "asset_id",
+    "asset_content_sha256",
+    "source_workflow_sha256",
+    "reviewed_revision_hash",
+    "canonical_origin",
+    "capture_lineage",
+    "evidence_refs",
+}
 
 
 class RuntimeReceiptStoreError(ValueError):
@@ -46,6 +106,8 @@ class RuntimeReceiptRecord:
     runtime_receipt: RuntimeResultReceiptV1
     backend_receipt: BackendDispatchReceipt | None
     content_sha256: str
+    verification_evidence: dict[str, Any] | None = None
+    next_observation: AgentObservationV1 | None = None
 
 
 def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -137,6 +199,8 @@ class RuntimeReceiptStore:
         receipt: RuntimeResultReceiptV1 | Mapping[str, object],
         *,
         backend_receipt: BackendDispatchReceipt | None = None,
+        verification_evidence: Mapping[str, object] | None = None,
+        next_observation: AgentObservationV1 | Mapping[str, object] | None = None,
     ) -> dict[str, str]:
         """验证并不可变发布一个 Receipt record。"""
 
@@ -146,13 +210,36 @@ class RuntimeReceiptStore:
         ):
             raise RuntimeReceiptStoreError("invalid backend receipt object")
         self._validate_backend_pairing(validated, backend_receipt)
-        envelope = {
-            "store_contract_version": STORE_CONTRACT_VERSION,
+        verified_evidence, validated_next = self._validate_semantic_evidence(
+            validated,
+            verification_evidence=verification_evidence,
+            next_observation=next_observation,
+        )
+        envelope: dict[str, object] = {
+            "store_contract_version": (
+                STORE_CONTRACT_VERSION_V2
+                if verified_evidence is not None
+                else STORE_CONTRACT_VERSION
+            ),
             "runtime_receipt": validated.model_dump(mode="json"),
             "backend_receipt": (
                 asdict(backend_receipt) if backend_receipt is not None else None
             ),
         }
+        if verified_evidence is not None:
+            envelope.update(
+                verification_evidence=verified_evidence,
+                next_observation=(
+                    validated_next.model_dump(mode="json")
+                    if validated_next is not None
+                    else None
+                ),
+                application=(
+                    validated_next.application.model_dump(mode="json")
+                    if validated_next is not None
+                    else None
+                ),
+            )
         object_bytes = _canonical_json_bytes(envelope)
         content_sha256 = hashlib.sha256(object_bytes).hexdigest()
         object_path = self._object_path(content_sha256)
@@ -228,11 +315,24 @@ class RuntimeReceiptStore:
         raw, envelope = self._read_canonical_json(object_path, label="receipt object")
         if hashlib.sha256(raw).hexdigest() != digest:
             raise RuntimeReceiptStoreError("runtime receipt object checksum mismatch")
-        if set(envelope) != {
+        version = envelope.get("store_contract_version")
+        v1_keys = {
             "store_contract_version",
             "runtime_receipt",
             "backend_receipt",
-        } or envelope.get("store_contract_version") != STORE_CONTRACT_VERSION:
+        }
+        v2_keys = v1_keys | {
+            "verification_evidence",
+            "next_observation",
+            "application",
+        }
+        if (
+            version == STORE_CONTRACT_VERSION
+            and set(envelope) != v1_keys
+        ) or (
+            version == STORE_CONTRACT_VERSION_V2
+            and set(envelope) != v2_keys
+        ) or version not in {STORE_CONTRACT_VERSION, STORE_CONTRACT_VERSION_V2}:
             raise RuntimeReceiptStoreError("invalid runtime receipt record contract")
         runtime_payload = envelope.get("runtime_receipt")
         if not isinstance(runtime_payload, Mapping):
@@ -242,11 +342,78 @@ class RuntimeReceiptStore:
             raise RuntimeReceiptStoreError("runtime receipt record identity mismatch")
         backend_receipt = self._validate_backend_payload(envelope.get("backend_receipt"))
         self._validate_backend_pairing(runtime_receipt, backend_receipt)
+        verification_evidence: dict[str, Any] | None = None
+        next_observation: AgentObservationV1 | None = None
+        if version == STORE_CONTRACT_VERSION_V2:
+            verification_payload = envelope.get("verification_evidence")
+            observation_payload = envelope.get("next_observation")
+            if not isinstance(verification_payload, Mapping) or (
+                observation_payload is not None
+                and not isinstance(observation_payload, Mapping)
+            ):
+                raise RuntimeReceiptStoreError(
+                    "invalid persisted receipt verification evidence"
+                )
+            verification_evidence, next_observation = self._validate_semantic_evidence(
+                runtime_receipt,
+                verification_evidence=verification_payload,
+                next_observation=observation_payload,
+            )
+            application = envelope.get("application")
+            if next_observation is None:
+                if application is not None:
+                    raise RuntimeReceiptStoreError(
+                        "verification failure cannot bind an application"
+                    )
+            elif (
+                not isinstance(application, Mapping)
+                or dict(application)
+                != next_observation.application.model_dump(mode="json")
+            ):
+                raise RuntimeReceiptStoreError("next observation application mismatch")
         return RuntimeReceiptRecord(
             runtime_receipt=runtime_receipt,
             backend_receipt=backend_receipt,
             content_sha256=digest,
+            verification_evidence=verification_evidence,
+            next_observation=next_observation,
         )
+
+    def resolve_verification_evidence(
+        self,
+        ref_or_receipt_id: Mapping[str, object] | str,
+    ) -> dict[str, Any]:
+        """通过已有权威 Receipt 路径解析 verification，不维护第二套索引。"""
+
+        record = self._resolve_record(ref_or_receipt_id)
+        if record.verification_evidence is None:
+            raise RuntimeReceiptStoreError(
+                "runtime receipt has no persisted verification evidence"
+            )
+        return json.loads(_canonical_json_bytes(record.verification_evidence))
+
+    def resolve_next_observation(
+        self,
+        ref_or_receipt_id: Mapping[str, object] | str,
+    ) -> AgentObservationV1:
+        """从权威 Receipt CAS object 解析其精确 next observation。"""
+
+        record = self._resolve_record(ref_or_receipt_id)
+        if record.next_observation is None:
+            raise RuntimeReceiptStoreError(
+                "runtime receipt has no persisted next observation"
+            )
+        return record.next_observation
+
+    def _resolve_record(
+        self,
+        ref_or_receipt_id: Mapping[str, object] | str,
+    ) -> RuntimeReceiptRecord:
+        if isinstance(ref_or_receipt_id, str):
+            return self.load_by_receipt_id(ref_or_receipt_id)
+        if isinstance(ref_or_receipt_id, Mapping):
+            return self.get(ref_or_receipt_id)
+        raise RuntimeReceiptStoreError("invalid runtime receipt resolver reference")
 
     def load_by_receipt_id(self, receipt_id: str) -> RuntimeReceiptRecord:
         """通过 Windows-safe hashed identity index 读取 Receipt。"""
@@ -405,6 +572,383 @@ class RuntimeReceiptStore:
             return RuntimeResultReceiptV1.model_validate(payload)
         except (TypeError, ValueError) as exc:
             raise RuntimeReceiptStoreError(f"invalid runtime receipt: {exc}") from exc
+
+    @classmethod
+    def _validate_semantic_evidence(
+        cls,
+        receipt: RuntimeResultReceiptV1,
+        *,
+        verification_evidence: Mapping[str, object] | None,
+        next_observation: AgentObservationV1 | Mapping[str, object] | None,
+    ) -> tuple[dict[str, Any] | None, AgentObservationV1 | None]:
+        """只校验调用方已重算的结果及谱系；store 不执行或伪造 verification。"""
+
+        semantic_success = receipt.outcome == "VERIFIED" or (
+            receipt.outcome == "SAFE_STOP"
+            and receipt.dispatch_status == "dispatched"
+        )
+        verification_failed = receipt.outcome == "VERIFICATION_FAILED"
+        if not semantic_success and not verification_failed:
+            if verification_evidence is not None or next_observation is not None:
+                raise RuntimeReceiptStoreError(
+                    "only semantic-success or verification-failed receipts "
+                    "accept verification evidence"
+                )
+            return None, None
+        if verification_evidence is None:
+            raise RuntimeReceiptStoreError(
+                "verified receipt requires verification evidence"
+            )
+        if verification_failed and next_observation is not None:
+            raise RuntimeReceiptStoreError(
+                "verification-failed receipt forbids a next observation"
+            )
+        if semantic_success and next_observation is None:
+            raise RuntimeReceiptStoreError(
+                "semantic-success receipt requires verification evidence "
+                "and a next observation"
+            )
+        if not isinstance(verification_evidence, Mapping):
+            raise RuntimeReceiptStoreError("verification evidence must be an object")
+        try:
+            verification = json.loads(
+                _canonical_json_bytes(verification_evidence).decode("utf-8")
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeReceiptStoreError(
+                "verification evidence must be canonical JSON"
+            ) from exc
+        if not isinstance(verification, dict):
+            raise RuntimeReceiptStoreError("verification evidence must be an object")
+        verification_ref = (
+            f"verification:{hashlib.sha256(_canonical_json_bytes(verification)).hexdigest()}"
+        )
+        if receipt.evidence.verification_ref != verification_ref:
+            raise RuntimeReceiptStoreError("verification reference mismatch")
+        if verification_failed:
+            cls._validate_blocked_verification(receipt, verification)
+            return verification, None
+
+        try:
+            observation_payload = (
+                next_observation.model_dump(mode="json")
+                if isinstance(next_observation, AgentObservationV1)
+                else next_observation
+            )
+            observation = AgentObservationV1.model_validate(observation_payload)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeReceiptStoreError(
+                f"invalid next AgentObservationV1: {exc}"
+            ) from exc
+        if receipt.next_observation_id != observation.observation_id:
+            raise RuntimeReceiptStoreError("next observation identity mismatch")
+        if receipt.observation_id == observation.observation_id:
+            raise RuntimeReceiptStoreError("next observation ID must be new")
+        if receipt.session_id != observation.session_id:
+            raise RuntimeReceiptStoreError("next observation session mismatch")
+        if receipt.workflow != observation.workflow:
+            raise RuntimeReceiptStoreError("next observation workflow mismatch")
+        cls._validate_verification_lineage(receipt, verification, observation)
+        return verification, observation
+
+    @classmethod
+    def _validate_blocked_verification(
+        cls,
+        receipt: RuntimeResultReceiptV1,
+        verification: Mapping[str, Any],
+    ) -> None:
+        failure_code = verification.get("failure_code")
+        expected_keys = set(_BLOCKED_VERIFICATION_BASE_KEYS)
+        if failure_code in {"destination_mismatch", "post_action_failure"}:
+            expected_keys.add("post_state_resolution")
+        if (
+            set(verification) != expected_keys
+            or
+            verification.get("contract_version") != "transition_verification_v1"
+            or verification.get("status") != "blocked"
+            or verification.get("artifact_is_authorization") is not False
+            or verification.get("execute_binding_enabled") is not False
+            or verification.get("state_advanced") is not False
+        ):
+            raise RuntimeReceiptStoreError(
+                "verification failure evidence is not a blocked result"
+            )
+        if failure_code != receipt.reason_code:
+            raise RuntimeReceiptStoreError(
+                "verification failure reason mismatch"
+            )
+        if failure_code == "destination_mismatch":
+            cls._validate_resolved_state(
+                receipt,
+                verification.get("post_state_resolution"),
+                observation=None,
+            )
+        elif failure_code == "post_action_failure":
+            cls._validate_blocked_state(
+                receipt,
+                verification.get("post_state_resolution"),
+            )
+
+    @classmethod
+    def _validate_verification_lineage(
+        cls,
+        receipt: RuntimeResultReceiptV1,
+        verification: Mapping[str, Any],
+        observation: AgentObservationV1,
+    ) -> None:
+        if (
+            set(verification) != _VERIFIED_VERIFICATION_KEYS
+            or
+            verification.get("contract_version") != "transition_verification_v1"
+            or verification.get("status") != "verified"
+            or verification.get("artifact_is_authorization") is not False
+            or verification.get("execute_binding_enabled") is not False
+            or verification.get("state_advanced") is not True
+        ):
+            raise RuntimeReceiptStoreError(
+                "verification evidence is not a semantic-success result"
+            )
+        if (
+            verification.get("asset_content_sha256")
+            != receipt.workflow.asset_content_sha256
+        ):
+            raise RuntimeReceiptStoreError("verification workflow mismatch")
+        if verification.get("transition_id") != receipt.action.action_id:
+            raise RuntimeReceiptStoreError("verification transition mismatch")
+        if (
+            not isinstance(verification.get("selection_sha256"), str)
+            or _SHA256_PATTERN.fullmatch(verification["selection_sha256"]) is None
+            or not isinstance(verification.get("source_state_id"), str)
+            or not verification["source_state_id"]
+        ):
+            raise RuntimeReceiptStoreError("verification lineage is invalid")
+        if verification.get("target_state_id") != observation.state.state_id:
+            raise RuntimeReceiptStoreError("verification destination mismatch")
+        capture = verification.get("post_capture_lineage")
+        cls._validate_capture_lineage(capture)
+        assert isinstance(capture, Mapping)
+        if (
+            capture.get("capture_id") != observation.current_capture.capture_id
+            or capture.get("screenshot_sha256")
+            != observation.current_capture.screenshot_sha256
+        ):
+            raise RuntimeReceiptStoreError("verification capture mismatch")
+        state = verification.get("post_state_resolution")
+        cls._validate_resolved_state(receipt, state, observation=observation)
+        assert isinstance(state, Mapping)
+        if dict(state["capture_lineage"]) != dict(capture):
+            raise RuntimeReceiptStoreError("verification capture mismatch")
+        evidence_refs = cls._validate_ref_list(
+            verification.get("evidence_refs"),
+            label="verification evidence refs",
+            allow_empty=False,
+        )
+        state_refs = cls._validate_ref_list(
+            state.get("evidence_refs"),
+            label="post-resolution evidence refs",
+            allow_empty=False,
+        )
+        required_refs = {
+            receipt.evidence.candidate_ref,
+            receipt.evidence.gate_decision_ref,
+            receipt.evidence.backend_receipt_ref,
+            *receipt.evidence.trace_refs,
+            *state_refs,
+        }
+        if None in required_refs or not required_refs.issubset(set(evidence_refs)):
+            raise RuntimeReceiptStoreError(
+                "verification evidence refs do not cover receipt lineage"
+            )
+
+    @classmethod
+    def _validate_resolved_state(
+        cls,
+        receipt: RuntimeResultReceiptV1,
+        value: object,
+        *,
+        observation: AgentObservationV1 | None,
+    ) -> None:
+        if not isinstance(value, Mapping) or set(value) != _RESOLVED_STATE_KEYS:
+            raise RuntimeReceiptStoreError("invalid resolved post-state contract")
+        if (
+            value.get("contract_version") != "current_state_resolution_v1"
+            or value.get("status") != "resolved"
+            or value.get("artifact_is_authorization") is not False
+            or value.get("execute_binding_enabled") is not False
+            or value.get("asset_id") != receipt.workflow.asset_id
+            or value.get("asset_content_sha256")
+            != receipt.workflow.asset_content_sha256
+            or value.get("source_workflow_sha256")
+            != receipt.workflow.source_workflow_sha256
+            or value.get("reviewed_revision_hash")
+            != receipt.workflow.reviewed_revision_hash
+        ):
+            raise RuntimeReceiptStoreError("post-state workflow mismatch")
+        cls._validate_capture_lineage(value.get("capture_lineage"))
+        score = value.get("score")
+        if (
+            not isinstance(score, (int, float))
+            or isinstance(score, bool)
+            or not math.isfinite(score)
+            or score < 0
+        ):
+            raise RuntimeReceiptStoreError("post-state score is invalid")
+        if (
+            not isinstance(value.get("state_id"), str)
+            or not value["state_id"]
+            or value.get("state_availability") not in {"reviewed", "stop_boundary"}
+            or not isinstance(value.get("resolution_sha256"), str)
+            or _SHA256_PATTERN.fullmatch(value["resolution_sha256"]) is None
+        ):
+            raise RuntimeReceiptStoreError("post-state identity is invalid")
+        cls._validate_ref_list(
+            value.get("evidence_refs"),
+            label="post-resolution evidence refs",
+            allow_empty=False,
+        )
+        anchors = value.get("matched_anchor_ids")
+        if (
+            not isinstance(anchors, list)
+            or not anchors
+            or any(not isinstance(item, str) or not item for item in anchors)
+            or anchors != sorted(set(anchors))
+        ):
+            raise RuntimeReceiptStoreError("post-state anchors are invalid")
+        canonical_origin = cls._normalized_http_origin(value.get("canonical_origin"))
+        observed_origin = cls._normalized_http_origin(value.get("observed_origin"))
+        if canonical_origin is None or observed_origin is None:
+            raise RuntimeReceiptStoreError("next observation application mismatch")
+        if observation is None:
+            return
+        if observation.application.kind != "web":
+            raise RuntimeReceiptStoreError(
+                "native application verification is unsupported"
+            )
+        if (
+            value.get("state_id") != observation.state.state_id
+            or value.get("state_availability")
+            != observation.state.state_availability
+            or value.get("resolution_sha256")
+            != observation.state.resolution_sha256
+        ):
+            raise RuntimeReceiptStoreError("verification state resolution mismatch")
+        parsed = urlsplit(observed_origin)
+        if observation.application.identity_ref != f"application:web:{parsed.hostname}":
+            raise RuntimeReceiptStoreError("next observation application mismatch")
+
+    @classmethod
+    def _validate_blocked_state(
+        cls,
+        receipt: RuntimeResultReceiptV1,
+        value: object,
+    ) -> None:
+        if not isinstance(value, Mapping):
+            raise RuntimeReceiptStoreError("invalid blocked post-state contract")
+        failure_code = value.get("failure_code")
+        expected_keys = set(_BLOCKED_STATE_BASE_KEYS)
+        if failure_code == "current_state_ambiguous":
+            expected_keys.add("candidate_state_ids")
+        if (
+            set(value) != expected_keys
+            or failure_code
+            not in {"current_state_unresolved", "current_state_ambiguous"}
+            or value.get("contract_version") != "current_state_resolution_v1"
+            or value.get("status") != "blocked"
+            or value.get("artifact_is_authorization") is not False
+            or value.get("execute_binding_enabled") is not False
+            or value.get("asset_id") != receipt.workflow.asset_id
+            or value.get("asset_content_sha256")
+            != receipt.workflow.asset_content_sha256
+            or value.get("source_workflow_sha256")
+            != receipt.workflow.source_workflow_sha256
+            or value.get("reviewed_revision_hash")
+            != receipt.workflow.reviewed_revision_hash
+            or cls._normalized_http_origin(value.get("canonical_origin")) is None
+        ):
+            raise RuntimeReceiptStoreError("invalid blocked post-state contract")
+        cls._validate_capture_lineage(value.get("capture_lineage"))
+        cls._validate_ref_list(
+            value.get("evidence_refs"),
+            label="blocked post-resolution evidence refs",
+            allow_empty=True,
+        )
+        if failure_code == "current_state_ambiguous":
+            candidates = value.get("candidate_state_ids")
+            if (
+                not isinstance(candidates, list)
+                or len(candidates) < 2
+                or any(not isinstance(item, str) or not item for item in candidates)
+                or candidates != sorted(set(candidates))
+            ):
+                raise RuntimeReceiptStoreError("invalid blocked post-state candidates")
+
+    @staticmethod
+    def _validate_capture_lineage(value: object) -> None:
+        if not isinstance(value, Mapping) or set(value) != _CAPTURE_LINEAGE_KEYS:
+            raise RuntimeReceiptStoreError("invalid verification capture lineage")
+        viewport = value.get("viewport_size")
+        if (
+            not isinstance(value.get("capture_id"), str)
+            or not value["capture_id"]
+            or not isinstance(value.get("screenshot_sha256"), str)
+            or _SHA256_PATTERN.fullmatch(value["screenshot_sha256"]) is None
+            or not isinstance(viewport, Mapping)
+            or set(viewport) != {"width", "height"}
+            or any(
+                not isinstance(viewport.get(key), int)
+                or isinstance(viewport.get(key), bool)
+                or viewport[key] <= 0
+                for key in ("width", "height")
+            )
+        ):
+            raise RuntimeReceiptStoreError("invalid verification capture lineage")
+
+    @staticmethod
+    def _validate_ref_list(
+        value: object,
+        *,
+        label: str,
+        allow_empty: bool,
+    ) -> list[str]:
+        if (
+            not isinstance(value, list)
+            or (not allow_empty and not value)
+            or any(not isinstance(item, str) or not item for item in value)
+            or value != sorted(set(value))
+        ):
+            raise RuntimeReceiptStoreError(f"invalid {label}")
+        return value
+
+    @staticmethod
+    def _normalized_http_origin(value: object) -> str | None:
+        if not isinstance(value, str) or not value or value != value.strip():
+            return None
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+        except ValueError:
+            return None
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname.lower() if parsed.hostname else ""
+        if (
+            scheme not in {"http", "https"}
+            or not hostname
+            or any(character.isspace() for character in hostname)
+            or "%" in hostname
+            or "\\" in parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            return None
+        default_port = 80 if scheme == "http" else 443
+        port_suffix = "" if port in {None, default_port} else f":{port}"
+        display_hostname = f"[{hostname}]" if ":" in hostname else hostname
+        normalized = f"{scheme}://{display_hostname}{port_suffix}"
+        return normalized if value == normalized else None
 
     @staticmethod
     def _validate_backend_payload(value: object) -> BackendDispatchReceipt | None:
