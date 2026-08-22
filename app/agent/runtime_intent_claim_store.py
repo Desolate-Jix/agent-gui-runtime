@@ -419,7 +419,13 @@ class RuntimeIntentClaimStore:
         with _PHASE_LOCK:
             base = self._load_claim(session_id, observation_id)
             self._validate_receipt_lineage(base, receipt)
-            self._validate_terminal_phase(base, receipt)
+            self._validate_terminal_phase(
+                base,
+                receipt,
+                backend_receipt=backend_receipt,
+                verification_evidence=verification_evidence,
+                next_observation=next_observation,
+            )
             try:
                 receipt_ref = self._receipt_store.put(
                     receipt,
@@ -621,6 +627,7 @@ class RuntimeIntentClaimStore:
             ) from exc
         if record is not None:
             self._validate_receipt_lineage(base, record.runtime_receipt)
+            self._validate_record_checkpoint_pairing(base, record)
         return record
 
     def _resolve_receipt(
@@ -635,6 +642,7 @@ class RuntimeIntentClaimStore:
                 f"authoritative runtime receipt is unavailable: {exc}"
             ) from exc
         self._validate_receipt_lineage(base, record.runtime_receipt)
+        self._validate_record_checkpoint_pairing(base, record)
         return record
 
     @staticmethod
@@ -654,6 +662,135 @@ class RuntimeIntentClaimStore:
             raise RuntimeIntentClaimStoreError(
                 f"runtime receipt lineage does not match claim context: {exc}"
             ) from exc
+
+    def _validate_record_checkpoint_pairing(
+        self,
+        base: Mapping[str, Any],
+        record: RuntimeReceiptRecord,
+    ) -> None:
+        observation: AgentObservationV1 = base["observation"]
+        identity_hash = self._identity_hash(
+            observation.session_id,
+            observation.observation_id,
+        )
+        verification_marker = self._load_verification_pending_marker(
+            self._verification_pending_path(identity_hash),
+            base=base,
+        )
+        self._validate_checkpoint_receipt_pairing(
+            base,
+            verification_marker,
+            receipt=record.runtime_receipt,
+            backend_receipt=record.backend_receipt,
+            verification_evidence=record.verification_evidence,
+            next_observation=record.next_observation,
+        )
+
+    def _validate_checkpoint_receipt_pairing(
+        self,
+        base: Mapping[str, Any],
+        verification_marker: Mapping[str, Any] | None,
+        *,
+        receipt: RuntimeResultReceiptV1,
+        backend_receipt: BackendDispatchReceipt | None,
+        verification_evidence: Mapping[str, object] | None,
+        next_observation: AgentObservationV1 | Mapping[str, object] | None,
+    ) -> None:
+        if verification_marker is None:
+            return
+        semantic_success = receipt.outcome == "VERIFIED" or (
+            receipt.outcome == "SAFE_STOP"
+            and receipt.dispatch_status == "dispatched"
+        )
+        if not semantic_success and receipt.outcome != "VERIFICATION_FAILED":
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing requires semantic terminal"
+            )
+        selection = verification_marker["selection"]
+        grounding = verification_marker["grounding"]
+        checkpoint_backend = verification_marker["backend_receipt"]
+        expected_backend = BackendDispatchReceipt(
+            receipt_ref=checkpoint_backend["receipt_ref"],
+            status=checkpoint_backend["status"],
+            reason_code=checkpoint_backend["reason_code"],
+        )
+        expected_selection_ref = f"selection:{selection['selection_sha256']}"
+        expected_candidate_ref = (
+            f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}"
+        )
+        expected_gate_ref = verification_marker["gate_decision_ref"]
+        evidence = receipt.evidence
+        if (
+            evidence.selection_ref != expected_selection_ref
+            or evidence.candidate_ref != expected_candidate_ref
+            or evidence.gate_decision_ref != expected_gate_ref
+            or evidence.backend_receipt_ref != expected_backend.receipt_ref
+            or backend_receipt != expected_backend
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing reference mismatch"
+            )
+        observation: AgentObservationV1 = base["observation"]
+        intent: AgentIntentV1 = base["intent"]
+        claimed_action = next(
+            (
+                action
+                for action in observation.available_actions
+                if action.action_id == intent.action_id
+            ),
+            None,
+        )
+        if (
+            claimed_action is None
+            or selection.get("transition_id") != intent.action_id
+            or selection.get("semantic_action") != claimed_action.semantic_action
+            or selection.get("source_state_id") != observation.state.state_id
+            or selection.get("target_state_id") != claimed_action.target_state_id
+            or receipt.action.action_id != selection.get("transition_id")
+            or receipt.action.semantic_action != selection.get("semantic_action")
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing action mismatch"
+            )
+        if not isinstance(verification_evidence, Mapping):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing requires verification evidence"
+            )
+        if not semantic_success:
+            return
+        if (
+            verification_evidence.get("selection_sha256")
+            != selection.get("selection_sha256")
+            or verification_evidence.get("transition_id")
+            != selection.get("transition_id")
+            or verification_evidence.get("source_state_id")
+            != selection.get("source_state_id")
+            or verification_evidence.get("target_state_id")
+            != selection.get("target_state_id")
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing verification mismatch"
+            )
+        try:
+            projected_observation = (
+                next_observation
+                if isinstance(next_observation, AgentObservationV1)
+                else self._validate_observation(next_observation)  # type: ignore[arg-type]
+            )
+        except RuntimeIntentClaimStoreError as exc:
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing next observation is invalid"
+            ) from exc
+        if (
+            projected_observation.session_id != observation.session_id
+            or projected_observation.workflow != observation.workflow
+            or projected_observation.application != observation.application
+            or projected_observation.state.state_id != selection.get("target_state_id")
+            or receipt.next_observation_id != projected_observation.observation_id
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint receipt pairing next observation mismatch"
+            )
 
     def _commit_terminal(
         self,
@@ -678,6 +815,14 @@ class RuntimeIntentClaimStore:
             receipt.runtime_receipt,
             dispatch_started=dispatch_marker is not None,
             verification_pending=verification_marker is not None,
+        )
+        self._validate_checkpoint_receipt_pairing(
+            base,
+            verification_marker,
+            receipt=receipt.runtime_receipt,
+            backend_receipt=receipt.backend_receipt,
+            verification_evidence=receipt.verification_evidence,
+            next_observation=receipt.next_observation,
         )
         self._publish_terminal_marker(base, receipt)
 
@@ -714,6 +859,10 @@ class RuntimeIntentClaimStore:
         self,
         base: Mapping[str, Any],
         receipt: RuntimeResultReceiptV1,
+        *,
+        backend_receipt: BackendDispatchReceipt | None,
+        verification_evidence: Mapping[str, object] | None,
+        next_observation: AgentObservationV1 | Mapping[str, object] | None,
     ) -> None:
         observation: AgentObservationV1 = base["observation"]
         identity_hash = self._identity_hash(
@@ -739,6 +888,14 @@ class RuntimeIntentClaimStore:
             dispatch_started=dispatch_marker is not None,
             verification_pending=verification_marker is not None,
         )
+        self._validate_checkpoint_receipt_pairing(
+            base,
+            verification_marker,
+            receipt=receipt,
+            backend_receipt=backend_receipt,
+            verification_evidence=verification_evidence,
+            next_observation=next_observation,
+        )
 
     @staticmethod
     def _validate_attempt_phase(
@@ -761,6 +918,10 @@ class RuntimeIntentClaimStore:
         if semantic_w5 and not verification_pending:
             raise RuntimeIntentClaimStoreError(
                 "semantic terminal receipt requires verification_pending"
+            )
+        if verification_pending and not semantic_w5:
+            raise RuntimeIntentClaimStoreError(
+                "verification_pending only accepts a semantic terminal receipt"
             )
 
     @staticmethod

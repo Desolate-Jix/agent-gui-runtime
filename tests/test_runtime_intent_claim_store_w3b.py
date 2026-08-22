@@ -10,6 +10,7 @@ import pytest
 
 from app.agent.desktop_backend import BackendDispatchReceipt
 from app.agent.runtime_contracts import (
+    AgentObservationV1,
     RuntimeResultReceiptV1,
     validate_agent_intent_v1,
     validate_agent_observation_v1,
@@ -92,6 +93,11 @@ def _verification_checkpoint_inputs() -> dict[str, object]:
         "reviewed_revision_hash": observation.workflow.reviewed_revision_hash,
         "transition_id": "transition.open-detail",
         "source_state_id": observation.state.state_id,
+        "target_state_id": next(
+            action.target_state_id
+            for action in observation.available_actions
+            if action.action_id == _intent().action_id
+        ),
         "semantic_action": "open_detail",
         "selection_sha256": selection_sha256,
         "capture_lineage": {
@@ -141,6 +147,42 @@ def _verification_checkpoint_inputs() -> dict[str, object]:
         "backend_receipt": _backend_for("DISPATCHED"),
         "target_process_id": 9001,
     }
+
+
+def _paired_semantic_artifacts():
+    inputs = _verification_checkpoint_inputs()
+    selection = inputs["selection"]
+    grounding = inputs["grounding"]
+    next_payload = _next_observation().model_dump(mode="json")
+    next_payload["state"]["state_id"] = selection["target_state_id"]
+    next_observation = AgentObservationV1.model_validate(next_payload)
+    verification = _verification(next_observation)
+    verification["selection_sha256"] = selection["selection_sha256"]
+    verification["transition_id"] = selection["transition_id"]
+    verification["source_state_id"] = selection["source_state_id"]
+    expected_candidate_ref = (
+        f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}"
+    )
+    verification["evidence_refs"] = [
+        expected_candidate_ref if ref == "candidate:1" else ref
+        for ref in verification["evidence_refs"]
+    ]
+    receipt_payload = _semantic_success_receipt(
+        verification,
+        next_observation,
+    ).model_dump(mode="json")
+    receipt_payload["intent_id"] = _intent().intent_id
+    receipt_payload["evidence"].update(
+        selection_ref=f"selection:{selection['selection_sha256']}",
+        candidate_ref=expected_candidate_ref,
+        gate_decision_ref=inputs["gate_decision_ref"],
+        backend_receipt_ref=inputs["backend_receipt"].receipt_ref,
+    )
+    return (
+        RuntimeResultReceiptV1.model_validate(receipt_payload),
+        verification,
+        next_observation,
+    )
 
 
 def test_claim_persists_exact_validated_contracts_without_action_authority(
@@ -1233,7 +1275,7 @@ def test_verification_pending_marker_tamper_or_extra_field_fails_closed(
         )
 
 
-def test_terminal_takes_precedence_and_pending_cannot_be_marked_after_terminal(
+def test_verification_pending_rejects_nonsemantic_dispatched_terminal(
     tmp_path: Path,
 ) -> None:
     from app.agent.runtime_intent_claim_store import (
@@ -1260,19 +1302,13 @@ def test_terminal_takes_precedence_and_pending_cannot_be_marked_after_terminal(
         **inputs,
     )
     receipt_ref = _store_receipt(receipt_store)
-    terminal = store.terminalize(
-        session_id=claim.observation.session_id,
-        observation_id=claim.observation.observation_id,
-        receipt_ref=receipt_ref,
-    )
-    assert terminal.phase == "terminal"
-    assert terminal.verification_checkpoint is not None
-    with pytest.raises(RuntimeIntentClaimStoreError, match="terminal"):
-        store.mark_verification_pending(
+    with pytest.raises(RuntimeIntentClaimStoreError, match="verification_pending|semantic"):
+        store.terminalize(
             session_id=claim.observation.session_id,
             observation_id=claim.observation.observation_id,
-            **inputs,
+            receipt_ref=receipt_ref,
         )
+    assert list(store.terminal_root.glob("*.json")) == []
 
 
 def test_semantic_terminal_requires_verification_pending_and_forwards_evidence(
@@ -1284,14 +1320,7 @@ def test_semantic_terminal_requires_verification_pending_and_forwards_evidence(
     )
     from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
-    next_observation = _next_observation()
-    verification = _verification(next_observation)
-    receipt_payload = _semantic_success_receipt(
-        verification,
-        next_observation,
-    ).model_dump(mode="json")
-    receipt_payload["intent_id"] = _intent().intent_id
-    receipt = RuntimeResultReceiptV1.model_validate(receipt_payload)
+    receipt, verification, next_observation = _paired_semantic_artifacts()
 
     without_checkpoint_root = tmp_path / "without-checkpoint"
     without_checkpoint = RuntimeIntentClaimStore(
@@ -1349,6 +1378,276 @@ def test_semantic_terminal_requires_verification_pending_and_forwards_evidence(
     assert record is not None
     assert record.verification_evidence == verification
     assert record.next_observation == next_observation
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["selection_ref", "candidate_ref", "gate_ref", "backend_ref", "backend_object"],
+)
+def test_semantic_terminal_rejects_checkpoint_receipt_ref_or_backend_mismatch_before_put(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    receipt_store = RuntimeReceiptStore(project_root=tmp_path)
+    store = RuntimeIntentClaimStore(project_root=tmp_path, receipt_store=receipt_store)
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    inputs = _verification_checkpoint_inputs()
+    store.mark_verification_pending(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        **inputs,
+    )
+    receipt, verification, next_observation = _paired_semantic_artifacts()
+    payload = receipt.model_dump(mode="json")
+    backend = inputs["backend_receipt"]
+    forged_ref = "forged:checkpoint-lineage"
+    if mutation == "selection_ref":
+        payload["evidence"]["selection_ref"] = forged_ref
+    elif mutation == "candidate_ref":
+        expected = payload["evidence"]["candidate_ref"]
+        payload["evidence"]["candidate_ref"] = forged_ref
+        verification["evidence_refs"] = [
+            forged_ref if ref == expected else ref for ref in verification["evidence_refs"]
+        ]
+    elif mutation == "gate_ref":
+        expected = payload["evidence"]["gate_decision_ref"]
+        payload["evidence"]["gate_decision_ref"] = forged_ref
+        verification["evidence_refs"] = [
+            forged_ref if ref == expected else ref for ref in verification["evidence_refs"]
+        ]
+    else:
+        expected = payload["evidence"]["backend_receipt_ref"]
+        payload["evidence"]["backend_receipt_ref"] = forged_ref
+        verification["evidence_refs"] = [
+            forged_ref if ref == expected else ref for ref in verification["evidence_refs"]
+        ]
+        if mutation == "backend_object":
+            backend = BackendDispatchReceipt(
+                receipt_ref=forged_ref,
+                status="dispatched",
+                reason_code="none",
+            )
+    verification_bytes = json.dumps(
+        verification,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    payload["evidence"]["verification_ref"] = (
+        f"verification:{hashlib.sha256(verification_bytes).hexdigest()}"
+    )
+    mismatched = RuntimeResultReceiptV1.model_validate(payload)
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="checkpoint|pairing"):
+        store.persist_terminal(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+            receipt=mismatched,
+            backend_receipt=backend,
+            verification_evidence=verification,
+            next_observation=next_observation,
+        )
+    assert receipt_store.find_for_intent(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        intent_id=claim.intent.intent_id,
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("selection_sha256", "e" * 64),
+        ("transition_id", "transition.other"),
+        ("source_state_id", "state-other"),
+        ("target_state_id", "state-other"),
+    ],
+)
+def test_semantic_terminal_rejects_verification_checkpoint_lineage_before_put(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    receipt_store = RuntimeReceiptStore(project_root=tmp_path)
+    store = RuntimeIntentClaimStore(project_root=tmp_path, receipt_store=receipt_store)
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    inputs = _verification_checkpoint_inputs()
+    store.mark_verification_pending(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        **inputs,
+    )
+    receipt, verification, next_observation = _paired_semantic_artifacts()
+    verification[field] = value
+    payload = receipt.model_dump(mode="json")
+    verification_bytes = json.dumps(
+        verification,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    payload["evidence"]["verification_ref"] = (
+        f"verification:{hashlib.sha256(verification_bytes).hexdigest()}"
+    )
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="checkpoint|pairing"):
+        store.persist_terminal(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+            receipt=RuntimeResultReceiptV1.model_validate(payload),
+            backend_receipt=inputs["backend_receipt"],
+            verification_evidence=verification,
+            next_observation=next_observation,
+        )
+    assert receipt_store.find_for_intent(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        intent_id=claim.intent.intent_id,
+    ) is None
+
+
+@pytest.mark.parametrize("mutation", ["session", "workflow", "application"])
+def test_semantic_terminal_rejects_next_observation_checkpoint_context_before_put(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    receipt_store = RuntimeReceiptStore(project_root=tmp_path)
+    store = RuntimeIntentClaimStore(project_root=tmp_path, receipt_store=receipt_store)
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    inputs = _verification_checkpoint_inputs()
+    store.mark_verification_pending(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        **inputs,
+    )
+    receipt, verification, next_observation = _paired_semantic_artifacts()
+    next_payload = next_observation.model_dump(mode="json")
+    if mutation == "session":
+        next_payload["session_id"] = "session-other"
+    elif mutation == "workflow":
+        next_payload["workflow"]["workflow_id"] = "workflow.other"
+    else:
+        next_payload["application"] = {
+            "identity_ref": "application:web:other.example",
+            "kind": "web",
+            "display_name": "other.example",
+        }
+    mismatched_next = AgentObservationV1.model_validate(next_payload)
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="checkpoint|pairing"):
+        store.persist_terminal(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+            receipt=receipt,
+            backend_receipt=inputs["backend_receipt"],
+            verification_evidence=verification,
+            next_observation=mismatched_next,
+        )
+    assert receipt_store.find_for_intent(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        intent_id=claim.intent.intent_id,
+    ) is None
+
+
+@pytest.mark.parametrize("path", ["auto_repair", "terminalize"])
+def test_read_side_rejects_precommitted_semantic_receipt_not_paired_to_checkpoint(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    receipt_store = RuntimeReceiptStore(project_root=tmp_path)
+    store = RuntimeIntentClaimStore(project_root=tmp_path, receipt_store=receipt_store)
+    claim = store.claim(
+        observation=_observation(),
+        intent=_intent(),
+        server_binding=_binding(),
+    )
+    store.mark_dispatch_started(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+    )
+    inputs = _verification_checkpoint_inputs()
+    store.mark_verification_pending(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        **inputs,
+    )
+    receipt, verification, next_observation = _paired_semantic_artifacts()
+    payload = receipt.model_dump(mode="json")
+    payload["evidence"]["selection_ref"] = "selection:forged"
+    ref = receipt_store.put(
+        RuntimeResultReceiptV1.model_validate(payload),
+        backend_receipt=inputs["backend_receipt"],
+        verification_evidence=verification,
+        next_observation=next_observation,
+    )
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="checkpoint|pairing"):
+        if path == "auto_repair":
+            RuntimeIntentClaimStore(
+                project_root=tmp_path,
+                receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+            ).get_for_observation(
+                session_id=claim.observation.session_id,
+                observation_id=claim.observation.observation_id,
+            )
+        else:
+            store.terminalize(
+                session_id=claim.observation.session_id,
+                observation_id=claim.observation.observation_id,
+                receipt_ref=ref,
+            )
+    assert list(store.terminal_root.glob("*.json")) == []
 
 
 def test_verification_failed_requires_verification_pending(tmp_path: Path) -> None:
