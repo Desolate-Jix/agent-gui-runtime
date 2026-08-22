@@ -7,15 +7,17 @@ Portfolio v1 仍是单一 live controller；敌对并发文件系统交换与分
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import stat
-from threading import RLock
+from threading import local, RLock
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -25,6 +27,7 @@ from app.agent.runtime_contracts import (
     AgentIntentV1,
     AgentObservationV1,
     RuntimeResultReceiptV1,
+    WorkflowRefV1,
     validate_agent_intent_v1,
     validate_agent_observation_v1,
     validate_runtime_result_receipt_v1,
@@ -34,12 +37,18 @@ from app.agent.runtime_receipt_store import (
     RuntimeReceiptStore,
     RuntimeReceiptStoreError,
 )
+from app.agent.reviewed_workflow_asset import _exclusive_file_lock
 
 
 CLAIM_CONTRACT_VERSION = "runtime_intent_claim_v1"
 DISPATCH_MARKER_CONTRACT_VERSION = "runtime_intent_dispatch_started_v1"
 VERIFICATION_PENDING_CONTRACT_VERSION = "runtime_intent_verification_pending_v2"
 TERMINAL_MARKER_CONTRACT_VERSION = "runtime_intent_terminal_v1"
+CONFIRMATION_REQUEST_CONTRACT_VERSION = "runtime_intent_confirmation_request_v1"
+CONFIRMATION_DECISION_CONTRACT_VERSION = "runtime_intent_confirmation_decision_v1"
+CONFIRMATION_RESUME_CONTRACT_VERSION = "runtime_intent_confirmation_resume_started_v1"
+CONFIRMATION_CLOSED_CONTRACT_VERSION = "runtime_intent_confirmation_closed_v1"
+CONFIRMATION_TTL_SECONDS = 300
 STORE_ROOT = Path("runtime_state/runtime-intent-claims-v1")
 _STABLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -56,6 +65,8 @@ _CURRENT_OBSERVATION_KEYS = {
 }
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _PHASE_LOCK = RLock()
+_PHASE_FENCE_STATE = local()
+_SERVER_CONFIRMATION_EVIDENCE_SEAL = object()
 
 
 class RuntimeIntentClaimStoreError(ValueError):
@@ -173,13 +184,68 @@ class RuntimeVerificationPendingCheckpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeIntentConfirmationSnapshot:
+    confirmation_id: str
+    request_content_sha256: str
+    session_id: str
+    observation_id: str
+    intent_id: str
+    workflow: WorkflowRefV1
+    transition_id: str
+    semantic_action: str
+    request_capture_id: str
+    request_screenshot_sha256: str
+    request_state_resolution_sha256: str
+    target_window_handle: int
+    target_process_id: int
+    requested_at: str
+    expires_at: str
+    decision: Literal["approved", "denied"] | None = None
+    decision_content_sha256: str | None = None
+    decided_at: str | None = None
+    resume_attempt_id: str | None = None
+    closed_reason_code: Literal["confirmation_expired", "confirmation_stale"] | None = None
+    evidence_ref: str = ""
+    grants_action_authority: Literal[False] = False
+    artifact_is_authorization: Literal[False] = False
+
+
+@dataclass(frozen=True, slots=True)
+class _ServerConfirmedTransitionEvidence:
+    confirmation: RuntimeIntentConfirmationSnapshot
+    _seal: object = field(repr=False, compare=False)
+
+
+def _unwrap_server_confirmed_transition_evidence(
+    value: object,
+) -> RuntimeIntentConfirmationSnapshot | None:
+    if (
+        not isinstance(value, _ServerConfirmedTransitionEvidence)
+        or value._seal is not _SERVER_CONFIRMATION_EVIDENCE_SEAL
+    ):
+        return None
+    return value.confirmation
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeIntentClaimSnapshot:
     claim_id: str
     claim_content_sha256: str
-    phase: Literal["claimed", "dispatch_started", "verification_pending", "terminal"]
+    phase: Literal[
+        "claimed",
+        "confirmation_pending",
+        "confirmation_approved",
+        "confirmation_denied",
+        "confirmation_resume_started",
+        "confirmation_closed",
+        "dispatch_started",
+        "verification_pending",
+        "terminal",
+    ]
     observation: AgentObservationV1
     intent: AgentIntentV1
     server_binding: RuntimeIntentServerBinding
+    confirmation: RuntimeIntentConfirmationSnapshot | None
     verification_checkpoint: RuntimeVerificationPendingCheckpoint | None
     terminal_receipt_ref: dict[str, str] | None
     recovery_required: bool
@@ -214,6 +280,7 @@ class RuntimeIntentClaimStore:
         *,
         project_root: str | Path,
         receipt_store: RuntimeReceiptStore,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(receipt_store, RuntimeReceiptStore):
             raise RuntimeIntentClaimStoreError("receipt_store is required")
@@ -227,8 +294,348 @@ class RuntimeIntentClaimStore:
         self.dispatch_started_root = self.root / "dispatch-started"
         self.verification_pending_root = self.root / "verification-pending"
         self.terminal_root = self.root / "terminal"
+        self.confirmation_requests_root = self.root / "confirmation-requests"
+        self.confirmation_decisions_root = self.root / "confirmation-decisions"
+        self.confirmation_resume_root = self.root / "confirmation-resume-started"
+        self.confirmation_closed_root = self.root / "confirmation-closed"
+        self.phase_locks_root = self.root / "phase-locks"
         self._receipt_store = receipt_store
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._ensure_layout()
+
+    def mark_confirmation_pending(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+        current_observation: Mapping[str, object],
+        state_resolution: Mapping[str, object],
+        transition_id: str,
+        semantic_action: str,
+        target_process_id: int,
+    ) -> RuntimeIntentClaimSnapshot:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
+            base = self._load_claim(session_id, observation_id)
+            request_path = self._confirmation_request_path(identity_hash)
+            if (
+                self._dispatch_path(identity_hash).exists()
+                or self._terminal_path(identity_hash).exists()
+                or self._find_receipt(base) is not None
+            ):
+                raise RuntimeIntentClaimStoreError(
+                    "confirmation request requires an unattempted claim"
+                )
+            observation: AgentObservationV1 = base["observation"]
+            intent: AgentIntentV1 = base["intent"]
+            action = next(
+                (item for item in observation.available_actions if item.action_id == intent.action_id),
+                None,
+            )
+            capture_id = current_observation.get("capture_id")
+            screenshot_sha256 = current_observation.get("screenshot_sha256")
+            resolution_sha256 = state_resolution.get("resolution_sha256")
+            if (
+                transition_id != intent.action_id
+                or action is None
+                or semantic_action != action.semantic_action
+                or action.requires_user_confirmation is not True
+                or not isinstance(capture_id, str)
+                or _STABLE_ID_PATTERN.fullmatch(capture_id) is None
+                or not isinstance(screenshot_sha256, str)
+                or _SHA256_PATTERN.fullmatch(screenshot_sha256) is None
+                or not isinstance(resolution_sha256, str)
+                or _SHA256_PATTERN.fullmatch(resolution_sha256) is None
+            ):
+                if action is not None and action.requires_user_confirmation is not True:
+                    raise RuntimeIntentClaimStoreError(
+                        "confirmation request action requires_user_confirmation must be true"
+                    )
+                raise RuntimeIntentClaimStoreError("confirmation request lineage is invalid")
+            self._validate_target_process_id(target_process_id)
+            if request_path.exists():
+                existing = self.get_for_observation(
+                    session_id=session_id,
+                    observation_id=observation_id,
+                )
+                confirmation = existing.confirmation
+                if confirmation is None or (
+                    confirmation.transition_id != transition_id
+                    or confirmation.semantic_action != semantic_action
+                    or confirmation.request_capture_id != capture_id
+                    or confirmation.request_screenshot_sha256 != screenshot_sha256
+                    or confirmation.request_state_resolution_sha256 != resolution_sha256
+                    or confirmation.target_process_id != target_process_id
+                ):
+                    raise RuntimeIntentClaimStoreError("confirmation request conflict")
+                return existing
+            now = self._utc_now()
+            marker = {
+                "store_contract_version": CONFIRMATION_REQUEST_CONTRACT_VERSION,
+                "claim_id": base["claim_id"],
+                "claim_content_sha256": base["claim_content_sha256"],
+                "phase": "confirmation_pending",
+                "confirmation_id": f"confirmation.{identity_hash}",
+                "session_id": observation.session_id,
+                "observation_id": observation.observation_id,
+                "intent_id": intent.intent_id,
+                "workflow": observation.workflow.model_dump(mode="json"),
+                "transition_id": transition_id,
+                "semantic_action": semantic_action,
+                "request_capture_id": capture_id,
+                "request_screenshot_sha256": screenshot_sha256,
+                "request_state_resolution_sha256": resolution_sha256,
+                "target_window_handle": base["server_binding"].target_window_handle,
+                "target_process_id": target_process_id,
+                "requested_at": self._format_time(now),
+                "expires_at": self._format_time(
+                    now + timedelta(seconds=CONFIRMATION_TTL_SECONDS)
+                ),
+                "artifact_is_authorization": False,
+                "grants_action_authority": False,
+            }
+            marker["request_binding_sha256"] = _payload_sha256(marker)
+            try:
+                self._publish_bytes(request_path, _canonical_json_bytes(marker))
+            except _PublishedBytesConflict as exc:
+                raise RuntimeIntentClaimStoreError(
+                    "confirmation request conflict"
+                ) from exc
+            return self.get_for_observation(
+                session_id=session_id,
+                observation_id=observation_id,
+            )
+
+    def record_confirmation_decision(
+        self,
+        *,
+        confirmation_id: str,
+        decision: Literal["approved", "denied"],
+    ) -> RuntimeIntentClaimSnapshot:
+        if decision not in {"approved", "denied"}:
+            raise RuntimeIntentClaimStoreError("confirmation decision is invalid")
+        identity_hash = self._confirmation_identity_hash(confirmation_id)
+        with self._claim_phase_fence(identity_hash):
+            request_raw, request = self._load_confirmation_request_by_identity(identity_hash)
+            base = self._load_claim(request["session_id"], request["observation_id"])
+            decision_path = self._confirmation_decision_path(identity_hash)
+            decision_raw, existing = self._load_optional_confirmation_decision(
+                identity_hash, base=base, request_raw=request_raw, request=request
+            )
+            if existing is not None and existing["decision"] != decision:
+                raise RuntimeIntentClaimStoreError("confirmation decision conflict")
+            closed = self._load_optional_confirmation_closed(
+                identity_hash,
+                base=base,
+                request_raw=request_raw,
+                request=request,
+                decision_raw=decision_raw,
+            )
+            if closed is not None:
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            if (
+                existing is not None
+                and self._confirmation_resume_path(identity_hash).exists()
+            ):
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            if self._utc_now() >= self._parse_time(request["expires_at"]):
+                self._publish_confirmation_closed(
+                    identity_hash,
+                    base=base,
+                    request_raw=request_raw,
+                    request=request,
+                    decision_raw=decision_raw,
+                    reason_code="confirmation_expired",
+                )
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            if decision_path.exists():
+                assert existing is not None
+                if existing["decision"] != decision:
+                    raise RuntimeIntentClaimStoreError("confirmation decision conflict")
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            marker = {
+                "store_contract_version": CONFIRMATION_DECISION_CONTRACT_VERSION,
+                "claim_id": base["claim_id"],
+                "claim_content_sha256": base["claim_content_sha256"],
+                "phase": "confirmation_decided",
+                "confirmation_id": confirmation_id,
+                "request_content_sha256": hashlib.sha256(request_raw).hexdigest(),
+                "decision": decision,
+                "decided_at": self._format_time(self._utc_now()),
+                "artifact_is_authorization": False,
+                "grants_action_authority": False,
+            }
+            marker["decision_binding_sha256"] = _payload_sha256(marker)
+            try:
+                self._publish_bytes(decision_path, _canonical_json_bytes(marker))
+            except _PublishedBytesConflict as exc:
+                raise RuntimeIntentClaimStoreError("confirmation decision conflict") from exc
+            return self.get_for_observation(
+                session_id=request["session_id"], observation_id=request["observation_id"]
+            )
+
+    def get_for_confirmation(self, *, confirmation_id: str) -> RuntimeIntentClaimSnapshot:
+        identity_hash = self._confirmation_identity_hash(confirmation_id)
+        with self._claim_phase_fence(identity_hash):
+            _, request = self._load_confirmation_request_by_identity(identity_hash)
+            return self.get_for_observation(
+                session_id=request["session_id"],
+                observation_id=request["observation_id"],
+            )
+
+    def _get_server_confirmed_transition_evidence(
+        self,
+        *,
+        confirmation_id: str,
+    ) -> _ServerConfirmedTransitionEvidence:
+        claim = self.get_for_confirmation(confirmation_id=confirmation_id)
+        confirmation = claim.confirmation
+        if (
+            claim.phase != "confirmation_resume_started"
+            or confirmation is None
+            or confirmation.decision != "approved"
+            or confirmation.resume_attempt_id is None
+            or not confirmation.evidence_ref
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "server confirmation evidence requires authoritative resume marker"
+            )
+        return _ServerConfirmedTransitionEvidence(
+            confirmation=confirmation,
+            _seal=_SERVER_CONFIRMATION_EVIDENCE_SEAL,
+        )
+
+    def begin_confirmation_resume(
+        self,
+        *,
+        confirmation_id: str,
+    ) -> RuntimeIntentClaimSnapshot:
+        identity_hash = self._confirmation_identity_hash(confirmation_id)
+        with self._claim_phase_fence(identity_hash):
+            request_raw, request = self._load_confirmation_request_by_identity(identity_hash)
+            base = self._load_claim(request["session_id"], request["observation_id"])
+            decision_raw, decision = self._load_confirmation_decision(
+                identity_hash, base=base, request_raw=request_raw, request=request
+            )
+            closed = self._load_optional_confirmation_closed(
+                identity_hash,
+                base=base,
+                request_raw=request_raw,
+                request=request,
+                decision_raw=decision_raw,
+            )
+            if closed is not None:
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            if decision["decision"] != "approved":
+                raise RuntimeIntentClaimStoreError("confirmation was not approved")
+            if self._confirmation_resume_path(identity_hash).exists():
+                raise RuntimeIntentClaimStoreError("confirmation resume already started")
+            if self._utc_now() >= self._parse_time(request["expires_at"]):
+                self._publish_confirmation_closed(
+                    identity_hash,
+                    base=base,
+                    request_raw=request_raw,
+                    request=request,
+                    decision_raw=decision_raw,
+                    reason_code="confirmation_expired",
+                )
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            marker = {
+                "store_contract_version": CONFIRMATION_RESUME_CONTRACT_VERSION,
+                "claim_id": base["claim_id"],
+                "claim_content_sha256": base["claim_content_sha256"],
+                "phase": "confirmation_resume_started",
+                "confirmation_id": confirmation_id,
+                "request_content_sha256": hashlib.sha256(request_raw).hexdigest(),
+                "decision_content_sha256": hashlib.sha256(decision_raw).hexdigest(),
+                "resume_attempt_id": f"resume.{uuid4().hex}",
+                "started_at": self._format_time(self._utc_now()),
+                "artifact_is_authorization": False,
+                "grants_action_authority": False,
+            }
+            marker["resume_binding_sha256"] = _payload_sha256(marker)
+            try:
+                published = self._publish_bytes(
+                    self._confirmation_resume_path(identity_hash),
+                    _canonical_json_bytes(marker),
+                )
+            except _PublishedBytesConflict as exc:
+                raise RuntimeIntentClaimStoreError(
+                    "confirmation resume already started"
+                ) from exc
+            if not published:
+                raise RuntimeIntentClaimStoreError("confirmation resume already started")
+            return self.get_for_observation(
+                session_id=request["session_id"], observation_id=request["observation_id"]
+            )
+
+    def close_confirmation(
+        self,
+        *,
+        confirmation_id: str,
+        reason_code: Literal["confirmation_expired", "confirmation_stale"],
+    ) -> RuntimeIntentClaimSnapshot:
+        if reason_code not in {"confirmation_expired", "confirmation_stale"}:
+            raise RuntimeIntentClaimStoreError("confirmation close reason is invalid")
+        identity_hash = self._confirmation_identity_hash(confirmation_id)
+        with self._claim_phase_fence(identity_hash):
+            request_raw, request = self._load_confirmation_request_by_identity(identity_hash)
+            base = self._load_claim(request["session_id"], request["observation_id"])
+            if (
+                self._dispatch_path(identity_hash).exists()
+                or self._verification_pending_path(identity_hash).exists()
+                or self._terminal_path(identity_hash).exists()
+                or self._find_receipt(base) is not None
+            ):
+                raise RuntimeIntentClaimStoreError(
+                    "confirmation cannot close after dispatch_started"
+                )
+            decision_raw, _ = self._load_optional_confirmation_decision(
+                identity_hash, base=base, request_raw=request_raw, request=request
+            )
+            closed = self._load_optional_confirmation_closed(
+                identity_hash,
+                base=base,
+                request_raw=request_raw,
+                request=request,
+                decision_raw=decision_raw,
+            )
+            if closed is not None:
+                if closed["reason_code"] != reason_code:
+                    raise RuntimeIntentClaimStoreError("confirmation close conflict")
+                return self.get_for_observation(
+                    session_id=request["session_id"],
+                    observation_id=request["observation_id"],
+                )
+            self._publish_confirmation_closed(
+                identity_hash,
+                base=base,
+                request_raw=request_raw,
+                request=request,
+                decision_raw=decision_raw,
+                reason_code=reason_code,
+            )
+            return self.get_for_observation(
+                session_id=request["session_id"], observation_id=request["observation_id"]
+            )
 
     def claim(
         self,
@@ -266,17 +673,18 @@ class RuntimeIntentClaimStore:
             "binding_sha256": _payload_sha256(binding_payload),
             "artifact_is_authorization": False,
         }
-        path = self._claim_path(identity_hash)
-        try:
-            self._publish_bytes(path, _canonical_json_bytes(record))
-        except _PublishedBytesConflict as exc:
-            raise RuntimeIntentClaimStoreError(
-                "runtime intent claim identity conflict"
-            ) from exc
-        return self.get_for_observation(
-            session_id=validated_observation.session_id,
-            observation_id=validated_observation.observation_id,
-        )
+        with self._claim_phase_fence(identity_hash):
+            path = self._claim_path(identity_hash)
+            try:
+                self._publish_bytes(path, _canonical_json_bytes(record))
+            except _PublishedBytesConflict as exc:
+                raise RuntimeIntentClaimStoreError(
+                    "runtime intent claim identity conflict"
+                ) from exc
+            return self.get_for_observation(
+                session_id=validated_observation.session_id,
+                observation_id=validated_observation.observation_id,
+            )
 
     def mark_dispatch_started(
         self,
@@ -284,9 +692,18 @@ class RuntimeIntentClaimStore:
         session_id: str,
         observation_id: str,
     ) -> RuntimeIntentClaimSnapshot:
-        with _PHASE_LOCK:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
             base = self._load_claim(session_id, observation_id)
-            identity_hash = self._identity_hash(session_id, observation_id)
+            if self._confirmation_request_path(identity_hash).exists():
+                confirmation_claim = self.get_for_observation(
+                    session_id=session_id,
+                    observation_id=observation_id,
+                )
+                if confirmation_claim.phase != "confirmation_resume_started":
+                    raise RuntimeIntentClaimStoreError(
+                        "confirmation dispatch requires confirmation_resume_started"
+                    )
             if self._terminal_path(identity_hash).exists():
                 raise RuntimeIntentClaimStoreError(
                     "terminal claim cannot return to dispatch_started"
@@ -323,7 +740,8 @@ class RuntimeIntentClaimStore:
         observation_id: str,
         receipt_ref: Mapping[str, object],
     ) -> RuntimeIntentClaimSnapshot:
-        with _PHASE_LOCK:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
             base = self._load_claim(session_id, observation_id)
             receipt = self._resolve_receipt(base, receipt_ref)
             self._commit_terminal(base, receipt)
@@ -347,9 +765,9 @@ class RuntimeIntentClaimStore:
     ) -> RuntimeIntentClaimSnapshot:
         """封存 definitive dispatch 后只读 verification 所需的 server evidence。"""
 
-        with _PHASE_LOCK:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
             base = self._load_claim(session_id, observation_id)
-            identity_hash = self._identity_hash(session_id, observation_id)
             if self._terminal_path(identity_hash).exists() or self._find_receipt(base) is not None:
                 raise RuntimeIntentClaimStoreError(
                     "terminal claim cannot return to verification_pending"
@@ -416,7 +834,8 @@ class RuntimeIntentClaimStore:
     ) -> RuntimeResultReceiptV1:
         """先封存 Receipt record，再提交 terminal marker 并重读精确结果。"""
 
-        with _PHASE_LOCK:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
             base = self._load_claim(session_id, observation_id)
             self._validate_receipt_lineage(base, receipt)
             self._validate_terminal_phase(
@@ -452,7 +871,8 @@ class RuntimeIntentClaimStore:
     ) -> RuntimeResultReceiptV1:
         """解析 terminal marker 指向的权威 Receipt。"""
 
-        with _PHASE_LOCK:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
             snapshot = self.get_for_observation(
                 session_id=session_id,
                 observation_id=observation_id,
@@ -473,9 +893,36 @@ class RuntimeIntentClaimStore:
         session_id: str,
         observation_id: str,
     ) -> RuntimeIntentClaimSnapshot:
-        with _PHASE_LOCK:
+        identity_hash = self._identity_hash(session_id, observation_id)
+        with self._claim_phase_fence(identity_hash):
             base = self._load_claim(session_id, observation_id)
-            identity_hash = self._identity_hash(session_id, observation_id)
+            request_raw, request_marker = self._load_optional_confirmation_request(
+                identity_hash, base=base
+            )
+            decision_raw: bytes | None = None
+            decision_marker: dict[str, Any] | None = None
+            if request_marker is not None:
+                decision_raw, decision_marker = self._load_optional_confirmation_decision(
+                    identity_hash,
+                    base=base,
+                    request_raw=request_raw,
+                    request=request_marker,
+                )
+            resume_marker = self._load_optional_confirmation_resume(
+                identity_hash,
+                base=base,
+                request_raw=request_raw,
+                request=request_marker,
+                decision_raw=decision_raw,
+                decision=decision_marker,
+            )
+            closed_marker = self._load_optional_confirmation_closed(
+                identity_hash,
+                base=base,
+                request_raw=request_raw,
+                request=request_marker,
+                decision_raw=decision_raw,
+            )
             dispatch_marker = self._load_optional_marker(
                 self._dispatch_path(identity_hash),
                 expected_contract=DISPATCH_MARKER_CONTRACT_VERSION,
@@ -520,14 +967,23 @@ class RuntimeIntentClaimStore:
                         base=base,
                     )
             if receipt_record is not None:
+                confirmation_evidence_ref = self._confirmation_resume_evidence_ref(
+                    base,
+                    identity_hash,
+                    pending_error=(
+                        "terminal confirmation resume evidence is unavailable"
+                    ),
+                )
+                self._validate_confirmation_receipt_evidence(
+                    receipt_record.runtime_receipt,
+                    confirmation_evidence_ref=confirmation_evidence_ref,
+                )
                 self._validate_attempt_phase(
                     receipt_record.runtime_receipt,
                     dispatch_started=dispatch_marker is not None,
                     verification_pending=verification_marker is not None,
                 )
-                phase: Literal[
-                    "claimed", "dispatch_started", "verification_pending", "terminal"
-                ] = "terminal"
+                phase = "terminal"
                 terminal_ref = {
                     "receipt_id": receipt_record.runtime_receipt.receipt_id,
                     "content_sha256": receipt_record.content_sha256,
@@ -537,6 +993,22 @@ class RuntimeIntentClaimStore:
                 terminal_ref = None
             elif dispatch_marker is not None:
                 phase = "dispatch_started"
+                terminal_ref = None
+            elif closed_marker is not None:
+                phase = "confirmation_closed"
+                terminal_ref = None
+            elif resume_marker is not None:
+                phase = "confirmation_resume_started"
+                terminal_ref = None
+            elif decision_marker is not None:
+                phase = (
+                    "confirmation_approved"
+                    if decision_marker["decision"] == "approved"
+                    else "confirmation_denied"
+                )
+                terminal_ref = None
+            elif request_marker is not None:
+                phase = "confirmation_pending"
                 terminal_ref = None
             else:
                 phase = "claimed"
@@ -548,13 +1020,31 @@ class RuntimeIntentClaimStore:
                 observation=base["observation"],
                 intent=base["intent"],
                 server_binding=base["server_binding"],
+                confirmation=(
+                    self._confirmation_snapshot(
+                        request_raw=request_raw,
+                        request=request_marker,
+                        decision_raw=decision_raw,
+                        decision=decision_marker,
+                        resume=resume_marker,
+                        closed=closed_marker,
+                        workflow=base["observation"].workflow,
+                    )
+                    if request_marker is not None and request_raw is not None
+                    else None
+                ),
                 verification_checkpoint=(
                     self._checkpoint_snapshot(verification_marker)
                     if verification_marker is not None
                     else None
                 ),
                 terminal_receipt_ref=terminal_ref,
-                recovery_required=phase != "terminal",
+                recovery_required=phase in {
+                    "claimed",
+                    "confirmation_resume_started",
+                    "dispatch_started",
+                    "verification_pending",
+                },
             )
 
     def _load_claim(self, session_id: str, observation_id: str) -> dict[str, Any]:
@@ -801,6 +1291,13 @@ class RuntimeIntentClaimStore:
             base["observation"].session_id,
             base["observation"].observation_id,
         )
+        confirmation_evidence_ref = self._validate_confirmation_terminalization(
+            base, identity_hash
+        )
+        self._validate_confirmation_receipt_evidence(
+            receipt.runtime_receipt,
+            confirmation_evidence_ref=confirmation_evidence_ref,
+        )
         dispatch_marker = self._load_optional_marker(
             self._dispatch_path(identity_hash),
             expected_contract=DISPATCH_MARKER_CONTRACT_VERSION,
@@ -869,6 +1366,13 @@ class RuntimeIntentClaimStore:
             observation.session_id,
             observation.observation_id,
         )
+        confirmation_evidence_ref = self._validate_confirmation_terminalization(
+            base, identity_hash
+        )
+        self._validate_confirmation_receipt_evidence(
+            receipt,
+            confirmation_evidence_ref=confirmation_evidence_ref,
+        )
         dispatch_marker = self._load_optional_marker(
             self._dispatch_path(identity_hash),
             expected_contract=DISPATCH_MARKER_CONTRACT_VERSION,
@@ -896,6 +1400,31 @@ class RuntimeIntentClaimStore:
             verification_evidence=verification_evidence,
             next_observation=next_observation,
         )
+
+    def _validate_confirmation_terminalization(
+        self,
+        base: Mapping[str, Any],
+        identity_hash: str,
+    ) -> str | None:
+        return self._confirmation_resume_evidence_ref(
+            base,
+            identity_hash,
+            pending_error="confirmation_pending cannot terminalize before confirmation resume",
+        )
+
+    @staticmethod
+    def _validate_confirmation_receipt_evidence(
+        receipt: RuntimeResultReceiptV1,
+        *,
+        confirmation_evidence_ref: str | None,
+    ) -> None:
+        if (
+            confirmation_evidence_ref is not None
+            and confirmation_evidence_ref not in receipt.evidence.trace_refs
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "terminal receipt confirmation evidence ref mismatch"
+            )
 
     @staticmethod
     def _validate_attempt_phase(
@@ -954,6 +1483,24 @@ class RuntimeIntentClaimStore:
             "grounding": self._checkpoint_mapping(grounding, label="grounding"),
             "gate": self._checkpoint_mapping(gate, label="gate"),
         }
+        observation: AgentObservationV1 = base["observation"]
+        identity_hash = self._identity_hash(
+            observation.session_id,
+            observation.observation_id,
+        )
+        confirmation_evidence_ref = self._confirmation_resume_evidence_ref(
+            base,
+            identity_hash,
+            pending_error="verification checkpoint confirmation resume is unavailable",
+        )
+        if (
+            confirmation_evidence_ref is not None
+            and mappings["selection"].get("human_confirmation_evidence_ref")
+            != confirmation_evidence_ref
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint confirmation evidence ref mismatch"
+            )
         self._validate_definitive_backend_receipt(backend_receipt)
         self._validate_target_process_id(target_process_id)
         if (
@@ -1067,6 +1614,24 @@ class RuntimeIntentClaimStore:
             gate=mappings["gate"],
             gate_decision_ref=gate_decision_ref,
         )
+        observation: AgentObservationV1 = base["observation"]
+        identity_hash = self._identity_hash(
+            observation.session_id,
+            observation.observation_id,
+        )
+        confirmation_evidence_ref = self._confirmation_resume_evidence_ref(
+            base,
+            identity_hash,
+            pending_error="verification checkpoint confirmation resume is unavailable",
+        )
+        if (
+            confirmation_evidence_ref is not None
+            and mappings["selection"].get("human_confirmation_evidence_ref")
+            != confirmation_evidence_ref
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint confirmation evidence ref mismatch"
+            )
         return marker
 
     @staticmethod
@@ -1297,6 +1862,402 @@ class RuntimeIntentClaimStore:
             )
         return marker
 
+    def _load_confirmation_request_by_identity(
+        self,
+        identity_hash: str,
+    ) -> tuple[bytes, dict[str, Any]]:
+        path = self._confirmation_request_path(identity_hash)
+        if not path.exists():
+            raise RuntimeIntentClaimStoreError("confirmation request is unavailable")
+        raw, marker = self._read_canonical_json(path, label="confirmation request")
+        session_id = marker.get("session_id")
+        observation_id = marker.get("observation_id")
+        if not isinstance(session_id, str) or not isinstance(observation_id, str):
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation request")
+        base = self._load_claim(session_id, observation_id)
+        loaded_raw, loaded = self._load_optional_confirmation_request(
+            identity_hash, base=base
+        )
+        if loaded is None or loaded_raw is None:
+            raise RuntimeIntentClaimStoreError("confirmation request is unavailable")
+        return loaded_raw, loaded
+
+    def _load_optional_confirmation_request(
+        self,
+        identity_hash: str,
+        *,
+        base: Mapping[str, Any],
+    ) -> tuple[bytes | None, dict[str, Any] | None]:
+        path = self._confirmation_request_path(identity_hash)
+        if not path.exists():
+            return None, None
+        raw, marker = self._read_canonical_json(path, label="confirmation request")
+        expected = {
+            "store_contract_version", "claim_id", "claim_content_sha256", "phase",
+            "confirmation_id", "session_id", "observation_id", "intent_id", "workflow",
+            "transition_id", "semantic_action", "request_capture_id",
+            "request_screenshot_sha256", "request_state_resolution_sha256",
+            "target_window_handle", "target_process_id", "requested_at", "expires_at",
+            "artifact_is_authorization", "grants_action_authority", "request_binding_sha256",
+        }
+        observation: AgentObservationV1 = base["observation"]
+        intent: AgentIntentV1 = base["intent"]
+        binding: RuntimeIntentServerBinding = base["server_binding"]
+        action = next(
+            (item for item in observation.available_actions if item.action_id == intent.action_id),
+            None,
+        )
+        if (
+            set(marker) != expected
+            or marker.get("store_contract_version") != CONFIRMATION_REQUEST_CONTRACT_VERSION
+            or marker.get("phase") != "confirmation_pending"
+            or marker.get("claim_id") != base["claim_id"]
+            or marker.get("claim_content_sha256") != base["claim_content_sha256"]
+            or marker.get("confirmation_id") != f"confirmation.{identity_hash}"
+            or marker.get("session_id") != observation.session_id
+            or marker.get("observation_id") != observation.observation_id
+            or marker.get("intent_id") != intent.intent_id
+            or marker.get("workflow") != observation.workflow.model_dump(mode="json")
+            or marker.get("transition_id") != intent.action_id
+            or action is None
+            or marker.get("semantic_action") != action.semantic_action
+            or action.requires_user_confirmation is not True
+            or marker.get("target_window_handle") != binding.target_window_handle
+            or marker.get("artifact_is_authorization") is not False
+            or marker.get("grants_action_authority") is not False
+            or marker.get("request_binding_sha256")
+            != _payload_sha256(
+                {key: value for key, value in marker.items() if key != "request_binding_sha256"}
+            )
+        ):
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation request")
+        for key in ("request_screenshot_sha256", "request_state_resolution_sha256"):
+            value = marker.get(key)
+            if not isinstance(value, str) or _SHA256_PATTERN.fullmatch(value) is None:
+                raise RuntimeIntentClaimStoreError("invalid or tampered confirmation request")
+        capture_id = marker.get("request_capture_id")
+        if not isinstance(capture_id, str) or _STABLE_ID_PATTERN.fullmatch(capture_id) is None:
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation request")
+        self._validate_target_process_id(marker.get("target_process_id"))
+        requested = self._parse_time(marker.get("requested_at"))
+        expires = self._parse_time(marker.get("expires_at"))
+        if expires - requested != timedelta(seconds=CONFIRMATION_TTL_SECONDS):
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation request")
+        return raw, marker
+
+    def _confirmation_resume_evidence_ref(
+        self,
+        base: Mapping[str, Any],
+        identity_hash: str,
+        *,
+        pending_error: str,
+    ) -> str | None:
+        request_raw, request = self._load_optional_confirmation_request(
+            identity_hash,
+            base=base,
+        )
+        if request_raw is None or request is None:
+            return None
+        decision_raw, decision = self._load_optional_confirmation_decision(
+            identity_hash,
+            base=base,
+            request_raw=request_raw,
+            request=request,
+        )
+        resume = self._load_optional_confirmation_resume(
+            identity_hash,
+            base=base,
+            request_raw=request_raw,
+            request=request,
+            decision_raw=decision_raw,
+            decision=decision,
+        )
+        closed = self._load_optional_confirmation_closed(
+            identity_hash,
+            base=base,
+            request_raw=request_raw,
+            request=request,
+            decision_raw=decision_raw,
+        )
+        if closed is not None:
+            raise RuntimeIntentClaimStoreError(
+                "closed confirmation cannot dispatch, verify, or terminalize"
+            )
+        if (
+            decision_raw is None
+            or decision is None
+            or decision.get("decision") != "approved"
+            or resume is None
+        ):
+            raise RuntimeIntentClaimStoreError(pending_error)
+        snapshot = self._confirmation_snapshot(
+            request_raw=request_raw,
+            request=request,
+            decision_raw=decision_raw,
+            decision=decision,
+            resume=resume,
+            closed=None,
+            workflow=base["observation"].workflow,
+        )
+        if not snapshot.evidence_ref:
+            raise RuntimeIntentClaimStoreError(
+                "confirmation evidence ref is unavailable"
+            )
+        return snapshot.evidence_ref
+
+    def _load_confirmation_decision(
+        self,
+        identity_hash: str,
+        *,
+        base: Mapping[str, Any],
+        request_raw: bytes,
+        request: Mapping[str, Any],
+    ) -> tuple[bytes, dict[str, Any]]:
+        raw, marker = self._load_optional_confirmation_decision(
+            identity_hash,
+            base=base,
+            request_raw=request_raw,
+            request=request,
+        )
+        if raw is None or marker is None:
+            raise RuntimeIntentClaimStoreError("confirmation decision is unavailable")
+        return raw, marker
+
+    def _load_optional_confirmation_decision(
+        self,
+        identity_hash: str,
+        *,
+        base: Mapping[str, Any],
+        request_raw: bytes | None,
+        request: Mapping[str, Any],
+    ) -> tuple[bytes | None, dict[str, Any] | None]:
+        path = self._confirmation_decision_path(identity_hash)
+        if not path.exists():
+            return None, None
+        if request_raw is None:
+            raise RuntimeIntentClaimStoreError("confirmation decision requires request")
+        raw, marker = self._read_canonical_json(path, label="confirmation decision")
+        expected = {
+            "store_contract_version", "claim_id", "claim_content_sha256", "phase",
+            "confirmation_id", "request_content_sha256", "decision", "decided_at",
+            "artifact_is_authorization", "grants_action_authority", "decision_binding_sha256",
+        }
+        if (
+            set(marker) != expected
+            or marker.get("store_contract_version") != CONFIRMATION_DECISION_CONTRACT_VERSION
+            or marker.get("phase") != "confirmation_decided"
+            or marker.get("claim_id") != base["claim_id"]
+            or marker.get("claim_content_sha256") != base["claim_content_sha256"]
+            or marker.get("confirmation_id") != request.get("confirmation_id")
+            or marker.get("request_content_sha256") != hashlib.sha256(request_raw).hexdigest()
+            or marker.get("decision") not in {"approved", "denied"}
+            or marker.get("artifact_is_authorization") is not False
+            or marker.get("grants_action_authority") is not False
+            or marker.get("decision_binding_sha256")
+            != _payload_sha256(
+                {key: value for key, value in marker.items() if key != "decision_binding_sha256"}
+            )
+        ):
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation decision")
+        self._parse_time(marker.get("decided_at"))
+        return raw, marker
+
+    def _load_optional_confirmation_resume(
+        self,
+        identity_hash: str,
+        *,
+        base: Mapping[str, Any],
+        request_raw: bytes | None,
+        request: Mapping[str, Any] | None,
+        decision_raw: bytes | None,
+        decision: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        path = self._confirmation_resume_path(identity_hash)
+        if not path.exists():
+            return None
+        if request_raw is None or request is None or decision_raw is None or decision is None:
+            raise RuntimeIntentClaimStoreError("confirmation resume requires approved decision")
+        _, marker = self._read_canonical_json(path, label="confirmation resume")
+        expected = {
+            "store_contract_version", "claim_id", "claim_content_sha256", "phase",
+            "confirmation_id", "request_content_sha256", "decision_content_sha256",
+            "resume_attempt_id", "started_at", "artifact_is_authorization",
+            "grants_action_authority", "resume_binding_sha256",
+        }
+        if (
+            set(marker) != expected
+            or marker.get("store_contract_version") != CONFIRMATION_RESUME_CONTRACT_VERSION
+            or marker.get("phase") != "confirmation_resume_started"
+            or marker.get("claim_id") != base["claim_id"]
+            or marker.get("claim_content_sha256") != base["claim_content_sha256"]
+            or marker.get("confirmation_id") != request.get("confirmation_id")
+            or marker.get("request_content_sha256") != hashlib.sha256(request_raw).hexdigest()
+            or marker.get("decision_content_sha256") != hashlib.sha256(decision_raw).hexdigest()
+            or decision.get("decision") != "approved"
+            or marker.get("artifact_is_authorization") is not False
+            or marker.get("grants_action_authority") is not False
+            or marker.get("resume_binding_sha256")
+            != _payload_sha256(
+                {key: value for key, value in marker.items() if key != "resume_binding_sha256"}
+            )
+        ):
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation resume")
+        resume_attempt_id = marker.get("resume_attempt_id")
+        if not isinstance(resume_attempt_id, str) or _STABLE_ID_PATTERN.fullmatch(resume_attempt_id) is None:
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation resume")
+        self._parse_time(marker.get("started_at"))
+        return marker
+
+    def _publish_confirmation_closed(
+        self,
+        identity_hash: str,
+        *,
+        base: Mapping[str, Any],
+        request_raw: bytes,
+        request: Mapping[str, Any],
+        decision_raw: bytes | None,
+        reason_code: Literal["confirmation_expired", "confirmation_stale"],
+    ) -> None:
+        marker = {
+            "store_contract_version": CONFIRMATION_CLOSED_CONTRACT_VERSION,
+            "claim_id": base["claim_id"],
+            "claim_content_sha256": base["claim_content_sha256"],
+            "phase": "confirmation_closed",
+            "confirmation_id": request["confirmation_id"],
+            "request_content_sha256": hashlib.sha256(request_raw).hexdigest(),
+            "decision_content_sha256": (
+                hashlib.sha256(decision_raw).hexdigest() if decision_raw else None
+            ),
+            "reason_code": reason_code,
+            "closed_at": self._format_time(self._utc_now()),
+            "artifact_is_authorization": False,
+            "grants_action_authority": False,
+        }
+        marker["closed_binding_sha256"] = _payload_sha256(marker)
+        try:
+            self._publish_bytes(
+                self._confirmation_closed_path(identity_hash),
+                _canonical_json_bytes(marker),
+            )
+        except _PublishedBytesConflict as exc:
+            raise RuntimeIntentClaimStoreError("confirmation close conflict") from exc
+
+    def _load_optional_confirmation_closed(
+        self,
+        identity_hash: str,
+        *,
+        base: Mapping[str, Any],
+        request_raw: bytes | None,
+        request: Mapping[str, Any] | None,
+        decision_raw: bytes | None,
+    ) -> dict[str, Any] | None:
+        path = self._confirmation_closed_path(identity_hash)
+        if not path.exists():
+            return None
+        if request_raw is None or request is None:
+            raise RuntimeIntentClaimStoreError("confirmation close requires request")
+        _, marker = self._read_canonical_json(path, label="confirmation close")
+        expected = {
+            "store_contract_version", "claim_id", "claim_content_sha256", "phase",
+            "confirmation_id", "request_content_sha256", "decision_content_sha256",
+            "reason_code", "closed_at", "artifact_is_authorization",
+            "grants_action_authority", "closed_binding_sha256",
+        }
+        expected_decision = hashlib.sha256(decision_raw).hexdigest() if decision_raw else None
+        if (
+            set(marker) != expected
+            or marker.get("store_contract_version") != CONFIRMATION_CLOSED_CONTRACT_VERSION
+            or marker.get("phase") != "confirmation_closed"
+            or marker.get("claim_id") != base["claim_id"]
+            or marker.get("claim_content_sha256") != base["claim_content_sha256"]
+            or marker.get("confirmation_id") != request.get("confirmation_id")
+            or marker.get("request_content_sha256") != hashlib.sha256(request_raw).hexdigest()
+            or marker.get("decision_content_sha256") != expected_decision
+            or marker.get("reason_code") not in {"confirmation_expired", "confirmation_stale"}
+            or marker.get("artifact_is_authorization") is not False
+            or marker.get("grants_action_authority") is not False
+            or marker.get("closed_binding_sha256")
+            != _payload_sha256(
+                {key: value for key, value in marker.items() if key != "closed_binding_sha256"}
+            )
+        ):
+            raise RuntimeIntentClaimStoreError("invalid or tampered confirmation close")
+        self._parse_time(marker.get("closed_at"))
+        return marker
+
+    @staticmethod
+    def _confirmation_snapshot(
+        *,
+        request_raw: bytes,
+        request: Mapping[str, Any],
+        decision_raw: bytes | None,
+        decision: Mapping[str, Any] | None,
+        resume: Mapping[str, Any] | None,
+        closed: Mapping[str, Any] | None,
+        workflow: Any,
+    ) -> RuntimeIntentConfirmationSnapshot:
+        decision_digest = hashlib.sha256(decision_raw).hexdigest() if decision_raw else None
+        evidence_ref = (
+            f"confirmation:{request['confirmation_id']}:{decision_digest}"
+            if decision_digest and decision and decision.get("decision") == "approved"
+            else ""
+        )
+        return RuntimeIntentConfirmationSnapshot(
+            confirmation_id=request["confirmation_id"],
+            request_content_sha256=hashlib.sha256(request_raw).hexdigest(),
+            session_id=request["session_id"],
+            observation_id=request["observation_id"],
+            intent_id=request["intent_id"],
+            workflow=workflow,
+            transition_id=request["transition_id"],
+            semantic_action=request["semantic_action"],
+            request_capture_id=request["request_capture_id"],
+            request_screenshot_sha256=request["request_screenshot_sha256"],
+            request_state_resolution_sha256=request["request_state_resolution_sha256"],
+            target_window_handle=request["target_window_handle"],
+            target_process_id=request["target_process_id"],
+            requested_at=request["requested_at"],
+            expires_at=request["expires_at"],
+            decision=decision.get("decision") if decision else None,
+            decision_content_sha256=decision_digest,
+            decided_at=decision.get("decided_at") if decision else None,
+            resume_attempt_id=resume.get("resume_attempt_id") if resume else None,
+            closed_reason_code=closed.get("reason_code") if closed else None,
+            evidence_ref=evidence_ref,
+        )
+
+    def _utc_now(self) -> datetime:
+        value = self._clock()
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise RuntimeIntentClaimStoreError("confirmation clock must return aware datetime")
+        return value.astimezone(timezone.utc).replace(microsecond=0)
+
+    @staticmethod
+    def _format_time(value: datetime) -> str:
+        return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    @staticmethod
+    def _parse_time(value: object) -> datetime:
+        if not isinstance(value, str) or not value.endswith("Z"):
+            raise RuntimeIntentClaimStoreError("confirmation timestamp is invalid")
+        try:
+            parsed = datetime.fromisoformat(f"{value[:-1]}+00:00")
+        except ValueError as exc:
+            raise RuntimeIntentClaimStoreError("confirmation timestamp is invalid") from exc
+        if parsed.tzinfo != timezone.utc:
+            raise RuntimeIntentClaimStoreError("confirmation timestamp is invalid")
+        return parsed
+
+    @staticmethod
+    def _confirmation_identity_hash(confirmation_id: str) -> str:
+        if (
+            not isinstance(confirmation_id, str)
+            or not confirmation_id.startswith("confirmation.")
+            or _SHA256_PATTERN.fullmatch(confirmation_id.removeprefix("confirmation.")) is None
+        ):
+            raise RuntimeIntentClaimStoreError("confirmation identity is invalid")
+        return confirmation_id.removeprefix("confirmation.")
+
     @staticmethod
     def _validate_observation(
         value: AgentObservationV1 | Mapping[str, object],
@@ -1357,6 +2318,11 @@ class RuntimeIntentClaimStore:
             self.dispatch_started_root,
             self.verification_pending_root,
             self.terminal_root,
+            self.confirmation_requests_root,
+            self.confirmation_decisions_root,
+            self.confirmation_resume_root,
+            self.confirmation_closed_root,
+            self.phase_locks_root,
         )
         for path in (self.project_root / "runtime_state", *paths):
             if path.exists() and self._is_reparse(path):
@@ -1399,6 +2365,50 @@ class RuntimeIntentClaimStore:
             self.verification_pending_root,
             f"{identity_hash}.json",
         )
+
+    def _confirmation_request_path(self, identity_hash: str) -> Path:
+        return self._bounded_path(self.confirmation_requests_root, f"{identity_hash}.json")
+
+    def _confirmation_decision_path(self, identity_hash: str) -> Path:
+        return self._bounded_path(self.confirmation_decisions_root, f"{identity_hash}.json")
+
+    def _confirmation_resume_path(self, identity_hash: str) -> Path:
+        return self._bounded_path(self.confirmation_resume_root, f"{identity_hash}.json")
+
+    def _confirmation_closed_path(self, identity_hash: str) -> Path:
+        return self._bounded_path(self.confirmation_closed_root, f"{identity_hash}.json")
+
+    def _phase_lock_path(self, identity_hash: str) -> Path:
+        return self._bounded_path(self.phase_locks_root, f"{identity_hash}.json")
+
+    @contextmanager
+    def _claim_phase_fence(self, identity_hash: str) -> Iterator[None]:
+        held = getattr(_PHASE_FENCE_STATE, "held", None)
+        if held is None:
+            held = set()
+            _PHASE_FENCE_STATE.held = held
+        if identity_hash in held:
+            yield
+            return
+        lock_path = self._phase_lock_path(identity_hash)
+        if self._is_reparse(lock_path):
+            raise RuntimeIntentClaimStoreError("claim phase lock reparse is forbidden")
+        with _PHASE_LOCK:
+            try:
+                with _exclusive_file_lock(lock_path, timeout_seconds=10.0):
+                    if self._is_reparse(lock_path):
+                        raise RuntimeIntentClaimStoreError(
+                            "claim phase lock reparse is forbidden"
+                        )
+                    held.add(identity_hash)
+                    try:
+                        yield
+                    finally:
+                        held.remove(identity_hash)
+            except TimeoutError as exc:
+                raise RuntimeIntentClaimStoreError(
+                    "claim phase transition lock timed out"
+                ) from exc
 
     def _bounded_path(self, parent: Path, filename: str) -> Path:
         if _SHA256_PATTERN.fullmatch(filename.removesuffix(".json")) is None:
@@ -1490,6 +2500,7 @@ class RuntimeIntentClaimStore:
 
 
 __all__ = [
+    "RuntimeIntentConfirmationSnapshot",
     "RuntimeIntentClaimSnapshot",
     "RuntimeIntentClaimStore",
     "RuntimeIntentClaimStoreError",

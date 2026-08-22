@@ -320,7 +320,54 @@ def select_verified_transition(
     *,
     semantic_action: str | None = None,
     transition_id: str | None = None,
-    human_confirmation: Mapping[str, Any] | bool | None = None,
+    human_confirmation: object | None = None,
+    current_observation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """公开选择器永远不接受调用方提供的确认权限。"""
+    return _select_verified_transition_impl(
+        asset,
+        state_resolution,
+        semantic_action=semantic_action,
+        transition_id=transition_id,
+        human_confirmation=None,
+        current_observation=current_observation,
+    )
+
+
+def _select_server_confirmed_transition(
+    asset: Mapping[str, Any],
+    state_resolution: Mapping[str, Any],
+    *,
+    semantic_action: str | None = None,
+    transition_id: str | None = None,
+    confirmation_evidence: object,
+    current_observation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """仅供 controller 使用已从权威 ledger 重读的确认快照。"""
+    from app.agent.runtime_intent_claim_store import (
+        _unwrap_server_confirmed_transition_evidence,
+    )
+
+    confirmation = _unwrap_server_confirmed_transition_evidence(
+        confirmation_evidence
+    )
+    return _select_verified_transition_impl(
+        asset,
+        state_resolution,
+        semantic_action=semantic_action,
+        transition_id=transition_id,
+        human_confirmation=confirmation,
+        current_observation=current_observation,
+    )
+
+
+def _select_verified_transition_impl(
+    asset: Mapping[str, Any],
+    state_resolution: Mapping[str, Any],
+    *,
+    semantic_action: str | None = None,
+    transition_id: str | None = None,
+    human_confirmation: object | None = None,
     current_observation: Mapping[str, Any],
 ) -> dict[str, Any]:
     """从严格 resolution 选择双向声明 transition；结果不含任何坐标。"""
@@ -375,8 +422,27 @@ def select_verified_transition(
             **context,
         )
     transition = candidates[0]
+    confirmation_ref = ""
     if transition["risk_policy"].get("requires_user_confirmation") is True:
-        return _failure("verified_transition_selection_v1", "human_review_required", transition_id=transition["transition_id"], **context)
+        try:
+            from app.agent.runtime_intent_claim_store import RuntimeIntentConfirmationSnapshot
+
+            confirmed = isinstance(human_confirmation, RuntimeIntentConfirmationSnapshot)
+        except ImportError:
+            confirmed = False
+        if (
+            not confirmed
+            or human_confirmation.decision != "approved"
+            or not human_confirmation.evidence_ref
+            or human_confirmation.workflow.asset_id != context["asset_id"]
+            or human_confirmation.workflow.asset_content_sha256 != context["asset_content_sha256"]
+            or human_confirmation.workflow.source_workflow_sha256 != context["source_workflow_sha256"]
+            or human_confirmation.workflow.reviewed_revision_hash != context["reviewed_revision_hash"]
+            or human_confirmation.transition_id != transition["transition_id"]
+            or human_confirmation.semantic_action != transition["semantic_action"]
+        ):
+            return _failure("verified_transition_selection_v1", "human_review_required", transition_id=transition["transition_id"], **context)
+        confirmation_ref = human_confirmation.evidence_ref
     target_ref = _transition_target_ref(transition)
     if not target_ref:
         return _failure("verified_transition_selection_v1", "target_unresolved", transition_id=transition["transition_id"], **context)
@@ -390,13 +456,18 @@ def select_verified_transition(
         "capture_lineage": deepcopy(lineage),
         "requirements": _selection_requirements(transition),
         "requires_user_confirmation": transition["risk_policy"].get("requires_user_confirmation") is True,
-        "human_confirmation_evidence_ref": "",
+        "human_confirmation_evidence_ref": confirmation_ref,
     }
     payload["selection_sha256"] = _selection_hash(payload)
     return _result("verified_transition_selection_v1", status="selected", **payload)
 
 
-def _validated_selection(asset: Mapping[str, Any], selection: Mapping[str, Any]) -> tuple[dict[str, Any] | None, Mapping[str, Any] | None, str | None]:
+def _validated_selection(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    *,
+    expected_confirmation_evidence_ref: str | None = None,
+) -> tuple[dict[str, Any] | None, Mapping[str, Any] | None, str | None]:
     canonical, context = _asset_context(asset)
     if (
         set(selection) != _SELECTION_KEYS
@@ -412,7 +483,13 @@ def _validated_selection(asset: Mapping[str, Any], selection: Mapping[str, Any])
     transition = _transition_by_id(canonical, _text(selection.get("transition_id")))
     if transition is None:
         return None, None, "selection_lineage_mismatch"
-    if transition["risk_policy"].get("requires_user_confirmation") is True:
+    requires_confirmation = transition["risk_policy"].get("requires_user_confirmation") is True
+    confirmation_ref = selection.get("human_confirmation_evidence_ref")
+    if requires_confirmation and (
+        not isinstance(expected_confirmation_evidence_ref, str)
+        or not expected_confirmation_evidence_ref
+        or confirmation_ref != expected_confirmation_evidence_ref
+    ):
         return None, None, "human_review_required"
     target_ref = _transition_target_ref(transition)
     if not target_ref:
@@ -432,7 +509,7 @@ def _validated_selection(asset: Mapping[str, Any], selection: Mapping[str, Any])
         require_exact=True,
     ) is None:
         return None, None, "selection_lineage_mismatch"
-    if selection.get("human_confirmation_evidence_ref") != "":
+    if not requires_confirmation and confirmation_ref != "":
         return None, None, "selection_lineage_mismatch"
     if _canonical_sha(selection.get("selection_sha256")) != _selection_hash(selection):
         return None, None, "selection_lineage_mismatch"
@@ -447,8 +524,61 @@ def validate_current_grounding(
     *,
     policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """公开 grounding 不接受调用方提供的确认权限。"""
+    return _validate_current_grounding_impl(
+        asset,
+        selection,
+        grounding_evidence,
+        gate_decision,
+        policy=policy,
+        expected_confirmation_evidence_ref=None,
+    )
+
+
+def _validate_server_confirmed_grounding(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    grounding_evidence: Mapping[str, Any],
+    gate_decision: Mapping[str, Any],
+    *,
+    confirmation_evidence: object,
+    policy: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """仅供 controller 校验 ledger-bound confirmation selection。"""
+    from app.agent.runtime_intent_claim_store import (
+        _unwrap_server_confirmed_transition_evidence,
+    )
+
+    confirmation = _unwrap_server_confirmed_transition_evidence(
+        confirmation_evidence
+    )
+    return _validate_current_grounding_impl(
+        asset,
+        selection,
+        grounding_evidence,
+        gate_decision,
+        policy=policy,
+        expected_confirmation_evidence_ref=(
+            confirmation.evidence_ref if confirmation is not None else None
+        ),
+    )
+
+
+def _validate_current_grounding_impl(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    grounding_evidence: Mapping[str, Any],
+    gate_decision: Mapping[str, Any],
+    *,
+    policy: Mapping[str, Any] | None = None,
+    expected_confirmation_evidence_ref: str | None = None,
+) -> dict[str, Any]:
     """校验当前 candidate 的严格 lineage、阈值、viewport 几何和 Gate 绑定。"""
-    _, transition, selection_error = _validated_selection(asset, selection)
+    _, transition, selection_error = _validated_selection(
+        asset,
+        selection,
+        expected_confirmation_evidence_ref=expected_confirmation_evidence_ref,
+    )
     if selection_error or transition is None:
         return _failure("current_grounding_validation_v1", selection_error or "selection_lineage_mismatch")
     expected_lineage = _capture_lineage(
@@ -553,7 +683,15 @@ def verify_transition_result(
     post_observation: Mapping[str, Any],
 ) -> dict[str, Any]:
     """校验可信 enriched adapter envelope，并只凭新 capture 的目标语义状态推进。"""
-    canonical, transition, selection_error = _validated_selection(asset, selection)
+    canonical, transition, selection_error = _validated_selection(
+        asset,
+        selection,
+        expected_confirmation_evidence_ref=(
+            selection.get("human_confirmation_evidence_ref")
+            if selection.get("requires_user_confirmation") is True
+            else None
+        ),
+    )
     if selection_error:
         return _failure("transition_verification_v1", selection_error, state_advanced=False)
     assert canonical is not None and transition is not None
@@ -661,7 +799,15 @@ def verify_server_dispatched_transition_result(
     server_evidence_refs: list[str],
 ) -> dict[str, Any]:
     """只凭服务端证据和 C1/C2 观察校验已派发 transition 的目标状态。"""
-    canonical, transition, selection_error = _validated_selection(asset, selection)
+    canonical, transition, selection_error = _validated_selection(
+        asset,
+        selection,
+        expected_confirmation_evidence_ref=(
+            selection.get("human_confirmation_evidence_ref")
+            if selection.get("requires_user_confirmation") is True
+            else None
+        ),
+    )
     if selection_error:
         return _failure("transition_verification_v1", selection_error, state_advanced=False)
     assert canonical is not None and transition is not None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -1681,4 +1682,608 @@ def test_verification_failed_requires_verification_pending(tmp_path: Path) -> No
             receipt=receipt,
             backend_receipt=_backend_for("DISPATCHED"),
             verification_evidence=verification,
+        )
+
+
+def _confirmation_contracts():
+    observation_payload = deepcopy(_observation_payload())
+    observation_payload["available_actions"][0]["requires_user_confirmation"] = True
+    observation = validate_agent_observation_v1(observation_payload)
+    intent = validate_agent_intent_v1(_intent_payload(), observation=observation)
+    return observation, intent
+
+
+def _confirmation_observation():
+    return _confirmation_contracts()[0]
+
+
+def _confirmation_intent():
+    return _confirmation_contracts()[1]
+
+
+def _confirmation_request_inputs() -> dict[str, object]:
+    observation, intent = _confirmation_contracts()
+    return {
+        "session_id": observation.session_id,
+        "observation_id": observation.observation_id,
+        "current_observation": {
+            "capture_id": "capture-confirmation",
+            "screenshot_sha256": "c" * 64,
+        },
+        "state_resolution": {"resolution_sha256": "d" * 64},
+        "transition_id": intent.action_id,
+        "semantic_action": "open_detail",
+        "target_process_id": 9001,
+    }
+
+
+def test_confirmation_request_rejects_action_that_does_not_require_confirmation(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    )
+    store.claim(observation=_observation(), intent=_intent(), server_binding=_binding())
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="requires_user_confirmation"):
+        store.mark_confirmation_pending(**_confirmation_request_inputs())
+
+
+def test_confirmation_request_and_decision_are_strict_idempotent_and_restart_safe(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    now = datetime(2026, 8, 22, 1, 2, 3, tzinfo=timezone.utc)
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        clock=lambda: now,
+    )
+    claim = store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+
+    pending = store.mark_confirmation_pending(**_confirmation_request_inputs())
+    assert pending.phase == "confirmation_pending"
+    confirmation = pending.confirmation
+    assert confirmation is not None
+    assert confirmation.session_id == claim.observation.session_id
+    assert confirmation.observation_id == claim.observation.observation_id
+    assert confirmation.intent_id == claim.intent.intent_id
+    assert confirmation.workflow == claim.observation.workflow
+    assert confirmation.transition_id == claim.intent.action_id
+    assert confirmation.semantic_action == "open_detail"
+    assert confirmation.target_window_handle == 7001
+    assert confirmation.target_process_id == 9001
+    assert confirmation.request_capture_id == "capture-confirmation"
+    assert confirmation.request_screenshot_sha256 == "c" * 64
+    assert confirmation.request_state_resolution_sha256 == "d" * 64
+    assert confirmation.requested_at == "2026-08-22T01:02:03Z"
+    assert confirmation.expires_at == "2026-08-22T01:07:03Z"
+    assert confirmation.artifact_is_authorization is False
+    assert confirmation.grants_action_authority is False
+    assert store.mark_confirmation_pending(**_confirmation_request_inputs()) == pending
+
+    mismatched_retry = _confirmation_request_inputs()
+    mismatched_retry["target_process_id"] = 9002
+    with pytest.raises(RuntimeIntentClaimStoreError, match="confirmation request conflict"):
+        store.mark_confirmation_pending(**mismatched_retry)
+
+    blocked_payload = _receipt_payload("BLOCKED")
+    blocked_payload["intent_id"] = claim.intent.intent_id
+    blocked_receipt = RuntimeResultReceiptV1.model_validate(blocked_payload)
+    with pytest.raises(RuntimeIntentClaimStoreError, match="confirmation_pending"):
+        store.persist_terminal(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+            receipt=blocked_receipt,
+        )
+
+    approved = store.record_confirmation_decision(
+        confirmation_id=confirmation.confirmation_id,
+        decision="approved",
+    )
+    assert approved.phase == "confirmation_approved"
+    assert approved.confirmation is not None
+    assert approved.confirmation.decision == "approved"
+    assert approved.confirmation.evidence_ref.startswith("confirmation:")
+
+    restarted = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        clock=lambda: now + timedelta(seconds=1),
+    )
+    recovered = restarted.record_confirmation_decision(
+        confirmation_id=confirmation.confirmation_id,
+        decision="approved",
+    )
+    assert recovered == approved
+
+
+def test_confirmation_opposite_decision_and_second_resume_fail_closed(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    now = datetime(2026, 8, 22, 1, 2, 3, tzinfo=timezone.utc)
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        clock=lambda: now,
+    )
+    store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    pending = store.mark_confirmation_pending(**_confirmation_request_inputs())
+    confirmation_id = pending.confirmation.confirmation_id
+    store.record_confirmation_decision(
+        confirmation_id=confirmation_id,
+        decision="approved",
+    )
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="decision conflict"):
+        store.record_confirmation_decision(
+            confirmation_id=confirmation_id,
+            decision="denied",
+        )
+
+    with pytest.raises(RuntimeIntentClaimStoreError, match="resume_started"):
+        store.mark_dispatch_started(
+            session_id=_observation().session_id,
+            observation_id=_observation().observation_id,
+        )
+    started = store.begin_confirmation_resume(confirmation_id=confirmation_id)
+    assert started.phase == "confirmation_resume_started"
+    dispatched = store.mark_dispatch_started(
+        session_id=_observation().session_id,
+        observation_id=_observation().observation_id,
+    )
+    assert dispatched.phase == "dispatch_started"
+    with pytest.raises(RuntimeIntentClaimStoreError, match="dispatch_started"):
+        store.close_confirmation(
+            confirmation_id=confirmation_id,
+            reason_code="confirmation_stale",
+        )
+    with pytest.raises(RuntimeIntentClaimStoreError, match="resume already started"):
+        RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+            clock=lambda: now + timedelta(seconds=1),
+        ).begin_confirmation_resume(confirmation_id=confirmation_id)
+
+
+def test_confirmation_evidence_ref_is_required_in_checkpoint_and_terminal_receipt(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    checkpoint_root = tmp_path / "checkpoint"
+    checkpoint_store = RuntimeIntentClaimStore(
+        project_root=checkpoint_root,
+        receipt_store=RuntimeReceiptStore(project_root=checkpoint_root),
+    )
+    checkpoint_store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    pending = checkpoint_store.mark_confirmation_pending(
+        **_confirmation_request_inputs()
+    )
+    confirmation_id = pending.confirmation.confirmation_id
+    approved = checkpoint_store.record_confirmation_decision(
+        confirmation_id=confirmation_id,
+        decision="approved",
+    )
+    evidence_ref = approved.confirmation.evidence_ref
+    checkpoint_store.begin_confirmation_resume(confirmation_id=confirmation_id)
+    checkpoint_store.mark_dispatch_started(
+        session_id=_confirmation_observation().session_id,
+        observation_id=_confirmation_observation().observation_id,
+    )
+
+    missing = _verification_checkpoint_inputs()
+    with pytest.raises(RuntimeIntentClaimStoreError, match="confirmation evidence"):
+        checkpoint_store.mark_verification_pending(
+            session_id=_confirmation_observation().session_id,
+            observation_id=_confirmation_observation().observation_id,
+            **missing,
+        )
+    wrong = _verification_checkpoint_inputs()
+    wrong["selection"]["human_confirmation_evidence_ref"] = "confirmation:wrong"
+    with pytest.raises(RuntimeIntentClaimStoreError, match="confirmation evidence"):
+        checkpoint_store.mark_verification_pending(
+            session_id=_confirmation_observation().session_id,
+            observation_id=_confirmation_observation().observation_id,
+            **wrong,
+        )
+    correct = _verification_checkpoint_inputs()
+    correct["selection"]["human_confirmation_evidence_ref"] = evidence_ref
+    checkpoint = checkpoint_store.mark_verification_pending(
+        session_id=_confirmation_observation().session_id,
+        observation_id=_confirmation_observation().observation_id,
+        **correct,
+    )
+    assert checkpoint.phase == "verification_pending"
+
+    terminal_root = tmp_path / "terminal"
+    terminal_store = RuntimeIntentClaimStore(
+        project_root=terminal_root,
+        receipt_store=RuntimeReceiptStore(project_root=terminal_root),
+    )
+    claim = terminal_store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    pending = terminal_store.mark_confirmation_pending(**_confirmation_request_inputs())
+    confirmation_id = pending.confirmation.confirmation_id
+    approved = terminal_store.record_confirmation_decision(
+        confirmation_id=confirmation_id,
+        decision="approved",
+    )
+    evidence_ref = approved.confirmation.evidence_ref
+    terminal_store.begin_confirmation_resume(confirmation_id=confirmation_id)
+    blocked_payload = _receipt_payload("BLOCKED")
+    blocked_payload["intent_id"] = claim.intent.intent_id
+    missing_receipt = RuntimeResultReceiptV1.model_validate(blocked_payload)
+    with pytest.raises(RuntimeIntentClaimStoreError, match="confirmation evidence"):
+        terminal_store.persist_terminal(
+            session_id=claim.observation.session_id,
+            observation_id=claim.observation.observation_id,
+            receipt=missing_receipt,
+        )
+    blocked_payload["evidence"]["trace_refs"].append(evidence_ref)
+    bound_receipt = RuntimeResultReceiptV1.model_validate(blocked_payload)
+    persisted = terminal_store.persist_terminal(
+        session_id=claim.observation.session_id,
+        observation_id=claim.observation.observation_id,
+        receipt=bound_receipt,
+    )
+    assert evidence_ref in persisted.evidence.trace_refs
+
+
+def test_confirmation_denial_and_expiry_are_durable_terminal_decisions(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    now = [datetime(2026, 8, 22, 1, 2, 3, tzinfo=timezone.utc)]
+    denied_store = RuntimeIntentClaimStore(
+        project_root=tmp_path / "denied",
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path / "denied"),
+        clock=lambda: now[0],
+    )
+    denied_store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    denied_pending = denied_store.mark_confirmation_pending(
+        **_confirmation_request_inputs()
+    )
+    denied = denied_store.record_confirmation_decision(
+        confirmation_id=denied_pending.confirmation.confirmation_id,
+        decision="denied",
+    )
+    assert denied.phase == "confirmation_denied"
+    with pytest.raises(RuntimeIntentClaimStoreError, match="not approved"):
+        denied_store.begin_confirmation_resume(
+            confirmation_id=denied_pending.confirmation.confirmation_id
+        )
+
+    expired_root = tmp_path / "expired"
+    expired_store = RuntimeIntentClaimStore(
+        project_root=expired_root,
+        receipt_store=RuntimeReceiptStore(project_root=expired_root),
+        clock=lambda: now[0],
+    )
+    expired_store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    expired_pending = expired_store.mark_confirmation_pending(
+        **_confirmation_request_inputs()
+    )
+    expired_store.record_confirmation_decision(
+        confirmation_id=expired_pending.confirmation.confirmation_id,
+        decision="approved",
+    )
+    now[0] += timedelta(minutes=5)
+    expired_decision = expired_store.record_confirmation_decision(
+        confirmation_id=expired_pending.confirmation.confirmation_id,
+        decision="approved",
+    )
+    assert expired_decision.phase == "confirmation_closed"
+    assert expired_decision.confirmation.closed_reason_code == "confirmation_expired"
+    assert expired_store.record_confirmation_decision(
+        confirmation_id=expired_pending.confirmation.confirmation_id,
+        decision="approved",
+    ) == expired_decision
+    assert expired_store.begin_confirmation_resume(
+        confirmation_id=expired_pending.confirmation.confirmation_id
+    ) == expired_decision
+    recovered = RuntimeIntentClaimStore(
+        project_root=expired_root,
+        receipt_store=RuntimeReceiptStore(project_root=expired_root),
+        clock=lambda: now[0],
+    ).get_for_observation(
+        session_id=_observation().session_id,
+        observation_id=_observation().observation_id,
+    )
+    assert recovered.phase == "confirmation_closed"
+    assert recovered.confirmation.closed_reason_code == "confirmation_expired"
+
+
+def test_confirmation_resume_has_one_winner_and_request_tamper_fails_closed(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    now = datetime(2026, 8, 22, 1, 2, 3, tzinfo=timezone.utc)
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        clock=lambda: now,
+    )
+    store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    pending = store.mark_confirmation_pending(**_confirmation_request_inputs())
+    confirmation_id = pending.confirmation.confirmation_id
+    store.record_confirmation_decision(
+        confirmation_id=confirmation_id,
+        decision="approved",
+    )
+    barrier = Barrier(2)
+    outcomes: list[str] = []
+
+    def contend() -> None:
+        contender = RuntimeIntentClaimStore(
+            project_root=tmp_path,
+            receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+            clock=lambda: now,
+        )
+        barrier.wait()
+        try:
+            contender.begin_confirmation_resume(confirmation_id=confirmation_id)
+            outcomes.append("winner")
+        except RuntimeIntentClaimStoreError as exc:
+            outcomes.append(str(exc))
+
+    threads = [Thread(target=contend), Thread(target=contend)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+    assert outcomes.count("winner") == 1
+    assert sum("resume already started" in item for item in outcomes) == 1
+
+    tamper_root = tmp_path / "tamper"
+    tampered = RuntimeIntentClaimStore(
+        project_root=tamper_root,
+        receipt_store=RuntimeReceiptStore(project_root=tamper_root),
+        clock=lambda: now,
+    )
+    tampered.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    tampered.mark_confirmation_pending(**_confirmation_request_inputs())
+    request_path = next(tampered.confirmation_requests_root.glob("*.json"))
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    request["target_process_id"] = 9002
+    request_path.write_text(
+        json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeIntentClaimStoreError, match="tampered"):
+        tampered.get_for_observation(
+            session_id=_observation().session_id,
+            observation_id=_observation().observation_id,
+        )
+
+
+def test_confirmation_close_vs_dispatch_has_one_legal_cross_process_winner(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+    import sys
+    import time
+
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    )
+    observation = _confirmation_observation()
+    store.claim(
+        observation=observation,
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    pending = store.mark_confirmation_pending(**_confirmation_request_inputs())
+    confirmation_id = pending.confirmation.confirmation_id
+    store.record_confirmation_decision(
+        confirmation_id=confirmation_id,
+        decision="approved",
+    )
+    store.begin_confirmation_resume(confirmation_id=confirmation_id)
+
+    worker = """
+import json
+from pathlib import Path
+import sys
+import time
+from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+root = Path(sys.argv[1])
+operation = sys.argv[2]
+start_at = float(sys.argv[3])
+confirmation_id = sys.argv[4]
+session_id = sys.argv[5]
+observation_id = sys.argv[6]
+store = RuntimeIntentClaimStore(
+    project_root=root,
+    receipt_store=RuntimeReceiptStore(project_root=root),
+)
+while time.time() < start_at:
+    time.sleep(0.001)
+try:
+    if operation == "close":
+        snapshot = store.close_confirmation(
+            confirmation_id=confirmation_id,
+            reason_code="confirmation_stale",
+        )
+    else:
+        snapshot = store.mark_dispatch_started(
+            session_id=session_id,
+            observation_id=observation_id,
+        )
+    print(json.dumps({"ok": True, "phase": snapshot.phase}))
+except Exception as exc:
+    print(json.dumps({"ok": False, "error": str(exc)}))
+"""
+    start_at = time.time() + 0.75
+    processes = []
+    for operation in ("close", "dispatch"):
+        processes.append(
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    worker,
+                    str(tmp_path),
+                    operation,
+                    str(start_at),
+                    confirmation_id,
+                    observation.session_id,
+                    observation.observation_id,
+                ],
+                cwd=Path(__file__).parents[1],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
+        )
+    results = []
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=20)
+        assert process.returncode == 0, stderr
+        results.append(json.loads(stdout.strip().splitlines()[-1]))
+
+    assert sum(result["ok"] is True for result in results) == 1
+    final = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+    ).get_for_observation(
+        session_id=observation.session_id,
+        observation_id=observation.observation_id,
+    )
+    if final.phase == "confirmation_closed":
+        assert not any(store.dispatch_started_root.glob("*.json"))
+    else:
+        assert final.phase == "dispatch_started"
+        assert not any(store.confirmation_closed_root.glob("*.json"))
+
+
+@pytest.mark.parametrize(
+    ("marker_kind", "field", "replacement"),
+    [
+        ("decision", "decision", "denied"),
+        ("resume", "resume_attempt_id", "resume.tampered"),
+        ("closed", "reason_code", "confirmation_expired"),
+    ],
+)
+def test_confirmation_marker_tamper_fails_closed(
+    tmp_path: Path,
+    marker_kind: str,
+    field: str,
+    replacement: str,
+) -> None:
+    from app.agent.runtime_intent_claim_store import (
+        RuntimeIntentClaimStore,
+        RuntimeIntentClaimStoreError,
+    )
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    store = RuntimeIntentClaimStore(
+        project_root=tmp_path,
+        receipt_store=RuntimeReceiptStore(project_root=tmp_path),
+        clock=lambda: datetime(2026, 8, 22, 1, 2, 3, tzinfo=timezone.utc),
+    )
+    store.claim(
+        observation=_confirmation_observation(),
+        intent=_confirmation_intent(),
+        server_binding=_binding(),
+    )
+    pending = store.mark_confirmation_pending(**_confirmation_request_inputs())
+    confirmation_id = pending.confirmation.confirmation_id
+    store.record_confirmation_decision(
+        confirmation_id=confirmation_id,
+        decision="approved",
+    )
+    if marker_kind == "resume":
+        store.begin_confirmation_resume(confirmation_id=confirmation_id)
+    if marker_kind == "closed":
+        store.close_confirmation(
+            confirmation_id=confirmation_id,
+            reason_code="confirmation_stale",
+        )
+    root = {
+        "decision": store.confirmation_decisions_root,
+        "resume": store.confirmation_resume_root,
+        "closed": store.confirmation_closed_root,
+    }[marker_kind]
+    path = next(root.glob("*.json"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[field] = replacement
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeIntentClaimStoreError, match="tampered"):
+        store.get_for_observation(
+            session_id=_observation().session_id,
+            observation_id=_observation().observation_id,
         )

@@ -137,6 +137,7 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 | UEI schemas, refs, registration, static projections | **Current — Contract Proof** | Canonical, provenance-preserving, non-authorizing evidence boundary. |
 | Reviewed Workflow v2 compiler and persistence | **Current — Contract Proof** | Offline compile/store/reload; publication grants no authority. |
 | Agent Observation / Intent / Receipt schemas and internal controller composition | **Partial — deterministic actual-adapter composition proof** | The production evidence-adapter class consumes an unmutated compiled asset and reaches an exactly paired `VERIFIED` terminal for `open_detail` with zero restart redispatch under deterministic dependencies. It has no public route or agent/demo callsite and is not real Windows/SEEK I/O or live proof. |
+| Server-owned one-shot confirmation and safe resume | **Partial — deterministic internal proof** | Immutable request/decision/resume/closed markers bind the exact claim, workflow revision/hashes, transition/action, capture/state evidence, HWND/PID, and fixed expiry. Approval is evidence only: exact Intent resubmission reacquires the lease and repeats C1, state resolution, re-grounding, Gate, visibility, one authority mint, one backend attempt, and C2 verification. There is no public approval route/panel callsite or live SEEK proof. |
 | Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
 | Built-in and OmniParser output entering one provider-neutral review model | **Partial** | UEI and Shadow foundations exist; the release vertical slice is not closed. |
@@ -207,9 +208,9 @@ Model weights and optional vision services are not distributed. Do not commit pr
 
 The remaining dependency-ordered release path is **Planned**, not current capability:
 
-> **W2 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → server-owned confirmation and bounded local public/demo callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out.**
+> **W2 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → bounded local public/demo confirmation callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out.**
 
-W1 runs in parallel but is required before W6. The current `open_apply_flow` fixture and ignored artifacts do not satisfy the Agent Observation confirmation, risk, and reviewed-release requirements; there is no public route, and confirmation execution currently hard-stops as `NEEDS_REVIEW`. Only after the release proof closes should more providers, Agent adapters, or workflow classes be considered.
+W1 runs in parallel but is required before W6. The server-owned ledger and deterministic Portfolio controller test now prove confirmation/restart safety internally, including a `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP` with zero form/Continue/final-submit scope. The current fixture and ignored artifacts still do not satisfy the human-reviewed W2 release evidence, there is no public approval route/panel callsite, and no actual Windows/SEEK execution was run. Only after the release proof closes should more providers, Agent adapters, or workflow classes be considered.
 
 Automatic provider selection, remote execution, raw-coordinate Agent authority, ATS traversal, form filling, upload, Continue/Next, and final submission are not Portfolio v1 capabilities.
 

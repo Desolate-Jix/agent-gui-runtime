@@ -21,6 +21,7 @@ from app.agent.desktop_backend import (
     _mint_execution_authority,
 )
 from app.agent.runtime_intent_claim_store import (
+    RuntimeIntentConfirmationSnapshot,
     RuntimeIntentClaimSnapshot,
     RuntimeIntentClaimStore,
     RuntimeIntentClaimStoreError,
@@ -32,6 +33,8 @@ from app.agent.reviewed_workflow_asset import (
     validate_reviewed_workflow_asset,
 )
 from app.agent.reviewed_workflow_replay import (
+    _select_server_confirmed_transition,
+    _validate_server_confirmed_grounding,
     resolve_current_state,
     select_verified_transition,
     validate_current_grounding,
@@ -73,6 +76,7 @@ class LiveSessionSnapshot:
 class LiveControllerDecision:
     status: str
     reason_code: str
+    confirmation_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,6 +225,7 @@ class _LiveSession:
     asset: dict[str, Any]
     window_lease: _WindowLease
     consumed: bool = False
+    confirmation: RuntimeIntentConfirmationSnapshot | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,6 +327,61 @@ class LiveController:
                 window_lease=lease,
             )
         return snapshot
+
+    def record_confirmation_decision(
+        self,
+        *,
+        confirmation_id: str,
+        decision: Literal["approved", "denied"],
+    ) -> LiveControllerDecision:
+        try:
+            pending = self._intent_claim_store.get_for_confirmation(
+                confirmation_id=confirmation_id
+            )
+            if pending.server_binding.to_dict() != {
+                "workflow_id": self._binding.workflow_id,
+                "asset_id": self._binding.asset_id,
+                "application_identity_key": self._binding.application_identity_key,
+                "target_window_handle": self._binding.target_window_handle,
+            }:
+                return LiveControllerDecision(
+                    "REJECTED", "confirmation_binding_mismatch", confirmation_id
+                )
+            claim = self._intent_claim_store.record_confirmation_decision(
+                confirmation_id=confirmation_id,
+                decision=decision,
+            )
+        except RuntimeIntentClaimStoreError as exc:
+            if "confirmation expired" in str(exc):
+                reason = "confirmation_expired"
+            elif "decision conflict" in str(exc):
+                reason = "confirmation_decision_conflict"
+            else:
+                reason = "confirmation_integrity_failed"
+            status = (
+                "REJECTED"
+                if reason in {"confirmation_expired", "confirmation_decision_conflict"}
+                else "RECOVERY_REQUIRED"
+            )
+            return LiveControllerDecision(status, reason, confirmation_id)
+        confirmation = claim.confirmation
+        if confirmation is None or confirmation.confirmation_id != confirmation_id:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED", "confirmation_integrity_failed", confirmation_id
+            )
+        if claim.phase == "confirmation_closed":
+            return LiveControllerDecision(
+                "REJECTED",
+                confirmation.closed_reason_code or "confirmation_stale",
+                confirmation_id,
+            )
+        if confirmation.decision == "denied":
+            return LiveControllerDecision("REJECTED", "confirmation_denied", confirmation_id)
+        if confirmation.decision == "approved":
+            return LiveControllerDecision("APPROVED", "confirmation_approved", confirmation_id)
+        return LiveControllerDecision(
+            "RECOVERY_REQUIRED", "confirmation_integrity_failed", confirmation_id
+        )
 
     def submit_intent(
         self,
@@ -466,7 +526,158 @@ class LiveController:
             )
         if claim.phase == "verification_pending":
             return self._recover_verification_pending(claim)
+        if claim.phase == "confirmation_pending":
+            confirmation_id = claim.confirmation.confirmation_id if claim.confirmation else None
+            return LiveControllerDecision(
+                "CONFIRMATION_REQUIRED",
+                "human_confirmation_required",
+                confirmation_id,
+            )
+        if claim.phase == "confirmation_denied":
+            confirmation_id = claim.confirmation.confirmation_id if claim.confirmation else None
+            return LiveControllerDecision("REJECTED", "confirmation_denied", confirmation_id)
+        if claim.phase == "confirmation_approved":
+            return self._resume_confirmed_claim(claim)
+        if claim.phase == "confirmation_resume_started":
+            confirmation_id = claim.confirmation.confirmation_id if claim.confirmation else None
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "confirmation_resume_indeterminate",
+                confirmation_id,
+            )
+        if claim.phase == "confirmation_closed":
+            confirmation = claim.confirmation
+            return LiveControllerDecision(
+                "REJECTED",
+                confirmation.closed_reason_code if confirmation else "confirmation_stale",
+                confirmation.confirmation_id if confirmation else None,
+            )
         return LiveControllerDecision("RECOVERY_REQUIRED", "observation_consumed")
+
+    def _resume_confirmed_claim(
+        self,
+        claim: RuntimeIntentClaimSnapshot,
+    ) -> RuntimeResultReceiptV1 | LiveControllerDecision:
+        confirmation = claim.confirmation
+        if confirmation is None or confirmation.decision != "approved":
+            return LiveControllerDecision("RECOVERY_REQUIRED", "confirmation_integrity_failed")
+        try:
+            if claim.server_binding.to_dict() != {
+                "workflow_id": self._binding.workflow_id,
+                "asset_id": self._binding.asset_id,
+                "application_identity_key": self._binding.application_identity_key,
+                "target_window_handle": self._binding.target_window_handle,
+            }:
+                return self._close_stale_confirmation(confirmation.confirmation_id)
+            asset = validate_reviewed_workflow_asset(
+                self._asset_loader.load_active(claim.observation.workflow.asset_id)
+            )
+            if (
+                asset["asset_id"] != claim.observation.workflow.asset_id
+                or content_sha256(asset) != claim.observation.workflow.asset_content_sha256
+                or asset["source_review_lineage"]["source_workflow_sha256"]
+                != claim.observation.workflow.source_workflow_sha256
+                or asset["source_review_lineage"]["reviewed_revision_hash"]
+                != claim.observation.workflow.reviewed_revision_hash
+                or self._asset_application_identity_key(asset)
+                != claim.server_binding.application_identity_key
+            ):
+                return self._close_stale_confirmation(confirmation.confirmation_id)
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED", "confirmation_integrity_failed", confirmation.confirmation_id
+            )
+        try:
+            lease = self._acquire_window_lease(claim.observation.session_id)
+        except Exception:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED", "window_lease_unavailable", confirmation.confirmation_id
+            )
+        try:
+            try:
+                started = self._intent_claim_store.begin_confirmation_resume(
+                    confirmation_id=confirmation.confirmation_id
+                )
+            except RuntimeIntentClaimStoreError as exc:
+                if "confirmation expired" in str(exc):
+                    return LiveControllerDecision(
+                        "REJECTED", "confirmation_expired", confirmation.confirmation_id
+                    )
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "confirmation_resume_indeterminate",
+                    confirmation.confirmation_id,
+                )
+            started_confirmation = started.confirmation
+            if started.phase == "confirmation_closed":
+                return LiveControllerDecision(
+                    "REJECTED",
+                    (
+                        started_confirmation.closed_reason_code
+                        if started_confirmation is not None
+                        else "confirmation_expired"
+                    ),
+                    confirmation.confirmation_id,
+                )
+            if started_confirmation is None:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "confirmation_integrity_failed",
+                    confirmation.confirmation_id,
+                )
+            session = _LiveSession(
+                snapshot=LiveSessionSnapshot(
+                    session_id=claim.observation.session_id,
+                    workflow=claim.observation.workflow,
+                    current_observation=claim.observation,
+                    target_window_handle=claim.server_binding.target_window_handle,
+                ),
+                asset=asset,
+                window_lease=lease,
+                consumed=True,
+                confirmation=started_confirmation,
+            )
+            result = self._execute_accepted_intent(session, claim.intent)
+            if isinstance(result, LiveControllerDecision):
+                return result
+            try:
+                return self._intent_claim_store.persist_terminal(
+                    session_id=claim.observation.session_id,
+                    observation_id=claim.observation.observation_id,
+                    receipt=result.receipt,
+                    backend_receipt=result.backend_receipt,
+                    verification_evidence=result.verification_evidence,
+                    next_observation=result.next_observation,
+                )
+            except RuntimeIntentClaimStoreError:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "receipt_persistence_failed",
+                    confirmation.confirmation_id,
+                )
+        finally:
+            self._release_window_lease(lease)
+
+    def _close_stale_confirmation(self, confirmation_id: str) -> LiveControllerDecision:
+        try:
+            closed = self._intent_claim_store.close_confirmation(
+                confirmation_id=confirmation_id,
+                reason_code="confirmation_stale",
+            )
+        except RuntimeIntentClaimStoreError:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED", "confirmation_integrity_failed", confirmation_id
+            )
+        confirmation = closed.confirmation
+        if (
+            closed.phase != "confirmation_closed"
+            or confirmation is None
+            or confirmation.closed_reason_code != "confirmation_stale"
+        ):
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED", "confirmation_integrity_failed", confirmation_id
+            )
+        return LiveControllerDecision("REJECTED", "confirmation_stale", confirmation_id)
 
     def _recover_verification_pending(
         self,
@@ -514,6 +725,7 @@ class LiveController:
             asset=asset,
             window_lease=lease,
             consumed=True,
+            confirmation=claim.confirmation,
         )
         try:
             result = self._verify_pending_checkpoint(session, claim.intent, checkpoint)
@@ -575,6 +787,11 @@ class LiveController:
         if projection_failure is not None:
             return LiveControllerDecision("RECOVERY_REQUIRED", projection_failure)
         current = dict(projected.current_observation)
+        if (
+            session.confirmation is not None
+            and projected.target_process_id != session.confirmation.target_process_id
+        ):
+            return self._close_stale_confirmation(session.confirmation.confirmation_id)
         if current.get("capture_id") == observation.current_capture.capture_id:
             return _ExecutionResult(
                 self._early_receipt(
@@ -602,13 +819,28 @@ class LiveController:
                     reason_code="target_unresolved",
                 )
             )
+        confirmation_evidence: object | None = None
         try:
-            selection = select_verified_transition(
-                session.asset,
-                state_resolution,
-                transition_id=intent.action_id,
-                current_observation=current,
-            )
+            if session.confirmation is not None:
+                confirmation_evidence = (
+                    self._intent_claim_store._get_server_confirmed_transition_evidence(
+                        confirmation_id=session.confirmation.confirmation_id
+                    )
+                )
+                selection = _select_server_confirmed_transition(
+                    session.asset,
+                    state_resolution,
+                    transition_id=intent.action_id,
+                    confirmation_evidence=confirmation_evidence,
+                    current_observation=current,
+                )
+            else:
+                selection = select_verified_transition(
+                    session.asset,
+                    state_resolution,
+                    transition_id=intent.action_id,
+                    current_observation=current,
+                )
         except Exception:
             return LiveControllerDecision(
                 "RECOVERY_REQUIRED",
@@ -617,13 +849,31 @@ class LiveController:
         if selection.get("status") != "selected":
             failure = str(selection.get("failure_code") or "target_unresolved")
             if failure == "human_review_required":
-                return _ExecutionResult(
-                    self._early_receipt(
-                        session=session,
-                        intent=intent,
-                        outcome="NEEDS_REVIEW",
-                        reason_code="needs_human_review",
+                try:
+                    pending = self._intent_claim_store.mark_confirmation_pending(
+                        session_id=session.snapshot.session_id,
+                        observation_id=observation.observation_id,
+                        current_observation=current,
+                        state_resolution=state_resolution,
+                        transition_id=intent.action_id,
+                        semantic_action=next(
+                            item.semantic_action
+                            for item in observation.available_actions
+                            if item.action_id == intent.action_id
+                        ),
+                        target_process_id=projected.target_process_id,
                     )
+                except (RuntimeIntentClaimStoreError, StopIteration):
+                    return LiveControllerDecision(
+                        "RECOVERY_REQUIRED", "confirmation_persistence_failed"
+                    )
+                confirmation_id = (
+                    pending.confirmation.confirmation_id if pending.confirmation else None
+                )
+                return LiveControllerDecision(
+                    "CONFIRMATION_REQUIRED",
+                    "human_confirmation_required",
+                    confirmation_id,
                 )
             return _ExecutionResult(
                 self._early_receipt(
@@ -723,13 +973,23 @@ class LiveController:
                 "gate_evaluation_failed",
             )
         try:
-            validation = validate_current_grounding(
-                session.asset,
-                selection,
-                grounding,
-                gate,
-                policy=self._grounding_policy,
-            )
+            if session.confirmation is not None:
+                validation = _validate_server_confirmed_grounding(
+                    session.asset,
+                    selection,
+                    grounding,
+                    gate,
+                    policy=self._grounding_policy,
+                    confirmation_evidence=confirmation_evidence,
+                )
+            else:
+                validation = validate_current_grounding(
+                    session.asset,
+                    selection,
+                    grounding,
+                    gate,
+                    policy=self._grounding_policy,
+                )
         except Exception:
             return LiveControllerDecision(
                 "RECOVERY_REQUIRED",
@@ -923,6 +1183,12 @@ class LiveController:
             checkpoint.gate_decision_ref,
             checkpoint.backend_receipt.receipt_ref,
             trace_ref,
+            *(
+                [session.confirmation.evidence_ref]
+                if session.confirmation is not None
+                and session.confirmation.evidence_ref
+                else []
+            ),
         ]
         try:
             verification = verify_server_dispatched_transition_result(
@@ -1300,7 +1566,15 @@ class LiveController:
                     "gate_decision_ref": gate_ref,
                     "backend_receipt_ref": backend_ref,
                     "verification_ref": verification_ref,
-                    "trace_refs": [f"trace:live-controller:{receipt_id}"],
+                    "trace_refs": [
+                        f"trace:live-controller:{receipt_id}",
+                        *(
+                            [session.confirmation.evidence_ref]
+                            if session.confirmation is not None
+                            and session.confirmation.evidence_ref
+                            else []
+                        ),
+                    ],
                 },
                 "next_observation_id": next_observation_id,
                 "safe_stop": {"required": reason_code != "none", "reason_code": reason_code},

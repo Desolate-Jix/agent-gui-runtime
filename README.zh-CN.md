@@ -135,6 +135,7 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 | UEI schemas、immutable refs、trusted registration 和静态 projection | **Current — Contract Proof** | 已有 canonical、保留 provenance、不可授权动作的 evidence boundary。 |
 | Reviewed Workflow v2 compiler 和内容寻址持久化 | **Current — Contract Proof** | 可离线编译、保存、检查并重新加载已审核语义资产；发布资产不等于执行许可。 |
 | Agent Observation / Intent / Receipt schemas 与内部 controller composition | **Partial — deterministic actual-adapter composition proof** | 生产 evidence-adapter 类会消费未经修改的 compiled asset，并在确定性依赖下让 `open_detail` 到达精确配对的 `VERIFIED` terminal；restart 后 zero redispatch。它没有公开 route 或 agent/demo callsite，也不是真实 Windows/SEEK I/O 或 live proof。 |
+| Server-owned one-shot confirmation 与安全恢复 | **Partial — deterministic internal proof** | Immutable request/decision/resume/closed marker 会绑定 exact claim、workflow revision/hashes、transition/action、capture/state evidence、HWND/PID 与固定过期时间。Approval 只是 evidence：exact Intent 重交后仍需重新获取 lease，并重做 C1、state resolution、re-grounding、Gate、visibility、一次 authority、一次 backend attempt 与 C2 verification。当前没有公开 approval route/panel callsite 或 live SEEK proof。 |
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
@@ -205,9 +206,9 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 以下剩余 release 工作按依赖顺序均为 **Planned**，不是当前能力：
 
-> **W2 人工审核的 Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → server-owned confirmation 与受限本地 public/demo callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。**
+> **W2 人工审核的 Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → 受限本地 public/demo approval callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。**
 
-W1 并行推进，但必须在 W6 前完成。当前 `open_apply_flow` fixture 和 ignored artifacts 不满足 Agent Observation 的 confirmation、risk 与 reviewed-release 要求；当前没有 public route，confirmation execution 会以 `NEEDS_REVIEW` hard stop。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
+W1 并行推进，但必须在 W6 前完成。Server-owned ledger 与确定性 Portfolio controller test 已在内部证明 confirmation/restart 安全，包括 `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP`，且不进入 form/Continue/final-submit 范围。当前 fixture 与 ignored artifacts 仍不满足 W2 人工审核 release evidence；当前没有公开 approval route/panel callsite，也没有运行真实 Windows/SEEK 执行。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
 
 Automatic provider selection、remote execution、raw-coordinate Agent authority、ATS traversal、表单填写、上传、Continue/Next 和 final submission 都不是 Portfolio v1 能力。
 

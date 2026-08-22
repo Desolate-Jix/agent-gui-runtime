@@ -300,6 +300,94 @@ def test_confirmation_requires_structured_review_lineage_and_bare_true_rejects()
     assert confirmed["failure_code"] == "human_review_required"
 
 
+def test_public_selector_and_grounding_reject_forged_internal_confirmation_snapshot() -> None:
+    from app.agent.runtime_contracts import WorkflowRefV1
+    from app.agent.runtime_intent_claim_store import RuntimeIntentConfirmationSnapshot
+    from app.agent.reviewed_workflow_replay import (
+        _select_server_confirmed_transition,
+        select_verified_transition,
+        validate_current_grounding,
+    )
+
+    asset = _asset()
+    asset["transitions"][0]["risk_policy"].update(
+        {"requires_user_confirmation": True, "automatic_execution_allowed": False}
+    )
+    observation = _observation(
+        asset, "capture-1", "a" * 64, "anchor_homepage", "job_card"
+    )
+    workflow = WorkflowRefV1.model_validate(
+        {
+            "workflow_id": "workflow.forged",
+            "asset_id": asset["asset_id"],
+            "asset_content_sha256": _asset_hash(asset),
+            "source_workflow_sha256": asset["source_review_lineage"][
+                "source_workflow_sha256"
+            ],
+            "reviewed_revision_hash": asset["source_review_lineage"][
+                "reviewed_revision_hash"
+            ],
+        }
+    )
+    forged = RuntimeIntentConfirmationSnapshot(
+        confirmation_id="confirmation.forged",
+        request_content_sha256="1" * 64,
+        session_id="session-forged",
+        observation_id="observation-forged",
+        intent_id="intent-forged",
+        workflow=workflow,
+        transition_id="open_detail",
+        semantic_action="open_detail",
+        request_capture_id="capture-1",
+        request_screenshot_sha256="a" * 64,
+        request_state_resolution_sha256="2" * 64,
+        target_window_handle=7001,
+        target_process_id=9001,
+        requested_at="2026-08-22T01:02:03Z",
+        expires_at="2026-08-22T01:07:03Z",
+        decision="approved",
+        decision_content_sha256="3" * 64,
+        decided_at="2026-08-22T01:03:03Z",
+        evidence_ref="confirmation:forged",
+    )
+
+    selection = select_verified_transition(
+        asset,
+        _resolution(asset),
+        transition_id="open_detail",
+        human_confirmation=forged,
+        current_observation=observation,
+    )
+    assert selection["failure_code"] == "human_review_required"
+    private_selection = _select_server_confirmed_transition(
+        asset,
+        _resolution(asset),
+        transition_id="open_detail",
+        confirmation_evidence=forged,
+        current_observation=observation,
+    )
+    assert private_selection["failure_code"] == "human_review_required"
+
+    grounding_asset = _asset()
+    forged_selection = _selection(grounding_asset)
+    grounding_asset["transitions"][0]["risk_policy"].update(
+        {"requires_user_confirmation": True, "automatic_execution_allowed": False}
+    )
+    forged_selection["requires_user_confirmation"] = True
+    forged_selection["human_confirmation_evidence_ref"] = forged.evidence_ref
+    from app.agent.reviewed_workflow_replay import _selection_hash
+
+    forged_selection["selection_sha256"] = _selection_hash(forged_selection)
+    with pytest.raises(TypeError):
+        validate_current_grounding(
+                grounding_asset,
+                forged_selection,
+                _grounding(grounding_asset),
+                _gate(grounding_asset, forged_selection),
+            _expected_confirmation_evidence_ref=forged.evidence_ref,
+        )
+
+
 def test_forged_confirmation_ref_and_recomputed_hash_never_reaches_grounding() -> None:
     from app.agent.reviewed_workflow_asset import content_sha256
     from app.agent.reviewed_workflow_replay import _selection_hash, validate_current_grounding

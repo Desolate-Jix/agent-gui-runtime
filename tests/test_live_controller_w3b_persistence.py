@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from threading import Event, Thread
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -15,6 +17,16 @@ from tests.test_live_controller_w4 import (
     _current_observation,
     _intent,
 )
+
+
+class _ConfirmationObservationSource(_ObservationSource):
+    def create_initial(self, **kwargs):
+        from app.agent.runtime_contracts import validate_agent_observation_v1
+
+        observation = super().create_initial(**kwargs)
+        payload = observation.model_dump(mode="json")
+        payload["available_actions"][0]["requires_user_confirmation"] = True
+        return validate_agent_observation_v1(payload)
 
 
 def _claim_store(tmp_path: Path):
@@ -37,13 +49,22 @@ def _controller(
     gate=None,
     backend=None,
     visibility=None,
+    target_window_handle: int = 6242,
 ):
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
 
     asset = asset or _asset()
     store = claim_store or _claim_store(tmp_path)
-    source = source or _ObservationSource(asset)
+    requires_confirmation = any(
+        transition.get("risk_policy", {}).get("requires_user_confirmation") is True
+        for transition in asset.get("transitions", [])
+    )
+    source = source or (
+        _ConfirmationObservationSource(asset)
+        if requires_confirmation
+        else _ObservationSource(asset)
+    )
     resolver = resolver or _TargetResolver()
     gate = gate or _Gate()
     backend = backend or DeterministicFakeBackend()
@@ -52,14 +73,14 @@ def _controller(
             workflow_id="workflow.seek.portfolio",
             asset_id=asset["asset_id"],
             application_identity_key="web:nz.seek.com",
-            target_window_handle=6242,
+            target_window_handle=target_window_handle,
         ),
         asset_loader=_TrustedAssetLoader(asset),
         observation_source=source,
         target_resolver=resolver,
         gate=gate,
         window_visibility_checker=visibility
-        or _WindowVisibilityChecker(bound_window_handle=6242),
+        or _WindowVisibilityChecker(bound_window_handle=target_window_handle),
         backend=backend,
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
         intent_claim_store=store,
@@ -572,14 +593,14 @@ def test_pre_dispatch_stage_exception_requires_recovery_without_retry(
     assert backend.attempt_count == 0
 
 
-def test_human_review_transition_returns_durable_needs_review(tmp_path: Path) -> None:
+def test_human_review_transition_returns_durable_confirmation_request(tmp_path: Path) -> None:
     asset = _asset()
     transition = next(
         item for item in asset["transitions"] if item["transition_id"] == "open_detail"
     )
     transition["risk_policy"]["requires_user_confirmation"] = True
     transition["risk_policy"]["automatic_execution_allowed"] = False
-    source = _ObservationSource(asset)
+    source = _ConfirmationObservationSource(asset)
     controller, store, _, _, _, backend = _controller(
         tmp_path,
         asset=asset,
@@ -589,15 +610,275 @@ def test_human_review_transition_returns_durable_needs_review(tmp_path: Path) ->
 
     result = controller.submit_intent(_intent(session))
 
-    assert (result.outcome, result.reason_code) == (
-        "NEEDS_REVIEW",
-        "needs_human_review",
+    assert (result.status, result.reason_code) == (
+        "CONFIRMATION_REQUIRED",
+        "human_confirmation_required",
     )
-    assert store.load_terminal_receipt(
+    assert result.confirmation_id
+    pending = store.get_for_observation(
         session_id=session.session_id,
         observation_id=session.current_observation.observation_id,
-    ) == result
+    )
+    assert pending.phase == "confirmation_pending"
+    assert pending.confirmation is not None
+    assert pending.confirmation.confirmation_id == result.confirmation_id
     assert backend.attempt_count == 0
+
+
+def test_approved_confirmation_resumes_after_restart_with_fresh_c1_and_one_dispatch(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    transition = next(
+        item for item in asset["transitions"] if item["transition_id"] == "open_detail"
+    )
+    transition["risk_policy"]["requires_user_confirmation"] = True
+    transition["risk_policy"]["automatic_execution_allowed"] = False
+    first, _, _, _, _, first_backend = _controller(tmp_path, asset=asset)
+    session = first.start_session()
+    payload = _intent(session)
+    pending = first.submit_intent(payload)
+
+    approved = first.record_confirmation_decision(
+        confirmation_id=pending.confirmation_id,
+        decision="approved",
+    )
+    assert (approved.status, approved.reason_code, approved.confirmation_id) == (
+        "APPROVED",
+        "confirmation_approved",
+        pending.confirmation_id,
+    )
+
+    restarted, store, source, resolver, gate, restarted_backend = _controller(
+        tmp_path,
+        asset=asset,
+        claim_store=_claim_store(tmp_path),
+    )
+    result = restarted.submit_intent(payload)
+    duplicate = restarted.submit_intent(payload)
+
+    assert result.outcome == "VERIFIED"
+    assert duplicate == result
+    assert first_backend.attempt_count == 0
+    assert restarted_backend.dispatch_count == 1
+    assert source.projected_calls == 2
+    assert resolver.calls == gate.calls == 1
+    terminal = store.get_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert terminal.phase == "terminal"
+    assert terminal.confirmation is not None
+    assert terminal.confirmation.evidence_ref in result.evidence.trace_refs
+    assert terminal.verification_checkpoint is not None
+    assert (
+        terminal.verification_checkpoint.selection["human_confirmation_evidence_ref"]
+        == terminal.confirmation.evidence_ref
+    )
+    same_decision_after_terminal = restarted.record_confirmation_decision(
+        confirmation_id=pending.confirmation_id,
+        decision="approved",
+    )
+    assert same_decision_after_terminal == approved
+
+
+def test_denied_and_expired_confirmation_are_durable_zero_dispatch_decisions(
+    tmp_path: Path,
+) -> None:
+    from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    asset = _asset()
+    transition = next(
+        item for item in asset["transitions"] if item["transition_id"] == "open_detail"
+    )
+    transition["risk_policy"]["requires_user_confirmation"] = True
+    transition["risk_policy"]["automatic_execution_allowed"] = False
+
+    denied, _, _, _, _, denied_backend = _controller(tmp_path / "denied", asset=asset)
+    denied_session = denied.start_session()
+    denied_payload = _intent(denied_session)
+    denied_pending = denied.submit_intent(denied_payload)
+    denied_decision = denied.record_confirmation_decision(
+        confirmation_id=denied_pending.confirmation_id,
+        decision="denied",
+    )
+    denied_retry = denied.submit_intent(denied_payload)
+    assert denied_decision == denied_retry == type(denied_decision)(
+        "REJECTED", "confirmation_denied", denied_pending.confirmation_id
+    )
+    assert denied_backend.attempt_count == 0
+
+    now = [datetime(2026, 8, 22, 1, 2, 3, tzinfo=timezone.utc)]
+    expired_root = tmp_path / "expired"
+    expired_store = RuntimeIntentClaimStore(
+        project_root=expired_root,
+        receipt_store=RuntimeReceiptStore(project_root=expired_root),
+        clock=lambda: now[0],
+    )
+    expired, _, source, resolver, gate, expired_backend = _controller(
+        expired_root,
+        asset=asset,
+        claim_store=expired_store,
+    )
+    expired_session = expired.start_session()
+    expired_payload = _intent(expired_session)
+    expired_pending = expired.submit_intent(expired_payload)
+    expired.record_confirmation_decision(
+        confirmation_id=expired_pending.confirmation_id,
+        decision="approved",
+    )
+    calls_before_retry = source.projected_calls
+    now[0] += timedelta(minutes=6)
+    expired_retry = expired.submit_intent(expired_payload)
+    exact_duplicate = expired.submit_intent(expired_payload)
+    assert expired_retry == exact_duplicate == type(expired_retry)(
+        "REJECTED", "confirmation_expired", expired_pending.confirmation_id
+    )
+    assert source.projected_calls == calls_before_retry
+    assert resolver.calls == gate.calls == expired_backend.attempt_count == 0
+
+    late_root = tmp_path / "late-approval"
+    now[0] = datetime(2026, 8, 22, 2, 0, 0, tzinfo=timezone.utc)
+    late_store = RuntimeIntentClaimStore(
+        project_root=late_root,
+        receipt_store=RuntimeReceiptStore(project_root=late_root),
+        clock=lambda: now[0],
+    )
+    late, _, _, _, _, late_backend = _controller(
+        late_root, asset=asset, claim_store=late_store
+    )
+    late_session = late.start_session()
+    late_pending = late.submit_intent(_intent(late_session))
+    now[0] += timedelta(minutes=6)
+    late_decision = late.record_confirmation_decision(
+        confirmation_id=late_pending.confirmation_id,
+        decision="approved",
+    )
+    assert late_decision == type(late_decision)(
+        "REJECTED", "confirmation_expired", late_pending.confirmation_id
+    )
+    assert late_backend.attempt_count == 0
+
+
+def test_stale_asset_closes_approval_and_never_dispatches_after_restore(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    transition = next(
+        item for item in asset["transitions"] if item["transition_id"] == "open_detail"
+    )
+    transition["risk_policy"]["requires_user_confirmation"] = True
+    transition["risk_policy"]["automatic_execution_allowed"] = False
+    first, _, _, _, _, _ = _controller(tmp_path, asset=asset)
+    session = first.start_session()
+    payload = _intent(session)
+    pending = first.submit_intent(payload)
+    first.record_confirmation_decision(
+        confirmation_id=pending.confirmation_id,
+        decision="approved",
+    )
+
+    stale_asset = deepcopy(asset)
+    stale_asset["application"]["display_name"] = "Changed reviewed application"
+    stale, _, stale_source, _, _, stale_backend = _controller(
+        tmp_path,
+        asset=stale_asset,
+        claim_store=_claim_store(tmp_path),
+    )
+    stale_result = stale.submit_intent(payload)
+    assert stale_result == type(stale_result)(
+        "REJECTED", "confirmation_stale", pending.confirmation_id
+    )
+    assert stale_source.projected_calls == stale_backend.attempt_count == 0
+
+    restored, store, restored_source, _, _, restored_backend = _controller(
+        tmp_path,
+        asset=asset,
+        claim_store=_claim_store(tmp_path),
+    )
+    duplicate = restored.submit_intent(payload)
+    assert duplicate == stale_result
+    assert restored_source.projected_calls == restored_backend.attempt_count == 0
+    closed = store.get_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert closed.phase == "confirmation_closed"
+    assert closed.confirmation.closed_reason_code == "confirmation_stale"
+
+
+def test_stale_pid_after_approval_closes_before_grounding_or_dispatch(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    transition = next(
+        item for item in asset["transitions"] if item["transition_id"] == "open_detail"
+    )
+    transition["risk_policy"]["requires_user_confirmation"] = True
+    transition["risk_policy"]["automatic_execution_allowed"] = False
+    first, _, _, _, _, _ = _controller(tmp_path, asset=asset)
+    session = first.start_session()
+    payload = _intent(session)
+    pending = first.submit_intent(payload)
+    first.record_confirmation_decision(
+        confirmation_id=pending.confirmation_id,
+        decision="approved",
+    )
+
+    source = _ConfirmationObservationSource(asset, target_process_id=9002)
+    restarted, store, _, resolver, gate, backend = _controller(
+        tmp_path,
+        asset=asset,
+        claim_store=_claim_store(tmp_path),
+        source=source,
+    )
+    result = restarted.submit_intent(payload)
+    duplicate = restarted.submit_intent(payload)
+    assert result == duplicate == type(result)(
+        "REJECTED", "confirmation_stale", pending.confirmation_id
+    )
+    assert source.projected_calls == 1
+    assert resolver.calls == gate.calls == backend.attempt_count == 0
+    closed = store.get_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert closed.phase == "confirmation_closed"
+
+
+def test_confirmation_decision_writer_must_match_exact_controller_binding(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    transition = next(
+        item for item in asset["transitions"] if item["transition_id"] == "open_detail"
+    )
+    transition["risk_policy"]["requires_user_confirmation"] = True
+    transition["risk_policy"]["automatic_execution_allowed"] = False
+    owner, store, _, _, _, owner_backend = _controller(tmp_path, asset=asset)
+    session = owner.start_session()
+    pending = owner.submit_intent(_intent(session))
+
+    wrong, _, _, _, _, wrong_backend = _controller(
+        tmp_path,
+        asset=asset,
+        claim_store=_claim_store(tmp_path),
+        target_window_handle=7000,
+    )
+    rejected = wrong.record_confirmation_decision(
+        confirmation_id=pending.confirmation_id,
+        decision="approved",
+    )
+    assert rejected == type(rejected)(
+        "REJECTED", "confirmation_binding_mismatch", pending.confirmation_id
+    )
+    persisted = store.get_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert persisted.phase == "confirmation_pending"
+    assert owner_backend.attempt_count == wrong_backend.attempt_count == 0
 
 
 @pytest.mark.parametrize(
