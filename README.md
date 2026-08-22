@@ -10,7 +10,7 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 **Perception is replaceable. Reviewed knowledge is durable.**
 
-**Target invariant:** Runtime Authority must be non-bypassable. **The internal W3b Windows composition is implemented and deterministic-test verified: it consumes observation-bound intent through current re-grounding and Gate to one guarded dispatch and a durable receipt. This is not Controlled Live Workflow Proof: W4 legacy-dispatch consolidation and W5 post-action semantic verification remain pending.**
+**Target invariant:** Runtime Authority must be non-bypassable. **The internal W3b Windows composition is implemented and deterministic-test verified. W4's internal authority stop is now verified: only `LiveController` mints one-time authority, the Windows backend is its sole consumer, and guarded raw input sinks fail closed. This is not Controlled Live Workflow Proof: W5 post-action semantic verification remains pending.**
 
 > **Target authority model:** Providers propose evidence. Agents propose semantic intent. The runtime alone grants bounded execution authority.
 
@@ -18,9 +18,9 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 *Sanitized workflow overview from the [earlier public showcase repository](https://github.com/Desolate-Jix/windows-gui-agent-runtime): reviewed interface knowledge guides intent, while the runtime must re-locate against the current observation and independently gate each action. This is a product-story illustration, not current Portfolio v1 live proof.*
 
-- **Today:** offline contract foundations; an internal server-owned W3b controller composition with durable intent/receipt records; and historical live GUI evidence.
+- **Today:** offline contract foundations; an internal server-owned W3b controller composition with durable intent/receipt records; W4 verified internal authority ownership; and historical live GUI evidence.
 - **Implemented internally:** reviewed asset -> passive bound-window capture -> observed UIA origin -> pinned recognition -> strict Observation/Intent -> current re-ground -> Gate -> exact pre-dispatch pixel freshness -> one-shot Windows backend -> durable receipt.
-- **Not yet:** W4 closure of legacy production mutation/dispatch bypasses, W5 post-action semantic effect/destination verification, Controlled Live Workflow Proof, public HTTP/demo callsites, external/remote Provider integration, or live external Agent adapters.
+- **Not yet:** W5 post-action semantic effect/destination verification, Controlled Live Workflow Proof, public HTTP/demo callsites, external/remote Provider integration, or live external Agent adapters.
 
 ## Why this runtime exists
 
@@ -55,7 +55,7 @@ This project does **not** race the perception releases of Qwen, OpenAI, Anthropi
 
 [![Historical Execute Mode panel](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
 
-**Evidence: historical showcase UI.** Inspect the intended Observation → available semantic actions → Gate → Trace surface. This panel does not prove W4 unique dispatch ownership or W5 semantic verification.
+**Evidence: historical showcase UI.** Inspect the intended Observation → available semantic actions → Gate → Trace surface. This panel is not the evidence for W4; current code audit and deterministic tests establish the internal authority boundary. It does not prove W5 semantic verification.
 
 ### Sanitized workflow sequence
 
@@ -98,7 +98,7 @@ The public architecture freezes four contracts:
 3. **Agent Runtime Contract** — Runtime exposes Observation/actions; Agent returns observation-bound semantic intent.
 4. **Runtime Result & Verification Receipt Contract** — distinguishes Gate, dispatch, effect, next state, and Safe Stop.
 
-Internal W3b composition is implemented and deterministic-test verified. It is not a live proof or public integration: W4 legacy dispatch consolidation and W5 post-action semantic verification remain incomplete:
+Internal W3b composition and the W4 authority boundary are deterministic-test and strict-audit verified. This remains an internal proof, not a live proof or public integration; W5 post-action semantic verification is incomplete:
 
 ```text
 Built-in fallback or trusted perception provider
@@ -146,7 +146,8 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
 | Built-in and OmniParser output entering one provider-neutral review model | **Partial** | UEI and Shadow foundations exist; the release vertical slice is not closed. |
 | Human review and workflow creation | **Partial** | Review UI, revisions, and graphs exist; v1 proof is incomplete. |
-| Mandatory current relocation, unique Gate dispatch, semantic verification, and durable live receipt | **Partial** | W3b proves the new internal controller path only. W4 remains Partial because legacy production mutation routes/clients can still bypass that owner; W5 semantic verification is not implemented. |
+| Current relocation, Gate, and unique dispatch authority (W4) | **Current — verified internal authority proof** | Only `LiveController` mints authority; `ExistingWindowsBackendAdapter` is the sole authority-scope consumer; guarded `InputController` / `WindowManager` raw sinks fail closed. This is deterministic internal evidence, not a live/control-workflow or public-integration claim. |
+| Post-action semantic verification and verified receipt promotion (W5) | **Partial** | A successful W3b action remains `DISPATCHED` + `verification_pending`; post-action capture, effect/destination verification, next observation, `VERIFIED` promotion, and Safe Stop remain incomplete. |
 | Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded one-shot Windows backend exist. It is not a public HTTP route, agent/demo callsite, or production-readiness claim. |
 | Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
@@ -209,13 +210,12 @@ Model weights and optional vision services are not distributed. Do not commit pr
 
 ## Target state and roadmap
 
-These items are **Planned**, not current capability:
+The immediate runtime critical path is **Planned**, not current capability:
 
-1. Close the Built-in/Omni -> UEI -> provider-neutral Review proof.
-2. Close or hard-bound legacy production mutation routes/clients so the W3b controller is the unique dispatch owner (W4).
-3. Add post-action capture and semantic effect/destination verification so `DISPATCHED` can become a verified receipt or Safe Stop (W5).
-4. Run the controlled live SEEK reference proof only after W4/W5 close, with matched positive and zero-click negative-control receipts.
-5. Only then consider more providers, Agent adapters, and workflow classes.
+1. Add post-action capture and semantic effect/destination verification so `DISPATCHED` can become a verified receipt or Safe Stop (W5).
+2. Run the controlled live SEEK reference proof only after W5 closes, with matched positive and zero-click negative-control receipts.
+3. In parallel, close the Built-in/Omni -> UEI -> provider-neutral Review proof required by the release package.
+4. Only after the release proof closes, consider more providers, Agent adapters, and workflow classes.
 
 Automatic provider selection, remote execution, raw-coordinate Agent authority, ATS traversal, form filling, upload, Continue/Next, and final submission are not Portfolio v1 capabilities.
 
