@@ -10,7 +10,7 @@
 
 **感知可以替换。经审核的知识可以持久复用。**
 
-**目标不变量：** Runtime Authority 必须不可绕过。**内部 W3b Windows composition 已实现并通过确定性测试；W4 内部 Authority 边界也已验证：只有 `LiveController` 能签发一次性 authority，Windows backend 是唯一 consumer，受保护的 raw input sink 默认拒绝绕过。这仍不是 Controlled Live Workflow Proof：W5 动作后语义验证尚未完成。**
+**目标不变量：** Runtime Authority 必须不可绕过。**内部 Windows composition 现在已在确定性测试中覆盖一次性 authority、受保护的 dispatch、全新 post-action observation、semantic destination verification 与 durable terminal receipt。这仍不是 Controlled Live Workflow Proof，也不是公开 Agent integration。**
 
 > **目标 Authority 模型：** Provider 只提出 evidence。Agent 只提出 semantic intent。只有 Runtime 能授予受限的执行权限。
 
@@ -18,9 +18,28 @@
 
 *来自[早期公开展示仓库](https://github.com/Desolate-Jix/windows-gui-agent-runtime)的脱敏 workflow 总览：经审核的界面知识用于约束 intent，而 Runtime 必须针对当前 observation 重新定位并独立 Gate 每次动作。这是产品故事示意，不是当前 Portfolio v1 live proof。*
 
-- **Today：** 离线合同基础；带 durable intent/receipt records 的内部 server-owned W3b controller composition；W4 已验证的内部 Authority ownership；以及历史 live GUI 证据。
-- **内部已实现：** reviewed asset → passive bound-window capture → observed UIA origin → pinned recognition → strict Observation/Intent → current re-ground → Gate → exact pre-dispatch pixel freshness → one-shot Windows backend → durable receipt。
-- **Not yet：** W5 动作后 semantic effect/destination verification、Controlled Live Workflow Proof、公开 HTTP/demo callsite、外部/远程 Provider 集成，或 live 外部 Agent adapter。
+### 来自早期公开展示仓库的产品界面
+
+> **历史展示 UI。** 这些面板让 Learn → Human Review → Runtime 的交接过程更直观。它们展示的是产品与设计沿革，不是当前 Portfolio v1 live proof；当前界面可能已经不同。
+
+<table>
+  <tr>
+    <td width="50%" align="center"><a href="docs/media/private-prototype-learn-mode.png"><img src="docs/media/private-prototype-learn-mode.png" alt="带 workflow graph 和框选界面 evidence 的历史 Learn Mode 面板" width="100%"></a></td>
+    <td width="50%" align="center"><a href="docs/media/private-prototype-execute-mode.png"><img src="docs/media/private-prototype-execute-mode.png" alt="带 runtime state、available actions、Gate 和 Trace 的历史 Execute Mode 面板" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td valign="top"><strong>Learn / Review</strong><br>审核者查看带框的界面 evidence、修正 semantic state，并连接可复用的 workflow graph。该面板不授予执行权限。</td>
+    <td valign="top"><strong>Execute / Runtime</strong><br>展示目标中的 current-state、available-action、Locate、Gate 与 Trace 界面。该图不证明当前 dispatch、observed semantic effect 或 live replay。</td>
+  </tr>
+</table>
+
+![脱敏的历史 workflow sequence](docs/media/private-prototype-seek.gif)
+
+*脱敏历史示意：results → detail → application-entry blocker / Safe Stop。它不是 Agent 实际运行录屏，也不证明 click、表单修改或提交。*
+
+- **Today：** 离线合同基础；带 durable intent、verification-checkpoint、backend 与 terminal receipt records 的内部 server-owned controller；以及历史 live GUI 证据。
+- **内部已实现：** reviewed asset → passive bound-window capture → observed UIA origin → pinned recognition → strict Observation/Intent → current re-ground → Gate → exact pre-dispatch pixel freshness → one-shot Windows backend → fresh C2 observation → semantic target-state verification → durable terminal receipt。
+- **Not yet：** actual-adapter composed positive proof、Controlled Live Workflow Proof、公开 HTTP/demo callsite、外部/远程 Provider 集成，或 live 外部 Agent adapter。
 
 ## 为什么需要这个 Runtime
 
@@ -40,30 +59,6 @@ screenshot → model → coordinate → click
 ```
 
 本项目**不与** Qwen、OpenAI、Anthropic、OmniParser 或其他 foundation-model/parser 团队竞争感知更新速度。更强的新感知能力可以接入 evidence boundary。仓库内置的 screenshot、UIA、OCR 和 recognition 是可用的 baseline/fallback，不是项目的 moat，也不代表已经具备通用视觉理解能力。
-
-## 产品界面导览
-
-> **历史展示 UI。** 以下面板来自[早期公开展示仓库](https://github.com/Desolate-Jix/windows-gui-agent-runtime)，用于直观说明产品工作流。它们只展示设计沿革，**不是当前 Portfolio v1 live proof**；当前界面和 Runtime 行为可能不同。
-
-### Learn / Review 面板
-
-[![历史 Learn Mode 面板](docs/media/private-prototype-learn-mode.png)](docs/media/private-prototype-learn-mode.png)
-
-**证据等级：历史展示 UI。** 审核采集的界面 evidence、批准 semantic state，并把它们连接成可复用 workflow graph。面板本身不授予执行权限。
-
-### Execute / Runtime 面板
-
-[![历史 Execute Mode 面板](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
-
-**证据等级：历史展示 UI。** 展示目标 Observation → available semantic actions → Gate → Trace 交互面。它不是 W4 的证明；W4 由当前代码审计与确定性测试支撑，也不证明 W5 semantic verification。
-
-### 脱敏 workflow sequence
-
-![脱敏的历史 workflow sequence](docs/media/private-prototype-seek.gif)
-
-**证据等级：脱敏历史展示。** 这段动画说明 reviewed results → detail → application-entry blocker / Safe Stop；它不是可复现 demo、live Agent proof，也不证明表单完成或提交。
-
-这些面板用于说明 **Learn → Human Review → Runtime** 的目标交接方式，不证明 current relocation、Gate lineage、semantic verification 或 autonomous replay 已完成。
 
 ## 与常见方案的区别
 
@@ -87,7 +82,7 @@ screenshot → model → coordinate → click
 6. **Relocate**：针对当前界面重新定位已审核目标；历史坐标只能作为 hint。
 7. **Gate**：结合当前窗口、候选、lineage、歧义和危险检查，最多开放一次受限尝试。
 8. **Execute**：通过位于 Runtime Authority 下方的内部 Desktop I/O backend seam 执行动作。W3b 已组合 reviewed asset、passive bound-window capture、真实 UIA origin、pinned recognition、strict intent、current re-ground、Gate、exact pixel freshness、one-shot Windows backend 和 durable receipt；确定性测试已验证这条内部路径。
-9. **Verify**：验证效果并生成 live receipt，或带诊断信息安全停止。W3b success 仍停在 `DISPATCHED` + `verification_pending`；W5 动作后 semantic effect/destination verification 尚未完成。
+9. **Verify**：验证效果并生成 receipt，或带诊断信息安全停止。内部 W5 slice 会获取全新的 C2 observation、验证 reviewed target-state identity，并且只允许与 checkpoint 精确配对的 terminal receipt 完成状态提升。actual-adapter positive composition 与 controlled live proof 仍未完成。
 
 ## Target authority architecture
 
@@ -98,7 +93,7 @@ screenshot → model → coordinate → click
 3. **Agent Runtime Contract** — Runtime 暴露 Observation 和可用语义动作；Agent 返回与 Observation 绑定的 semantic intent。
 4. **Runtime Result & Verification Receipt Contract** — outcome 明确区分 Gate、dispatch、observed effect、next state 和 Safe Stop。
 
-内部 W3b composition 与 W4 Authority boundary 已通过确定性测试和严格审计验证。它仍是内部 proof，不是 live proof 或公开 integration；W5 动作后 semantic verification 尚未完成：
+内部 W3b/W4/W5 controller slices 已通过确定性测试和严格审计验证，覆盖 current re-grounding、唯一 authority、受保护的 dispatch、全新 post-action observation、semantic destination verification，以及 checkpoint 与 terminal receipt 的精确配对。它仍是内部 proof，不是 controlled live proof、公开 route 或外部 Agent integration：
 
 ```text
 内置 fallback 或受信 perception provider
@@ -139,13 +134,13 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 | --- | --- | --- |
 | UEI schemas、immutable refs、trusted registration 和静态 projection | **Current — Contract Proof** | 已有 canonical、保留 provenance、不可授权动作的 evidence boundary。 |
 | Reviewed Workflow v2 compiler 和内容寻址持久化 | **Current — Contract Proof** | 可离线编译、保存、检查并重新加载已审核语义资产；发布资产不等于执行许可。 |
-| Agent Observation / Intent / Receipt schemas 与 W3b internal composition | **Partial — deterministic composition proof** | 内部路径绑定 exact session/capture/SHA/viewport/HWND/PID identity，重算 rank/margin，对 zero/low/ambiguous anchor 默认拒绝，并记录 duplicate-safe durable dispatch receipt。它没有公开 route 或 agent/demo callsite，也不是 live proof。 |
+| Agent Observation / Intent / Receipt schemas 与内部 controller composition | **Partial — deterministic composition proof** | 内部路径绑定 exact session/capture/SHA/viewport/HWND/PID identity，重算 rank/margin，对 zero/low/ambiguous anchor 默认拒绝，并记录 duplicate-safe durable dispatch 与 terminal receipts。它没有公开 route 或 agent/demo callsite，也不是 live proof。 |
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
 | 人工审核和应用范围 workflow 创建 | **Partial** | 已有 review UI、候选、revision 和 workflow graph；Portfolio v1 证据包尚未完成。 |
 | Current relocation、Gate 与唯一 dispatch authority（W4） | **Current — verified internal authority proof** | 只有 `LiveController` 能签发 authority；`ExistingWindowsBackendAdapter` 是唯一 authority-scope consumer；受保护的 `InputController` / `WindowManager` raw sink 默认拒绝绕过。这是确定性的内部证据，不是 live workflow 或公开 integration 主张。 |
-| 动作后 semantic verification 与 verified receipt promotion（W5） | **Partial** | W3b 成功动作仍停在 `DISPATCHED` + `verification_pending`；post-action capture、effect/destination verification、next observation、`VERIFIED` promotion 与 Safe Stop 尚未完成。 |
+| 动作后 semantic verification 与 verified receipt promotion（W5） | **Partial — deterministic internal proof** | controller 会执行全新 C2 observation、检查封闭的 `target_state_identity` rule、保存精确 verification lineage，并在不盲目重新 dispatch 的前提下终结为 `VERIFIED`、`VERIFICATION_FAILED` 或 `SAFE_STOP`。actual-adapter positive composition 与 controlled live evidence 仍未完成。 |
 | Desktop I/O Backend SPI | **Partial** | 已有内部 SPI、deterministic fake backend 和受保护的 one-shot Windows backend；它不是公开 HTTP route、agent/demo callsite 或 production-readiness 主张。 |
 | Primary / Assist / Automatic provider routing 和远程 Provider | **Planned** | 仅为 Target State；尚未实现自动 Provider fallback。 |
 | Live external Computer-Use Agent adapters | **Planned** | 今天没有任何 live-integrated 实现。 |
@@ -185,7 +180,7 @@ SEEK 只是 **reference workflow**，不是产品定位。Portfolio v1 的目标
 - **可持久化但不授权的资产：** workflow revision 和 hash 保存经审核知识，但 storage 不能变成权限。
 - **Semantic action taxonomy：** `open_detail`、`open_apply_flow` 与字段修改、继续流程和终端提交严格区分。
 - **Fail-closed ambiguity：** stale observation、错误窗口、identity 不匹配、unknown intent 和 ambiguous candidate 都是 zero-click outcome。
-- **Durable runtime receipts：** 内部 controller 会持久化精确的 dispatch/recovery outcome，并在 duplicate/restart lookup 后返回同一 terminal receipt；effect 与 destination proof 仍是独立且尚未完成的一步。
+- **Durable verification receipts：** 内部 controller 会持久化 dispatch、verification checkpoint、C2 evidence 和精确配对的 terminal receipt；duplicate/restart lookup 不会盲目重新 dispatch。如果在 terminal persistence 前崩溃，恢复时可能被动地重新 capture C2，但绝不会重新 dispatch 动作。这是确定性的内部证据，不是 live proof。
 
 ## 本地运行
 
@@ -208,12 +203,12 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ## Target State 与 Roadmap
 
-以下内容均为 **Planned**，不是当前能力：
+以下剩余 release 工作均为 **Planned**，不是当前能力：
 
-1. 闭合 Built-in/Omni → UEI → provider-neutral Review proof。
-2. 围绕现有 session/intent consumption、backend receipt 与 durable claim/receipt stores 完成 server-owned controller 的 production composition。
-3. 增加动作后 capture 与 semantic effect/destination verification，让每条 reviewed transition 都以 durable verified receipt 或 Safe Stop 结束。
-4. 为 Apply-entry safe-stop slice 发布匹配的正向和 zero-click negative-control receipts。
+1. 证明 compiled reviewed asset 与实际 Windows evidence adapter 不依赖 test-only mutation，也能进入内部 W5 verified terminal path。
+2. 通过 release proof 所需的受限 public/demo callsite 暴露 server-owned path。
+3. 运行 controlled live SEEK reference proof，并生成匹配的正向与 zero-click negative-control receipts。
+4. 并行闭合 Built-in/Omni → UEI → provider-neutral Review proof。
 5. 完成以上目标后，再考虑更多 Provider、外部 Agent adapter 和受限 workflow class。
 
 Automatic provider selection、remote execution、raw-coordinate Agent authority、ATS traversal、表单填写、上传、Continue/Next 和 final submission 都不是 Portfolio v1 能力。
