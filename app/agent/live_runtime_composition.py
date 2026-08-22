@@ -370,6 +370,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
         application = asset.get("application") if isinstance(asset.get("application"), Mapping) else {}
         canonical_origin = str(application.get("canonical_origin") or "")
         recognition_by_anchor: list[tuple[str, bytes]] = []
+        recognition_by_goal: dict[str, bytes] = {}
         anchor_evidence: list[dict[str, object]] = []
         if observed_origin and observed_origin == canonical_origin:
             uia_snapshot = _validated_uia_snapshot(
@@ -377,16 +378,20 @@ class ExistingWindowsCurrentEvidenceAdapter:
                 expected_identity=before,
             )
             for anchor in _all_unique_anchors(asset):
-                try:
-                    raw = self._recognition_runner(
-                        image_path=str(image_path),
-                        goal=str(anchor["label"]),
-                        provider_mode=self._provider_mode,
-                        uia_snapshot=uia_snapshot,
-                    )
-                    raw_bytes = _json_bytes(raw)
-                except Exception as exc:
-                    raise ValueError("current recognition failed for a reviewed anchor") from exc
+                goal = str(anchor["label"])
+                raw_bytes = recognition_by_goal.get(goal)
+                if raw_bytes is None:
+                    try:
+                        raw = self._recognition_runner(
+                            image_path=str(image_path),
+                            goal=goal,
+                            provider_mode=self._provider_mode,
+                            uia_snapshot=uia_snapshot,
+                        )
+                        raw_bytes = _json_bytes(raw)
+                    except Exception as exc:
+                        raise ValueError("current recognition failed for a reviewed anchor") from exc
+                    recognition_by_goal[goal] = raw_bytes
                 recognition_by_anchor.append((str(anchor["anchor_id"]), raw_bytes))
                 try:
                     candidates, local = _parse_recognition(_json_mapping(raw_bytes))

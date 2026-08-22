@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 from hashlib import sha256
 import inspect
@@ -389,6 +390,54 @@ def test_capture_current_uses_passive_exact_image_bytes_and_current_anchor_refs(
     assert all(current["capture_id"] in item["evidence_ref"] for item in current["observed_anchor_evidence"])
     assert all(call["image_path"] == str(screenshot.paths[0].resolve()) for call in runner.calls)
     assert all(call["provider_mode"] is None for call in runner.calls)
+
+
+def test_capture_reuses_exact_goal_only_within_one_current_capture(tmp_path: Path) -> None:
+    asset = _asset()
+    entry = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
+    entry["identity_anchors"] = [
+        {"anchor_id": "anchor_homepage", "label": "Shared identity", "kind": "text"},
+        {"anchor_id": "job_card", "label": "Shared identity", "kind": "text"},
+        {"anchor_id": "unique_identity", "label": "Unique identity", "kind": "text"},
+    ]
+    runner = _RecognitionRunner(
+        {
+            "Shared identity": _recognition("Shared identity", role="text"),
+            "Unique identity": _recognition("Unique identity", role="text"),
+        }
+    )
+    screenshot = _ScreenshotService(tmp_path)
+    adapter, *_ = _adapter(
+        tmp_path,
+        asset,
+        manager=_WindowManager(*[_bound() for _ in range(6)]),
+        screenshot=screenshot,
+        runner=runner,
+    )
+
+    captures = [
+        adapter.capture_current(
+            session_id="session-current",
+            asset=asset,
+            target_window_handle=4242,
+        )
+        for _ in range(2)
+    ]
+
+    expected_anchor_ids = {"anchor_homepage", "job_card", "unique_identity"}
+    assert all(
+        {item["anchor_id"] for item in capture["observed_anchor_evidence"]}
+        == expected_anchor_ids
+        for capture in captures
+    )
+    calls_by_capture_and_goal = Counter(
+        (str(call["image_path"]), str(call["goal"])) for call in runner.calls
+    )
+    assert set(calls_by_capture_and_goal.values()) == {1}
+    for capture_path in screenshot.paths:
+        resolved_path = str(capture_path.resolve())
+        assert calls_by_capture_and_goal[(resolved_path, "Shared identity")] == 1
+        assert calls_by_capture_and_goal[(resolved_path, "Unique identity")] == 1
 
 
 @pytest.mark.parametrize(
