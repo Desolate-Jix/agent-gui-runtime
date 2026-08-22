@@ -170,6 +170,53 @@ def test_compiles_reviewed_seek_path_to_safe_stop_boundary_without_writing_store
     assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
 
 
+@pytest.mark.parametrize(
+    ("semantic_action", "edge_id", "success_condition"),
+    [
+        ("open_detail", "home_to_detail", "Job detail identity is visible"),
+        ("open_apply_flow", "detail_to_apply", "Same-site application entry is visible"),
+    ],
+)
+def test_compiled_transition_uses_closed_target_state_identity_post_verification_rule(
+    tmp_path: Path,
+    semantic_action: str,
+    edge_id: str,
+    success_condition: str,
+) -> None:
+    from app.agent.reviewed_workflow_compiler import _safe_id
+
+    review = _base_review()
+    source_edge = next(item for item in review["edges"] if item["edge_id"] == edge_id)
+    source_edge["success_conditions"] = [f"  {success_condition}  "]
+    source, digest = _persist_reviewed_workflow(tmp_path, review)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "compiled"
+    transition = next(
+        item
+        for item in result["asset"]["transitions"]
+        if item["semantic_action"] == semantic_action
+    )
+    expected_rule_id = _safe_id(
+        "rule_",
+        f"{edge_id}:target_state_identity:{transition['target_state_id']}",
+    )
+    assert transition["post_action_verification"] == {
+        "requires_new_capture": True,
+        "semantic_success_rules": [
+            {"rule_id": expected_rule_id, "type": "target_state_identity"}
+        ],
+    }
+    assert transition["expected_effect"]["semantic_success_rules"] == [
+        {
+            "rule_id": _safe_id("rule_", f"{edge_id}:success_conditions:1"),
+            "type": "source_semantic_success_condition",
+            "condition": success_condition,
+        }
+    ]
+
+
 def test_blocks_mismatched_source_sha_and_registry_record(tmp_path: Path) -> None:
     source, digest = _persist_reviewed_workflow(tmp_path)
     from app.agent.reviewed_workflow_compiler import compile_reviewed_workflow_asset_v2

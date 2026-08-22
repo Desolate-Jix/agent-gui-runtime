@@ -63,9 +63,20 @@ def test_actual_server_loaded_workflow_projects_real_semantic_action(tmp_path: P
     observation = _adapt(tmp_path, asset)
     assert observation.state.source_interface_id == "items"
     entry = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
-    assert [item.action_id for item in observation.available_actions] == [entry["allowed_transition_ids"][0], "runtime.safe_stop"]
+    transition_id = entry["allowed_transition_ids"][0]
+    transition = next(
+        item for item in asset["transitions"] if item["transition_id"] == transition_id
+    )
+    identity_rule = transition["post_action_verification"]["semantic_success_rules"][0]
+    rule_digest = sha256(
+        f"transition:{transition_id}:rule:{identity_rule['rule_id']}".encode("utf-8")
+    ).hexdigest()
+    assert identity_rule["type"] == "target_state_identity"
+    assert [item.action_id for item in observation.available_actions] == [transition_id, "runtime.safe_stop"]
     assert observation.available_actions[0].semantic_action == "open_detail"
-    assert observation.available_actions[0].verification_rule_refs[0].startswith(f"content-sha256:{observation.workflow.asset_content_sha256}:")
+    assert observation.available_actions[0].verification_rule_refs == [
+        f"content-sha256:{observation.workflow.asset_content_sha256}:{rule_digest}"
+    ]
     assert observation.semantic_facts[0].capture_id is None
 
 

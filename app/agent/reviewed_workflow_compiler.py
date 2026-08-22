@@ -472,6 +472,14 @@ def compile_reviewed_workflow_asset_v2(
             reasons.append(_reason("edge_target_element_invalid", "edge target control or region must exist in reviewed source node", edge_id=edge_id, source_node_id=source_id))
             continue
         transition_id = _safe_id("transition_", edge_id)
+        target_state_id = state_ids[target_id]
+        target_identity_rule = {
+            "rule_id": _safe_id(
+                "rule_",
+                f"{edge_id}:target_state_identity:{target_state_id}",
+            ),
+            "type": "target_state_identity",
+        }
         requires_user_confirmation = edge.get("requires_user_confirmation")
         if not isinstance(requires_user_confirmation, bool):
             reasons.append(
@@ -494,7 +502,7 @@ def compile_reviewed_workflow_asset_v2(
             {
                 "transition_id": transition_id,
                 "source_state_id": state_ids[source_id],
-                "target_state_id": state_ids[target_id],
+                "target_state_id": target_state_id,
                 "semantic_action": action,
                 "display_name": _text(edge.get("operation_id") or edge_id),
                 "element_ref": element_ref,
@@ -503,8 +511,8 @@ def compile_reviewed_workflow_asset_v2(
                     "preconditions": reviewed_preconditions,
                     "failure_conditions": failure_rules,
                 },
-                "expected_effect": {"semantic_success": {"target_state_id": state_ids[target_id]}, "semantic_success_rules": deepcopy(success_rules)},
-                "post_action_verification": {"requires_new_capture": True, "semantic_success_rules": success_rules},
+                "expected_effect": {"semantic_success": {"target_state_id": target_state_id}, "semantic_success_rules": deepcopy(success_rules)},
+                "post_action_verification": {"requires_new_capture": True, "semantic_success_rules": [target_identity_rule]},
                 "recovery_policy": _recovery_policy(),
                 "risk_policy": risk_policy,
             }
