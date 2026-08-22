@@ -8,7 +8,7 @@ Portfolio v1 仍是单一 live controller；敌对并发文件系统交换与分
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import os
@@ -38,10 +38,22 @@ from app.agent.runtime_receipt_store import (
 
 CLAIM_CONTRACT_VERSION = "runtime_intent_claim_v1"
 DISPATCH_MARKER_CONTRACT_VERSION = "runtime_intent_dispatch_started_v1"
+VERIFICATION_PENDING_CONTRACT_VERSION = "runtime_intent_verification_pending_v1"
 TERMINAL_MARKER_CONTRACT_VERSION = "runtime_intent_terminal_v1"
 STORE_ROOT = Path("runtime_state/runtime-intent-claims-v1")
 _STABLE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_OPAQUE_REF_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_CURRENT_OBSERVATION_KEYS = {
+    "contract_version",
+    "asset_id",
+    "expected_asset_content_sha256",
+    "capture_id",
+    "screenshot_sha256",
+    "viewport_size",
+    "origin",
+    "observed_anchor_evidence",
+}
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _PHASE_LOCK = RLock()
 
@@ -121,13 +133,53 @@ class RuntimeIntentServerBinding:
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeVerificationPendingCheckpoint:
+    """只读 verification resume 快照；属性每次返回独立 JSON 副本。"""
+
+    claim_id: str
+    claim_content_sha256: str
+    checkpoint_sha256: str
+    gate_decision_ref: str
+    backend_receipt: BackendDispatchReceipt
+    _current_observation_json: bytes = field(repr=False)
+    _selection_json: bytes = field(repr=False)
+    _grounding_json: bytes = field(repr=False)
+    _gate_json: bytes = field(repr=False)
+    grants_action_authority: Literal[False] = False
+    artifact_is_authorization: Literal[False] = False
+
+    @staticmethod
+    def _mapping(raw: bytes) -> dict[str, Any]:
+        value = json.loads(raw.decode("utf-8"))
+        assert isinstance(value, dict)
+        return value
+
+    @property
+    def current_observation(self) -> dict[str, Any]:
+        return self._mapping(self._current_observation_json)
+
+    @property
+    def selection(self) -> dict[str, Any]:
+        return self._mapping(self._selection_json)
+
+    @property
+    def grounding(self) -> dict[str, Any]:
+        return self._mapping(self._grounding_json)
+
+    @property
+    def gate(self) -> dict[str, Any]:
+        return self._mapping(self._gate_json)
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeIntentClaimSnapshot:
     claim_id: str
     claim_content_sha256: str
-    phase: Literal["claimed", "dispatch_started", "terminal"]
+    phase: Literal["claimed", "dispatch_started", "verification_pending", "terminal"]
     observation: AgentObservationV1
     intent: AgentIntentV1
     server_binding: RuntimeIntentServerBinding
+    verification_checkpoint: RuntimeVerificationPendingCheckpoint | None
     terminal_receipt_ref: dict[str, str] | None
     recovery_required: bool
     grants_action_authority: Literal[False] = False
@@ -172,6 +224,7 @@ class RuntimeIntentClaimStore:
         self.root = self.project_root / STORE_ROOT
         self.claims_root = self.root / "claims"
         self.dispatch_started_root = self.root / "dispatch-started"
+        self.verification_pending_root = self.root / "verification-pending"
         self.terminal_root = self.root / "terminal"
         self._receipt_store = receipt_store
         self._ensure_layout()
@@ -237,6 +290,10 @@ class RuntimeIntentClaimStore:
                 raise RuntimeIntentClaimStoreError(
                     "terminal claim cannot return to dispatch_started"
                 )
+            if self._verification_pending_path(identity_hash).exists():
+                raise RuntimeIntentClaimStoreError(
+                    "verification_pending claim cannot return to dispatch_started"
+                )
             existing_receipt = self._find_receipt(base)
             if existing_receipt is not None:
                 self._commit_terminal(base, existing_receipt)
@@ -274,6 +331,60 @@ class RuntimeIntentClaimStore:
                 observation_id=observation_id,
             )
 
+    def mark_verification_pending(
+        self,
+        *,
+        session_id: str,
+        observation_id: str,
+        current_observation: Mapping[str, object],
+        selection: Mapping[str, object],
+        grounding: Mapping[str, object],
+        gate: Mapping[str, object],
+        gate_decision_ref: str,
+        backend_receipt: BackendDispatchReceipt,
+    ) -> RuntimeIntentClaimSnapshot:
+        """封存 definitive dispatch 后只读 verification 所需的 server evidence。"""
+
+        with _PHASE_LOCK:
+            base = self._load_claim(session_id, observation_id)
+            identity_hash = self._identity_hash(session_id, observation_id)
+            if self._terminal_path(identity_hash).exists() or self._find_receipt(base) is not None:
+                raise RuntimeIntentClaimStoreError(
+                    "terminal claim cannot return to verification_pending"
+                )
+            dispatch_marker = self._load_optional_marker(
+                self._dispatch_path(identity_hash),
+                expected_contract=DISPATCH_MARKER_CONTRACT_VERSION,
+                expected_phase="dispatch_started",
+                base=base,
+            )
+            if dispatch_marker is None:
+                raise RuntimeIntentClaimStoreError(
+                    "verification_pending requires dispatch_started"
+                )
+            marker = self._verification_pending_marker(
+                base,
+                current_observation=current_observation,
+                selection=selection,
+                grounding=grounding,
+                gate=gate,
+                gate_decision_ref=gate_decision_ref,
+                backend_receipt=backend_receipt,
+            )
+            try:
+                self._publish_bytes(
+                    self._verification_pending_path(identity_hash),
+                    _canonical_json_bytes(marker),
+                )
+            except _PublishedBytesConflict as exc:
+                raise RuntimeIntentClaimStoreError(
+                    "verification_pending phase conflict"
+                ) from exc
+            return self.get_for_observation(
+                session_id=session_id,
+                observation_id=observation_id,
+            )
+
     def find_for_observation(
         self,
         *,
@@ -297,16 +408,21 @@ class RuntimeIntentClaimStore:
         observation_id: str,
         receipt: RuntimeResultReceiptV1,
         backend_receipt: BackendDispatchReceipt | None = None,
+        verification_evidence: Mapping[str, object] | None = None,
+        next_observation: AgentObservationV1 | Mapping[str, object] | None = None,
     ) -> RuntimeResultReceiptV1:
         """先封存 Receipt record，再提交 terminal marker 并重读精确结果。"""
 
         with _PHASE_LOCK:
             base = self._load_claim(session_id, observation_id)
             self._validate_receipt_lineage(base, receipt)
+            self._validate_terminal_phase(base, receipt)
             try:
                 receipt_ref = self._receipt_store.put(
                     receipt,
                     backend_receipt=backend_receipt,
+                    verification_evidence=verification_evidence,
+                    next_observation=next_observation,
                 )
             except RuntimeReceiptStoreError as exc:
                 raise RuntimeIntentClaimStoreError(
@@ -357,6 +473,14 @@ class RuntimeIntentClaimStore:
                 expected_phase="dispatch_started",
                 base=base,
             )
+            verification_marker = self._load_verification_pending_marker(
+                self._verification_pending_path(identity_hash),
+                base=base,
+            )
+            if verification_marker is not None and dispatch_marker is None:
+                raise RuntimeIntentClaimStoreError(
+                    "verification_pending requires dispatch_started"
+                )
             terminal_marker = self._load_optional_marker(
                 self._terminal_path(identity_hash),
                 expected_contract=TERMINAL_MARKER_CONTRACT_VERSION,
@@ -377,6 +501,7 @@ class RuntimeIntentClaimStore:
                     self._validate_attempt_phase(
                         receipt_record.runtime_receipt,
                         dispatch_started=dispatch_marker is not None,
+                        verification_pending=verification_marker is not None,
                     )
                     self._publish_terminal_marker(base, receipt_record)
                     terminal_marker = self._load_optional_marker(
@@ -389,12 +514,18 @@ class RuntimeIntentClaimStore:
                 self._validate_attempt_phase(
                     receipt_record.runtime_receipt,
                     dispatch_started=dispatch_marker is not None,
+                    verification_pending=verification_marker is not None,
                 )
-                phase: Literal["claimed", "dispatch_started", "terminal"] = "terminal"
+                phase: Literal[
+                    "claimed", "dispatch_started", "verification_pending", "terminal"
+                ] = "terminal"
                 terminal_ref = {
                     "receipt_id": receipt_record.runtime_receipt.receipt_id,
                     "content_sha256": receipt_record.content_sha256,
                 }
+            elif verification_marker is not None:
+                phase = "verification_pending"
+                terminal_ref = None
             elif dispatch_marker is not None:
                 phase = "dispatch_started"
                 terminal_ref = None
@@ -408,6 +539,11 @@ class RuntimeIntentClaimStore:
                 observation=base["observation"],
                 intent=base["intent"],
                 server_binding=base["server_binding"],
+                verification_checkpoint=(
+                    self._checkpoint_snapshot(verification_marker)
+                    if verification_marker is not None
+                    else None
+                ),
                 terminal_receipt_ref=terminal_ref,
                 recovery_required=phase != "terminal",
             )
@@ -531,9 +667,14 @@ class RuntimeIntentClaimStore:
             expected_phase="dispatch_started",
             base=base,
         )
+        verification_marker = self._load_verification_pending_marker(
+            self._verification_pending_path(identity_hash),
+            base=base,
+        )
         self._validate_attempt_phase(
             receipt.runtime_receipt,
             dispatch_started=dispatch_marker is not None,
+            verification_pending=verification_marker is not None,
         )
         self._publish_terminal_marker(base, receipt)
 
@@ -566,11 +707,42 @@ class RuntimeIntentClaimStore:
         except _PublishedBytesConflict as exc:
             raise RuntimeIntentClaimStoreError("terminal phase conflict") from exc
 
+    def _validate_terminal_phase(
+        self,
+        base: Mapping[str, Any],
+        receipt: RuntimeResultReceiptV1,
+    ) -> None:
+        observation: AgentObservationV1 = base["observation"]
+        identity_hash = self._identity_hash(
+            observation.session_id,
+            observation.observation_id,
+        )
+        dispatch_marker = self._load_optional_marker(
+            self._dispatch_path(identity_hash),
+            expected_contract=DISPATCH_MARKER_CONTRACT_VERSION,
+            expected_phase="dispatch_started",
+            base=base,
+        )
+        verification_marker = self._load_verification_pending_marker(
+            self._verification_pending_path(identity_hash),
+            base=base,
+        )
+        if verification_marker is not None and dispatch_marker is None:
+            raise RuntimeIntentClaimStoreError(
+                "verification_pending requires dispatch_started"
+            )
+        self._validate_attempt_phase(
+            receipt,
+            dispatch_started=dispatch_marker is not None,
+            verification_pending=verification_marker is not None,
+        )
+
     @staticmethod
     def _validate_attempt_phase(
         receipt: RuntimeResultReceiptV1,
         *,
         dispatch_started: bool,
+        verification_pending: bool,
     ) -> None:
         if receipt.attempt_count == 1 and not dispatch_started:
             raise RuntimeIntentClaimStoreError(
@@ -579,6 +751,13 @@ class RuntimeIntentClaimStore:
         if receipt.attempt_count == 0 and dispatch_started:
             raise RuntimeIntentClaimStoreError(
                 "attempt_count 0 receipt must terminalize from claimed"
+            )
+        semantic_w5 = receipt.outcome in {"VERIFIED", "VERIFICATION_FAILED"} or (
+            receipt.outcome == "SAFE_STOP" and receipt.dispatch_status == "dispatched"
+        )
+        if semantic_w5 and not verification_pending:
+            raise RuntimeIntentClaimStoreError(
+                "semantic terminal receipt requires verification_pending"
             )
 
     @staticmethod
@@ -590,6 +769,323 @@ class RuntimeIntentClaimStore:
             "phase": "dispatch_started",
             "artifact_is_authorization": False,
         }
+
+    def _verification_pending_marker(
+        self,
+        base: Mapping[str, Any],
+        *,
+        current_observation: Mapping[str, object],
+        selection: Mapping[str, object],
+        grounding: Mapping[str, object],
+        gate: Mapping[str, object],
+        gate_decision_ref: str,
+        backend_receipt: BackendDispatchReceipt,
+    ) -> dict[str, object]:
+        mappings = {
+            "current_observation": self._checkpoint_mapping(
+                current_observation, label="current observation"
+            ),
+            "selection": self._checkpoint_mapping(selection, label="selection"),
+            "grounding": self._checkpoint_mapping(grounding, label="grounding"),
+            "gate": self._checkpoint_mapping(gate, label="gate"),
+        }
+        self._validate_definitive_backend_receipt(backend_receipt)
+        if (
+            not isinstance(gate_decision_ref, str)
+            or _OPAQUE_REF_PATTERN.fullmatch(gate_decision_ref) is None
+        ):
+            raise RuntimeIntentClaimStoreError("gate decision ref is invalid")
+        self._validate_checkpoint_lineage(
+            base,
+            current_observation=mappings["current_observation"],
+            selection=mappings["selection"],
+            grounding=mappings["grounding"],
+            gate=mappings["gate"],
+            gate_decision_ref=gate_decision_ref,
+        )
+        marker: dict[str, object] = {
+            "store_contract_version": VERIFICATION_PENDING_CONTRACT_VERSION,
+            "claim_id": base["claim_id"],
+            "claim_content_sha256": base["claim_content_sha256"],
+            "phase": "verification_pending",
+            **mappings,
+            "gate_decision_ref": gate_decision_ref,
+            "backend_receipt": asdict(backend_receipt),
+            "artifact_is_authorization": False,
+            "grants_action_authority": False,
+        }
+        marker["checkpoint_sha256"] = _payload_sha256(marker)
+        return marker
+
+    def _load_verification_pending_marker(
+        self,
+        path: Path,
+        *,
+        base: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        _, marker = self._read_canonical_json(
+            path,
+            label="verification_pending marker",
+        )
+        expected_keys = {
+            "store_contract_version",
+            "claim_id",
+            "claim_content_sha256",
+            "phase",
+            "current_observation",
+            "selection",
+            "grounding",
+            "gate",
+            "gate_decision_ref",
+            "backend_receipt",
+            "artifact_is_authorization",
+            "grants_action_authority",
+            "checkpoint_sha256",
+        }
+        digest_payload = dict(marker)
+        checkpoint_sha256 = digest_payload.pop("checkpoint_sha256", None)
+        if (
+            set(marker) != expected_keys
+            or marker.get("store_contract_version")
+            != VERIFICATION_PENDING_CONTRACT_VERSION
+            or marker.get("phase") != "verification_pending"
+            or marker.get("claim_id") != base["claim_id"]
+            or marker.get("claim_content_sha256") != base["claim_content_sha256"]
+            or marker.get("artifact_is_authorization") is not False
+            or marker.get("grants_action_authority") is not False
+            or checkpoint_sha256 != _payload_sha256(digest_payload)
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "invalid or tampered verification_pending marker"
+            )
+        backend_payload = marker.get("backend_receipt")
+        if not isinstance(backend_payload, Mapping) or set(backend_payload) != {
+            "receipt_ref",
+            "status",
+            "reason_code",
+        }:
+            raise RuntimeIntentClaimStoreError(
+                "invalid or tampered verification_pending backend receipt"
+            )
+        backend_receipt = BackendDispatchReceipt(
+            receipt_ref=backend_payload.get("receipt_ref"),  # type: ignore[arg-type]
+            status=backend_payload.get("status"),  # type: ignore[arg-type]
+            reason_code=backend_payload.get("reason_code"),  # type: ignore[arg-type]
+        )
+        self._validate_definitive_backend_receipt(backend_receipt)
+        mappings = {}
+        for field_name in ("current_observation", "selection", "grounding", "gate"):
+            mappings[field_name] = self._checkpoint_mapping(
+                marker.get(field_name),  # type: ignore[arg-type]
+                label=field_name.replace("_", " "),
+            )
+        gate_decision_ref = marker.get("gate_decision_ref")
+        if (
+            not isinstance(gate_decision_ref, str)
+            or _OPAQUE_REF_PATTERN.fullmatch(gate_decision_ref) is None
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "invalid or tampered verification_pending gate ref"
+            )
+        self._validate_checkpoint_lineage(
+            base,
+            current_observation=mappings["current_observation"],
+            selection=mappings["selection"],
+            grounding=mappings["grounding"],
+            gate=mappings["gate"],
+            gate_decision_ref=gate_decision_ref,
+        )
+        return marker
+
+    @staticmethod
+    def _checkpoint_mapping(
+        value: Mapping[str, object],
+        *,
+        label: str,
+    ) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise RuntimeIntentClaimStoreError(f"{label} checkpoint input must be a mapping")
+        try:
+            cloned = json.loads(_canonical_json_bytes(value).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeIntentClaimStoreError(
+                f"{label} checkpoint input is invalid"
+            ) from exc
+        if not isinstance(cloned, dict):
+            raise RuntimeIntentClaimStoreError(f"{label} checkpoint input must be a mapping")
+        RuntimeIntentClaimStore._reject_action_authority(cloned, path=label)
+        return cloned
+
+    @staticmethod
+    def _reject_action_authority(value: object, *, path: str) -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                normalized = str(key).lower()
+                if normalized in {
+                    "artifact_is_authorization",
+                    "grants_action_authority",
+                    "execute_binding_enabled",
+                }:
+                    if nested is not False:
+                        raise RuntimeIntentClaimStoreError(
+                            f"{path} cannot grant action authority or authorization"
+                        )
+                elif (
+                    "authority" in normalized
+                    or "authorization" in normalized
+                    or normalized in {
+                        "token",
+                        "approved_plan",
+                        "approved_to_click",
+                        "approved_to_dispatch",
+                    }
+                ):
+                    raise RuntimeIntentClaimStoreError(
+                        f"{path} cannot carry authority or authorization tokens"
+                    )
+                RuntimeIntentClaimStore._reject_action_authority(
+                    nested,
+                    path=f"{path}.{key}",
+                )
+        elif isinstance(value, list):
+            for index, nested in enumerate(value):
+                RuntimeIntentClaimStore._reject_action_authority(
+                    nested,
+                    path=f"{path}[{index}]",
+                )
+
+    @staticmethod
+    def _validate_definitive_backend_receipt(value: object) -> None:
+        if (
+            not isinstance(value, BackendDispatchReceipt)
+            or not isinstance(value.receipt_ref, str)
+            or _OPAQUE_REF_PATTERN.fullmatch(value.receipt_ref) is None
+            or value.status != "dispatched"
+            or value.reason_code != "none"
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification_pending requires a definitive dispatched backend receipt"
+            )
+
+    @staticmethod
+    def _validate_checkpoint_lineage(
+        base: Mapping[str, Any],
+        *,
+        current_observation: Mapping[str, Any],
+        selection: Mapping[str, Any],
+        grounding: Mapping[str, Any],
+        gate: Mapping[str, Any],
+        gate_decision_ref: str,
+    ) -> None:
+        observation: AgentObservationV1 = base["observation"]
+        intent: AgentIntentV1 = base["intent"]
+        workflow = observation.workflow
+        if (
+            set(current_observation) != _CURRENT_OBSERVATION_KEYS
+            or current_observation.get("contract_version")
+            != "reviewed_workflow_current_observation_v1"
+            or current_observation.get("asset_id") != workflow.asset_id
+            or current_observation.get("expected_asset_content_sha256")
+            != workflow.asset_content_sha256
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint current observation lineage mismatch"
+            )
+        if (
+            current_observation.get("capture_id")
+            == observation.current_capture.capture_id
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint C1 capture must be newer than claim C0"
+            )
+        capture_lineage = {
+            key: current_observation.get(key)
+            for key in ("capture_id", "screenshot_sha256", "viewport_size")
+        }
+        selection_capture = selection.get("capture_lineage")
+        expected_selection = {
+            "asset_id": workflow.asset_id,
+            "asset_content_sha256": workflow.asset_content_sha256,
+            "source_workflow_sha256": workflow.source_workflow_sha256,
+            "reviewed_revision_hash": workflow.reviewed_revision_hash,
+        }
+        claimed_action = next(
+            (
+                action
+                for action in observation.available_actions
+                if action.action_id == intent.action_id
+            ),
+            None,
+        )
+        selection_sha256 = selection.get("selection_sha256")
+        if (
+            any(selection.get(key) != expected for key, expected in expected_selection.items())
+            or not isinstance(selection_capture, Mapping)
+            or dict(selection_capture) != capture_lineage
+            or claimed_action is None
+            or selection.get("transition_id") != intent.action_id
+            or selection.get("semantic_action") != claimed_action.semantic_action
+            or not isinstance(selection_sha256, str)
+            or _SHA256_PATTERN.fullmatch(selection_sha256) is None
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint selection lineage mismatch"
+            )
+        for field_name, expected in (
+            ("asset_content_sha256", workflow.asset_content_sha256),
+            ("transition_id", selection.get("transition_id")),
+            ("source_state_id", selection.get("source_state_id")),
+            ("capture_id", capture_lineage["capture_id"]),
+            ("screenshot_sha256", capture_lineage["screenshot_sha256"]),
+            ("viewport_size", capture_lineage["viewport_size"]),
+        ):
+            if grounding.get(field_name) != expected:
+                raise RuntimeIntentClaimStoreError(
+                    "verification checkpoint grounding lineage mismatch"
+                )
+        expected_gate = {
+            "allowed": True,
+            "asset_content_sha256": workflow.asset_content_sha256,
+            "transition_id": selection.get("transition_id"),
+            "selection_sha256": selection.get("selection_sha256"),
+            "selected_candidate_id": grounding.get("candidate_id"),
+            "selected_click_point": grounding.get("click_point"),
+            "capture_id": capture_lineage["capture_id"],
+            "screenshot_sha256": capture_lineage["screenshot_sha256"],
+            "viewport_size": capture_lineage["viewport_size"],
+        }
+        refs = gate.get("evidence_refs")
+        if (
+            any(gate.get(key) != expected for key, expected in expected_gate.items())
+            or not isinstance(refs, list)
+            or gate_decision_ref not in refs
+        ):
+            raise RuntimeIntentClaimStoreError(
+                "verification checkpoint Gate lineage mismatch"
+            )
+
+    @staticmethod
+    def _checkpoint_snapshot(
+        marker: Mapping[str, Any],
+    ) -> RuntimeVerificationPendingCheckpoint:
+        backend = marker["backend_receipt"]
+        return RuntimeVerificationPendingCheckpoint(
+            claim_id=marker["claim_id"],
+            claim_content_sha256=marker["claim_content_sha256"],
+            checkpoint_sha256=marker["checkpoint_sha256"],
+            gate_decision_ref=marker["gate_decision_ref"],
+            backend_receipt=BackendDispatchReceipt(
+                receipt_ref=backend["receipt_ref"],
+                status=backend["status"],
+                reason_code=backend["reason_code"],
+            ),
+            _current_observation_json=_canonical_json_bytes(marker["current_observation"]),
+            _selection_json=_canonical_json_bytes(marker["selection"]),
+            _grounding_json=_canonical_json_bytes(marker["grounding"]),
+            _gate_json=_canonical_json_bytes(marker["gate"]),
+        )
 
     def _load_optional_marker(
         self,
@@ -681,6 +1177,7 @@ class RuntimeIntentClaimStore:
             self.root,
             self.claims_root,
             self.dispatch_started_root,
+            self.verification_pending_root,
             self.terminal_root,
         )
         for path in (self.project_root / "runtime_state", *paths):
@@ -718,6 +1215,12 @@ class RuntimeIntentClaimStore:
 
     def _terminal_path(self, identity_hash: str) -> Path:
         return self._bounded_path(self.terminal_root, f"{identity_hash}.json")
+
+    def _verification_pending_path(self, identity_hash: str) -> Path:
+        return self._bounded_path(
+            self.verification_pending_root,
+            f"{identity_hash}.json",
+        )
 
     def _bounded_path(self, parent: Path, filename: str) -> Path:
         if _SHA256_PATTERN.fullmatch(filename.removesuffix(".json")) is None:
@@ -813,4 +1316,5 @@ __all__ = [
     "RuntimeIntentClaimStore",
     "RuntimeIntentClaimStoreError",
     "RuntimeIntentServerBinding",
+    "RuntimeVerificationPendingCheckpoint",
 ]
