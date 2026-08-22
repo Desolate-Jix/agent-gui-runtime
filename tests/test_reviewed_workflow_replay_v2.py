@@ -524,6 +524,157 @@ def test_nonexecuted_operation_preserves_gate_rejection_reason(reason: str) -> N
     assert result["failure_code"] == reason
 
 
+def test_server_dispatch_verifier_uses_only_observations_and_server_evidence() -> None:
+    import inspect
+
+    from app.agent.reviewed_workflow_replay import verify_server_dispatched_transition_result
+
+    asset = _asset()
+    selection = _selection(asset)
+    before = _observation(asset, "capture-1", "a" * 64, "anchor_homepage", "job_card")
+    after = _observation(asset, "capture-2", "d" * 64, "anchor_detail", "quick_apply")
+
+    assert list(inspect.signature(verify_server_dispatched_transition_result).parameters) == [
+        "asset", "selection", "before_observation", "post_observation", "server_evidence_refs",
+    ]
+    result = verify_server_dispatched_transition_result(
+        asset,
+        selection,
+        before,
+        after,
+        server_evidence_refs=["server:dispatch:2", "server:dispatch:1", "server:dispatch:2"],
+    )
+
+    assert result == {
+        "contract_version": "transition_verification_v1",
+        "status": "verified",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "state_advanced": True,
+        "asset_content_sha256": selection["asset_content_sha256"],
+        "selection_sha256": selection["selection_sha256"],
+        "transition_id": "open_detail",
+        "source_state_id": "homepage",
+        "target_state_id": "detail",
+        "post_capture_lineage": {
+            "capture_id": "capture-2",
+            "screenshot_sha256": "d" * 64,
+            "viewport_size": {"width": 1440, "height": 900},
+        },
+        "post_state_resolution": result["post_state_resolution"],
+        "evidence_refs": [
+            "evidence:capture-2:anchor_detail",
+            "evidence:capture-2:quick_apply",
+            "server:dispatch:1",
+            "server:dispatch:2",
+        ],
+    }
+    assert result["post_state_resolution"]["status"] == "resolved"
+    assert result["post_state_resolution"]["state_id"] == "detail"
+
+
+def test_server_dispatch_verifier_maps_only_semantic_post_outcomes() -> None:
+    from app.agent.reviewed_workflow_replay import verify_server_dispatched_transition_result
+
+    asset = _asset()
+    selection = _selection(asset)
+    before = _observation(asset, "capture-1", "a" * 64, "anchor_homepage", "job_card")
+
+    same_capture = verify_server_dispatched_transition_result(
+        asset,
+        selection,
+        before,
+        _observation(asset, "capture-1", "a" * 64, "anchor_detail"),
+        server_evidence_refs=["server:dispatch"],
+    )
+    assert same_capture == {
+        "contract_version": "transition_verification_v1",
+        "status": "blocked",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "failure_code": "post_capture_not_new",
+        "state_advanced": False,
+    }
+
+    wrong = verify_server_dispatched_transition_result(
+        asset,
+        selection,
+        before,
+        _observation(asset, "capture-2", "d" * 64, "anchor_homepage"),
+        server_evidence_refs=["server:dispatch"],
+    )
+    assert wrong["failure_code"] == "destination_mismatch"
+    assert wrong["post_state_resolution"]["status"] == "resolved"
+    assert wrong["post_state_resolution"]["state_id"] == "homepage"
+
+    for after in (
+        _observation(asset, "capture-2", "d" * 64),
+        _observation(asset, "capture-2", "d" * 64, "anchor_homepage", "anchor_detail"),
+    ):
+        unresolved = verify_server_dispatched_transition_result(
+            asset, selection, before, after, server_evidence_refs=["server:dispatch"]
+        )
+        assert unresolved["failure_code"] == "post_action_failure"
+        assert unresolved["post_state_resolution"]["status"] == "blocked"
+        assert unresolved["post_state_resolution"]["failure_code"] in {
+            "current_state_unresolved", "current_state_ambiguous",
+        }
+
+
+def test_server_dispatch_verifier_preserves_strict_post_observation_failures() -> None:
+    from app.agent.reviewed_workflow_replay import verify_server_dispatched_transition_result
+
+    asset = _asset()
+    selection = _selection(asset)
+    before = _observation(asset, "capture-1", "a" * 64, "anchor_homepage", "job_card")
+    cases = []
+    cross_asset = _observation(asset, "capture-2", "d" * 64, "anchor_detail")
+    cross_asset["expected_asset_content_sha256"] = "e" * 64
+    cases.append((cross_asset, "asset_lineage_mismatch"))
+    wrong_origin = _observation(asset, "capture-2", "d" * 64, "anchor_detail", origin="https://evil.example")
+    cases.append((wrong_origin, "unexpected_origin"))
+    malformed_capture = _observation(asset, "capture-2", "not-a-sha", "anchor_detail")
+    cases.append((malformed_capture, "capture_missing"))
+    malformed_contract = _observation(asset, "capture-2", "d" * 64, "anchor_detail")
+    malformed_contract["approved_plan_id"] = "caller-forged"
+    cases.append((malformed_contract, "invalid_observation_contract"))
+
+    for after, failure_code in cases:
+        result = verify_server_dispatched_transition_result(
+            asset, selection, before, after, server_evidence_refs=["server:dispatch"]
+        )
+        assert result["failure_code"] == failure_code
+        assert result["post_state_resolution"]["failure_code"] == failure_code
+        assert result["state_advanced"] is False
+        assert result["artifact_is_authorization"] is False
+        assert result["execute_binding_enabled"] is False
+
+
+@pytest.mark.parametrize(
+    "rules",
+    [
+        [{"rule_id": "detail_identity", "type": "caller_verification_flag"}],
+        [{"rule_id": "detail_identity", "type": "target_state_identity", "approved_plan_id": "forged"}],
+        [{"rule_id": "detail_identity"}],
+    ],
+)
+def test_server_dispatch_verifier_rejects_nonexact_semantic_rules_before_success(rules: list[dict]) -> None:
+    from app.agent.reviewed_workflow_replay import verify_server_dispatched_transition_result
+
+    asset = _asset()
+    asset["transitions"][0]["post_action_verification"]["semantic_success_rules"] = rules
+    selection = _selection(asset)
+    result = verify_server_dispatched_transition_result(
+        asset,
+        selection,
+        _observation(asset, "capture-1", "a" * 64, "anchor_homepage", "job_card"),
+        _observation(asset, "capture-2", "d" * 64, "anchor_detail"),
+        server_evidence_refs=["server:dispatch"],
+    )
+    assert result["failure_code"] == "unsupported_semantic_success_rule"
+    assert result["state_advanced"] is False
+
+
 @pytest.mark.parametrize(
     "failure_code,expected",
     [

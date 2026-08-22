@@ -652,6 +652,126 @@ def verify_transition_result(
     )
 
 
+def verify_server_dispatched_transition_result(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    before_observation: Mapping[str, Any],
+    post_observation: Mapping[str, Any],
+    *,
+    server_evidence_refs: list[str],
+) -> dict[str, Any]:
+    """只凭服务端证据和 C1/C2 观察校验已派发 transition 的目标状态。"""
+    canonical, transition, selection_error = _validated_selection(asset, selection)
+    if selection_error:
+        return _failure("transition_verification_v1", selection_error, state_advanced=False)
+    assert canonical is not None and transition is not None
+
+    post_policy = transition.get("post_action_verification")
+    rules = post_policy.get("semantic_success_rules") if isinstance(post_policy, Mapping) else None
+    rule_ids: set[str] = set()
+    if (
+        not isinstance(post_policy, Mapping)
+        or set(post_policy) != {"requires_new_capture", "semantic_success_rules"}
+        or post_policy.get("requires_new_capture") is not True
+        or not isinstance(rules, list)
+        or not rules
+    ):
+        return _failure("transition_verification_v1", "unsupported_semantic_success_rule", state_advanced=False)
+    for rule in rules:
+        if (
+            not isinstance(rule, Mapping)
+            or set(rule) != {"rule_id", "type"}
+            or not _text(rule.get("rule_id"))
+            or rule.get("type") != "target_state_identity"
+            or _text(rule.get("rule_id")) in rule_ids
+        ):
+            return _failure("transition_verification_v1", "unsupported_semantic_success_rule", state_advanced=False)
+        rule_ids.add(_text(rule.get("rule_id")))
+
+    if (
+        not isinstance(server_evidence_refs, list)
+        or not server_evidence_refs
+        or any(not isinstance(ref, str) or not ref.strip() for ref in server_evidence_refs)
+    ):
+        return _failure("transition_verification_v1", "server_evidence_missing", state_advanced=False)
+
+    before_resolution = resolve_current_state(canonical, before_observation)
+    if before_resolution.get("status") != "resolved":
+        return _failure(
+            "transition_verification_v1",
+            _text(before_resolution.get("failure_code")) or "selection_lineage_mismatch",
+            state_advanced=False,
+            pre_state_resolution=before_resolution,
+        )
+    before_lineage = before_resolution.get("capture_lineage")
+    if (
+        not isinstance(before_lineage, Mapping)
+        or not _same_lineage(before_lineage, selection.get("capture_lineage"))
+    ):
+        return _failure("transition_verification_v1", "capture_lineage_mismatch", state_advanced=False)
+    if before_resolution.get("state_id") != transition["source_state_id"]:
+        return _failure("transition_verification_v1", "selection_lineage_mismatch", state_advanced=False)
+
+    post_resolution = resolve_current_state(canonical, post_observation)
+    strict_post_failure = post_resolution.get("failure_code")
+    if strict_post_failure in {
+        "unexpected_origin",
+        "asset_lineage_mismatch",
+        "invalid_observation_contract",
+        "capture_missing",
+        "invalid_anchor_evidence",
+    }:
+        return _failure(
+            "transition_verification_v1",
+            strict_post_failure,
+            state_advanced=False,
+            post_state_resolution=post_resolution,
+        )
+    post_lineage = post_resolution.get("capture_lineage")
+    if not isinstance(post_lineage, Mapping):
+        return _failure(
+            "transition_verification_v1",
+            "post_action_failure",
+            state_advanced=False,
+            post_state_resolution=post_resolution,
+        )
+    if _text(post_lineage.get("capture_id")) == _text(before_lineage.get("capture_id")):
+        return _failure("transition_verification_v1", "post_capture_not_new", state_advanced=False)
+    if post_resolution.get("status") != "resolved":
+        return _failure(
+            "transition_verification_v1",
+            "post_action_failure",
+            state_advanced=False,
+            post_state_resolution=post_resolution,
+        )
+    if post_resolution.get("state_id") != transition["target_state_id"]:
+        return _failure(
+            "transition_verification_v1",
+            "destination_mismatch",
+            state_advanced=False,
+            post_state_resolution=post_resolution,
+        )
+
+    evidence_refs = set(server_evidence_refs)
+    evidence_refs.update(
+        ref for ref in post_resolution.get("evidence_refs", [])
+        if isinstance(ref, str) and ref.strip()
+    )
+    return _result(
+        "transition_verification_v1",
+        status="verified",
+        state_advanced=True,
+        asset_content_sha256=selection["asset_content_sha256"],
+        selection_sha256=selection["selection_sha256"],
+        transition_id=transition["transition_id"],
+        source_state_id=transition["source_state_id"],
+        target_state_id=transition["target_state_id"],
+        post_capture_lineage=dict(post_lineage),
+        post_state_resolution=post_resolution,
+        evidence_refs=sorted(evidence_refs),
+    )
+
+
 def build_recovery_decision(transition: Mapping[str, Any], failure_code: str, *, attempts_used: int) -> dict[str, Any]:
     """生成最多一次且绝不重放 action 的恢复决策。"""
     if not isinstance(attempts_used, int) or isinstance(attempts_used, bool) or attempts_used < 0:
