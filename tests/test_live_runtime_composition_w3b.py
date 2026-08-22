@@ -160,6 +160,25 @@ class _RecognitionRunner:
         return deepcopy(self.payloads.get(str(kwargs.get("goal")), _empty_recognition(str(kwargs.get("goal")))))
 
 
+class _SequencedRecognitionRunner(_RecognitionRunner):
+    def __init__(self, payloads_by_capture: list[dict[str, dict]]) -> None:
+        super().__init__({})
+        self.payloads_by_capture = payloads_by_capture
+        self.capture_paths: list[str] = []
+
+    def __call__(self, **kwargs: object) -> dict:
+        image_path = str(kwargs.get("image_path"))
+        if image_path not in self.capture_paths:
+            if len(self.capture_paths) >= len(self.payloads_by_capture):
+                raise AssertionError("unexpected recognition capture")
+            self.capture_paths.append(image_path)
+        capture_index = self.capture_paths.index(image_path)
+        self.calls.append(dict(kwargs))
+        payloads = self.payloads_by_capture[capture_index]
+        goal = str(kwargs.get("goal"))
+        return deepcopy(payloads.get(goal, _empty_recognition(goal)))
+
+
 def _recognition(
     label: str,
     *,
@@ -271,12 +290,27 @@ def _role(kind: str) -> str:
     return {"control": "button", "text": "text", "region": "region"}.get(kind, kind)
 
 
-def _entry_payloads(asset: dict) -> dict[str, dict]:
-    state = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
+def _state_payloads(asset: dict, state_id: str) -> dict[str, dict]:
+    state = next(item for item in asset["states"] if item["state_id"] == state_id)
     return {
         anchor["label"]: _recognition(anchor["label"], role=_role(anchor["kind"]))
         for anchor in state["identity_anchors"]
     }
+
+
+def _entry_payloads(asset: dict) -> dict[str, dict]:
+    return _state_payloads(asset, asset["entry_state_id"])
+
+
+def _transition_payload_sequence(asset: dict) -> list[dict[str, dict]]:
+    transition = next(
+        item
+        for item in asset["transitions"]
+        if item["source_state_id"] == asset["entry_state_id"]
+    )
+    source = _state_payloads(asset, transition["source_state_id"])
+    target = _state_payloads(asset, transition["target_state_id"])
+    return [source, source, target]
 
 
 def _workflow(asset: dict, workflow_id: str) -> dict[str, str]:
@@ -922,10 +956,6 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset, _ = _server_asset(tmp_path)
-    for transition in asset["transitions"]:
-        transition["post_action_verification"]["semantic_success_rules"] = [
-            {"rule_id": f"{transition['transition_id']}_target_identity", "type": "target_state_identity"}
-        ]
     ReviewedWorkflowAssetStore(project_root=tmp_path).publish(
         asset,
         expected_registry_revision=0,
@@ -948,10 +978,11 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
         "WindowsUIAOriginReader",
         lambda **_kwargs: _OriginReader(origin="https://example.test"),
     )
+    runner = _SequencedRecognitionRunner(_transition_payload_sequence(asset))
     monkeypatch.setattr(
         composition,
         "_run_existing_read_only_recognition",
-        _RecognitionRunner(_entry_payloads(asset)),
+        runner,
     )
     monkeypatch.setattr(composition, "ExistingWindowsBackendAdapter", lambda: backend)
     monkeypatch.setattr(composition, "ExistingWindowManagerVisibilityChecker", _Visibility)
@@ -987,10 +1018,11 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     }
     receipt = controller.submit_intent(payload)
 
-    expected_outcome = "VERIFICATION_FAILED" if case == "dispatch" else "BLOCKED"
+    expected_outcome = "VERIFIED" if case == "dispatch" else "BLOCKED"
     assert receipt.outcome == expected_outcome
     assert backend.dispatch_count == (1 if case == "dispatch" else 0)
     assert len(screenshot.calls) == (4 if case == "dispatch" else 2 if case == "gate_block" else 3)
+    assert len(runner.capture_paths) == (3 if case == "dispatch" else 2)
     screenshot_call_count = len(screenshot.calls)
     duplicate = controller.submit_intent(payload)
     assert duplicate == receipt
@@ -999,9 +1031,13 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     persisted = RuntimeReceiptStore(project_root=tmp_path).load_by_receipt_id(receipt.receipt_id)
     assert persisted.runtime_receipt == receipt
     if case == "dispatch":
-        assert receipt.reason_code == "destination_mismatch"
-        assert receipt.effect_status == "not_verified"
-        assert receipt.destination_status == "not_verified"
+        assert receipt.reason_code == "none"
+        assert receipt.effect_status == "verified"
+        assert receipt.destination_status == "verified"
+        assert receipt.next_observation_id is not None
+        assert receipt.next_observation_id != session.current_observation.observation_id
+        assert persisted.next_observation is not None
+        assert persisted.next_observation.observation_id == receipt.next_observation_id
     if case == "changed_pixels":
         assert receipt.reason_code == "target_occluded"
 
@@ -1088,7 +1124,7 @@ class _Visibility:
 
 @pytest.mark.parametrize(
     ("gate_score", "expected_outcome", "dispatches"),
-    [(0.45, "VERIFICATION_FAILED", 1), (0.99, "BLOCKED", 0)],
+    [(0.45, "VERIFIED", 1), (0.99, "BLOCKED", 0)],
 )
 def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
     tmp_path: Path,
@@ -1103,11 +1139,7 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
     from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset, _ = _server_asset(tmp_path)
-    for transition in asset["transitions"]:
-        transition["post_action_verification"]["semantic_success_rules"] = [
-            {"rule_id": f"{transition['transition_id']}_target_identity", "type": "target_state_identity"}
-        ]
-    runner = _RecognitionRunner(_entry_payloads(asset))
+    runner = _SequencedRecognitionRunner(_transition_payload_sequence(asset))
     adapter, _, screenshot, _, _ = _adapter(
         tmp_path,
         asset,
@@ -1154,11 +1186,12 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
 
     assert receipt.outcome == expected_outcome
     assert backend.dispatch_count == dispatches
-    if expected_outcome == "VERIFICATION_FAILED":
-        assert receipt.reason_code == "destination_mismatch"
-        assert receipt.effect_status == "not_verified"
-        assert receipt.destination_status == "not_verified"
-        assert receipt.next_observation_id is None
+    if expected_outcome == "VERIFIED":
+        assert receipt.reason_code == "none"
+        assert receipt.effect_status == "verified"
+        assert receipt.destination_status == "verified"
+        assert receipt.next_observation_id is not None
+        assert receipt.next_observation_id != session.current_observation.observation_id
         restarted_backend = DeterministicFakeBackend()
         restarted = LiveController(
             binding=controller._binding,
@@ -1175,6 +1208,10 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
             grounding_policy={"minimum_confidence": 0.45, "minimum_score_margin": 0.06},
         )
         duplicate = restarted.submit_intent(intent)
-        assert duplicate.outcome == "VERIFICATION_FAILED"
+        assert duplicate == receipt
         assert restarted_backend.dispatch_count == 0
         assert len(screenshot.calls) == 3
+        assert len(runner.capture_paths) == 3
+    else:
+        assert len(screenshot.calls) == 2
+        assert len(runner.capture_paths) == 2
