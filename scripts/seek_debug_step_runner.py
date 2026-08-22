@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ctypes
 import hashlib
 import json
 import re
@@ -489,35 +488,11 @@ def _seek_window_candidates(apps_response: dict[str, Any]) -> list[dict[str, Any
 
 
 def _close_top_level_windows(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    closed: list[dict[str, Any]] = []
-    if sys.platform != "win32":
-        return closed
-    user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-    wm_close = 0x0010
-    for item in windows:
-        title = str(item.get("title") or "")
-        title_key = unicodedata.normalize("NFKC", title).casefold()
-        if "和另外" in title_key or " other " in title_key or " other pages" in title_key:
-            closed.append(
-                {
-                    "handle": item.get("handle"),
-                    "title": item.get("title"),
-                    "post_message_sent": False,
-                    "skipped": True,
-                    "skip_reason": "multi_tab_browser_window",
-                }
-            )
-            continue
-        handle = item.get("handle")
-        try:
-            hwnd = int(handle)
-        except Exception:
-            continue
-        if hwnd <= 0:
-            continue
-        posted = bool(user32.PostMessageW(hwnd, wm_close, 0, 0))
-        closed.append({"handle": hwnd, "title": item.get("title"), "post_message_sent": posted})
-    return closed
+    del windows
+    raise SeekTraversalError(
+        "close_window is not an approved Portfolio v1 Runtime action; "
+        "run without --allow-close-windows and close windows manually outside this debug runner"
+    )
 
 
 def _observe_and_extract_cards(base_url: str, app_name: str, timeout: float) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2535,6 +2510,9 @@ def _candidate_point_validation(point: dict[str, Any] | None, bbox: dict[str, in
 
 
 def run_step(args: argparse.Namespace) -> dict[str, Any]:
+    if bool(getattr(args, "allow_close_windows", False)):
+        _close_top_level_windows([])
+
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     state = _load_state(run_dir)
@@ -2545,22 +2523,18 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
     if step == "close_old_seek_windows":
         apps = _apps_snapshot(args.base_url, args.timeout)
         candidates = _seek_window_candidates(apps)
-        closed = _close_top_level_windows(candidates) if args.allow_close_windows else []
-        if closed:
-            time.sleep(0.8)
+        closed: list[dict[str, Any]] = []
         report = {
             "status": "ok",
             "old_seek_windows_detected": candidates,
             "closed_windows": closed,
-            "close_policy": "explicit_allow_close_windows" if args.allow_close_windows else "detect_only",
+            "close_policy": "detect_only",
         }
         state["next_allowed_steps"] = ["open"]
     elif step == "open":
         before = _apps_snapshot(args.base_url, args.timeout)
         old_windows = _seek_window_candidates(before)
-        closed = _close_top_level_windows(old_windows) if args.allow_close_windows else []
-        if closed:
-            time.sleep(0.8)
+        closed = []
         open_response = _open_seek_debug(args.base_url, url=args.url, app_name=args.app_name, timeout=args.timeout)
         opened_bound_window = (_result_payload(open_response).get("bound_window") or {}).copy() or None
         if open_response.get("success") is not True or not opened_bound_window:
@@ -2572,7 +2546,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
                 "failure_reason": "open_did_not_bind_window",
                 "old_seek_windows_detected": old_windows,
                 "closed_windows": closed,
-                "close_policy": "explicit_allow_close_windows" if args.allow_close_windows else "detect_only",
+                "close_policy": "detect_only",
                 "open_response": open_response,
                 "trace_paths": _trace_paths(open_response),
             }
@@ -2591,7 +2565,7 @@ def run_step(args: argparse.Namespace) -> dict[str, Any]:
                 "status": "ok",
                 "old_seek_windows_detected": old_windows,
                 "closed_windows": closed,
-                "close_policy": "explicit_allow_close_windows" if args.allow_close_windows else "detect_only",
+                "close_policy": "detect_only",
                 "open_response": open_response,
                 "resize_response": resize_response,
                 "after_image": capture["image_path"],
@@ -3353,7 +3327,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-close-windows",
         action="store_true",
-        help="Send WM_CLOSE to detected top-level SEEK browser windows before opening a new debug run.",
+        help="Compatibility flag only; fails closed because close_window is not an approved Portfolio v1 Runtime action.",
     )
     return parser
 

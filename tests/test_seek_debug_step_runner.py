@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
 
 
@@ -1159,27 +1160,35 @@ def test_close_old_seek_windows_detect_only_does_not_close(monkeypatch, tmp_path
     assert payload["close_policy"] == "detect_only"
 
 
-def test_close_old_seek_windows_skips_multi_tab_browser_window(monkeypatch) -> None:
-    monkeypatch.setattr(runner.sys, "platform", "win32")
-    closed = runner._close_top_level_windows(
-        [
-            {
-                "handle": 10,
-                "title": "Software Engineer Jobs in All Auckland, Job Vacancies - Jun 2026 | SEEK 和另外 3 个页面 - Microsoft Edge",
-                "process_name": "msedge.exe",
-            }
-        ]
+def test_close_top_level_windows_is_not_an_approved_runtime_action() -> None:
+    with pytest.raises(runner.SeekTraversalError, match="close_window.*not an approved Portfolio v1 Runtime action"):
+        runner._close_top_level_windows(
+            [
+                {
+                    "handle": 10,
+                    "title": "Software Engineer Jobs in All Auckland - Microsoft Edge",
+                    "process_name": "msedge.exe",
+                }
+            ]
+        )
+
+
+def test_open_with_allow_close_windows_fails_before_snapshot_or_open(monkeypatch, tmp_path: Path) -> None:
+    args = _args(tmp_path, "open")
+    args.allow_close_windows = True
+    monkeypatch.setattr(
+        runner,
+        "_apps_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must fail before window discovery")),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_open_seek_debug",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must not open")),
     )
 
-    assert closed == [
-        {
-            "handle": 10,
-            "title": "Software Engineer Jobs in All Auckland, Job Vacancies - Jun 2026 | SEEK 和另外 3 个页面 - Microsoft Edge",
-            "post_message_sent": False,
-            "skipped": True,
-            "skip_reason": "multi_tab_browser_window",
-        }
-    ]
+    with pytest.raises(runner.SeekTraversalError, match="close_window.*not an approved Portfolio v1 Runtime action"):
+        runner.run_step(args)
 
 
 def test_open_seek_debug_requests_new_browser_window(monkeypatch) -> None:

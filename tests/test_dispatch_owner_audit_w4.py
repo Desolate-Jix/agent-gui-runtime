@@ -6,6 +6,47 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+RAW_SCRIPT_GUI_MUTATIONS = {
+    "PostMessage",
+    "PostMessageW",
+    "SendMessage",
+    "SendMessageW",
+    "CloseWindow",
+    "DestroyWindow",
+    "SetWindowPos",
+    "MoveWindow",
+    "ShowWindow",
+    "SetForegroundWindow",
+    "SendInput",
+    "mouse_event",
+    "keybd_event",
+    "SetCursorPos",
+}
+RAW_SCRIPT_GUI_MUTATION_ALLOWLIST: set[tuple[str, str, int]] = set()
+
+
+def _scan_raw_script_gui_mutations(scripts_root: Path) -> list[tuple[str, str, int]]:
+    violations: list[tuple[str, str, int]] = []
+    for path in sorted(scripts_root.rglob("*.py")):
+        module = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        relative_path = path.relative_to(scripts_root.parent).as_posix()
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Attribute):
+                call_name = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                call_name = node.func.id
+            else:
+                continue
+            violation = (relative_path, call_name, node.lineno)
+            if (
+                call_name in RAW_SCRIPT_GUI_MUTATIONS
+                and violation not in RAW_SCRIPT_GUI_MUTATION_ALLOWLIST
+            ):
+                violations.append(violation)
+    return violations
+
 
 def _first_executable_statement(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
@@ -35,6 +76,23 @@ def test_only_desktop_backend_enters_runtime_input_scope() -> None:
                 callers.append(path.relative_to(REPO_ROOT).as_posix())
 
     assert callers == ["app/agent/desktop_backend.py"]
+
+
+def test_production_scripts_have_no_raw_gui_mutation_dispatchers() -> None:
+    assert _scan_raw_script_gui_mutations(REPO_ROOT / "scripts") == []
+
+
+def test_raw_gui_mutation_scanner_detects_pywin32_post_message(tmp_path: Path) -> None:
+    scripts_root = tmp_path / "scripts"
+    scripts_root.mkdir()
+    (scripts_root / "unsafe.py").write_text(
+        "import win32gui\nwin32gui.PostMessage(10, 0x0010, 0, 0)\n",
+        encoding="utf-8",
+    )
+
+    assert _scan_raw_script_gui_mutations(scripts_root) == [
+        ("scripts/unsafe.py", "PostMessage", 2)
+    ]
 
 
 def test_all_public_input_actions_pass_the_common_authority_guard() -> None:
