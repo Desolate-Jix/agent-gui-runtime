@@ -103,6 +103,28 @@ class _OriginReader:
         }
 
 
+class _UIAProvider:
+    def __init__(self, *, handle: int = 4242, process_id: int = 9001) -> None:
+        self.handle = handle
+        self.process_id = process_id
+        self.calls: list[object] = []
+
+    def snapshot_window(self, bound: object) -> dict[str, object]:
+        self.calls.append(bound)
+        return {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "window": {
+                "handle": self.handle,
+                "process_id": self.process_id,
+                "bbox": {"x": 0, "y": 0, "w": 320, "h": 200},
+            },
+            "control_count": 0,
+            "controls": [],
+        }
+
+
 class _RecognitionRunner:
     def __init__(self, payloads: dict[str, dict]) -> None:
         self.payloads = payloads
@@ -250,6 +272,7 @@ def _adapter(
     screenshot: _ScreenshotService | None = None,
     origin: _OriginReader | None = None,
     runner: _RecognitionRunner | None = None,
+    uia: _UIAProvider | None = None,
     application_identity_key: str = "web:nz.seek.com",
 ) -> tuple[
     ExistingWindowsCurrentEvidenceAdapter,
@@ -258,10 +281,11 @@ def _adapter(
     _OriginReader,
     _RecognitionRunner,
 ]:
-    manager = manager or _WindowManager(_bound(), _bound())
+    manager = manager or _WindowManager(_bound(), _bound(), _bound())
     screenshot = screenshot or _ScreenshotService(tmp_path)
     origin = origin or _OriginReader()
     runner = runner or _RecognitionRunner(_entry_payloads(asset))
+    uia = uia or _UIAProvider()
     adapter = ExistingWindowsCurrentEvidenceAdapter(
         project_root=tmp_path,
         application_identity_key=application_identity_key,
@@ -269,6 +293,7 @@ def _adapter(
         origin_reader=origin,
         window_manager=manager,
         recognition_runner=runner,
+        uia_provider=uia,
     )
     return adapter, manager, screenshot, origin, runner
 
@@ -290,8 +315,8 @@ def test_capture_current_uses_passive_exact_image_bytes_and_current_anchor_refs(
             "purpose": "runtime-observation",
         }
     ]
-    assert manager.calls == 2
-    assert origin.calls == [4242]
+    assert manager.calls == 3
+    assert origin.calls == [4242, 4242]
     assert current["screenshot_sha256"] == sha256(screenshot.paths[0].read_bytes()).hexdigest()
     assert current["viewport_size"] == {"width": 320, "height": 200}
     assert current["origin"] == "https://nz.seek.com"
@@ -356,6 +381,92 @@ def test_capture_rejects_saved_image_change_during_recognition(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="screenshot changed during recognition"):
         adapter.capture_current(session_id="session-current", asset=asset, target_window_handle=4242)
+
+
+def test_capture_pins_exact_uia_snapshot_and_revalidates_binding_epoch(tmp_path: Path) -> None:
+    asset = _asset()
+    manager = _WindowManager(_bound(), _bound(), _bound())
+    runner = _RecognitionRunner(_entry_payloads(asset))
+    uia = _UIAProvider()
+    adapter = ExistingWindowsCurrentEvidenceAdapter(
+        project_root=tmp_path,
+        application_identity_key="web:nz.seek.com",
+        screenshot_service=_ScreenshotService(tmp_path),
+        origin_reader=_OriginReader(),
+        window_manager=manager,
+        recognition_runner=runner,
+        uia_provider=uia,
+    )
+
+    adapter.capture_current(session_id="session-current", asset=asset, target_window_handle=4242)
+
+    assert len(uia.calls) == 1
+    assert runner.calls
+    assert all(call["uia_snapshot"]["window"]["handle"] == 4242 for call in runner.calls)
+    assert manager.calls == 3
+
+
+@pytest.mark.parametrize(
+    ("uia", "final_bound"),
+    [(_UIAProvider(handle=9999), _bound()), (_UIAProvider(), _bound(process_id=9002))],
+)
+def test_capture_rejects_uia_or_final_binding_drift_before_cache(
+    tmp_path: Path,
+    uia: _UIAProvider,
+    final_bound: object,
+) -> None:
+    asset = _asset()
+    runner = _RecognitionRunner(_entry_payloads(asset))
+    adapter = ExistingWindowsCurrentEvidenceAdapter(
+        project_root=tmp_path,
+        application_identity_key="web:nz.seek.com",
+        screenshot_service=_ScreenshotService(tmp_path),
+        origin_reader=_OriginReader(),
+        window_manager=_WindowManager(_bound(), _bound(), final_bound),
+        recognition_runner=runner,
+        uia_provider=uia,
+    )
+
+    with pytest.raises(ValueError, match="UIA snapshot|binding drift"):
+        adapter.capture_current(
+            session_id="session-current",
+            asset=asset,
+            target_window_handle=4242,
+        )
+
+    if uia.handle != 4242:
+        assert runner.calls == []
+
+
+def test_capture_rejects_origin_drift_after_pinned_recognition(tmp_path: Path) -> None:
+    asset = _asset()
+
+    class DriftingOrigin(_OriginReader):
+        def read_origin(self, target_window_handle: int) -> dict[str, object]:
+            result = super().read_origin(target_window_handle)
+            if len(self.calls) == 2:
+                result["origin"] = "https://wrong.example"
+            return result
+
+    runner = _RecognitionRunner(_entry_payloads(asset))
+    adapter = ExistingWindowsCurrentEvidenceAdapter(
+        project_root=tmp_path,
+        application_identity_key="web:nz.seek.com",
+        screenshot_service=_ScreenshotService(tmp_path),
+        origin_reader=DriftingOrigin(),
+        window_manager=_WindowManager(_bound(), _bound(), _bound()),
+        recognition_runner=runner,
+        uia_provider=_UIAProvider(),
+    )
+
+    with pytest.raises(ValueError, match="origin drift"):
+        adapter.capture_current(
+            session_id="session-current",
+            asset=asset,
+            target_window_handle=4242,
+        )
+
+    assert runner.calls
 
 
 @pytest.mark.parametrize(
@@ -434,7 +545,7 @@ def test_create_initial_projects_geometry_free_observation_from_exact_asset(tmp_
     adapter, *_ = _adapter(
         tmp_path,
         asset,
-        manager=_WindowManager(_bound(), _bound()),
+        manager=_WindowManager(_bound(), _bound(), _bound()),
         origin=_OriginReader(origin="https://example.test"),
         runner=_RecognitionRunner(_entry_payloads(asset)),
         application_identity_key="web:example.test",
@@ -619,6 +730,12 @@ def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound
     image_path = tmp_path / "exact.png"
     Image.new("RGB", (20, 10), (1, 2, 3)).save(image_path)
     requests: list[object] = []
+    observed_snapshots: list[dict] = []
+    pinned_snapshot = {
+        "status": "ok",
+        "window": {"handle": 4242, "process_id": 9001},
+        "controls": [],
+    }
 
     class Response:
         def model_dump(self, **_: object) -> dict:
@@ -634,6 +751,7 @@ def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound
 
     def fake_recognition(request):
         requests.append(request)
+        observed_snapshots.append(vision_api.uia_provider.snapshot_bound_window())
         return Response()
 
     monkeypatch.setattr(vision_api, "recognition_plan", fake_recognition)
@@ -642,6 +760,7 @@ def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound
         image_path=str(image_path),
         goal="Quick Apply",
         provider_mode="test-provider",
+        uia_snapshot=pinned_snapshot,
     )
 
     assert result["image_path"] == str(image_path)
@@ -655,6 +774,7 @@ def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound
         "element_memory": False,
         "trace": False,
     }
+    assert observed_snapshots == [pinned_snapshot]
 
 
 class _AssetLoader:
@@ -694,7 +814,7 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
     adapter, _, screenshot, _, _ = _adapter(
         tmp_path,
         asset,
-        manager=_WindowManager(_bound(), _bound(), _bound(), _bound()),
+        manager=_WindowManager(*[_bound() for _ in range(6)]),
         screenshot=_ScreenshotService(tmp_path),
         origin=_OriginReader(origin="https://example.test"),
         runner=runner,

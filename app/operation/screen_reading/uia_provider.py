@@ -1,12 +1,29 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator, Mapping
 
 from app.core.window_manager import BoundWindow, window_manager
 
 UIA_PROVIDER_ID = "windows_uia"
 UIA_PROVIDER_VERSION = "windows_uia_provider_v1"
+
+_PINNED_UIA_SNAPSHOT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "pinned_uia_snapshot",
+    default=None,
+)
+
+
+@contextmanager
+def pinned_uia_snapshot(snapshot: Mapping[str, Any]) -> Iterator[None]:
+    token = _PINNED_UIA_SNAPSHOT.set(deepcopy(dict(snapshot)))
+    try:
+        yield
+    finally:
+        _PINNED_UIA_SNAPSHOT.reset(token)
 
 
 @dataclass(frozen=True)
@@ -66,6 +83,9 @@ class WindowsUIAProvider:
         }
 
     def snapshot_bound_window(self, *, max_controls: int = 250) -> dict[str, Any]:
+        pinned = _PINNED_UIA_SNAPSHOT.get()
+        if pinned is not None:
+            return deepcopy(pinned)
         bound = window_manager.get_bound_window()
         if bound is None:
             return self._unavailable("no_bound_window", "Bind a target window before collecting UIA controls.")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from io import BytesIO
@@ -67,6 +68,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
         origin_reader: Any | None = None,
         window_manager: Any | None = None,
         recognition_runner: Callable[..., Mapping[str, Any]] | None = None,
+        uia_provider: Any | None = None,
         grounding_policy: Mapping[str, Any] | None = None,
         cache_limit: int = 8,
     ) -> None:
@@ -85,6 +87,11 @@ class ExistingWindowsCurrentEvidenceAdapter:
         self._window_manager = window_manager
         self._origin_reader = origin_reader or WindowsUIAOriginReader(window_manager=window_manager)
         self._recognition_runner = recognition_runner or _run_existing_read_only_recognition
+        if uia_provider is None:
+            from app.operation.screen_reading.uia_provider import uia_provider as active_uia_provider
+
+            uia_provider = active_uia_provider
+        self._uia_provider = uia_provider
         policy = dict(_DEFAULT_GROUNDING_POLICY if grounding_policy is None else grounding_policy)
         self._minimum_confidence = _number(policy["minimum_confidence"], minimum=0.0, maximum=1.0)
         self._minimum_score_margin = _number(
@@ -267,8 +274,9 @@ class ExistingWindowsCurrentEvidenceAdapter:
         asset: dict[str, Any],
         target_window_handle: int,
     ) -> dict[str, Any]:
+        before_bound = self._window_manager.get_bound_window()
         before = _bound_identity(
-            self._window_manager.get_bound_window(),
+            before_bound,
             target_window_handle=target_window_handle,
         )
         capture = self._screenshot_service.capture_window(
@@ -276,8 +284,9 @@ class ExistingWindowsCurrentEvidenceAdapter:
             focus_window=False,
             purpose="runtime-observation",
         )
+        after_bound = self._window_manager.get_bound_window()
         after = _bound_identity(
-            self._window_manager.get_bound_window(),
+            after_bound,
             target_window_handle=target_window_handle,
         )
         if before != after:
@@ -297,12 +306,17 @@ class ExistingWindowsCurrentEvidenceAdapter:
         recognition_by_anchor: list[tuple[str, bytes]] = []
         anchor_evidence: list[dict[str, object]] = []
         if observed_origin and observed_origin == canonical_origin:
+            uia_snapshot = _validated_uia_snapshot(
+                self._uia_provider.snapshot_window(after_bound),
+                expected_identity=before,
+            )
             for anchor in _all_unique_anchors(asset):
                 try:
                     raw = self._recognition_runner(
                         image_path=str(image_path),
                         goal=str(anchor["label"]),
                         provider_mode=self._provider_mode,
+                        uia_snapshot=uia_snapshot,
                     )
                     raw_bytes = _json_bytes(raw)
                 except Exception as exc:
@@ -337,6 +351,19 @@ class ExistingWindowsCurrentEvidenceAdapter:
                         ),
                     }
                 )
+        final = _bound_identity(
+            self._window_manager.get_bound_window(),
+            target_window_handle=target_window_handle,
+        )
+        if final != before:
+            raise ValueError("bound window binding drift detected during current recognition")
+        final_origin = _validated_origin_fact(
+            self._origin_reader.read_origin(target_window_handle),
+            target_window_handle=target_window_handle,
+            process_id=before[1],
+        )
+        if final_origin != observed_origin:
+            raise ValueError("bound window origin drift detected during current recognition")
         _require_unchanged_screenshot(image_path, expected_sha256=screenshot_digest)
         current = {
             "contract_version": "reviewed_workflow_current_observation_v1",
@@ -461,6 +488,30 @@ def _require_unchanged_screenshot(image_path: Path, *, expected_sha256: str) -> 
         raise ValueError("persisted runtime screenshot changed during recognition") from exc
     if current_sha256 != expected_sha256:
         raise ValueError("persisted runtime screenshot changed during recognition")
+
+
+def _validated_uia_snapshot(
+    snapshot: Any,
+    *,
+    expected_identity: tuple[int, int, tuple[int, int]],
+) -> dict[str, Any]:
+    if not isinstance(snapshot, Mapping) or snapshot.get("status") != "ok":
+        raise ValueError("current UIA snapshot is unavailable")
+    window = snapshot.get("window")
+    if not isinstance(window, Mapping):
+        raise ValueError("current UIA snapshot window identity is unavailable")
+    bbox = window.get("bbox")
+    try:
+        identity = (
+            int(window["handle"]),
+            int(window["process_id"]),
+            (int(bbox["w"]), int(bbox["h"])),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("current UIA snapshot window identity is malformed") from exc
+    if identity != expected_identity:
+        raise ValueError("current UIA snapshot does not match the bound capture epoch")
+    return deepcopy(dict(snapshot))
 
 
 def _validated_origin_fact(
@@ -948,9 +999,11 @@ def _run_existing_read_only_recognition(
     image_path: str,
     goal: str,
     provider_mode: str | None,
+    uia_snapshot: Mapping[str, Any],
 ) -> Mapping[str, Any]:
     from app.api.models.request import VisionRecognitionPlanRequestModel
     from app.api.vision import recognition_plan
+    from app.operation.screen_reading.uia_provider import pinned_uia_snapshot
 
     request = VisionRecognitionPlanRequestModel(
         image_path=image_path,
@@ -962,7 +1015,8 @@ def _run_existing_read_only_recognition(
         metadata={},
         observe_trace_path=None,
     )
-    response = recognition_plan(request).model_dump(mode="json")
+    with pinned_uia_snapshot(uia_snapshot):
+        response = recognition_plan(request).model_dump(mode="json")
     if response.get("success") is not True:
         raise ValueError("read-only current recognition failed")
     data = response.get("data")
