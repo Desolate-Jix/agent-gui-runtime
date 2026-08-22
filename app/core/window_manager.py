@@ -115,6 +115,7 @@ class WindowManager:
 
     def focus_bound_window(self) -> BoundWindow:
         """Bring the currently bound window to the foreground and refresh its state."""
+        self._ensure_window_mutation_authority()
         self._ensure_windows_backend()
         bound = self.get_bound_window()
         if bound is None:
@@ -220,6 +221,7 @@ class WindowManager:
         focus: bool = True,
     ) -> BoundWindow:
         """Resize the currently bound window and refresh its bound-window snapshot."""
+        self._ensure_window_mutation_authority()
         self._ensure_windows_backend()
         if width <= 0 or height <= 0:
             raise ValueError("width and height must be positive")
@@ -263,6 +265,7 @@ class WindowManager:
 
     def maximize_bound_window(self, *, focus: bool = True) -> BoundWindow:
         """Maximize the currently bound window and refresh its bound-window snapshot."""
+        self._ensure_window_mutation_authority()
         self._ensure_windows_backend()
         bound = self.get_bound_window()
         if bound is None:
@@ -416,6 +419,7 @@ class WindowManager:
 
     def _activate_window(self, handle: int) -> None:
         """Best-effort lightweight foreground activation for screen-coordinate capture."""
+        self._ensure_window_mutation_authority()
         try:
             if hasattr(win32gui, "IsIconic") and win32gui.IsIconic(handle):  # type: ignore[union-attr]
                 win32gui.ShowWindow(handle, win32con.SW_RESTORE)  # type: ignore[union-attr]
@@ -594,6 +598,13 @@ class WindowManager:
             raise RuntimeError(
                 "Windows automation backend is unavailable. "
                 f"Import error: {WINDOWS_BACKEND_IMPORT_ERROR}"
+            )
+
+    def _ensure_window_mutation_authority(self) -> None:
+        """拒绝未由 LiveController 单次授权的窗口状态变更。"""
+        if not runtime_backend_input_is_active():
+            raise PermissionError(
+                "Window mutation requires one-time LiveController authority via DesktopBackend"
             )
 
 

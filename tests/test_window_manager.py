@@ -244,6 +244,139 @@ def test_get_bound_window_clears_binding_when_refresh_fails(monkeypatch) -> None
     assert manager._bound_window is None
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "focus_bound_window",
+        "resize_bound_window",
+        "maximize_bound_window",
+        "_activate_window",
+    ],
+)
+def test_window_mutations_require_runtime_backend_authority(monkeypatch, operation: str) -> None:
+    manager = WindowManager()
+    bound = BoundWindow(
+        handle=321,
+        title="Target window",
+        process_id=12,
+        process_name="target.exe",
+        rect=WindowRect(left=10, top=20, right=810, bottom=620),
+        is_active=False,
+    )
+    mutation_calls: list[tuple[object, ...]] = []
+
+    class MutationWin32Gui:
+        active_handle = 0
+
+        @staticmethod
+        def IsIconic(handle):
+            return False
+
+        @staticmethod
+        def GetForegroundWindow():
+            return MutationWin32Gui.active_handle
+
+        @staticmethod
+        def ShowWindow(*args):
+            mutation_calls.append(("ShowWindow", *args))
+
+        @staticmethod
+        def BringWindowToTop(*args):
+            mutation_calls.append(("BringWindowToTop", *args))
+
+        @staticmethod
+        def SetWindowPos(*args):
+            mutation_calls.append(("SetWindowPos", *args))
+
+        @staticmethod
+        def SetForegroundWindow(handle):
+            mutation_calls.append(("SetForegroundWindow", handle))
+            MutationWin32Gui.active_handle = handle
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", MutationWin32Gui)
+    monkeypatch.setattr(manager, "get_bound_window", lambda: bound)
+    monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(PermissionError, match="LiveController authority"):
+        if operation == "focus_bound_window":
+            manager.focus_bound_window()
+        elif operation == "resize_bound_window":
+            manager.resize_bound_window(width=640, height=480, focus=False)
+        elif operation == "maximize_bound_window":
+            manager.maximize_bound_window(focus=False)
+        else:
+            manager._activate_window(bound.handle)
+
+    assert mutation_calls == []
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["focus_bound_window", "resize_bound_window", "maximize_bound_window"],
+)
+def test_window_mutation_authority_is_checked_before_backend_availability(
+    monkeypatch,
+    operation: str,
+) -> None:
+    manager = WindowManager()
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", False)
+
+    with pytest.raises(PermissionError, match="LiveController authority"):
+        if operation == "focus_bound_window":
+            manager.focus_bound_window()
+        elif operation == "resize_bound_window":
+            manager.resize_bound_window(width=640, height=480, focus=False)
+        else:
+            manager.maximize_bound_window(focus=False)
+
+
+def test_resize_and_maximize_reach_win32_only_with_runtime_backend_authority(monkeypatch) -> None:
+    manager = WindowManager()
+    bound = BoundWindow(
+        handle=321,
+        title="Target window",
+        process_id=12,
+        process_name="target.exe",
+        rect=WindowRect(left=10, top=20, right=810, bottom=620),
+        is_active=False,
+    )
+    mutation_calls: list[tuple[object, ...]] = []
+
+    class MutationWin32Gui:
+        @staticmethod
+        def ShowWindow(*args):
+            mutation_calls.append(("ShowWindow", *args))
+
+        @staticmethod
+        def SetWindowPos(*args):
+            mutation_calls.append(("SetWindowPos", *args))
+
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", MutationWin32Gui)
+    monkeypatch.setattr(manager, "get_bound_window", lambda: bound)
+    monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
+
+    with _runtime_backend_input_scope():
+        manager.resize_bound_window(width=640, height=480, focus=False)
+        manager.maximize_bound_window(focus=False)
+
+    assert mutation_calls == [
+        ("ShowWindow", 321, window_manager_module.win32con.SW_RESTORE),
+        (
+            "SetWindowPos",
+            321,
+            window_manager_module.win32con.HWND_NOTOPMOST,
+            10,
+            20,
+            640,
+            480,
+            window_manager_module.win32con.SWP_SHOWWINDOW,
+        ),
+        ("ShowWindow", 321, window_manager_module.win32con.SW_MAXIMIZE),
+    ]
+
+
 def test_focus_bound_window_preserves_non_minimized_window_state(monkeypatch) -> None:
     manager = WindowManager()
     manager._bound_window = BoundWindow(
@@ -317,7 +450,8 @@ def test_focus_bound_window_preserves_non_minimized_window_state(monkeypatch) ->
     monkeypatch.setattr(window_manager_module, "HwndWrapper", Wrapper)
     monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
 
-    focused = manager.focus_bound_window()
+    with _runtime_backend_input_scope():
+        focused = manager.focus_bound_window()
 
     assert focused.handle == 321
     assert show_calls == []
@@ -396,7 +530,8 @@ def test_focus_bound_window_restores_minimized_window(monkeypatch) -> None:
     monkeypatch.setattr(window_manager_module, "HwndWrapper", Wrapper)
     monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
 
-    focused = manager.focus_bound_window()
+    with _runtime_backend_input_scope():
+        focused = manager.focus_bound_window()
 
     assert focused.handle == 654
     assert show_calls == [(654, window_manager_module.win32con.SW_RESTORE)]
@@ -439,8 +574,9 @@ def test_focus_bound_window_rejects_foreground_mismatch(monkeypatch) -> None:
     monkeypatch.setattr(window_manager_module.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(manager, "get_bound_window", lambda: bound)
 
-    with pytest.raises(RuntimeError, match="foreground verification failed"):
-        manager.focus_bound_window()
+    with _runtime_backend_input_scope():
+        with pytest.raises(RuntimeError, match="foreground verification failed"):
+            manager.focus_bound_window()
 
 
 def test_activate_window_temporarily_attaches_input_threads(monkeypatch) -> None:
@@ -487,7 +623,8 @@ def test_activate_window_temporarily_attaches_input_threads(monkeypatch) -> None
     monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
     monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
 
-    manager._activate_window(777)
+    with _runtime_backend_input_scope():
+        manager._activate_window(777)
 
     assert attach_calls == [
         (20, 21, True),
@@ -543,7 +680,8 @@ def test_activate_window_continues_after_foreground_thread_attach_failure(monkey
     monkeypatch.setattr(window_manager_module, "win32process", FocusWin32Process)
     monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
 
-    manager._activate_window(777)
+    with _runtime_backend_input_scope():
+        manager._activate_window(777)
 
     assert attach_calls == [
         (20, 21, True),
@@ -712,4 +850,19 @@ def test_foreground_keyboard_fallback_requires_runtime_authority(monkeypatch) ->
     monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
 
     assert manager._retry_foreground_activation_with_alt_unlock(777) is False
+    assert key_calls == []
+
+
+def test_shell_notification_foreground_cycle_requires_runtime_authority(monkeypatch) -> None:
+    manager = WindowManager()
+    key_calls = []
+
+    class FocusWin32Api:
+        @staticmethod
+        def keybd_event(key, scan, flags, extra):
+            key_calls.append((key, scan, flags, extra))
+
+    monkeypatch.setattr(window_manager_module, "win32api", FocusWin32Api, raising=False)
+
+    assert manager._cycle_past_shell_notification_foreground(777) is False
     assert key_calls == []
