@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from difflib import SequenceMatcher
 from typing import Any
@@ -357,13 +358,41 @@ def _image_path_for_live_or_saved(
     image_path: str | None,
     purpose: str,
     app_name: str | None = None,
+    enrich_live_capture: bool = False,
 ) -> tuple[str, dict | None]:
     if capture_live:
         capture = screenshot_service.capture_window(save_image=True, purpose=purpose, name_hint=app_name or purpose)
+        if enrich_live_capture:
+            capture = _enrich_server_owned_live_capture(capture)
         return str(Path(str(capture["image_path"])).resolve()), capture
     if image_path:
         return image_path, None
     raise ValueError("Provide image_path or set capture_live=true")
+
+
+def _enrich_server_owned_live_capture(capture: dict[str, Any]) -> dict[str, Any]:
+    """在截图所有者边界把已保存截图绑定到不可变文件事实。"""
+    image_value = capture.get("image_path")
+    if not isinstance(image_value, str) or not image_value:
+        raise RuntimeError("Live capture did not produce a saved image")
+    image_path = Path(image_value).resolve()
+    if not image_path.is_file() or image_path.is_symlink():
+        raise RuntimeError("Live capture image is not a regular file")
+    image_bytes = image_path.read_bytes()
+    with Image.open(image_path) as image:
+        image_size = {"width": int(image.width), "height": int(image.height)}
+    stat = image_path.stat()
+    artifact_sha256 = hashlib.sha256(image_bytes).hexdigest()
+    captured_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    capture_id = f"capture/builtin/{artifact_sha256[:24]}/{stat.st_mtime_ns}"
+    return {
+        **capture,
+        "image_path": str(image_path),
+        "capture_id": capture_id,
+        "captured_at": captured_at,
+        "sha256": artifact_sha256,
+        "image_size": image_size,
+    }
 
 
 def _learning_capture_visual_readiness(image_path: str | Path) -> dict[str, Any]:
@@ -423,6 +452,7 @@ def _learning_observe_image_source(
         image_path=request.image_path,
         purpose="observe_screen",
         app_name=request.app_name,
+        enrich_live_capture=request.agent_mode == "learn",
     )
     readiness_requested = bool(
         isinstance(request.metadata, dict)
@@ -454,11 +484,11 @@ def _learning_observe_image_source(
             return image_path, capture_payload
         if attempt_index + 1 < max_attempts:
             time.sleep(retry_delay_seconds)
-            capture_payload = screenshot_service.capture_window(
+            capture_payload = _enrich_server_owned_live_capture(screenshot_service.capture_window(
                 save_image=True,
                 purpose="observe_screen_ready_retry",
                 name_hint=request.app_name or "learning_observe",
-            )
+            ))
             image_path = str(capture_payload.get("image_path") or "")
             if not image_path or not Path(image_path).exists():
                 raise RuntimeError("Learning capture readiness retry did not create an image")
@@ -3819,6 +3849,13 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
     )
     legacy = observe_result_to_legacy_response(task_result)
     if legacy["success"] is True:
+        data = legacy.get("data") if isinstance(legacy.get("data"), dict) else {}
+        observed = data.get("result") if isinstance(data.get("result"), dict) else {}
+        if request.agent_mode == "learn":
+            _attach_server_owned_builtin_uei_ref(
+                observed,
+                project_root=Path(__file__).resolve().parents[2],
+            )
         return APIResponse(
             success=True,
             message=legacy["message"],
@@ -3835,6 +3872,71 @@ def observe_screen(request: VisionObserveScreenRequestModel) -> APIResponse:
             details=str(failure.get("details") or "Screen observation failed"),
         ),
     )
+
+
+def _attach_server_owned_builtin_uei_ref(
+    observed: dict[str, Any], *, project_root: Path,
+) -> None:
+    """仅由服务端 Observe 所有者签发可传给面板的 UEI 引用。"""
+    if not isinstance(observed, dict):
+        return
+    live_capture = observed.get("live_capture")
+    ocr_result = observed.get("ocr_result")
+    if not isinstance(ocr_result, dict):
+        ocr_result = _builtin_ocr_fixture_from_observed_texts(observed)
+    image_path = observed.get("image_path")
+    if not isinstance(live_capture, dict) or not isinstance(ocr_result, dict) or not isinstance(image_path, str):
+        return
+    capture_id = live_capture.get("capture_id")
+    captured_at = live_capture.get("captured_at")
+    image_sha256 = live_capture.get("sha256")
+    image_size = live_capture.get("image_size")
+    if not all(isinstance(value, str) and value for value in (capture_id, captured_at, image_sha256)):
+        return
+    if not (isinstance(image_size, dict) and isinstance(image_size.get("width"), int) and isinstance(image_size.get("height"), int)):
+        return
+    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
+
+    observed["uei_shadow_result_ref"] = seal_builtin_ocr_evidence(
+        project_root=project_root,
+        image_path=Path(image_path),
+        capture_id=capture_id,
+        captured_at=captured_at,
+        ocr_result=ocr_result,
+        expected_image_sha256=image_sha256,
+        expected_image_size={"width": image_size["width"], "height": image_size["height"]},
+    )
+
+
+def _builtin_ocr_fixture_from_observed_texts(
+    observed: dict[str, Any],
+) -> dict[str, object] | None:
+    """只投影规范化屏幕文本，不保留 OCR 原生载荷。"""
+    texts = observed.get("texts")
+    if not isinstance(texts, list):
+        return None
+    matches: list[dict[str, object]] = []
+    for item in texts:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text")
+        bbox = item.get("bbox")
+        confidence = item.get("confidence")
+        if not isinstance(text, str) or not isinstance(bbox, dict):
+            continue
+        if not all(isinstance(bbox.get(name), int) and not isinstance(bbox[name], bool) for name in ("x", "y", "width", "height")):
+            continue
+        score = float(confidence) if isinstance(confidence, (int, float)) and not isinstance(confidence, bool) else 0.0
+        matches.append({
+            "text": text,
+            "score": max(0.0, min(score, 1.0)),
+            "bbox": {name: int(bbox[name]) for name in ("x", "y", "width", "height")},
+        })
+    return {
+        "image_path": "server-owned-screen-reading",
+        "matches": matches,
+        "metadata": {"engine": "screen-reading-text-projection"},
+    }
 
 
 def _build_degraded_observation_result(

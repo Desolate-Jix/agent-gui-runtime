@@ -481,7 +481,7 @@ def test_learn_task_worker_subprocess_does_not_load_panel_api() -> None:
     assert all(item["panel_loaded"] is False for item in report["results"])
 
 
-def test_recognition_task_forwards_omniparser_as_immutable_provider_source(tmp_path) -> None:
+def test_recognition_task_drops_raw_provider_payload_at_learning_boundary(tmp_path) -> None:
     from app.learn.workflow_contracts import RecognitionTaskInput
     from app.learn.workflow_tasks.recognition import run_recognition_task
 
@@ -503,6 +503,8 @@ def test_recognition_task_forwards_omniparser_as_immutable_provider_source(tmp_p
         "provenance": {"runner": "local_smoke"},
     }
 
+    saved_payload = {}
+    trace_payload = {}
     result = run_recognition_task(
         RecognitionTaskInput(
             app_name="sample_app",
@@ -512,6 +514,7 @@ def test_recognition_task_forwards_omniparser_as_immutable_provider_source(tmp_p
                 "capture_id": "capture-17",
                 "screenshot_sha256": "a" * 64,
                 "omniparser": parser_result,
+                "sources": {"omniparser": parser_result},
             },
         ),
         project_root=tmp_path,
@@ -534,17 +537,19 @@ def test_recognition_task_forwards_omniparser_as_immutable_provider_source(tmp_p
             }
         ),
         grounding_adapter=lambda **_kwargs: {},
-        trial_saver=lambda _payload, *, app_name, project_root: (
-            f"artifacts/{app_name}/trial.json"
+        trial_saver=lambda payload, *, app_name, project_root: (
+            saved_payload.update(payload) or f"artifacts/{app_name}/trial.json"
         ),
-        trace_writer=lambda **_kwargs: "logs/traces/recognition.json",
+        trace_writer=lambda **kwargs: (
+            trace_payload.update(kwargs["payload"]) or "logs/traces/recognition.json"
+        ),
     )
 
     assert result.outcome == "completed"
-    source = captured_bundle["sources"]["omniparser"]
-    assert source == parser_result
-    assert source is not parser_result
+    assert "omniparser" not in captured_bundle["sources"]
     assert captured_bundle["capture_id"] == "capture-17"
     assert captured_bundle["screenshot_sha256"] == "a" * 64
-    assert source["model_revision"] == "v.2.0.1"
-    assert source["provenance"] == {"runner": "local_smoke"}
+    serialized = json.dumps({"bundle": captured_bundle, "saved": saved_payload, "trace": trace_payload})
+    assert "omni-run-17" not in serialized
+    assert "local_smoke" not in serialized
+    assert "image_normalized_xyxy" not in serialized

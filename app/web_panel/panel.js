@@ -10079,14 +10079,12 @@ function buildLearningDraftObservationEvidence() {
     : result.interface_classification && typeof result.interface_classification === "object"
       ? result.interface_classification
       : {};
-  const omniparser = [
-    observeResult.omniparser,
-    nestedGet(observeResult, ["sources", "omniparser"]),
-  ].find((candidate) => (
-    candidate
-    && typeof candidate === "object"
-    && candidate.contract_version === "screen_parser_result_v1"
-  ));
+  const ueiShadowResultRef = observeResult.uei_shadow_result_ref;
+  const hasUeiShadowResultRef = ueiShadowResultRef
+    && typeof ueiShadowResultRef === "object"
+    && Object.keys(ueiShadowResultRef).length === 2
+    && typeof ueiShadowResultRef.id === "string"
+    && typeof ueiShadowResultRef.content_sha256 === "string";
   const hasScreenMapEvidence = screenMapEvidenceCount(screenMap) > 0;
   const hasCalibrationCandidates = calibrationEvidenceTargets.length > 0;
   const hasModelCalibrationEvidence = vistaValidatedCount > 0;
@@ -10135,7 +10133,12 @@ function buildLearningDraftObservationEvidence() {
     screen_summary: result.screen_summary || nestedGet(result, ["screen_map", "summary", "screen_summary"]) || nestedGet(result, ["screen_reading", "screen_summary"]) || observeResult.screen_summary || nestedGet(observeResult, ["screen_map", "summary", "screen_summary"]) || nestedGet(observeResult, ["screen_reading", "screen_summary"]) || "",
     interface_classification: interfaceClassification,
     screen_map: screenMap,
-    ...(omniparser ? { omniparser } : {}),
+    ...(hasUeiShadowResultRef
+      ? { uei_shadow_result_ref: {
+        id: ueiShadowResultRef.id,
+        content_sha256: ueiShadowResultRef.content_sha256,
+      } }
+      : {}),
     coordinate_overlay_path: result.coordinate_overlay_path || nestedGet(result, ["learn_all_targets", "overlay_path"]) || "",
     coordinate_overlay: {
       contract_version: String(coordinateOverlay.contract_version || ""),

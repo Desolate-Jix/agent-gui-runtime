@@ -35,6 +35,13 @@ def run_recognition_task(
 ) -> LearningTaskResult:
     """生成只读学习草稿，并保持执行授权始终关闭。"""
 
+    task_input = task_input.model_copy(
+        update={
+            "observation_evidence": _provider_safe_observation_evidence(
+                task_input.observation_evidence,
+            ),
+        },
+    )
     root = project_root.resolve()
     try:
         observe_bundle = _build_observe_bundle(task_input)
@@ -256,6 +263,16 @@ def save_recognition_trial(
     return _relative_path(trial_path, project_root=project_root)
 
 
+def _provider_safe_observation_evidence(value: object) -> dict[str, Any]:
+    """进入学习持久化或 Trace 边界前移除 provider 原生载荷。"""
+    evidence = deepcopy(value) if isinstance(value, dict) else {}
+    evidence.pop("omniparser", None)
+    sources = evidence.get("sources")
+    if isinstance(sources, dict):
+        sources.pop("omniparser", None)
+    return evidence
+
+
 def _build_observe_bundle(task_input: RecognitionTaskInput) -> dict[str, Any]:
     evidence = (
         task_input.observation_evidence
@@ -299,13 +316,6 @@ def _build_observe_bundle(task_input: RecognitionTaskInput) -> dict[str, Any]:
             sources["vision"]["regions"] = candidates
         if interface_classification:
             sources["vision"]["interface_classification"] = interface_classification
-    omniparser = (
-        evidence.get("omniparser")
-        if isinstance(evidence.get("omniparser"), dict)
-        else {}
-    )
-    if omniparser:
-        sources["omniparser"] = deepcopy(omniparser)
     if review_boxes:
         ocr_boxes = [
             item for item in review_boxes if item.get("role") == "ocr_text_review_only"

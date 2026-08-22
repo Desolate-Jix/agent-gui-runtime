@@ -1,0 +1,10 @@
+{
+  "matches": [
+    {
+      "text": "Quick Apply",
+      "score": 0.9,
+      "bbox": {"x": 1, "y": 1, "width": 4, "height": 2}
+    }
+  ],
+  "metadata": {"engine": "recorded-built-in"}
+}

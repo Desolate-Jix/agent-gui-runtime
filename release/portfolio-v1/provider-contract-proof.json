@@ -1,0 +1,81 @@
+{
+  "contract_version": "portfolio_v1_provider_contract_proof_v1",
+  "fixed_or_recorded_evidence": true,
+  "live_omniparser_inference": false,
+  "execution_authorized": false,
+  "provider_accuracy_proven": false,
+  "scope": "provider-neutral UEI-to-Review conformance only",
+  "built_in": {
+    "provider_id": "local.runtime/builtin-ocr",
+    "fixture": "tests/fixtures/uei-v1/portfolio-v1-builtin-fixed-output.json",
+    "fixture_sha256": "0df7831bd9d2d9b54cba87af76166a40409e1053fc2d8946e46a42e8b5ec6a29",
+    "result_contract": "provider_safe_result_v1",
+    "result_ref": {
+      "id": "result/a1f3fde9f382b67d130b44d5bc2adf591745677f9d20842d9ce4e8331c657a50",
+      "content_sha256": "04e5812d1eb77c7e2ee56736f6d4fbf7efa04b6a587941d0bd2382527f6b029a"
+    },
+    "reference_resolution": "generated_rebuilt_at_test_not_directly_resolvable",
+    "review_contract": "uei_shadow_provider_summary_v1"
+  },
+  "recorded_omniparser": {
+    "provider_id": "local.runtime/omniparser",
+    "adapter": "OmniParserShadowAdapter",
+    "runtime": "ShadowProviderRuntime",
+    "success": {
+      "fixture": "tests/fixtures/uei-v1/portfolio-v1-omniparser-recorded-success.json",
+      "fixture_sha256": "573befe716e85ade1fdf5f03001b025ce5a09472bbd8528ddcbbf4d5700c1868",
+      "receipt_ref": {
+        "id": "receipt/4e60ff84de0ef29b3ada01e0079ffc023362562079b5c98329a527b20826c853",
+        "content_sha256": "9584949906a8287373ffe2f34f77a6e6ed0de7c9a962b774c3ad406a527bff45"
+      },
+      "result_ref": {
+        "id": "result/4e60ff84de0ef29b3ada01e0079ffc023362562079b5c98329a527b20826c853",
+        "content_sha256": "94f4d9cbbb9f846705195cf6b161d0b22f48986f1c97a3dfd35065cb6f7b9588"
+      },
+      "receipt_status": "succeeded",
+      "result_status": "success",
+      "receipt_contract": "provider_runtime_receipt_v1",
+      "result_contract": "provider_safe_result_v1",
+      "reference_resolution": "generated_rebuilt_at_test_not_directly_resolvable",
+      "reverify": "uv run python scripts/build_portfolio_v1_provider_contract_proof.py"
+    },
+    "failure": {
+      "fixture": "tests/fixtures/uei-v1/portfolio-v1-omniparser-recorded-failure.json",
+      "fixture_sha256": "fd1a24451a3dc112ea331172a6678604d4da551dcf590e6ae0d88dbb215a2cb0",
+      "receipt_ref": {
+        "id": "receipt/4e60ff84de0ef29b3ada01e0079ffc023362562079b5c98329a527b20826c853",
+        "content_sha256": "a00bbae920eb93d5f4c06e7276326ec197db8144b5e9838da09fdf99de12a64e"
+      },
+      "result_ref": {
+        "id": "result/4e60ff84de0ef29b3ada01e0079ffc023362562079b5c98329a527b20826c853",
+        "content_sha256": "e94fcb2cd9d38c98d63faaed89e3dbf6c283825b49583c83bd0656973d795427"
+      },
+      "receipt_status": "failed",
+      "result_status": "failed",
+      "receipt_contract": "provider_runtime_receipt_v1",
+      "result_contract": "provider_safe_result_v1",
+      "reference_resolution": "generated_rebuilt_at_test_not_directly_resolvable",
+      "error_ref": {
+        "id": "error/4e60ff84de0ef29b3ada01e0079ffc023362562079b5c98329a527b20826c853",
+        "content_sha256": "d5a2ba1e41edab740e992b4485814c2375884302066be8aff21e9e2f31b09b14"
+      },
+      "error_contract": "provider_error_v1",
+      "reverify": "uv run python scripts/build_portfolio_v1_provider_contract_proof.py"
+    }
+  },
+  "boundaries": {
+    "panel_forwards_only": [
+      "id",
+      "content_sha256"
+    ],
+    "provider_native_payload_exposed": false,
+    "geometry_exposed": false,
+    "action_candidates": []
+  },
+  "not_proven": [
+    "live provider inference",
+    "provider accuracy",
+    "remote provider support",
+    "runtime execution authorization"
+  ]
+}

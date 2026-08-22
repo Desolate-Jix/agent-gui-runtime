@@ -45,6 +45,28 @@ function summary(providerId, profileId) {
   };
 }
 
+function buildObservationEvidence(observeResult) {
+  const builder = body("buildLearningDraftObservationEvidence", "function setLearningTrialResultPath");
+  const context = {
+    lastLearningDeepCalibrationResponse: null,
+    lastResponse: {},
+    lastLearningDraftObserveResponse: observeResult,
+    learningSourceImagePath: "",
+    currentImagePath: "",
+    resultOf: (value) => value || {},
+    nestedGet: (value, path) => path.reduce((current, key) => current && current[key], value),
+    screenMapEvidenceCount: () => 0,
+    compactLearningDraftTargets: () => [],
+    compactVistaCoordinateValidation: () => null,
+    firstLearningSourceImagePath: (...values) => values.find(Boolean) || "",
+    isLearningDisplayOverlayPath: () => false,
+    $: () => null,
+  };
+  vm.createContext(context);
+  vm.runInContext(`${builder}\nthis.build = buildLearningDraftObservationEvidence;`, context);
+  return context.build();
+}
+
 test("Built-in and Omni provenance render through one provider-neutral canonical model", () => {
   const canonicalRenderer = body("renderUeiShadowProviderSummary", "function renderScreenUnderstandingPreview");
   assert.doesNotMatch(canonicalRenderer, /local\.runtime\/ocr|windows[_-]uia|omniparser/i);
@@ -98,4 +120,15 @@ test("canonical UEI evidence suppresses the legacy provider-specific Review mode
   assert.equal(calls.legacy[1], legacy);
   assert.equal(calls.canonical.length, 2);
   assert.equal(calls.canonical[1], undefined);
+});
+
+test("Panel forwards only a server-issued immutable UEI ref when one is present", () => {
+  const ref = { id: "result/server/1", content_sha256: "a".repeat(64) };
+  const evidence = buildObservationEvidence({
+    uei_shadow_result_ref: ref,
+    omniparser: { contract_version: "screen_parser_result_v1", elements: [{ source_bbox: [1, 2, 3, 4] }] },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(evidence.uei_shadow_result_ref)), ref);
+  assert.equal(Object.prototype.hasOwnProperty.call(evidence, "omniparser"), false);
+  assert.equal(JSON.stringify(evidence).includes("source_bbox"), false);
 });

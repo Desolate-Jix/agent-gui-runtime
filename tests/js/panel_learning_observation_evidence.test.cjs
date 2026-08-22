@@ -74,7 +74,7 @@ test("learning observation evidence preserves actual model classification", () =
 });
 
 
-test("learning observation evidence preserves canonical OmniParser results from either observe shape", () => {
+test("learning observation evidence drops raw OmniParser shapes without a server UEI ref", () => {
   const topLevel = {
     contract_version: "screen_parser_result_v1",
     provider: "omniparser",
@@ -82,7 +82,7 @@ test("learning observation evidence preserves canonical OmniParser results from 
     elements: [{ element_id: "omniparser_0001", interactivity: true }],
   };
   const fromTopLevel = loadEvidenceBuilder({ omniparser: topLevel })();
-  assert.deepEqual(JSON.parse(JSON.stringify(fromTopLevel.omniparser)), topLevel);
+  assert.equal(Object.prototype.hasOwnProperty.call(fromTopLevel, "omniparser"), false);
 
   const nested = {
     contract_version: "screen_parser_result_v1",
@@ -91,7 +91,8 @@ test("learning observation evidence preserves canonical OmniParser results from 
     error: { code: "weights_missing", details: "weights are unavailable" },
   };
   const fromNested = loadEvidenceBuilder({ sources: { omniparser: nested } })();
-  assert.deepEqual(JSON.parse(JSON.stringify(fromNested.omniparser)), nested);
+  assert.equal(Object.prototype.hasOwnProperty.call(fromNested, "omniparser"), false);
+  assert.equal(JSON.stringify(fromNested).includes("weights_missing"), false);
   assert.deepEqual(topLevel.elements, [{ element_id: "omniparser_0001", interactivity: true }]);
 });
 
