@@ -204,7 +204,14 @@ class _WindowVisibilityChecker:
         self.visible = visible
         self.calls: list[tuple[int, tuple[float, float]]] = []
 
-    def check(self, *, target_window_handle: int, click_point: tuple[float, float]) -> dict:
+    def check(
+        self,
+        *,
+        session_id: str,
+        capture_lineage: dict,
+        target_window_handle: int,
+        click_point: tuple[float, float],
+    ) -> dict:
         self.calls.append((target_window_handle, click_point))
         if self.bound_window_handle != target_window_handle:
             return {
@@ -674,7 +681,16 @@ def test_window_manager_visibility_adapter_returns_facts_not_authority() -> None
     manager = WindowManager()
     checker = ExistingWindowManagerVisibilityChecker(window_manager=manager)
 
-    facts = checker.check(target_window_handle=4949, click_point=(220.0, 240.0))
+    facts = checker.check(
+        session_id="session-current",
+        capture_lineage={
+            "capture_id": "capture-current",
+            "screenshot_sha256": "a" * 64,
+            "viewport_size": {"width": 800, "height": 600},
+        },
+        target_window_handle=4949,
+        click_point=(220.0, 240.0),
+    )
 
     assert facts == {
         "bound_window_handle": 4949,

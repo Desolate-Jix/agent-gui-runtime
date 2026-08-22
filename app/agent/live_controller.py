@@ -118,6 +118,8 @@ class WindowVisibilityChecker(Protocol):
     def check(
         self,
         *,
+        session_id: str,
+        capture_lineage: Mapping[str, Any],
         target_window_handle: int,
         click_point: tuple[float, float],
     ) -> Mapping[str, Any]: ...
@@ -136,6 +138,8 @@ class ExistingWindowManagerVisibilityChecker:
     def check(
         self,
         *,
+        session_id: str,
+        capture_lineage: Mapping[str, Any],
         target_window_handle: int,
         click_point: tuple[float, float],
     ) -> Mapping[str, Any]:
@@ -631,6 +635,8 @@ class LiveController:
         try:
             visibility = dict(
                 self._window_visibility_checker.check(
+                    session_id=session.snapshot.session_id,
+                    capture_lineage=selection["capture_lineage"],
                     target_window_handle=session.snapshot.target_window_handle,
                     click_point=click_point,
                 )

@@ -30,6 +30,7 @@ from tests.test_reviewed_workflow_asset_v2 import _asset
 
 from app.agent.live_runtime_composition import (
     ExistingWindowsCurrentEvidenceAdapter,
+    ExistingWindowsCurrentEvidenceVisibilityChecker,
     build_existing_windows_live_controller,
 )
 
@@ -85,6 +86,29 @@ class _ScreenshotService:
             "capture_purpose": kwargs.get("purpose"),
             "window_size": {"width": width, "height": self.height},
         }
+
+
+class _SequencedScreenshotService(_ScreenshotService):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        colors: list[tuple[int, int, int]],
+        fail_on_call: int | None = None,
+    ) -> None:
+        super().__init__(root)
+        self.colors = colors
+        self.fail_on_call = fail_on_call
+
+    def capture_window(self, **kwargs: object) -> dict[str, object]:
+        call_number = len(self.calls) + 1
+        if call_number == self.fail_on_call:
+            self.calls.append(dict(kwargs))
+            raise RuntimeError("fresh capture failed")
+        result = super().capture_window(**kwargs)
+        color = self.colors[min(call_number - 1, len(self.colors) - 1)]
+        Image.new("RGB", (self.width, self.height), color).save(str(result["image_path"]))
+        return result
 
 
 class _OriginReader:
@@ -470,6 +494,69 @@ def test_capture_rejects_origin_drift_after_pinned_recognition(tmp_path: Path) -
 
 
 @pytest.mark.parametrize(
+    ("case", "expected_allowed", "expected_fresh_calls"),
+    [
+        ("unchanged", True, 2),
+        ("changed_pixels", False, 2),
+        ("resize", False, 1),
+        ("wrong_session", False, 1),
+        ("capture_failure", False, 2),
+    ],
+)
+def test_pre_dispatch_visibility_requires_exact_cached_pixels(
+    tmp_path: Path,
+    case: str,
+    expected_allowed: bool,
+    expected_fresh_calls: int,
+) -> None:
+    asset = _asset()
+    screenshot = _SequencedScreenshotService(
+        tmp_path,
+        colors=[(1, 20, 30), (200, 20, 30) if case == "changed_pixels" else (1, 20, 30)],
+        fail_on_call=2 if case == "capture_failure" else None,
+    )
+    checker_bound = _bound(width=321) if case == "resize" else _bound()
+    manager = _WindowManager(_bound(), _bound(), _bound(), checker_bound, checker_bound)
+    adapter, _, _, _, runner = _adapter(
+        tmp_path,
+        asset,
+        manager=manager,
+        screenshot=screenshot,
+    )
+    current = adapter.capture_current(
+        session_id="session-current",
+        asset=asset,
+        target_window_handle=4242,
+    )
+    recognition_call_count = len(runner.calls)
+    checker = ExistingWindowsCurrentEvidenceVisibilityChecker(
+        evidence_adapter=adapter,
+        delegate=_Visibility(),
+    )
+
+    result = checker.check(
+        session_id="session-other" if case == "wrong_session" else "session-current",
+        capture_lineage={
+            "capture_id": current["capture_id"],
+            "screenshot_sha256": current["screenshot_sha256"],
+            "viewport_size": current["viewport_size"],
+        },
+        target_window_handle=4242,
+        click_point=(100.0, 100.0),
+    )
+
+    assert result["point_visibility"]["allowed"] is expected_allowed
+    assert len(screenshot.calls) == expected_fresh_calls
+    assert len(runner.calls) == recognition_call_count
+    if expected_fresh_calls == 2:
+        assert screenshot.calls[-1] == {
+            "save_image": True,
+            "focus_window": False,
+            "purpose": "runtime-pre-dispatch-freshness",
+        }
+
+
+@pytest.mark.parametrize(
     "mutation",
     [
         lambda payload: payload["candidate_result"]["candidates"][0].update(score=0.99),
@@ -708,6 +795,14 @@ def test_factory_wires_internal_existing_windows_runtime_without_route(tmp_path:
     assert isinstance(controller._asset_loader, ReviewedWorkflowAssetStore)
     assert isinstance(controller._observation_source, ExistingWindowsCurrentEvidenceAdapter)
     assert controller._observation_source is controller._target_resolver
+    assert isinstance(
+        controller._window_visibility_checker,
+        ExistingWindowsCurrentEvidenceVisibilityChecker,
+    )
+    assert (
+        controller._window_visibility_checker._evidence_adapter
+        is controller._observation_source
+    )
     assert isinstance(controller._gate, ReviewedWorkflowGateAdapter)
     assert isinstance(controller._backend, ExistingWindowsBackendAdapter)
     assert isinstance(controller._intent_claim_store, RuntimeIntentClaimStore)
@@ -720,11 +815,11 @@ def test_factory_wires_internal_existing_windows_runtime_without_route(tmp_path:
     assert "execute_" + "recognition_plan" not in source
 
 
-@pytest.mark.parametrize("gate_block", [False, True])
-def test_factory_graph_dispatches_once_or_persists_gate_block(
+@pytest.mark.parametrize("case", ["dispatch", "gate_block", "changed_pixels"])
+def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    gate_block: bool,
+    case: str,
 ) -> None:
     import app.agent.live_runtime_composition as composition
     import app.core.screenshot as screenshot_module
@@ -742,8 +837,16 @@ def test_factory_graph_dispatches_once_or_persists_gate_block(
         expected_registry_revision=0,
     )
     backend = DeterministicFakeBackend()
-    manager = _WindowManager(*[_bound() for _ in range(6)])
-    monkeypatch.setattr(screenshot_module, "screenshot_service", _ScreenshotService(tmp_path))
+    manager = _WindowManager(*[_bound() for _ in range(8)])
+    screenshot = _SequencedScreenshotService(
+        tmp_path,
+        colors=[
+            (1, 20, 30),
+            (1, 20, 30),
+            (200, 20, 30) if case == "changed_pixels" else (1, 20, 30),
+        ],
+    )
+    monkeypatch.setattr(screenshot_module, "screenshot_service", screenshot)
     monkeypatch.setattr(window_module, "window_manager", manager)
     monkeypatch.setattr(uia_module, "uia_provider", _UIAProvider())
     monkeypatch.setattr(
@@ -758,7 +861,7 @@ def test_factory_graph_dispatches_once_or_persists_gate_block(
     )
     monkeypatch.setattr(composition, "ExistingWindowsBackendAdapter", lambda: backend)
     monkeypatch.setattr(composition, "ExistingWindowManagerVisibilityChecker", _Visibility)
-    if gate_block:
+    if case == "gate_block":
         monkeypatch.setattr(
             composition,
             "ReviewedWorkflowGateAdapter",
@@ -780,25 +883,33 @@ def test_factory_graph_dispatches_once_or_persists_gate_block(
         if item.action_id != "runtime.safe_stop"
     )
 
-    receipt = controller.submit_intent(
-        {
-            "contract_version": "agent_intent_v1",
-            "intent_id": f"factory-intent-{gate_block}",
-            "session_id": session.session_id,
-            "observation_id": session.current_observation.observation_id,
-            "workflow": session.workflow.model_dump(mode="json"),
-            "action_id": action.action_id,
-        }
-    )
+    payload = {
+        "contract_version": "agent_intent_v1",
+        "intent_id": f"factory-intent-{case}",
+        "session_id": session.session_id,
+        "observation_id": session.current_observation.observation_id,
+        "workflow": session.workflow.model_dump(mode="json"),
+        "action_id": action.action_id,
+    }
+    receipt = controller.submit_intent(payload)
 
-    assert receipt.outcome == ("BLOCKED" if gate_block else "DISPATCHED")
-    assert backend.dispatch_count == (0 if gate_block else 1)
+    expected_outcome = "DISPATCHED" if case == "dispatch" else "BLOCKED"
+    assert receipt.outcome == expected_outcome
+    assert backend.dispatch_count == (1 if case == "dispatch" else 0)
+    assert len(screenshot.calls) == (2 if case == "gate_block" else 3)
+    screenshot_call_count = len(screenshot.calls)
+    duplicate = controller.submit_intent(payload)
+    assert duplicate == receipt
+    assert backend.dispatch_count == (1 if case == "dispatch" else 0)
+    assert len(screenshot.calls) == screenshot_call_count
     persisted = RuntimeReceiptStore(project_root=tmp_path).load_by_receipt_id(receipt.receipt_id)
     assert persisted.runtime_receipt == receipt
-    if not gate_block:
+    if case == "dispatch":
         assert receipt.reason_code == "verification_pending"
         assert receipt.effect_status == "not_evaluated"
         assert receipt.destination_status == "not_evaluated"
+    if case == "changed_pixels":
+        assert receipt.reason_code == "target_occluded"
 
 
 def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound(
@@ -867,7 +978,14 @@ class _AssetLoader:
 
 
 class _Visibility:
-    def check(self, *, target_window_handle: int, click_point: tuple[float, float]) -> dict:
+    def check(
+        self,
+        *,
+        session_id: str,
+        capture_lineage: dict,
+        target_window_handle: int,
+        click_point: tuple[float, float],
+    ) -> dict:
         return {
             "bound_window_handle": target_window_handle,
             "point_visibility": {"allowed": True, "click_point": click_point},

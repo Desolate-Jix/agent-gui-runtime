@@ -49,6 +49,9 @@ class _CurrentEvidenceBundle:
     capture_id: str
     screenshot_sha256: str
     asset_content_sha256: str
+    target_window_handle: int
+    target_process_id: int
+    viewport_size: tuple[int, int]
     image_path: str
     asset_json: bytes
     current_observation_json: bytes
@@ -380,6 +383,9 @@ class ExistingWindowsCurrentEvidenceAdapter:
             capture_id=capture_id,
             screenshot_sha256=screenshot_digest,
             asset_content_sha256=asset_hash,
+            target_window_handle=before[0],
+            target_process_id=before[1],
+            viewport_size=before[2],
             image_path=str(image_path),
             asset_json=_json_bytes(asset),
             current_observation_json=_json_bytes(current),
@@ -429,6 +435,131 @@ class ExistingWindowsCurrentEvidenceAdapter:
         ):
             return None
         return item
+
+    def _find_bundle_for_visibility(
+        self,
+        *,
+        session_id: str,
+        capture_lineage: Mapping[str, Any],
+    ) -> _CurrentEvidenceBundle | None:
+        if set(capture_lineage) != {"capture_id", "screenshot_sha256", "viewport_size"}:
+            return None
+        capture_id = capture_lineage.get("capture_id")
+        screenshot_digest = capture_lineage.get("screenshot_sha256")
+        viewport = capture_lineage.get("viewport_size")
+        if (
+            not isinstance(capture_id, str)
+            or not isinstance(screenshot_digest, str)
+            or not isinstance(viewport, Mapping)
+            or set(viewport) != {"width", "height"}
+        ):
+            return None
+        with self._lock:
+            bundle = self._cache.get((session_id, capture_id, screenshot_digest))
+        if bundle is None or viewport != {
+            "width": bundle.viewport_size[0],
+            "height": bundle.viewport_size[1],
+        }:
+            return None
+        return bundle
+
+
+class ExistingWindowsCurrentEvidenceVisibilityChecker:
+    """在底层 dispatch 前证明当前像素仍属于同一份 evidence。"""
+
+    def __init__(
+        self,
+        *,
+        evidence_adapter: ExistingWindowsCurrentEvidenceAdapter,
+        delegate: Any | None = None,
+    ) -> None:
+        self._evidence_adapter = evidence_adapter
+        self._screenshot_service = evidence_adapter._screenshot_service
+        self._window_manager = evidence_adapter._window_manager
+        self._delegate = delegate or ExistingWindowManagerVisibilityChecker(
+            window_manager=self._window_manager
+        )
+
+    def check(
+        self,
+        *,
+        session_id: str,
+        capture_lineage: Mapping[str, Any],
+        target_window_handle: int,
+        click_point: tuple[float, float],
+    ) -> Mapping[str, Any]:
+        bundle = self._evidence_adapter._find_bundle_for_visibility(
+            session_id=session_id,
+            capture_lineage=capture_lineage,
+        )
+        if bundle is None:
+            return self._blocked("current_evidence_missing")
+        expected_identity = (
+            bundle.target_window_handle,
+            bundle.target_process_id,
+            bundle.viewport_size,
+        )
+        try:
+            before = _bound_identity(
+                self._window_manager.get_bound_window(),
+                target_window_handle=target_window_handle,
+            )
+            if before != expected_identity:
+                return self._blocked(
+                    "bound_window_changed",
+                    bound_window_handle=before[0],
+                )
+            capture = self._screenshot_service.capture_window(
+                save_image=True,
+                focus_window=False,
+                purpose="runtime-pre-dispatch-freshness",
+            )
+            after = _bound_identity(
+                self._window_manager.get_bound_window(),
+                target_window_handle=target_window_handle,
+            )
+            if after != expected_identity:
+                return self._blocked(
+                    "bound_window_changed",
+                    bound_window_handle=after[0],
+                )
+            _, image_bytes, viewport = _validated_saved_capture(
+                capture,
+                expected_size=bundle.viewport_size,
+            )
+        except Exception:
+            return self._blocked("fresh_capture_failed")
+        if viewport != {
+            "width": bundle.viewport_size[0],
+            "height": bundle.viewport_size[1],
+        }:
+            return self._blocked(
+                "viewport_changed",
+                bound_window_handle=target_window_handle,
+            )
+        if sha256(image_bytes).hexdigest() != bundle.screenshot_sha256:
+            return self._blocked(
+                "pixel_hash_changed",
+                bound_window_handle=target_window_handle,
+            )
+        return self._delegate.check(
+            session_id=session_id,
+            capture_lineage=capture_lineage,
+            target_window_handle=target_window_handle,
+            click_point=click_point,
+        )
+
+    @staticmethod
+    def _blocked(
+        reason: str,
+        *,
+        bound_window_handle: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "bound_window_handle": bound_window_handle,
+            "point_visibility": {"allowed": False},
+            "freshness": {"status": "blocked", "reason": reason},
+        }
 
 
 def _bound_identity(bound: Any, *, target_window_handle: int) -> tuple[int, int, tuple[int, int]]:
@@ -1054,7 +1185,10 @@ def build_existing_windows_live_controller(
             min_candidate_score=float(policy["minimum_confidence"]),
             min_margin=float(policy["minimum_score_margin"]),
         ),
-        window_visibility_checker=ExistingWindowManagerVisibilityChecker(),
+        window_visibility_checker=ExistingWindowsCurrentEvidenceVisibilityChecker(
+            evidence_adapter=evidence,
+            delegate=ExistingWindowManagerVisibilityChecker(),
+        ),
         backend=ExistingWindowsBackendAdapter(),
         intent_claim_store=claim_store,
         grounding_policy=policy,
@@ -1063,5 +1197,6 @@ def build_existing_windows_live_controller(
 
 __all__ = [
     "ExistingWindowsCurrentEvidenceAdapter",
+    "ExistingWindowsCurrentEvidenceVisibilityChecker",
     "build_existing_windows_live_controller",
 ]
