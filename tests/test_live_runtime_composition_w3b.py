@@ -333,6 +333,22 @@ def test_binding_drift_and_viewport_mismatch_fail_before_recognition(tmp_path: P
     assert runner.calls == []
 
 
+def test_capture_rejects_saved_image_change_during_recognition(tmp_path: Path) -> None:
+    asset = _asset()
+
+    class MutatingRunner(_RecognitionRunner):
+        def __call__(self, **kwargs: object) -> dict:
+            result = super().__call__(**kwargs)
+            Image.new("RGB", (320, 200), (200, 100, 50)).save(str(kwargs["image_path"]))
+            return result
+
+    runner = MutatingRunner(_entry_payloads(asset))
+    adapter, *_ = _adapter(tmp_path, asset, runner=runner)
+
+    with pytest.raises(ValueError, match="screenshot changed during recognition"):
+        adapter.capture_current(session_id="session-current", asset=asset, target_window_handle=4242)
+
+
 def test_create_initial_projects_geometry_free_observation_from_exact_asset(tmp_path: Path) -> None:
     asset, _ = _server_asset(tmp_path)
     adapter, *_ = _adapter(

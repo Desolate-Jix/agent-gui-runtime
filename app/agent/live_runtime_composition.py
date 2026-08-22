@@ -4,6 +4,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from hashlib import sha256
+from io import BytesIO
 import json
 from pathlib import Path
 from threading import RLock
@@ -313,6 +314,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
                         ),
                     }
                 )
+        _require_unchanged_screenshot(image_path, expected_sha256=screenshot_digest)
         current = {
             "contract_version": "reviewed_workflow_current_observation_v1",
             "asset_id": asset["asset_id"],
@@ -410,7 +412,7 @@ def _validated_saved_capture(
         image_bytes = image_path.read_bytes()
         from PIL import Image
 
-        with Image.open(image_path) as image:
+        with Image.open(BytesIO(image_bytes)) as image:
             actual_size = (int(image.width), int(image.height))
     except Exception as exc:
         raise ValueError("persisted passive screenshot is unreadable") from exc
@@ -428,6 +430,15 @@ def _validated_saved_capture(
     ):
         raise ValueError("passive screenshot viewport does not match the bound window")
     return image_path, image_bytes, {"width": actual_size[0], "height": actual_size[1]}
+
+
+def _require_unchanged_screenshot(image_path: Path, *, expected_sha256: str) -> None:
+    try:
+        current_sha256 = sha256(image_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError("persisted runtime screenshot changed during recognition") from exc
+    if current_sha256 != expected_sha256:
+        raise ValueError("persisted runtime screenshot changed during recognition")
 
 
 def _validated_origin_fact(
