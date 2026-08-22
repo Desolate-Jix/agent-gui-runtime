@@ -19510,6 +19510,7 @@ function renderLearningDraftReview(review) {
   const reviewPanel = $("learningDraftReviewPanel");
   if (reviewPanel) reviewPanel.hidden = false;
   const draft = review?.draft || {};
+  const canonicalProviderSummary = review?.uei_shadow_provider_summary;
   const states = Array.isArray(draft.states) ? draft.states : [];
   const regions = Array.isArray(draft.regions) ? draft.regions : [];
   const actions = Array.isArray(draft.action_templates) ? draft.action_templates : [];
@@ -19573,13 +19574,15 @@ function renderLearningDraftReview(review) {
   }
   if (typeof renderLearningDraftProviderSummary === "function") {
     renderLearningDraftProviderSummary(
-      review?.provider_summary
-      || review?.draft?.page_details?.provider_summary
-      || learningDraftProviderSummary,
+      canonicalProviderSummary
+        ? null
+        : review?.provider_summary
+          || review?.draft?.page_details?.provider_summary
+          || learningDraftProviderSummary,
     );
   }
   if (typeof renderUeiShadowProviderSummary === "function") {
-    renderUeiShadowProviderSummary(review?.uei_shadow_provider_summary);
+    renderUeiShadowProviderSummary(canonicalProviderSummary);
   }
   renderScreenUnderstandingPreview(review?.screen_understanding_preview);
   renderLearningDraftScreenshotPanel(review);

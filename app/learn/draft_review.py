@@ -81,6 +81,11 @@ def load_learning_draft_review(
         normalized_draft, project_root=root,
         current_capture_lineage_ref=_server_capture_lineage_ref(payload, normalized_draft),
     )
+    if shadow_summary is not None:
+        normalized_draft.pop("provider_summary", None)
+        page_details = normalized_draft.get("page_details")
+        if isinstance(page_details, dict):
+            page_details.pop("provider_summary", None)
     strip_uei_shadow_review_cache(normalized_draft)
     _bind_review_source_image(normalized_draft, root)
     result = {
