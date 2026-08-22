@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from app.api.action import router as action_router
+from app.api.agent_runtime import router as agent_runtime_router
 from app.api.apps import router as apps_router
 from app.api.execute import router as execute_router
 from app.api.memory import router as memory_router
@@ -39,6 +40,7 @@ app.include_router(runtime_router)
 app.include_router(session_router)
 app.include_router(state_router)
 app.include_router(action_router)
+app.include_router(agent_runtime_router)
 app.include_router(execute_router)
 app.include_router(memory_router)
 app.include_router(vision_router)

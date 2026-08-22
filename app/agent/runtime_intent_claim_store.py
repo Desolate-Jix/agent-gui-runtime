@@ -822,6 +822,61 @@ class RuntimeIntentClaimStore:
             observation_id=observation_id,
         )
 
+    def list_unresolved_claims(self) -> tuple[RuntimeIntentClaimSnapshot, ...]:
+        """严格校验并返回阻止新本地会话的 durable claims。"""
+
+        try:
+            paths = tuple(sorted(self.claims_root.iterdir(), key=lambda item: item.name))
+        except OSError as exc:
+            raise RuntimeIntentClaimStoreError(
+                "runtime intent claim inventory is unavailable"
+            ) from exc
+        unresolved: list[RuntimeIntentClaimSnapshot] = []
+        unresolved_phases = {
+            "claimed",
+            "confirmation_pending",
+            "confirmation_approved",
+            "confirmation_resume_started",
+            "dispatch_started",
+            "verification_pending",
+        }
+        for path in paths:
+            if (
+                path.parent != self.claims_root
+                or path.suffix != ".json"
+                or _SHA256_PATTERN.fullmatch(path.stem) is None
+                or not path.is_file()
+                or self._is_reparse(path)
+            ):
+                raise RuntimeIntentClaimStoreError(
+                    "runtime intent claim inventory contains an invalid entry"
+                )
+            identity_hash = path.stem
+            with self._claim_phase_fence(identity_hash):
+                _, payload = self._read_canonical_json(path, label="intent claim")
+                observation = payload.get("observation")
+                if not isinstance(observation, Mapping):
+                    raise RuntimeIntentClaimStoreError(
+                        "runtime intent claim inventory identity is invalid"
+                    )
+                session_id = observation.get("session_id")
+                observation_id = observation.get("observation_id")
+                if (
+                    not isinstance(session_id, str)
+                    or not isinstance(observation_id, str)
+                    or self._identity_hash(session_id, observation_id) != identity_hash
+                ):
+                    raise RuntimeIntentClaimStoreError(
+                        "runtime intent claim inventory identity is invalid"
+                    )
+                snapshot = self.get_for_observation(
+                    session_id=session_id,
+                    observation_id=observation_id,
+                )
+            if snapshot.phase in unresolved_phases:
+                unresolved.append(snapshot)
+        return tuple(unresolved)
+
     def persist_terminal(
         self,
         *,

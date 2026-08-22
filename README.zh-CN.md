@@ -134,8 +134,8 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 | --- | --- | --- |
 | UEI schemas、immutable refs、trusted registration 和静态 projection | **Current — Contract Proof** | 已有 canonical、保留 provenance、不可授权动作的 evidence boundary。 |
 | Reviewed Workflow v2 compiler 和内容寻址持久化 | **Current — Contract Proof** | 可离线编译、保存、检查并重新加载已审核语义资产；发布资产不等于执行许可。 |
-| Agent Observation / Intent / Receipt schemas 与内部 controller composition | **Partial — deterministic actual-adapter composition proof** | 生产 evidence-adapter 类会消费未经修改的 compiled asset，并在确定性依赖下让 `open_detail` 到达精确配对的 `VERIFIED` terminal；restart 后 zero redispatch。它没有公开 route 或 agent/demo callsite，也不是真实 Windows/SEEK I/O 或 live proof。 |
-| Server-owned one-shot confirmation 与安全恢复 | **Partial — deterministic internal proof** | Immutable request/decision/resume/closed marker 会绑定 exact claim、workflow revision/hashes、transition/action、capture/state evidence、HWND/PID 与固定过期时间。Approval 只是 evidence：exact Intent 重交后仍需重新获取 lease，并重做 C1、state resolution、re-grounding、Gate、visibility、一次 authority、一次 backend attempt 与 C2 verification。当前没有公开 approval route/panel callsite 或 live SEEK proof。 |
+| Agent Observation / Intent / Receipt schemas 与内部 controller composition | **Partial — deterministic local callsite proof** | 现有 loopback-only `/runtime/agent` callsite 会把服务器持有的 active asset/window state 投影为 Observation，只接收不含 geometry 的 intent ID，并返回现有 Receipt contract。确定性 route 测试会替换物理 backend；这不是真实 Windows/SEEK I/O 或 live proof。 |
+| Server-owned one-shot confirmation 与安全恢复 | **Partial — deterministic local callsite proof** | Immutable request/decision/resume/closed marker 会绑定 exact claim、workflow revision/hashes、transition/action、capture/state evidence、HWND/PID 与固定过期时间。本地 approval route 只接收服务器 confirmation ID 与 decision，再重新加载持久化的 exact Intent；approval 仍只是 evidence，不是 authority。当前没有 panel approval UI 或 live SEEK proof。 |
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
@@ -200,15 +200,17 @@ uv sync
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
+受限本地 Agent Runtime callsite 提供 `POST /runtime/agent/session/start`、`POST /runtime/agent/intent/submit` 与 `POST /runtime/agent/confirmation/decide`。它仅允许 loopback，并假设单个 uvicorn worker。唯一 active reviewed asset、当前 bound window、workflow hashes、semantic action binding、evidence 与生产 backend 均由服务器选择，客户端不能提供。相关 route 只使用注入的非点击依赖完成确定性测试；当前不主张 panel 或真实 Windows/SEEK 执行已经完成。
+
 仓库不分发模型权重和可选本地视觉服务。请勿提交个人截图、浏览器会话、凭据、模型权重或私有 trace。
 
 ## Target State 与 Roadmap
 
 以下剩余 release 工作按依赖顺序均为 **Planned**，不是当前能力：
 
-> **W2 人工审核的 Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → 受限本地 public/demo approval callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。**
+> **W2 人工审核的 Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → 把已完成的本地 callsite 绑定到该 release asset → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。**
 
-W1 并行推进，但必须在 W6 前完成。Server-owned ledger 与确定性 Portfolio controller test 已在内部证明 confirmation/restart 安全，包括 `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP`，且不进入 form/Continue/final-submit 范围。当前 fixture 与 ignored artifacts 仍不满足 W2 人工审核 release evidence；当前没有公开 approval route/panel callsite，也没有运行真实 Windows/SEEK 执行。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
+W1 并行推进，但必须在 W6 前完成。Server-owned ledger、确定性 Portfolio controller test 与 loopback-only API callsite 已证明 confirmation/restart routing 不接受客户端 geometry 或 authority，并覆盖内部测试的 `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP` 范围。当前 fixture 与 ignored artifacts 仍不满足 W2 人工审核 release evidence；当前没有 panel approval UI，也没有运行真实 Windows/SEEK 执行。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
 
 Automatic provider selection、remote execution、raw-coordinate Agent authority、ATS traversal、表单填写、上传、Continue/Next 和 final submission 都不是 Portfolio v1 能力。
 
