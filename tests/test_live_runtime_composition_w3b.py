@@ -398,7 +398,11 @@ def test_resolver_returns_strict_typed_current_gate_evidence_and_ignores_seriali
     current = adapter.capture_current(session_id="session-current", asset=asset, target_window_handle=4242)
     selection = _selected(asset, current)
 
-    result = adapter.resolve(selection=selection, current_observation=current)
+    result = adapter.resolve(
+        session_id="session-current",
+        selection=selection,
+        current_observation=current,
+    )
 
     assert result["status"] == "resolved"
     assert isinstance(result["gate_context"]["candidates"], CandidateRankResult)
@@ -420,10 +424,24 @@ def test_resolver_rejects_missing_stale_ambiguous_and_malformed_current_evidence
     selection = _selected(asset, current)
 
     missing, *_ = _adapter(tmp_path, asset)
-    assert missing.resolve(selection=selection, current_observation=current)["status"] == "stale"
+    assert missing.resolve(
+        session_id="session-current",
+        selection=selection,
+        current_observation=current,
+    )["status"] == "stale"
     stale = deepcopy(current)
     stale["screenshot_sha256"] = "0" * 64
-    assert adapter.resolve(selection=selection, current_observation=stale)["status"] == "stale"
+    assert adapter.resolve(
+        session_id="session-current",
+        selection=selection,
+        current_observation=stale,
+    )["status"] == "stale"
+
+    assert adapter.resolve(
+        session_id="session-other",
+        selection=selection,
+        current_observation=current,
+    )["status"] == "stale"
 
     target = next(
         anchor
@@ -445,6 +463,7 @@ def test_resolver_rejects_missing_stale_ambiguous_and_malformed_current_evidence
     )
     ambiguous_selection = _selected(asset, ambiguous_current)
     assert ambiguous.resolve(
+        session_id="session-ambiguous",
         selection=ambiguous_selection,
         current_observation=ambiguous_current,
     )["status"] == "ambiguous"
@@ -463,6 +482,7 @@ def test_resolver_rejects_missing_stale_ambiguous_and_malformed_current_evidence
     )
     malformed_selection = _selected(asset, malformed_current)
     malformed_result = malformed.resolve(
+        session_id="session-malformed",
         selection=malformed_selection,
         current_observation=malformed_current,
     )

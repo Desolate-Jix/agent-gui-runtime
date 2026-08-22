@@ -129,10 +129,15 @@ class ExistingWindowsCurrentEvidenceAdapter:
     def resolve(
         self,
         *,
+        session_id: str,
         selection: dict[str, Any],
         current_observation: dict[str, Any],
     ) -> Mapping[str, Any]:
-        bundle = self._find_bundle(selection=selection, current_observation=current_observation)
+        bundle = self._find_bundle(
+            session_id=session_id,
+            selection=selection,
+            current_observation=current_observation,
+        )
         if bundle is None:
             return {"status": "stale", "reason": "current_evidence_missing"}
         try:
@@ -349,6 +354,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
     def _find_bundle(
         self,
         *,
+        session_id: str,
         selection: Mapping[str, Any],
         current_observation: Mapping[str, Any],
     ) -> _CurrentEvidenceBundle | None:
@@ -370,16 +376,14 @@ class ExistingWindowsCurrentEvidenceAdapter:
         except ValueError:
             return None
         with self._lock:
-            matches = [
-                item
-                for (session_id, cached_capture, cached_sha), item in self._cache.items()
-                if session_id
-                and cached_capture == capture_id
-                and cached_sha == screenshot_digest
-                and item.asset_content_sha256 == expected_asset_hash
-                and item.current_observation_json == current_bytes
-            ]
-        return matches[0] if len(matches) == 1 else None
+            item = self._cache.get((session_id, capture_id, screenshot_digest))
+        if (
+            item is None
+            or item.asset_content_sha256 != expected_asset_hash
+            or item.current_observation_json != current_bytes
+        ):
+            return None
+        return item
 
 
 def _bound_identity(bound: Any, *, target_window_handle: int) -> tuple[int, int, tuple[int, int]]:

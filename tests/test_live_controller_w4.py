@@ -141,7 +141,7 @@ class _TargetResolver:
         self.status = status
         self.calls = 0
 
-    def resolve(self, *, selection: dict, current_observation: dict) -> dict:
+    def resolve(self, *, session_id: str, selection: dict, current_observation: dict) -> dict:
         self.calls += 1
         if self.status != "resolved":
             return {"status": self.status}

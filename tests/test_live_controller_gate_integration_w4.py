@@ -19,8 +19,9 @@ class _ResolverWithCurrentGateEvidence(_TargetResolver):
         super().__init__()
         self._policy_allowed = policy_allowed
 
-    def resolve(self, *, selection: dict, current_observation: dict) -> dict:
+    def resolve(self, *, session_id: str, selection: dict, current_observation: dict) -> dict:
         result = super().resolve(
+            session_id=session_id,
             selection=selection,
             current_observation=current_observation,
         )

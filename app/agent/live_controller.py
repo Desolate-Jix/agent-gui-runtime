@@ -98,6 +98,7 @@ class TargetResolver(Protocol):
     def resolve(
         self,
         *,
+        session_id: str,
         selection: dict[str, Any],
         current_observation: dict[str, Any],
     ) -> Mapping[str, Any]: ...
@@ -523,6 +524,7 @@ class LiveController:
         try:
             resolution = dict(
                 self._target_resolver.resolve(
+                    session_id=session.snapshot.session_id,
                     selection=selection,
                     current_observation=current,
                 )
