@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from app.agent.reviewed_workflow_compiler import compile_reviewed_workflow_asset_v2
+from app.agent.reviewed_workflow_compiler import (
+    _GRANULAR_CONFIRMATION_CONTRACTS,
+    _granular_review_revision,
+    compile_reviewed_workflow_asset_v2,
+)
 from app.agent.reviewed_workflow_replay import resolve_current_state
 from app.learn.interface_workflow_review import build_interface_node_review_revision, save_interface_workflow_review_candidate
 from tests.test_agent_evidence import _persist_reviewed_workflow
@@ -24,13 +28,49 @@ def _server_asset(tmp_path: Path, *, blocker: bool = False) -> tuple[dict, Path]
     second.update({"node_id": "detail", "display_name": "Detail", "surface_type": "detail", "state_signature": "detail-v1", "agent_description": "Read the selected item detail.", "action_candidates": [], "controls": []})
     if blocker:
         first["blockers"] = [{"blocker_id": "reviewed_policy", "description": "A reviewed policy requires safe stop.", "safe_stop_required": True}]
+    open_item = next(
+        item
+        for item in first["action_candidates"]
+        if item["action_template_id"] == "open_item"
+    )
+    open_item.update(
+        {
+            "action_type": "open_detail",
+            "target_interface_id": "detail",
+        }
+    )
     review["nodes"] = [first, second]
-    review["edges"] = [{"edge_id": "items_to_detail", "source_node_id": "items", "target_node_id": "detail", "source_control_id": "open_item", "target_control_id": "open_item", "action_type": "open_detail", "agent_description": "Open the reviewed item detail.", "risk_level": "low", "review_status": "human_approved", "requires_user_confirmation": False, "preconditions": [], "success_conditions": ["Detail is visible"], "failure_conditions": ["Detail did not open"]}]
+    review["edges"] = [{"edge_id": "items_to_detail", "source_node_id": "items", "target_node_id": "detail", "source_control_id": "open_item", "target_control_id": "open_item", "action_type": "open_detail", "semantic_action": "open_detail", "action_template_id": "open_item", "agent_description": "Open the reviewed item detail.", "risk_level": "low", "review_status": "human_approved", "requires_user_confirmation": False, "preconditions": [], "success_conditions": ["Detail is visible"], "failure_conditions": ["Detail did not open"]}]
     review["workflow"].update({"node_ids": ["items", "detail"], "edge_ids": ["items_to_detail"]})
     for node in review["nodes"]:
         node.pop("human_review_confirmation", None)
     draft = save_interface_workflow_review_candidate(review, project_root=tmp_path)
     review = json.loads(Path(draft["path"]).read_text(encoding="utf-8"))
+    # 以下批准仅用于 tmp_path 合成夹具的合同一致性测试，不是 Portfolio 人工审核证据。
+    first = next(node for node in review["nodes"] if node["node_id"] == "items")
+    target_control = next(
+        item for item in first["controls"] if item["control_id"] == "open_item"
+    )
+    action_candidate = next(
+        item
+        for item in first["action_candidates"]
+        if item["action_template_id"] == "open_item"
+    )
+    edge = next(item for item in review["edges"] if item["edge_id"] == "items_to_detail")
+    for subject, subject_kind in (
+        (target_control, "target_control"),
+        (action_candidate, "action_candidate"),
+        (edge, "edge"),
+    ):
+        subject["review_status"] = "human_approved"
+        subject["reviewed_by_human"] = True
+        subject["display_only"] = True
+        subject["artifact_is_authorization"] = False
+        subject["execute_binding_enabled"] = False
+        subject["human_review_confirmation"] = {
+            "contract_version": _GRANULAR_CONFIRMATION_CONTRACTS[subject_kind],
+            "revision": _granular_review_revision(subject),
+        }
     for node in review["nodes"]:
         node["review_status"] = "human_approved"
         node["reviewed_by_human"] = True
