@@ -114,17 +114,17 @@ Fixture、recorded replay、synthetic harness 和 live GUI 证据必须分别标
 |---|---|---|---|
 | Built-in screenshot / OCR / UIA / recognition | Partial | 受控 capture、OCR/UIA 候选与 recognition path 可用 | 通用识别质量与陌生界面可靠性未证明 |
 | UEI v1 canonical schemas/store/registry/projections | Stable — offline contract | immutable refs、trusted registration、OCR/UIA/parser projection、fail-closed tests | 当前为离线/Shadow 合同，不授权动作 |
-| OmniParser Shadow adapter | Implementation stable — release conformance pending | bounded trusted local Shadow path、recorded/fake-worker contract tests | 真实 cold + 3 warm inference 因 GPU free memory `< 8 GiB` 未验证；当前 focused suite 仍有 1 个 README wording failure |
+| OmniParser Shadow adapter | Implementation stable — release conformance pending | bounded trusted local Shadow path、recorded/fake-worker contract tests | 真实 cold + 3 warm inference 因 GPU free memory `< 8 GiB` 未验证；先前 README wording failure 已修复，但 release conformance receipt 仍待完成 |
 | UEI → Learning | Prototype | Draft 可显示 compact `uei_shadow_provider_summary_v1` | 未进入完整 review/compile/action-candidate 主链 |
 | Learn Mode / human review / workflow graph | Partial | review workspace、节点/边编辑、人工确认和历史工作流 UI 存在 | 当前资产链条较多，release 纵向 slice 尚未统一 |
 | Reviewed Workflow v2 compiler/store | Stable — offline contract | fail-closed compile、CAS-style immutable storage、preview/reload tests | production live replay orchestrator 缺失 |
 | Agent-facing Observation / Intent contract | Current — internal composition proof; public/live integration pending | `agent_observation_v1` / `agent_intent_v1` closed schemas、strict validators，以及 server-owned/server-loaded reviewed context → Observation adapter，已经由 W3b composition 消费；Session/intent identity、current capture/state/fact freshness、integrity 与 geometry-free action projection 均 fail closed | 无 public route、external Agent/demo callsite 或 Controlled Live Workflow Proof |
-| Runtime Result & Verification Receipt Contract | Partial — durable dispatch receipt; semantic verification pending | `runtime_result_receipt_v1` 七类 outcome matrix 已冻结；W3b durable store 绑定 backend/runtime dispatch outcome 并对 duplicate lookup 防止 re-dispatch | W5 尚未提供 post-action effect/destination、next observation、`VERIFIED` promotion 与 safe-stop proof |
+| Runtime Result & Verification Receipt Contract | Partial — deterministic internal W5 proof; live/public pending | durable verification checkpoint 先于 fresh C2；server-side target-state verification 只接受 compiler-emitted `target_state_identity`，并将 exact checkpoint 配对到 `VERIFIED`、dispatched `SAFE_STOP` 或 `VERIFICATION_FAILED` terminal；restart lookup zero redispatch | actual-adapter `open_apply_flow` → application-entry stop-boundary、Controlled Live Workflow Proof 与 public/demo callsite 尚未证明 |
 | Current capture / runtime relocation | Current — verified internal W4 proof | W3b 使用 server-owned passive bound-window capture、exact session/capture/SHA/viewport/HWND/PID、current re-ground 与 pre-dispatch pixel freshness；旧坐标不授予 authority | 尚无 Controlled Live Workflow Proof 或 live SEEK receipt |
 | Gate / zero-click rejection | Current — verified internal W4 proof | 只有 `LiveController` mint authority；Windows backend 是唯一 scope caller；所有 raw input sinks leading-guard；stale/wrong/ambiguous/unsupported paths zero dispatch | 内部 deterministic/code-audit proof，不是 public/live integration |
-| Semantic effect verification | Partial | 若启用可记录 post-action verification | 当前 SEEK 证据主要是像素/焦点变化；禁用时不能提升为 verified |
-| Safe stop | Partial | no-submit fixtures、apply-entry 边界与受控停止已有基础 | 尚未绑定统一 Agent receipt / live workflow controller |
-| Trace lineage | Partial | 多类 trace、asset hash 和 action trace 已存在 | 缺少一个 workflow revision → intent → current observation → effect 的统一链 |
+| Semantic effect verification | Partial — deterministic internal proof | internal W5 对 fresh C2 执行 closed target-state identity verification；production evidence-adapter 类在确定性依赖下从未经修改的 compiler asset 让 `open_detail` 到达 `VERIFIED` | `open_apply_flow` 的 actual-adapter stop-boundary 与真实 SEEK before/after semantic evidence 尚未证明 |
+| Safe stop | Partial | controller 对已派发且解析到 `stop_boundary` 的目标产生 exactly paired terminal `SAFE_STOP`，verification failure 同样 fail closed | actual-adapter `open_apply_flow` → application-entry safe stop 与 controlled live receipt 尚未证明 |
+| Trace lineage | Partial | internal W5 已绑定 workflow/intent、C1 selection/current grounding、Gate、backend receipt、fresh C2 verification、next observation 与 exact terminal receipt | 尚无 public/live workflow trace graph 或 Controlled Live Workflow receipt |
 | Public demo | Partial | controlled GIF / two bounded SEEK actions 已有记录 | 不是完整 semantic workflow replay，也不是 unattended apply |
 
 ### Verification baselines
@@ -132,7 +132,8 @@ Fixture、recorded replay、synthetic harness 和 live GUI 证据必须分别标
 - **Earlier release-focused UEI checkpoint:** `109 passed, 1 failed`；唯一失败是 README 缺少 `Universal Evidence Interface v1` 文案。该文案现已补齐，当前 `tests/test_uei_v1_static_conformance.py` 为 `5 passed`；这证明静态 conformance 已恢复，不冒充完整 UEI suite 重跑。
 - **Last full offline repository baseline:** Python `2762 passed, 1 skipped`；JavaScript `128 passed, 0 failed`。这是完整离线回归基线，不是 live SEEK 或 Portfolio v1 live-controller 证明。
 - **Portfolio v1 Contract Foundation:** schema/validator、server-owned/server-loaded reviewed-context Observation adapter（current capture/state/fact freshness 与 integrity bindings、geometry-free action projection、blocker/state fail-closed）、reviewed replay Receipt adapter（validated reviewed asset + strict post observation 内部重算 existing replay verifier、canonical application/source/next-observation lineage、拒绝 unproven dispatch/Gate 与 arbitrary operation refs）组成的 focused combined suite 为 `394 passed, 2 skipped`。它证明 offline Contract Foundation 与真实代码边界映射，不证明 Live Controller、Session mutation ledger、唯一 Gate dispatch、GUI dispatch、backend receipt、semantic verification owner 或 durable runtime persistence。
-- **Release-focused W3b/W4 implementation proof:** `595 passed, 3 skipped in 25.10s`。它覆盖 internal composition、durable dispatch receipt、current re-ground/freshness 与 unique raw-input authority；独立严格审计为 PASS，W4 Stop Condition MET。它不是 full-repository baseline、live Windows/SEEK run、Controlled Live Workflow Proof、public integration 或 `VERIFIED` semantic outcome。
+- **Release-focused W3b/W4 implementation proof:** `595 passed, 3 skipped in 25.10s`。它覆盖 internal composition、durable dispatch receipt、current re-ground/freshness 与 unique raw-input authority；独立严格审计为 PASS，W4 Stop Condition MET。它是保留的历史 focused baseline，不是 full-repository baseline 或 live Windows/SEEK proof。
+- **Release-focused W5 + actual-adapter composition proof:** compiler/replay/Observation/claim/receipt/controller/Gate/composition suites 为 `351 passed, 2 skipped in 23.65s`。production `ExistingWindowsCurrentEvidenceAdapter` 类在 deterministic window/screenshot/UIA/recognition doubles 与 `DeterministicFakeBackend` 下消费未经修改的 compiler asset，使 `open_detail` source → target 到达 `VERIFIED`，restart 返回 exact receipt 且 zero redispatch。它不是真实 Windows/SEEK I/O、physical Windows dispatch + C2、Controlled Live Workflow Proof、public integration、external Agent integration 或 full-repository baseline。
 
 ## 5. Portfolio v1 Proofs
 
@@ -190,17 +191,17 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 | # | Acceptance | Current | Exact gap / minimal work | Primary files / evidence | Dependency | Required acceptance evidence | Estimate |
 |---|---|---|---|---|---|---|---|
 | 1 | Built-in output enters UEI | Partial | 把真实 Built-in result 投影到 UEI ref，并由同一 review projection 消费；不只显示 Shadow summary | `app/learn/recognition/uei/projections.py`, `app/learn/workflow_tasks/recognition.py`, `app/learn/draft_review.py` | UEI schemas/store | Built-in fixed capture → sealed UEI result → review projection conformance | M |
-| 2 | OmniParser recorded/Shadow output passes same UEI contract | Implementation stable — release conformance pending | 固定 path-neutral recorded output并输出可发布 receipt；把 live smoke 保持 optional；修正文档 conformance failure | `app/learn/recognition/uei/omniparser_shadow_adapter.py`, UEI tests/fixtures | none; #3 consumes shared review projection | Recorded Provider-Output Conformance Proof + failure receipt | S |
+| 2 | OmniParser recorded/Shadow output passes same UEI contract | Implementation stable — release conformance pending | 固定 path-neutral recorded output并输出可发布 receipt；把 live smoke 保持 optional；README conformance wording 已修复 | `app/learn/recognition/uei/omniparser_shadow_adapter.py`, UEI tests/fixtures | none; #3 consumes shared review projection | Recorded Provider-Output Conformance Proof + failure receipt | S |
 | 3 | Review UI has no provider-specific Learning branch | Partial | UI 只读 canonical review model；provider 仅作为 provenance 展示 | `app/web_panel/panel.js`, `app/web_panel/learning_workflow_review.js`, JS tests | #1–2 | 两 provider fixture 投影得到同一 UI model；无 provider branch test | M |
 | 4 | Human review forms a reviewed workflow | Partial | 收缩成 Job Detail、Apply Entry 两状态，一个 `open_apply_flow` transition 和一个 stop boundary；独立 `open_detail` proof 使用独立 reviewed source/target，不接入主链 | review UI, `app/agent/reviewed_workflow_compiler.py` | #1–3 | Panel/API review → compile-ready source with reviewed node/edge hashes | M |
 | 5 | Asset survives save, process restart and reload | Stable — offline; release proof pending | 用 release slice 做独立进程 round-trip，并验证 exact revision/hash | `app/agent/reviewed_workflow_asset.py`, `app/api/panel.py`, v2 tests | #4 | save → restart → load exact immutable asset/active revision | S |
 | 6 | Runtime uses current window capture | Current — verified internal W4 proof | W3b server-owned passive capture 与 exact session/capture/SHA/viewport/origin/HWND/PID binding 已实现并 fail closed | W3b composition/current-evidence tests + strict W4 audit；live receipt 留给 Controlled Live Workflow Proof | L |
-| 7 | Action is re-grounded before dispatch | Current — verified internal W4 proof | reviewed semantic target 只经 current pinned recognition/ranking 与 exact pre-dispatch pixel freshness 产生当前 click point；历史 bbox 不授予 authority | current-grounding/freshness positive and stale negative tests；live effect 留给 W5/proof | L |
+| 7 | Action is re-grounded before dispatch | Current — verified internal W4 proof | reviewed semantic target 只经 current pinned recognition/ranking 与 exact pre-dispatch pixel freshness 产生当前 click point；历史 bbox 不授予 authority | current-grounding/freshness positive and stale negative tests；internal W5 已闭合，live effect 留给 Controlled Live Workflow Proof | L |
 | 8 | Stale/wrong/ambiguous means zero click | Current — verified internal W4 proof | freshness、window identity、lineage、score ambiguity 和 unsupported backend capability 均 fail closed、zero dispatch | matched deterministic negative controls + strict W4 audit；不是 live proof | M |
-| 9 | Every real action passes Gate | Current — verified internal W4 authority proof | only `LiveController` mints one-time authority；only `ExistingWindowsBackendAdapter` enters authority scope；all raw sinks leading-guard；scripts zero raw dispatchers；SEEK `WM_CLOSE` disabled | authority audit/tests + one-step dispatch budget；Controlled Live Workflow receipt 仍待 W5 后收集 | L |
-| 10 | `open_detail` / `open_apply_flow` have real semantic verification | Partial | 验证 job identity/detail state 与 application-entry state；禁用/失败不得写 verified | `app/api/action.py`, verification path, SEEK fixture/live smoke | #9 | before/after semantic evidence + expected-effect assertion for both actions | L |
-| 11 | Safe stop at application entry | Partial | application-entry、Continue/form-fill/final boundary 统一转成 terminal safe-stop，无后续 dispatch | workflow asset/replay controller, danger policy | #10 | `safe_stop=true`, reason/boundary, zero later action | M |
-| 12 | Trace follows workflow to observed effect | Partial | 统一 workflow/asset revision、observation、intent、candidate、Gate、operation、verification refs | asset/store, action trace, new receipt contract | #5–11 | one replay trace graph with resolvable hashes/refs end to end | M |
+| 9 | Every real action passes Gate | Current — verified internal W4 authority proof | only `LiveController` mints one-time authority；only `ExistingWindowsBackendAdapter` enters authority scope；all raw sinks leading-guard；scripts zero raw dispatchers；SEEK `WM_CLOSE` disabled | authority audit/tests + one-step dispatch budget；Controlled Live Workflow receipt 仍待收集 | L |
+| 10 | `open_detail` / `open_apply_flow` have real semantic verification | Partial — deterministic `open_detail` composition proof | compiler/controller/production evidence-adapter class 已用 fresh C2 与 closed target identity 使未经修改的 `open_detail` asset 到达 `VERIFIED`；禁用/失败不得写 verified | W5 focused suites + actual-adapter composed test；真实 SEEK evidence 与 `open_apply_flow` stop-boundary 仍待证明 | #9 | before/after semantic evidence + expected-effect assertion for both actions | L |
+| 11 | Safe stop at application entry | Partial | controller 内部可将 verified stop-boundary 绑定为 terminal `SAFE_STOP`，且无 blind redispatch | actual-adapter `open_apply_flow` → application-entry stop-boundary 和 controlled live receipt 仍待证明 | #10 | `safe_stop=true`, reason/boundary, zero later action | M |
+| 12 | Trace follows workflow to observed effect | Partial — deterministic internal lineage proof | internal W5 已统一 workflow/asset revision、observation、intent、candidate、Gate、backend、verification checkpoint、C2 与 terminal refs | public/live end-to-end trace graph 仍待证明 | #5–11 | one replay trace graph with resolvable hashes/refs end to end | M |
 
 ## 7. Boundary Contract Acceptance — 4 Additional Gates
 
@@ -210,8 +211,8 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 |---|---|---|---|---|
 | N1 | `agent_observation_v1` | Current — internal composition proof; external/live integration pending | 版本化 schema 包含 workflow/revision、application/current-state identity、current capture、semantic facts/evidence、blockers、eligible reviewed actions、expected effect、verification、risk/safe-stop boundary；W3b Observation adapter 使用 server-owned/server-loaded reviewed context并对 blocker/state fail closed | 已纳入 W3a/W3b；无 public/external Agent callsite 或 live proof |
 | N2 | `agent_intent_v1` | Current — internal composition proof; external/live integration pending | Agent 只提交 observation-bound semantic action id；unknown/stale/cross-workflow intent、raw coordinate authority 与越权 parameters 均拒绝；W3b controller 已消费该 intent | 已纳入 W3a/W3b；无 public/external Agent callsite 或 live proof |
-| N3 | `runtime_result_receipt_v1` | Partial — durable dispatch receipt; W5 pending | 七类 outcome matrix 严格区分 Gate、dispatch、effect、destination；W3b durable receipt 可解析 dispatch/recovery outcome、重复请求不 re-dispatch | W5 才能补齐 observed effect/destination、next observation、`VERIFIED` 和 safe stop |
-| N4 | Current internal adapter conformance | Current — deterministic internal composition proof | server-loaded reviewed context → Observation → Intent → current re-ground → Gate → one-shot backend → durable receipt 已组合；W4 unique-authority Stop Condition MET | 无 public/external Agent callsite、live workflow proof或 W5 verification |
+| N3 | `runtime_result_receipt_v1` | Partial — deterministic internal W5 proof; live/public pending | 七类 outcome matrix 严格区分 Gate、dispatch、effect、destination；durable checkpoint → fresh C2 → exact semantic terminal 已组合，duplicate/restart 不 re-dispatch | actual-adapter `open_apply_flow` stop-boundary、public callsite 与 Controlled Live Workflow receipt 仍待证明 |
+| N4 | Current internal adapter conformance | Current — deterministic actual-adapter composition proof | server-loaded reviewed context → Observation → Intent → current re-ground → Gate → one-shot fake backend → fresh C2 → exact `VERIFIED` terminal 已由 production evidence-adapter 类和未经修改的 compiler asset 组合；W4 authority Stop Condition MET | 无 public/external Agent callsite、physical Windows dispatch + C2 或 live workflow proof |
 
 **Stretch only:** 第二个 Computer-Use adapter。<br>
 **Roadmap only:** raw click/scroll/type computer-use bridge、remote agents、MCP/router、automatic provider selection。
@@ -232,7 +233,8 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 ### W2 — Reviewed asset release slice
 
 完成 #4–5。只创建 detail → apply entry → stop 的最小 reviewed workflow。<br>
-**Feeds W4.**
+当前 `open_apply_flow` fixture/ignored artifacts 不满足 Agent Observation confirmation、risk 与 reviewed-release 要求；必须先形成 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset，并完成 save/process restart/exact reload。<br>
+**Feeds server-owned confirmation and the bounded local public/demo callsite.**
 
 ### W3a — Agent-side schemas and offline validation
 
@@ -248,15 +250,15 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 
 ### W3b — Current internal adapter and receipt integration
 
-**2026-08-22 implementation update:** The internal composition slice is implemented and independently reviewed (Sol High final review: PASS). It composes the exact active reviewed asset -> passive bound-window capture -> real observed UIA origin -> pinned current recognition -> strict Agent Observation/Intent -> current re-ground -> real Gate -> exact pre-dispatch pixel freshness -> one-shot ExistingWindowsBackend -> durable backend/runtime receipt. Exact session/capture/SHA/viewport/HWND/PID binding is retained; ranking/margin is recomputed; zero/low/ambiguous anchors fail closed; duplicate durable receipt lookup prevents re-dispatch. The release-focused W3b/W4 regression suite reports `595 passed, 3 skipped in 25.10s`. This remains focused implementation evidence, not a full-repository baseline.
+**2026-08-22 implementation update:** The internal composition slice is implemented and independently reviewed (Sol High final review: PASS). It composes the exact active reviewed asset -> passive bound-window capture -> real observed UIA origin -> pinned current recognition -> strict Agent Observation/Intent -> current re-ground -> real Gate -> exact pre-dispatch pixel freshness -> one-shot ExistingWindowsBackend -> durable backend/runtime receipt. Exact session/capture/SHA/viewport/HWND/PID binding is retained; ranking/margin is recomputed; zero/low/ambiguous anchors fail closed; duplicate durable receipt lookup prevents re-dispatch. The release-focused W3b/W4 regression suite reports `595 passed, 3 skipped in 25.10s`. This remains a preserved focused implementation baseline, not a full-repository baseline.
 
-This is an internal composition proof only, not a Controlled Live Workflow Proof or release completion: it has no post-action semantic/destination verification, `VERIFIED` outcome, live Windows/SEEK run, public HTTP route, or agent/demo callsite. A successful dispatch is only `DISPATCHED` + `verification_pending`. W4's internal authority prerequisite is closed; the release chain remains incomplete until W5 adds post-action capture, effect/destination verification, next observation, and safe-stop proof.<br>
-**Feeds W5; W4 prerequisite is met.**
+W5 now extends this internal path through a durable pre-C2 verification checkpoint, fresh projected C2, closed target-state verification, and an exactly paired semantic terminal. The actual-adapter composed proof uses the production `ExistingWindowsCurrentEvidenceAdapter` class with deterministic dependencies and `DeterministicFakeBackend`; it consumes an unmutated compiler asset, reaches `VERIFIED` for `open_detail`, returns the exact receipt after restart, and performs zero redispatch. This is still not real Windows/SEEK I/O, physical Windows dispatch + C2, Controlled Live Workflow Proof, public HTTP route, agent/demo callsite, external Agent integration, or release completion.<br>
+**Internal prerequisite closed; feeds controlled live proof.**
 
 ### W5 — Semantic verification, safe stop and lineage
 
-完成 #10–12，并把 W3b receipt 绑定到真实 observed effect。`open_detail` 是独立 effect proof；Proof B 主链只执行 `open_apply_flow` 后 safe stop。W5 remains pending: post-action capture, effect/destination verification, next observation, and safe-stop proof are not present in W3b. <br>
-**W4/W3b internal prerequisites are met; this is the next critical path.**
+完成 #10–12，并把 W3b receipt 绑定到 fresh observed effect。`open_detail` 是独立 effect proof；Proof B 主链只执行 `open_apply_flow` 后 safe stop。**2026-08-22 internal closure:** internal W5 与 actual-adapter deterministic composition 已闭合，focused suites 为 `351 passed, 2 skipped in 23.65s`。compiler-emitted rule、fresh C2、semantic destination verification、next observation、exact checkpoint/terminal pairing、restart exact receipt 与 zero redispatch 均已验证。release acceptance 仍为 Partial：actual-adapter `open_apply_flow` → application-entry stop-boundary、physical Windows dispatch + C2 和 Controlled Live Workflow receipt 尚未证明。<br>
+**Immediate dependency path:** W2 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → server-owned confirmation and bounded local public/demo callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out. W1 runs in parallel but is required before W6. The current confirmation path hard-stops as `NEEDS_REVIEW`, and no public route exists.
 
 ### W6 — Evidence package and public close-out
 
@@ -273,7 +275,7 @@ W2 ─────→ W4 → W3b → W5 ┤
 W3a ───────┘─────────────┘
 ```
 
-依赖摘要（冻结设计）：**`{W2, W3a} → W4 → W3b → W5`；W1 parallel；W6 close-out。** 当前实现状态中 W4/W3b internal prerequisites 已通过，因此 immediate runtime frontier 是 **W5 → controlled live SEEK proof → W6**；W1/W2 仍是 release evidence prerequisites，不得被内部 authority proof 替代。
+依赖摘要（冻结设计）：**`{W2, W3a} → W4 → W3b → W5`；W1 parallel；W6 close-out。** 当前实现状态中 W4/W3b/W5 `open_detail` internal prerequisites 已通过，但 release 依赖路径仍是 **W2 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → server-owned confirmation and bounded local public/demo callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out**。W1 parallel，但必须在 W6 前完成；不得用 internal `open_detail` composition proof 替代 W1/W2。
 
 ## 9. Effort and Calendar Estimate
 
@@ -289,7 +291,7 @@ W3a ───────┘─────────────┘
 | **Total engineering effort（去除重叠）** | **40h** | **58h** | **78h** | 可并行，但不能简单折算为日历时间 |
 
 **Expected focused calendar:** 单人按每天 6 个有效工程小时约 7 / 10 / 13 个工作日；保留真实 GUI 复测、证据清理和 README close-out 时间。<br>
-**Remaining runtime critical path:** W5 → controlled live SEEK proof → W6。W1/W2 release evidence 仍需闭合；上表是初始总工程估算，不用当前通过的 W4/W3b 重复计费。<br>
+**Remaining runtime critical path:** W2 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → server-owned confirmation and bounded local public/demo callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。W1 parallel，但必须在 W6 前完成；上表是初始总工程估算，不用当前通过的 W4/W3b/W5 `open_detail` internal work 重复计费。<br>
 如果 W4 或 W5 进入 `XL`，必须缩小实现，不得把 scope 扩大到 Homepage、scroll、表单或新 adapter。
 
 ## 10. Negative Controls

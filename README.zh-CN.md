@@ -39,7 +39,7 @@
 
 - **Today：** 离线合同基础；带 durable intent、verification-checkpoint、backend 与 terminal receipt records 的内部 server-owned controller；以及历史 live GUI 证据。
 - **内部已实现：** reviewed asset → passive bound-window capture → observed UIA origin → pinned recognition → strict Observation/Intent → current re-ground → Gate → exact pre-dispatch pixel freshness → one-shot Windows backend → fresh C2 observation → semantic target-state verification → durable terminal receipt。
-- **Not yet：** actual-adapter composed positive proof、Controlled Live Workflow Proof、公开 HTTP/demo callsite、外部/远程 Provider 集成，或 live 外部 Agent adapter。
+- **Not yet：** physical Windows dispatch + C2 proof、Controlled Live Workflow Proof、公开 HTTP/demo callsite、外部/远程 Provider 集成，或 live 外部 Agent adapter。
 
 ## 为什么需要这个 Runtime
 
@@ -82,7 +82,7 @@ screenshot → model → coordinate → click
 6. **Relocate**：针对当前界面重新定位已审核目标；历史坐标只能作为 hint。
 7. **Gate**：结合当前窗口、候选、lineage、歧义和危险检查，最多开放一次受限尝试。
 8. **Execute**：通过位于 Runtime Authority 下方的内部 Desktop I/O backend seam 执行动作。W3b 已组合 reviewed asset、passive bound-window capture、真实 UIA origin、pinned recognition、strict intent、current re-ground、Gate、exact pixel freshness、one-shot Windows backend 和 durable receipt；确定性测试已验证这条内部路径。
-9. **Verify**：验证效果并生成 receipt，或带诊断信息安全停止。内部 W5 slice 会获取全新的 C2 observation、验证 reviewed target-state identity，并且只允许与 checkpoint 精确配对的 terminal receipt 完成状态提升。actual-adapter positive composition 与 controlled live proof 仍未完成。
+9. **Verify**：验证效果并生成 receipt，或带诊断信息安全停止。内部 W5 slice 会获取全新的 C2 observation、验证 reviewed target-state identity，并且只允许与 checkpoint 精确配对的 terminal receipt 完成状态提升。生产 `ExistingWindowsCurrentEvidenceAdapter` 类现在会消费未经修改的 compiler asset，并在确定性依赖下让 `open_detail` 到达 `VERIFIED`；这不是真实 Windows/SEEK I/O，controlled live proof 仍未完成。
 
 ## Target authority architecture
 
@@ -93,7 +93,7 @@ screenshot → model → coordinate → click
 3. **Agent Runtime Contract** — Runtime 暴露 Observation 和可用语义动作；Agent 返回与 Observation 绑定的 semantic intent。
 4. **Runtime Result & Verification Receipt Contract** — outcome 明确区分 Gate、dispatch、observed effect、next state 和 Safe Stop。
 
-内部 W3b/W4/W5 controller slices 已通过确定性测试和严格审计验证，覆盖 current re-grounding、唯一 authority、受保护的 dispatch、全新 post-action observation、semantic destination verification，以及 checkpoint 与 terminal receipt 的精确配对。它仍是内部 proof，不是 controlled live proof、公开 route 或外部 Agent integration：
+内部 W3b/W4/W5 controller slices 与 actual-adapter composition 已通过确定性测试和严格审计验证，覆盖 current re-grounding、唯一 authority、受保护的 dispatch、全新 post-action observation、semantic destination verification，以及 checkpoint 与 terminal receipt 的精确配对。actual-adapter proof 使用确定性的 window/screenshot/UIA/recognition doubles 和 `DeterministicFakeBackend`；它仍是内部 proof，不是真实 Windows/SEEK I/O、physical Windows dispatch + C2、controlled live proof、公开 route 或外部 Agent integration：
 
 ```text
 内置 fallback 或受信 perception provider
@@ -134,13 +134,13 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 | --- | --- | --- |
 | UEI schemas、immutable refs、trusted registration 和静态 projection | **Current — Contract Proof** | 已有 canonical、保留 provenance、不可授权动作的 evidence boundary。 |
 | Reviewed Workflow v2 compiler 和内容寻址持久化 | **Current — Contract Proof** | 可离线编译、保存、检查并重新加载已审核语义资产；发布资产不等于执行许可。 |
-| Agent Observation / Intent / Receipt schemas 与内部 controller composition | **Partial — deterministic composition proof** | 内部路径绑定 exact session/capture/SHA/viewport/HWND/PID identity，重算 rank/margin，对 zero/low/ambiguous anchor 默认拒绝，并记录 duplicate-safe durable dispatch 与 terminal receipts。它没有公开 route 或 agent/demo callsite，也不是 live proof。 |
+| Agent Observation / Intent / Receipt schemas 与内部 controller composition | **Partial — deterministic actual-adapter composition proof** | 生产 evidence-adapter 类会消费未经修改的 compiled asset，并在确定性依赖下让 `open_detail` 到达精确配对的 `VERIFIED` terminal；restart 后 zero redispatch。它没有公开 route 或 agent/demo callsite，也不是真实 Windows/SEEK I/O 或 live proof。 |
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
 | 人工审核和应用范围 workflow 创建 | **Partial** | 已有 review UI、候选、revision 和 workflow graph；Portfolio v1 证据包尚未完成。 |
 | Current relocation、Gate 与唯一 dispatch authority（W4） | **Current — verified internal authority proof** | 只有 `LiveController` 能签发 authority；`ExistingWindowsBackendAdapter` 是唯一 authority-scope consumer；受保护的 `InputController` / `WindowManager` raw sink 默认拒绝绕过。这是确定性的内部证据，不是 live workflow 或公开 integration 主张。 |
-| 动作后 semantic verification 与 verified receipt promotion（W5） | **Partial — deterministic internal proof** | controller 会执行全新 C2 observation、检查封闭的 `target_state_identity` rule、保存精确 verification lineage，并在不盲目重新 dispatch 的前提下终结为 `VERIFIED`、`VERIFICATION_FAILED` 或 `SAFE_STOP`。actual-adapter positive composition 与 controlled live evidence 仍未完成。 |
+| 动作后 semantic verification 与 verified receipt promotion（W5） | **Partial — deterministic actual-adapter proof** | controller 会执行全新 C2 observation、检查 compiler 输出的封闭 `target_state_identity` rule、保存精确 verification lineage，并在不盲目重新 dispatch 的前提下终结为 `VERIFIED`、`VERIFICATION_FAILED` 或 `SAFE_STOP`。已验证 composed `open_detail` 正向路径；actual-adapter `open_apply_flow` → application-entry stop-boundary 与 controlled live evidence 仍未完成。 |
 | Desktop I/O Backend SPI | **Partial** | 已有内部 SPI、deterministic fake backend 和受保护的 one-shot Windows backend；它不是公开 HTTP route、agent/demo callsite 或 production-readiness 主张。 |
 | Primary / Assist / Automatic provider routing 和远程 Provider | **Planned** | 仅为 Target State；尚未实现自动 Provider fallback。 |
 | Live external Computer-Use Agent adapters | **Planned** | 今天没有任何 live-integrated 实现。 |
@@ -203,13 +203,11 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ## Target State 与 Roadmap
 
-以下剩余 release 工作均为 **Planned**，不是当前能力：
+以下剩余 release 工作按依赖顺序均为 **Planned**，不是当前能力：
 
-1. 证明 compiled reviewed asset 与实际 Windows evidence adapter 不依赖 test-only mutation，也能进入内部 W5 verified terminal path。
-2. 通过 release proof 所需的受限 public/demo callsite 暴露 server-owned path。
-3. 运行 controlled live SEEK reference proof，并生成匹配的正向与 zero-click negative-control receipts。
-4. 并行闭合 Built-in/Omni → UEI → provider-neutral Review proof。
-5. 完成以上目标后，再考虑更多 Provider、外部 Agent adapter 和受限 workflow class。
+> **W2 人工审核的 Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → server-owned confirmation 与受限本地 public/demo callsite → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。**
+
+W1 并行推进，但必须在 W6 前完成。当前 `open_apply_flow` fixture 和 ignored artifacts 不满足 Agent Observation 的 confirmation、risk 与 reviewed-release 要求；当前没有 public route，confirmation execution 会以 `NEEDS_REVIEW` hard stop。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
 
 Automatic provider selection、remote execution、raw-coordinate Agent authority、ATS traversal、表单填写、上传、Continue/Next 和 final submission 都不是 Portfolio v1 能力。
 
