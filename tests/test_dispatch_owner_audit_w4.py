@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 
@@ -23,6 +24,59 @@ RAW_SCRIPT_GUI_MUTATIONS = {
     "SetCursorPos",
 }
 RAW_SCRIPT_GUI_MUTATION_ALLOWLIST: set[tuple[str, str, int]] = set()
+
+RAW_APP_GUI_MUTATIONS = {
+    *RAW_SCRIPT_GUI_MUTATIONS,
+    "AttachThreadInput",
+    "BringWindowToTop",
+    "EmptyClipboard",
+    "SetClipboardData",
+    "SetClipboardText",
+}
+EXPECTED_RAW_APP_GUI_MUTATION_SINKS = {
+    ("app/core/input_controller.py", "InputController", "_focus_window"): Counter(
+        {"SetForegroundWindow": 1}
+    ),
+    ("app/core/input_controller.py", "InputController", "_send_mouse_input"): Counter(
+        {"SendInput": 1}
+    ),
+    ("app/core/input_controller.py", "InputController", "_send_key"): Counter(
+        {"SendInput": 1}
+    ),
+    ("app/core/input_controller.py", "InputController", "_set_clipboard_text"): Counter(
+        {"EmptyClipboard": 1, "SetClipboardText": 1}
+    ),
+    (
+        "app/core/input_controller.py",
+        "InputController",
+        "_set_clipboard_image_dib",
+    ): Counter({"EmptyClipboard": 1, "SetClipboardData": 1}),
+    ("app/core/window_manager.py", "WindowManager", "resize_bound_window"): Counter(
+        {"ShowWindow": 1, "SetWindowPos": 1}
+    ),
+    ("app/core/window_manager.py", "WindowManager", "maximize_bound_window"): Counter(
+        {"ShowWindow": 1}
+    ),
+    ("app/core/window_manager.py", "WindowManager", "_activate_window"): Counter(
+        {
+            "ShowWindow": 1,
+            "AttachThreadInput": 2,
+            "BringWindowToTop": 1,
+            "SetWindowPos": 2,
+            "SetForegroundWindow": 1,
+        }
+    ),
+    (
+        "app/core/window_manager.py",
+        "WindowManager",
+        "_retry_foreground_activation_with_alt_unlock",
+    ): Counter({"keybd_event": 2, "SetForegroundWindow": 1}),
+    (
+        "app/core/window_manager.py",
+        "WindowManager",
+        "_cycle_past_shell_notification_foreground",
+    ): Counter({"keybd_event": 4}),
+}
 
 
 def _scan_raw_script_gui_mutations(scripts_root: Path) -> list[tuple[str, str, int]]:
@@ -63,19 +117,256 @@ def _first_executable_statement(
     return body[0]
 
 
-def test_only_desktop_backend_enters_runtime_input_scope() -> None:
-    callers: list[str] = []
-    marker = "_runtime_backend_input_scope"
+def _scan_production_symbol_calls(
+    repo_root: Path,
+    symbol: str,
+) -> list[tuple[str, str | None, str]]:
+    callsites: list[tuple[str, str | None, str]] = []
     for root_name in ("app", "scripts"):
-        for path in sorted((REPO_ROOT / root_name).rglob("*.py")):
-            if path.as_posix().endswith(
-                ("app/core/input_controller.py", "app/core/runtime_input_authority.py")
-            ):
-                continue
-            if marker in path.read_text(encoding="utf-8-sig"):
-                callers.append(path.relative_to(REPO_ROOT).as_posix())
+        root = repo_root / root_name
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            module = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+            parents = {
+                child: parent
+                for parent in ast.walk(module)
+                for child in ast.iter_child_nodes(parent)
+            }
+            for node in ast.walk(module):
+                if not isinstance(node, ast.Call):
+                    continue
+                if isinstance(node.func, ast.Attribute):
+                    call_name = node.func.attr
+                elif isinstance(node.func, ast.Name):
+                    call_name = node.func.id
+                else:
+                    continue
+                if call_name != symbol:
+                    continue
 
-    assert callers == ["app/agent/desktop_backend.py"]
+                current: ast.AST | None = node
+                function: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+                owner: str | None = None
+                while current is not None:
+                    current = parents.get(current)
+                    if function is None and isinstance(
+                        current, (ast.FunctionDef, ast.AsyncFunctionDef)
+                    ):
+                        function = current
+                    elif function is not None and isinstance(current, ast.ClassDef):
+                        owner = current.name
+                        break
+                assert function is not None, (
+                    f"{path.relative_to(repo_root).as_posix()}:{node.lineno} "
+                    f"calls {symbol} at module scope"
+                )
+                callsites.append(
+                    (path.relative_to(repo_root).as_posix(), owner, function.name)
+                )
+    return callsites
+
+
+def _scan_raw_app_gui_mutations(
+    app_root: Path,
+) -> tuple[
+    dict[tuple[str, str | None, str], Counter[str]],
+    dict[tuple[str, str | None, str], ast.FunctionDef | ast.AsyncFunctionDef],
+]:
+    inventory: dict[tuple[str, str | None, str], Counter[str]] = {}
+    functions: dict[
+        tuple[str, str | None, str], ast.FunctionDef | ast.AsyncFunctionDef
+    ] = {}
+    for path in sorted(app_root.rglob("*.py")):
+        module = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(module):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+
+        relative_path = path.relative_to(app_root.parent).as_posix()
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Attribute):
+                call_name = node.func.attr
+            elif isinstance(node.func, ast.Name):
+                call_name = node.func.id
+            else:
+                continue
+            if call_name not in RAW_APP_GUI_MUTATIONS:
+                continue
+
+            current: ast.AST | None = node
+            function: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+            owner: str | None = None
+            while current is not None:
+                current = parents.get(current)
+                if function is None and isinstance(
+                    current, (ast.FunctionDef, ast.AsyncFunctionDef)
+                ):
+                    function = current
+                elif function is not None and isinstance(current, ast.ClassDef):
+                    owner = current.name
+                    break
+
+            assert function is not None, (
+                f"{relative_path}:{node.lineno} calls {call_name} at module scope"
+            )
+            key = (relative_path, owner, function.name)
+            inventory.setdefault(key, Counter())[call_name] += 1
+            functions[key] = function
+    return inventory, functions
+
+
+def _assert_leading_runtime_authority_guard(
+    key: tuple[str, str | None, str],
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> None:
+    statement = _first_executable_statement(function)
+    path, owner, name = key
+    if owner == "InputController":
+        assert isinstance(statement, ast.Expr), f"{path}:{name} lacks a leading guard"
+        call = statement.value
+        assert (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "_ensure_windows_input"
+        ), f"{path}:{name} reaches a raw sink before InputController authority"
+        return
+
+    if owner == "WindowManager" and name in {
+        "_retry_foreground_activation_with_alt_unlock",
+        "_cycle_past_shell_notification_foreground",
+    }:
+        assert isinstance(statement, ast.If), f"{path}:{name} lacks a leading guard"
+        assert (
+            isinstance(statement.test, ast.UnaryOp)
+            and isinstance(statement.test.op, ast.Not)
+            and isinstance(statement.test.operand, ast.Call)
+            and isinstance(statement.test.operand.func, ast.Name)
+            and statement.test.operand.func.id == "runtime_backend_input_is_active"
+        ), f"{path}:{name} reaches a raw sink before WindowManager authority"
+        assert any(
+            isinstance(child, ast.Return)
+            and isinstance(child.value, ast.Constant)
+            and child.value.value is False
+            for child in statement.body
+        ), f"{path}:{name} does not fail closed without authority"
+        return
+
+    assert owner == "WindowManager", f"unexpected raw mutation owner: {key}"
+    assert isinstance(statement, ast.Expr), f"{path}:{name} lacks a leading guard"
+    call = statement.value
+    assert (
+        isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "self"
+        and call.func.attr == "_ensure_window_mutation_authority"
+    ), f"{path}:{name} reaches a raw sink before WindowManager authority"
+
+
+def test_only_desktop_backend_enters_runtime_input_scope() -> None:
+    callers = _scan_production_symbol_calls(
+        REPO_ROOT,
+        "_runtime_backend_input_scope",
+    )
+
+    assert callers == [
+        ("app/agent/desktop_backend.py", "ExistingWindowsBackendAdapter", "dispatch")
+    ]
+
+
+def test_scope_callsite_scanner_preserves_duplicate_calls(tmp_path: Path) -> None:
+    module_path = tmp_path / "app" / "agent" / "desktop_backend.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_text(
+        "class ExistingWindowsBackendAdapter:\n"
+        "    def dispatch(self):\n"
+        "        _runtime_backend_input_scope()\n"
+        "        _runtime_backend_input_scope()\n",
+        encoding="utf-8",
+    )
+
+    assert _scan_production_symbol_calls(
+        tmp_path,
+        "_runtime_backend_input_scope",
+    ) == [
+        ("app/agent/desktop_backend.py", "ExistingWindowsBackendAdapter", "dispatch"),
+        ("app/agent/desktop_backend.py", "ExistingWindowsBackendAdapter", "dispatch"),
+    ]
+
+
+def test_windows_backend_consumes_authority_before_entering_input_scope() -> None:
+    path = REPO_ROOT / "app" / "agent" / "desktop_backend.py"
+    module = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+    backend = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == "ExistingWindowsBackendAdapter"
+    )
+    dispatch = next(
+        node
+        for node in backend.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "dispatch"
+    )
+    parents = {
+        child: parent
+        for parent in ast.walk(dispatch)
+        for child in ast.iter_child_nodes(parent)
+    }
+
+    consume_calls = [
+        node
+        for node in ast.walk(dispatch)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_consume_authority"
+    ]
+    scope_calls = [
+        node
+        for node in ast.walk(dispatch)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_runtime_backend_input_scope"
+    ]
+    assert len(consume_calls) == 1
+    assert len(scope_calls) == 1
+
+    first = _first_executable_statement(dispatch)
+    assert isinstance(first, ast.Expr) and first.value is consume_calls[0], (
+        "ExistingWindowsBackendAdapter.dispatch must consume authority unconditionally first"
+    )
+
+    scope_call = scope_calls[0]
+    with_item = parents.get(scope_call)
+    assert isinstance(with_item, ast.withitem)
+    scope_with = parents.get(with_item)
+    assert isinstance(scope_with, ast.With)
+
+    def top_level_statement(node: ast.AST) -> ast.AST:
+        current = node
+        while parents.get(current) is not dispatch:
+            current = parents[current]
+        return current
+
+    consume_statement = top_level_statement(consume_calls[0])
+    scope_statement = top_level_statement(scope_call)
+    assert dispatch.body.index(consume_statement) < dispatch.body.index(scope_statement)
+
+
+def test_only_live_controller_mints_execution_authority() -> None:
+    assert _scan_production_symbol_calls(
+        REPO_ROOT,
+        "_mint_execution_authority",
+    ) == [
+        ("app/agent/live_controller.py", "LiveController", "_execute_accepted_intent")
+    ]
 
 
 def test_production_scripts_have_no_raw_gui_mutation_dispatchers() -> None:
@@ -120,16 +411,26 @@ def test_all_public_input_actions_pass_the_common_authority_guard() -> None:
 
     for name in sorted(guarded):
         method = methods[name]
-        calls = [
-            node
-            for node in ast.walk(method)
-            if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "self"
-            and node.func.attr == "_ensure_windows_input"
-        ]
-        assert calls, f"{name} bypasses the common LiveController authority guard"
+        statement = _first_executable_statement(method)
+        assert isinstance(statement, ast.Expr), (
+            f"{name} does not check LiveController authority first"
+        )
+        call = statement.value
+        assert (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "_ensure_windows_input"
+        ), f"{name} does not check LiveController authority first"
+
+
+def test_every_app_raw_gui_mutation_sink_is_inventoried_and_leading_guarded() -> None:
+    inventory, functions = _scan_raw_app_gui_mutations(REPO_ROOT / "app")
+
+    assert inventory == EXPECTED_RAW_APP_GUI_MUTATION_SINKS
+    for key, function in functions.items():
+        _assert_leading_runtime_authority_guard(key, function)
 
 
 def test_raw_keyboard_fallbacks_check_the_same_authority_context() -> None:

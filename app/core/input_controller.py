@@ -385,6 +385,7 @@ class InputController:
         return resolve_window_and_screen_point(bound=bound, x=x, y=y)
 
     def _focus_window(self, handle: int) -> bool:
+        self._ensure_windows_input()
         set_foreground_ok = False
         try:
             win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
@@ -422,6 +423,7 @@ class InputController:
         self._send_mouse_input(dx=0, dy=0, flags=flags)
 
     def _send_mouse_input(self, *, dx: int, dy: int, flags: int, mouse_data: int = 0) -> None:
+        self._ensure_windows_input()
         input_struct = INPUT(
             type=INPUT_MOUSE,
             union=INPUT_UNION(
@@ -450,6 +452,7 @@ class InputController:
         self._send_key(key, key_up=True)
 
     def _send_key(self, key: int, *, key_up: bool) -> None:
+        self._ensure_windows_input()
         input_struct = INPUT(
             type=INPUT_KEYBOARD,
             union=INPUT_UNION(
@@ -485,6 +488,7 @@ class InputController:
             return None
 
     def _set_clipboard_text(self, text: str) -> None:
+        self._ensure_windows_input()
         if win32clipboard is None:
             raise RuntimeError("win32clipboard is unavailable; cannot paste text")
         opened = False
@@ -498,6 +502,7 @@ class InputController:
                 win32clipboard.CloseClipboard()  # type: ignore[union-attr]
 
     def _set_clipboard_image_dib(self, dib_bytes: bytes) -> None:
+        self._ensure_windows_input()
         if win32clipboard is None:
             raise RuntimeError("win32clipboard is unavailable; cannot paste image")
         opened = False
