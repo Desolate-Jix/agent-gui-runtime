@@ -30,6 +30,13 @@ def _portfolio_v1_review() -> dict:
                 "evidence": {},
                 "controls": [{"control_id": "apply", "label": "Apply"}],
                 "regions": [],
+                "action_candidates": [{
+                    "action_template_id": "open_apply_flow",
+                    "semantic_action": "open_apply_flow",
+                    "target_control_id": "apply",
+                    "target_region_id": "",
+                    "target_interface_id": "apply_entry",
+                }],
                 "review_status": "needs_human_review",
                 "reviewed_by_human": False,
             },
@@ -42,6 +49,7 @@ def _portfolio_v1_review() -> dict:
                 "evidence": {},
                 "controls": [],
                 "regions": [],
+                "action_candidates": [],
                 "review_status": "needs_learning",
                 "reviewed_by_human": False,
             },
@@ -53,6 +61,7 @@ def _portfolio_v1_review() -> dict:
                 "source_node_id": "job_detail",
                 "target_node_id": "apply_entry",
                 "action_type": "open_apply_flow",
+                "action_template_id": "open_apply_flow",
                 "target_control_id": "apply",
                 "target_region_id": "",
                 "risk_level": "medium",
@@ -79,6 +88,26 @@ def _save_integrity_reviewed_source(project_root: Path) -> tuple[Path, str]:
     source = Path(initial["path"])
     review = json.loads(source.read_text(encoding="utf-8"))
     detail = next(node for node in review["nodes"] if node["node_id"] == "job_detail")
+    edge = review["edges"][0]
+    from app.agent.reviewed_workflow_compiler import (
+        _GRANULAR_CONFIRMATION_CONTRACTS,
+        _granular_review_revision,
+    )
+
+    for subject, subject_kind in (
+        (detail["controls"][0], "target_control"),
+        (detail["action_candidates"][0], "action_candidate"),
+        (edge, "edge"),
+    ):
+        subject["review_status"] = "human_approved"
+        subject["reviewed_by_human"] = True
+        subject["display_only"] = True
+        subject["artifact_is_authorization"] = False
+        subject["execute_binding_enabled"] = False
+        subject["human_review_confirmation"] = {
+            "contract_version": _GRANULAR_CONFIRMATION_CONTRACTS[subject_kind],
+            "revision": _granular_review_revision(subject),
+        }
     detail["review_status"] = "human_approved"
     detail["reviewed_by_human"] = True
     detail["human_review_confirmation"] = {

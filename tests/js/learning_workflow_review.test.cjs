@@ -574,6 +574,32 @@ function reviewFixture() {
   };
 }
 
+function makeOperationExactlyReviewable(review, edgeId = "edge_open") {
+  const edge = review.edges.find((item) => item.edge_id === edgeId);
+  const source = review.nodes.find((item) => item.node_id === edge.source_node_id);
+  const targetControlId = String(edge.target_control_id || source.controls?.[0]?.control_id || "");
+  const actionTemplateId = String(source.action_candidates?.[0]?.action_template_id || `${edgeId}_action`);
+  Object.assign(edge, {
+    action_template_id: actionTemplateId,
+    target_control_id: targetControlId,
+    target_region_id: "",
+  });
+  Object.assign(source.action_candidates[0], {
+    action_template_id: actionTemplateId,
+    semantic_action: edge.action_type,
+    target_control_id: targetControlId,
+    target_region_id: "",
+    target_interface_id: edge.target_node_id,
+  });
+  return review;
+}
+
+function approveOperationGranularly(state, edgeId = "edge_open") {
+  state.confirmOperationTargetControlHumanReview(edgeId);
+  state.confirmOperationActionCandidateHumanReview(edgeId);
+  state.confirmOperationEdgeHumanReview(edgeId);
+}
+
 test("removes legacy draft wording from user-facing learning labels", () => {
   assert.equal(
     userFacingLearningLabel("UI hierarchy draft: 2 structure regions"),
@@ -768,10 +794,11 @@ test("editing an approved node revokes approval until the user approves again", 
 });
 
 test("only explicit confirmation records human review for the current node revision", () => {
-  const review = reviewFixture();
+  const review = makeOperationExactlyReviewable(reviewFixture());
   review.nodes[0].review_status = "human_approved";
   delete review.nodes[0].reviewed_by_human;
   const state = createInterfaceWorkflowReviewState(review);
+  approveOperationGranularly(state);
 
   assert.equal(state.snapshot().nodes[0].reviewed_by_human === true, false);
   state.confirmNodeHumanReview("node_list");
@@ -805,7 +832,10 @@ test("only explicit confirmation records human review for the current node revis
     { page_details: { summary: "Changed evidence semantics" } },
     { source_paths: ["artifacts/changed-revision.json"] },
   ]) {
-    const revisionState = createInterfaceWorkflowReviewState(reviewFixture());
+    const revisionState = createInterfaceWorkflowReviewState(
+      makeOperationExactlyReviewable(reviewFixture()),
+    );
+    approveOperationGranularly(revisionState);
     revisionState.confirmNodeHumanReview("node_list");
     revisionState.updateNode("node_list", patch);
     assert.equal(revisionState.snapshot().nodes[0].review_status, "needs_human_review");
@@ -813,8 +843,164 @@ test("only explicit confirmation records human review for the current node revis
   }
 });
 
+test("source node confirmation requires current granular operation approvals", () => {
+  const review = reviewFixture();
+  Object.assign(review.edges[0], {
+    action_template_id: "open",
+    target_control_id: "open_button",
+    target_region_id: "",
+  });
+  Object.assign(review.nodes[0].action_candidates[0], {
+    semantic_action: "open_detail",
+    target_control_id: "open_button",
+    target_region_id: "",
+    target_interface_id: "node_detail",
+  });
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(
+    () => state.confirmNodeHumanReview("node_list"),
+    /granular human approval/i,
+  );
+
+  state.confirmOperationTargetControlHumanReview("edge_open");
+  state.confirmOperationActionCandidateHumanReview("edge_open");
+  state.confirmOperationEdgeHumanReview("edge_open");
+  const granular = state.operationGranularReview("edge_open");
+  assert.deepEqual(
+    [granular.target_control.current, granular.action_candidate.current, granular.edge.current],
+    [true, true, true],
+  );
+
+  state.confirmNodeHumanReview("node_list");
+  const snapshot = state.snapshot();
+  const control = snapshot.nodes[0].controls[0];
+  const candidate = snapshot.nodes[0].action_candidates[0];
+  const edge = snapshot.edges[0];
+  assert.equal(control.review_status, "human_approved");
+  assert.equal(control.reviewed_by_human, true);
+  assert.equal(
+    control.human_review_confirmation.contract_version,
+    "interface_target_control_human_review_confirmation_v1",
+  );
+  assert.equal(
+    candidate.human_review_confirmation.contract_version,
+    "interface_action_candidate_human_review_confirmation_v1",
+  );
+  assert.equal(
+    edge.human_review_confirmation.contract_version,
+    "interface_workflow_edge_human_review_confirmation_v1",
+  );
+  assert.equal(control.display_only, true);
+  assert.equal(control.artifact_is_authorization, false);
+  assert.equal(control.execute_binding_enabled, false);
+});
+
+test("editing an approved operation child revokes it and the source node confirmation", () => {
+  const review = reviewFixture();
+  Object.assign(review.edges[0], {
+    action_template_id: "open",
+    target_control_id: "open_button",
+    target_region_id: "",
+  });
+  Object.assign(review.nodes[0].action_candidates[0], {
+    semantic_action: "open_detail",
+    target_control_id: "open_button",
+    target_region_id: "",
+    target_interface_id: "node_detail",
+  });
+  const state = createInterfaceWorkflowReviewState(review);
+  state.confirmOperationTargetControlHumanReview("edge_open");
+  state.confirmOperationActionCandidateHumanReview("edge_open");
+  state.confirmOperationEdgeHumanReview("edge_open");
+  state.confirmNodeHumanReview("node_list");
+
+  const editedCandidates = state.snapshot().nodes[0].action_candidates;
+  editedCandidates[0].label = "Open exact item";
+  state.updateNode("node_list", { action_candidates: editedCandidates });
+
+  const snapshot = state.snapshot();
+  assert.equal(snapshot.nodes[0].action_candidates[0].review_status, "needs_human_review");
+  assert.equal(snapshot.nodes[0].action_candidates[0].reviewed_by_human, false);
+  assert.equal("human_review_confirmation" in snapshot.nodes[0].action_candidates[0], false);
+  assert.equal(snapshot.nodes[0].review_status, "needs_human_review");
+  assert.equal("human_review_confirmation" in snapshot.nodes[0], false);
+});
+
+test("granular approval requires immutable non-authorizing safety facts", () => {
+  for (const [subjectKind, mutate, expectedField] of [
+    ["control", (review) => { review.nodes[0].controls[0].display_only = false; }, "target_control"],
+    ["action", (review) => { review.nodes[0].action_candidates[0].artifact_is_authorization = true; }, "action_candidate"],
+    ["edge", (review) => { review.edges[0].execute_binding_enabled = true; }, "edge"],
+  ]) {
+    const state = createInterfaceWorkflowReviewState(makeOperationExactlyReviewable(reviewFixture()));
+    approveOperationGranularly(state);
+    const mutated = state.snapshot();
+    mutate(mutated);
+
+    const restored = createInterfaceWorkflowReviewState(mutated);
+    assert.equal(
+      restored.operationGranularReview("edge_open")[expectedField].current,
+      false,
+      subjectKind,
+    );
+  }
+
+  const state = createInterfaceWorkflowReviewState(makeOperationExactlyReviewable(reviewFixture()));
+  approveOperationGranularly(state);
+  const controls = state.snapshot().nodes[0].controls;
+  controls[0].display_only = false;
+  state.updateNode("node_list", { controls });
+  assert.equal(state.snapshot().nodes[0].controls[0].review_status, "needs_human_review");
+  assert.equal("human_review_confirmation" in state.snapshot().nodes[0].controls[0], false);
+});
+
+test("granular operation approval rejects ambiguous or inconsistent action candidates", () => {
+  const review = reviewFixture();
+  Object.assign(review.edges[0], {
+    action_template_id: "open",
+    target_control_id: "open_button",
+    target_region_id: "",
+  });
+  Object.assign(review.nodes[0].action_candidates[0], {
+    semantic_action: "open_detail",
+    target_control_id: "open_button",
+    target_region_id: "",
+    target_interface_id: "node_detail",
+  });
+  review.nodes[0].action_candidates.push({ ...review.nodes[0].action_candidates[0] });
+  const ambiguous = createInterfaceWorkflowReviewState(review);
+  assert.throws(
+    () => ambiguous.confirmOperationActionCandidateHumanReview("edge_open"),
+    /exactly one action candidate/i,
+  );
+
+  review.nodes[0].action_candidates.pop();
+  review.nodes[0].action_candidates[0].target_interface_id = "node_missing";
+  const inconsistent = createInterfaceWorkflowReviewState(review);
+  assert.throws(
+    () => inconsistent.confirmOperationActionCandidateHumanReview("edge_open"),
+    /does not match edge/i,
+  );
+
+  for (const mutate of [
+    (candidate, _edge) => { candidate.action_type = "back"; },
+    (candidate, _edge) => { candidate.source_control_id = "filter_button"; },
+    (_candidate, edge) => { edge.semantic_action = "back"; },
+  ]) {
+    const conflictingReview = makeOperationExactlyReviewable(reviewFixture());
+    mutate(conflictingReview.nodes[0].action_candidates[0], conflictingReview.edges[0]);
+    const conflicting = createInterfaceWorkflowReviewState(conflictingReview);
+    assert.throws(
+      () => conflicting.confirmOperationActionCandidateHumanReview("edge_open"),
+      /does not match edge/i,
+    );
+  }
+});
+
 test("human review revision excludes only durable evidence projections", () => {
-  const initial = createInterfaceWorkflowReviewState(reviewFixture());
+  const initial = createInterfaceWorkflowReviewState(makeOperationExactlyReviewable(reviewFixture()));
+  approveOperationGranularly(initial);
   initial.confirmNodeHumanReview("node_list");
   const confirmedRevision = initial.snapshot().nodes[0].human_review_confirmation.revision;
 
@@ -851,8 +1037,9 @@ test("human review revision excludes only durable evidence projections", () => {
 });
 
 test("panel save orchestration commits operation edits before binding human review", () => {
-  const review = reviewFixture();
+  const review = makeOperationExactlyReviewable(reviewFixture());
   const state = createInterfaceWorkflowReviewState(review);
+  approveOperationGranularly(state);
   const callOrder = [];
   const originalUpdateNode = state.updateNode;
   const originalConfirm = state.confirmNodeHumanReview;
@@ -872,6 +1059,7 @@ test("panel save orchestration commits operation edits before binding human revi
     commitOperation: () => {
       callOrder.push("operation");
       state.updateEdge("edge_open", { success_conditions: ["new detail visible"] });
+      state.confirmOperationEdgeHumanReview("edge_open");
     },
     humanReviewConfirmed: true,
   });
@@ -884,11 +1072,33 @@ test("panel save orchestration commits operation edits before binding human revi
   );
 });
 
-test("editing workflow actions revokes the source node human review fact", () => {
+test("save orchestration preserves an immutable needs_learning stop boundary", () => {
   const review = reviewFixture();
+  review.nodes.find((node) => node.node_id === "node_missing").review_status = "needs_learning";
+  const state = createInterfaceWorkflowReviewState(review);
+
+  const snapshot = commitInterfaceWorkflowReviewForSave({
+    state,
+    nodeId: "node_missing",
+    nodePatch: {
+      display_name: "Still a stop boundary",
+      review_status: "human_approved",
+    },
+    humanReviewConfirmed: true,
+  });
+
+  const boundary = snapshot.nodes.find((node) => node.node_id === "node_missing");
+  assert.equal(boundary.review_status, "needs_learning");
+  assert.equal(boundary.reviewed_by_human, false);
+  assert.equal("human_review_confirmation" in boundary, false);
+});
+
+test("editing workflow actions revokes the source node human review fact", () => {
+  const review = makeOperationExactlyReviewable(reviewFixture());
   review.nodes[0].review_status = "human_approved";
   review.nodes[0].reviewed_by_human = true;
   const state = createInterfaceWorkflowReviewState(review);
+  approveOperationGranularly(state);
 
   state.updateEdge("edge_open", {
     success_conditions: ["updated detail is visible"],
@@ -897,6 +1107,11 @@ test("editing workflow actions revokes the source node human review fact", () =>
   assert.equal(state.snapshot().nodes[0].review_status, "needs_human_review");
   assert.equal(state.snapshot().nodes[0].reviewed_by_human, false);
 
+  assert.throws(
+    () => state.confirmNodeHumanReview("node_list"),
+    /granular human approval/i,
+  );
+  state.confirmOperationEdgeHumanReview("edge_open");
   state.confirmNodeHumanReview("node_list");
   state.addOperation("node_list", {
     operation_id: "open_missing",
@@ -1466,7 +1681,7 @@ test("node and transition edits are retained in the review snapshot", () => {
   const snapshot = state.snapshot();
   assert.equal(current.node.display_name, "Reviewed item list");
   assert.equal(current.node.surface_type, "collection");
-  assert.equal(snapshot.edges[0].review_status, "human_reviewed");
+  assert.equal(snapshot.edges[0].review_status, "needs_human_review");
   assert.equal(snapshot.edges[0].agent_description, "点击当前条目进入详情页");
   assert.equal(snapshot.nodes[0].content_descriptors[0].content_behavior, "fixed_label");
   assert.equal(snapshot.display_only, true);

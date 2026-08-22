@@ -21,6 +21,40 @@ _REGISTRY_CONTRACT = "interface_workflow_library_registry_v1"
 _ALLOWED_ACTIONS = {"open_detail", "open_apply_flow", "back", "close_modal"}
 _STOP_BOUNDARY_STATUS = "needs_learning"
 _SAFE_ID_PART = re.compile(r"[^A-Za-z0-9_.:-]+")
+_GRANULAR_CONFIRMATION_CONTRACTS = {
+    "action_candidate": "interface_action_candidate_human_review_confirmation_v1",
+    "edge": "interface_workflow_edge_human_review_confirmation_v1",
+    "target_control": "interface_target_control_human_review_confirmation_v1",
+}
+_REVIEW_REVISION_METADATA_FIELDS = {
+    "agent_eligibility_reason",
+    "agent_usable",
+    "artifact_is_authorization",
+    "current_revision_hash",
+    "display_only",
+    "editable_review_source_path",
+    "execute_binding_enabled",
+    "execution_verification_status",
+    "human_review_confirmation",
+    "review_bucket",
+    "review_status",
+    "reviewed_by_human",
+    "reviewed_revision_hash",
+    "source_paths",
+    "source_screenshot_sha256",
+    "review_revision_source_screenshot_path",
+    "review_revision_numbered_overlay_path",
+    "review_revision_fused_overlay_path",
+    "review_revision_human_review_overlay_path",
+}
+_RUNTIME_POINT_FIELDS = {
+    "actual_point",
+    "click_point",
+    "clickpoint",
+    "confirmed_point",
+    "screen_point",
+    "target_point",
+}
 
 
 def _text(value: Any) -> str:
@@ -35,6 +69,112 @@ def _canonical_sha256(value: Any) -> str:
     return _sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
+
+
+def _granular_review_revision(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_granular_review_revision(item) for item in value]
+    if not isinstance(value, dict):
+        return deepcopy(value)
+    return {
+        key: _granular_review_revision(item)
+        for key, item in value.items()
+        if key not in _REVIEW_REVISION_METADATA_FIELDS and key not in _RUNTIME_POINT_FIELDS
+    }
+
+
+def _type_exact_equal(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _type_exact_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _type_exact_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    return left == right
+
+
+def _granular_human_review_is_current(subject: Any, subject_kind: str) -> bool:
+    if not isinstance(subject, dict):
+        return False
+    confirmation = subject.get("human_review_confirmation")
+    return (
+        subject.get("review_status") == "human_approved"
+        and subject.get("reviewed_by_human") is True
+        and isinstance(confirmation, dict)
+        and confirmation.get("contract_version")
+        == _GRANULAR_CONFIRMATION_CONTRACTS[subject_kind]
+        and subject.get("display_only") is True
+        and subject.get("artifact_is_authorization") is False
+        and subject.get("execute_binding_enabled") is False
+        and _type_exact_equal(
+            confirmation.get("revision"), _granular_review_revision(subject)
+        )
+    )
+
+
+def _exact_transition_subjects(
+    *, node: dict[str, Any], edge: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str]:
+    target_control_id = _text(edge.get("target_control_id"))
+    target_region_id = _text(edge.get("target_region_id"))
+    if bool(target_control_id) == bool(target_region_id):
+        return None, None, "edge must reference exactly one target control or target region"
+    collection_name = "controls" if target_control_id else "regions"
+    id_key = "control_id" if target_control_id else "region_id"
+    target_id = target_control_id or target_region_id
+    collection = node.get(collection_name)
+    target_matches = [
+        item
+        for item in collection if isinstance(item, dict) and _text(item.get(id_key)) == target_id
+    ] if isinstance(collection, list) else []
+    if len(target_matches) != 1:
+        return None, None, "edge target must match exactly one source-node item of the declared type"
+
+    action_template_id = _text(edge.get("action_template_id"))
+    candidates = node.get("action_candidates")
+    action_matches = [
+        item
+        for item in candidates
+        if isinstance(item, dict)
+        and _text(item.get("action_template_id")) == action_template_id
+    ] if isinstance(candidates, list) else []
+    if not action_template_id or len(action_matches) != 1:
+        return target_matches[0], None, "edge action_template_id must match exactly one action candidate"
+    action_candidate = action_matches[0]
+    edge_action = _text(edge.get("action_type")).casefold()
+    edge_semantic_action = _text(edge.get("semantic_action")).casefold()
+    candidate_semantic_action = _text(action_candidate.get("semantic_action")).casefold()
+    candidate_action_type = _text(action_candidate.get("action_type")).casefold()
+    candidate_action = candidate_semantic_action or candidate_action_type
+    candidate_target_node_ids = [
+        _text(action_candidate.get(key))
+        for key in ("target_interface_id", "target_node_id")
+        if _text(action_candidate.get(key))
+    ]
+    if (
+        (edge_semantic_action and edge_semantic_action != edge_action)
+        or (
+            candidate_semantic_action
+            and candidate_action_type
+            and candidate_semantic_action != candidate_action_type
+        )
+        or candidate_action != edge_action
+        or _text(action_candidate.get("target_control_id")) != target_control_id
+        or _text(action_candidate.get("target_region_id")) != target_region_id
+        or (
+            _text(action_candidate.get("source_control_id"))
+            and _text(action_candidate.get("source_control_id")) != target_id
+        )
+        or not candidate_target_node_ids
+        or any(value != _text(edge.get("target_node_id")) for value in candidate_target_node_ids)
+    ):
+        return target_matches[0], None, "matched action candidate type, control, or target is inconsistent with edge"
+    return target_matches[0], action_candidate, ""
 
 
 def _reason(code: str, detail: str, **context: str) -> dict[str, Any]:
@@ -460,16 +600,54 @@ def compile_reviewed_workflow_asset_v2(
                 )
             )
             continue
+        availability_invalid = False
         if availability.get(source_id) != "reviewed":
             reasons.append(_reason("edge_source_not_reviewed", "outgoing edge authority requires reviewed source node", edge_id=edge_id, source_node_id=source_id))
-            continue
+            availability_invalid = True
         if availability.get(target_id) not in {"reviewed", "stop_boundary"}:
             reasons.append(_reason("edge_target_not_reviewed", "edge target must be reviewed or needs_learning stop boundary", edge_id=edge_id, target_node_id=target_id))
-            continue
+            availability_invalid = True
         target_reference = _text(edge.get("target_control_id") or edge.get("target_region_id"))
         element_ref = anchors_by_node[source_id].get(target_reference)
-        if not target_reference or not element_ref:
+        element_invalid = not target_reference or not element_ref
+        if element_invalid:
             reasons.append(_reason("edge_target_element_invalid", "edge target control or region must exist in reviewed source node", edge_id=edge_id, source_node_id=source_id))
+        target_subject, action_subject, subject_error = _exact_transition_subjects(
+            node=node_by_id[source_id], edge=edge
+        )
+        granular_errors: list[dict[str, Any]] = []
+        if not _granular_human_review_is_current(target_subject, "target_control"):
+            granular_errors.append(
+                _reason(
+                    "edge_target_control_approval_invalid",
+                    subject_error or "edge target control or region lacks a current human approval",
+                    edge_id=edge_id,
+                    source_node_id=source_id,
+                )
+            )
+        if not _granular_human_review_is_current(action_subject, "action_candidate"):
+            granular_errors.append(
+                _reason(
+                    "edge_action_candidate_approval_invalid",
+                    subject_error or "edge action candidate lacks a current human approval",
+                    edge_id=edge_id,
+                    source_node_id=source_id,
+                )
+            )
+        if not _granular_human_review_is_current(edge, "edge"):
+            granular_errors.append(
+                _reason(
+                    "edge_approval_invalid",
+                    "edge lacks a current human approval for its exact semantic revision",
+                    edge_id=edge_id,
+                    source_node_id=source_id,
+                )
+            )
+        if granular_errors:
+            reasons.extend(granular_errors)
+        if granular_errors or availability_invalid:
+            continue
+        if element_invalid:
             continue
         transition_id = _safe_id("transition_", edge_id)
         target_state_id = state_ids[target_id]

@@ -48,6 +48,8 @@ single node confirmation:
    `agent_usable` with exactly one `open_apply_flow` action and that
    `apply_entry` remains a stop boundary.
 
+The Panel now exposes the three distinct granular review gestures and requires all three before source-node confirmation; the compiler independently checks each approval before accepting a candidate. The current Portfolio draft is still unreviewed: W2c remains open until the user reviews the target control, exact action candidate, transition edge, and source node, then saves and supplies exact compile/publish/process-restart/reload proof. This implementation status does not claim human approval, Runtime authorization, or live workflow proof.
+
 Node confirmation alone does not approve a control, action candidate, or edge.
 Automation must not perform any of these human-review decisions.
 

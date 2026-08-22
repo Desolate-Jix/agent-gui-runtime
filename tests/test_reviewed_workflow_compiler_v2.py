@@ -31,6 +31,13 @@ def _base_review() -> dict:
                 "evidence": {},
                 "controls": [{"control_id": "job_card", "label": "Job result"}],
                 "regions": [],
+                "action_candidates": [{
+                    "action_template_id": "open_job_detail",
+                    "semantic_action": "open_detail",
+                    "target_control_id": "job_card",
+                    "target_region_id": "",
+                    "target_interface_id": "detail",
+                }],
                 "review_status": "needs_human_review",
                 "reviewed_by_human": False,
             },
@@ -43,6 +50,13 @@ def _base_review() -> dict:
                 "evidence": {},
                 "controls": [{"control_id": "quick_apply", "label": "Quick apply"}],
                 "regions": [],
+                "action_candidates": [{
+                    "action_template_id": "open_apply_entry",
+                    "semantic_action": "open_apply_flow",
+                    "target_control_id": "quick_apply",
+                    "target_region_id": "",
+                    "target_interface_id": "apply_entry",
+                }],
                 "review_status": "needs_human_review",
                 "reviewed_by_human": False,
             },
@@ -55,6 +69,7 @@ def _base_review() -> dict:
                 "evidence": {},
                 "controls": [],
                 "regions": [],
+                "action_candidates": [],
                 "review_status": "needs_learning",
                 "reviewed_by_human": False,
             },
@@ -66,6 +81,7 @@ def _base_review() -> dict:
                 "source_node_id": "home",
                 "target_node_id": "detail",
                 "action_type": "open_detail",
+                "action_template_id": "open_job_detail",
                 "target_control_id": "job_card",
                 "target_region_id": "",
                 "risk_level": "low",
@@ -81,6 +97,7 @@ def _base_review() -> dict:
                 "source_node_id": "detail",
                 "target_node_id": "apply_entry",
                 "action_type": "open_apply_flow",
+                "action_template_id": "open_apply_entry",
                 "target_control_id": "quick_apply",
                 "target_region_id": "",
                 "risk_level": "low",
@@ -104,6 +121,38 @@ def _persist_reviewed_workflow(tmp_path: Path, review: dict | None = None) -> tu
     first = save_interface_workflow_review_candidate(review or _base_review(), project_root=tmp_path)
     path = Path(first["path"])
     review = json.loads(path.read_text(encoding="utf-8"))
+    from app.agent.reviewed_workflow_compiler import (
+        _GRANULAR_CONFIRMATION_CONTRACTS,
+        _granular_review_revision,
+    )
+
+    node_by_id = {node["node_id"]: node for node in review["nodes"]}
+    for edge in review["edges"]:
+        source_node = node_by_id[edge["source_node_id"]]
+        target_id = edge.get("target_control_id") or edge.get("target_region_id")
+        target_key = "control_id" if edge.get("target_control_id") else "region_id"
+        target_collection = source_node["controls"] if edge.get("target_control_id") else source_node["regions"]
+        target_subject = next((item for item in target_collection if item[target_key] == target_id), None)
+        action_subject = next((
+            item for item in source_node["action_candidates"]
+            if item.get("action_template_id") == edge.get("action_template_id")
+        ), None)
+        for subject, subject_kind in (
+            (target_subject, "target_control"),
+            (action_subject, "action_candidate"),
+            (edge, "edge"),
+        ):
+            if subject is None:
+                continue
+            subject["review_status"] = "human_approved"
+            subject["reviewed_by_human"] = True
+            subject["display_only"] = True
+            subject["artifact_is_authorization"] = False
+            subject["execute_binding_enabled"] = False
+            subject["human_review_confirmation"] = {
+                "contract_version": _GRANULAR_CONFIRMATION_CONTRACTS[subject_kind],
+                "revision": _granular_review_revision(subject),
+            }
     for node in review["nodes"][:2]:
         node["review_status"] = "human_approved"
         node["reviewed_by_human"] = True
@@ -264,6 +313,165 @@ def test_blocks_edge_only_approval_and_disallowed_actions(tmp_path: Path) -> Non
     )
     assert blocked["status"] == "blocked"
     assert "source_node_not_human_reviewed" in {item["code"] for item in blocked["blocked_reasons"]}
+
+
+def test_blocks_node_only_approval_without_current_granular_transition_approvals(
+    tmp_path: Path,
+) -> None:
+    source, digest = _persist_reviewed_workflow(tmp_path)
+    review = json.loads(source.read_text(encoding="utf-8"))
+    for node in review["nodes"]:
+        for subject in [*node.get("controls", []), *node.get("regions", []), *node.get("action_candidates", [])]:
+            subject["review_status"] = "needs_human_review"
+            subject["reviewed_by_human"] = False
+            subject.pop("human_review_confirmation", None)
+    for edge in review["edges"]:
+        edge.pop("human_review_confirmation", None)
+        edge["reviewed_by_human"] = False
+    source.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    _rebind_registry_source_sha(tmp_path, digest)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "blocked"
+    assert {
+        "edge_target_control_approval_invalid",
+        "edge_action_candidate_approval_invalid",
+        "edge_approval_invalid",
+    }.issubset({item["code"] for item in result["blocked_reasons"]})
+
+
+@pytest.mark.parametrize(
+    ("subject_kind", "expected_code"),
+    [
+        ("control", "edge_target_control_approval_invalid"),
+        ("action", "edge_action_candidate_approval_invalid"),
+        ("edge", "edge_approval_invalid"),
+        ("malformed_action_confirmation", "edge_action_candidate_approval_invalid"),
+    ],
+)
+def test_blocks_stale_or_malformed_granular_transition_confirmation(
+    tmp_path: Path,
+    subject_kind: str,
+    expected_code: str,
+) -> None:
+    source, _digest = _persist_reviewed_workflow(tmp_path)
+    review = json.loads(source.read_text(encoding="utf-8"))
+    if subject_kind == "control":
+        review["nodes"][0]["controls"][0]["label"] = "Changed target control"
+    elif subject_kind == "action":
+        review["nodes"][0]["action_candidates"][0]["operation_goal"] = "Changed operation"
+    elif subject_kind == "edge":
+        review["edges"][0]["display_name"] = "Changed edge"
+    else:
+        review["nodes"][0]["action_candidates"][0]["human_review_confirmation"] = []
+    source.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    _rebind_registry_source_sha(tmp_path, digest)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "blocked"
+    assert expected_code in {item["code"] for item in result["blocked_reasons"]}
+
+
+@pytest.mark.parametrize(
+    ("subject_kind", "field_name", "field_value", "expected_code"),
+    [
+        ("control", "display_only", False, "edge_target_control_approval_invalid"),
+        ("action", "artifact_is_authorization", True, "edge_action_candidate_approval_invalid"),
+        ("edge", "execute_binding_enabled", True, "edge_approval_invalid"),
+    ],
+)
+def test_blocks_granular_approval_when_non_authorizing_safety_fact_changes(
+    tmp_path: Path,
+    subject_kind: str,
+    field_name: str,
+    field_value: bool,
+    expected_code: str,
+) -> None:
+    source, _digest = _persist_reviewed_workflow(tmp_path)
+    review = json.loads(source.read_text(encoding="utf-8"))
+    subjects = {
+        "control": review["nodes"][0]["controls"][0],
+        "action": review["nodes"][0]["action_candidates"][0],
+        "edge": review["edges"][0],
+    }
+    subjects[subject_kind][field_name] = field_value
+    source.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    _rebind_registry_source_sha(tmp_path, digest)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "blocked"
+    assert expected_code in {item["code"] for item in result["blocked_reasons"]}
+
+
+def test_granular_revision_comparison_is_recursively_type_exact(tmp_path: Path) -> None:
+    source, _digest = _persist_reviewed_workflow(tmp_path)
+    review = json.loads(source.read_text(encoding="utf-8"))
+    review["edges"][0]["human_review_confirmation"]["revision"][
+        "requires_user_confirmation"
+    ] = 0
+    source.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    _rebind_registry_source_sha(tmp_path, digest)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "blocked"
+    assert "edge_approval_invalid" in {
+        item["code"] for item in result["blocked_reasons"]
+    }
+
+
+@pytest.mark.parametrize(
+    ("ambiguity_kind", "expected_code"),
+    [
+        ("duplicate_control", "edge_target_control_approval_invalid"),
+        ("duplicate_action", "edge_action_candidate_approval_invalid"),
+        ("both_target_types", "edge_target_control_approval_invalid"),
+        ("candidate_target_mismatch", "edge_action_candidate_approval_invalid"),
+        ("candidate_action_type_conflict", "edge_action_candidate_approval_invalid"),
+        ("candidate_source_control_mismatch", "edge_action_candidate_approval_invalid"),
+        ("edge_semantic_action_conflict", "edge_action_candidate_approval_invalid"),
+    ],
+)
+def test_blocks_ambiguous_or_inconsistent_exact_transition_subjects(
+    tmp_path: Path,
+    ambiguity_kind: str,
+    expected_code: str,
+) -> None:
+    review = _base_review()
+    if ambiguity_kind == "duplicate_control":
+        review["nodes"][0]["controls"].append(
+            {"control_id": "job_card", "label": "Duplicate job result"}
+        )
+    elif ambiguity_kind == "duplicate_action":
+        review["nodes"][0]["action_candidates"].append(
+            dict(review["nodes"][0]["action_candidates"][0])
+        )
+    elif ambiguity_kind == "both_target_types":
+        review["nodes"][0]["regions"] = [
+            {"region_id": "job_card_region", "label": "Job result region"}
+        ]
+        review["edges"][0]["target_region_id"] = "job_card_region"
+    elif ambiguity_kind == "candidate_target_mismatch":
+        review["nodes"][0]["action_candidates"][0]["target_interface_id"] = "apply_entry"
+    elif ambiguity_kind == "candidate_action_type_conflict":
+        review["nodes"][0]["action_candidates"][0]["action_type"] = "back"
+    elif ambiguity_kind == "candidate_source_control_mismatch":
+        review["nodes"][0]["action_candidates"][0]["source_control_id"] = "other_control"
+    else:
+        review["edges"][0]["semantic_action"] = "back"
+    source, digest = _persist_reviewed_workflow(tmp_path, review)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "blocked"
+    assert expected_code in {item["code"] for item in result["blocked_reasons"]}
 
 
 def test_blocks_non_mvp_action_missing_semantic_success_and_unknown_element(tmp_path: Path) -> None:

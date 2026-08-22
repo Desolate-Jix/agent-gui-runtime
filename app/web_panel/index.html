@@ -922,6 +922,7 @@
                         <label>
                           <span data-i18n="interface_workflow_review_status">审核状态</span>
                           <select id="interfaceWorkflowNodeReviewStatus">
+                            <option value="needs_learning">needs_learning（固定安全停止）</option>
                             <option value="needs_human_review">needs_human_review</option>
                             <option value="reviewed_candidate">reviewed_candidate</option>
                             <option value="human_approved">human_approved（需显式确认）</option>
@@ -1033,6 +1034,12 @@
                               </select>
                             </label>
                             <label>
+                              <span>匹配操作候选</span>
+                              <select id="interfaceWorkflowOperationActionCandidate">
+                                <option value="">请选择精确候选</option>
+                              </select>
+                            </label>
+                            <label>
                               <span>显示名称</span>
                               <input id="interfaceWorkflowOperationLabel" type="text" placeholder="例如：打开岗位详情" />
                             </label>
@@ -1082,6 +1089,15 @@
                             <button id="interfaceWorkflowOperationDeleteBtn" type="button" class="secondary">删除</button>
                             <button id="interfaceWorkflowOperationDryRunBtn" type="button">安全验证</button>
                           </div>
+                          <div class="interface-workflow-operation-actions" aria-label="当前操作的逐项人工审核">
+                            <button id="interfaceWorkflowOperationApproveTargetControlBtn" type="button" class="secondary">批准目标控件</button>
+                            <span id="interfaceWorkflowOperationTargetControlReviewStatus">needs_human_review</span>
+                            <button id="interfaceWorkflowOperationApproveActionCandidateBtn" type="button" class="secondary">批准操作候选</button>
+                            <span id="interfaceWorkflowOperationActionCandidateReviewStatus">needs_human_review</span>
+                            <button id="interfaceWorkflowOperationApproveEdgeBtn" type="button" class="secondary">批准跳转边</button>
+                            <span id="interfaceWorkflowOperationEdgeReviewStatus">needs_human_review</span>
+                          </div>
+                          <small>逐项审核只记录当前语义 revision；display_only=true，artifact_is_authorization=false，execute_binding_enabled=false。</small>
                         </section>
                         <div class="interface-workflow-editor-actions">
                           <button id="interfaceWorkflowEditBoxesBtn" type="button" data-i18n="interface_workflow_edit_boxes">修改当前界面框</button>

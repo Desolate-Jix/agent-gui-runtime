@@ -30,6 +30,11 @@
     "send",
     "submit",
   ]);
+  const GRANULAR_CONFIRMATION_CONTRACTS = {
+    action_candidate: "interface_action_candidate_human_review_confirmation_v1",
+    edge: "interface_workflow_edge_human_review_confirmation_v1",
+    target_control: "interface_target_control_human_review_confirmation_v1",
+  };
 
   function createLatestInterfaceWorkflowLoadGuard() {
     let latestToken = 0;
@@ -91,6 +96,7 @@
     "display_name",
     "agent_description",
     "operation_id",
+    "action_template_id",
     "action_type",
     "target_node_id",
     "target_region_id",
@@ -227,6 +233,30 @@
     return Object.fromEntries(Object.entries(value)
       .filter(([key]) => !REVISION_METADATA_FIELDS.has(String(key)))
       .map(([key, item]) => [key, withoutReviewRevisionMetadata(item)]));
+  }
+
+  function granularReviewRevision(value) {
+    return withoutRuntimePoints(withoutReviewRevisionMetadata(value));
+  }
+
+  function canonicalReviewValue(value) {
+    if (Array.isArray(value)) return value.map(canonicalReviewValue);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.keys(value).sort().map(
+      (key) => [key, canonicalReviewValue(value[key])],
+    ));
+  }
+
+  function granularHumanReviewIsCurrent(value, subjectKind) {
+    const confirmation = value?.human_review_confirmation;
+    return value?.review_status === "human_approved"
+      && value?.reviewed_by_human === true
+      && value?.display_only === true
+      && value?.artifact_is_authorization === false
+      && value?.execute_binding_enabled === false
+      && confirmation?.contract_version === GRANULAR_CONFIRMATION_CONTRACTS[subjectKind]
+      && JSON.stringify(canonicalReviewValue(confirmation?.revision))
+        === JSON.stringify(canonicalReviewValue(granularReviewRevision(value)));
   }
 
   function buildInterfaceNodeReviewRevision(review, nodeId) {
@@ -648,6 +678,9 @@
     const nodes = Array.isArray(review.nodes) ? review.nodes : [];
     const edges = Array.isArray(review.edges) ? review.edges : [];
     const nodeById = new Map(nodes.map((node) => [node.node_id, node]));
+    const stopBoundaryNodeIds = new Set(nodes.filter(
+      (node) => String(node?.review_status || "").trim() === "needs_learning",
+    ).map((node) => String(node.node_id || "").trim()));
     const entryNodeId = review.workflow && review.workflow.entry_node_id;
     let selectedNodeId = nodeById.has(entryNodeId)
       ? entryNodeId
@@ -777,6 +810,7 @@
           target_node_id: edge.target_node_id,
           display_name: edge.display_name || edge.action_type || edge.edge_id,
           action_type: edge.action_type || "unknown_action",
+          action_template_id: edge.action_template_id || "",
           target_control_id: edge.target_control_id || "",
           target_region_id: edge.target_region_id || "",
           review_status: edge.review_status || "needs_human_review",
@@ -808,10 +842,171 @@
       delete node.current_revision_hash;
     }
 
+    function revokeGranularHumanReview(subject) {
+      subject.review_status = "needs_human_review";
+      subject.reviewed_by_human = false;
+      delete subject.human_review_confirmation;
+      subject.display_only = true;
+      subject.artifact_is_authorization = false;
+      subject.execute_binding_enabled = false;
+    }
+
+    function confirmGranularHumanReview(subject, subjectKind) {
+      subject.review_status = "human_approved";
+      subject.reviewed_by_human = true;
+      subject.display_only = true;
+      subject.artifact_is_authorization = false;
+      subject.execute_binding_enabled = false;
+      subject.human_review_confirmation = {
+        contract_version: GRANULAR_CONFIRMATION_CONTRACTS[subjectKind],
+        revision: granularReviewRevision(subject),
+      };
+    }
+
+    function resolveOperationSubjects(edgeId) {
+      const normalizedEdgeId = String(edgeId || "").trim();
+      const edgeMatches = edges.filter((item) => String(item?.edge_id || "").trim() === normalizedEdgeId);
+      if (edgeMatches.length !== 1) {
+        throw new Error(`workflow operation edge must exist exactly once: ${normalizedEdgeId}`);
+      }
+      const edge = edgeMatches[0];
+      const sourceNodeId = String(edge.source_node_id || "").trim();
+      const sourceNode = nodeById.get(sourceNodeId);
+      if (!sourceNode) throw new Error(`workflow operation source node is invalid: ${sourceNodeId}`);
+
+      const targetControlId = String(edge.target_control_id || "").trim();
+      const targetRegionId = String(edge.target_region_id || "").trim();
+      if (Boolean(targetControlId) === Boolean(targetRegionId)) {
+        throw new Error(`workflow operation must reference exactly one target control or region: ${normalizedEdgeId}`);
+      }
+      const targetCollection = targetControlId ? sourceNode.controls : sourceNode.regions;
+      const targetIdKey = targetControlId ? "control_id" : "region_id";
+      const targetId = targetControlId || targetRegionId;
+      const targetMatches = (Array.isArray(targetCollection) ? targetCollection : []).filter(
+        (item) => String(item?.[targetIdKey] || "").trim() === targetId,
+      );
+      if (targetMatches.length !== 1) {
+        throw new Error(`workflow operation must match exactly one target control or region: ${normalizedEdgeId}`);
+      }
+
+      const actionTemplateId = String(edge.action_template_id || "").trim();
+      const actionMatches = (Array.isArray(sourceNode.action_candidates)
+        ? sourceNode.action_candidates
+        : []).filter((item) => (
+        String(item?.action_template_id || "").trim() === actionTemplateId
+      ));
+      if (!actionTemplateId || actionMatches.length !== 1) {
+        throw new Error(`workflow operation must match exactly one action candidate: ${normalizedEdgeId}`);
+      }
+      const actionCandidate = actionMatches[0];
+      const edgeAction = String(edge.action_type || "").trim();
+      const edgeSemanticAction = String(edge.semantic_action || "").trim();
+      const candidateSemanticAction = String(actionCandidate.semantic_action || "").trim();
+      const candidateActionType = String(actionCandidate.action_type || "").trim();
+      const candidateAction = candidateSemanticAction || candidateActionType;
+      const candidateTargetControlId = String(actionCandidate.target_control_id || "").trim();
+      const candidateTargetRegionId = String(actionCandidate.target_region_id || "").trim();
+      const candidateTargetNodeIds = [
+        actionCandidate.target_interface_id,
+        actionCandidate.target_node_id,
+      ].map((value) => String(value || "").trim()).filter(Boolean);
+      if (
+        (edgeSemanticAction && edgeSemanticAction !== edgeAction)
+        || (candidateSemanticAction && candidateActionType && candidateSemanticAction !== candidateActionType)
+        || candidateAction !== edgeAction
+        || candidateTargetControlId !== targetControlId
+        || candidateTargetRegionId !== targetRegionId
+        || (
+          String(actionCandidate.source_control_id || "").trim()
+          && String(actionCandidate.source_control_id || "").trim() !== targetId
+        )
+        || candidateTargetNodeIds.length < 1
+        || candidateTargetNodeIds.some((value) => value !== String(edge.target_node_id || "").trim())
+      ) {
+        throw new Error(`workflow action candidate does not match edge type, control, or target: ${normalizedEdgeId}`);
+      }
+      return { edge, sourceNode, targetControl: targetMatches[0], actionCandidate };
+    }
+
+    function operationGranularReview(edgeId) {
+      try {
+        const subjects = resolveOperationSubjects(edgeId);
+        return {
+          edge_id: String(subjects.edge.edge_id || ""),
+          target_control: {
+            current: granularHumanReviewIsCurrent(subjects.targetControl, "target_control"),
+            review_status: String(subjects.targetControl.review_status || "needs_human_review"),
+          },
+          action_candidate: {
+            current: granularHumanReviewIsCurrent(subjects.actionCandidate, "action_candidate"),
+            review_status: String(subjects.actionCandidate.review_status || "needs_human_review"),
+          },
+          edge: {
+            current: granularHumanReviewIsCurrent(subjects.edge, "edge"),
+            review_status: String(subjects.edge.review_status || "needs_human_review"),
+          },
+          error: "",
+        };
+      } catch (error) {
+        return {
+          edge_id: String(edgeId || "").trim(),
+          target_control: { current: false, review_status: "invalid" },
+          action_candidate: { current: false, review_status: "invalid" },
+          edge: { current: false, review_status: "invalid" },
+          error: String(error?.message || error || "invalid granular operation review"),
+        };
+      }
+    }
+
+    function confirmOperationTargetControlHumanReview(edgeId) {
+      const subjects = resolveOperationSubjects(edgeId);
+      confirmGranularHumanReview(subjects.targetControl, "target_control");
+      revokeNodeHumanReview(subjects.sourceNode);
+      return operationGranularReview(edgeId);
+    }
+
+    function confirmOperationActionCandidateHumanReview(edgeId) {
+      const subjects = resolveOperationSubjects(edgeId);
+      confirmGranularHumanReview(subjects.actionCandidate, "action_candidate");
+      revokeNodeHumanReview(subjects.sourceNode);
+      return operationGranularReview(edgeId);
+    }
+
+    function confirmOperationEdgeHumanReview(edgeId) {
+      const subjects = resolveOperationSubjects(edgeId);
+      confirmGranularHumanReview(subjects.edge, "edge");
+      revokeNodeHumanReview(subjects.sourceNode);
+      return operationGranularReview(edgeId);
+    }
+
+    function revokeOperationEdgeHumanReview(edgeId) {
+      const normalizedEdgeId = String(edgeId || "").trim();
+      const matches = edges.filter((edge) => String(edge?.edge_id || "").trim() === normalizedEdgeId);
+      if (matches.length !== 1) {
+        throw new Error(`workflow operation edge must exist exactly once: ${normalizedEdgeId}`);
+      }
+      const edge = matches[0];
+      revokeGranularHumanReview(edge);
+      const sourceNode = nodeById.get(String(edge.source_node_id || "").trim());
+      if (sourceNode) revokeNodeHumanReview(sourceNode);
+      return operationGranularReview(normalizedEdgeId);
+    }
+
     function confirmNodeHumanReview(nodeId) {
       const node = nodeById.get(nodeId);
       if (!node) {
         throw new Error(`unknown interface workflow node: ${nodeId}`);
+      }
+      if (stopBoundaryNodeIds.has(String(nodeId || "").trim())) {
+        throw new Error(`needs_learning stop-boundary node cannot be human approved: ${nodeId}`);
+      }
+      const outgoing = edges.filter((edge) => String(edge?.source_node_id || "").trim() === nodeId);
+      const invalid = outgoing.find((edge) => {
+        const status = operationGranularReview(edge.edge_id);
+        return !status.target_control.current || !status.action_candidate.current || !status.edge.current;
+      });
+      if (invalid) {
+        throw new Error(`current granular human approval is required for outgoing edge: ${invalid.edge_id}`);
       }
       node.review_status = "human_approved";
       node.reviewed_by_human = true;
@@ -831,12 +1026,30 @@
         throw new Error(`unknown interface workflow node: ${nodeId}`);
       }
       const normalizedPatch = patch && typeof patch === "object" ? { ...patch } : {};
+      if (String(normalizedPatch.review_status || "").trim() === "needs_learning") {
+        stopBoundaryNodeIds.add(String(nodeId || "").trim());
+      }
+      if (stopBoundaryNodeIds.has(String(nodeId || "").trim())) {
+        normalizedPatch.review_status = "needs_learning";
+      }
       const changedEvidenceFields = Object.entries(normalizedPatch).some(([key, value]) => (
         key !== "review_status"
         && EDITABLE_NODE_FIELDS.has(key)
         && JSON.stringify(node[key]) !== JSON.stringify(value)
       ));
       applyEditablePatch(node, normalizedPatch, EDITABLE_NODE_FIELDS);
+      for (const [items, subjectKind] of [
+        [node.controls, "target_control"],
+        [node.regions, "target_control"],
+        [node.action_candidates, "action_candidate"],
+      ]) {
+        (Array.isArray(items) ? items : []).forEach((item) => {
+          if (
+            (item?.review_status === "human_approved" || item?.reviewed_by_human === true || item?.human_review_confirmation)
+            && !granularHumanReviewIsCurrent(item, subjectKind)
+          ) revokeGranularHumanReview(item);
+        });
+      }
       if (changedEvidenceFields) {
         revokeNodeHumanReview(node);
       } else if (
@@ -844,6 +1057,13 @@
         && String(normalizedPatch.review_status || "") !== "human_approved"
       ) {
         node.reviewed_by_human = false;
+      }
+      if (stopBoundaryNodeIds.has(String(nodeId || "").trim())) {
+        node.review_status = "needs_learning";
+        node.reviewed_by_human = false;
+        delete node.human_review_confirmation;
+        delete node.reviewed_revision_hash;
+        delete node.current_revision_hash;
       }
       return current();
     }
@@ -910,6 +1130,7 @@
       ));
       applyEditablePatch(edge, normalizedPatch, EDITABLE_EDGE_FIELDS);
       if (changedActionFields) {
+        revokeGranularHumanReview(edge);
         const sourceNode = nodeById.get(edge.source_node_id);
         if (sourceNode) revokeNodeHumanReview(sourceNode);
       }
@@ -965,6 +1186,7 @@
       };
       nodes.push(node);
       nodeById.set(nodeId, node);
+      stopBoundaryNodeIds.add(nodeId);
       if (!review.workflow || typeof review.workflow !== "object") review.workflow = {};
       review.workflow.node_ids = nodes.map((item) => item.node_id);
       if (!review.workflow.entry_node_id) review.workflow.entry_node_id = nodeId;
@@ -1001,6 +1223,7 @@
       };
       nodes.push(node);
       nodeById.set(nodeId, node);
+      if (node.review_status === "needs_learning") stopBoundaryNodeIds.add(nodeId);
       if (!review.workflow || typeof review.workflow !== "object") review.workflow = {};
       review.workflow.node_ids = nodes.map((item) => item.node_id);
       if (!review.workflow.entry_node_id) review.workflow.entry_node_id = nodeId;
@@ -1037,6 +1260,7 @@
         display_name: String(operation?.display_name || actionType).trim() || actionType,
         agent_description: String(operation?.agent_description || "").trim(),
         action_type: actionType,
+        action_template_id: String(operation?.action_template_id || "").trim(),
         target_region_id: String(operation?.target_region_id || "").trim(),
         target_control_id: String(operation?.target_control_id || "").trim(),
         risk_level: riskLevel,
@@ -1129,10 +1353,15 @@
       addPlaceholderNode,
       clearFocus,
       confirmNodeHumanReview,
+      confirmOperationActionCandidateHumanReview,
+      confirmOperationEdgeHumanReview,
+      confirmOperationTargetControlHumanReview,
       current,
       focusControl,
       focusInterface,
       graph,
+      operationGranularReview,
+      revokeOperationEdgeHumanReview,
       removeInterfaceNode,
       removeOperation,
       select,
@@ -1156,7 +1385,8 @@
     if (normalizedNodeId) state.updateNode(normalizedNodeId, nodePatch || {});
     if (typeof commitOperation === "function") commitOperation();
     if (normalizedNodeId && humanReviewConfirmed) {
-      state.confirmNodeHumanReview(normalizedNodeId);
+      const node = state.snapshot().nodes.find((item) => item.node_id === normalizedNodeId);
+      if (node?.review_status !== "needs_learning") state.confirmNodeHumanReview(normalizedNodeId);
     }
     return state.snapshot();
   }

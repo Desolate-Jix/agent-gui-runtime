@@ -18232,6 +18232,10 @@ function clearInterfaceWorkflowReview(reason = "") {
     "interfaceWorkflowNodeHumanReviewConfirmed",
     "interfaceWorkflowTransitionAction",
     "interfaceWorkflowTransitionTarget",
+    "interfaceWorkflowOperationActionCandidate",
+    "interfaceWorkflowOperationApproveTargetControlBtn",
+    "interfaceWorkflowOperationApproveActionCandidateBtn",
+    "interfaceWorkflowOperationApproveEdgeBtn",
     "interfaceWorkflowRemoveSourceBtn",
     "interfaceWorkflowEditBoxesBtn",
     "interfaceWorkflowContentBehavior",
@@ -18591,6 +18595,21 @@ function handleInterfaceWorkflowEditorMutation({ clearConfirmation = true } = {}
   markInterfaceWorkflowUnsaved();
 }
 
+function handleInterfaceWorkflowOperationEditorMutation() {
+  clearInterfaceWorkflowNodeHumanReviewConfirmation();
+  if (interfaceWorkflowReviewState && interfaceWorkflowSelectedOperationId) {
+    const committed = commitInterfaceWorkflowOperationEditor({ silent: true });
+    if (!committed) {
+      interfaceWorkflowReviewState.revokeOperationEdgeHumanReview(
+        interfaceWorkflowSelectedOperationId,
+      );
+    }
+    interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  }
+  markInterfaceWorkflowUnsaved();
+  renderInterfaceWorkflowOperationGranularStatus(currentInterfaceWorkflowOperation());
+}
+
 function interfaceWorkflowAssetV2BindingCandidate() {
   const select = $("interfaceWorkflowLibrarySelect");
   const workflowId = String(select?.value || "").trim();
@@ -18719,15 +18738,24 @@ function currentInterfaceWorkflowOperation(view = null) {
 }
 
 function interfaceWorkflowOperationPatch() {
+  const targetId = String($("interfaceWorkflowOperationTargetControl")?.value || "").trim();
+  const node = interfaceWorkflowReviewState?.current()?.node;
+  const controlMatches = (Array.isArray(node?.controls) ? node.controls : []).filter(
+    (item) => String(item?.control_id || "").trim() === targetId,
+  );
+  const regionMatches = (Array.isArray(node?.regions) ? node.regions : []).filter(
+    (item) => String(item?.region_id || "").trim() === targetId,
+  );
   return {
     display_name: String($("interfaceWorkflowOperationLabel")?.value || "").trim(),
     agent_description: String($("interfaceWorkflowOperationDescription")?.value || "").trim(),
     action_type: String($("interfaceWorkflowOperationType")?.value || "read").trim(),
-    target_control_id: String($("interfaceWorkflowOperationTargetControl")?.value || "").trim(),
+    action_template_id: String($("interfaceWorkflowOperationActionCandidate")?.value || "").trim(),
+    target_control_id: targetId && controlMatches.length === 1 && regionMatches.length === 0 ? targetId : "",
+    target_region_id: targetId && regionMatches.length === 1 && controlMatches.length === 0 ? targetId : "",
     target_node_id: String($("interfaceWorkflowOperationTargetNode")?.value || "").trim(),
     risk_level: String($("interfaceWorkflowOperationRisk")?.value || "low").trim(),
     requires_user_confirmation: $("interfaceWorkflowOperationConfirmation")?.checked === true,
-    review_status: "needs_human_review",
   };
 }
 
@@ -18739,6 +18767,25 @@ function markInterfaceWorkflowUnsaved(message = "有未保存的操作或路径�
   }
   if ($("interfaceWorkflowSaveStatus")) {
     $("interfaceWorkflowSaveStatus").textContent = "有未保存修改 · 保存后才能安全验证";
+  }
+}
+
+function renderInterfaceWorkflowOperationGranularStatus(operation) {
+  const granular = operation
+    ? interfaceWorkflowReviewState?.operationGranularReview?.(operation.edge_id)
+    : null;
+  for (const [subject, buttonId, statusId] of [
+    ["target_control", "interfaceWorkflowOperationApproveTargetControlBtn", "interfaceWorkflowOperationTargetControlReviewStatus"],
+    ["action_candidate", "interfaceWorkflowOperationApproveActionCandidateBtn", "interfaceWorkflowOperationActionCandidateReviewStatus"],
+    ["edge", "interfaceWorkflowOperationApproveEdgeBtn", "interfaceWorkflowOperationEdgeReviewStatus"],
+  ]) {
+    const status = granular?.[subject];
+    if ($(buttonId)) $(buttonId).disabled = !operation || status?.current === true;
+    if ($(statusId)) {
+      $(statusId).textContent = granular?.error
+        ? `invalid · ${granular.error}`
+        : (status?.current ? "human_approved · current" : (status?.review_status || "needs_human_review"));
+    }
   }
 }
 
@@ -18774,6 +18821,20 @@ function renderInterfaceWorkflowOperationEditor(view) {
   if ($("interfaceWorkflowOperationDescription")) {
     $("interfaceWorkflowOperationDescription").value = String(operation?.agent_description || "");
     $("interfaceWorkflowOperationDescription").disabled = !enabled;
+  }
+  const actionCandidateSelect = $("interfaceWorkflowOperationActionCandidate");
+  if (actionCandidateSelect) {
+    actionCandidateSelect.innerHTML = `<option value="">请选择精确候选</option>`;
+    (Array.isArray(node?.action_candidates) ? node.action_candidates : []).forEach((candidate) => {
+      const actionTemplateId = String(candidate?.action_template_id || "").trim();
+      if (!actionTemplateId) return;
+      const option = document.createElement("option");
+      option.value = actionTemplateId;
+      option.textContent = interfaceWorkflowItemLabel(candidate, actionTemplateId);
+      actionCandidateSelect.appendChild(option);
+    });
+    actionCandidateSelect.value = String(operation?.action_template_id || "");
+    actionCandidateSelect.disabled = !enabled;
   }
   if ($("interfaceWorkflowOperationTargetControl")) {
     fillInterfaceWorkflowControlSelect(
@@ -18832,6 +18893,7 @@ function renderInterfaceWorkflowOperationEditor(view) {
   if ($("interfaceWorkflowOperationDryRunBtn")) {
     $("interfaceWorkflowOperationDryRunBtn").disabled = !operation || interfaceWorkflowHasUnsavedChanges;
   }
+  renderInterfaceWorkflowOperationGranularStatus(operation);
   if ($("interfaceWorkflowOperationStatus")) {
     $("interfaceWorkflowOperationStatus").textContent = operation
       ? `${operation.action_type || "unknown_action"} · ${node?.node_id || ""} -> ${operation.target_node_id || ""}`
@@ -18929,6 +18991,31 @@ function commitInterfaceWorkflowOperationEditor(options = {}) {
   interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
   if (options.silent !== true) markInterfaceWorkflowUnsaved();
   return currentInterfaceWorkflowOperation();
+}
+
+function confirmCurrentInterfaceWorkflowOperationGranular(subjectKind) {
+  if (!interfaceWorkflowReviewState || !interfaceWorkflowSelectedOperationId) return null;
+  try {
+    const committed = commitInterfaceWorkflowOperationEditor({ silent: true });
+    if (!committed) throw new Error("operation editor commit failed");
+    const methods = {
+      target_control: "confirmOperationTargetControlHumanReview",
+      action_candidate: "confirmOperationActionCandidateHumanReview",
+      edge: "confirmOperationEdgeHumanReview",
+    };
+    const method = methods[subjectKind];
+    if (!method || typeof interfaceWorkflowReviewState[method] !== "function") return null;
+    const result = interfaceWorkflowReviewState[method](interfaceWorkflowSelectedOperationId);
+    interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+    markInterfaceWorkflowUnsaved("已记录当前语义 revision 的逐项人工审核 · 尚未保存");
+    renderInterfaceWorkflowReviewSelection();
+    return result;
+  } catch (error) {
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = error?.message || "逐项人工审核失败";
+    }
+    return null;
+  }
 }
 
 async function dryRunInterfaceWorkflowOperation() {
@@ -19134,14 +19221,16 @@ function renderInterfaceWorkflowEditor(view) {
   }
   if ($("interfaceWorkflowNodeReviewStatus")) {
     const status = String(node?.review_status || "needs_human_review");
-    $("interfaceWorkflowNodeReviewStatus").value = ["needs_human_review", "reviewed_candidate", "human_approved", "rejected"].includes(status)
+    const stopBoundary = status === "needs_learning";
+    $("interfaceWorkflowNodeReviewStatus").value = ["needs_learning", "needs_human_review", "reviewed_candidate", "human_approved", "rejected"].includes(status)
       ? status
       : "needs_human_review";
-    $("interfaceWorkflowNodeReviewStatus").disabled = !enabled;
+    $("interfaceWorkflowNodeReviewStatus").disabled = !enabled || stopBoundary;
   }
   if ($("interfaceWorkflowNodeHumanReviewConfirmed")) {
     $("interfaceWorkflowNodeHumanReviewConfirmed").checked = false;
-    $("interfaceWorkflowNodeHumanReviewConfirmed").disabled = !enabled;
+    $("interfaceWorkflowNodeHumanReviewConfirmed").disabled = !enabled
+      || String(node?.review_status || "") === "needs_learning";
   }
   if ($("interfaceWorkflowEditBoxesBtn")) $("interfaceWorkflowEditBoxesBtn").disabled = !enabled;
   if ($("interfaceWorkflowRemoveSourceBtn")) $("interfaceWorkflowRemoveSourceBtn").disabled = !enabled;
@@ -22280,6 +22369,9 @@ function bindEvents() {
   on("interfaceWorkflowOperationUpdateBtn", "click", updateInterfaceWorkflowOperation);
   on("interfaceWorkflowOperationDeleteBtn", "click", removeInterfaceWorkflowOperation);
   on("interfaceWorkflowOperationDryRunBtn", "click", dryRunInterfaceWorkflowOperation);
+  on("interfaceWorkflowOperationApproveTargetControlBtn", "click", () => confirmCurrentInterfaceWorkflowOperationGranular("target_control"));
+  on("interfaceWorkflowOperationApproveActionCandidateBtn", "click", () => confirmCurrentInterfaceWorkflowOperationGranular("action_candidate"));
+  on("interfaceWorkflowOperationApproveEdgeBtn", "click", () => confirmCurrentInterfaceWorkflowOperationGranular("edge"));
   on("interfaceWorkflowContentSaveBtn", "click", saveInterfaceWorkflowContentDescriptor);
   on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);
   on("interfaceAssetUnreviewedTab", "click", () => showInterfaceAssetPage("unreviewed"));
@@ -22320,6 +22412,7 @@ function bindEvents() {
   on("interfaceWorkflowLibrarySelect", "change", handleInterfaceWorkflowLibrarySelectionChanged);
   for (const [id, eventName] of [
     ["interfaceWorkflowOperationType", "change"],
+    ["interfaceWorkflowOperationActionCandidate", "change"],
     ["interfaceWorkflowOperationLabel", "input"],
     ["interfaceWorkflowOperationDescription", "input"],
     ["interfaceWorkflowOperationTargetControl", "change"],
@@ -22328,7 +22421,7 @@ function bindEvents() {
     ["interfaceWorkflowOperationPlaceholderName", "input"],
     ["interfaceWorkflowOperationConfirmation", "change"],
   ]) {
-    on(id, eventName, handleInterfaceWorkflowEditorMutation);
+    on(id, eventName, handleInterfaceWorkflowOperationEditorMutation);
   }
   for (const [id, eventName] of [
     ["interfaceWorkflowContentBehavior", "change"],
