@@ -720,6 +720,87 @@ def test_factory_wires_internal_existing_windows_runtime_without_route(tmp_path:
     assert "execute_" + "recognition_plan" not in source
 
 
+@pytest.mark.parametrize("gate_block", [False, True])
+def test_factory_graph_dispatches_once_or_persists_gate_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    gate_block: bool,
+) -> None:
+    import app.agent.live_runtime_composition as composition
+    import app.core.screenshot as screenshot_module
+    import app.core.window_manager as window_module
+    import app.operation.screen_reading.uia_provider as uia_module
+    from app.agent.desktop_backend import DeterministicFakeBackend
+    from app.agent.live_controller import ServerWorkflowBinding
+    from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore
+    from app.agent.reviewed_workflow_gate import ReviewedWorkflowGateAdapter
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    asset, _ = _server_asset(tmp_path)
+    ReviewedWorkflowAssetStore(project_root=tmp_path).publish(
+        asset,
+        expected_registry_revision=0,
+    )
+    backend = DeterministicFakeBackend()
+    manager = _WindowManager(*[_bound() for _ in range(6)])
+    monkeypatch.setattr(screenshot_module, "screenshot_service", _ScreenshotService(tmp_path))
+    monkeypatch.setattr(window_module, "window_manager", manager)
+    monkeypatch.setattr(uia_module, "uia_provider", _UIAProvider())
+    monkeypatch.setattr(
+        composition,
+        "WindowsUIAOriginReader",
+        lambda **_kwargs: _OriginReader(origin="https://example.test"),
+    )
+    monkeypatch.setattr(
+        composition,
+        "_run_existing_read_only_recognition",
+        _RecognitionRunner(_entry_payloads(asset)),
+    )
+    monkeypatch.setattr(composition, "ExistingWindowsBackendAdapter", lambda: backend)
+    monkeypatch.setattr(composition, "ExistingWindowManagerVisibilityChecker", _Visibility)
+    if gate_block:
+        monkeypatch.setattr(
+            composition,
+            "ReviewedWorkflowGateAdapter",
+            lambda **_kwargs: ReviewedWorkflowGateAdapter(min_candidate_score=0.99),
+        )
+    controller = build_existing_windows_live_controller(
+        tmp_path,
+        ServerWorkflowBinding(
+            workflow_id="workflow_agent_evidence",
+            asset_id=asset["asset_id"],
+            application_identity_key="web:example.test",
+            target_window_handle=4242,
+        ),
+    )
+    session = controller.start_session()
+    action = next(
+        item
+        for item in session.current_observation.available_actions
+        if item.action_id != "runtime.safe_stop"
+    )
+
+    receipt = controller.submit_intent(
+        {
+            "contract_version": "agent_intent_v1",
+            "intent_id": f"factory-intent-{gate_block}",
+            "session_id": session.session_id,
+            "observation_id": session.current_observation.observation_id,
+            "workflow": session.workflow.model_dump(mode="json"),
+            "action_id": action.action_id,
+        }
+    )
+
+    assert receipt.outcome == ("BLOCKED" if gate_block else "DISPATCHED")
+    assert backend.dispatch_count == (0 if gate_block else 1)
+    persisted = RuntimeReceiptStore(project_root=tmp_path).load_by_receipt_id(receipt.receipt_id)
+    assert persisted.runtime_receipt == receipt
+    if not gate_block:
+        assert receipt.reason_code == "verification_pending"
+        assert receipt.effect_status == "not_evaluated"
+        assert receipt.destination_status == "not_evaluated"
+
+
 def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
