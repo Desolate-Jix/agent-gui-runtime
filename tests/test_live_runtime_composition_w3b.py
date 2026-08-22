@@ -922,12 +922,16 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset, _ = _server_asset(tmp_path)
+    for transition in asset["transitions"]:
+        transition["post_action_verification"]["semantic_success_rules"] = [
+            {"rule_id": f"{transition['transition_id']}_target_identity", "type": "target_state_identity"}
+        ]
     ReviewedWorkflowAssetStore(project_root=tmp_path).publish(
         asset,
         expected_registry_revision=0,
     )
     backend = DeterministicFakeBackend()
-    manager = _WindowManager(*[_bound() for _ in range(8)])
+    manager = _WindowManager(*[_bound() for _ in range(16)])
     screenshot = _SequencedScreenshotService(
         tmp_path,
         colors=[
@@ -983,10 +987,10 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     }
     receipt = controller.submit_intent(payload)
 
-    expected_outcome = "DISPATCHED" if case == "dispatch" else "BLOCKED"
+    expected_outcome = "VERIFICATION_FAILED" if case == "dispatch" else "BLOCKED"
     assert receipt.outcome == expected_outcome
     assert backend.dispatch_count == (1 if case == "dispatch" else 0)
-    assert len(screenshot.calls) == (2 if case == "gate_block" else 3)
+    assert len(screenshot.calls) == (4 if case == "dispatch" else 2 if case == "gate_block" else 3)
     screenshot_call_count = len(screenshot.calls)
     duplicate = controller.submit_intent(payload)
     assert duplicate == receipt
@@ -995,9 +999,9 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     persisted = RuntimeReceiptStore(project_root=tmp_path).load_by_receipt_id(receipt.receipt_id)
     assert persisted.runtime_receipt == receipt
     if case == "dispatch":
-        assert receipt.reason_code == "verification_pending"
-        assert receipt.effect_status == "not_evaluated"
-        assert receipt.destination_status == "not_evaluated"
+        assert receipt.reason_code == "destination_mismatch"
+        assert receipt.effect_status == "not_verified"
+        assert receipt.destination_status == "not_verified"
     if case == "changed_pixels":
         assert receipt.reason_code == "target_occluded"
 
@@ -1084,7 +1088,7 @@ class _Visibility:
 
 @pytest.mark.parametrize(
     ("gate_score", "expected_outcome", "dispatches"),
-    [(0.45, "DISPATCHED", 1), (0.99, "BLOCKED", 0)],
+    [(0.45, "VERIFICATION_FAILED", 1), (0.99, "BLOCKED", 0)],
 )
 def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
     tmp_path: Path,
@@ -1099,11 +1103,15 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
     from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
     asset, _ = _server_asset(tmp_path)
+    for transition in asset["transitions"]:
+        transition["post_action_verification"]["semantic_success_rules"] = [
+            {"rule_id": f"{transition['transition_id']}_target_identity", "type": "target_state_identity"}
+        ]
     runner = _RecognitionRunner(_entry_payloads(asset))
     adapter, _, screenshot, _, _ = _adapter(
         tmp_path,
         asset,
-        manager=_WindowManager(*[_bound() for _ in range(6)]),
+        manager=_WindowManager(*[_bound() for _ in range(16)]),
         screenshot=_ScreenshotService(tmp_path),
         origin=_OriginReader(origin="https://example.test"),
         runner=runner,
@@ -1146,10 +1154,10 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
 
     assert receipt.outcome == expected_outcome
     assert backend.dispatch_count == dispatches
-    if expected_outcome == "DISPATCHED":
-        assert receipt.reason_code == "verification_pending"
-        assert receipt.effect_status == "not_evaluated"
-        assert receipt.destination_status == "not_evaluated"
+    if expected_outcome == "VERIFICATION_FAILED":
+        assert receipt.reason_code == "destination_mismatch"
+        assert receipt.effect_status == "not_verified"
+        assert receipt.destination_status == "not_verified"
         assert receipt.next_observation_id is None
         restarted_backend = DeterministicFakeBackend()
         restarted = LiveController(
@@ -1167,6 +1175,6 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
             grounding_policy={"minimum_confidence": 0.45, "minimum_score_margin": 0.06},
         )
         duplicate = restarted.submit_intent(intent)
-        assert duplicate.outcome == "DISPATCHED"
+        assert duplicate.outcome == "VERIFICATION_FAILED"
         assert restarted_backend.dispatch_count == 0
-        assert len(screenshot.calls) == 2
+        assert len(screenshot.calls) == 3

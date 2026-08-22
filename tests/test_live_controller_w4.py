@@ -98,11 +98,27 @@ def _current_observation(asset: dict, *, capture_id: str = "capture-current", an
 
 
 class _ObservationSource:
-    def __init__(self, asset: dict, *, current: dict | None = None) -> None:
+    def __init__(
+        self,
+        asset: dict,
+        *,
+        current: dict | None = None,
+        post_current: dict | None = None,
+        target_process_id: int = 9001,
+        post_target_process_id: int | None = None,
+    ) -> None:
         self.asset = asset
         self.current = current or _current_observation(asset)
+        self.post_current = post_current or _current_observation(
+            asset,
+            capture_id="capture-post",
+            anchors=("anchor_detail", "quick_apply"),
+        )
+        self.target_process_id = target_process_id
+        self.post_target_process_id = post_target_process_id or target_process_id
         self.initial_calls = 0
         self.current_calls = 0
+        self.projected_calls = 0
         self.initial_assets: list[dict] = []
         self.initial_window_handles: list[int] = []
         self.current_window_handles: list[int] = []
@@ -118,12 +134,46 @@ class _ObservationSource:
         self.initial_calls += 1
         self.initial_assets.append(asset)
         self.initial_window_handles.append(target_window_handle)
-        return validate_agent_observation_v1(_agent_observation(session_id, workflow))
+        payload = _agent_observation(session_id, workflow)
+        transition = next(
+            item for item in asset["transitions"] if item["transition_id"] == "open_detail"
+        )
+        payload["available_actions"][0]["target_state_id"] = transition["target_state_id"]
+        return validate_agent_observation_v1(payload)
 
     def capture_current(self, *, session_id: str, asset: dict, target_window_handle: int) -> dict:
         self.current_calls += 1
         self.current_window_handles.append(target_window_handle)
         return deepcopy(self.current)
+
+    def capture_projected(
+        self,
+        *,
+        session_id: str,
+        workflow: dict,
+        asset: dict,
+        target_window_handle: int,
+    ):
+        from app.agent.live_controller import ProjectedObservationCapture
+        from app.agent.runtime_contracts import WorkflowRefV1
+
+        self.projected_calls += 1
+        raw = self.current if self.projected_calls == 1 else self.post_current
+        return ProjectedObservationCapture(
+            session_id=session_id,
+            workflow=WorkflowRefV1.model_validate(workflow),
+            application_identity_key="web:nz.seek.com",
+            asset_id=asset["asset_id"],
+            asset_content_sha256=content_sha256(asset),
+            target_window_handle=target_window_handle,
+            target_process_id=(
+                self.target_process_id
+                if self.projected_calls == 1
+                else self.post_target_process_id
+            ),
+            current_observation=deepcopy(raw),
+            agent_observation=_projected_agent_observation(asset, session_id, workflow, raw),
+        )
 
 
 class _TrustedAssetLoader:
@@ -227,10 +277,13 @@ class _WindowVisibilityChecker:
 def _controller(
     tmp_path,
     *,
+    asset_override: dict | None = None,
     resolver_status: str = "resolved",
     gate_allowed: bool = True,
     backend_fail: bool = False,
     current: dict | None = None,
+    post_current: dict | None = None,
+    post_target_process_id: int | None = None,
     backend_override=None,
     target_window_handle: int = 4242,
     visibility_checker=None,
@@ -240,9 +293,14 @@ def _controller(
     from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
     from app.agent.runtime_receipt_store import RuntimeReceiptStore
 
-    asset = _asset()
+    asset = deepcopy(asset_override) if asset_override is not None else _asset()
     asset_loader = _TrustedAssetLoader(asset)
-    source = _ObservationSource(asset, current=current)
+    source = _ObservationSource(
+        asset,
+        current=current,
+        post_current=post_current,
+        post_target_process_id=post_target_process_id,
+    )
     resolver = _TargetResolver(resolver_status)
     gate = _Gate(allowed=gate_allowed)
     backend = backend_override or DeterministicFakeBackend(fail=backend_fail)
@@ -410,13 +468,15 @@ def test_accepted_intent_uses_fresh_current_evidence_before_gate_and_dispatch(tm
 
     result = controller.submit_intent(payload)
 
-    assert result.outcome == "DISPATCHED"
-    assert result.reason_code == "verification_pending"
-    assert result.effect_status == "not_evaluated"
-    assert result.destination_status == "not_evaluated"
-    assert result.evidence.verification_ref is None
-    assert source.current_calls == resolver.calls == gate.calls == 1
-    assert source.current_window_handles == [4242]
+    assert result.outcome == "VERIFIED"
+    assert result.reason_code == "none"
+    assert result.effect_status == "verified"
+    assert result.destination_status == "verified"
+    assert result.evidence.verification_ref is not None
+    assert source.current_calls == 0
+    assert source.projected_calls == 2
+    assert resolver.calls == gate.calls == 1
+    assert source.current_window_handles == []
     assert backend.dispatch_count == 1
     assert backend.commands[0].capture_id == "capture-current"
     assert backend.commands[0].click_point == (220.0, 240.0)
@@ -426,6 +486,228 @@ def test_accepted_intent_uses_fresh_current_evidence_before_gate_and_dispatch(tm
         observation=session.current_observation,
         intent=intent,
     ) == result
+
+
+def test_definitive_dispatch_is_verified_from_one_server_owned_c2(tmp_path) -> None:
+    controller, source, resolver, gate, backend = _controller(tmp_path)
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("VERIFIED", "none")
+    assert (result.effect_status, result.destination_status) == ("verified", "verified")
+    assert result.next_observation_id == "observation-capture-post"
+    assert result.evidence.verification_ref.startswith("verification:")
+    assert source.current_calls == 0
+    assert source.projected_calls == 2
+    assert resolver.calls == gate.calls == backend.dispatch_count == 1
+
+
+def test_stop_boundary_after_dispatch_is_terminal_safe_stop(tmp_path) -> None:
+    asset = _asset()
+    asset["transitions"][0]["target_state_id"] = "apply_entry"
+    asset["transitions"][0]["expected_effect"]["semantic_success"]["target_state_id"] = "apply_entry"
+    post = _current_observation(
+        asset,
+        capture_id="capture-stop",
+        anchors=("anchor_apply_entry",),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        asset_override=asset,
+        post_current=post,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("SAFE_STOP", "stop_boundary")
+    assert result.dispatch_status == "dispatched"
+    assert source.projected_calls == 2
+    assert backend.dispatch_count == 1
+
+
+def test_verification_checkpoint_is_durable_before_c2(tmp_path) -> None:
+    controller, source, _, _, _ = _controller(tmp_path)
+    events: list[str] = []
+    original_capture = source.capture_projected
+    original_mark = controller._intent_claim_store.mark_verification_pending
+
+    def capture(**kwargs):
+        result = original_capture(**kwargs)
+        events.append(f"c{source.projected_calls}")
+        return result
+
+    def mark(**kwargs):
+        result = original_mark(**kwargs)
+        events.append("checkpoint")
+        return result
+
+    source.capture_projected = capture
+    controller._intent_claim_store.mark_verification_pending = mark
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert result.outcome == "VERIFIED"
+    assert events == ["c1", "checkpoint", "c2"]
+
+
+@pytest.mark.parametrize(
+    ("post_current", "reason"),
+    [
+        ("same", "post_capture_not_new"),
+        ("wrong", "destination_mismatch"),
+        ("unresolved", "post_action_failure"),
+    ],
+)
+def test_definitive_dispatch_verification_failures_are_terminal(post_current, reason, tmp_path) -> None:
+    asset = _asset()
+    if post_current == "same":
+        post = _current_observation(asset)
+    elif post_current == "wrong":
+        post = _current_observation(asset, capture_id="capture-post-wrong")
+    else:
+        post = _current_observation(asset, capture_id="capture-post-unresolved", anchors=())
+    controller, source, _, _, backend = _controller(tmp_path, post_current=post)
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("VERIFICATION_FAILED", reason)
+    if reason == "post_capture_not_new":
+        assert result.effect_status == "not_verified"
+        assert result.destination_status == "not_evaluated"
+    assert source.projected_calls == 2
+    assert backend.dispatch_count == 1
+
+
+def test_c2_process_mismatch_stays_recoverable_with_checkpoint(tmp_path) -> None:
+    controller, source, _, _, backend = _controller(tmp_path, post_target_process_id=9002)
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.status, result.reason_code) == (
+        "RECOVERY_REQUIRED",
+        "post_capture_lineage_mismatch",
+    )
+    checkpoint = controller._intent_claim_store.find_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert checkpoint.phase == "verification_pending"
+    assert source.projected_calls == 2
+    assert backend.dispatch_count == 1
+
+
+def test_unsupported_post_action_rule_blocks_before_dispatch_or_c2(tmp_path) -> None:
+    asset = _asset()
+    transition = next(item for item in asset["transitions"] if item["transition_id"] == "open_detail")
+    transition["post_action_verification"]["semantic_success_rules"][0]["type"] = "caller_flag"
+    controller, source, _, _, backend = _controller(tmp_path, asset_override=asset)
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("BLOCKED", "policy_blocked")
+    assert source.projected_calls == 1
+    assert backend.attempt_count == 0
+
+
+def test_terminal_duplicate_returns_stored_receipt_without_capture(tmp_path) -> None:
+    controller, source, _, _, backend = _controller(tmp_path)
+    session = controller.start_session()
+    payload = _intent(session)
+    first = controller.submit_intent(payload)
+    captures = source.projected_calls
+
+    second = controller.submit_intent(payload)
+
+    assert second == first
+    assert source.projected_calls == captures
+    assert backend.dispatch_count == 1
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ["window", "session", "workflow", "application", "asset_hash"],
+)
+def test_c2_projected_binding_mismatch_stays_recoverable_with_checkpoint(
+    mismatch: str,
+    tmp_path,
+) -> None:
+    from dataclasses import replace
+
+    asset = _asset()
+
+    class MismatchedC2Source(_ObservationSource):
+        def capture_projected(self, **kwargs):
+            projected = super().capture_projected(**kwargs)
+            if self.projected_calls != 2:
+                return projected
+            changes = {
+                "window": {"target_window_handle": 9999},
+                "session": {"session_id": "session.mismatched"},
+                "workflow": {
+                    "workflow": projected.workflow.model_copy(
+                        update={"workflow_id": "workflow.mismatched"}
+                    )
+                },
+                "application": {
+                    "application_identity_key": "web:evil.example"
+                },
+                "asset_hash": {"asset_content_sha256": "0" * 64},
+            }
+            return replace(projected, **changes[mismatch])
+
+    source = MismatchedC2Source(asset)
+    controller, _, _, _, backend = _controller(tmp_path)
+    controller._observation_source = source
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.status, result.reason_code) == (
+        "RECOVERY_REQUIRED",
+        "post_capture_lineage_mismatch",
+    )
+    checkpoint = controller._intent_claim_store.find_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert checkpoint is not None
+    assert checkpoint.phase == "verification_pending"
+    assert source.projected_calls == 2
+    assert backend.dispatch_count == 1
+
+
+def test_verification_pending_restart_observes_c2_without_redispatch(tmp_path) -> None:
+    controller, source, _, _, backend = _controller(tmp_path)
+    session = controller.start_session()
+    payload = _intent(session)
+    original_capture = source.capture_projected
+
+    def crash_after_checkpoint(**kwargs):
+        if source.projected_calls == 1:
+            raise RuntimeError("simulated C2 crash")
+        return original_capture(**kwargs)
+
+    source.capture_projected = crash_after_checkpoint
+    pending = controller.submit_intent(payload)
+    assert (pending.status, pending.reason_code) == (
+        "RECOVERY_REQUIRED",
+        "post_capture_failed",
+    )
+    assert backend.dispatch_count == 1
+
+    restarted, restarted_source, _, _, restarted_backend = _controller(tmp_path)
+    restarted_source.projected_calls = 1
+    recovered = restarted.submit_intent(payload)
+
+    assert (recovered.outcome, recovered.reason_code) == ("VERIFIED", "none")
+    assert restarted_backend.dispatch_count == 0
+    assert restarted_source.projected_calls == 2
 
 
 @pytest.mark.parametrize(
@@ -483,7 +765,7 @@ def test_replay_of_consumed_intent_is_rejected_and_total_dispatch_remains_one(tm
     first = controller.submit_intent(payload)
     second = controller.submit_intent(payload)
 
-    assert first.outcome == "DISPATCHED"
+    assert first.outcome == "VERIFIED"
     assert second == first
     assert backend.dispatch_count == 1
 
@@ -655,7 +937,7 @@ def test_valid_dispatch_is_bound_to_server_target_window_exactly_once(tmp_path) 
     first = controller.submit_intent(payload)
     second = controller.submit_intent(payload)
 
-    assert first.outcome == "DISPATCHED"
+    assert first.outcome == "VERIFIED"
     assert second == first
     assert backend.dispatch_count == 1
     assert backend.commands[0].target_window_handle == 4848
@@ -700,3 +982,65 @@ def test_window_manager_visibility_adapter_returns_facts_not_authority() -> None
         },
     }
     assert manager.calls == [(4949, 220, 240)]
+
+
+def _projected_agent_observation(asset: dict, session_id: str, workflow: dict, current: dict) -> object:
+    from app.agent.reviewed_workflow_replay import resolve_current_state
+
+    resolution = resolve_current_state(asset, current)
+    payload = _agent_observation(session_id, workflow)
+    capture_id = current["capture_id"]
+    payload["observation_id"] = f"observation-{capture_id}"
+    payload["state_resolution_ref"] = f"state-resolution:{capture_id}"
+    payload["current_capture"] = {
+        "capture_id": capture_id,
+        "screenshot_sha256": current["screenshot_sha256"],
+        "evidence_ref": f"capture:{capture_id}",
+    }
+    payload["evidence_refs"] = [f"state-resolution:{capture_id}", f"capture:{capture_id}"]
+    availability = resolution.get("state_availability")
+    resolved = resolution.get("status") == "resolved"
+    payload["state"].update({
+        "status": (
+            "stop_boundary" if availability == "stop_boundary" else
+            "matched" if resolved else
+            "ambiguous" if resolution.get("failure_code") == "current_state_ambiguous" else
+            "unknown"
+        ),
+        "state_id": resolution.get("state_id") if resolved else None,
+        "state_availability": availability if resolved else None,
+        "resolution_sha256": resolution.get("resolution_sha256") if resolved else None,
+    })
+    if not resolved:
+        payload["state"].update({
+            "source_interface_id": None,
+            "display_name": None,
+            "surface_type": None,
+            "responsibility": None,
+        })
+    if resolution.get("state_id") == "detail":
+        payload["available_actions"][0].update({
+            "action_id": "open_apply_flow",
+            "semantic_action": "open_apply_flow",
+            "target_state_id": "apply_entry",
+            "requires_user_confirmation": True,
+            "risk_level": "medium",
+        })
+    elif availability == "stop_boundary" or not resolved:
+        payload["available_actions"] = [payload["available_actions"][1]]
+        payload["blockers"] = [{
+            "blocker_id": "blocker.stop-boundary",
+            "blocker_type": "policy",
+            "description": "Reviewed stop boundary.",
+            "safe_stop_required": True,
+            "evidence_refs": [f"state-resolution:{capture_id}"],
+        }]
+        payload["safe_stop"] = {
+            "required": True,
+            "reason_code": (
+                "stop_boundary" if availability == "stop_boundary" else
+                "state_ambiguous" if resolution.get("failure_code") == "current_state_ambiguous" else
+                "state_unknown"
+            ),
+        }
+    return validate_agent_observation_v1(payload)

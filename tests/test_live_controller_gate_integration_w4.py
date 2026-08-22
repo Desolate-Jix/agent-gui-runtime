@@ -66,8 +66,8 @@ def test_live_controller_uses_existing_pre_click_policy_before_dispatch(tmp_path
 
     receipt = controller.submit_intent(_intent(session))
 
-    assert receipt.outcome == "DISPATCHED"
-    assert receipt.reason_code == "verification_pending"
+    assert receipt.outcome == "VERIFIED"
+    assert receipt.reason_code == "none"
     assert backend.dispatch_count == 1
 
 

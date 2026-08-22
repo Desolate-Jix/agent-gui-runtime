@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 import re
 from threading import RLock
@@ -22,6 +24,7 @@ from app.agent.runtime_intent_claim_store import (
     RuntimeIntentClaimSnapshot,
     RuntimeIntentClaimStore,
     RuntimeIntentClaimStoreError,
+    RuntimeVerificationPendingCheckpoint,
 )
 from app.agent.reviewed_workflow_asset import (
     ReviewedWorkflowAssetStore,
@@ -32,6 +35,7 @@ from app.agent.reviewed_workflow_replay import (
     resolve_current_state,
     select_verified_transition,
     validate_current_grounding,
+    verify_server_dispatched_transition_result,
 )
 from app.agent.runtime_contracts import (
     AgentIntentV1,
@@ -223,6 +227,8 @@ class _LiveSession:
 class _ExecutionResult:
     receipt: RuntimeResultReceiptV1
     backend_receipt: BackendDispatchReceipt | None = None
+    verification_evidence: Mapping[str, object] | None = None
+    next_observation: AgentObservationV1 | None = None
 
 
 class LiveController:
@@ -418,6 +424,8 @@ class LiveController:
                     observation_id=session.snapshot.current_observation.observation_id,
                     receipt=result.receipt,
                     backend_receipt=result.backend_receipt,
+                    verification_evidence=result.verification_evidence,
+                    next_observation=result.next_observation,
                 )
             except RuntimeIntentClaimStoreError:
                 return LiveControllerDecision(
@@ -425,6 +433,8 @@ class LiveController:
                     "receipt_persistence_failed",
                 )
         finally:
+            with self._lock:
+                self._sessions.pop(session.snapshot.session_id, None)
             self._release_window_lease(session.window_lease)
 
     def _recover_existing_claim(
@@ -454,7 +464,74 @@ class LiveController:
                 "RECOVERY_REQUIRED",
                 "dispatch_indeterminate",
             )
+        if claim.phase == "verification_pending":
+            return self._recover_verification_pending(claim)
         return LiveControllerDecision("RECOVERY_REQUIRED", "observation_consumed")
+
+    def _recover_verification_pending(
+        self,
+        claim: RuntimeIntentClaimSnapshot,
+    ) -> RuntimeResultReceiptV1 | LiveControllerDecision:
+        checkpoint = claim.verification_checkpoint
+        if checkpoint is None:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "claim_integrity_failed")
+        try:
+            if claim.server_binding.to_dict() != {
+                "workflow_id": self._binding.workflow_id,
+                "asset_id": self._binding.asset_id,
+                "application_identity_key": self._binding.application_identity_key,
+                "target_window_handle": self._binding.target_window_handle,
+            }:
+                return LiveControllerDecision("RECOVERY_REQUIRED", "claim_binding_mismatch")
+            asset = validate_reviewed_workflow_asset(
+                self._asset_loader.load_active(claim.observation.workflow.asset_id)
+            )
+            if (
+                asset["asset_id"] != claim.observation.workflow.asset_id
+                or content_sha256(asset) != claim.observation.workflow.asset_content_sha256
+                or asset["source_review_lineage"]["source_workflow_sha256"]
+                != claim.observation.workflow.source_workflow_sha256
+                or asset["source_review_lineage"]["reviewed_revision_hash"]
+                != claim.observation.workflow.reviewed_revision_hash
+                or self._asset_application_identity_key(asset)
+                != claim.server_binding.application_identity_key
+            ):
+                return LiveControllerDecision("RECOVERY_REQUIRED", "claim_binding_mismatch")
+        except Exception:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "claim_integrity_failed")
+
+        try:
+            lease = self._acquire_window_lease(claim.observation.session_id)
+        except Exception:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "window_lease_unavailable")
+        session = _LiveSession(
+            snapshot=LiveSessionSnapshot(
+                session_id=claim.observation.session_id,
+                workflow=claim.observation.workflow,
+                current_observation=claim.observation,
+                target_window_handle=claim.server_binding.target_window_handle,
+            ),
+            asset=asset,
+            window_lease=lease,
+            consumed=True,
+        )
+        try:
+            result = self._verify_pending_checkpoint(session, claim.intent, checkpoint)
+            if isinstance(result, LiveControllerDecision):
+                return result
+            try:
+                return self._intent_claim_store.persist_terminal(
+                    session_id=claim.observation.session_id,
+                    observation_id=claim.observation.observation_id,
+                    receipt=result.receipt,
+                    backend_receipt=result.backend_receipt,
+                    verification_evidence=result.verification_evidence,
+                    next_observation=result.next_observation,
+                )
+            except RuntimeIntentClaimStoreError:
+                return LiveControllerDecision("RECOVERY_REQUIRED", "receipt_persistence_failed")
+        finally:
+            self._release_window_lease(lease)
 
     def _execute_accepted_intent(
         self,
@@ -480,18 +557,24 @@ class LiveController:
             )
 
         try:
-            current = dict(
-                self._observation_source.capture_current(
-                    session_id=session.snapshot.session_id,
-                    asset=session.asset,
-                    target_window_handle=session.snapshot.target_window_handle,
-                )
+            projected = self._observation_source.capture_projected(
+                session_id=session.snapshot.session_id,
+                workflow=session.snapshot.workflow.model_dump(mode="json"),
+                asset=session.asset,
+                target_window_handle=session.snapshot.target_window_handle,
             )
         except Exception:
             return LiveControllerDecision(
                 "RECOVERY_REQUIRED",
                 "current_capture_failed",
             )
+        projection_failure = self._projected_capture_failure(
+            projected,
+            session=session,
+        )
+        if projection_failure is not None:
+            return LiveControllerDecision("RECOVERY_REQUIRED", projection_failure)
+        current = dict(projected.current_observation)
         if current.get("capture_id") == observation.current_capture.capture_id:
             return _ExecutionResult(
                 self._early_receipt(
@@ -548,6 +631,16 @@ class LiveController:
                     intent=intent,
                     outcome="BLOCKED",
                     reason_code="target_unresolved",
+                )
+            )
+
+        if not self._supports_exact_target_state_verification(session.asset, selection):
+            return _ExecutionResult(
+                self._early_receipt(
+                    session=session,
+                    intent=intent,
+                    outcome="BLOCKED",
+                    reason_code="policy_blocked",
                 )
             )
 
@@ -768,22 +861,268 @@ class LiveController:
                 gate_ref=gate_ref,
                 backend_receipt=backend_receipt,
             )
-        return _ExecutionResult(
-            self._receipt(
-                session=session,
-                intent=intent,
-                outcome="DISPATCHED",
-                reason_code="verification_pending",
-                attempt_count=1,
-                gate_status="allowed",
-                dispatch_status="dispatched",
-                selection_ref=f"selection:{selection['selection_sha256']}",
-                candidate_ref=f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}",
-                gate_ref=gate_ref,
-                backend_ref=backend_receipt.receipt_ref,
-            ),
-            backend_receipt,
+        try:
+            checkpoint_claim = self._intent_claim_store.mark_verification_pending(
+                session_id=session.snapshot.session_id,
+                observation_id=observation.observation_id,
+                current_observation=current,
+                selection=selection,
+                grounding=grounding,
+                gate=gate,
+                gate_decision_ref=gate_ref,
+                backend_receipt=backend_receipt,
+                target_process_id=projected.target_process_id,
+            )
+            checkpoint_claim = self._intent_claim_store.get_for_observation(
+                session_id=session.snapshot.session_id,
+                observation_id=observation.observation_id,
+            )
+        except RuntimeIntentClaimStoreError:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "verification_checkpoint_failed")
+        checkpoint = checkpoint_claim.verification_checkpoint
+        if checkpoint_claim.phase != "verification_pending" or checkpoint is None:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "verification_checkpoint_failed")
+        return self._verify_pending_checkpoint(session, intent, checkpoint)
+
+    def _verify_pending_checkpoint(
+        self,
+        session: _LiveSession,
+        intent: AgentIntentV1,
+        checkpoint: RuntimeVerificationPendingCheckpoint,
+    ) -> _ExecutionResult | LiveControllerDecision:
+        try:
+            projected = self._observation_source.capture_projected(
+                session_id=session.snapshot.session_id,
+                workflow=session.snapshot.workflow.model_dump(mode="json"),
+                asset=session.asset,
+                target_window_handle=session.snapshot.target_window_handle,
+            )
+        except Exception:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "post_capture_failed")
+        projection_failure = self._projected_capture_failure(
+            projected,
+            session=session,
+            expected_process_id=checkpoint.target_process_id,
         )
+        if projection_failure is not None:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                "post_capture_lineage_mismatch",
+            )
+
+        selection = checkpoint.selection
+        grounding = checkpoint.grounding
+        gate = checkpoint.gate
+        selection_ref = f"selection:{selection['selection_sha256']}"
+        candidate_ref = f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}"
+        receipt_id = f"receipt.{uuid4().hex}"
+        trace_ref = f"trace:live-controller:{receipt_id}"
+        server_refs = [
+            selection_ref,
+            candidate_ref,
+            checkpoint.gate_decision_ref,
+            checkpoint.backend_receipt.receipt_ref,
+            trace_ref,
+        ]
+        try:
+            verification = verify_server_dispatched_transition_result(
+                session.asset,
+                selection,
+                checkpoint.current_observation,
+                projected.current_observation,
+                server_evidence_refs=server_refs,
+            )
+        except Exception:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "post_verification_integrity_failed")
+
+        status = verification.get("status")
+        failure = str(verification.get("failure_code") or "")
+        if status == "blocked" and failure not in {
+            "post_capture_not_new",
+            "destination_mismatch",
+            "post_action_failure",
+        }:
+            return LiveControllerDecision(
+                "RECOVERY_REQUIRED",
+                failure or "post_verification_integrity_failed",
+            )
+        if status not in {"verified", "blocked"}:
+            return LiveControllerDecision("RECOVERY_REQUIRED", "post_verification_integrity_failed")
+
+        verification_ref = self._verification_ref(verification)
+        common = {
+            "session": session,
+            "intent": intent,
+            "receipt_id": receipt_id,
+            "attempt_count": 1,
+            "gate_status": "allowed",
+            "dispatch_status": "dispatched",
+            "selection_ref": selection_ref,
+            "candidate_ref": candidate_ref,
+            "gate_ref": checkpoint.gate_decision_ref,
+            "backend_ref": checkpoint.backend_receipt.receipt_ref,
+            "verification_ref": verification_ref,
+        }
+        if status == "blocked":
+            receipt = self._receipt(
+                **common,
+                outcome="VERIFICATION_FAILED",
+                reason_code=failure,
+                effect_status="not_verified",
+                destination_status=(
+                    "not_evaluated"
+                    if failure == "post_capture_not_new"
+                    else "not_verified"
+                ),
+            )
+            return _ExecutionResult(
+                receipt,
+                checkpoint.backend_receipt,
+                verification,
+                None,
+            )
+
+        availability = verification["post_state_resolution"]["state_availability"]
+        outcome = "SAFE_STOP" if availability == "stop_boundary" else "VERIFIED"
+        reason_code = "stop_boundary" if availability == "stop_boundary" else "none"
+        receipt = self._receipt(
+            **common,
+            outcome=outcome,
+            reason_code=reason_code,
+            effect_status="verified",
+            destination_status="verified",
+            next_observation_id=projected.agent_observation.observation_id,
+        )
+        return _ExecutionResult(
+            receipt,
+            checkpoint.backend_receipt,
+            verification,
+            projected.agent_observation,
+        )
+
+    def _projected_capture_failure(
+        self,
+        projected: object,
+        *,
+        session: _LiveSession,
+        expected_process_id: int | None = None,
+    ) -> str | None:
+        if not isinstance(projected, ProjectedObservationCapture):
+            return "current_capture_lineage_mismatch"
+        if (
+            not isinstance(projected.agent_observation, AgentObservationV1)
+            or not isinstance(projected.current_observation, dict)
+        ):
+            return "current_capture_lineage_mismatch"
+        workflow = session.snapshot.workflow
+        if (
+            projected.grants_action_authority is not False
+            or projected.artifact_is_authorization is not False
+            or projected.session_id != session.snapshot.session_id
+            or projected.workflow != workflow
+            or projected.application_identity_key != self._binding.application_identity_key
+            or projected.asset_id != workflow.asset_id
+            or projected.asset_content_sha256 != workflow.asset_content_sha256
+            or projected.target_window_handle != session.snapshot.target_window_handle
+            or type(projected.target_process_id) is not int
+            or projected.target_process_id <= 0
+            or (
+                expected_process_id is not None
+                and projected.target_process_id != expected_process_id
+            )
+        ):
+            return "current_capture_lineage_mismatch"
+        agent = projected.agent_observation
+        current = projected.current_observation
+        if (
+            agent.observation_id == session.snapshot.current_observation.observation_id
+            or agent.session_id != projected.session_id
+            or agent.workflow != workflow
+            or agent.application.kind != session.asset["application"]["kind"]
+            or agent.application.identity_ref
+            != f"application:{projected.application_identity_key}"
+            or agent.current_capture.capture_id != current.get("capture_id")
+            or agent.current_capture.screenshot_sha256
+            != str(current.get("screenshot_sha256") or "").lower()
+        ):
+            return "current_capture_lineage_mismatch"
+        try:
+            resolution = resolve_current_state(session.asset, current)
+        except Exception:
+            return "current_capture_lineage_mismatch"
+        if resolution.get("status") == "resolved":
+            expected_status = (
+                "stop_boundary"
+                if resolution.get("state_availability") == "stop_boundary"
+                else "matched"
+            )
+            if (
+                agent.state.status != expected_status
+                or agent.state.state_id != resolution.get("state_id")
+                or agent.state.state_availability
+                != resolution.get("state_availability")
+                or agent.state.resolution_sha256
+                != resolution.get("resolution_sha256")
+            ):
+                return "current_capture_lineage_mismatch"
+        else:
+            expected_status = (
+                "ambiguous"
+                if resolution.get("failure_code") == "current_state_ambiguous"
+                else "unknown"
+            )
+            if agent.state.status != expected_status or agent.state.state_id is not None:
+                return "current_capture_lineage_mismatch"
+        return None
+
+    @staticmethod
+    def _supports_exact_target_state_verification(
+        asset: Mapping[str, Any],
+        selection: Mapping[str, Any],
+    ) -> bool:
+        transition = next(
+            (
+                item
+                for item in asset.get("transitions", [])
+                if isinstance(item, Mapping)
+                and item.get("transition_id") == selection.get("transition_id")
+            ),
+            None,
+        )
+        policy = transition.get("post_action_verification") if transition else None
+        rules = policy.get("semantic_success_rules") if isinstance(policy, Mapping) else None
+        if (
+            not isinstance(policy, Mapping)
+            or set(policy) != {"requires_new_capture", "semantic_success_rules"}
+            or policy.get("requires_new_capture") is not True
+            or not isinstance(rules, list)
+            or not rules
+        ):
+            return False
+        ids: set[str] = set()
+        for rule in rules:
+            if (
+                not isinstance(rule, Mapping)
+                or set(rule) != {"rule_id", "type"}
+                or not isinstance(rule.get("rule_id"), str)
+                or not rule["rule_id"].strip()
+                or rule.get("type") != "target_state_identity"
+                or rule["rule_id"].strip() in ids
+            ):
+                return False
+            ids.add(rule["rule_id"].strip())
+        return True
+
+    @staticmethod
+    def _verification_ref(verification: Mapping[str, object]) -> str:
+        encoded = json.dumps(
+            dict(verification),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return f"verification:{hashlib.sha256(encoded).hexdigest()}"
 
     @staticmethod
     def _is_valid_backend_receipt(value: object) -> bool:
@@ -927,10 +1266,13 @@ class LiveController:
         backend_ref: str | None,
         effect_status: str = "not_evaluated",
         destination_status: str = "not_evaluated",
+        receipt_id: str | None = None,
+        verification_ref: str | None = None,
+        next_observation_id: str | None = None,
     ) -> RuntimeResultReceiptV1:
         observation = session.snapshot.current_observation
         selected = next(item for item in observation.available_actions if item.action_id == intent.action_id)
-        receipt_id = f"receipt.{uuid4().hex}"
+        receipt_id = receipt_id or f"receipt.{uuid4().hex}"
         return RuntimeResultReceiptV1.model_validate(
             {
                 "contract_version": "runtime_result_receipt_v1",
@@ -957,11 +1299,11 @@ class LiveController:
                     "candidate_ref": candidate_ref,
                     "gate_decision_ref": gate_ref,
                     "backend_receipt_ref": backend_ref,
-                    "verification_ref": None,
+                    "verification_ref": verification_ref,
                     "trace_refs": [f"trace:live-controller:{receipt_id}"],
                 },
-                "next_observation_id": None,
-                "safe_stop": {"required": True, "reason_code": reason_code},
+                "next_observation_id": next_observation_id,
+                "safe_stop": {"required": reason_code != "none", "reason_code": reason_code},
                 "artifact_is_authorization": False,
             }
         )

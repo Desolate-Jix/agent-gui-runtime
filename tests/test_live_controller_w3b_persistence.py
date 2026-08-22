@@ -71,16 +71,19 @@ def test_valid_intent_is_durably_claimed_before_fresh_capture(tmp_path: Path) ->
     store = _claim_store(tmp_path)
 
     class ClaimAwareSource(_ObservationSource):
-        observed_claim_phase = None
+        observed_claim_phases = []
 
-        def capture_current(self, *, session_id, asset, target_window_handle):
+        def capture_projected(self, *, session_id, workflow, asset, target_window_handle):
             snapshot = store.find_for_observation(
                 session_id=session_id,
                 observation_id="observation-initial",
             )
-            self.observed_claim_phase = snapshot.phase if snapshot is not None else None
-            return super().capture_current(
+            self.observed_claim_phases.append(
+                snapshot.phase if snapshot is not None else None
+            )
+            return super().capture_projected(
                 session_id=session_id,
+                workflow=workflow,
                 asset=asset,
                 target_window_handle=target_window_handle,
             )
@@ -95,13 +98,30 @@ def test_valid_intent_is_durably_claimed_before_fresh_capture(tmp_path: Path) ->
 
     result = controller.submit_intent(_intent(session))
 
-    assert result.outcome == "DISPATCHED"
-    assert source.observed_claim_phase == "claimed"
+    assert result.outcome == "VERIFIED"
+    assert source.observed_claim_phases == ["claimed", "verification_pending"]
     assert store.load_terminal_receipt(
         session_id=session.session_id,
         observation_id=session.current_observation.observation_id,
     ) == result
     assert backend.dispatch_count == 1
+    from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+    record = RuntimeReceiptStore(project_root=tmp_path).load_by_receipt_id(
+        result.receipt_id
+    )
+    assert record.verification_evidence is not None
+    assert record.next_observation is not None
+    assert record.next_observation.observation_id == result.next_observation_id
+    assert record.verification_evidence["post_capture_lineage"]["capture_id"] == (
+        record.next_observation.current_capture.capture_id
+    )
+    assert record.verification_evidence["post_state_resolution"]["state_id"] == (
+        record.next_observation.state.state_id
+    )
+    assert record.verification_evidence["post_state_resolution"][
+        "resolution_sha256"
+    ] == record.next_observation.state.resolution_sha256
 
 
 def test_duplicate_and_restart_return_exact_terminal_receipt_without_dispatch(
@@ -123,6 +143,7 @@ def test_duplicate_and_restart_return_exact_terminal_receipt_without_dispatch(
     assert first_backend.dispatch_count == 1
     assert restarted_backend.dispatch_count == 0
     assert restarted_source.current_calls == 0
+    assert restarted_source.projected_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -230,7 +251,7 @@ def test_inflight_duplicate_never_releases_active_window_lease(tmp_path: Path) -
         "RECOVERY_REQUIRED",
         "dispatch_indeterminate",
     )
-    assert results[0].outcome == "DISPATCHED"
+    assert results[0].outcome == "VERIFIED"
 
 
 def test_claim_failure_before_commit_has_zero_side_effects_and_can_retry(
@@ -259,8 +280,10 @@ def test_claim_failure_before_commit_has_zero_side_effects_and_can_retry(
         "RECOVERY_REQUIRED",
         "claim_persistence_failed",
     )
-    assert second.outcome == "DISPATCHED"
-    assert source.current_calls == resolver.calls == gate.calls == 1
+    assert second.outcome == "VERIFIED"
+    assert source.current_calls == 0
+    assert source.projected_calls == 2
+    assert resolver.calls == gate.calls == 1
     assert backend.dispatch_count == 1
 
 
@@ -289,7 +312,7 @@ def test_post_dispatch_persistence_failure_never_blindly_retries(
 ) -> None:
     from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStoreError
 
-    controller, store, _, _, _, backend = _controller(tmp_path)
+    controller, store, source, resolver, gate, backend = _controller(tmp_path)
     session = controller.start_session()
     payload = _intent(session)
 
@@ -306,8 +329,16 @@ def test_post_dispatch_persistence_failure_never_blindly_retries(
     )
     assert (second.status, second.reason_code) == (
         "RECOVERY_REQUIRED",
-        "dispatch_indeterminate",
+        "receipt_persistence_failed",
     )
+    checkpoint = store.find_for_observation(
+        session_id=session.session_id,
+        observation_id=session.current_observation.observation_id,
+    )
+    assert checkpoint is not None
+    assert checkpoint.phase == "verification_pending"
+    assert source.projected_calls == 3
+    assert resolver.calls == gate.calls == 1
     assert backend.dispatch_count == 1
 
 
@@ -326,7 +357,7 @@ def test_conflicting_duplicate_payload_is_consumed_without_second_dispatch(
     injected["bbox"] = [1, 2, 3, 4]
     injected_result = controller.submit_intent(injected)
 
-    assert original.outcome == "DISPATCHED"
+    assert original.outcome == "VERIFIED"
     assert (result.status, result.reason_code) == (
         "REJECTED",
         "observation_consumed",
@@ -461,10 +492,10 @@ def test_pre_dispatch_stage_exception_requires_recovery_without_retry(
     asset = _asset()
 
     class RaisingSource(_ObservationSource):
-        def capture_current(self, **kwargs):
+        def capture_projected(self, **kwargs):
             if stage == "capture":
                 raise RuntimeError("capture failed")
-            return super().capture_current(**kwargs)
+            return super().capture_projected(**kwargs)
 
     class RaisingResolver(_TargetResolver):
         def resolve(self, **kwargs):
@@ -485,10 +516,20 @@ def test_pre_dispatch_stage_exception_requires_recovery_without_retry(
             return super().check(**kwargs)
 
     if stage == "state":
+        original_resolve = live_controller_module.resolve_current_state
+        resolve_calls = 0
+
+        def fail_c1_state_resolution(*args, **kwargs):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            if resolve_calls == 2:
+                raise RuntimeError("state failed")
+            return original_resolve(*args, **kwargs)
+
         monkeypatch.setattr(
             live_controller_module,
             "resolve_current_state",
-            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("state failed")),
+            fail_c1_state_resolution,
         )
     if stage == "selection":
         monkeypatch.setattr(
