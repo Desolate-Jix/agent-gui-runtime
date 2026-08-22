@@ -41,6 +41,10 @@ logs/*.json
 !docs/media/private-prototype-seek-results.png
 !docs/media/private-prototype-seek-job-detail.png
 !docs/media/private-prototype-seek-application.png
+!release/portfolio-v1/reviewed-asset-workspace/artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png
+!release/portfolio-v1/reviewed-asset-workspace/artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/apply_entry/source_screenshot_path.png
+!release/portfolio-v1/reviewed-asset-workspace/artifacts/portfolio-v1-review-evidence/job-detail-sanitized-historical.png
+!release/portfolio-v1/reviewed-asset-workspace/artifacts/portfolio-v1-review-evidence/apply-entry-sanitized-historical.png
 *.jpg
 *.jpeg
 *.webp

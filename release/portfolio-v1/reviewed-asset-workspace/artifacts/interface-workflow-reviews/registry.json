@@ -1,0 +1,47 @@
+{
+  "contract_version": "interface_workflow_library_registry_v1",
+  "registry_revision": 4,
+  "applications": {
+    "web:nz.seek.com": {
+      "application_identity": {
+        "contract_version": "application_identity_v1",
+        "identity_schema_version": 1,
+        "kind": "web",
+        "identity_key": "web:nz.seek.com",
+        "identity_status": "resolved",
+        "name": "nz.seek.com",
+        "display_name": "nz.seek.com",
+        "canonical_domain": "nz.seek.com",
+        "canonical_origin": "https://nz.seek.com",
+        "executable_identity": null,
+        "product_identity": null,
+        "source_evidence": {
+          "url_or_domain_provided": true,
+          "browser_process_detected": false
+        },
+        "artifact_is_authorization": false
+      },
+      "workflow_ids": [
+        "portfolio_v1_seek_apply_entry"
+      ],
+      "artifact_is_authorization": false
+    }
+  },
+  "workflows": {
+    "portfolio_v1_seek_apply_entry": {
+      "path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/reviewed_workflow.json",
+      "application_identity_key": "web:nz.seek.com",
+      "goal": "From an already-open SEEK Job Detail, open the reviewed Quick apply entry once and stop before any form mutation.",
+      "node_count": 2,
+      "edge_count": 1,
+      "reviewed_node_revision_hashes": {},
+      "reviewed_node_evidence_sha256": {},
+      "source_asset_sha256": "10b9c16990577b884757134569721d404d58678af4b20a1c1caf1192cba082c7",
+      "review_status": "needs_human_review",
+      "published": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  },
+  "artifact_is_authorization": false
+}

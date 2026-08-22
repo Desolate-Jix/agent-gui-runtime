@@ -1,0 +1,69 @@
+{
+  "contract_version": "interface_workflow_node_review_source_v1",
+  "workflow_id": "portfolio_v1_seek_apply_entry",
+  "node_id": "job_detail",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Job Detail",
+    "state_guess": "detail",
+    "state_signature": "seek-job-detail-v1",
+    "states": [],
+    "regions": [
+      {
+        "region_id": "job_detail_content",
+        "label": "Job detail content",
+        "semantic_name": "Job detail content",
+        "purpose": "Contains the selected job title, company, and description.",
+        "role": "document",
+        "review_status": "needs_human_review"
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "open_apply_flow",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "source_control_id": "apply",
+        "target_control_id": "apply",
+        "target_interface_id": "apply_entry",
+        "agent_description": "Open the reviewed application entry from the current Job Detail.",
+        "operation_goal": "Activate the currently grounded Quick apply control once.",
+        "verification_rule_ids": [
+          "application_entry_visible"
+        ],
+        "risk_level": "medium",
+        "review_status": "needs_human_review",
+        "display_only": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "label": "open_apply_flow",
+        "target_region_id": "apply"
+      }
+    ],
+    "blockers": [],
+    "verification_rules": [
+      {
+        "rule_id": "application_entry_visible",
+        "description": "The Choose documents application-entry surface is visible.",
+        "expected_decision": "safe_stop"
+      }
+    ],
+    "page_details": {
+      "screen": {
+        "summary": "Job Detail",
+        "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+        "source_image_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      }
+    },
+    "learning_source": "reviewed_multi_interface_workflow",
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true
+    }
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false
+}

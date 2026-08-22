@@ -1,0 +1,54 @@
+{
+  "contract_version": "interface_workflow_node_review_source_v1",
+  "workflow_id": "portfolio_v1_seek_apply_entry",
+  "node_id": "apply_entry",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Choose documents",
+    "state_guess": "application_entry",
+    "state_signature": "seek-quick-apply-entry-stop-v1",
+    "states": [],
+    "regions": [
+      {
+        "region_id": "application_entry_surface",
+        "label": "Choose documents",
+        "semantic_name": "Application entry",
+        "purpose": "Marks the reviewed boundary where execution must stop.",
+        "role": "document",
+        "review_status": "needs_learning"
+      }
+    ],
+    "action_templates": [],
+    "blockers": [
+      {
+        "blocker_id": "portfolio_v1_application_entry_stop",
+        "description": "Stop before form fill, Continue, Next, or final submit.",
+        "safe_stop_required": true
+      }
+    ],
+    "verification_rules": [
+      {
+        "rule_id": "application_entry_visible",
+        "description": "The Choose documents application-entry surface is visible.",
+        "expected_decision": "safe_stop"
+      }
+    ],
+    "page_details": {
+      "screen": {
+        "summary": "Choose documents",
+        "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/apply_entry/source_screenshot_path.png",
+        "source_image_sha256": "a15c86847704f5d94984006491ef3071d366b5a1b077180807ac9f6f11248322",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      }
+    },
+    "learning_source": "reviewed_multi_interface_workflow",
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true
+    }
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false
+}

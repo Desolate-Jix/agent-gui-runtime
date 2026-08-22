@@ -236,6 +236,8 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 当前 `open_apply_flow` fixture/ignored artifacts 不满足 Agent Observation confirmation、risk 与 reviewed-release 要求；必须先形成 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset，并完成 save/process restart/exact reload。<br>
 **Feeds server-owned confirmation and the bounded local public/demo callsite.**
 
+**2026-08-22 draft update:** `release/portfolio-v1/reviewed-asset-workspace` 现保存一个可移植、已去敏的两状态 review draft，并在本地 ignored `artifacts/` 中 materialize 同字节 Panel review source。它固定 `Job Detail → open_apply_flow (confirmation required) → Choose documents / SAFE STOP`、不含 runtime geometry，并由 focused tests 证明未获人审时 compiler fail closed。该 draft 使用 historical captures 的 privacy-redacted visual derivatives；它们不是 raw/forensic pixel evidence，去敏可能改变非审核像素，因此人审只覆盖声明的界面责任、语义控件、transition 与 safe-stop boundary。`human_review_completed=false`、`controlled_live_workflow_proven=false`，不能替代真实 Panel 人审、compiled release asset、process-restart exact reload 或 controlled live proof。W2 仍为 open。<br>
+
 ### W3a — Agent-side schemas and offline validation
 
 先完成 N1–N3 的 versioned schema、strict validation 与 offline conformance。不得新增第二个 Computer-Use Agent adapter。<br>

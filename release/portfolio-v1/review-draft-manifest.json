@@ -1,0 +1,24 @@
+{
+  "contract_version": "portfolio_v1_review_draft_manifest_v1",
+  "workflow_id": "portfolio_v1_seek_apply_entry",
+  "workspace_root": "release/portfolio-v1/reviewed-asset-workspace",
+  "source_workflow_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/reviewed_workflow.json",
+  "evidence_grade": "review_draft_using_privacy_redacted_historical_derivatives",
+  "human_review_completed": false,
+  "compiled_release_asset_present": false,
+  "controlled_live_workflow_proven": false,
+  "runtime_dispatch_authorization": false,
+  "approved_node_ids": [],
+  "pending_human_review_node_ids": [
+    "job_detail"
+  ],
+  "stop_boundary_node_ids": [
+    "apply_entry"
+  ],
+  "notes": [
+    "This workspace is a portable review draft, not a reviewed release asset.",
+    "The screenshots are privacy-redacted visual derivatives of historical captures, not raw or forensic pixel evidence and not controlled live workflow proof.",
+    "Privacy redaction may alter non-reviewed pixels; human review is limited to the declared interface responsibility, semantic control, transition, and safe-stop boundary.",
+    "Automation must not synthesize human approval or promote this draft to execution authority."
+  ]
+}
