@@ -14,6 +14,10 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 > **Target authority model:** Providers propose evidence. Agents propose semantic intent. The runtime alone grants bounded execution authority.
 
+[![Sanitized reviewed workflow overview](docs/media/private-prototype-workflow.png)](docs/media/private-prototype-workflow.png)
+
+*Sanitized workflow overview from the [earlier public showcase repository](https://github.com/Desolate-Jix/windows-gui-agent-runtime): reviewed interface knowledge guides intent, while the runtime must re-locate against the current observation and independently gate each action. This is a product-story illustration, not current Portfolio v1 live proof.*
+
 - **Today:** offline contract foundations; an internal server-owned W3b controller composition with durable intent/receipt records; and historical live GUI evidence.
 - **Implemented internally:** reviewed asset -> passive bound-window capture -> observed UIA origin -> pinned recognition -> strict Observation/Intent -> current re-ground -> Gate -> exact pre-dispatch pixel freshness -> one-shot Windows backend -> durable receipt.
 - **Not yet:** W4 closure of legacy production mutation/dispatch bypasses, W5 post-action semantic effect/destination verification, Controlled Live Workflow Proof, public HTTP/demo callsites, external/remote Provider integration, or live external Agent adapters.
@@ -26,7 +30,7 @@ The common computer-use loop is short:
 screenshot → model → coordinate → click
 ```
 
-It fails when responses become stale, windows change, labels repeat, or dispatch is mistaken for verified effect. A stronger model alone creates neither durable knowledge nor authority.
+It can fail when responses become stale, windows change, labels repeat, or dispatch is mistaken for verified effect. A stronger model alone creates neither durable knowledge nor authority.
 
 This project adds the missing reliability layer:
 
@@ -39,24 +43,31 @@ This project does **not** race the perception releases of Qwen, OpenAI, Anthropi
 
 ## Visual product tour
 
-> **Historical private-prototype evidence.** These panels come from the earlier public showcase repository and are included to make the product workflow visible. They show design lineage—not current Portfolio v1 live proof—and the current interface and runtime behavior may differ.
+> **Historical showcase UI.** These panels come from the [earlier public showcase repository](https://github.com/Desolate-Jix/windows-gui-agent-runtime) and are included to make the product workflow visible. They show design lineage—not current Portfolio v1 live proof—and the current interface and runtime behavior may differ.
 
-<table>
-  <tr>
-    <td width="50%" align="center"><a href="docs/media/private-prototype-learn-mode.png"><img src="docs/media/private-prototype-learn-mode.png" alt="Historical private-prototype Learn Mode panel" width="100%"></a></td>
-    <td width="50%" align="center"><a href="docs/media/private-prototype-execute-mode.png"><img src="docs/media/private-prototype-execute-mode.png" alt="Historical private-prototype Execute Mode panel" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td valign="top"><strong>Learn Mode</strong><br>Review interface evidence, approve semantic states, and connect them into a reusable workflow graph.</td>
-    <td valign="top"><strong>Execute Mode</strong><br>Inspect runtime state and available semantic actions while keeping application entry separate from final submission.</td>
-  </tr>
-</table>
+### Learn / Review panel
+
+[![Historical Learn Mode panel](docs/media/private-prototype-learn-mode.png)](docs/media/private-prototype-learn-mode.png)
+
+**Evidence: historical showcase UI.** Review captured interface evidence, approve semantic states, and connect them into a reusable workflow graph. The panel does not authorize execution.
+
+### Execute / Runtime panel
+
+[![Historical Execute Mode panel](docs/media/private-prototype-execute-mode.png)](docs/media/private-prototype-execute-mode.png)
+
+**Evidence: historical showcase UI.** Inspect the intended Observation → available semantic actions → Gate → Trace surface. This panel does not prove W4 unique dispatch ownership or W5 semantic verification.
+
+### Sanitized workflow sequence
+
+![Sanitized private-prototype workflow sequence](docs/media/private-prototype-seek.gif)
+
+**Evidence: sanitized historical showcase.** This animation explains reviewed results → detail → application-entry blocker / Safe Stop. It is not the reproducible demo, a live Agent proof, or evidence of form completion or submission.
 
 The panels illustrate the intended **Learn → Human Review → Runtime** handoff. They do not prove current relocation, Gate lineage, semantic verification, or autonomous replay.
 
 ## How it differs
 
-| Screenshot-to-click systems | agent-gui-runtime |
+| Screenshot-to-click systems | Target runtime behavior |
 | --- | --- |
 | Model output can become a coordinate. | Provider output remains evidence through trusted adaptation and review. |
 | Past geometry may be replayed. | Reviewed semantics are reused; geometry must be relocated on the current capture. |
@@ -143,7 +154,7 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 
 ## Historical prototype evidence
 
-> **Historical private-prototype evidence.** The screenshots below come from an earlier private prototype and are included to show design lineage. They are **not current Portfolio v1 live proof**, and the current interface may differ. SEEK and all employer names and marks belong to their respective owners; no affiliation or endorsement is implied.
+> **Historical showcase evidence.** The screenshots below were published by the earlier public showcase repository and are included to show design lineage. They are **not current Portfolio v1 live proof**, and the current interface may differ. SEEK and all employer names and marks belong to their respective owners; no affiliation or endorsement is implied.
 
 ### SEEK reference states · Historical screenshots
 
@@ -162,9 +173,9 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 
 ### SEEK reference recording · Partial historical visual corroboration
 
-![Controlled SEEK browser recording](docs/media/seek-three-interface-real-agent-demo.gif)
+![Historical SEEK three-state navigation recording](docs/media/seek-three-interface-real-agent-demo.gif)
 
-This redacted 16-second historical recording covers SEEK home/list, job detail, and same-site Apply entry, with no fill, typing, upload, Continue/Next, or submission. It is bounded visual corroboration—not Portfolio v1 Controlled Live Workflow Proof. It does **not** prove restart/reload, relocation, Gate lineage, semantic verification, receipts, or autonomous replay.
+This 16-second historical recording covers SEEK home/list, job detail, and same-site Apply entry; application content is redacted, with no fill, typing, upload, Continue/Next, or submission. It is bounded visual corroboration—not Portfolio v1 Controlled Live Workflow Proof. Without a matching current runtime trace and receipt, it does **not** establish which component produced each click or prove restart/reload, relocation, Gate lineage, semantic verification, receipts, or autonomous replay.
 
 SEEK is a **reference workflow**, not the product. The v1 target is **Job Detail → `open_apply_flow` → Apply Entry → Safe Stop**. `open_detail` is a separate target proof, not homepage traversal.
 
