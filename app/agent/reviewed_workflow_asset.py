@@ -475,6 +475,7 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         errors.append("source_review_lineage is required")
     else:
         for field in (
+            "source_workflow_id",
             "source_workflow_path",
             "source_workflow_sha256",
             "current_revision_hash",
@@ -483,6 +484,15 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         ):
             if not _text(lineage.get(field)):
                 errors.append(f"source_review_lineage.{field} is required")
+        source_workflow_id = lineage.get("source_workflow_id")
+        if (
+            not isinstance(source_workflow_id, str)
+            or source_workflow_id != source_workflow_id.strip()
+            or not _ID_RE.fullmatch(source_workflow_id)
+        ):
+            errors.append(
+                "source_review_lineage.source_workflow_id must be a stable identifier"
+            )
         if not _is_normalized_project_relative_path(lineage.get("source_workflow_path")):
             errors.append(
                 "source_review_lineage.source_workflow_path must be normalized project-relative"

@@ -44,7 +44,14 @@ def _server_asset(tmp_path: Path, *, blocker: bool = False) -> tuple[dict, Path]
     return asset, source
 
 
-def _adapt(tmp_path: Path, asset: dict, *, anchors: tuple[str, ...] | None = None, state_id: str | None = None):
+def _adapt(
+    tmp_path: Path,
+    asset: dict,
+    *,
+    anchors: tuple[str, ...] | None = None,
+    state_id: str | None = None,
+    workflow_id: str | None = None,
+):
     requested_state = state_id or asset["entry_state_id"]
     state = next(item for item in asset["states"] if item["state_id"] == requested_state)
     anchor_ids = tuple(item["anchor_id"] for item in state["identity_anchors"])
@@ -52,7 +59,13 @@ def _adapt(tmp_path: Path, asset: dict, *, anchors: tuple[str, ...] | None = Non
     resolution = resolve_current_state(asset, current)
     from app.agent.agent_observation_adapter import adapt_reviewed_context_to_agent_observation_v1
     return adapt_reviewed_context_to_agent_observation_v1(
-        observation_id="observation-current", session_id="session-current", workflow_id="workflow_agent_evidence",
+        observation_id="observation-current",
+        session_id="session-current",
+        workflow_id=(
+            workflow_id
+            if workflow_id is not None
+            else asset["source_review_lineage"]["source_workflow_id"]
+        ),
         reviewed_asset=asset, current_observation=current, state_resolution=resolution,
         project_root=tmp_path, application_identity_key="web:example.test",
     )
@@ -85,6 +98,16 @@ def test_adapter_api_cannot_accept_caller_context() -> None:
     assert "interface_workflow_agent_context" not in inspect.signature(adapt_reviewed_context_to_agent_observation_v1).parameters
     assert "state_resolution_ref" not in inspect.signature(adapt_reviewed_context_to_agent_observation_v1).parameters
     assert "current_capture_evidence_ref" not in inspect.signature(adapt_reviewed_context_to_agent_observation_v1).parameters
+
+
+def test_adapter_rejects_asset_id_substituted_for_source_workflow_id(
+    tmp_path: Path,
+) -> None:
+    asset, _ = _server_asset(tmp_path)
+    assert asset["asset_id"] != asset["source_review_lineage"]["source_workflow_id"]
+
+    with pytest.raises(ValueError, match="workflow identity"):
+        _adapt(tmp_path, asset, workflow_id=asset["asset_id"])
 
 
 def test_valid_current_interface_ignores_global_agent_ready_false(tmp_path: Path, monkeypatch) -> None:

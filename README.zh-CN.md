@@ -93,6 +93,8 @@ screenshot → model → coordinate → click
 3. **Agent Runtime Contract** — Runtime 暴露 Observation 和可用语义动作；Agent 返回与 Observation 绑定的 semantic intent。
 4. **Runtime Result & Verification Receipt Contract** — outcome 明确区分 Gate、dispatch、observed effect、next state 和 Safe Stop。
 
+固定后的 `WorkflowRef` 会把原始人工审核流程的 `workflow_id` 与编译产物 `asset_id` 明确分开。Compiler 会把经过 registry/path/SHA 校验的源流程身份写入不可变 lineage；Runtime、adapter 与 controller 边界会拒绝身份替换，而不会从 asset 名称猜测 ID。缺少该 lineage 字段的旧 v2 对象会 fail closed，必须重新编译；历史 geometry 仍不会获得 authority。
+
 内部 W3b/W4/W5 controller slices 与 actual-adapter composition 已通过确定性测试和严格审计验证，覆盖 current re-grounding、唯一 authority、受保护的 dispatch、全新 post-action observation、semantic destination verification，以及 checkpoint 与 terminal receipt 的精确配对。actual-adapter proof 使用确定性的 window/screenshot/UIA/recognition doubles 和 `DeterministicFakeBackend`；它仍是内部 proof，不是真实 Windows/SEEK I/O、physical Windows dispatch + C2、controlled live proof、公开 route 或外部 Agent integration：
 
 ```text

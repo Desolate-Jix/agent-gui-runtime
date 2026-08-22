@@ -332,6 +332,41 @@ def test_publish_blocks_injected_source_mutation_after_compile_without_cas_write
     assert not (tmp_path / "runtime_state" / "reviewed-workflow-assets-v2").exists()
 
 
+def test_publish_rejects_compiled_source_workflow_identity_substitution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.api.panel as panel_api
+
+    application_identity_key, workflow_id, digest = _request_source(tmp_path)
+    real_compile = panel_api._compile_reviewed_workflow_request
+
+    def compile_then_substitute_identity(request):
+        result = real_compile(request)
+        result["asset"]["source_review_lineage"]["source_workflow_id"] = (
+            "different.reviewed.workflow"
+        )
+        return result
+
+    monkeypatch.setattr(
+        panel_api,
+        "_compile_reviewed_workflow_request",
+        compile_then_substitute_identity,
+    )
+    response = panel_api.publish_reviewed_workflow_asset_endpoint(
+        panel_api.PanelPublishReviewedWorkflowAssetRequest(
+            application_identity_key=application_identity_key,
+            workflow_id=workflow_id,
+            expected_source_workflow_sha256=digest,
+            expected_registry_revision=0,
+        )
+    )
+
+    assert response.success is False
+    assert response.error.code == "reviewed_workflow_source_changed"
+    assert not (tmp_path / "runtime_state" / "reviewed-workflow-assets-v2").exists()
+
+
 def test_compile_hides_injected_oserror_absolute_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

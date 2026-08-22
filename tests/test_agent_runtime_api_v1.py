@@ -49,6 +49,7 @@ OPAQUE_APPLY_ACTION_ID = (
 def _reviewed_asset(asset_id: str = "portfolio.seek") -> dict[str, object]:
     asset = deepcopy(_reviewed_asset_fixture())
     asset["asset_id"] = asset_id
+    asset["source_review_lineage"]["source_workflow_id"] = asset_id
     return asset
 
 
@@ -59,7 +60,7 @@ def _workflow(
 ) -> dict[str, object]:
     asset = asset or _reviewed_asset(asset_id)
     return {
-        "workflow_id": asset_id,
+        "workflow_id": asset["source_review_lineage"]["source_workflow_id"],
         "asset_id": asset_id,
         "asset_content_sha256": content_sha256(asset),
         "source_workflow_sha256": asset["source_review_lineage"]["source_workflow_sha256"],
@@ -262,11 +263,13 @@ class _Controller:
         self,
         claims: _Claims,
         *,
+        binding: ServerWorkflowBinding,
         requires_confirmation: bool,
         workflow: dict[str, object],
         semantic_action: str = "open_apply_flow",
     ) -> None:
         self.claims = claims
+        self.binding = binding
         self.observation = _observation(
             workflow=workflow,
             semantic_action=semantic_action,
@@ -304,10 +307,10 @@ class _Controller:
                 intent=intent,
                 server_binding=SimpleNamespace(
                     to_dict=lambda: {
-                        "workflow_id": "portfolio.seek",
-                        "asset_id": "portfolio.seek",
-                        "application_identity_key": "web:nz.seek.com",
-                        "target_window_handle": 77,
+                        "workflow_id": self.binding.workflow_id,
+                        "asset_id": self.binding.asset_id,
+                        "application_identity_key": self.binding.application_identity_key,
+                        "target_window_handle": self.binding.target_window_handle,
                     }
                 ),
                 confirmation=confirmation,
@@ -362,6 +365,7 @@ def _factory(
         bindings.append(binding)
         controller = _Controller(
             claims,
+            binding=binding,
             requires_confirmation=requires_confirmation,
             workflow=workflow or _workflow(asset=assets.assets[binding.asset_id]),
             semantic_action=semantic_action,
@@ -497,6 +501,106 @@ def test_start_uses_server_binding_and_second_start_conflicts() -> None:
     assert second.json()["error"]["code"] == "agent_runtime_session_active"
 
 
+def test_start_keeps_source_workflow_identity_distinct_from_compiled_asset_id() -> None:
+    assets = _Assets()
+    asset = assets.assets["portfolio.seek"]
+    asset["source_review_lineage"]["source_workflow_id"] = "portfolio.reviewed.source"
+    assets.active["portfolio.seek"] = content_sha256(asset)
+
+    service, _, _, bindings = _callsite(assets=assets)
+    observation = _start(_client(service))
+
+    assert observation["workflow"]["workflow_id"] == "portfolio.reviewed.source"
+    assert observation["workflow"]["asset_id"] == "portfolio.seek"
+    assert bindings == [
+        ServerWorkflowBinding(
+            workflow_id="portfolio.reviewed.source",
+            asset_id="portfolio.seek",
+            application_identity_key="web:nz.seek.com",
+            target_window_handle=77,
+        )
+    ]
+
+
+def test_distinct_source_workflow_identity_survives_confirmation_and_terminal_recovery() -> None:
+    assets = _Assets()
+    asset = assets.assets["portfolio.seek"]
+    source_workflow_id = "portfolio.reviewed.source"
+    asset["source_review_lineage"]["source_workflow_id"] = source_workflow_id
+    assets.active["portfolio.seek"] = content_sha256(asset)
+
+    first, claims, controllers, _ = _callsite(
+        assets=assets,
+        requires_confirmation=True,
+    )
+    first_client = _client(first)
+    observation = _start(first_client)
+    assert observation["workflow"]["workflow_id"] == source_workflow_id
+    assert observation["workflow"]["asset_id"] == "portfolio.seek"
+
+    intent_payload = _intent_payload()
+    pending = first_client.post(
+        "/runtime/agent/intent/submit",
+        json=intent_payload,
+    )
+    assert pending.status_code == 200
+    assert pending.json()["data"]["status"] == "NEEDS_REVIEW"
+    assert claims.claim.observation.workflow.workflow_id == source_workflow_id
+    assert claims.claim.observation.workflow.asset_id == "portfolio.seek"
+    assert claims.claim.server_binding.to_dict()["workflow_id"] == source_workflow_id
+    assert claims.claim.server_binding.to_dict()["asset_id"] == "portfolio.seek"
+
+    confirmation_payload = {
+        "confirmation_id": pending.json()["data"]["confirmation_id"],
+        "decision": "approved",
+    }
+    approved = first_client.post(
+        "/runtime/agent/confirmation/decide",
+        json=confirmation_payload,
+    )
+    assert approved.status_code == 200
+    receipt = approved.json()["data"]
+    assert receipt["workflow"]["workflow_id"] == source_workflow_id
+    assert receipt["workflow"]["asset_id"] == "portfolio.seek"
+    assert claims.claim.phase == "terminal"
+    assert sum(controller.attempts for controller in controllers) == 1
+
+    recovered_controllers: list[_Controller] = []
+
+    def recovered_factory(binding: ServerWorkflowBinding):
+        controller = _Controller(
+            claims,
+            binding=binding,
+            requires_confirmation=True,
+            workflow=_workflow(asset=assets.assets[binding.asset_id]),
+        )
+        recovered_controllers.append(controller)
+        return controller
+
+    restarted = LocalAgentRuntimeCallsite(
+        project_root=Path("."),
+        asset_store=assets,
+        window_manager=_WindowManager(),
+        claim_store=claims,
+        controller_factory=recovered_factory,
+    )
+    restarted_client = _client(restarted)
+    repeated_intent = restarted_client.post(
+        "/runtime/agent/intent/submit",
+        json=intent_payload,
+    )
+    repeated_approval = restarted_client.post(
+        "/runtime/agent/confirmation/decide",
+        json=confirmation_payload,
+    )
+
+    assert repeated_intent.status_code == repeated_approval.status_code == 200
+    assert repeated_intent.json()["data"] == receipt
+    assert repeated_approval.json()["data"] == receipt
+    assert recovered_controllers == []
+    assert sum(controller.attempts for controller in controllers) == 1
+
+
 def test_start_rejects_controller_forged_workflow_hashes() -> None:
     assets = _Assets()
     forged = _workflow(asset=assets.assets["portfolio.seek"])
@@ -523,6 +627,7 @@ def test_start_fails_closed_when_active_asset_republishes_during_start() -> None
     def republishing_factory(binding: ServerWorkflowBinding):
         controller = _Controller(
             claims,
+            binding=binding,
             requires_confirmation=False,
             workflow=original_workflow,
         )
@@ -799,6 +904,7 @@ def test_restart_blocks_new_start_but_recovers_confirmation_from_persisted_claim
     def recovered_factory(binding: ServerWorkflowBinding):
         controller = _Controller(
             claims,
+            binding=binding,
             requires_confirmation=True,
             workflow=_workflow(asset=recovered_assets.assets[binding.asset_id]),
         )
@@ -835,9 +941,10 @@ def test_opaque_reviewed_transition_id_is_accepted_and_preserved_through_restart
     claims = _Claims()
     controllers: list[_Controller] = []
 
-    def controller_factory(_binding: ServerWorkflowBinding):
+    def controller_factory(binding: ServerWorkflowBinding):
         controller = _Controller(
             claims,
+            binding=binding,
             requires_confirmation=True,
             workflow=workflow,
         )
@@ -1022,6 +1129,7 @@ def test_default_production_factory_can_be_replaced_without_physical_input(
         created.append(binding)
         return _Controller(
             claims,
+            binding=binding,
             requires_confirmation=False,
             workflow=_workflow(asset=assets.assets[binding.asset_id]),
         )

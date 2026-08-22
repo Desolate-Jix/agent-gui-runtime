@@ -234,6 +234,9 @@ def adapt_reviewed_context_to_agent_observation_v1(
     expected_resolution = resolve_current_state(asset, current_observation)
     if dict(state_resolution) != expected_resolution:
         raise ValueError("state resolution does not match current authoritative resolution")
+    lineage = _mapping(asset.get("source_review_lineage"), "reviewed asset lineage")
+    if workflow_id != str(lineage.get("source_workflow_id") or ""):
+        raise ValueError("workflow identity does not match reviewed asset lineage")
     context = load_interface_workflow_agent_context(
         project_root=Path(project_root), application_identity_key=application_identity_key,
     )
@@ -248,7 +251,6 @@ def adapt_reviewed_context_to_agent_observation_v1(
     if application_identity_key != application_key or str(context.get("application_identity_key") or "") != application_key or str(context_application.get("identity_key") or "") != application_key:
         raise ValueError("application identity mismatch")
 
-    lineage = _mapping(asset.get("source_review_lineage"), "reviewed asset lineage")
     asset_hash = content_sha256(asset)
     workflow = {
         "workflow_id": workflow_id,

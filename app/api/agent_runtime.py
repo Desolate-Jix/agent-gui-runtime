@@ -632,9 +632,12 @@ class LocalAgentRuntimeCallsite:
             ):
                 raise ValueError("asset identity mismatch")
             application_identity_key = _asset_application_identity_key(asset)
+            source_workflow_id = asset["source_review_lineage"][
+                "source_workflow_id"
+            ]
             workflow = WorkflowRefV1.model_validate(
                 {
-                    "workflow_id": asset_id,
+                    "workflow_id": source_workflow_id,
                     "asset_id": asset_id,
                     "asset_content_sha256": asset_content_sha256,
                     "source_workflow_sha256": asset["source_review_lineage"][
@@ -654,7 +657,7 @@ class LocalAgentRuntimeCallsite:
         bound, process_id = self._current_bound_window()
         return _ResolvedServerState(
             binding=ServerWorkflowBinding(
-                workflow_id=asset_id,
+                workflow_id=source_workflow_id,
                 asset_id=asset_id,
                 application_identity_key=application_identity_key,
                 target_window_handle=bound.handle,

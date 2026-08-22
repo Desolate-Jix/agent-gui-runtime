@@ -93,6 +93,8 @@ The public architecture freezes four contracts:
 3. **Agent Runtime Contract** — Runtime exposes Observation/actions; Agent returns observation-bound semantic intent.
 4. **Runtime Result & Verification Receipt Contract** — distinguishes Gate, dispatch, effect, next state, and Safe Stop.
 
+The pinned `WorkflowRef` keeps the exact reviewed source `workflow_id` separate from the compiled `asset_id`. The compiler carries that registry/path/SHA-verified identity into immutable lineage, and Runtime/adapter/controller boundaries reject substitution instead of inferring an ID from an asset name. Older v2 objects without this lineage field fail closed and must be recompiled; no historical geometry gains authority.
+
 Internal W3b/W4/W5 controller slices and the actual-adapter composition are deterministic-test and strict-audit verified. They cover current re-grounding, unique authority, guarded dispatch, fresh post-action observation, semantic destination verification, and exact checkpoint-to-terminal pairing. The actual-adapter proof uses deterministic window/screenshot/UIA/recognition doubles and `DeterministicFakeBackend`; this remains an internal proof—not real Windows/SEEK I/O, physical Windows dispatch + C2, a controlled live proof, public route, or external Agent integration:
 
 ```text

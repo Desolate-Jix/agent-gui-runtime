@@ -277,6 +277,11 @@ class LiveController:
         )
         if asset["asset_id"] != self._binding.asset_id:
             raise ValueError("active reviewed asset identity does not match server binding")
+        if (
+            asset["source_review_lineage"]["source_workflow_id"]
+            != self._binding.workflow_id
+        ):
+            raise ValueError("reviewed source workflow identity does not match server binding")
         expected_application_key = self._asset_application_identity_key(asset)
         if expected_application_key != self._binding.application_identity_key:
             raise ValueError("reviewed asset application identity does not match server binding")
@@ -574,6 +579,9 @@ class LiveController:
             )
             if (
                 asset["asset_id"] != claim.observation.workflow.asset_id
+                or asset["source_review_lineage"]["source_workflow_id"]
+                != claim.observation.workflow.workflow_id
+                or claim.observation.workflow.workflow_id != self._binding.workflow_id
                 or content_sha256(asset) != claim.observation.workflow.asset_content_sha256
                 or asset["source_review_lineage"]["source_workflow_sha256"]
                 != claim.observation.workflow.source_workflow_sha256
@@ -699,6 +707,9 @@ class LiveController:
             )
             if (
                 asset["asset_id"] != claim.observation.workflow.asset_id
+                or asset["source_review_lineage"]["source_workflow_id"]
+                != claim.observation.workflow.workflow_id
+                or claim.observation.workflow.workflow_id != self._binding.workflow_id
                 or content_sha256(asset) != claim.observation.workflow.asset_content_sha256
                 or asset["source_review_lineage"]["source_workflow_sha256"]
                 != claim.observation.workflow.source_workflow_sha256

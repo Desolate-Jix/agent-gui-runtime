@@ -157,6 +157,7 @@ def test_compiles_reviewed_seek_path_to_safe_stop_boundary_without_writing_store
     assert result["blocked_reasons"] == []
     asset = result["asset"]
     assert asset["contract_version"] == "reviewed_workflow_asset_v2"
+    assert asset["source_review_lineage"]["source_workflow_id"] == "seek_home_to_apply"
     assert asset["source_review_lineage"]["source_workflow_sha256"] == digest
     assert [state["availability"] for state in asset["states"]] == [
         "stop_boundary", "reviewed", "reviewed"

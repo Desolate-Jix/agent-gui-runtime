@@ -182,6 +182,7 @@ def _asset() -> dict:
             "allow_external_sites": False,
         },
         "source_review_lineage": {
+            "source_workflow_id": "workflow.seek.portfolio",
             "source_workflow_path": "synthetic/seek-review.json",
             "source_workflow_sha256": "a" * 64,
             "current_revision_hash": "b" * 64,
@@ -321,6 +322,22 @@ def test_validator_rejects_v1_contract_instead_of_normalizing_it() -> None:
     asset = _asset()
     asset["contract_version"] = "reviewed_workflow_asset_v1"
     with pytest.raises(ValueError, match="contract_version"):
+        validate_reviewed_workflow_asset(asset)
+
+
+@pytest.mark.parametrize("source_workflow_id", [None, "", " invalid", "a" * 129])
+def test_source_workflow_identity_is_required_and_stable(
+    source_workflow_id: str | None,
+) -> None:
+    from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
+
+    asset = _asset()
+    if source_workflow_id is None:
+        asset["source_review_lineage"].pop("source_workflow_id")
+    else:
+        asset["source_review_lineage"]["source_workflow_id"] = source_workflow_id
+
+    with pytest.raises(ValueError, match="source_workflow_id"):
         validate_reviewed_workflow_asset(asset)
 
 

@@ -1828,7 +1828,14 @@ def publish_reviewed_workflow_asset_endpoint(request: PanelPublishReviewedWorkfl
                 return APIResponse(success=False, message="Reviewed workflow publish blocked", data={"compile_result": _safe_blocked_compile_result(result)}, error=ErrorModel(code="reviewed_workflow_compile_blocked", details="reviewed workflow must compile immediately before publish"))
             # 在 CAS 写入前再次读取 v1 binding 与 source bytes，避免 save/delete 的 TOCTOU。
             source_path, source_sha = _resolve_reviewed_workflow_source(application_identity_key=request.application_identity_key, workflow_id=request.workflow_id)
-            if source_sha != result["asset"]["source_review_lineage"]["source_workflow_sha256"] or hashlib.sha256((ROOT_DIR / source_path).read_bytes()).hexdigest() != source_sha:
+            if (
+                request.workflow_id
+                != result["asset"]["source_review_lineage"]["source_workflow_id"]
+                or source_sha
+                != result["asset"]["source_review_lineage"]["source_workflow_sha256"]
+                or hashlib.sha256((ROOT_DIR / source_path).read_bytes()).hexdigest()
+                != source_sha
+            ):
                 return APIResponse(success=False, message="Reviewed workflow publish blocked", data={"compile_result": result}, error=ErrorModel(code="reviewed_workflow_source_changed", details="reviewed workflow source changed before publish"))
             publish_result = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).publish(result["asset"], expected_registry_revision=request.expected_registry_revision)
     except (OSError, ValueError, json.JSONDecodeError):

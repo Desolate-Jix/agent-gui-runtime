@@ -287,6 +287,7 @@ def _controller(
     backend_override=None,
     target_window_handle: int = 4242,
     visibility_checker=None,
+    workflow_id: str = "workflow.seek.portfolio",
 ):
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
@@ -309,7 +310,7 @@ def _controller(
     )
     controller = LiveController(
         binding=ServerWorkflowBinding(
-            workflow_id="workflow.seek.portfolio",
+            workflow_id=workflow_id,
             asset_id=asset["asset_id"],
             application_identity_key="web:nz.seek.com",
             target_window_handle=target_window_handle,
@@ -351,6 +352,21 @@ def test_session_is_server_created_and_pins_workflow_revision(tmp_path) -> None:
     assert session.workflow.asset_content_sha256 == content_sha256(_asset())
     assert source.initial_calls == 1
     assert source.initial_window_handles == [4242]
+
+
+def test_start_session_rejects_source_workflow_identity_mismatch_before_capture(
+    tmp_path,
+) -> None:
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        workflow_id="workflow.wrong",
+    )
+
+    with pytest.raises(ValueError, match="source workflow identity"):
+        controller.start_session()
+
+    assert source.initial_calls == 0
+    assert backend.attempt_count == backend.dispatch_count == 0
 
 
 def test_start_session_hands_exact_validated_asset_to_initial_observation_source(tmp_path) -> None:

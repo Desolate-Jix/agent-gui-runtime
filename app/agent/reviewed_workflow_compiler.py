@@ -525,6 +525,7 @@ def compile_reviewed_workflow_asset_v2(
     current_revision_hash = _canonical_sha256({node_id: reviewed_integrity[node_id]["canonical_revision_hash"] for node_id in approved_ids})
     evidence_sha256 = _canonical_sha256({node_id: reviewed_integrity[node_id]["expected_evidence_provenance"] for node_id in approved_ids})
     lineage = {
+        "source_workflow_id": workflow_id,
         "source_workflow_path": source_path,
         "source_workflow_sha256": source_sha,
         "current_revision_hash": current_revision_hash,
