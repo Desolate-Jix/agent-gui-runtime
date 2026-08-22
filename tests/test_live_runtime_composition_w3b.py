@@ -12,6 +12,7 @@ import pytest
 
 from app.agent.reviewed_workflow_asset import content_sha256
 from app.agent.reviewed_workflow_replay import resolve_current_state, select_verified_transition
+from app.agent.runtime_contracts import AgentObservationV1
 from app.operation.page_structure.schemas import (
     InteractionPolicy,
     PageElement,
@@ -651,6 +652,95 @@ def test_create_initial_projects_geometry_free_observation_from_exact_asset(tmp_
     encoded = json.dumps(payload, ensure_ascii=False).casefold()
     for token in ("bbox", "click_point", "coordinates", "viewport", "approved_to_click"):
         assert token not in encoded
+
+
+def test_capture_projected_uses_one_capture_for_raw_and_agent_observation(
+    tmp_path: Path,
+) -> None:
+    asset, _ = _server_asset(tmp_path)
+    workflow = _workflow(asset, "workflow_agent_evidence")
+    adapter, manager, screenshot, origin, runner = _adapter(
+        tmp_path,
+        asset,
+        manager=_WindowManager(_bound(), _bound(), _bound()),
+        origin=_OriginReader(origin="https://example.test"),
+        runner=_RecognitionRunner(_entry_payloads(asset)),
+        application_identity_key="web:example.test",
+    )
+
+    projected = adapter.capture_projected(
+        session_id="session-projected",
+        workflow=workflow,
+        asset=asset,
+        target_window_handle=4242,
+    )
+
+    assert len(screenshot.calls) == 1
+    assert manager.calls == 3
+    assert origin.calls == [4242, 4242]
+    assert runner.calls
+    assert isinstance(projected.agent_observation, AgentObservationV1)
+    assert projected.agent_observation.session_id == "session-projected"
+    assert projected.agent_observation.workflow.model_dump(mode="json") == workflow
+    assert projected.agent_observation.application.identity_ref == "application:web:example.test"
+    assert projected.current_observation["asset_id"] == asset["asset_id"]
+    assert projected.current_observation["capture_id"] == (
+        projected.agent_observation.current_capture.capture_id
+    )
+    assert projected.current_observation["screenshot_sha256"] == (
+        projected.agent_observation.current_capture.screenshot_sha256
+    )
+    assert projected.target_window_handle == 4242
+    assert projected.target_process_id == 9001
+    assert projected.artifact_is_authorization is False
+    assert projected.grants_action_authority is False
+    encoded = json.dumps(
+        {
+            "current_observation": projected.current_observation,
+            "agent_observation": projected.agent_observation.model_dump(mode="json"),
+            "artifact_is_authorization": projected.artifact_is_authorization,
+            "grants_action_authority": projected.grants_action_authority,
+        },
+        ensure_ascii=False,
+    ).casefold()
+    assert "authority_token" not in encoded
+
+
+def test_capture_projected_projection_failure_fails_closed_after_one_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.agent.live_runtime_composition as composition
+
+    asset, _ = _server_asset(tmp_path)
+    screenshot = _ScreenshotService(tmp_path)
+    adapter, *_ = _adapter(
+        tmp_path,
+        asset,
+        manager=_WindowManager(_bound(), _bound(), _bound()),
+        screenshot=screenshot,
+        origin=_OriginReader(origin="https://example.test"),
+        runner=_RecognitionRunner(_entry_payloads(asset)),
+        application_identity_key="web:example.test",
+    )
+
+    def fail_projection(**_kwargs: object) -> object:
+        raise ValueError("projection provider failed")
+
+    monkeypatch.setattr(
+        composition,
+        "adapt_reviewed_context_to_agent_observation_v1",
+        fail_projection,
+    )
+
+    with pytest.raises(ValueError, match="projection"):
+        adapter.capture_projected(
+            session_id="session-projected",
+            workflow=_workflow(asset, "workflow_agent_evidence"),
+            asset=asset,
+            target_window_handle=4242,
+        )
+    assert len(screenshot.calls) == 1
 
 
 def _selected(asset: dict, current: dict) -> dict:

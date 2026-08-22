@@ -17,6 +17,7 @@ from app.agent.desktop_backend import ExistingWindowsBackendAdapter
 from app.agent.live_controller import (
     ExistingWindowManagerVisibilityChecker,
     LiveController,
+    ProjectedObservationCapture,
     ServerWorkflowBinding,
 )
 from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore, content_sha256
@@ -24,6 +25,11 @@ from app.agent.reviewed_workflow_gate import ReviewedWorkflowGateAdapter
 from app.agent.reviewed_workflow_replay import resolve_current_state
 from app.agent.runtime_intent_claim_store import RuntimeIntentClaimStore
 from app.agent.runtime_receipt_store import RuntimeReceiptStore
+from app.agent.runtime_contracts import (
+    AgentObservationV1,
+    WorkflowRefV1,
+    validate_agent_observation_v1,
+)
 from app.agent.windows_uia_origin_reader import WindowsUIAOriginReader
 from app.operation.page_structure.schemas import InteractionPolicy, PageElement, VerificationHints
 from app.operation.recognition.decision import decide_pre_click
@@ -114,22 +120,12 @@ class ExistingWindowsCurrentEvidenceAdapter:
         asset: dict[str, Any],
         target_window_handle: int,
     ):
-        current = self._capture_current(
+        return self.capture_projected(
             session_id=session_id,
+            workflow=workflow,
             asset=asset,
             target_window_handle=target_window_handle,
-        )
-        state_resolution = resolve_current_state(asset, current)
-        return adapt_reviewed_context_to_agent_observation_v1(
-            observation_id=f"observation.{uuid4().hex}",
-            session_id=session_id,
-            workflow_id=str(workflow["workflow_id"]),
-            reviewed_asset=asset,
-            current_observation=current,
-            state_resolution=state_resolution,
-            project_root=self._project_root,
-            application_identity_key=self._application_identity_key,
-        )
+        ).agent_observation
 
     def capture_current(
         self,
@@ -142,6 +138,73 @@ class ExistingWindowsCurrentEvidenceAdapter:
             session_id=session_id,
             asset=asset,
             target_window_handle=target_window_handle,
+        )
+
+    def capture_projected(
+        self,
+        *,
+        session_id: str,
+        workflow: dict[str, Any],
+        asset: dict[str, Any],
+        target_window_handle: int,
+    ) -> ProjectedObservationCapture:
+        """一次 passive capture 同时封装 raw C1 与 AgentObservation。"""
+
+        current = self._capture_current(
+            session_id=session_id,
+            asset=asset,
+            target_window_handle=target_window_handle,
+        )
+        try:
+            validated_workflow = WorkflowRefV1.model_validate(workflow)
+            state_resolution = resolve_current_state(asset, current)
+            projected = adapt_reviewed_context_to_agent_observation_v1(
+                observation_id=f"observation.{uuid4().hex}",
+                session_id=session_id,
+                workflow_id=validated_workflow.workflow_id,
+                reviewed_asset=asset,
+                current_observation=current,
+                state_resolution=state_resolution,
+                project_root=self._project_root,
+                application_identity_key=self._application_identity_key,
+            )
+            observation = validate_agent_observation_v1(
+                projected.model_dump(mode="json")
+                if isinstance(projected, AgentObservationV1)
+                else projected
+            )
+            bundle = self._bundle_for_projected(
+                session_id=session_id,
+                current_observation=current,
+            )
+            asset_hash = content_sha256(asset)
+            if (
+                observation.session_id != session_id
+                or observation.workflow != validated_workflow
+                or observation.application.identity_ref
+                != f"application:{self._application_identity_key}"
+                or observation.current_capture.capture_id != current.get("capture_id")
+                or observation.current_capture.screenshot_sha256
+                != current.get("screenshot_sha256")
+                or current.get("asset_id") != validated_workflow.asset_id
+                or current.get("expected_asset_content_sha256") != asset_hash
+                or validated_workflow.asset_content_sha256 != asset_hash
+                or bundle.asset_content_sha256 != asset_hash
+                or bundle.target_window_handle != target_window_handle
+            ):
+                raise ValueError("projected observation lineage mismatch")
+        except Exception as exc:
+            raise ValueError("current AgentObservation projection failed") from exc
+        return ProjectedObservationCapture(
+            session_id=session_id,
+            workflow=validated_workflow,
+            application_identity_key=self._application_identity_key,
+            asset_id=validated_workflow.asset_id,
+            asset_content_sha256=validated_workflow.asset_content_sha256,
+            target_window_handle=bundle.target_window_handle,
+            target_process_id=bundle.target_process_id,
+            current_observation=deepcopy(current),
+            agent_observation=observation,
         )
 
     def resolve(
@@ -401,6 +464,23 @@ class ExistingWindowsCurrentEvidenceAdapter:
             self._cache.move_to_end(key)
             while len(self._cache) > self._cache_limit:
                 self._cache.popitem(last=False)
+
+    def _bundle_for_projected(
+        self,
+        *,
+        session_id: str,
+        current_observation: Mapping[str, Any],
+    ) -> _CurrentEvidenceBundle:
+        capture_id = current_observation.get("capture_id")
+        screenshot_digest = current_observation.get("screenshot_sha256")
+        with self._lock:
+            bundle = self._cache.get((session_id, capture_id, screenshot_digest))
+        if (
+            bundle is None
+            or bundle.current_observation_json != _json_bytes(current_observation)
+        ):
+            raise ValueError("projected current evidence bundle is unavailable")
+        return bundle
 
     def _find_bundle(
         self,

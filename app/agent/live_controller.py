@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 from threading import RLock
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 from weakref import WeakValueDictionary
 
@@ -71,6 +71,23 @@ class LiveControllerDecision:
     reason_code: str
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectedObservationCapture:
+    """同一 passive capture 派生出的 C1 与严格 AgentObservation。"""
+
+    session_id: str
+    workflow: WorkflowRefV1
+    application_identity_key: str
+    asset_id: str
+    asset_content_sha256: str
+    target_window_handle: int
+    target_process_id: int
+    current_observation: dict[str, Any]
+    agent_observation: AgentObservationV1
+    grants_action_authority: Literal[False] = False
+    artifact_is_authorization: Literal[False] = False
+
+
 class AssetLoader(Protocol):
     def load_active(self, asset_id: str) -> dict[str, Any]: ...
 
@@ -92,6 +109,15 @@ class ObservationSource(Protocol):
         asset: dict[str, Any],
         target_window_handle: int,
     ) -> Mapping[str, Any]: ...
+
+    def capture_projected(
+        self,
+        *,
+        session_id: str,
+        workflow: dict[str, Any],
+        asset: dict[str, Any],
+        target_window_handle: int,
+    ) -> ProjectedObservationCapture: ...
 
 
 class TargetResolver(Protocol):
