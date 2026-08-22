@@ -242,17 +242,20 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 ### W4 — Mandatory current relocation and Gate
 
 完成 #6–9。server-owned current observation、re-ground、fail-closed negative controls、所有动作 Gate。<br>
-**Depends on W2; critical path.**
+**2026-08-22 audit update:** W3b's new internal controller path has these guards, but the W4 unique-dispatch release stop remains **Partial**: legacy production mutation routes/clients are still reachable outside that controller. Close or hard-bound those bypasses before any live reference proof; do not hide them behind fallback routing.<br>
+**Critical release prerequisite for W5.**
 
 ### W3b — Current internal adapter and receipt integration
 
-离线 adapter mapping foundation 已完成；剩余工作是把同一 Observation/Intent/Receipt 边界接到 W4 唯一 live dispatch envelope、Session/intent consumption、backend receipt 与 durable store。Runtime Receipt 的 final live verification fields 由 W5 填充。<br>
-**Depends on W3a + W4; feeds W5.**
+**2026-08-22 implementation update:** The internal composition slice is implemented and independently reviewed (Sol High final review: PASS). It composes the exact active reviewed asset -> passive bound-window capture -> real observed UIA origin -> pinned current recognition -> strict Agent Observation/Intent -> current re-ground -> real Gate -> exact pre-dispatch pixel freshness -> one-shot ExistingWindowsBackend -> durable backend/runtime receipt. Exact session/capture/SHA/viewport/HWND/PID binding is retained; ranking/margin is recomputed; zero/low/ambiguous anchors fail closed; duplicate durable receipt lookup prevents re-dispatch. The focused deterministic suite reports `114 passed`.
+
+This is an internal composition proof only, not a Controlled Live Workflow Proof or release completion: it has no post-action semantic/destination verification, `VERIFIED` outcome, live Windows/SEEK run, public HTTP route, or agent/demo callsite. A successful dispatch is only `DISPATCHED` + `verification_pending`. The release chain remains incomplete until W4 closes legacy dispatch bypasses and W5 adds post-action capture, effect/destination verification, next observation, and safe-stop proof.<br>
+**Feeds W5 after W4 closure.**
 
 ### W5 — Semantic verification, safe stop and lineage
 
-完成 #10–12，并把 W3b receipt 绑定到真实 observed effect。`open_detail` 是独立 effect proof；Proof B 主链只执行 `open_apply_flow` 后 safe stop。<br>
-**Depends on W3b + W4; critical path.**
+完成 #10–12，并把 W3b receipt 绑定到真实 observed effect。`open_detail` 是独立 effect proof；Proof B 主链只执行 `open_apply_flow` 后 safe stop。W5 remains pending: post-action capture, effect/destination verification, next observation, and safe-stop proof are not present in W3b. <br>
+**Depends on W4 closure + W3b; critical path.**
 
 ### W6 — Evidence package and public close-out
 
