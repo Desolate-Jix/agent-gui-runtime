@@ -41,6 +41,11 @@ from tests.test_runtime_intent_claim_store_w3b import (
 )
 
 
+OPAQUE_APPLY_ACTION_ID = (
+    "transition_detail_to_apply_entry_0123456789abcdef0123456789abcdef"
+)
+
+
 def _reviewed_asset(asset_id: str = "portfolio.seek") -> dict[str, object]:
     asset = deepcopy(_reviewed_asset_fixture())
     asset["asset_id"] = asset_id
@@ -100,7 +105,7 @@ def _observation(
             "blockers": [],
             "available_actions": [
                 {
-                    "action_id": "open_apply_flow",
+                    "action_id": OPAQUE_APPLY_ACTION_ID,
                     "semantic_action": semantic_action,
                     "description": "Open the reviewed application entry.",
                     "target_state_id": "apply-entry",
@@ -414,7 +419,7 @@ def _intent_payload() -> dict[str, str]:
         "intent_id": "intent.open-apply",
         "session_id": "session.initial",
         "observation_id": "observation.initial",
-        "action_id": "open_apply_flow",
+        "action_id": OPAQUE_APPLY_ACTION_ID,
     }
 
 
@@ -477,6 +482,8 @@ def test_start_uses_server_binding_and_second_start_conflicts() -> None:
     service, _, _, bindings = _callsite()
     observation = _start(_client(service))
     assert observation["contract_version"] == "agent_observation_v1"
+    assert observation["available_actions"][0]["action_id"] == OPAQUE_APPLY_ACTION_ID
+    assert observation["available_actions"][0]["semantic_action"] == "open_apply_flow"
     assert bindings == [
         ServerWorkflowBinding(
             workflow_id="portfolio.seek",
@@ -584,7 +591,7 @@ def test_terminal_intent_is_server_completed_and_duplicate_does_not_redispatch()
     [
         ("session_id", "session.wrong"),
         ("observation_id", "observation.wrong"),
-        ("action_id", "runtime.safe_stop"),
+        ("action_id", "transition_unknown_0123456789abcdef"),
     ],
 )
 def test_wrong_intent_identity_is_rejected_without_consuming(field: str, value: str) -> None:
@@ -818,6 +825,68 @@ def test_restart_blocks_new_start_but_recovers_confirmation_from_persisted_claim
     assert sum(item.attempts for item in controllers + recovered_controllers) == 1
 
 
+def test_opaque_reviewed_transition_id_is_accepted_and_preserved_through_restart_approval() -> None:
+    action_id = OPAQUE_APPLY_ACTION_ID
+    assets = _Assets()
+    workflow = _workflow(asset=assets.assets["portfolio.seek"])
+    payload = _observation(workflow=workflow).model_dump(mode="json")
+    payload["available_actions"][0]["action_id"] = action_id
+    observation = validate_agent_observation_v1(payload)
+    claims = _Claims()
+    controllers: list[_Controller] = []
+
+    def controller_factory(_binding: ServerWorkflowBinding):
+        controller = _Controller(
+            claims,
+            requires_confirmation=True,
+            workflow=workflow,
+        )
+        controller.observation = observation
+        controllers.append(controller)
+        return controller
+
+    first = LocalAgentRuntimeCallsite(
+        project_root=Path("."),
+        asset_store=assets,
+        window_manager=_WindowManager(),
+        claim_store=claims,
+        controller_factory=controller_factory,
+    )
+    first_client = _client(first)
+    _start(first_client)
+    intent_payload = {
+        "intent_id": "intent.opaque-transition",
+        "session_id": observation.session_id,
+        "observation_id": observation.observation_id,
+        "action_id": action_id,
+    }
+    pending = first_client.post(
+        "/runtime/agent/intent/submit",
+        json=intent_payload,
+    )
+    assert pending.status_code == 200
+    assert pending.json()["data"]["status"] == "NEEDS_REVIEW"
+    assert claims.claim.intent.action_id == action_id
+
+    restarted = LocalAgentRuntimeCallsite(
+        project_root=Path("."),
+        asset_store=assets,
+        window_manager=_WindowManager(),
+        claim_store=claims,
+        controller_factory=controller_factory,
+    )
+    approved = _client(restarted).post(
+        "/runtime/agent/confirmation/decide",
+        json={
+            "confirmation_id": pending.json()["data"]["confirmation_id"],
+            "decision": "approved",
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json()["data"]["action"]["action_id"] == action_id
+    assert sum(controller.attempts for controller in controllers) == 1
+
+
 def test_restart_confirmation_approve_rejects_persisted_semantic_action_bypass_before_runtime_dependencies() -> None:
     assets = _Assets()
     observation = _observation(
@@ -831,7 +900,7 @@ def test_restart_confirmation_approve_rejects_persisted_semantic_action_bypass_b
             "session_id": observation.session_id,
             "observation_id": observation.observation_id,
             "workflow": observation.workflow.model_dump(mode="json"),
-            "action_id": "open_apply_flow",
+            "action_id": OPAQUE_APPLY_ACTION_ID,
         }
     )
     confirmation_id = "confirmation." + "b" * 64
@@ -985,7 +1054,7 @@ def test_list_unresolved_claims_empty_and_corruption_fails_closed(tmp_path: Path
             "session_id": observation.session_id,
             "observation_id": observation.observation_id,
             "workflow": observation.workflow.model_dump(mode="json"),
-            "action_id": "open_apply_flow",
+            "action_id": OPAQUE_APPLY_ACTION_ID,
         }
     )
     store.claim(

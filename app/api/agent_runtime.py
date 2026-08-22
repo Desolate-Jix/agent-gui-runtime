@@ -198,7 +198,6 @@ class LocalAgentRuntimeCallsite:
                 if (
                     request.session_id != observation.session_id
                     or request.observation_id != observation.observation_id
-                    or request.action_id != "open_apply_flow"
                     or selected_action is None
                     or selected_action.semantic_action != "open_apply_flow"
                 ):
@@ -385,7 +384,6 @@ class LocalAgentRuntimeCallsite:
             claim is None
             or request.intent_id != claim.intent.intent_id
             or request.action_id != claim.intent.action_id
-            or request.action_id != "open_apply_flow"
         ):
             raise self._error(
                 409,
@@ -413,7 +411,6 @@ class LocalAgentRuntimeCallsite:
             intent.session_id != observation.session_id
             or intent.observation_id != observation.observation_id
             or intent.workflow != observation.workflow
-            or intent.action_id != "open_apply_flow"
             or action is None
             or action.action_id != intent.action_id
             or action.semantic_action != "open_apply_flow"
