@@ -67,6 +67,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
         origin_reader: Any | None = None,
         window_manager: Any | None = None,
         recognition_runner: Callable[..., Mapping[str, Any]] | None = None,
+        grounding_policy: Mapping[str, Any] | None = None,
         cache_limit: int = 8,
     ) -> None:
         if screenshot_service is None:
@@ -84,6 +85,13 @@ class ExistingWindowsCurrentEvidenceAdapter:
         self._window_manager = window_manager
         self._origin_reader = origin_reader or WindowsUIAOriginReader(window_manager=window_manager)
         self._recognition_runner = recognition_runner or _run_existing_read_only_recognition
+        policy = dict(_DEFAULT_GROUNDING_POLICY if grounding_policy is None else grounding_policy)
+        self._minimum_confidence = _number(policy["minimum_confidence"], minimum=0.0, maximum=1.0)
+        self._minimum_score_margin = _number(
+            policy["minimum_score_margin"],
+            minimum=0.0,
+            maximum=1.0,
+        )
         self._cache_limit = max(1, int(cache_limit))
         self._cache: OrderedDict[tuple[str, str, str], _CurrentEvidenceBundle] = OrderedDict()
         self._lock = RLock()
@@ -308,11 +316,21 @@ class ExistingWindowsCurrentEvidenceAdapter:
                 if len(matches) != 1:
                     continue
                 candidate, grounded = matches[0]
+                confidence = min(float(candidate.score), float(grounded.confidence))
+                if (
+                    not candidates.candidates
+                    or candidates.candidates[0].candidate_id != candidate.candidate_id
+                    or candidates.recommended_candidate_id != candidate.candidate_id
+                    or local.recommended_candidate_id != candidate.candidate_id
+                    or confidence < self._minimum_confidence
+                    or _rank_margin(candidates.candidates) < self._minimum_score_margin
+                ):
+                    continue
                 anchor_evidence.append(
                     {
                         "anchor_id": anchor["anchor_id"],
                         "matched": True,
-                        "confidence": min(float(candidate.score), float(grounded.confidence)),
+                        "confidence": confidence,
                         "evidence_ref": (
                             f"current-recognition:{capture_id}:{screenshot_digest[:16]}:"
                             f"{anchor['anchor_id']}:{candidate.candidate_id}"
@@ -566,6 +584,27 @@ def _candidate_bbox(candidate: RecognitionCandidate) -> dict[str, int]:
     return candidate.element.bbox.to_dict()
 
 
+def _rank_margin(candidates: list[RecognitionCandidate]) -> float:
+    if not candidates:
+        return 0.0
+    if len(candidates) == 1:
+        return round(float(candidates[0].score), 4)
+    return round(float(candidates[0].score) - float(candidates[1].score), 4)
+
+
+def _validate_ranked_candidates(
+    candidates: list[RecognitionCandidate],
+    *,
+    expected_eligible: bool,
+) -> None:
+    if [item.rank for item in candidates] != list(range(1, len(candidates) + 1)):
+        raise ValueError("candidate ranks are not contiguous")
+    if any(item.eligible is not expected_eligible for item in candidates):
+        raise ValueError("candidate eligibility does not match its ranking collection")
+    if any(left.score < right.score for left, right in zip(candidates, candidates[1:])):
+        raise ValueError("candidate ranking order is inconsistent")
+
+
 def _parse_recognition(payload: Mapping[str, Any]) -> tuple[CandidateRankResult, LocalGroundingResult]:
     if payload.get("contract_version") != "recognition_plan_v1":
         raise ValueError("current recognition contract mismatch")
@@ -575,6 +614,11 @@ def _parse_recognition(payload: Mapping[str, Any]) -> tuple[CandidateRankResult,
         raise ValueError("current recognition candidate identities are ambiguous")
     if len({item.candidate_id for item in local.results}) != len(local.results):
         raise ValueError("current grounding candidate identities are ambiguous")
+    candidate_by_id = {item.candidate_id: item for item in candidates.candidates}
+    for grounded in local.results:
+        candidate = candidate_by_id.get(grounded.candidate_id)
+        if candidate is None or candidate.element_id != grounded.element_id:
+            raise ValueError("current grounding identities do not match ranked candidates")
     return candidates, local
 
 
@@ -593,17 +637,28 @@ def _parse_candidate_result(value: Mapping[str, Any]) -> CandidateRankResult:
         raise ValueError("candidate result is malformed")
     candidates = [_parse_candidate(_strict_mapping(item)) for item in _strict_list(value["candidates"])]
     rejected = [_parse_candidate(_strict_mapping(item)) for item in _strict_list(value["rejected"])]
-    margin = value["margin_to_second"]
-    if margin is not None:
-        margin = _number(margin, minimum=0.0, maximum=1.0)
+    serialized_margin = value["margin_to_second"]
+    if serialized_margin is not None:
+        _number(serialized_margin, minimum=0.0, maximum=1.0)
+    all_candidate_ids = [item.candidate_id for item in [*candidates, *rejected]]
+    if len(set(all_candidate_ids)) != len(all_candidate_ids):
+        raise ValueError("candidate identities are ambiguous")
+    all_element_ids = [item.element_id for item in [*candidates, *rejected]]
+    if len(set(all_element_ids)) != len(all_element_ids):
+        raise ValueError("candidate element identities are ambiguous")
+    _validate_ranked_candidates(candidates, expected_eligible=True)
+    _validate_ranked_candidates(rejected, expected_eligible=False)
+    recommended = candidates[0].candidate_id if candidates else None
+    if _optional_text(value["recommended_candidate_id"]) != recommended:
+        raise ValueError("candidate recommendation is inconsistent")
     return CandidateRankResult(
         contract_version="candidate_rank_v1",
         goal=_text(value["goal"]),
         top_k=_integer(value["top_k"], minimum=1),
         candidates=candidates,
         rejected=rejected,
-        recommended_candidate_id=_optional_text(value["recommended_candidate_id"]),
-        margin_to_second=margin,
+        recommended_candidate_id=recommended,
+        margin_to_second=_rank_margin(candidates) if candidates else None,
         summary=dict(_strict_mapping(value["summary"])),
     )
 
@@ -648,20 +703,27 @@ def _parse_candidate(value: Mapping[str, Any]) -> RecognitionCandidate:
     )
     if abs(breakdown.total() - _number(breakdown_value["total"], minimum=0.0, maximum=1.0)) > 0.001:
         raise ValueError("candidate score total is inconsistent")
+    score = _number(value["score"], minimum=0.0, maximum=1.0)
+    if breakdown.total() != round(score, 4):
+        raise ValueError("candidate score does not match its breakdown")
     refined = value["refined_bbox"]
     refined_bbox = _parse_bbox_mapping(_strict_mapping(refined)) if refined is not None else None
+    element = _parse_page_element(_strict_mapping(value["element"]))
+    element_id = _text(value["element_id"])
+    if element.element_id != element_id:
+        raise ValueError("candidate element identity is inconsistent")
     return RecognitionCandidate(
         candidate_id=_text(value["candidate_id"]),
         rank=_integer(value["rank"], minimum=1),
-        element_id=_text(value["element_id"]),
+        element_id=element_id,
         label=_text(value["label"], allow_empty=True),
         role=_text(value["role"], allow_empty=True),
         text=_text(value["text"], allow_empty=True),
-        score=_number(value["score"], minimum=0.0, maximum=1.0),
+        score=score,
         eligible=value["eligible"],
         reasons=[_text(item, allow_empty=True) for item in _strict_list(value["reasons"])],
         score_breakdown=breakdown,
-        element=_parse_page_element(_strict_mapping(value["element"])),
+        element=element,
         refined_bbox=refined_bbox,
         bbox_refine_reason=_optional_text(value["bbox_refine_reason"]),
     )
@@ -752,13 +814,16 @@ def _parse_local_grounding(value: Mapping[str, Any]) -> LocalGroundingResult:
     required = {"contract_version", "goal", "results", "recommended_candidate_id", "summary"}
     if set(value) != required or value.get("contract_version") != "narrow_search_v1":
         raise ValueError("local grounding result is malformed")
+    results = [_parse_local_result(_strict_mapping(item)) for item in _strict_list(value["results"])]
+    successful = [item for item in results if item.status == "grounded"]
+    recommended = successful[0].candidate_id if successful else (results[0].candidate_id if results else None)
+    if _optional_text(value["recommended_candidate_id"]) != recommended:
+        raise ValueError("local grounding recommendation is inconsistent")
     return LocalGroundingResult(
         contract_version="narrow_search_v1",
         goal=_text(value["goal"]),
-        results=[
-            _parse_local_result(_strict_mapping(item)) for item in _strict_list(value["results"])
-        ],
-        recommended_candidate_id=_optional_text(value["recommended_candidate_id"]),
+        results=results,
+        recommended_candidate_id=recommended,
         summary=dict(_strict_mapping(value["summary"])),
     )
 
@@ -922,6 +987,7 @@ def build_existing_windows_live_controller(
         project_root=project_root,
         application_identity_key=binding.application_identity_key,
         provider_mode=provider_mode,
+        grounding_policy=policy,
     )
     receipt_store = RuntimeReceiptStore(project_root=project_root)
     claim_store = RuntimeIntentClaimStore(project_root=project_root, receipt_store=receipt_store)

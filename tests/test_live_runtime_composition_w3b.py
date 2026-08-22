@@ -127,6 +127,20 @@ def _recognition(
     element_id = element_id or f"current-{label.casefold().replace(' ', '-')}"
     box = BBox(x=bbox[0], y=bbox[1], w=bbox[2], h=bbox[3])
     point = {"x": bbox[0] + bbox[2] // 2, "y": bbox[1] + bbox[3] // 2}
+    score_parts: dict[str, float] = {}
+    remaining = score
+    for name, weight in (
+        ("text_similarity", 0.38),
+        ("policy_score", 0.18),
+        ("role_score", 0.16),
+        ("confidence_score", 0.14),
+        ("screen_reading_score", 0.10),
+        ("state_score", 0.08),
+    ):
+        value = min(1.0, max(0.0, remaining / weight))
+        score_parts[name] = value
+        remaining -= value * weight
+    breakdown = ScoreBreakdown(**score_parts)
     candidate = RecognitionCandidate(
         candidate_id=candidate_id,
         rank=1,
@@ -137,12 +151,7 @@ def _recognition(
         score=score,
         eligible=eligible,
         reasons=["current_test_evidence"],
-        score_breakdown=ScoreBreakdown(
-            text_similarity=1.0,
-            role_score=1.0,
-            policy_score=1.0,
-            confidence_score=1.0,
-        ),
+        score_breakdown=breakdown,
         element=PageElement(
             element_id=element_id,
             label=label,
@@ -349,6 +358,77 @@ def test_capture_rejects_saved_image_change_during_recognition(tmp_path: Path) -
         adapter.capture_current(session_id="session-current", asset=asset, target_window_handle=4242)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload["candidate_result"]["candidates"][0].update(score=0.99),
+        lambda payload: payload["candidate_result"]["candidates"][0].update(rank=2),
+        lambda payload: payload["candidate_result"].update(
+            recommended_candidate_id="candidate-forged"
+        ),
+        lambda payload: payload["candidate_result"]["candidates"][0]["element"].update(
+            element_id="element-forged"
+        ),
+    ],
+)
+def test_recognition_parser_rejects_forged_ranking_authority(mutation) -> None:
+    import app.agent.live_runtime_composition as composition
+
+    payload = _recognition("Quick Apply", role="button")
+    mutation(payload)
+
+    with pytest.raises(ValueError):
+        composition._parse_recognition(payload)
+
+
+def test_recognition_parser_recomputes_serialized_margin() -> None:
+    import app.agent.live_runtime_composition as composition
+
+    payload = _recognition("Quick Apply", role="button", score=0.83)
+    payload["candidate_result"]["margin_to_second"] = 1.0
+
+    candidates, _ = composition._parse_recognition(payload)
+
+    assert candidates.margin_to_second == pytest.approx(0.83)
+
+
+@pytest.mark.parametrize("case", ["zero_score", "low_local_confidence", "low_margin"])
+def test_anchor_evidence_requires_server_grounding_thresholds(tmp_path: Path, case: str) -> None:
+    asset = _asset()
+    payloads = _entry_payloads(asset)
+    state = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
+    target = state["identity_anchors"][0]
+    payload = payloads[target["label"]]
+    if case == "zero_score":
+        payloads[target["label"]] = _recognition(
+            target["label"],
+            role=_role(target["kind"]),
+            score=0.0,
+        )
+    elif case == "low_local_confidence":
+        payload["narrow_search_result"]["results"][0]["confidence"] = 0.1
+    else:
+        second = _recognition("Different control", role="button", score=0.94)
+        second_candidate = second["candidate_result"]["candidates"][0]
+        second_candidate["rank"] = 2
+        payload["candidate_result"]["candidates"].append(second_candidate)
+        payload["candidate_result"]["margin_to_second"] = 1.0
+        payload["narrow_search_result"]["results"].append(
+            second["narrow_search_result"]["results"][0]
+        )
+
+    adapter, *_ = _adapter(tmp_path, asset, runner=_RecognitionRunner(payloads))
+    current = adapter.capture_current(
+        session_id=f"session-{case}",
+        asset=asset,
+        target_window_handle=4242,
+    )
+
+    assert target["anchor_id"] not in {
+        item["anchor_id"] for item in current["observed_anchor_evidence"]
+    }
+
+
 def test_create_initial_projects_geometry_free_observation_from_exact_asset(tmp_path: Path) -> None:
     asset, _ = _server_asset(tmp_path)
     adapter, *_ = _adapter(
@@ -451,8 +531,15 @@ def test_resolver_rejects_missing_stale_ambiguous_and_malformed_current_evidence
     )
     ambiguous_payloads = _entry_payloads(asset)
     first = _recognition(target["label"], role=_role(target["kind"]), candidate_id="candidate-a")
-    second = _recognition(target["label"], role=_role(target["kind"]), candidate_id="candidate-b")
-    first["candidate_result"]["candidates"].append(second["candidate_result"]["candidates"][0])
+    second = _recognition(
+        target["label"],
+        role=_role(target["kind"]),
+        candidate_id="candidate-b",
+        element_id="current-target-b",
+    )
+    second_candidate = second["candidate_result"]["candidates"][0]
+    second_candidate["rank"] = 2
+    first["candidate_result"]["candidates"].append(second_candidate)
     first["narrow_search_result"]["results"].append(second["narrow_search_result"]["results"][0])
     ambiguous_payloads[target["label"]] = first
     ambiguous, *_ = _adapter(tmp_path, asset, runner=_RecognitionRunner(ambiguous_payloads))
