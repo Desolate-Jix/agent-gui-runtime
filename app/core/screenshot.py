@@ -49,12 +49,18 @@ class ScreenshotService:
         *,
         purpose: str = "capture",
         name_hint: Optional[str] = None,
+        focus_window: bool = True,
     ) -> dict[str, Any]:
         """Capture a screenshot for the bound window or a sub-region."""
         self._ensure_capture_backend()
 
-        bound = window_manager.focus_bound_window()
-        self._wait_after_focus()
+        if focus_window:
+            bound = window_manager.focus_bound_window()
+            self._wait_after_focus()
+        else:
+            bound = window_manager.get_bound_window()
+            if bound is None:
+                raise ValueError("No bound window available to capture")
 
         capture_rect = self._resolve_capture_rect(
             left=bound.rect.left,
