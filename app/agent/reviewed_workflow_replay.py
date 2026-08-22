@@ -600,7 +600,7 @@ def verify_transition_result(
     gate_result = operation_result.get("gate_result")
     if not isinstance(gate_result, Mapping):
         return _failure("transition_verification_v1", "operation_lineage_mismatch", state_advanced=False)
-    if operation_result.get("action_executed") is not True or operation_result.get("post_action_verified") is not True:
+    if operation_result.get("action_executed") is not True:
         gate_reason = _text(gate_result.get("reason"))
         preserved_reason = gate_reason if gate_reason in {
             "stale_approved_plan",

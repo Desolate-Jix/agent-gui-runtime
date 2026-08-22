@@ -434,6 +434,29 @@ def test_post_verification_accepts_trusted_enriched_adapter_envelope_and_new_sem
     assert verify_transition_result(asset, selection, alias_operation, _observation(asset, "capture-2", "d" * 64, "anchor_detail"))["status"] == "verified"
 
 
+@pytest.mark.parametrize("post_action_verified", [False, None])
+def test_post_verification_ignores_caller_supplied_post_action_verified(post_action_verified: bool | None) -> None:
+    from app.agent.reviewed_workflow_replay import verify_transition_result
+
+    asset = _asset()
+    selection = _selection(asset)
+    operation = _operation(selection)
+    if post_action_verified is None:
+        operation.pop("post_action_verified")
+    else:
+        operation["post_action_verified"] = post_action_verified
+
+    result = verify_transition_result(
+        asset,
+        selection,
+        operation,
+        _observation(asset, "capture-2", "d" * 64, "anchor_detail"),
+    )
+
+    assert result["status"] == "verified", result
+    assert result["state_advanced"] is True
+
+
 def test_post_rejects_forged_selection_old_capture_wrong_state_and_operation_shortcut() -> None:
     from app.agent.reviewed_workflow_replay import verify_transition_result
 
