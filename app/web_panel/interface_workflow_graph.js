@@ -519,7 +519,7 @@
     const x = Number(point.x);
     const y = Number(point.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    const nodes = Array.isArray(layout.nodes) ? layout.nodes : [];
+    const nodes = Array.isArray(layout?.nodes) ? layout.nodes : [];
     for (let index = nodes.length - 1; index >= 0; index -= 1) {
       const node = nodes[index];
       if (

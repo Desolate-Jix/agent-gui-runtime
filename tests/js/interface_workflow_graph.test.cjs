@@ -525,6 +525,13 @@ test("keeps cycles and self-loops finite and hit-testable", () => {
   );
 });
 
+test("treats a not-yet-created workflow layout as an empty hit-test surface", () => {
+  assert.equal(
+    hitTestInterfaceWorkflowNode(null, { x: 120, y: 80 }),
+    null,
+  );
+});
+
 test("appends disconnected interfaces without overlapping reachable nodes", () => {
   const graph = branchingGraph();
   graph.nodes.push({ node_id: "orphan", label: "Orphan" });
