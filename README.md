@@ -37,7 +37,7 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 *Sanitized historical illustration: results → detail → application-entry blocker / Safe Stop. It is not a recorded Agent run and does not prove any click, form mutation, or submission.*
 
-- **Today:** offline contract foundations; a human-reviewed and CAS-published Job Detail workflow with two reviewed regions and a locally verified Panel save/reload; an exact deterministic release-callsite proof; and one bounded controlled-live Windows proof through server-owned confirmation, fresh Apply Entry verification, and durable `SAFE_STOP/stop_boundary`. The current active-revision reload has not yet been packaged as tracked release evidence.
+- **Today:** offline contract foundations; a tracked human-reviewed and CAS-published Job Detail workflow with two reviewed regions and fresh-process exact reload proof; an exact deterministic release-callsite proof; and one independently reviewed bounded controlled-live Windows proof through server-owned confirmation, fresh Apply Entry verification, and durable `SAFE_STOP/stop_boundary`.
 - **Implemented internally:** exact released asset → loopback `LocalAgentRuntimeCallsite` → production current-evidence adapter → strict Observation/Intent → current re-ground → Gate → one-time authority → exactly one deterministic fake dispatch → fresh C2 observation → semantic Safe Stop → durable terminal receipt.
 - **Not yet:** general SEEK navigation, form filling, file upload, Continue/Next, submission, unattended reliability, production readiness, public/external Agent integration, external/remote Provider integration, or live external Agent adapters.
 
@@ -144,10 +144,10 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 | Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
 | Built-in and recorded OmniParser Shadow output entering one provider-neutral review model | **Current — Contract Proof** | A server-owned fixed Built-in OCR capture and recorded OmniParser-shaped worker success/failure are sealed into UEI and render through the same non-authorizing Review summary. This is not live OmniParser inference, provider-accuracy proof, or execution authorization. |
-| Human review and workflow creation | **Current — Portfolio v1 release asset** | The visible Panel flow repaired Quick Apply, added a non-executable Save evidence box, and now rebinds to backend-canonical saved_review before accepting human_approved; a local reload verified the Job Detail state. Active asset workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0 is registry revision 2, content SHA 8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7. The current active-revision tracked reload proof is still missing from a tracked release workspace. The asset remains non-authorizing; Apply Entry remains the safe-stop boundary. |
+| Human review and workflow creation | **Current — Portfolio v1 release asset** | The visible Panel flow repaired Quick Apply, added a non-executable Save evidence box, and now rebinds to backend-canonical saved_review before accepting human_approved. The tracked release workspace recompiles and reloads active asset workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0 byte-exactly at content SHA 8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7. Five unavailable archival draft snapshots are explicitly marked unresolved and non-authoritative; they do not affect the current asset. The asset remains non-authorizing; Apply Entry remains the safe-stop boundary. |
 | Current relocation, Gate, and unique dispatch authority (W4) | **Current — internal + one bounded live proof** | Only `LiveController` mints authority; `ExistingWindowsBackendAdapter` is the sole authority-scope consumer; guarded raw sinks fail closed. The scoped live run passed current target-region freshness and dispatched once; this does not prove general reliability or public integration. |
 | Post-action semantic verification and verified receipt promotion (W5) | **Current — deterministic + one bounded live proof** | The active released asset reached one real `open_apply_flow` dispatch, fresh `Choose documents` resolution, verified effect/destination, and durable `SAFE_STOP/stop_boundary`; `attempt_count=1` and there was no form fill, upload, Continue/Next, submission, or redispatch. |
-| Portfolio v1 close-out (W6) | **Partial — evidence packaging pending** | One bounded live receipt exists, but the tracked release workspace, a current 10–15 second GIF, a public negative-control/lineage/rollback bundle, current active-revision tracked reload proof, and current semantic `open_detail` proof are still missing. |
+| Portfolio v1 close-out (W6) | **Partial — one acceptance gap remains** | The tracked release workspace, 12-second privacy-checked GIF, public receipt/negative-control/cleanup package, exact active-revision reload, and bounded `open_apply_flow` proof are complete and independently reviewed. A current Runtime-owned semantic `open_detail` proof is still missing; historical click/diff recordings are insufficient because their semantic verifier was not applicable. |
 | Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded one-shot Windows backend exist. It is not a public HTTP route, agent/demo callsite, or production-readiness claim. |
 | Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
@@ -156,6 +156,10 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 ### Bounded controlled-live receipt
 
 One scoped run started from an already-open SEEK Job Detail and used the same reviewed asset, loopback Agent Runtime contract, server-owned confirmation, current re-grounding, Gate, Windows backend, post-action observation, and durable receipt path:
+
+![Controlled Portfolio v1 runtime replay](docs/media/portfolio-v1-controlled-live.gif)
+
+*12-second privacy-checked editorial replay, not a continuous recording. The PRE capture is separately hashed but not receipt-bound; the POST capture is receipt-bound. See the [media manifest](docs/media/portfolio-v1-controlled-live.manifest.json) and [public evidence package](release/portfolio-v1/evidence/manifest.json).*
 
 - workflow: `portfolio_v1_seek_apply_entry`
 - active asset SHA: `8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7`
@@ -225,11 +229,11 @@ Model weights and optional vision services are not distributed. Do not commit pr
 
 ## Target state and roadmap
 
-Portfolio v1 has one scoped controlled-live receipt, but **W6 remains Partial / evidence packaging pending**. Close-out still requires tracked, public, reviewer-auditable artifacts rather than prose alone:
+Portfolio v1 has a tracked and independently reviewed evidence package for one scoped controlled-live receipt, but **W6 remains Partial** because one acceptance predicate is still open:
 
-> **Reviewed release asset → deterministic exact-asset proof → one controlled-live `open_apply_flow` → fresh Apply Entry `SAFE_STOP/stop_boundary` receipt → W6 evidence packaging pending.**
+> **Reviewed release asset → exact reload → deterministic exact-asset proof → one controlled-live `open_apply_flow` → fresh Apply Entry `SAFE_STOP/stop_boundary` receipt → public evidence review passed.**
 
-Still missing: a tracked release workspace; a current 10–15 second GIF; a public negative-control, lineage, and rollback bundle; tracked reload proof for the current active revision; and current semantic `open_detail` proof. The existing receipt ID and object hash remain valid scoped evidence, but they do not complete those deliverables. No Provider accuracy, general SEEK navigation, form fill, Continue/Next, upload, final submit, unattended reliability, or production readiness is claimed.
+Still missing: a current Runtime-owned semantic `open_detail` proof with before/after expected-effect verification. Historical `open_detail` artifacts prove a real click and visual change only; their semantic verifier was marked not applicable, so they are not promoted. Creating a new proof would leave the user-approved Quick Apply-only scope and therefore remains a separate approval decision. No Provider accuracy, general SEEK navigation, form fill, Continue/Next, upload, final submit, unattended reliability, or production readiness is claimed.
 
 Automatic provider selection, remote execution, raw-coordinate Agent authority, ATS traversal, form filling, upload, Continue/Next, and final submission are not Portfolio v1 capabilities.
 

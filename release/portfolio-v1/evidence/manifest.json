@@ -8,9 +8,9 @@
   },
   "status": {
     "package": "complete",
-    "independent_review": "pending",
-    "release_status_promotion": "blocked_pending_review",
-    "controlled_live_workflow_proven": false
+    "independent_review": "accepted",
+    "release_status_promotion": "eligible",
+    "controlled_live_workflow_proven": true
   },
   "evidence_grade_taxonomy": {
     "exact_live": "A projection of one observed real Runtime receipt.",

@@ -17,8 +17,8 @@ historical filename. It records:
 
 - `human_review_completed: true` for the executable `job_detail` boundary;
 - `compiled_release_asset_present: true`;
-- `controlled_live_workflow_proven: false` while the checked-in public evidence
-  package awaits independent review and explicit release-status promotion;
+- `controlled_live_workflow_proven: true` for one bounded `open_apply_flow`
+  path after independent package review; this is not a general reliability claim;
 - `runtime_dispatch_authorization: false`;
 - `artifact_is_authorization: false` and `execute_binding_enabled: false`.
 
@@ -96,8 +96,8 @@ The focused release test proves:
 - source compilation reproduces the checked-in asset byte-for-byte;
 - compiled runtime knowledge contains no historical geometry authority;
 - a fresh process reloads the exact active content-addressed asset;
-- all artifacts remain non-authoritative and
-  `controlled_live_workflow_proven` remains false.
+- all reviewed assets remain non-authoritative even though the separate public
+  package now proves one bounded controlled-live workflow path.
 
 ## Public evidence package
 
@@ -111,7 +111,7 @@ The focused release test proves:
 - strict JSON Schemas for each public artifact.
 
 The package contains no raw Runtime object, capture, window/process identity,
-full URL, or page-specific personal fields. Its status remains blocked pending
-independent review. Until that review and a separate root/release status-sync
-slice finish, it must not promote `controlled_live_workflow_proven` or broaden
-the claim beyond one bounded live receipt.
+full URL, or page-specific personal fields. Independent review (read-only) found
+no Important or Critical issue, so the bounded workflow claim is promoted. The
+claim remains limited to one receipt-backed `open_apply_flow` path and must not
+be broadened to Provider accuracy, general navigation, or production readiness.

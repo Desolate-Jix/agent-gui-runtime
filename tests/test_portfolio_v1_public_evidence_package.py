@@ -82,9 +82,9 @@ def test_public_evidence_manifest_is_content_addressed_and_schema_bound() -> Non
     }
     assert manifest["status"] == {
         "package": "complete",
-        "independent_review": "pending",
-        "release_status_promotion": "blocked_pending_review",
-        "controlled_live_workflow_proven": False,
+        "independent_review": "accepted",
+        "release_status_promotion": "eligible",
+        "controlled_live_workflow_proven": True,
     }
     assert manifest["evidence_grade_taxonomy"] == {
         "exact_live": "A projection of one observed real Runtime receipt.",
@@ -393,16 +393,16 @@ def test_public_schemas_freeze_contract_versions_and_disallow_extra_fields() -> 
     assert all(item["additionalProperties"] is False for item in variants)
 
 
-def test_release_status_stays_partial_until_independent_package_review() -> None:
+def test_reviewed_package_promotes_only_the_bounded_live_workflow_claim() -> None:
     package = _json(PACKAGE_ROOT / "manifest.json")
     release = _json(RELEASE_MANIFEST)
     readme = ROOT_README.read_text(encoding="utf-8-sig")
     release_readme = RELEASE_README.read_text(encoding="utf-8-sig")
 
-    assert package["status"]["independent_review"] == "pending"
-    assert package["status"]["release_status_promotion"] == "blocked_pending_review"
-    assert package["status"]["controlled_live_workflow_proven"] is False
-    assert release["controlled_live_workflow_proven"] is False
+    assert package["status"]["independent_review"] == "accepted"
+    assert package["status"]["release_status_promotion"] == "eligible"
+    assert package["status"]["controlled_live_workflow_proven"] is True
+    assert release["controlled_live_workflow_proven"] is True
     assert "Portfolio v1 close-out (W6) | **Partial" in readme
     assert "Portfolio v1 close-out (W6) | **Stable" not in readme
     assert "evidence/manifest.json" in release_readme

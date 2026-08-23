@@ -11,7 +11,7 @@
   "evidence_grade": "human_reviewed_source_with_sanitized_evidence_and_compiled_asset",
   "human_review_completed": true,
   "compiled_release_asset_present": true,
-  "controlled_live_workflow_proven": false,
+  "controlled_live_workflow_proven": true,
   "runtime_dispatch_authorization": false,
   "artifact_is_authorization": false,
   "execute_binding_enabled": false,
@@ -27,6 +27,6 @@
     "Quick apply is the only compiled transition; Save is preserved as read_only review evidence and is not executable.",
     "Review sources may retain evidence bounding boxes, but the compiled asset contains no historical coordinate authority and requires fresh grounding.",
     "The compiled asset is reviewed knowledge, not dispatch authorization; Gate and one-time Runtime authority remain mandatory.",
-    "controlled_live_workflow_proven remains false because the public controlled-live evidence package is a separate release slice."
+    "One bounded controlled-live open_apply_flow path is proven by the independently reviewed public evidence package; this does not authorize dispatch or establish general reliability."
   ]
 }

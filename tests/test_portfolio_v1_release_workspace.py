@@ -93,7 +93,11 @@ def test_portfolio_v1_release_manifest_records_reviewed_non_authoritative_asset(
     assert manifest["evidence_grade"] == "human_reviewed_source_with_sanitized_evidence_and_compiled_asset"
     assert manifest["human_review_completed"] is True
     assert manifest["compiled_release_asset_present"] is True
-    assert manifest["controlled_live_workflow_proven"] is False
+    assert manifest["controlled_live_workflow_proven"] is True
+    assert any(
+        "one bounded controlled-live open_apply_flow path" in note.lower()
+        for note in manifest["notes"]
+    )
     assert manifest["runtime_dispatch_authorization"] is False
     assert manifest["artifact_is_authorization"] is False
     assert manifest["execute_binding_enabled"] is False
