@@ -968,9 +968,20 @@ test("approve and save persists exactly the approved revision without a second e
   const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
   assert.notEqual(start, -1, "approve-and-save handler must exist");
   const calls = [];
+  const originalSnapshot = {
+    workflow: { workflow_id: "seek_flow" },
+    nodes: [{ node_id: "job_detail" }],
+  };
   const reviewState = {
-    snapshot: () => ({ workflow: { workflow_id: "seek_flow" }, nodes: [{ node_id: "job_detail" }] }),
+    snapshot: () => structuredClone(originalSnapshot),
     select: () => {},
+  };
+  const draftState = {
+    snapshot: () => structuredClone(originalSnapshot),
+    select: () => {},
+  };
+  const approvedReview = {
+    nodes: [{ node_id: "job_detail", review_status: "human_approved" }],
   };
   const sandbox = {
     currentInterfaceWorkflowMutationTarget: () => ({
@@ -983,10 +994,10 @@ test("approve and save persists exactly the approved revision without a second e
     interfaceWorkflowSavedReviewPath: "",
     learningDraftEditorWorkflowBinding: null,
     renderInterfaceWorkflowReviewSelection: () => {},
-    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => reviewState },
-    approveCurrentInterfaceWorkflowNode: () => {
-      calls.push(["approve"]);
-      return { nodes: [{ node_id: "job_detail", review_status: "human_approved" }] };
+    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => draftState },
+    approveCurrentInterfaceWorkflowNode: (options) => {
+      calls.push(["approve", options?.state === draftState, options?.isolated === true]);
+      return approvedReview;
     },
     saveInterfaceWorkflowReview: async (options) => {
       calls.push(["save", options]);
@@ -1001,10 +1012,101 @@ test("approve and save persists exactly the approved revision without a second e
   assert.deepEqual(JSON.parse(JSON.stringify(await sandbox.result)), {
     path: "reviewed_workflow.json",
   });
-  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-    ["approve"],
-    ["save", { commitEditor: false, requireDisplayedWorkflow: true }],
-  ]);
+  assert.deepEqual(calls[0], ["approve", true, true]);
+  assert.equal(calls[1][0], "save");
+  assert.equal(calls[1][1].commitEditor, false);
+  assert.equal(calls[1][1].requireDisplayedWorkflow, true);
+  assert.equal(calls[1][1].expectedState, reviewState);
+  assert.equal(calls[1][1].expectedBinding, null);
+  assert.equal(calls[1][1].expectedSnapshotKey, JSON.stringify(originalSnapshot));
+  assert.equal(calls[1][1].preserveStateSession, true);
+  assert.equal(calls[1][1].reviewOverride, approvedReview);
+  assert.equal(sandbox.interfaceWorkflowReviewState, draftState);
+});
+
+test("non-session approval stays hidden until persistence succeeds and then rerenders approved state", async () => {
+  const start = source.indexOf("function approveCurrentInterfaceWorkflowNode");
+  const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
+  const originalSnapshot = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "seek_flow" },
+    nodes: [{ node_id: "job_detail", review_status: "needs_human_review" }],
+    edges: [],
+  };
+  const createState = () => ({
+    approved: false,
+    select: () => {},
+    current() {
+      return { node: this.snapshot().nodes[0], outgoing_edges: [] };
+    },
+    confirmNodeAndOutgoingHumanReview() {
+      this.approved = true;
+    },
+    snapshot() {
+      const value = structuredClone(originalSnapshot);
+      if (this.approved) value.nodes[0].review_status = "human_approved";
+      return value;
+    },
+  });
+  const liveState = createState();
+  const draftState = createState();
+  const binding = { authority: "workflow", state: liveState };
+  const renderStatuses = [];
+  let resolveSave;
+  let savedOptions = null;
+  const savePending = new Promise((resolve) => { resolveSave = resolve; });
+  const sandbox = {
+    interfaceWorkflowReviewState: liveState,
+    interfaceWorkflowReview: liveState.snapshot(),
+    interfaceWorkflowHasUnsavedChanges: true,
+    interfaceWorkflowSavedReviewPath: "workflow.json",
+    learningDraftEditorWorkflowBinding: binding,
+    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => draftState },
+    window: {
+      InterfaceWorkflowReview: {
+        commitInterfaceWorkflowReviewForSave: ({ state, commitOperation }) => {
+          commitOperation();
+          return state.snapshot();
+        },
+      },
+    },
+    currentInterfaceWorkflowOperation: () => null,
+    commitInterfaceWorkflowOperationEditor: () => null,
+    markInterfaceWorkflowUnsaved: () => {},
+    saveInterfaceWorkflowReview: async (options) => {
+      savedOptions = options;
+      return savePending;
+    },
+    renderInterfaceWorkflowReviewSelection: () => {
+      renderStatuses.push(
+        sandbox.interfaceWorkflowReviewState.current().node.review_status,
+      );
+    },
+    $: (id) => ({
+      interfaceWorkflowNodeName: { value: "Job Detail" },
+      interfaceWorkflowSurfaceType: { value: "detail" },
+    }[id] || null),
+  };
+  sandbox.currentInterfaceWorkflowMutationTarget = () => ({
+    state: sandbox.interfaceWorkflowReviewState,
+    view: sandbox.interfaceWorkflowReviewState.current(),
+    reason: "",
+  });
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = approveAndSaveCurrentInterfaceWorkflowNode();`,
+    sandbox,
+  );
+
+  const rendersBeforePersistence = [...renderStatuses];
+  resolveSave({ path: "reviewed_workflow.json" });
+  assert.deepEqual(JSON.parse(JSON.stringify(await sandbox.result)), {
+    path: "reviewed_workflow.json",
+  });
+  assert.deepEqual(rendersBeforePersistence, []);
+  assert.equal(savedOptions.reviewOverride.nodes[0].review_status, "human_approved");
+  assert.equal(sandbox.interfaceWorkflowReviewState, draftState);
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, draftState);
+  assert.deepEqual(renderStatuses, ["human_approved"]);
 });
 
 test("workflow editor commits preserve the current review status without a removed status selector", () => {
@@ -1091,7 +1193,14 @@ test("session approval is built in an isolated state and persistence failure lea
   const draftState = {
     approved: false,
     select: () => {},
-    current: () => ({ node: { node_id: "job_detail", review_status: "needs_human_review" } }),
+    current() {
+      return {
+        node: {
+          node_id: "job_detail",
+          review_status: this.approved ? "human_approved" : "needs_human_review",
+        },
+      };
+    },
     snapshot() {
       const value = structuredClone(originalSnapshot);
       if (this.approved) value.nodes[0].review_status = "human_approved";
@@ -1144,7 +1253,74 @@ test("session approval is built in an isolated state and persistence failure lea
   assert.equal(calls.some(([name]) => name === "render"), false);
 });
 
-test("approve and save restores the unapproved revision when persistence fails", async () => {
+test("successful session approval rerenders the canonical approved live state after persistence", async () => {
+  const start = source.indexOf("async function approveAndSaveCurrentInterfaceWorkflowNode");
+  const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
+  const originalSnapshot = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "seek_flow" },
+    nodes: [{ node_id: "job_detail", review_status: "needs_human_review" }],
+    edges: [],
+  };
+  const liveState = { snapshot: () => structuredClone(originalSnapshot) };
+  const draftState = {
+    approved: false,
+    select: () => {},
+    current() {
+      return {
+        node: {
+          node_id: "job_detail",
+          review_status: this.approved ? "human_approved" : "needs_human_review",
+        },
+      };
+    },
+    snapshot() {
+      const value = structuredClone(originalSnapshot);
+      if (this.approved) value.nodes[0].review_status = "human_approved";
+      return value;
+    },
+  };
+  const binding = { authority: "workflow", state: liveState };
+  const renderStatuses = [];
+  const sandbox = {
+    interfaceWorkflowReviewState: liveState,
+    interfaceWorkflowReview: originalSnapshot,
+    learningDraftEditorWorkflowBinding: binding,
+    interfaceWorkflowReviewSessionIsCurrent: () => true,
+    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => draftState },
+    approveCurrentInterfaceWorkflowNode: () => {
+      draftState.approved = true;
+      return draftState.snapshot();
+    },
+    saveInterfaceWorkflowReview: async () => ({ path: "reviewed_workflow.json" }),
+    renderInterfaceWorkflowReviewSelection: () => {
+      renderStatuses.push(
+        sandbox.interfaceWorkflowReviewState.current().node.review_status,
+      );
+    },
+  };
+  const session = {
+    state: liveState,
+    binding,
+    workflow_id: "seek_flow",
+    node_id: "job_detail",
+    source_path: "draft.json",
+  };
+  sandbox.session = session;
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = approveAndSaveCurrentInterfaceWorkflowNode(session);`,
+    sandbox,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await sandbox.result)), {
+    path: "reviewed_workflow.json",
+  });
+  assert.equal(sandbox.interfaceWorkflowReviewState, draftState);
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, draftState);
+  assert.deepEqual(renderStatuses, ["human_approved"]);
+});
+
+test("approve and save leaves the original unapproved revision untouched when persistence fails", async () => {
   const start = source.indexOf("async function approveAndSaveCurrentInterfaceWorkflowNode");
   const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
   const originalSnapshot = {
@@ -1152,8 +1328,9 @@ test("approve and save restores the unapproved revision when persistence fails",
     nodes: [{ node_id: "job_detail", review_status: "needs_human_review" }],
   };
   const originalState = { snapshot: () => originalSnapshot, select: () => {} };
-  const restoredState = { snapshot: () => originalSnapshot, select: () => {} };
+  const draftState = { snapshot: () => originalSnapshot, select: () => {} };
   const binding = { authority: "workflow", state: originalState };
+  let renders = 0;
   const sandbox = {
     currentInterfaceWorkflowMutationTarget: () => ({
       state: originalState,
@@ -1164,12 +1341,12 @@ test("approve and save restores the unapproved revision when persistence fails",
     interfaceWorkflowHasUnsavedChanges: false,
     interfaceWorkflowSavedReviewPath: "workflow.json",
     learningDraftEditorWorkflowBinding: binding,
-    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => restoredState },
+    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => draftState },
     approveCurrentInterfaceWorkflowNode: () => ({
       nodes: [{ node_id: "job_detail", review_status: "human_approved" }],
     }),
     saveInterfaceWorkflowReview: async () => null,
-    renderInterfaceWorkflowReviewSelection: () => {},
+    renderInterfaceWorkflowReviewSelection: () => { renders += 1; },
   };
   vm.runInNewContext(
     `${source.slice(start, end)}; globalThis.result = approveAndSaveCurrentInterfaceWorkflowNode();`,
@@ -1177,9 +1354,10 @@ test("approve and save restores the unapproved revision when persistence fails",
   );
 
   assert.equal(await sandbox.result, null);
-  assert.equal(sandbox.interfaceWorkflowReviewState, restoredState);
-  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, restoredState);
+  assert.equal(sandbox.interfaceWorkflowReviewState, originalState);
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, originalState);
   assert.equal(sandbox.interfaceWorkflowReview.nodes[0].review_status, "needs_human_review");
+  assert.equal(renders, 0);
 });
 
 test("approving the current interface commits then confirms the node and all outgoing paths", () => {

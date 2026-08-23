@@ -20272,41 +20272,58 @@ async function approveAndSaveCurrentInterfaceWorkflowNode(session = null) {
     };
     session.state = draftState;
     session.binding = learningDraftEditorWorkflowBinding;
+    renderInterfaceWorkflowReviewSelection();
     return saved;
   }
   const mutationTarget = currentInterfaceWorkflowMutationTarget();
   const originalState = mutationTarget.state;
   const originalSnapshot = originalState?.snapshot?.();
   const originalNodeId = String(mutationTarget.view?.node?.node_id || "").trim();
-  const originalUnsaved = interfaceWorkflowHasUnsavedChanges;
-  const originalSavedPath = interfaceWorkflowSavedReviewPath;
-  const restoreUnapprovedSnapshot = () => {
-    const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
-    if (!originalSnapshot || typeof factory !== "function") return;
-    const restoredState = factory(originalSnapshot);
-    interfaceWorkflowReviewState = restoredState;
-    interfaceWorkflowReview = restoredState.snapshot();
-    interfaceWorkflowHasUnsavedChanges = originalUnsaved;
-    interfaceWorkflowSavedReviewPath = originalSavedPath;
-    if (
-      learningDraftEditorWorkflowBinding?.authority === "workflow"
-      && learningDraftEditorWorkflowBinding.state === originalState
-    ) {
-      learningDraftEditorWorkflowBinding = {
-        ...learningDraftEditorWorkflowBinding,
-        state: restoredState,
-      };
-    }
-    if (originalNodeId) restoredState.select(originalNodeId);
-    renderInterfaceWorkflowReviewSelection();
-  };
-  const approved = approveCurrentInterfaceWorkflowNode();
-  if (!approved) {
-    restoreUnapprovedSnapshot();
+  const originalBinding = learningDraftEditorWorkflowBinding;
+  const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+  if (!originalSnapshot || !originalNodeId || typeof factory !== "function") return null;
+  const openingSnapshotKey = JSON.stringify(originalSnapshot);
+  const draftState = factory(originalSnapshot);
+  try {
+    draftState.select(originalNodeId);
+  } catch (_error) {
     return null;
   }
-  const saved = await saveInterfaceWorkflowReview({ commitEditor: false, requireDisplayedWorkflow: true });
-  if (!saved) restoreUnapprovedSnapshot();
+  const approved = approveCurrentInterfaceWorkflowNode({
+    state: draftState,
+    view: draftState.current?.(),
+    isolated: true,
+  });
+  if (!approved) return null;
+  const saved = await saveInterfaceWorkflowReview({
+    commitEditor: false,
+    requireDisplayedWorkflow: true,
+    expectedState: originalState,
+    expectedBinding: originalBinding,
+    expectedSnapshotKey: openingSnapshotKey,
+    preserveStateSession: true,
+    reviewOverride: approved,
+  });
+  if (!saved) return null;
+  const currentTarget = currentInterfaceWorkflowMutationTarget();
+  if (
+    currentTarget.state !== originalState
+    || String(currentTarget.view?.node?.node_id || "").trim() !== originalNodeId
+    || learningDraftEditorWorkflowBinding !== originalBinding
+    || JSON.stringify(originalState.snapshot()) !== openingSnapshotKey
+  ) return null;
+  interfaceWorkflowReviewState = draftState;
+  interfaceWorkflowReview = approved;
+  if (
+    learningDraftEditorWorkflowBinding?.authority === "workflow"
+    && learningDraftEditorWorkflowBinding.state === originalState
+  ) {
+    learningDraftEditorWorkflowBinding = {
+      ...learningDraftEditorWorkflowBinding,
+      state: draftState,
+    };
+  }
+  renderInterfaceWorkflowReviewSelection();
   return saved;
 }
 
