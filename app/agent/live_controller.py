@@ -254,7 +254,7 @@ class LiveController:
         project_root: str | Path | None = None,
         verification_max_capture_attempts: int = 4,
         verification_poll_interval_seconds: float = 0.25,
-        verification_total_budget_seconds: float = 5.0,
+        verification_total_budget_seconds: float = 30.0,
         verification_sleeper: Callable[[float], None] | None = None,
         verification_monotonic_clock: Callable[[], float] | None = None,
     ) -> None:

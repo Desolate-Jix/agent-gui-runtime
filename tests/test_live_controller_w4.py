@@ -307,7 +307,7 @@ def _controller(
     workflow_id: str = "workflow.seek.portfolio",
     verification_max_capture_attempts: int = 1,
     verification_poll_interval_seconds: float = 0.0,
-    verification_total_budget_seconds: float = 5.0,
+    verification_total_budget_seconds: float | None = None,
     verification_sleeper=lambda _seconds: None,
     verification_monotonic_clock=lambda: 0.0,
 ):
@@ -331,6 +331,16 @@ def _controller(
     visibility = visibility_checker or _WindowVisibilityChecker(
         bound_window_handle=target_window_handle,
     )
+    verification_options = {
+        "verification_max_capture_attempts": verification_max_capture_attempts,
+        "verification_poll_interval_seconds": verification_poll_interval_seconds,
+        "verification_sleeper": verification_sleeper,
+        "verification_monotonic_clock": verification_monotonic_clock,
+    }
+    if verification_total_budget_seconds is not None:
+        verification_options["verification_total_budget_seconds"] = (
+            verification_total_budget_seconds
+        )
     controller = LiveController(
         binding=ServerWorkflowBinding(
             workflow_id=workflow_id,
@@ -349,11 +359,7 @@ def _controller(
             receipt_store=RuntimeReceiptStore(project_root=tmp_path),
         ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
-        verification_max_capture_attempts=verification_max_capture_attempts,
-        verification_poll_interval_seconds=verification_poll_interval_seconds,
-        verification_total_budget_seconds=verification_total_budget_seconds,
-        verification_sleeper=verification_sleeper,
-        verification_monotonic_clock=verification_monotonic_clock,
+        **verification_options,
     )
     return controller, source, resolver, gate, backend
 
@@ -832,6 +838,39 @@ def test_bounded_verification_poll_stops_when_total_budget_is_exhausted(tmp_path
     )
     assert source.projected_calls == 2
     assert waits == []
+    assert backend.dispatch_count == 1
+
+
+def test_default_verification_budget_allows_second_capture_after_slow_first_capture(
+    tmp_path,
+) -> None:
+    asset = _asset()
+    clock_values = iter((0.0, 12.0, 12.25))
+    waits: list[float] = []
+    source_state = _current_observation(
+        asset,
+        capture_id="capture-post-source",
+    )
+    target_state = _current_observation(
+        asset,
+        capture_id="capture-post-target",
+        anchors=("anchor_detail", "quick_apply"),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        post_current_sequence=[source_state, target_state],
+        verification_max_capture_attempts=2,
+        verification_poll_interval_seconds=0.25,
+        verification_sleeper=waits.append,
+        verification_monotonic_clock=lambda: next(clock_values),
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("VERIFIED", "none")
+    assert source.projected_calls == 3
+    assert waits == [0.25]
     assert backend.dispatch_count == 1
 
 
