@@ -908,6 +908,116 @@ test("reviewed control action binding rejects a conflicting region subject", () 
   );
 });
 
+test("reviewed control action binding canonicalizes unmatched aliases across the action collection", () => {
+  const review = reviewFixture();
+  const sourceNode = review.nodes[0];
+  sourceNode.editable_review_source_path = "artifacts/node-review-sources/list.json";
+  sourceNode.source_paths = [sourceNode.editable_review_source_path];
+  sourceNode.controls = [
+    { control_id: "apply", label: "Quick apply", role: "button" },
+    { control_id: "archive", label: "Archive", role: "button" },
+  ];
+  const candidates = [
+    {
+      action_template_id: "open_apply_flow",
+      semantic_action: "open_apply_flow",
+      target_control_id: "apply",
+      target_region_id: "apply",
+      target_interface_id: "node_detail",
+    },
+    {
+      action_template_id: "archive_item",
+      semantic_action: "archive_item",
+      target_control_id: "archive",
+      target_region_id: "archive",
+      target_interface_id: "node_detail",
+    },
+    {
+      action_template_id: "read_content",
+      semantic_action: "read_content",
+      target_control_id: "",
+      target_region_id: "content_region",
+      target_interface_id: "node_detail",
+    },
+  ];
+  const originalCandidates = structuredClone(candidates);
+  const state = createInterfaceWorkflowReviewState(review);
+
+  state.replaceReviewedNodeEvidenceBySource(
+    sourceNode.editable_review_source_path,
+    "artifacts/learning-draft-review/list/reviewed.json",
+    {
+      regions: [{
+        region_id: "reviewed_apply",
+        label: "Quick apply",
+        semantic_action: "open_apply_flow",
+        bbox: { x: 120, y: 240, w: 180, h: 44 },
+      }],
+      action_candidates: candidates,
+    },
+  );
+
+  const attached = state.snapshot().nodes[0].action_candidates;
+  assert.deepEqual(
+    attached.map((action) => [action.action_template_id, action.target_control_id, action.target_region_id]),
+    [
+      ["open_apply_flow", "apply", ""],
+      ["archive_item", "archive", ""],
+      ["read_content", "", "content_region"],
+    ],
+  );
+  assert.deepEqual(candidates, originalCandidates);
+});
+
+test("reviewed control action binding rejects a later unmatched conflict atomically", () => {
+  const review = reviewFixture();
+  const sourceNode = review.nodes[0];
+  sourceNode.editable_review_source_path = "artifacts/node-review-sources/list.json";
+  sourceNode.source_paths = [sourceNode.editable_review_source_path];
+  sourceNode.controls = [
+    { control_id: "apply", label: "Quick apply", role: "button" },
+    { control_id: "archive", label: "Archive", role: "button" },
+  ];
+  const candidates = [
+    {
+      action_template_id: "open_apply_flow",
+      semantic_action: "open_apply_flow",
+      target_control_id: "apply",
+      target_region_id: "apply",
+      target_interface_id: "node_detail",
+    },
+    {
+      action_template_id: "archive_item",
+      semantic_action: "archive_item",
+      target_control_id: "archive",
+      target_region_id: "different_region",
+      target_interface_id: "node_detail",
+    },
+  ];
+  const originalCandidates = structuredClone(candidates);
+  const state = createInterfaceWorkflowReviewState(review);
+  const originalState = state.snapshot();
+
+  assert.throws(
+    () => state.replaceReviewedNodeEvidenceBySource(
+      sourceNode.editable_review_source_path,
+      "artifacts/learning-draft-review/list/reviewed.json",
+      {
+        regions: [{
+          region_id: "reviewed_apply",
+          label: "Quick apply",
+          semantic_action: "open_apply_flow",
+          bbox: { x: 120, y: 240, w: 180, h: 44 },
+        }],
+        action_candidates: candidates,
+      },
+    ),
+    /conflicting target control and region/i,
+  );
+  assert.deepEqual(candidates, originalCandidates);
+  assert.deepEqual(state.snapshot(), originalState);
+});
+
 test("saved workflow membership wins over a standalone source preview on reopen", () => {
   assert.deepEqual(resolveInterfaceAssetOpenTarget({
     sourcePath: "artifacts/node-review-sources/list.json",
