@@ -11062,9 +11062,9 @@ function clearInterfaceWorkflowCorrectionSelection() {
   if (learningDraftReviewLoadAbortController && !learningDraftReviewLoadAbortController.signal.aborted) {
     learningDraftReviewLoadAbortController.abort();
   }
-  learningDraftReview = null;
-  learningDraftReviewBboxEdits = { regions: {}, actions: {} };
-  resetLearningDraftEditorState(null);
+  clearLearningDraftReviewDisplay("workflow node changed", {
+    preserveWorkflowReview: true,
+  });
   closeImageInspector();
   setInterfaceWorkflowCorrectionOpen(false);
   setInterfaceWorkflowBoxEditorStatus("");

@@ -1890,8 +1890,15 @@ test("panel asset switch invalidates and clears the previous editor selection", 
     let learningDraftReview = { draft: { source_path: "artifacts/old/source.json" } };
     let learningDraftReviewBboxEdits = { regions: { old: true }, actions: {} };
     let resetValue = "not-called";
+    let clearedDisplay = null;
     let inspectorClosed = false;
     let correctionOpen = true;
+    function clearLearningDraftReviewDisplay(reason, options) {
+      clearedDisplay = { reason, options };
+      learningDraftReview = null;
+      learningDraftReviewBboxEdits = { regions: {}, actions: {} };
+      resetLearningDraftEditorState(null);
+    }
     function resetLearningDraftEditorState(value) { resetValue = value; }
     function closeImageInspector() { inspectorClosed = true; }
     function setInterfaceWorkflowCorrectionOpen(value) { correctionOpen = value; }
@@ -1906,6 +1913,7 @@ test("panel asset switch invalidates and clears the previous editor selection", 
       review: learningDraftReview,
       edits: learningDraftReviewBboxEdits,
       resetValue,
+      clearedDisplay,
       inspectorClosed,
       correctionOpen,
     };
@@ -1917,6 +1925,11 @@ test("panel asset switch invalidates and clears the previous editor selection", 
   assert.equal(sandbox.snapshot.aborted, true);
   assert.equal(sandbox.snapshot.review, null);
   assert.equal(sandbox.snapshot.resetValue, null);
+  assert.equal(sandbox.snapshot.clearedDisplay.reason, "workflow node changed");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(sandbox.snapshot.clearedDisplay.options)),
+    { preserveWorkflowReview: true },
+  );
   assert.equal(sandbox.snapshot.inspectorClosed, true);
   assert.equal(sandbox.snapshot.correctionOpen, false);
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.snapshot.edits)), { regions: {}, actions: {} });
