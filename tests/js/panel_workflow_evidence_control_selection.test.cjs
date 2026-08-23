@@ -145,3 +145,35 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   assert.equal(observations.editorRenders, 1);
   assert.equal(observations.evidenceRenders, 1);
 });
+
+test("switching the box editor source preserves the workflow review that owns it", () => {
+  const sourceBindingFunctions = functionSource(
+    "function invalidateLearningDraftReviewSource",
+    "async function loadLearningDraftFreshnessDemo",
+  );
+  const openEditorSource = functionSource(
+    "async function openCurrentInterfaceWorkflowBoxEditor",
+    "function interfaceWorkflowSourcePathsAfterReview",
+  );
+  const sourceInput = { value: "old-review.json" };
+  const observations = { clearOptions: null };
+  const sandbox = { console, globalThis: {}, sourceInput, observations };
+  vm.runInNewContext(`
+    let learningDraftReviewLoadRequestToken = 4;
+    const clearLearningDraftReviewDisplay = (_reason, options) => {
+      observations.clearOptions = options;
+    };
+    const $ = (id) => id === "learningDraftReviewSourcePath" ? sourceInput : null;
+    ${sourceBindingFunctions}
+    globalThis.setSourcePath = setLearningDraftReviewSourcePath;
+  `, sandbox);
+
+  sandbox.globalThis.setSourcePath("job-detail-review.json", { preserveWorkflowReview: true });
+
+  assert.equal(sourceInput.value, "job-detail-review.json");
+  assert.equal(observations.clearOptions?.preserveWorkflowReview, true);
+  assert.equal(
+    openEditorSource.match(/setLearningDraftReviewSourcePath\(sourcePath, \{ preserveWorkflowReview: true \}\);/g)?.length,
+    2,
+  );
+});

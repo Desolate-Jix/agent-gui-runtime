@@ -3988,7 +3988,7 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
   setInterfaceWorkflowCorrectionOpen(true, view);
   setInterfaceWorkflowBoxEditorStatus("正在加载可编辑证据…");
   if (currentLearningDraftReviewMatchesSource(sourcePath)) {
-    setLearningDraftReviewSourcePath(sourcePath);
+    setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true });
     const currentEditorImagePath = learningDraftSourceImagePath(learningDraftReview?.draft || {})
       || editorImagePath;
     if (!currentEditorImagePath) {
@@ -4017,7 +4017,7 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
     const controls = $("imageInspectorEditorControls");
     if (controls) controls.style.display = "none";
   }
-  setLearningDraftReviewSourcePath(sourcePath);
+  setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true });
   try {
     const review = await loadLearningDraftReview({
       skipResponse: true,
@@ -10009,16 +10009,18 @@ function learningDraftReviewSourcePath() {
   return candidates[0] || "";
 }
 
-function invalidateLearningDraftReviewSource() {
+function invalidateLearningDraftReviewSource(options = {}) {
   learningDraftReviewLoadRequestToken += 1;
-  clearLearningDraftReviewDisplay("source changed");
+  clearLearningDraftReviewDisplay("source changed", {
+    preserveWorkflowReview: options.preserveWorkflowReview === true,
+  });
 }
 
-function setLearningDraftReviewSourcePath(path) {
+function setLearningDraftReviewSourcePath(path, options = {}) {
   const nextPath = String(path || "");
   const currentPath = String($("learningDraftReviewSourcePath")?.value || "");
   if (currentPath !== nextPath) {
-    invalidateLearningDraftReviewSource();
+    invalidateLearningDraftReviewSource(options);
   }
   if ($("learningDraftReviewSourcePath")) $("learningDraftReviewSourcePath").value = nextPath;
 }
