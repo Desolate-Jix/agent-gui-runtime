@@ -44,6 +44,16 @@ from app.vision.schemas import BBox
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "portfolio_v1_release_callsite"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CURRENT_RELEASE_WORKSPACE_ROOT = (
+    REPO_ROOT / "release" / "portfolio-v1" / "reviewed-asset-workspace"
+)
+CURRENT_RELEASE_ASSET_SHA256 = (
+    "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
+)
+CURRENT_RELEASE_SOURCE_WORKFLOW_SHA256 = (
+    "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc"
+)
 ASSET_ID = "workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0"
 ASSET_SHA256 = "a9eb42d9439568770735f69ff109e6d93b86085507414d62ee49cfef33bb1d1b"
 SOURCE_WORKFLOW_ID = "portfolio_v1_seek_apply_entry"
@@ -253,6 +263,21 @@ def _materialize_release_project(
     assert publish_result["object_sha256"] == ASSET_SHA256
     assert publish_result["content_sha256"] == ASSET_SHA256
     assert asset == asset_before_publish
+    return asset, store
+
+
+def _materialize_current_release_workspace(
+    tmp_path: Path,
+) -> tuple[dict[str, Any], ReviewedWorkflowAssetStore]:
+    project_root = tmp_path / "current-release-workspace"
+    shutil.copytree(CURRENT_RELEASE_WORKSPACE_ROOT, project_root)
+    store = ReviewedWorkflowAssetStore(project_root=project_root)
+    asset = store.load_active(ASSET_ID)
+    assert content_sha256(asset) == CURRENT_RELEASE_ASSET_SHA256
+    assert (
+        asset["source_review_lineage"]["source_workflow_sha256"]
+        == CURRENT_RELEASE_SOURCE_WORKFLOW_SHA256
+    )
     return asset, store
 
 
@@ -665,6 +690,96 @@ def test_release_fixture_materializes_exact_active_asset_and_agent_context(
         item.get("interface_id") == "apply_entry"
         for item in context["blocked_interfaces"]
     )
+
+
+def test_current_release_workspace_runs_confirmation_duplicate_and_stop_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asset, asset_store = _materialize_current_release_workspace(tmp_path)
+    assert content_sha256(asset_store.load_active(ASSET_ID)) == CURRENT_RELEASE_ASSET_SHA256
+    fake_backend, window_manager, screenshot_service, recognition_runner = (
+        _install_release_runtime_doubles(monkeypatch, tmp_path / "current-release-workspace", asset)
+    )
+
+    first_callsite = _new_release_callsite(
+        tmp_path / "current-release-workspace",
+        window_manager,
+    )
+    first_client = _release_runtime_client(first_callsite)
+    started_response = first_client.post("/runtime/agent/session/start", json={})
+    assert started_response.status_code == 200, started_response.text
+    observation = started_response.json()["data"]
+    assert observation["workflow"]["asset_content_sha256"] == CURRENT_RELEASE_ASSET_SHA256
+    assert observation["workflow"]["source_workflow_sha256"] == (
+        CURRENT_RELEASE_SOURCE_WORKFLOW_SHA256
+    )
+    open_apply_action = next(
+        item
+        for item in observation["available_actions"]
+        if item["semantic_action"] == "open_apply_flow"
+    )
+    intent_payload = {
+        "intent_id": "intent.current-release-open-apply",
+        "session_id": observation["session_id"],
+        "observation_id": observation["observation_id"],
+        "action_id": open_apply_action["action_id"],
+    }
+
+    pending_response = first_client.post(
+        "/runtime/agent/intent/submit",
+        json=intent_payload,
+    )
+    assert pending_response.status_code == 200, pending_response.text
+    pending = pending_response.json()["data"]
+    assert (pending["status"], pending["reason_code"]) == (
+        "NEEDS_REVIEW",
+        "human_confirmation_required",
+    )
+    assert fake_backend.attempt_count == fake_backend.dispatch_count == 0
+    confirmation_id = pending["confirmation_id"]
+    first_client.close()
+
+    approved_callsite = _new_release_callsite(
+        tmp_path / "current-release-workspace",
+        window_manager,
+    )
+    approved_client = _release_runtime_client(approved_callsite)
+    approved_response = approved_client.post(
+        "/runtime/agent/confirmation/decide",
+        json={"confirmation_id": confirmation_id, "decision": "approved"},
+    )
+    assert approved_response.status_code == 200, approved_response.text
+    receipt = approved_response.json()["data"]
+    assert (receipt["outcome"], receipt["reason_code"]) == (
+        "SAFE_STOP",
+        "stop_boundary",
+    )
+    assert receipt["workflow"]["asset_content_sha256"] == CURRENT_RELEASE_ASSET_SHA256
+    assert fake_backend.dispatch_count == 1
+    persisted = RuntimeReceiptStore(
+        project_root=tmp_path / "current-release-workspace"
+    ).load_by_receipt_id(receipt["receipt_id"])
+    assert [item.semantic_action for item in persisted.next_observation.available_actions] == [
+        "safe_stop"
+    ]
+
+    dispatch_count = fake_backend.dispatch_count
+    repeated_approval = approved_client.post(
+        "/runtime/agent/confirmation/decide",
+        json={"confirmation_id": confirmation_id, "decision": "approved"},
+    )
+    repeated_intent = approved_client.post(
+        "/runtime/agent/intent/submit",
+        json=intent_payload,
+    )
+    assert repeated_approval.status_code == repeated_intent.status_code == 200
+    assert repeated_approval.json()["data"] == receipt
+    assert repeated_intent.json()["data"] == receipt
+    assert fake_backend.dispatch_count == dispatch_count
+    assert screenshot_service.calls
+    assert recognition_runner.calls
+    approved_client.close()
 
 
 def test_exact_release_asset_runs_through_local_callsite_and_safe_stops(

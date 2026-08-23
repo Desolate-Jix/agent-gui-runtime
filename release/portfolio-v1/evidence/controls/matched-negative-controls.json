@@ -7,23 +7,25 @@
   },
   "controls": [
     {
-      "control_id": "confirmation_required_zero_dispatch",
-      "evidence_grade": "deterministic_exact_current_asset",
+      "control_id": "stale_capture_or_observation_zero_dispatch",
+      "contract_surface": "runtime_result_receipt_v1",
+      "evidence_grade": "deterministic_behavior_equivalent_synthetic_fixture",
       "live_observed": false,
       "result": {
-        "confirmation_status": "NEEDS_REVIEW",
+        "reason_code": "stale_candidate",
         "runtime_dispatch_count": 0
       },
       "source": {
-        "path": "tests/test_portfolio_v1_release_callsite.py",
-        "sha256": "24713555be618e96e299bf7b9708012e7b700541615cf4045cd45fa786e05e70",
-        "test": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops",
-        "asset_relationship": "exact_current_asset"
+        "path": "tests/test_live_controller_w4.py",
+        "sha256": "cc13c147296cc6afa704b590396d2c6ad82f7037ff71e8e12eb062467f09b314",
+        "asset_relationship": "deterministic_behavior_equivalent_synthetic_fixture",
+        "test": "test_unresolved_current_target_never_reaches_gate_or_backend"
       }
     },
     {
-      "control_id": "occluded_or_wrong_foreground_zero_dispatch",
-      "evidence_grade": "deterministic_behavior_equivalent_historical_asset",
+      "control_id": "wrong_window_or_identity_mismatch_zero_dispatch",
+      "contract_surface": "runtime_result_receipt_v1",
+      "evidence_grade": "deterministic_behavior_equivalent_synthetic_fixture",
       "live_observed": false,
       "result": {
         "reason_codes": [
@@ -35,12 +37,96 @@
       "source": {
         "path": "tests/test_live_controller_w4.py",
         "sha256": "cc13c147296cc6afa704b590396d2c6ad82f7037ff71e8e12eb062467f09b314",
-        "test": "test_runtime_visibility_block_after_gate_has_zero_dispatch",
-        "asset_relationship": "behavior_equivalent_historical_fixture"
+        "asset_relationship": "deterministic_behavior_equivalent_synthetic_fixture",
+        "test": "test_runtime_visibility_block_after_gate_has_zero_dispatch"
+      }
+    },
+    {
+      "control_id": "ambiguous_current_candidate_zero_dispatch",
+      "contract_surface": "runtime_result_receipt_v1",
+      "evidence_grade": "deterministic_behavior_equivalent_synthetic_fixture",
+      "live_observed": false,
+      "result": {
+        "reason_code": "grounding_ambiguous",
+        "runtime_dispatch_count": 0
+      },
+      "source": {
+        "path": "tests/test_live_controller_w4.py",
+        "sha256": "cc13c147296cc6afa704b590396d2c6ad82f7037ff71e8e12eb062467f09b314",
+        "asset_relationship": "deterministic_behavior_equivalent_synthetic_fixture",
+        "test": "test_unresolved_current_target_never_reaches_gate_or_backend"
+      }
+    },
+    {
+      "control_id": "unknown_or_unauthorized_intent_zero_dispatch",
+      "contract_surface": "live_controller_decision",
+      "evidence_grade": "deterministic_behavior_equivalent_synthetic_fixture",
+      "live_observed": false,
+      "result": {
+        "status": "REJECTED",
+        "runtime_dispatch_count": 0
+      },
+      "source": {
+        "path": "tests/test_live_controller_w4.py",
+        "sha256": "cc13c147296cc6afa704b590396d2c6ad82f7037ff71e8e12eb062467f09b314",
+        "asset_relationship": "deterministic_behavior_equivalent_synthetic_fixture",
+        "test": "test_invalid_or_authority_injected_intent_has_zero_dispatch"
+      }
+    },
+    {
+      "control_id": "continue_form_or_terminal_boundary_safe_stop",
+      "contract_surface": "runtime_result_receipt_v1",
+      "evidence_grade": "deterministic_exact_current_asset",
+      "live_observed": false,
+      "result": {
+        "post_state_availability": "stop_boundary",
+        "available_semantic_actions": [
+          "safe_stop"
+        ],
+        "continuation_or_mutation_actions_present": false
+      },
+      "source": {
+        "path": "tests/test_portfolio_v1_release_callsite.py",
+        "sha256": "b0cd1cb24e95f8c29ac1de377f27c9cf931d0e60ad9abffdcdebba847373860c",
+        "test": "test_current_release_workspace_runs_confirmation_duplicate_and_stop_controls",
+        "asset_relationship": "exact_current_asset"
+      }
+    },
+    {
+      "control_id": "semantic_verification_failure_terminal",
+      "contract_surface": "runtime_result_receipt_v1",
+      "evidence_grade": "deterministic_behavior_equivalent_synthetic_fixture",
+      "live_observed": false,
+      "result": {
+        "outcome": "VERIFICATION_FAILED",
+        "runtime_dispatch_count": 1
+      },
+      "source": {
+        "path": "tests/test_live_controller_w4.py",
+        "sha256": "cc13c147296cc6afa704b590396d2c6ad82f7037ff71e8e12eb062467f09b314",
+        "asset_relationship": "deterministic_behavior_equivalent_synthetic_fixture",
+        "test": "test_definitive_dispatch_verification_failures_are_terminal"
+      }
+    },
+    {
+      "control_id": "confirmation_required_zero_dispatch",
+      "contract_surface": "live_controller_decision",
+      "evidence_grade": "deterministic_exact_current_asset",
+      "live_observed": false,
+      "result": {
+        "confirmation_status": "NEEDS_REVIEW",
+        "runtime_dispatch_count": 0
+      },
+      "source": {
+        "path": "tests/test_portfolio_v1_release_callsite.py",
+        "sha256": "b0cd1cb24e95f8c29ac1de377f27c9cf931d0e60ad9abffdcdebba847373860c",
+        "test": "test_current_release_workspace_runs_confirmation_duplicate_and_stop_controls",
+        "asset_relationship": "exact_current_asset"
       }
     },
     {
       "control_id": "duplicate_approval_and_intent_zero_redispatch",
+      "contract_surface": "runtime_result_receipt_v1",
       "evidence_grade": "deterministic_exact_current_asset",
       "live_observed": false,
       "result": {
@@ -50,35 +136,19 @@
       },
       "source": {
         "path": "tests/test_portfolio_v1_release_callsite.py",
-        "sha256": "24713555be618e96e299bf7b9708012e7b700541615cf4045cd45fa786e05e70",
-        "test": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops",
-        "asset_relationship": "exact_current_asset"
-      }
-    },
-    {
-      "control_id": "stop_boundary_projects_only_safe_stop",
-      "evidence_grade": "deterministic_exact_current_asset",
-      "live_observed": false,
-      "result": {
-        "post_state_availability": "stop_boundary",
-        "available_semantic_actions": [
-          "safe_stop"
-        ],
-        "mutation_actions_present": false
-      },
-      "source": {
-        "path": "tests/test_portfolio_v1_release_callsite.py",
-        "sha256": "24713555be618e96e299bf7b9708012e7b700541615cf4045cd45fa786e05e70",
-        "test": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops",
+        "sha256": "b0cd1cb24e95f8c29ac1de377f27c9cf931d0e60ad9abffdcdebba847373860c",
+        "test": "test_current_release_workspace_runs_confirmation_duplicate_and_stop_controls",
         "asset_relationship": "exact_current_asset"
       }
     }
   ],
   "summary": {
-    "control_count": 4,
+    "control_count": 8,
+    "canonical_control_count": 6,
+    "supplemental_control_count": 2,
     "exact_live_control_count": 0,
     "deterministic_exact_current_asset_count": 3,
-    "deterministic_behavior_equivalent_historical_asset_count": 1
+    "deterministic_behavior_equivalent_synthetic_fixture_count": 5
   },
-  "claim_boundary": "Matched deterministic controls; not all controls are live. The visibility control uses a behavior-equivalent historical fixture and does not prove the exact current asset under live occlusion."
+  "claim_boundary": "Six canonical negative-control categories are mapped through production LiveController/runtime behavior. Confirmation and duplicate-intent checks are supplemental. Only controls with contract_surface runtime_result_receipt_v1 are receipts. Only the named current-release callsite test loads asset 8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7; all other controls are deterministic behavior-equivalent synthetic-fixture evidence, not exact-current or live evidence."
 }

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,9 +93,9 @@ def test_public_evidence_manifest_is_content_addressed_and_schema_bound() -> Non
         "deterministic_exact_current_asset": (
             "A deterministic test that loads the exact checked-in current release asset."
         ),
-        "deterministic_behavior_equivalent_historical_asset": (
-            "A deterministic Runtime-contract test using a behavior-equivalent historical fixture; "
-            "it is not exact-current-asset or live evidence."
+        "deterministic_behavior_equivalent_synthetic_fixture": (
+            "A deterministic LiveController/runtime-contract test using a behavior-equivalent "
+            "synthetic fixture; it is not exact-current-asset or live evidence."
         ),
         "operator_cleanup_commitment": (
             "An operator cleanup statement without a retained raw cleanup artifact."
@@ -206,76 +208,176 @@ def test_matched_negative_controls_separate_exact_and_equivalent_evidence() -> N
         "asset_content_sha256": ASSET_SHA256,
     }
     by_id = {item["control_id"]: item for item in controls["controls"]}
-    assert set(by_id) == {
-        "confirmation_required_zero_dispatch",
-        "occluded_or_wrong_foreground_zero_dispatch",
-        "duplicate_approval_and_intent_zero_redispatch",
-        "stop_boundary_projects_only_safe_stop",
+    expected_results = {
+        "stale_capture_or_observation_zero_dispatch": {
+            "reason_code": "stale_candidate",
+            "runtime_dispatch_count": 0,
+        },
+        "wrong_window_or_identity_mismatch_zero_dispatch": {
+            "reason_codes": ["foreground_window_changed", "target_occluded"],
+            "runtime_dispatch_count": 0,
+        },
+        "ambiguous_current_candidate_zero_dispatch": {
+            "reason_code": "grounding_ambiguous",
+            "runtime_dispatch_count": 0,
+        },
+        "unknown_or_unauthorized_intent_zero_dispatch": {
+            "status": "REJECTED",
+            "runtime_dispatch_count": 0,
+        },
+        "continue_form_or_terminal_boundary_safe_stop": {
+            "post_state_availability": "stop_boundary",
+            "available_semantic_actions": ["safe_stop"],
+            "continuation_or_mutation_actions_present": False,
+        },
+        "semantic_verification_failure_terminal": {
+            "outcome": "VERIFICATION_FAILED",
+            "runtime_dispatch_count": 1,
+        },
+        "confirmation_required_zero_dispatch": {
+            "confirmation_status": "NEEDS_REVIEW",
+            "runtime_dispatch_count": 0,
+        },
+        "duplicate_approval_and_intent_zero_redispatch": {
+            "initial_runtime_dispatch_count": 1,
+            "additional_runtime_dispatch_count": 0,
+            "stored_receipt_reused": True,
+        },
     }
+    assert set(by_id) == set(expected_results)
+    for control_id, expected_result in expected_results.items():
+        _assert_exact_keys(
+            by_id[control_id],
+            {
+                "control_id",
+                "contract_surface",
+                "evidence_grade",
+                "live_observed",
+                "result",
+                "source",
+            },
+        )
+        assert by_id[control_id]["live_observed"] is False
+        assert by_id[control_id]["result"] == expected_result
 
-    exact_test_path = ROOT / "tests" / "test_portfolio_v1_release_callsite.py"
-    visibility_test_path = ROOT / "tests" / "test_live_controller_w4.py"
-    exact_sha = _sha256(exact_test_path)
-    visibility_sha = _sha256(visibility_test_path)
-
-    confirmation = by_id["confirmation_required_zero_dispatch"]
-    assert confirmation["evidence_grade"] == "deterministic_exact_current_asset"
-    assert confirmation["live_observed"] is False
-    assert confirmation["result"] == {
-        "confirmation_status": "NEEDS_REVIEW",
-        "runtime_dispatch_count": 0,
-    }
-    assert confirmation["source"] == {
+    exact_source = {
         "path": "tests/test_portfolio_v1_release_callsite.py",
-        "sha256": exact_sha,
-        "test": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops",
+        "sha256": _sha256(ROOT / "tests" / "test_portfolio_v1_release_callsite.py"),
+        "test": "test_current_release_workspace_runs_confirmation_duplicate_and_stop_controls",
         "asset_relationship": "exact_current_asset",
     }
+    exact_current_ids = {
+        "confirmation_required_zero_dispatch",
+        "duplicate_approval_and_intent_zero_redispatch",
+        "continue_form_or_terminal_boundary_safe_stop",
+    }
+    for control_id in exact_current_ids:
+        assert by_id[control_id]["evidence_grade"] == "deterministic_exact_current_asset"
+        assert by_id[control_id]["source"] == exact_source
 
-    visibility = by_id["occluded_or_wrong_foreground_zero_dispatch"]
-    assert (
-        visibility["evidence_grade"]
-        == "deterministic_behavior_equivalent_historical_asset"
-    )
-    assert visibility["live_observed"] is False
-    assert visibility["result"] == {
-        "reason_codes": ["foreground_window_changed", "target_occluded"],
-        "runtime_dispatch_count": 0,
-    }
-    assert visibility["source"] == {
-        "path": "tests/test_live_controller_w4.py",
-        "sha256": visibility_sha,
-        "test": "test_runtime_visibility_block_after_gate_has_zero_dispatch",
-        "asset_relationship": "behavior_equivalent_historical_fixture",
-    }
+    historical_source_path = ROOT / "tests" / "test_live_controller_w4.py"
+    historical_sha = _sha256(historical_source_path)
+    for control_id, control in by_id.items():
+        if control_id in exact_current_ids:
+            continue
+        assert (
+            control["evidence_grade"]
+            == "deterministic_behavior_equivalent_synthetic_fixture"
+        )
+        assert control["source"]["path"] == "tests/test_live_controller_w4.py"
+        assert control["source"]["sha256"] == historical_sha
+        assert (
+            control["source"]["asset_relationship"]
+            == "deterministic_behavior_equivalent_synthetic_fixture"
+        )
 
-    duplicate = by_id["duplicate_approval_and_intent_zero_redispatch"]
-    assert duplicate["evidence_grade"] == "deterministic_exact_current_asset"
-    assert duplicate["live_observed"] is False
-    assert duplicate["result"] == {
-        "initial_runtime_dispatch_count": 1,
-        "additional_runtime_dispatch_count": 0,
-        "stored_receipt_reused": True,
+    expected_contract_surfaces = {
+        "stale_capture_or_observation_zero_dispatch": "runtime_result_receipt_v1",
+        "wrong_window_or_identity_mismatch_zero_dispatch": "runtime_result_receipt_v1",
+        "ambiguous_current_candidate_zero_dispatch": "runtime_result_receipt_v1",
+        "unknown_or_unauthorized_intent_zero_dispatch": "live_controller_decision",
+        "continue_form_or_terminal_boundary_safe_stop": "runtime_result_receipt_v1",
+        "semantic_verification_failure_terminal": "runtime_result_receipt_v1",
+        "confirmation_required_zero_dispatch": "live_controller_decision",
+        "duplicate_approval_and_intent_zero_redispatch": "runtime_result_receipt_v1",
     }
-    assert duplicate["source"] == confirmation["source"]
-
-    stop = by_id["stop_boundary_projects_only_safe_stop"]
-    assert stop["evidence_grade"] == "deterministic_exact_current_asset"
-    assert stop["live_observed"] is False
-    assert stop["result"] == {
-        "post_state_availability": "stop_boundary",
-        "available_semantic_actions": ["safe_stop"],
-        "mutation_actions_present": False,
-    }
-    assert stop["source"] == confirmation["source"]
+    assert {
+        control_id: control["contract_surface"]
+        for control_id, control in by_id.items()
+    } == expected_contract_surfaces
 
     assert controls["summary"] == {
-        "control_count": 4,
+        "control_count": 8,
+        "canonical_control_count": 6,
+        "supplemental_control_count": 2,
         "exact_live_control_count": 0,
         "deterministic_exact_current_asset_count": 3,
-        "deterministic_behavior_equivalent_historical_asset_count": 1,
+        "deterministic_behavior_equivalent_synthetic_fixture_count": 5,
     }
-    assert "not all controls are live" in controls["claim_boundary"].lower()
+    assert "six canonical" in controls["claim_boundary"].lower()
+    assert "production livecontroller/runtime behavior" in controls["claim_boundary"].lower()
+    assert "only controls with contract_surface runtime_result_receipt_v1 are receipts" in controls["claim_boundary"].lower()
+    assert "supplemental" in controls["claim_boundary"].lower()
+
+
+def test_public_control_matrix_covers_canonical_categories_with_honest_asset_relationships() -> None:
+    controls = _json(PACKAGE_ROOT / "controls" / "matched-negative-controls.json")
+    by_id = {item["control_id"]: item for item in controls["controls"]}
+
+    canonical_control_ids = {
+        "stale_capture_or_observation_zero_dispatch",
+        "wrong_window_or_identity_mismatch_zero_dispatch",
+        "ambiguous_current_candidate_zero_dispatch",
+        "unknown_or_unauthorized_intent_zero_dispatch",
+        "continue_form_or_terminal_boundary_safe_stop",
+        "semantic_verification_failure_terminal",
+    }
+    supplemental_control_ids = {
+        "confirmation_required_zero_dispatch",
+        "duplicate_approval_and_intent_zero_redispatch",
+    }
+    assert set(by_id) == canonical_control_ids | supplemental_control_ids
+
+    exact_current_ids = {
+        "confirmation_required_zero_dispatch",
+        "duplicate_approval_and_intent_zero_redispatch",
+        "continue_form_or_terminal_boundary_safe_stop",
+    }
+    for control_id, control in by_id.items():
+        source = control["source"]
+        source_path = ROOT / source["path"]
+        assert source_path.is_file()
+        assert source["sha256"] == _sha256(source_path)
+        assert f"def {source['test']}(" in source_path.read_text(encoding="utf-8")
+        if control_id in exact_current_ids:
+            assert control["evidence_grade"] == "deterministic_exact_current_asset"
+            assert source["asset_relationship"] == "exact_current_asset"
+            assert source["path"] == "tests/test_portfolio_v1_release_callsite.py"
+            assert source["test"] == (
+                "test_current_release_workspace_runs_confirmation_duplicate_and_stop_controls"
+            )
+        else:
+            assert (
+                control["evidence_grade"]
+                == "deterministic_behavior_equivalent_synthetic_fixture"
+            )
+            assert (
+                source["asset_relationship"]
+                == "deterministic_behavior_equivalent_synthetic_fixture"
+            )
+
+    assert controls["summary"] == {
+        "control_count": 8,
+        "canonical_control_count": 6,
+        "supplemental_control_count": 2,
+        "exact_live_control_count": 0,
+        "deterministic_exact_current_asset_count": 3,
+        "deterministic_behavior_equivalent_synthetic_fixture_count": 5,
+    }
+    assert "six canonical" in controls["claim_boundary"].lower()
+    assert "production livecontroller/runtime behavior" in controls["claim_boundary"].lower()
+    assert "only controls with contract_surface runtime_result_receipt_v1 are receipts" in controls["claim_boundary"].lower()
+    assert "supplemental" in controls["claim_boundary"].lower()
 
 
 def test_operator_cleanup_record_does_not_invent_missing_raw_evidence() -> None:
@@ -359,6 +461,44 @@ def test_public_package_has_no_private_runtime_or_page_identity_payloads() -> No
         assert "artifacts/screenshots" not in serialized
 
 
+def test_control_schema_rejects_duplicate_or_omitted_categories_with_draft202012(
+    tmp_path: Path,
+) -> None:
+    schema_path = PACKAGE_ROOT / "schemas" / "matched-negative-controls.schema.json"
+    controls = _json(PACKAGE_ROOT / "controls" / "matched-negative-controls.json")
+    duplicate_and_omitted = deepcopy(controls)
+    duplicate_and_omitted["controls"][1] = deepcopy(
+        duplicate_and_omitted["controls"][0]
+    )
+    omitted = deepcopy(controls)
+    omitted["controls"].pop()
+
+    for name, mutation in {
+        "duplicate-and-omitted": duplicate_and_omitted,
+        "omitted": omitted,
+    }.items():
+        instance_path = tmp_path / f"{name}.json"
+        instance_path.write_text(
+            json.dumps(mutation, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        completed = subprocess.run(
+            [
+                "uvx",
+                "check-jsonschema",
+                "--schemafile",
+                str(schema_path),
+                str(instance_path),
+            ],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert completed.returncode != 0, completed.stdout + completed.stderr
+
+
 def test_public_schemas_freeze_contract_versions_and_disallow_extra_fields() -> None:
     expected = {
         "schemas/manifest.schema.json": "portfolio_v1_public_evidence_manifest_v1",
@@ -380,15 +520,21 @@ def test_public_schemas_freeze_contract_versions_and_disallow_extra_fields() -> 
     controls_schema = _json(
         PACKAGE_ROOT / "schemas" / "matched-negative-controls.schema.json"
     )
-    variants = controls_schema["properties"]["controls"]["items"]["oneOf"]
-    assert len(variants) == 4
+    controls_array_schema = controls_schema["properties"]["controls"]
+    assert controls_array_schema.get("uniqueItems") is True
+    variants = controls_array_schema["items"]["oneOf"]
+    assert len(variants) == 8
     assert {
         item["properties"]["control_id"]["const"] for item in variants
     } == {
+        "stale_capture_or_observation_zero_dispatch",
+        "wrong_window_or_identity_mismatch_zero_dispatch",
+        "ambiguous_current_candidate_zero_dispatch",
+        "unknown_or_unauthorized_intent_zero_dispatch",
+        "continue_form_or_terminal_boundary_safe_stop",
+        "semantic_verification_failure_terminal",
         "confirmation_required_zero_dispatch",
-        "occluded_or_wrong_foreground_zero_dispatch",
         "duplicate_approval_and_intent_zero_redispatch",
-        "stop_boundary_projects_only_safe_stop",
     }
     assert all(item["additionalProperties"] is False for item in variants)
 

@@ -69,11 +69,11 @@
           "type": "string",
           "minLength": 20
         },
-        "deterministic_behavior_equivalent_historical_asset": {
+        "operator_cleanup_commitment": {
           "type": "string",
           "minLength": 20
         },
-        "operator_cleanup_commitment": {
+        "deterministic_behavior_equivalent_synthetic_fixture": {
           "type": "string",
           "minLength": 20
         }
@@ -81,7 +81,7 @@
       "required": [
         "exact_live",
         "deterministic_exact_current_asset",
-        "deterministic_behavior_equivalent_historical_asset",
+        "deterministic_behavior_equivalent_synthetic_fixture",
         "operator_cleanup_commitment"
       ],
       "additionalProperties": false

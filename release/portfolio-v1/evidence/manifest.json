@@ -15,13 +15,13 @@
   "evidence_grade_taxonomy": {
     "exact_live": "A projection of one observed real Runtime receipt.",
     "deterministic_exact_current_asset": "A deterministic test that loads the exact checked-in current release asset.",
-    "deterministic_behavior_equivalent_historical_asset": "A deterministic Runtime-contract test using a behavior-equivalent historical fixture; it is not exact-current-asset or live evidence.",
+    "deterministic_behavior_equivalent_synthetic_fixture": "A deterministic LiveController/runtime-contract test using a behavior-equivalent synthetic fixture; it is not exact-current-asset or live evidence.",
     "operator_cleanup_commitment": "An operator cleanup statement without a retained raw cleanup artifact."
   },
   "artifacts": [
     {
       "path": "controls/matched-negative-controls.json",
-      "sha256": "16f0bfd6fd9b6e09621086639ae4c9ada28f58b71a0055c07b928b682f60fcf4",
+      "sha256": "1f099782dba63cf2e3f13f12c66683a08eea07cb1a03d1020cfe27b5515bebbf",
       "role": "matched_negative_controls",
       "schema_path": "schemas/matched-negative-controls.schema.json"
     },
@@ -39,7 +39,7 @@
     },
     {
       "path": "schemas/matched-negative-controls.schema.json",
-      "sha256": "acbfd1c3dd54579c0363373155bc3bdc9521a6d2b69a178b2d645e3bfd8a051f",
+      "sha256": "88bc200ab7ba2fe602b9fd3e97ec7a649ad0eb1d9e35cc4ceaa7f0c709556c6f",
       "role": "schema",
       "schema_path": "schemas/matched-negative-controls.schema.json"
     },
@@ -57,7 +57,7 @@
     },
     {
       "path": "schemas/manifest.schema.json",
-      "sha256": "077a80699105f7d03a56a44c5e62666e4f5354834fea41290961e3fbdf47cdf2",
+      "sha256": "07cc82206e2c40423ec74946e1a1c73265ebeded2af4f66453ae3f3abf7dd161",
       "role": "schema",
       "schema_path": "schemas/manifest.schema.json"
     }
