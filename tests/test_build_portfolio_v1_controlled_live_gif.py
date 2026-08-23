@@ -76,6 +76,12 @@ def _write_sources(tmp_path: Path) -> tuple[Path, Path]:
 
 def _receipt_payload(post_sha256: str) -> dict[str, object]:
     backend_ref = "backend-receipt:test-controlled-live"
+    candidate_ref = "candidate:test-controlled-live"
+    capture_evidence_ref = "capture:test-controlled-live"
+    gate_ref = "gate:test-controlled-live:allowed"
+    resolution_ref = "resolution:test-controlled-live"
+    selection_ref = "selection:" + "b" * 64
+    trace_ref = "trace:test-controlled-live"
     session_id = "session.test-controlled-live"
     source_observation_id = "observation.test-source"
     next_observation_id = "observation.test-next"
@@ -84,6 +90,9 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
     target_state_id = "state.test-choose-documents"
     workflow = {
         "asset_content_sha256": "a" * 64,
+        "asset_id": "workflow.test-controlled-live",
+        "reviewed_revision_hash": "d" * 64,
+        "source_workflow_sha256": "c" * 64,
         "workflow_id": "portfolio_v1_seek_apply_entry",
     }
     capture = {
@@ -104,12 +113,32 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
         "target_state_id": target_state_id,
         "post_capture_lineage": copy.deepcopy(capture),
         "post_state_resolution": {
+            "artifact_is_authorization": False,
+            "asset_content_sha256": workflow["asset_content_sha256"],
+            "asset_id": workflow["asset_id"],
+            "canonical_origin": "https://nz.seek.com",
+            "contract_version": "current_state_resolution_v1",
+            "evidence_refs": ["current-recognition:test-controlled-live"],
+            "execute_binding_enabled": False,
+            "matched_anchor_ids": ["anchor.test-choose-documents"],
+            "observed_origin": "https://nz.seek.com",
+            "resolution_sha256": "e" * 64,
+            "reviewed_revision_hash": workflow["reviewed_revision_hash"],
+            "score": 0.86,
+            "source_workflow_sha256": workflow["source_workflow_sha256"],
             "status": "resolved",
             "state_id": target_state_id,
             "state_availability": "stop_boundary",
             "capture_lineage": copy.deepcopy(capture),
         },
-        "evidence_refs": [backend_ref],
+        "evidence_refs": [
+            backend_ref,
+            candidate_ref,
+            "current-recognition:test-controlled-live",
+            gate_ref,
+            selection_ref,
+            trace_ref,
+        ],
     }
     verification_ref = _verification_ref(verification)
     return {
@@ -121,8 +150,10 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
         "runtime_receipt": {
             "receipt_id": "receipt.test-controlled-live",
             "contract_version": "runtime_result_receipt_v1",
+            "issued_at": "2026-08-24T00:00:00Z",
             "session_id": session_id,
             "observation_id": source_observation_id,
+            "intent_id": "intent.test-controlled-live",
             "next_observation_id": next_observation_id,
             "attempt_count": 1,
             "action": {
@@ -138,16 +169,30 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
             "safe_stop": {"reason_code": "stop_boundary", "required": True},
             "evidence": {
                 "backend_receipt_ref": backend_ref,
+                "candidate_ref": candidate_ref,
+                "gate_decision_ref": gate_ref,
+                "selection_ref": selection_ref,
+                "state_resolution_ref": resolution_ref,
+                "trace_refs": [trace_ref],
                 "verification_ref": verification_ref,
             },
             "workflow": copy.deepcopy(workflow),
+            "artifact_is_authorization": False,
         },
         "next_observation": {
+            "contract_version": "agent_observation_v1",
             "session_id": session_id,
             "observation_id": next_observation_id,
             "workflow": copy.deepcopy(workflow),
+            "application": {
+                "display_name": "web:nz.seek.com",
+                "identity_ref": "application:web:nz.seek.com",
+                "kind": "web",
+            },
+            "state_resolution_ref": resolution_ref,
             "current_capture": {
                 "capture_id": capture["capture_id"],
+                "evidence_ref": capture_evidence_ref,
                 "screenshot_sha256": post_sha256,
             },
             "state": {
@@ -156,14 +201,35 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
                 "status": "stop_boundary",
                 "surface_type": "application_entry",
                 "state_id": target_state_id,
+                "resolution_sha256": "e" * 64,
+                "responsibility": "Stop at the reviewed terminal boundary.",
+                "source_interface_id": "apply_entry",
             },
+            "semantic_facts": [],
+            "evidence_refs": [resolution_ref, capture_evidence_ref],
+            "blockers": [
+                {
+                    "blocker_id": "blocker.stop_boundary",
+                    "blocker_type": "state",
+                    "description": "Runtime requires safe stop: stop_boundary.",
+                    "evidence_refs": [resolution_ref],
+                    "safe_stop_required": True,
+                }
+            ],
             "safe_stop": {"reason_code": "stop_boundary", "required": True},
             "available_actions": [
                 {
                     "action_id": "runtime.safe_stop",
+                    "description": "Stop without dispatching another action.",
+                    "expected_effect": "Stop without dispatching another action.",
+                    "requires_user_confirmation": False,
+                    "risk_level": "low",
                     "semantic_action": "safe_stop",
+                    "target_state_id": None,
+                    "verification_rule_refs": [],
                 }
             ],
+            "artifact_is_authorization": False,
         },
         "verification_evidence": verification,
     }
@@ -313,6 +379,21 @@ def test_builder_creates_post_receipt_bound_public_safe_replay(tmp_path: Path) -
         ("runtime_receipt.evidence.verification_ref", "verification:" + "e" * 64, False),
         ("verification_evidence.target_state_id", "state.different", True),
         ("verification_evidence.post_state_resolution.state_id", "state.different", True),
+        ("verification_evidence.post_state_resolution.asset_id", "asset.forged", True),
+        ("verification_evidence.post_state_resolution.asset_content_sha256", "f" * 64, True),
+        ("verification_evidence.post_state_resolution.reviewed_revision_hash", "f" * 64, True),
+        ("verification_evidence.post_state_resolution.source_workflow_sha256", "f" * 64, True),
+        ("verification_evidence.post_state_resolution.resolution_sha256", "f" * 64, True),
+        ("verification_evidence.post_state_resolution.contract_version", "forged_v1", True),
+        ("verification_evidence.post_state_resolution.observed_origin", "https://evil.invalid", True),
+        ("verification_evidence.post_state_resolution.artifact_is_authorization", True, True),
+        ("verification_evidence.post_state_resolution.execute_binding_enabled", True, True),
+        (
+            "verification_evidence.post_state_resolution.capture_lineage.viewport_size",
+            {"height": 1, "width": 1},
+            True,
+        ),
+        ("verification_evidence.post_state_resolution.evidence_refs", [], True),
     ],
 )
 def test_receipt_claim_validation_rejects_mismatches(

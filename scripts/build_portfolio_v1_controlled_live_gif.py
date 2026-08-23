@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,8 +14,10 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageSequence
 from rapidocr_onnxruntime import RapidOCR
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 ARTIFACT_KIND = "post-receipt-bound controlled-live replay"
 CANVAS_SIZE = (960, 540)
 FRAME_DURATION_MS = 100
@@ -313,6 +316,20 @@ def _validate_receipt(
     # 保持同一组最小跨对象绑定，防止只凭状态字段生成伪造的 receipt-backed claim。
     if evidence.get("verification_ref") != _verification_ref(verification):
         raise ValueError("runtime receipt verification reference mismatch")
+
+    # 直接复用 Receipt Store 的权威语义谱系校验，避免媒体生成器维护缩减副本。
+    try:
+        from app.agent.runtime_contracts import RuntimeResultReceiptV1
+        from app.agent.runtime_receipt_store import RuntimeReceiptStore
+
+        runtime_contract = RuntimeResultReceiptV1.model_validate(runtime)
+        RuntimeReceiptStore._validate_semantic_evidence(
+            runtime_contract,
+            verification_evidence=verification,
+            next_observation=observation,
+        )
+    except ValueError as exc:
+        raise ValueError(f"receipt canonical semantic validation failed: {exc}") from exc
 
     runtime_session_id = _required_text(runtime, "session_id")
     if _required_text(observation, "session_id") != runtime_session_id:
