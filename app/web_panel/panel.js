@@ -15427,6 +15427,7 @@ function resetLearningDraftEditorState(review = null) {
   ].filter((item) => item.target_id && normalizeBbox(item.bbox));
   learningDraftEditorState = typeof factory === "function" ? factory(items) : null;
   learningDraftEditorSelected = null;
+  learningDraftEditorWorkflowSelection = null;
   learningDraftEditorActive = false;
   learningDraftEditorAddMode = false;
   learningDraftEditorCompactMode = true;

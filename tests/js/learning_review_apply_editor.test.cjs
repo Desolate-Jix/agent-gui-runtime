@@ -767,6 +767,38 @@ test("workflow-bound evidence refresh preserves the captured workflow while swit
   assert.match(body, /setLearningDraftReviewSourcePath\(sourcePath, \{ preserveWorkflowReview: true \}\)/);
 });
 
+test("learning draft reset clears both editor selection layers before reviewed evidence reselection", () => {
+  const start = source.indexOf("function resetLearningDraftEditorState");
+  const end = source.indexOf("\nfunction ", start + 1);
+  assert.notEqual(start, -1, "learning draft reset lifecycle must exist");
+  assert.notEqual(end, -1, "learning draft reset lifecycle must have a stable extraction boundary");
+  const sandbox = {
+    globalThis: {},
+    learningDraftEditorRevision: 1,
+    learningDraftEditorLoadToken: 1,
+    learningDraftEditorState: {},
+    learningDraftEditorSelected: { target_kind: "action", target_id: "candidate_a" },
+    learningDraftEditorWorkflowSelection: {
+      status: "matched",
+      target_kind: "action",
+      target_id: "candidate_a",
+      control_id: "apply",
+    },
+    learningDraftEditorActive: true,
+    learningDraftEditorAddMode: true,
+    learningDraftEditorCompactMode: false,
+    learningDraftEditorExpandedGroupKey: "overlap_group",
+    learningDraftArray: (value) => Array.isArray(value) ? value : [],
+    normalizeBbox: () => null,
+    renderLearningDraftOwnershipReview: () => {},
+    updateLearningDraftEditorControls: () => {},
+  };
+  vm.runInNewContext(`${source.slice(start, end)}\nresetLearningDraftEditorState();`, sandbox);
+
+  assert.equal(sandbox.learningDraftEditorSelected, null);
+  assert.equal(sandbox.learningDraftEditorWorkflowSelection, null);
+});
+
 test("operation review bundle aborts when the operation editor commit fails", () => {
   const vm = require("node:vm");
   const start = source.indexOf("function confirmCurrentInterfaceWorkflowOperationBundle");
