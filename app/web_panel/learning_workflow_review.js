@@ -331,6 +331,131 @@
     })).filter((item) => item.control_id);
   }
 
+  function resolveDraftItemWorkflowBinding(node = {}, draftItem = {}, outgoingEdges = []) {
+    const empty = (status, reason) => ({
+      status,
+      reason,
+      control_id: "",
+      control_label: "",
+      action_template_id: "",
+      edge_id: "",
+      target_node_id: "",
+    });
+    const controls = Array.isArray(node?.controls) && node.controls.length
+      ? node.controls
+      : Array.isArray(node?.regions)
+        ? node.regions
+        : [];
+    const controlId = (control) => String(control?.control_id || control?.region_id || "").trim();
+    const draftId = String(
+      draftItem?.target_id
+      || draftItem?.region_id
+      || draftItem?.action_template_id
+      || "",
+    ).trim();
+    const explicitControlId = String(
+      draftItem?.target_control_id
+      || draftItem?.source_control_id
+      || "",
+    ).trim();
+    const semanticAction = String(
+      draftItem?.semantic_action
+      || draftItem?.action_type
+      || "",
+    ).trim();
+
+    let controlMatches = [];
+    if (explicitControlId) {
+      controlMatches = controls.filter((control) => controlId(control) === explicitControlId);
+    } else if (draftId) {
+      controlMatches = controls.filter((control) => (
+        String(control?.evidence_region_id || "").trim() === draftId
+        || controlId(control) === draftId
+      ));
+    }
+    if (controlMatches.length > 1) {
+      return empty("ambiguous", "workflow_control_mapping_ambiguous");
+    }
+
+    const actionCandidates = Array.isArray(node?.action_candidates) ? node.action_candidates : [];
+    const explicitActionId = String(
+      draftItem?.action_template_id
+      || (draftItem?.target_kind === "action" ? draftId : "")
+      || "",
+    ).trim();
+    let candidateMatches = actionCandidates.filter((candidate) => {
+      const candidateId = String(candidate?.action_template_id || "").trim();
+      const candidateAction = String(candidate?.semantic_action || candidate?.action_type || "").trim();
+      if (explicitActionId && candidateId !== explicitActionId) return false;
+      if (!explicitActionId && semanticAction && candidateAction !== semanticAction) return false;
+      if (!explicitActionId && !semanticAction) return false;
+      if (controlMatches.length === 1) {
+        const targetId = String(
+          candidate?.target_control_id
+          || candidate?.target_region_id
+          || candidate?.source_control_id
+          || "",
+        ).trim();
+        return targetId === controlId(controlMatches[0]);
+      }
+      return true;
+    });
+    if (candidateMatches.length > 1) {
+      return empty("ambiguous", "workflow_control_mapping_ambiguous");
+    }
+    const actionCandidate = candidateMatches[0] || null;
+
+    if (!controlMatches.length && actionCandidate) {
+      const candidateControlId = String(
+        actionCandidate?.target_control_id
+        || actionCandidate?.target_region_id
+        || actionCandidate?.source_control_id
+        || "",
+      ).trim();
+      controlMatches = controls.filter((control) => controlId(control) === candidateControlId);
+    }
+    if (controlMatches.length > 1) {
+      return empty("ambiguous", "workflow_control_mapping_ambiguous");
+    }
+    if (controlMatches.length !== 1) {
+      return empty("unmatched", "workflow_control_mapping_unavailable");
+    }
+
+    const control = controlMatches[0];
+    const normalizedControlId = controlId(control);
+    const actionTemplateId = String(actionCandidate?.action_template_id || explicitActionId || "").trim();
+    const edges = (Array.isArray(outgoingEdges) ? outgoingEdges : []).filter((edge) => {
+      const edgeControlId = String(edge?.target_control_id || edge?.target_region_id || "").trim();
+      const edgeActionId = String(edge?.action_template_id || "").trim();
+      const edgeAction = String(edge?.semantic_action || edge?.action_type || "").trim();
+      return edgeControlId === normalizedControlId
+        && (!actionTemplateId || edgeActionId === actionTemplateId)
+        && (!semanticAction || edgeAction === semanticAction);
+    });
+    if (edges.length > 1) {
+      return empty("ambiguous", "workflow_operation_mapping_ambiguous");
+    }
+    const actionable = Boolean(semanticAction && !["read", "read_only"].includes(semanticAction));
+    if (actionable && edges.length !== 1) {
+      return empty("unmatched", "workflow_operation_mapping_unavailable");
+    }
+    const edge = edges[0] || null;
+    return {
+      status: "matched",
+      reason: "",
+      control_id: normalizedControlId,
+      control_label: String(
+        control?.label
+        || control?.name
+        || control?.semantic_name
+        || normalizedControlId,
+      ).trim(),
+      action_template_id: String(actionCandidate?.action_template_id || edge?.action_template_id || "").trim(),
+      edge_id: String(edge?.edge_id || "").trim(),
+      target_node_id: String(edge?.target_node_id || actionCandidate?.target_interface_id || "").trim(),
+    };
+  }
+
   function projectInterfaceWorkflowStepAudit(runtimeReport = {}, interfaceId = "") {
     const report = runtimeReport && typeof runtimeReport === "object" ? runtimeReport : {};
     const steps = Array.isArray(report.steps) ? report.steps : [];
@@ -1839,6 +1964,7 @@
     projectLearningDraftOwnershipConflicts,
     buildLearningDraftOwnershipOperations,
     resolveInterfaceAssetOpenTarget,
+    resolveDraftItemWorkflowBinding,
     resolveInterfaceWorkflowCorrectionTarget,
     userFacingLearningLabel,
   };

@@ -124,6 +124,7 @@ let learningDraftEditorState = null;
 let learningDraftEditorSelected = null;
 let learningDraftEditorActive = false;
 let learningDraftEditorWorkflowBinding = null;
+let learningDraftEditorWorkflowSelection = null;
 let learningDraftEditorAddMode = false;
 let learningDraftEditorDrag = null;
 let learningDraftEditorCompactMode = true;
@@ -3768,6 +3769,71 @@ function renderLearningDraftEditorBoxes() {
   updateLearningDraftEditorControls();
 }
 
+function syncLearningDraftEditorWorkflowSelection(item) {
+  const binding = learningDraftEditorWorkflowBinding;
+  if (String(binding?.authority || "") !== "workflow") {
+    learningDraftEditorWorkflowSelection = null;
+    syncImageInspectorConfirmAndStoreButton();
+    return null;
+  }
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  const state = mutationTarget.state;
+  const view = mutationTarget.view;
+  const nodeId = String(view?.node?.node_id || "").trim();
+  const bindingMatches = state
+    && state === binding?.state
+    && nodeId
+    && nodeId === String(binding?.node_id || "").trim();
+  const resolver = globalThis.InterfaceWorkflowReview?.resolveDraftItemWorkflowBinding;
+  const result = bindingMatches && typeof resolver === "function"
+    ? resolver(view.node, item, view.outgoing_edges || [])
+    : {
+      status: "unmatched",
+      reason: "workflow_review_binding_stale",
+      control_id: "",
+      edge_id: "",
+    };
+  learningDraftEditorWorkflowSelection = {
+    ...result,
+    node_id: nodeId,
+    target_kind: String(item?.target_kind || ""),
+    target_id: String(item?.target_id || item?.region_id || item?.action_template_id || ""),
+  };
+
+  if (result.status !== "matched" || !result.control_id) {
+    try {
+      state?.clearFocus?.();
+    } catch (_error) {
+      // 清除旧焦点失败时仍保持不可确认，避免显示陈旧控件。
+    }
+    interfaceWorkflowSelectedOperationId = "";
+    renderInterfaceWorkflowReviewSelection();
+    const message = result.status === "ambiguous"
+      ? "当前框未唯一绑定软件流程控件，无法审核或确认。"
+      : "当前框尚未绑定软件流程控件，无法审核或确认。";
+    setInterfaceWorkflowBoxEditorStatus(message, "error");
+    if ($("interfaceWorkflowContentStatus")) {
+      $("interfaceWorkflowContentStatus").textContent = message;
+    }
+    syncImageInspectorConfirmAndStoreButton(view);
+    return learningDraftEditorWorkflowSelection;
+  }
+
+  state.focusControl(result.control_id);
+  interfaceWorkflowSelectedOperationId = String(result.edge_id || "").trim();
+  renderInterfaceWorkflowReviewSelection();
+  const label = String(result.control_label || result.control_id).trim();
+  const message = result.edge_id
+    ? `已选择 ${label}；请核对用途、操作、目标界面与验证条件。`
+    : `已选择 ${label}；请核对控件用途。`;
+  setInterfaceWorkflowBoxEditorStatus(message, "ok");
+  if ($("interfaceWorkflowContentStatus")) {
+    $("interfaceWorkflowContentStatus").textContent = message;
+  }
+  syncImageInspectorConfirmAndStoreButton(state.current());
+  return learningDraftEditorWorkflowSelection;
+}
+
 function selectLearningDraftEditorItem(targetKind, targetId) {
   const item = learningDraftEditorState?.getItem(targetKind, targetId);
   if (!item) return;
@@ -3778,6 +3844,7 @@ function selectLearningDraftEditorItem(targetKind, targetId) {
     point: { x: bbox.x + bbox.width / 2, y: bbox.y + bbox.height / 2 },
   } : null;
   drawImageInspectorSelection(imageInspectorSelection?.bbox, imageInspectorSelection?.point);
+  syncLearningDraftEditorWorkflowSelection(item);
   renderLearningDraftEditorBoxes();
 }
 
@@ -3932,14 +3999,60 @@ function currentInterfaceWorkflowMutationTarget(displayedView = null) {
   return { state: interfaceWorkflowReviewState, view: workflowView, reason: "" };
 }
 
-function interfaceWorkflowEditableImagePath(view) {
+function interfaceWorkflowEditableImageSource(view) {
   const sourceLayer = (Array.isArray(view?.available_layers) ? view.available_layers : [])
     .find((entry) => entry?.layer === "source");
-  return String(
+  const evidence = view?.node?.evidence && typeof view.node.evidence === "object"
+    ? view.node.evidence
+    : {};
+  const screen = view?.node?.page_details?.screen && typeof view.node.page_details.screen === "object"
+    ? view.node.page_details.screen
+    : {};
+  const path = String(
     sourceLayer?.path
-    || view?.node?.evidence?.source_screenshot_path
+    || evidence.source_screenshot_path
     || "",
   ).trim();
+  const imageKind = String(
+    sourceLayer?.source_image_kind
+    || sourceLayer?.image_kind
+    || evidence.source_image_kind
+    || screen.source_image_kind
+    || "legacy_unclassified",
+  ).trim().toLowerCase();
+  const explicitEditable = sourceLayer?.editable_base_allowed
+    ?? evidence.editable_base_allowed
+    ?? screen.editable_base_allowed;
+  const forbiddenKinds = new Set([
+    "annotated_derivative",
+    "annotated_overlay",
+    "privacy_redacted_derivative",
+    "review_overlay",
+  ]);
+  if (!path) {
+    return { path: "", image_kind: imageKind, editable: false, reason: "editable_source_missing" };
+  }
+  if (imageKind === "legacy_unclassified") {
+    return {
+      path: "",
+      image_kind: imageKind,
+      editable: false,
+      reason: "editable_source_kind_unclassified",
+    };
+  }
+  if (explicitEditable === false || forbiddenKinds.has(imageKind)) {
+    return {
+      path: "",
+      image_kind: imageKind,
+      editable: false,
+      reason: "annotated_derivative_not_editable",
+    };
+  }
+  return { path, image_kind: imageKind, editable: true, reason: "" };
+}
+
+function interfaceWorkflowEditableImagePath(view) {
+  return interfaceWorkflowEditableImageSource(view).path;
 }
 
 function interfaceWorkflowEditableReviewSourcePath(view) {
@@ -3985,7 +4098,23 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
     }, "Interface workflow review");
     return null;
   }
-  const editorImagePath = interfaceWorkflowEditableImagePath(view);
+  const editorImage = interfaceWorkflowEditableImageSource(view);
+  const editorImagePath = editorImage.path;
+  if (!editorImage.editable) {
+    const message = editorImage.reason === "annotated_derivative_not_editable"
+      ? "当前证据是带标注的派生图，不能作为框审核原图；请重新捕获干净截图。"
+      : editorImage.reason === "editable_source_kind_unclassified"
+        ? "当前证据未声明为干净截图，不能进入框审核；请重新捕获或补齐证据来源。"
+        : "当前界面缺少可编辑原图。";
+    setInterfaceWorkflowCorrectionOpen(false);
+    setInterfaceWorkflowBoxEditorStatus(message, "error");
+    renderResponse({
+      success: false,
+      message,
+      data: { reason: editorImage.reason, source_image_kind: editorImage.image_kind },
+    }, "Interface workflow review");
+    return null;
+  }
   const sourcePath = interfaceWorkflowEditableReviewSourcePath(view);
   if (!sourcePath) {
     setInterfaceWorkflowBoxEditorStatus("当前界面没有可编辑的学习证据", "error");
@@ -4014,11 +4143,11 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
   }
 
   setInterfaceWorkflowCorrectionOpen(true, view);
+  learningDraftEditorWorkflowSelection = null;
   setInterfaceWorkflowBoxEditorStatus("正在加载可编辑证据…");
   if (currentLearningDraftReviewMatchesSource(sourcePath)) {
     setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true });
-    const currentEditorImagePath = learningDraftSourceImagePath(learningDraftReview?.draft || {})
-      || editorImagePath;
+    const currentEditorImagePath = editorImagePath;
     if (!currentEditorImagePath) {
       setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑原图", "error");
       return null;
@@ -4064,7 +4193,7 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
       setInterfaceWorkflowBoxEditorStatus("当前界面学习证据加载失败", "error");
       return null;
     }
-    const loadedEditorImagePath = learningDraftSourceImagePath(review.draft);
+    const loadedEditorImagePath = editorImagePath;
     if (!loadedEditorImagePath) {
       closeImageInspector();
       setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑原图", "error");
@@ -4307,6 +4436,7 @@ function closeImageInspector() {
   learningDraftEditorDrag = null;
   learningDraftEditorExpandedGroupKey = "";
   learningDraftEditorWorkflowBinding = null;
+  learningDraftEditorWorkflowSelection = null;
   imageInspectorEditContext = null;
   imageInspectorSelection = null;
   setInterfaceWorkflowCorrectionOpen(false);
@@ -18217,14 +18347,30 @@ function syncImageInspectorConfirmAndStoreButton(displayedView = null) {
     && workflowId === String(binding?.workflow_id || "").trim()
     && nodeId
     && nodeId === String(binding?.node_id || "").trim();
+  const outgoingEdges = Array.isArray(mutationTarget.view?.outgoing_edges)
+    ? mutationTarget.view.outgoing_edges
+    : [];
+  const requiresOperationSelection = outgoingEdges.length > 0;
+  const workflowSelectionMatches = !requiresOperationSelection || (
+    learningDraftEditorWorkflowSelection?.status === "matched"
+    && String(learningDraftEditorWorkflowSelection?.node_id || "").trim() === nodeId
+    && String(learningDraftEditorWorkflowSelection?.control_id || "").trim()
+    && outgoingEdges.some((edge) => (
+      String(edge?.edge_id || "").trim()
+      === String(learningDraftEditorWorkflowSelection?.edge_id || "").trim()
+    ))
+  );
   button.hidden = !learningDraftEditorActive;
   button.disabled = !bindingMatches
+    || !workflowSelectionMatches
     || String(node?.review_status || "") === "needs_learning"
     || (currentApproval && !hasDraftChanges && !interfaceWorkflowHasUnsavedChanges);
   button.textContent = currentLanguage === "en-US" ? "Confirm and store" : "确认并入库";
   button.title = binding?.authority === "source_preview"
     ? "请先将当前单界面加入软件流程"
-    : "保存当前修正，并确认当前界面及其操作路径";
+    : !workflowSelectionMatches
+      ? "请先在大图中选择并核对当前操作对应的控件"
+      : "保存当前修正，并确认当前界面及其操作路径";
 }
 
 function syncInterfaceWorkflowCorrectionToggleLabel() {

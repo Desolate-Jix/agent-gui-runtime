@@ -415,3 +415,223 @@ test("switching the box editor source preserves the workflow review that owns it
     2,
   );
 });
+
+test("annotated derivative cannot become the editable full-image review base", () => {
+  const resolverSource = functionSource(
+    "function interfaceWorkflowEditableImageSource",
+    "function interfaceWorkflowEditableReviewSourcePath",
+  );
+  const sandbox = { globalThis: {} };
+  vm.runInNewContext(`
+    ${resolverSource}
+    globalThis.resolveEditableImage = interfaceWorkflowEditableImageSource;
+  `, sandbox);
+
+  const derivative = sandbox.globalThis.resolveEditableImage({
+    node: {
+      evidence: {
+        source_screenshot_path: "artifacts/job-detail-overlay.png",
+        source_image_kind: "privacy_redacted_derivative",
+        editable_base_allowed: false,
+      },
+    },
+  });
+  assert.equal(derivative.editable, false);
+  assert.equal(derivative.path, "");
+  assert.equal(derivative.reason, "annotated_derivative_not_editable");
+
+  const unclassified = sandbox.globalThis.resolveEditableImage({
+    node: {
+      evidence: {
+        source_screenshot_path: "artifacts/job-detail-unknown.png",
+      },
+    },
+  });
+  assert.equal(unclassified.editable, false);
+  assert.equal(unclassified.path, "");
+  assert.equal(unclassified.reason, "editable_source_kind_unclassified");
+
+  const clean = sandbox.globalThis.resolveEditableImage({
+    node: {
+      evidence: {
+        source_screenshot_path: "artifacts/job-detail-clean.png",
+        source_image_kind: "sanitized_clean_capture",
+        editable_base_allowed: true,
+      },
+    },
+  });
+  assert.equal(clean.editable, true);
+  assert.equal(clean.path, "artifacts/job-detail-clean.png");
+  assert.equal(clean.reason, "");
+});
+
+test("selecting a full-image draft box focuses its exact workflow control and operation", () => {
+  const selectionSource = functionSource(
+    "function syncLearningDraftEditorWorkflowSelection",
+    "function selectLearningDraftEditorItem",
+  );
+  const observations = { focused: "", cleared: 0, renders: 0, status: [] };
+  const workflowState = {
+    current: () => ({
+      node: { node_id: "job_detail" },
+      outgoing_edges: [{ edge_id: "job_detail_to_choose_documents" }],
+    }),
+    focusControl: (controlId) => { observations.focused = controlId; },
+    clearFocus: () => { observations.cleared += 1; },
+  };
+  const sandbox = { console, globalThis: {}, observations, workflowState };
+  vm.runInNewContext(`
+    let interfaceWorkflowSelectedOperationId = "";
+    let learningDraftEditorWorkflowSelection = null;
+    const learningDraftEditorWorkflowBinding = {
+      authority: "workflow",
+      workflow_id: "workflow_seek",
+      node_id: "job_detail",
+      state: workflowState,
+    };
+    const currentInterfaceWorkflowMutationTarget = () => ({
+      state: workflowState,
+      view: workflowState.current(),
+      reason: "",
+    });
+    globalThis.InterfaceWorkflowReview = {
+      resolveDraftItemWorkflowBinding: () => ({
+        status: "matched",
+        reason: "",
+        control_id: "apply",
+        control_label: "Quick apply",
+        action_template_id: "open_apply_flow",
+        edge_id: "job_detail_to_choose_documents",
+        target_node_id: "choose_documents",
+      }),
+    };
+    const setInterfaceWorkflowBoxEditorStatus = (message, tone) => observations.status.push([message, tone]);
+    const renderInterfaceWorkflowReviewSelection = () => { observations.renders += 1; };
+    const syncImageInspectorConfirmAndStoreButton = () => {};
+    const $ = () => null;
+    ${selectionSource}
+    globalThis.syncSelection = syncLearningDraftEditorWorkflowSelection;
+    globalThis.snapshot = () => ({
+      operationId: interfaceWorkflowSelectedOperationId,
+      selection: learningDraftEditorWorkflowSelection,
+    });
+  `, sandbox);
+
+  const result = sandbox.globalThis.syncSelection({
+    target_kind: "region",
+    target_id: "manual_region_1",
+    label: "Manual region 1",
+    semantic_action: "open_apply_flow",
+  });
+
+  assert.equal(result.status, "matched");
+  assert.equal(observations.focused, "apply");
+  assert.equal(observations.cleared, 0);
+  assert.equal(observations.renders, 1);
+  assert.equal(sandbox.globalThis.snapshot().operationId, "job_detail_to_choose_documents");
+  assert.equal(sandbox.globalThis.snapshot().selection.control_id, "apply");
+  assert.match(observations.status.at(-1)[0], /Quick apply/);
+});
+
+test("ambiguous full-image mapping clears stale focus and blocks confirmation", () => {
+  const selectionSource = functionSource(
+    "function syncLearningDraftEditorWorkflowSelection",
+    "function selectLearningDraftEditorItem",
+  );
+  const observations = { focused: "", cleared: 0, renders: 0, status: [] };
+  const workflowState = {
+    current: () => ({ node: { node_id: "job_detail" }, outgoing_edges: [{ edge_id: "edge_old" }] }),
+    focusControl: (controlId) => { observations.focused = controlId; },
+    clearFocus: () => { observations.cleared += 1; },
+  };
+  const sandbox = { console, globalThis: {}, observations, workflowState };
+  vm.runInNewContext(`
+    let interfaceWorkflowSelectedOperationId = "edge_old";
+    let learningDraftEditorWorkflowSelection = { status: "matched", control_id: "stale" };
+    const learningDraftEditorWorkflowBinding = {
+      authority: "workflow",
+      workflow_id: "workflow_seek",
+      node_id: "job_detail",
+      state: workflowState,
+    };
+    const currentInterfaceWorkflowMutationTarget = () => ({ state: workflowState, view: workflowState.current(), reason: "" });
+    globalThis.InterfaceWorkflowReview = {
+      resolveDraftItemWorkflowBinding: () => ({
+        status: "ambiguous",
+        reason: "workflow_control_mapping_ambiguous",
+        control_id: "",
+        edge_id: "",
+      }),
+    };
+    const setInterfaceWorkflowBoxEditorStatus = (message, tone) => observations.status.push([message, tone]);
+    const renderInterfaceWorkflowReviewSelection = () => { observations.renders += 1; };
+    const syncImageInspectorConfirmAndStoreButton = () => {};
+    const $ = () => null;
+    ${selectionSource}
+    globalThis.syncSelection = syncLearningDraftEditorWorkflowSelection;
+    globalThis.snapshot = () => ({
+      operationId: interfaceWorkflowSelectedOperationId,
+      selection: learningDraftEditorWorkflowSelection,
+    });
+  `, sandbox);
+
+  const result = sandbox.globalThis.syncSelection({
+    target_kind: "region",
+    target_id: "manual_region_1",
+    semantic_action: "open_apply_flow",
+  });
+
+  assert.equal(result.status, "ambiguous");
+  assert.equal(observations.focused, "");
+  assert.equal(observations.cleared, 1);
+  assert.equal(sandbox.globalThis.snapshot().operationId, "");
+  assert.equal(sandbox.globalThis.snapshot().selection.reason, "workflow_control_mapping_ambiguous");
+  assert.equal(observations.status.at(-1)[1], "error");
+  assert.match(observations.status.at(-1)[0], /唯一绑定/);
+});
+
+test("outgoing workflow cannot be confirmed until its full-image target was inspected", () => {
+  const buttonSource = functionSource(
+    "function syncImageInspectorConfirmAndStoreButton",
+    "function syncInterfaceWorkflowCorrectionToggleLabel",
+  );
+  const button = { hidden: true, disabled: false, textContent: "", title: "" };
+  const view = {
+    node: { node_id: "job_detail", review_status: "needs_human_review" },
+    outgoing_edges: [{ edge_id: "job_detail_to_choose_documents" }],
+  };
+  const state = { snapshot: () => ({ workflow: { workflow_id: "workflow_seek" } }) };
+  const sandbox = { globalThis: {}, button, view, state };
+  vm.runInNewContext(`
+    const learningDraftEditorWorkflowBinding = {
+      authority: "workflow",
+      workflow_id: "workflow_seek",
+      node_id: "job_detail",
+    };
+    let learningDraftEditorWorkflowSelection = null;
+    const learningDraftEditorState = { exportOperations: () => [] };
+    const learningDraftEditorActive = true;
+    const interfaceWorkflowHasUnsavedChanges = false;
+    const currentLanguage = "zh-CN";
+    const currentInterfaceWorkflowMutationTarget = () => ({ state, view });
+    const $ = (id) => id === "imageInspectorConfirmAndStoreBtn" ? button : null;
+    ${buttonSource}
+    globalThis.syncButton = syncImageInspectorConfirmAndStoreButton;
+    globalThis.markInspected = () => {
+      learningDraftEditorWorkflowSelection = {
+        status: "matched",
+        node_id: "job_detail",
+        control_id: "apply",
+        edge_id: "job_detail_to_choose_documents",
+      };
+    };
+  `, sandbox);
+
+  sandbox.globalThis.syncButton(view);
+  assert.equal(button.disabled, true);
+  assert.match(button.title, /选择并核对/);
+
+  sandbox.globalThis.markInspected();
+  sandbox.globalThis.syncButton(view);
+  assert.equal(button.disabled, false);
+});

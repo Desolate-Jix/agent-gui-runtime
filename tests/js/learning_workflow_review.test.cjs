@@ -17,6 +17,7 @@ const {
   projectLearningDraftOwnershipConflicts,
   buildLearningDraftOwnershipOperations,
   resolveInterfaceAssetOpenTarget,
+  resolveDraftItemWorkflowBinding,
   resolveInterfaceWorkflowCorrectionTarget,
   userFacingLearningLabel,
 } = require("../../app/web_panel/learning_workflow_review.js");
@@ -1595,7 +1596,11 @@ test("panel correction editor opens displayed asset A while workflow remains on 
     node: {
       node_id: "asset_a",
       editable_review_source_path: "artifacts/asset-a/trial_result.json",
-      evidence: { source_screenshot_path: "artifacts/asset-a/source.png" },
+      evidence: {
+        source_screenshot_path: "artifacts/asset-a/source.png",
+        source_image_kind: "sanitized_clean_capture",
+        editable_base_allowed: true,
+      },
     },
     available_layers: [{ layer: "source", path: "artifacts/asset-a/source.png" }],
   };
@@ -1616,11 +1621,11 @@ test("panel correction editor opens displayed asset A while workflow remains on 
     },
     interfaceWorkflowReviewState: { current: () => workflowBView },
     interfaceWorkflowSourceReviewState: { current: () => assetAView },
-    learningDraftReview: { draft: { source_screenshot_path: "artifacts/asset-a/source.png" } },
+    learningDraftReview: { draft: { source_screenshot_path: "artifacts/asset-a/review-overlay.png" } },
     learningDraftEditorState: {},
     currentLearningDraftReviewMatchesSource: () => true,
     setLearningDraftReviewSourcePath: (value) => { opened.sourcePath = value; },
-    learningDraftSourceImagePath: () => "artifacts/asset-a/source.png",
+    learningDraftSourceImagePath: () => "artifacts/asset-a/review-overlay.png",
     openLearningDraftBoxEditor: (value, options) => { opened.imagePath = value; opened.options = options; return true; },
     setInterfaceWorkflowCorrectionOpen: (_open, view) => { opened.correctionNodeId = view?.node?.node_id || ""; },
     setInterfaceWorkflowBoxEditorStatus: () => {},
@@ -1756,6 +1761,85 @@ test("control choices expose readable labels while retaining internal ids", () =
       role: "button",
     },
   ]);
+});
+
+test("draft evidence region resolves to one workflow control and outgoing operation", () => {
+  const node = {
+    node_id: "job_detail",
+    controls: [{
+      control_id: "apply",
+      label: "Quick apply",
+      role: "button",
+      evidence_region_id: "manual_region_1",
+    }],
+    action_candidates: [{
+      action_template_id: "open_apply_flow",
+      semantic_action: "open_apply_flow",
+      action_type: "open_apply_flow",
+      target_control_id: "apply",
+      target_interface_id: "choose_documents",
+    }],
+  };
+  const outgoingEdges = [{
+    edge_id: "job_detail_to_choose_documents",
+    source_node_id: "job_detail",
+    target_node_id: "choose_documents",
+    action_template_id: "open_apply_flow",
+    action_type: "open_apply_flow",
+    target_control_id: "apply",
+  }];
+
+  const result = resolveDraftItemWorkflowBinding(node, {
+    target_kind: "region",
+    target_id: "manual_region_1",
+    region_id: "manual_region_1",
+    semantic_action: "open_apply_flow",
+  }, outgoingEdges);
+
+  assert.deepEqual(result, {
+    status: "matched",
+    reason: "",
+    control_id: "apply",
+    control_label: "Quick apply",
+    action_template_id: "open_apply_flow",
+    edge_id: "job_detail_to_choose_documents",
+    target_node_id: "choose_documents",
+  });
+});
+
+test("ambiguous draft action mapping fails closed instead of guessing a control", () => {
+  const node = {
+    node_id: "job_detail",
+    controls: [
+      { control_id: "apply_primary", label: "Quick apply" },
+      { control_id: "apply_secondary", label: "Apply" },
+    ],
+    action_candidates: [
+      {
+        action_template_id: "open_apply_primary",
+        semantic_action: "open_apply_flow",
+        target_control_id: "apply_primary",
+        target_interface_id: "choose_documents",
+      },
+      {
+        action_template_id: "open_apply_secondary",
+        semantic_action: "open_apply_flow",
+        target_control_id: "apply_secondary",
+        target_interface_id: "choose_documents",
+      },
+    ],
+  };
+
+  const result = resolveDraftItemWorkflowBinding(node, {
+    target_kind: "region",
+    target_id: "manual_region_1",
+    semantic_action: "open_apply_flow",
+  }, []);
+
+  assert.equal(result.status, "ambiguous");
+  assert.equal(result.reason, "workflow_control_mapping_ambiguous");
+  assert.equal(result.control_id, "");
+  assert.equal(result.edge_id, "");
 });
 
 test("invalid contracts are rejected", () => {
