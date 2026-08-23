@@ -139,7 +139,7 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 | --- | --- | --- |
 | UEI schemas, refs, registration, static projections | **Current — Contract Proof** | Canonical, provenance-preserving, non-authorizing evidence boundary. |
 | Reviewed Workflow v2 compiler and persistence | **Current — Contract Proof** | Offline compile/store/reload; publication grants no authority. |
-| Agent Observation / Intent / Receipt schemas and internal controller composition | **Current — deterministic release-callsite proof** | The loopback-only `/runtime/agent` callsite binds the exact released asset, projects server-owned active asset/window state, accepts only geometry-free intent IDs, and returns the durable Receipt contract. Deterministic external-boundary doubles and a fake output backend replace physical Windows/SEEK I/O. |
+| Agent Observation / Intent / Receipt schemas and internal controller composition | **Current — deterministic + one bounded live proof** | The loopback-only `/runtime/agent` callsite binds the exact released asset, projects server-owned active asset/window state, accepts only geometry-free intent IDs, and returns the durable Receipt contract. Deterministic external-boundary doubles and a fake output backend cover the release callsite, while one bounded Windows/SEEK run proves the same contract through server-owned confirmation and exactly one physical dispatch. |
 | Server-owned one-shot confirmation and safe resume | **Current — deterministic + one bounded live proof** | Immutable request/decision/resume/closed markers bind the exact claim, workflow revision/hashes, transition/action, capture/state evidence, HWND/PID, and fixed expiry. The local approval route accepts only a server confirmation ID and decision. The bounded live proof used this same route before exactly one dispatch. |
 | Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
@@ -166,7 +166,7 @@ One scoped run started from an already-open SEEK Job Detail and used the same re
 - receipt: `receipt.38d529e464f94dbf858ec4d18de90c7c`
 - receipt object SHA: `8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e`
 - result: one `open_apply_flow` dispatch → fresh `Choose documents` state → `SAFE_STOP/stop_boundary`
-- negative controls: zero form fill, typing, upload, Continue/Next, final submit, or redispatch
+- negative controls: all six canonical failure classes are mapped through the Runtime boundary, with exact-current controls separated from behavior-equivalent synthetic fixtures; no form fill, typing, upload, Continue/Next, final submit, or redispatch occurred
 
 This proves one bounded runtime path only. It does **not** prove Provider accuracy, general SEEK navigation, unfamiliar-site reliability, unattended operation, application completion, or production readiness. PII-bearing application screenshots and raw fields are intentionally excluded from public evidence.
 

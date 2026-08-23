@@ -164,7 +164,7 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 - receipt：`receipt.38d529e464f94dbf858ec4d18de90c7c`
 - receipt object SHA：`8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e`
 - result：一次 `open_apply_flow` dispatch → 全新 `Choose documents` state → `SAFE_STOP/stop_boundary`
-- negative controls：零 form fill、typing、upload、Continue/Next、final submit 或 redispatch
+- negative controls：六类 canonical failure 已全部映射到 Runtime 边界，exact-current controls 与 behavior-equivalent synthetic fixtures 明确分级；全程零 form fill、typing、upload、Continue/Next、final submit 或 redispatch
 
 这只证明一个受限 Runtime 路径；不证明 Provider accuracy、通用 SEEK 导航、陌生站点可靠性、无人值守、完成求职申请或 production readiness。含个人信息的 application screenshot 和 raw field 不进入公开证据。
 

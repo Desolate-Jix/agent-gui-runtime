@@ -104,8 +104,10 @@ The focused release test proves:
 `evidence/manifest.json` content-addresses a privacy-minimized package with:
 
 - an allowlisted projection of one exact-live Runtime receipt;
-- matched deterministic controls that distinguish the exact current asset from
-  a behavior-equivalent historical visibility fixture;
+- all six canonical negative-control classes plus confirmation and duplicate-
+  intent controls, with exact-current evidence separated from explicitly
+  behavior-equivalent synthetic fixtures and each typed decision/Receipt
+  surface identified;
 - an operator cleanup commitment that explicitly records the absence of a raw
   navigation-restore artifact; and
 - strict JSON Schemas for each public artifact.
