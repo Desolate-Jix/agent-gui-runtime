@@ -2941,6 +2941,132 @@ def test_execute_recognition_plan_blocks_when_vista_direct_grounding_times_out(t
     assert result["narrow_search_result"]["summary"]["error"] == "vista_direct_point_grounding_failed: timed out"
 
 
+def test_vista_direct_failure_recommends_first_current_uia_grounded_candidate(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color="white").save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_prompt",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("timed out")),
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 1,
+            "controls": [
+                {
+                    "provider": "windows_uia",
+                    "control_id": "btn_start",
+                    "name": "Start",
+                    "control_type": "Button",
+                    "automation_id": "startButton",
+                    "class_name": "Button",
+                    "bbox": {"x": 170, "y": 112, "w": 80, "h": 36},
+                    "screen_bbox": {"x": 170, "y": 112, "w": 80, "h": 36},
+                    "enabled": True,
+                    "visible": True,
+                    "patterns": ["InvokePattern"],
+                }
+            ],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()["data"]["result"]
+    grounding = result["narrow_search_result"]
+    grounded = [item for item in grounding["results"] if item["status"] == "grounded"]
+    assert grounded
+    assert grounding["recommended_candidate_id"] == grounded[0]["candidate_id"]
+    assert grounding["summary"]["grounded_count"] == len(grounded)
+    assert result["execution_path"]["action_executed"] is False
+
+
+def test_vista_direct_failure_keeps_recommendation_null_without_grounded_results(tmp_path, monkeypatch) -> None:
+    image_path = tmp_path / "capture.png"
+    Image.new("RGB", (500, 260), color="white").save(image_path)
+
+    monkeypatch.setattr(
+        "app.api.vision.VisionProviderFactory.load_config",
+        lambda: {
+            "vision": {
+                "mode": "local",
+                "timeout_seconds": 600,
+                "local_grounding": {
+                    "model_name": "inclusionAI/VISTA-4B",
+                    "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+                    "runtime": "transformers",
+                    "output_contract": "vista_point_v1",
+                },
+            }
+        },
+    )
+    monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
+    monkeypatch.setattr(
+        "app.api.vision._call_vista_point_prompt",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("timed out")),
+    )
+    monkeypatch.setattr(
+        "app.api.vision.uia_provider.snapshot_bound_window",
+        lambda max_controls=250: {
+            "provider": "windows_uia",
+            "provider_version": "windows_uia_provider_v1",
+            "status": "ok",
+            "control_count": 0,
+            "controls": [],
+        },
+    )
+
+    response = TestClient(app).post(
+        "/vision/recognition_plan",
+        json={
+            "image_path": str(image_path),
+            "provider_mode": "local_grounding",
+            "task": "click_target",
+            "goal": "Click Start",
+            "app_name": "demo",
+            "agent_mode": "execute",
+            "top_k": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    grounding = response.json()["data"]["result"]["narrow_search_result"]
+    assert grounding["results"] == []
+    assert grounding["recommended_candidate_id"] is None
+
+
 def test_vision_layer_trace_returns_each_layer_result_and_validation(tmp_path, monkeypatch) -> None:
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (420, 220), color=(255, 255, 255)).save(image_path)

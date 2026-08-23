@@ -2819,15 +2819,26 @@ def _recognition_plan_from_vista_point(
                 ),
             )
         )
+    recommended_grounded_candidate_id = next(
+        (
+            candidate.candidate_id
+            for candidate in candidates
+            if any(
+                result.candidate_id == candidate.candidate_id and result.status == "grounded"
+                for result in grounding_results
+            )
+        ),
+        None,
+    )
     narrow_search_result = LocalGroundingResult(
         goal=goal,
         results=grounding_results,
-        recommended_candidate_id=selected_candidate.candidate_id if selected_candidate else None,
+        recommended_candidate_id=recommended_grounded_candidate_id,
         summary={
             "provider": "current_uia_unique_match_v1" if fast_grounding_used else "vista_point_grounding",
             "output_contract": "vista_point_v1",
             "candidate_count": len(candidates),
-            "grounded_count": 1 if selected_candidate else 0,
+            "grounded_count": sum(1 for result in grounding_results if result.status == "grounded"),
             "error": vista_error,
             "vista_point_inside_candidate_bbox": vista_point_inside_selected_bbox,
             "seeded_candidate_primary_point_used": seeded_primary_point_used,
