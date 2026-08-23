@@ -123,6 +123,7 @@ let imageInspectorSelection = null;
 let learningDraftEditorState = null;
 let learningDraftEditorSelected = null;
 let learningDraftEditorActive = false;
+let learningDraftEditorWorkflowBinding = null;
 let learningDraftEditorAddMode = false;
 let learningDraftEditorDrag = null;
 let learningDraftEditorCompactMode = true;
@@ -3835,8 +3836,9 @@ function startLearningDraftEditorDrag(event, mode) {
   window.addEventListener("mouseup", up);
 }
 
-function openLearningDraftBoxEditor(imagePathOverride = "") {
+function openLearningDraftBoxEditor(imagePathOverride = "", options = {}) {
   if (!learningDraftReview?.draft || !learningDraftEditorState) return false;
+  if (options.preserveWorkflowBinding !== true) learningDraftEditorWorkflowBinding = null;
   const imagePath = String(imagePathOverride || "").trim()
     || learningDraftSourceImagePath(learningDraftReview.draft);
   if (!imagePath) return false;
@@ -3921,6 +3923,26 @@ function interfaceWorkflowEditableReviewSourcePath(view) {
     .find(Boolean) || "";
 }
 
+function buildLearningDraftEditorBinding({ authority = "", state = null, view = null, sourcePath = "" } = {}) {
+  const normalizedAuthority = String(authority || "").trim();
+  const normalizedSourcePath = String(sourcePath || "").trim();
+  const nodeId = String(view?.node?.node_id || "").trim();
+  if (!["workflow", "source_preview"].includes(normalizedAuthority) || !state || !nodeId || !normalizedSourcePath) {
+    return null;
+  }
+  const workflowId = normalizedAuthority === "workflow"
+    ? String(state?.snapshot?.()?.workflow?.workflow_id || "").trim()
+    : "";
+  if (normalizedAuthority === "workflow" && !workflowId) return null;
+  return {
+    authority: normalizedAuthority,
+    workflow_id: workflowId,
+    node_id: nodeId,
+    source_path: normalizedSourcePath,
+    state,
+  };
+}
+
 async function openCurrentInterfaceWorkflowBoxEditor() {
   const correctionTarget = currentInterfaceWorkflowCorrectionTarget();
   const view = correctionTarget.view;
@@ -3946,6 +3968,23 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
     return null;
   }
 
+  const bindingState = correctionTarget.authority === "source_preview"
+    ? interfaceWorkflowSourceReviewState
+    : interfaceWorkflowReviewState;
+  learningDraftEditorWorkflowBinding = buildLearningDraftEditorBinding({
+    authority: correctionTarget.authority,
+    state: bindingState,
+    view,
+    sourcePath,
+  });
+  if (!learningDraftEditorWorkflowBinding) {
+    const message = "当前界面缺少稳定的流程、节点或证据绑定，修正工具已安全停止。";
+    setInterfaceWorkflowCorrectionOpen(false);
+    setInterfaceWorkflowBoxEditorStatus(message, "error");
+    renderResponse({ success: false, message }, "Interface workflow review");
+    return null;
+  }
+
   setInterfaceWorkflowCorrectionOpen(true, view);
   setInterfaceWorkflowBoxEditorStatus("正在加载可编辑证据…");
   if (currentLearningDraftReviewMatchesSource(sourcePath)) {
@@ -3956,7 +3995,7 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
       setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑原图", "error");
       return null;
     }
-    if (!openLearningDraftBoxEditor(currentEditorImagePath)) {
+    if (!openLearningDraftBoxEditor(currentEditorImagePath, { preserveWorkflowBinding: true })) {
       setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑截图", "error");
       return null;
     }
@@ -4003,7 +4042,7 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
       setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑原图", "error");
       return null;
     }
-    if (!openLearningDraftBoxEditor(loadedEditorImagePath)) {
+    if (!openLearningDraftBoxEditor(loadedEditorImagePath, { preserveWorkflowBinding: true })) {
       closeImageInspector();
       setInterfaceWorkflowBoxEditorStatus("当前界面缺少可编辑截图", "error");
       return null;
@@ -4045,43 +4084,75 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
   previousSourcePath,
   reviewedPath,
   review,
+  workflowBinding = null,
 }) {
-  if (typeof interfaceWorkflowReviewState === "undefined" || !interfaceWorkflowReviewState) return "not_bound";
+  if (workflowBinding?.authority !== "workflow") return "not_bound";
+  const boundState = workflowBinding?.state;
+  if (!boundState) return "not_bound";
   const previous = String(previousSourcePath || "").trim();
   const reviewed = String(reviewedPath || "").trim();
   if (!previous || !reviewed) return false;
-  const replaceBySource = interfaceWorkflowReviewState.replaceReviewedNodeEvidenceBySource;
-  const snapshot = typeof interfaceWorkflowReviewState.snapshot === "function"
-    ? interfaceWorkflowReviewState.snapshot()
+  const replaceBySource = boundState.replaceReviewedNodeEvidenceBySource;
+  const snapshot = typeof boundState.snapshot === "function"
+    ? boundState.snapshot()
     : null;
   const normalizedPrevious = previous.replace(/\\/g, "/").toLowerCase();
+  const normalizedExpectedSource = String(workflowBinding?.source_path || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .toLowerCase();
+  if (normalizedExpectedSource && normalizedExpectedSource !== normalizedPrevious) return "not_bound";
   if (!snapshot) return "not_bound";
-  const matches = Array.isArray(snapshot.nodes) ? snapshot.nodes.filter((node) => [
+  const expectedNodeId = String(workflowBinding?.node_id || "").trim();
+  const expectedWorkflowId = String(workflowBinding?.workflow_id || "").trim();
+  if (!expectedNodeId || !expectedWorkflowId || !normalizedExpectedSource) return "not_bound";
+  const currentWorkflowId = String(snapshot?.workflow?.workflow_id || "").trim();
+  if (currentWorkflowId !== expectedWorkflowId) {
+    return "not_bound";
+  }
+  const matches = Array.isArray(snapshot.nodes) ? snapshot.nodes.filter((node) => (
+    String(node?.node_id || "").trim() === expectedNodeId
+    && [
     node?.editable_review_source_path,
     ...(Array.isArray(node?.source_paths) ? node.source_paths : []),
-  ].some((value) => String(value || "").trim().replace(/\\/g, "/").toLowerCase() === normalizedPrevious)) : [];
+    ].some((value) => String(value || "").trim().replace(/\\/g, "/").toLowerCase() === normalizedPrevious)
+  )) : [];
   if (!matches.length) return "not_bound";
   if (matches.length !== 1 || typeof replaceBySource !== "function") return "error";
 
   const draft = review?.draft && typeof review.draft === "object" ? review.draft : {};
   try {
-    const updated = replaceBySource(previous, reviewed, {
+    const pageDetails = draft.page_details && typeof draft.page_details === "object"
+      ? draft.page_details
+      : {};
+    const humanReviewOverlayPath = String(
+      pageDetails.human_review_overlay_path
+      || pageDetails.compiled_overlay_path
+      || "",
+    ).trim();
+    const reviewedNodePatch = {
       regions: Array.isArray(draft.regions) ? draft.regions : [],
       action_candidates: Array.isArray(draft.action_templates) ? draft.action_templates : [],
       blockers: Array.isArray(draft.blockers) ? draft.blockers : [],
       verification_rules: Array.isArray(draft.verification_rules) ? draft.verification_rules : [],
-      page_details: draft.page_details && typeof draft.page_details === "object"
-        ? draft.page_details
-        : {},
+      page_details: pageDetails,
       manual_revision: {
         source_path: reviewed,
         source_after_review: String(review?.source_after_review || "mixed"),
         artifact_is_authorization: false,
         execute_binding_enabled: false,
       },
-    });
+    };
+    if (humanReviewOverlayPath) {
+      reviewedNodePatch.evidence = {
+        ...(matches[0]?.evidence && typeof matches[0].evidence === "object" ? matches[0].evidence : {}),
+        human_review_overlay_path: humanReviewOverlayPath,
+      };
+    }
+    const updated = replaceBySource(previous, reviewed, reviewedNodePatch);
     const nodeId = String(updated?.node?.node_id || "").trim();
     if (!nodeId) return "error";
+    interfaceWorkflowReviewState = boundState;
     interfaceWorkflowWorkbenchState.showWorkflowNode(nodeId);
   } catch (error) {
     renderResponse({
@@ -4091,11 +4162,11 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
     }, "Interface workflow review");
     return "error";
   }
-  interfaceWorkflowReview = interfaceWorkflowReviewState.snapshot();
+  interfaceWorkflowReview = boundState.snapshot();
   return true;
 }
 
-async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPath }) {
+async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPath, workflowBinding = null }) {
   const sourcePath = String(reviewedPath || "").trim();
   if (!sourcePath) return null;
   setLearningDraftReviewSourcePath(sourcePath);
@@ -4108,11 +4179,15 @@ async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPat
     skipReviewRender: true,
   });
   if (!refreshedReview) return null;
+  if (workflowBinding?.authority !== "workflow") {
+    return { review: refreshedReview, workflow: null };
+  }
   let refreshedWorkflow = null;
   const binding = applyReviewedEvidenceToCurrentWorkflowNode({
     previousSourcePath,
     reviewedPath: sourcePath,
     review: refreshedReview,
+    workflowBinding,
   });
   if (binding === true) {
     const saveResult = await saveInterfaceWorkflowReview({ commitEditor: false });
@@ -4137,6 +4212,19 @@ async function refreshCurrentInterfaceWorkflowEvidence() {
     );
     return null;
   }
+  const workflowBinding = buildLearningDraftEditorBinding({
+    authority: "workflow",
+    state: interfaceWorkflowReviewState,
+    view,
+    sourcePath,
+  });
+  if (!workflowBinding) {
+    renderResponse(
+      { success: false, message: "当前界面缺少稳定的流程、节点或证据绑定。" },
+      "Interface workflow evidence refresh",
+    );
+    return null;
+  }
   if (button) {
     button.disabled = true;
     button.textContent = "正在刷新...";
@@ -4145,6 +4233,7 @@ async function refreshCurrentInterfaceWorkflowEvidence() {
     const refreshed = await refreshSavedLearningDraftReview({
       previousSourcePath: sourcePath,
       reviewedPath: sourcePath,
+      workflowBinding,
     });
     if (!refreshed || !refreshed.workflow) {
       renderResponse(
@@ -4179,6 +4268,7 @@ function closeImageInspector() {
   learningDraftEditorAddMode = false;
   learningDraftEditorDrag = null;
   learningDraftEditorExpandedGroupKey = "";
+  learningDraftEditorWorkflowBinding = null;
   imageInspectorEditContext = null;
   imageInspectorSelection = null;
 }
@@ -20013,7 +20103,23 @@ async function saveLearningDraftReview() {
     apply.textContent = "Saving review...";
   }
   try {
-    const sourcePath = learningDraftReviewSourcePath();
+    const workflowBinding = learningDraftEditorWorkflowBinding;
+    const currentSourcePath = String(learningDraftReviewSourcePath() || "").trim();
+    const boundSourcePath = String(workflowBinding?.source_path || "").trim();
+    const normalizedCurrentSource = currentSourcePath.replace(/\\/g, "/").toLowerCase();
+    const normalizedBoundSource = boundSourcePath.replace(/\\/g, "/").toLowerCase();
+    if (normalizedBoundSource && normalizedCurrentSource !== normalizedBoundSource) {
+      renderResponse({
+        success: false,
+        message: "Learning draft review source changed while the editor was open",
+        data: {
+          workflow_id: workflowBinding?.workflow_id || "",
+          node_id: workflowBinding?.node_id || "",
+        },
+      }, "Learning draft review");
+      return null;
+    }
+    const sourcePath = boundSourcePath || currentSourcePath;
     if (!sourcePath) {
       renderResponse({ success: false, message: "learning_draft_review_source_path is required" }, "Learning draft review");
       return null;
@@ -20044,6 +20150,7 @@ async function saveLearningDraftReview() {
     const refreshed = await refreshSavedLearningDraftReview({
       previousSourcePath: sourcePath,
       reviewedPath,
+      workflowBinding,
     });
     if (!refreshed?.review) {
       renderResponse({
@@ -20053,8 +20160,21 @@ async function saveLearningDraftReview() {
       }, "Learning draft review");
       return null;
     }
+    if (workflowBinding?.authority === "workflow" && !refreshed.workflow) {
+      renderResponse({
+        success: false,
+        message: "Reviewed evidence was saved, but it was not attached to the originating workflow node",
+        data: {
+          reviewed_template_candidate_path: reviewedPath,
+          workflow_id: workflowBinding.workflow_id,
+          node_id: workflowBinding.node_id,
+        },
+      }, "Learning draft review");
+      return null;
+    }
     saveSucceeded = true;
     closeImageInspector();
+    learningDraftEditorWorkflowBinding = null;
     void loadLearningCorrectionMemoryRegistry({ skipResponse: true }).catch((error) => {
       renderResponse({
         success: false,

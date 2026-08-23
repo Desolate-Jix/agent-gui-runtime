@@ -1089,6 +1089,76 @@
 
       const node = matches[0];
       const normalizedPatch = patch && typeof patch === "object" ? { ...patch } : {};
+      const reviewedRegions = Array.isArray(normalizedPatch.regions) ? normalizedPatch.regions : [];
+      const reviewedActions = Array.isArray(normalizedPatch.action_candidates)
+        ? normalizedPatch.action_candidates
+        : (Array.isArray(node.action_candidates) ? node.action_candidates : []);
+      const existingControls = Array.isArray(node.controls) ? clone(node.controls) : [];
+      const actionableReviewedRegions = reviewedRegions.filter((region) => {
+        const semanticAction = String(region?.semantic_action || region?.action_type || "").trim();
+        return semanticAction
+          && semanticAction !== "read"
+          && semanticAction !== "read_only"
+          && region?.bbox;
+      });
+      for (const region of actionableReviewedRegions) {
+        const bbox = region?.bbox;
+        const semanticAction = String(region?.semantic_action || region?.action_type || "").trim();
+        if (
+          !Number.isFinite(Number(bbox.x))
+          || !Number.isFinite(Number(bbox.y))
+          || !Number.isFinite(Number(bbox.w))
+          || !Number.isFinite(Number(bbox.h))
+          || Number(bbox.x) < 0
+          || Number(bbox.y) < 0
+          || Number(bbox.w) <= 0
+          || Number(bbox.h) <= 0
+        ) {
+          throw new Error(`reviewed bbox must contain finite non-negative position and positive size: ${semanticAction}`);
+        }
+        const regionId = String(region?.region_id || region?.target_id || "").trim();
+        if (!regionId) {
+          throw new Error(`reviewed bbox must have an evidence region id: ${semanticAction}`);
+        }
+        const regionMatches = actionableReviewedRegions.filter((candidate) => (
+          String(candidate?.semantic_action || candidate?.action_type || "").trim() === semanticAction
+        ));
+        if (regionMatches.length !== 1) {
+          throw new Error(`reviewed bbox semantic action must match exactly one reviewed region: ${semanticAction}`);
+        }
+        const actionMatches = reviewedActions.filter((action) => (
+          String(action?.semantic_action || action?.action_type || "").trim() === semanticAction
+        ));
+        if (actionMatches.length !== 1) {
+          throw new Error(`reviewed bbox semantic action must match exactly one action candidate: ${semanticAction}`);
+        }
+        const action = actionMatches[0];
+        const controlId = String(action?.target_control_id || action?.source_control_id || "").trim();
+        const controlMatches = existingControls.filter((control) => String(control?.control_id || "").trim() === controlId);
+        if (!controlId || controlMatches.length !== 1) {
+          throw new Error(`reviewed bbox action candidate must match exactly one target control: ${controlId || semanticAction}`);
+        }
+        const controlIndex = existingControls.indexOf(controlMatches[0]);
+        const updatedControl = {
+          ...controlMatches[0],
+          bbox: {
+            x: Number(bbox.x),
+            y: Number(bbox.y),
+            w: Number(bbox.w),
+            h: Number(bbox.h),
+          },
+          evidence_region_id: regionId,
+          review_status: "needs_human_review",
+          reviewed_by_human: false,
+          display_only: true,
+          artifact_is_authorization: false,
+          execute_binding_enabled: false,
+        };
+        delete updatedControl.human_review_confirmation;
+        delete updatedControl.reviewed_revision_hash;
+        existingControls[controlIndex] = updatedControl;
+      }
+      if (existingControls.length) normalizedPatch.controls = existingControls;
       const nextSourcePaths = [
         normalizedReviewed,
         ...(Array.isArray(node.source_paths) ? node.source_paths : []),

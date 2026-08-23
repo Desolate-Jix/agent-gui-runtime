@@ -10,6 +10,9 @@ const {
   learningDraftEditorPointerMode,
   resizeBboxFromHandle,
 } = require("../../app/web_panel/learning_draft_editor.js");
+const {
+  createInterfaceWorkflowReviewState,
+} = require("../../app/web_panel/learning_workflow_review.js");
 
 function loadSaveLearningDraftReview(overrides = {}) {
   const panelSource = fs.readFileSync("app/web_panel/panel.js", "utf8");
@@ -26,13 +29,23 @@ function loadSaveLearningDraftReview(overrides = {}) {
     },
     snapshot: () => {
       calls.push("snapshot");
-      return { nodes: [{ node_id: "node1", source_paths: ["artifacts/source.json"] }] };
+      return {
+        workflow: { workflow_id: "workflow-1" },
+        nodes: [{ node_id: "node1", source_paths: ["artifacts/source.json"] }],
+      };
     },
   };
   const context = {
     console,
     learningDraftEditorActive: true,
     learningDraftEditorSelected: { target_kind: "region", target_id: "r1" },
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "workflow-1",
+      node_id: "node1",
+      source_path: "artifacts/source.json",
+      state: workflowState,
+    },
     interfaceWorkflowDraftSourcePaths: ["artifacts/source.json"],
     $: () => button,
     learningDraftReviewSourcePath: () => "artifacts/source.json",
@@ -72,7 +85,7 @@ function loadSaveLearningDraftReview(overrides = {}) {
     `${panelSource.slice(refreshStart, refreshEnd)}\n${panelSource.slice(saveStart, saveEnd)}`,
     context,
   );
-  return { context, button, calls };
+  return { context, button, calls, workflowState };
 }
 
 test("learning draft editor clamps moved and resized boxes to the source image", () => {
@@ -387,9 +400,178 @@ test("learning draft editor save refreshes the parent before closing", async () 
   ]);
 });
 
+test("workflow box save keeps the exact originating workflow binding across draft refresh", async () => {
+  const { context, calls, workflowState } = loadSaveLearningDraftReview();
+  context.learningDraftEditorWorkflowBinding = {
+    authority: "workflow",
+    workflow_id: "workflow-1",
+    node_id: "node1",
+    source_path: "artifacts/source.json",
+    state: workflowState,
+  };
+  context.loadLearningDraftReview = async () => {
+    calls.push("parent_refresh");
+    context.interfaceWorkflowReviewState = null;
+    return { draft: {} };
+  };
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result.reviewed_template_candidate_path, "artifacts/reviewed.json");
+  assert.ok(calls.includes("replace:artifacts/source.json->artifacts/reviewed.json"));
+  assert.ok(calls.includes("workflow_save"));
+});
+
+test("workflow evidence merge attaches a uniquely matched reviewed bbox to the existing control", () => {
+  const review = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: {
+      workflow_id: "portfolio_v1_seek_apply_entry",
+      entry_node_id: "job_detail",
+      node_ids: ["job_detail", "apply_entry"],
+      edge_ids: ["open_apply_flow"],
+    },
+    nodes: [
+      {
+        node_id: "job_detail",
+        editable_review_source_path: "artifacts/source.json",
+        source_paths: ["artifacts/source.json"],
+        controls: [{ control_id: "apply", label: "Quick apply", role: "button" }],
+        action_candidates: [{
+          action_template_id: "open_apply_flow",
+          semantic_action: "open_apply_flow",
+          target_control_id: "apply",
+          target_interface_id: "apply_entry",
+        }],
+        regions: [],
+      },
+      { node_id: "apply_entry", controls: [], action_candidates: [], regions: [] },
+    ],
+    edges: [{
+      edge_id: "open_apply_flow",
+      source_node_id: "job_detail",
+      target_node_id: "apply_entry",
+      action_type: "open_apply_flow",
+    }],
+  };
+  const state = createInterfaceWorkflowReviewState(review);
+
+  state.replaceReviewedNodeEvidenceBySource(
+    "artifacts/source.json",
+    "artifacts/reviewed.json",
+    {
+      regions: [{
+        region_id: "manual_region_1",
+        label: "Manual region 1",
+        role: "button",
+        semantic_action: "open_apply_flow",
+        bbox: { x: 1127, y: 630, w: 97, h: 38 },
+      }],
+      action_candidates: review.nodes[0].action_candidates,
+    },
+  );
+
+  const savedNode = state.snapshot().nodes.find((node) => node.node_id === "job_detail");
+  assert.equal(savedNode.controls[0].control_id, "apply");
+  assert.equal(savedNode.controls[0].label, "Quick apply");
+  assert.equal(savedNode.controls[0].role, "button");
+  assert.deepEqual(savedNode.controls[0].bbox, { x: 1127, y: 630, w: 97, h: 38 });
+  assert.equal(savedNode.action_candidates[0].target_interface_id, "apply_entry");
+});
+
+test("workflow evidence merge refuses an ambiguous semantic action", () => {
+  const review = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "workflow_a", entry_node_id: "node1", node_ids: ["node1"], edge_ids: [] },
+    nodes: [{
+      node_id: "node1",
+      editable_review_source_path: "artifacts/source.json",
+      source_paths: ["artifacts/source.json"],
+      controls: [
+        { control_id: "apply_a", label: "Quick apply" },
+        { control_id: "apply_b", label: "Apply" },
+      ],
+      action_candidates: [
+        { action_template_id: "a", semantic_action: "open_apply_flow", target_control_id: "apply_a" },
+        { action_template_id: "b", semantic_action: "open_apply_flow", target_control_id: "apply_b" },
+      ],
+      regions: [],
+    }],
+    edges: [],
+  };
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(() => state.replaceReviewedNodeEvidenceBySource(
+    "artifacts/source.json",
+    "artifacts/reviewed.json",
+    { regions: [{ region_id: "manual_region_1", semantic_action: "open_apply_flow", bbox: { x: 1, y: 2, w: 3, h: 4 } }] },
+  ), /must match exactly one action candidate/);
+  assert.equal(state.snapshot().nodes[0].controls.some((control) => control.bbox), false);
+});
+
+test("workflow evidence merge refuses multiple reviewed regions for one semantic action", () => {
+  const review = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "workflow_a", entry_node_id: "node1", node_ids: ["node1"], edge_ids: [] },
+    nodes: [{
+      node_id: "node1",
+      editable_review_source_path: "artifacts/source.json",
+      source_paths: ["artifacts/source.json"],
+      controls: [{ control_id: "apply", label: "Quick apply" }],
+      action_candidates: [{
+        action_template_id: "open_apply_flow",
+        semantic_action: "open_apply_flow",
+        target_control_id: "apply",
+      }],
+      regions: [],
+    }],
+    edges: [],
+  };
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(() => state.replaceReviewedNodeEvidenceBySource(
+    "artifacts/source.json",
+    "artifacts/reviewed.json",
+    { regions: [
+      { region_id: "r1", semantic_action: "open_apply_flow", bbox: { x: 1, y: 2, w: 3, h: 4 } },
+      { region_id: "r2", semantic_action: "open_apply_flow", bbox: { x: 5, y: 6, w: 7, h: 8 } },
+    ] },
+  ), /must match exactly one reviewed region/);
+  assert.equal(state.snapshot().nodes[0].controls.some((control) => control.bbox), false);
+});
+
+test("workflow evidence merge refuses invalid reviewed bbox geometry", () => {
+  const review = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "workflow_a", entry_node_id: "node1", node_ids: ["node1"], edge_ids: [] },
+    nodes: [{
+      node_id: "node1",
+      editable_review_source_path: "artifacts/source.json",
+      source_paths: ["artifacts/source.json"],
+      controls: [{ control_id: "apply", label: "Quick apply" }],
+      action_candidates: [{ semantic_action: "open_apply_flow", target_control_id: "apply" }],
+      regions: [],
+    }],
+    edges: [],
+  };
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(() => state.replaceReviewedNodeEvidenceBySource(
+    "artifacts/source.json",
+    "artifacts/reviewed.json",
+    { regions: [{
+      region_id: "r1",
+      semantic_action: "open_apply_flow",
+      bbox: { x: -1, y: 2, w: "bad", h: 4 },
+    }] },
+  ), /finite non-negative position and positive size/);
+  assert.equal(state.snapshot().nodes[0].controls.some((control) => control.bbox), false);
+});
+
 test("learning draft editor saves standalone candidate without workflow binding", async () => {
   const calls = [];
   const { context, button } = loadSaveLearningDraftReview({
+    learningDraftEditorWorkflowBinding: null,
     interfaceWorkflowReviewState: {
       snapshot: () => ({ nodes: [{ node_id: "other", source_paths: ["artifacts/other.json"] }] }),
       replaceReviewedNodeEvidenceBySource: () => {
@@ -430,13 +612,24 @@ test("learning draft editor stays open and reports failure when parent refresh f
 
 test("learning draft editor stays open when workflow evidence replacement fails", async () => {
   const calls = [];
+  const failingState = {
+    snapshot: () => ({
+      workflow: { workflow_id: "workflow-1" },
+      nodes: [{ node_id: "node1", source_paths: ["artifacts/source.json"] }],
+    }),
+    replaceReviewedNodeEvidenceBySource: () => {
+      calls.push("replace");
+      return { node: null };
+    },
+  };
   const { context, button } = loadSaveLearningDraftReview({
-    interfaceWorkflowReviewState: {
-      snapshot: () => ({ nodes: [{ node_id: "node1", source_paths: ["artifacts/source.json"] }] }),
-      replaceReviewedNodeEvidenceBySource: () => {
-        calls.push("replace");
-        return { node: null };
-      },
+    interfaceWorkflowReviewState: failingState,
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "workflow-1",
+      node_id: "node1",
+      source_path: "artifacts/source.json",
+      state: failingState,
     },
     closeImageInspector: () => calls.push("close"),
     renderResponse: (response) => calls.push(`response:${response.success}`),
@@ -446,6 +639,80 @@ test("learning draft editor stays open when workflow evidence replacement fails"
 
   assert.equal(result, null);
   assert.deepEqual(calls, ["replace", "response:false"]);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Save review");
+});
+
+test("workflow-context save stays open when the exact origin node is not bound", async () => {
+  const calls = [];
+  const mismatchedState = {
+    snapshot: () => ({
+      workflow: { workflow_id: "workflow-1" },
+      nodes: [{ node_id: "other", source_paths: ["artifacts/other.json"] }],
+    }),
+    replaceReviewedNodeEvidenceBySource: () => {
+      calls.push("replace");
+      return { node: null };
+    },
+  };
+  const { context, button } = loadSaveLearningDraftReview({
+    interfaceWorkflowReviewState: mismatchedState,
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "workflow-1",
+      node_id: "node1",
+      source_path: "artifacts/source.json",
+      state: mismatchedState,
+    },
+    closeImageInspector: () => calls.push("close"),
+    renderResponse: (response) => calls.push(`response:${response.success}`),
+  });
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result, null);
+  assert.deepEqual(calls, ["response:false"]);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Save review");
+});
+
+test("workflow-context save rejects source drift before writing a derivative", async () => {
+  const calls = [];
+  const { context, button } = loadSaveLearningDraftReview({
+    learningDraftReviewSourcePath: () => "artifacts/other.json",
+    api: async () => {
+      calls.push("save");
+      return { success: true, data: { reviewed_template_candidate_path: "artifacts/reviewed.json" } };
+    },
+    renderResponse: (response) => calls.push(`response:${response.success}:${response.message}`),
+  });
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result, null);
+  assert.deepEqual(calls, ["response:false:Learning draft review source changed while the editor was open"]);
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Save review");
+});
+
+test("workflow-context save rejects a binding without captured state", async () => {
+  const calls = [];
+  const { context, button } = loadSaveLearningDraftReview({
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "workflow-1",
+      node_id: "node1",
+      source_path: "artifacts/source.json",
+      state: null,
+    },
+    renderResponse: (response) => calls.push(`response:${response.success}`),
+  });
+
+  const result = await context.saveLearningDraftReview();
+
+  assert.equal(result, null);
+  assert.deepEqual(calls.filter((call) => call === "workflow_save" || call.startsWith("replace:")), []);
+  assert.ok(calls.includes("response:false"));
   assert.equal(button.disabled, false);
   assert.equal(button.textContent, "Save review");
 });
@@ -472,6 +739,7 @@ test("learning draft editor stays open when workflow save fails", async () => {
 test("learning draft editor saves standalone candidate without current workflow", async () => {
   const calls = [];
   const { context, button } = loadSaveLearningDraftReview({
+    learningDraftEditorWorkflowBinding: null,
     interfaceWorkflowReviewState: null,
     closeImageInspector: () => calls.push("close"),
     renderResponse: (response) => calls.push(`response:${response.success}`),

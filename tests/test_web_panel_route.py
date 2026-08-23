@@ -5259,8 +5259,8 @@ def test_interface_workflow_correction_opens_existing_full_image_box_editor() ->
     assert "const loadedEditorImagePath = learningDraftSourceImagePath(review.draft);" in function_body
     assert 'if (!loadedEditorImagePath)' in function_body
     assert "当前界面缺少可编辑原图" in function_body
-    assert "openLearningDraftBoxEditor(currentEditorImagePath)" in function_body
-    assert "openLearningDraftBoxEditor(loadedEditorImagePath)" in function_body
+    assert "openLearningDraftBoxEditor(currentEditorImagePath, { preserveWorkflowBinding: true })" in function_body
+    assert "openLearningDraftBoxEditor(loadedEditorImagePath, { preserveWorkflowBinding: true })" in function_body
     assert function_body.index("const loadedEditorImagePath") > function_body.index(
         "await loadLearningDraftReview({"
     )
@@ -5299,6 +5299,13 @@ def test_interface_workflow_box_editor_prefers_saved_editable_evidence_projectio
     assert "source_paths" in function_body
 
 
+def test_image_inspector_close_clears_captured_workflow_binding() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    function_body = _extract_javascript_function(panel_js, "function closeImageInspector")
+
+    assert "learningDraftEditorWorkflowBinding = null" in function_body
+
+
 def test_reviewed_node_refresh_preserves_the_saved_multi_interface_graph() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
     helper_start = panel_js.index("function applyReviewedEvidenceToCurrentWorkflowNode")
@@ -5313,6 +5320,8 @@ def test_reviewed_node_refresh_preserves_the_saved_multi_interface_graph() -> No
     assert "reviewedPath" in helper_body
     assert "regions" in helper_body
     assert "action_candidates" in helper_body
+    assert "human_review_overlay_path" in helper_body
+    assert "evidence" in helper_body
     assert "saveInterfaceWorkflowReview({ commitEditor: false })" in refresh_body
     assert "applyReviewedEvidenceToCurrentWorkflowNode" in refresh_body
     assert "loadInterfaceWorkflowReview" not in refresh_body

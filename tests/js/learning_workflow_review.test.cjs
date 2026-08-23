@@ -1499,7 +1499,7 @@ test("panel correction editor opens displayed asset A while workflow remains on 
       evidence: { source_screenshot_path: "artifacts/workflow-b/source.png" },
     },
   };
-  const opened = { sourcePath: "", imagePath: "", correctionNodeId: "" };
+  const opened = { sourcePath: "", imagePath: "", correctionNodeId: "", options: null };
   const sandbox = {
     console,
     globalThis: null,
@@ -1514,7 +1514,7 @@ test("panel correction editor opens displayed asset A while workflow remains on 
     currentLearningDraftReviewMatchesSource: () => true,
     setLearningDraftReviewSourcePath: (value) => { opened.sourcePath = value; },
     learningDraftSourceImagePath: () => "artifacts/asset-a/source.png",
-    openLearningDraftBoxEditor: (value) => { opened.imagePath = value; return true; },
+    openLearningDraftBoxEditor: (value, options) => { opened.imagePath = value; opened.options = options; return true; },
     setInterfaceWorkflowCorrectionOpen: (_open, view) => { opened.correctionNodeId = view?.node?.node_id || ""; },
     setInterfaceWorkflowBoxEditorStatus: () => {},
     renderResponse: () => {},
@@ -1534,6 +1534,11 @@ test("panel correction editor opens displayed asset A while workflow remains on 
   assert.equal(opened.correctionNodeId, "asset_a");
   assert.equal(opened.sourcePath, "artifacts/asset-a/trial_result.json");
   assert.equal(opened.imagePath, "artifacts/asset-a/source.png");
+  assert.equal(opened.options.preserveWorkflowBinding, true);
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.authority, "source_preview");
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.node_id, "asset_a");
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.source_path, "artifacts/asset-a/trial_result.json");
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, sandbox.interfaceWorkflowSourceReviewState);
 });
 
 test("panel asset switch invalidates and clears the previous editor selection", () => {
