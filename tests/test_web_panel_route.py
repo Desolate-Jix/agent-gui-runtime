@@ -1131,7 +1131,10 @@ def test_learning_draft_box_save_refreshes_parent_before_closing_editor() -> Non
     correction_index = save_body.index("void loadLearningCorrectionMemoryRegistry({ skipResponse: true })")
 
     assert saving_index < refresh_index < workflow_refresh_index < close_index < correction_index
-    assert "setLearningDraftReviewSourcePath(sourcePath)" in refresh_body
+    assert (
+        "setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true })"
+        in refresh_body
+    )
     assert 'const reviewedPath = String(data.reviewed_template_candidate_path || "").trim()' in save_body
     assert "Reviewed template candidate save response is missing reviewed_template_candidate_path" in save_body
     assert "try {" in save_body
@@ -1168,7 +1171,9 @@ def test_interface_workflow_exposes_manual_current_evidence_refresh() -> None:
     shared_refresh_body = panel_js[shared_refresh_start:shared_refresh_end]
     assert "refreshSavedLearningDraftReview({" in refresh_body
     assert "applyReviewedEvidenceToCurrentWorkflowNode" in shared_refresh_body
-    assert "saveInterfaceWorkflowReview({ commitEditor: false })" in shared_refresh_body
+    assert "const saveResult = await saveInterfaceWorkflowReview({" in shared_refresh_body
+    assert "expectedState: workflowSession?.state || null" in shared_refresh_body
+    assert "workflowSession," in shared_refresh_body
     assert "loadInterfaceWorkflowReview" not in shared_refresh_body
     assert "discoverRelatedSidecars: false" in shared_refresh_body
     assert "supersedePendingLoad: true" in shared_refresh_body
@@ -5327,7 +5332,9 @@ def test_reviewed_node_refresh_preserves_the_saved_multi_interface_graph() -> No
     assert "action_candidates" in helper_body
     assert "human_review_overlay_path" in helper_body
     assert "evidence" in helper_body
-    assert "saveInterfaceWorkflowReview({ commitEditor: false })" in refresh_body
+    assert "const saveResult = await saveInterfaceWorkflowReview({" in refresh_body
+    assert "expectedState: workflowSession?.state || null" in refresh_body
+    assert "workflowSession," in refresh_body
     assert "applyReviewedEvidenceToCurrentWorkflowNode" in refresh_body
     assert "loadInterfaceWorkflowReview" not in refresh_body
     assert "interfaceWorkflowEditableReviewSourcePath(view)" in panel_js
@@ -5335,7 +5342,10 @@ def test_reviewed_node_refresh_preserves_the_saved_multi_interface_graph() -> No
     save_start = panel_js.index("async function saveInterfaceWorkflowReview")
     save_end = panel_js.index("\nasync function loadInterfaceWorkflowReview", save_start)
     save_body = panel_js[save_start:save_end]
-    assert "{ commitEditor = true, requireDisplayedWorkflow = false } = {}" in save_body
+    assert "commitEditor = true," in save_body
+    assert "requireDisplayedWorkflow = false," in save_body
+    assert "expectedState = null," in save_body
+    assert "workflowSession = null," in save_body
     assert "commitEditor" in save_body
     assert "interfaceWorkflowReviewState.snapshot()" in save_body
 
