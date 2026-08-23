@@ -12466,7 +12466,7 @@ async function maybeLoadCurrentLearningDraftReview() {
   if (currentLearnReplaySubview !== "draft" || learningDraftReview) return null;
   const sourcePath = String($("learningDraftReviewSourcePath")?.value || "").trim();
   if (!sourcePath) return null;
-  const options = { skipResponse: true };
+  const options = { skipResponse: true, discoverRelatedSidecars: false };
   if (typeof interfaceWorkflowReviewState !== "undefined" && interfaceWorkflowReviewState) {
     options.skipWorkflowReview = true;
   }

@@ -5642,7 +5642,8 @@ def test_recent_single_interface_load_does_not_replace_open_saved_workflow() -> 
     clear_end = panel_js.index("\nfunction renderLearningCorrectionMemoryRegistry", clear_start)
     clear_body = panel_js[clear_start:clear_end]
 
-    assert 'const options = { skipResponse: true };' in body
+    assert "skipResponse: true" in body
+    assert "discoverRelatedSidecars: false" in body
     assert 'typeof interfaceWorkflowReviewState !== "undefined"' in body
     assert "options.skipWorkflowReview = true" in body
     assert "preserveWorkflowReview: options.skipWorkflowReview === true" in load_body

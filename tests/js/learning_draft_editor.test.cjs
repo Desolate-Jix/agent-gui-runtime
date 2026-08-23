@@ -933,7 +933,10 @@ test("draft subview auto-loads the selected source once", async () => {
   context.learningDraftReview = { draft: {} };
   await context.maybeLoadCurrentLearningDraftReview();
 
-  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ skipResponse: true }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{
+    skipResponse: true,
+    discoverRelatedSidecars: false,
+  }]);
 });
 
 test("recommended draft source discovery preserves an already-open workflow review", () => {
