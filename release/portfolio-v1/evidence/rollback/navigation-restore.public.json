@@ -1,0 +1,21 @@
+{
+  "contract_version": "portfolio_v1_operator_cleanup_v1",
+  "cleanup_kind": "operator_cleanup",
+  "positive_receipt_binding": {
+    "receipt_id": "receipt.38d529e464f94dbf858ec4d18de90c7c",
+    "private_parent_object_sha256": "8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e"
+  },
+  "restore": {
+    "post_state": "Job Detail",
+    "additional_runtime_dispatch_count": 0,
+    "external_mutation_performed": false
+  },
+  "evidence_grade": "operator_cleanup_commitment",
+  "evidence_status": "passive_semantic_restore_evidence_commitment",
+  "raw_artifact": {
+    "present": false,
+    "reference": null,
+    "sha256": null
+  },
+  "claim_boundary": "Operator cleanup statement only. It is not independently replayable, does not prove a raw navigation-restore trace, and grants no Runtime authority."
+}

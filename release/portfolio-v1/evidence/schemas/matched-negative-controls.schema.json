@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "portfolio_v1_matched_negative_controls_v1"
+    },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "const": "portfolio_v1_seek_apply_entry"
+        },
+        "source_workflow_sha256": {
+          "const": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc"
+        },
+        "asset_content_sha256": {
+          "const": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "source_workflow_sha256",
+        "asset_content_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "controls": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "control_id": {
+                "const": "confirmation_required_zero_dispatch"
+              },
+              "evidence_grade": {
+                "const": "deterministic_exact_current_asset"
+              },
+              "live_observed": {
+                "const": false
+              },
+              "result": {
+                "type": "object",
+                "properties": {
+                  "confirmation_status": {
+                    "const": "NEEDS_REVIEW"
+                  },
+                  "runtime_dispatch_count": {
+                    "const": 0
+                  }
+                },
+                "required": [
+                  "confirmation_status",
+                  "runtime_dispatch_count"
+                ],
+                "additionalProperties": false
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "const": "tests/test_portfolio_v1_release_callsite.py"
+                  },
+                  "sha256": {
+                    "const": "24713555be618e96e299bf7b9708012e7b700541615cf4045cd45fa786e05e70"
+                  },
+                  "test": {
+                    "const": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops"
+                  },
+                  "asset_relationship": {
+                    "const": "exact_current_asset"
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "test",
+                  "asset_relationship"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "control_id",
+              "evidence_grade",
+              "live_observed",
+              "result",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "control_id": {
+                "const": "occluded_or_wrong_foreground_zero_dispatch"
+              },
+              "evidence_grade": {
+                "const": "deterministic_behavior_equivalent_historical_asset"
+              },
+              "live_observed": {
+                "const": false
+              },
+              "result": {
+                "type": "object",
+                "properties": {
+                  "reason_codes": {
+                    "const": [
+                      "foreground_window_changed",
+                      "target_occluded"
+                    ]
+                  },
+                  "runtime_dispatch_count": {
+                    "const": 0
+                  }
+                },
+                "required": [
+                  "reason_codes",
+                  "runtime_dispatch_count"
+                ],
+                "additionalProperties": false
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "const": "tests/test_live_controller_w4.py"
+                  },
+                  "sha256": {
+                    "const": "cc13c147296cc6afa704b590396d2c6ad82f7037ff71e8e12eb062467f09b314"
+                  },
+                  "test": {
+                    "const": "test_runtime_visibility_block_after_gate_has_zero_dispatch"
+                  },
+                  "asset_relationship": {
+                    "const": "behavior_equivalent_historical_fixture"
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "test",
+                  "asset_relationship"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "control_id",
+              "evidence_grade",
+              "live_observed",
+              "result",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "control_id": {
+                "const": "duplicate_approval_and_intent_zero_redispatch"
+              },
+              "evidence_grade": {
+                "const": "deterministic_exact_current_asset"
+              },
+              "live_observed": {
+                "const": false
+              },
+              "result": {
+                "type": "object",
+                "properties": {
+                  "initial_runtime_dispatch_count": {
+                    "const": 1
+                  },
+                  "additional_runtime_dispatch_count": {
+                    "const": 0
+                  },
+                  "stored_receipt_reused": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "initial_runtime_dispatch_count",
+                  "additional_runtime_dispatch_count",
+                  "stored_receipt_reused"
+                ],
+                "additionalProperties": false
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "const": "tests/test_portfolio_v1_release_callsite.py"
+                  },
+                  "sha256": {
+                    "const": "24713555be618e96e299bf7b9708012e7b700541615cf4045cd45fa786e05e70"
+                  },
+                  "test": {
+                    "const": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops"
+                  },
+                  "asset_relationship": {
+                    "const": "exact_current_asset"
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "test",
+                  "asset_relationship"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "control_id",
+              "evidence_grade",
+              "live_observed",
+              "result",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "control_id": {
+                "const": "stop_boundary_projects_only_safe_stop"
+              },
+              "evidence_grade": {
+                "const": "deterministic_exact_current_asset"
+              },
+              "live_observed": {
+                "const": false
+              },
+              "result": {
+                "type": "object",
+                "properties": {
+                  "post_state_availability": {
+                    "const": "stop_boundary"
+                  },
+                  "available_semantic_actions": {
+                    "const": [
+                      "safe_stop"
+                    ]
+                  },
+                  "mutation_actions_present": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "post_state_availability",
+                  "available_semantic_actions",
+                  "mutation_actions_present"
+                ],
+                "additionalProperties": false
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "const": "tests/test_portfolio_v1_release_callsite.py"
+                  },
+                  "sha256": {
+                    "const": "24713555be618e96e299bf7b9708012e7b700541615cf4045cd45fa786e05e70"
+                  },
+                  "test": {
+                    "const": "test_exact_release_asset_runs_through_local_callsite_and_safe_stops"
+                  },
+                  "asset_relationship": {
+                    "const": "exact_current_asset"
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "test",
+                  "asset_relationship"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "control_id",
+              "evidence_grade",
+              "live_observed",
+              "result",
+              "source"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "control_count": {
+          "const": 4
+        },
+        "exact_live_control_count": {
+          "const": 0
+        },
+        "deterministic_exact_current_asset_count": {
+          "const": 3
+        },
+        "deterministic_behavior_equivalent_historical_asset_count": {
+          "const": 1
+        }
+      },
+      "required": [
+        "control_count",
+        "exact_live_control_count",
+        "deterministic_exact_current_asset_count",
+        "deterministic_behavior_equivalent_historical_asset_count"
+      ],
+      "additionalProperties": false
+    },
+    "claim_boundary": {
+      "type": "string",
+      "minLength": 40
+    }
+  },
+  "required": [
+    "contract_version",
+    "workflow",
+    "controls",
+    "summary",
+    "claim_boundary"
+  ],
+  "additionalProperties": false
+}

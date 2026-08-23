@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "portfolio_v1_operator_cleanup_v1"
+    },
+    "cleanup_kind": {
+      "const": "operator_cleanup"
+    },
+    "positive_receipt_binding": {
+      "type": "object",
+      "properties": {
+        "receipt_id": {
+          "const": "receipt.38d529e464f94dbf858ec4d18de90c7c"
+        },
+        "private_parent_object_sha256": {
+          "const": "8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e"
+        }
+      },
+      "required": [
+        "receipt_id",
+        "private_parent_object_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "restore": {
+      "type": "object",
+      "properties": {
+        "post_state": {
+          "const": "Job Detail"
+        },
+        "additional_runtime_dispatch_count": {
+          "const": 0
+        },
+        "external_mutation_performed": {
+          "const": false
+        }
+      },
+      "required": [
+        "post_state",
+        "additional_runtime_dispatch_count",
+        "external_mutation_performed"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_grade": {
+      "const": "operator_cleanup_commitment"
+    },
+    "evidence_status": {
+      "const": "passive_semantic_restore_evidence_commitment"
+    },
+    "raw_artifact": {
+      "type": "object",
+      "properties": {
+        "present": {
+          "const": false
+        },
+        "reference": {
+          "type": "null"
+        },
+        "sha256": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "present",
+        "reference",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "claim_boundary": {
+      "type": "string",
+      "minLength": 40
+    }
+  },
+  "required": [
+    "contract_version",
+    "cleanup_kind",
+    "positive_receipt_binding",
+    "restore",
+    "evidence_grade",
+    "evidence_status",
+    "raw_artifact",
+    "claim_boundary"
+  ],
+  "additionalProperties": false
+}

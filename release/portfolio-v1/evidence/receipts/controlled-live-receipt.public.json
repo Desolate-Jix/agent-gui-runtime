@@ -1,0 +1,46 @@
+{
+  "contract_version": "portfolio_v1_public_runtime_receipt_v1",
+  "projection_kind": "allowlisted_projection",
+  "private_parent_object_sha256": "8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e",
+  "receipt_id": "receipt.38d529e464f94dbf858ec4d18de90c7c",
+  "workflow": {
+    "workflow_id": "portfolio_v1_seek_apply_entry",
+    "source_workflow_sha256": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc",
+    "asset_content_sha256": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
+  },
+  "action": {
+    "semantic_action": "open_apply_flow",
+    "attempt_count": 1
+  },
+  "gate": {
+    "status": "allowed"
+  },
+  "backend": {
+    "dispatch_status": "dispatched"
+  },
+  "verification": {
+    "effect_status": "verified",
+    "destination_status": "verified",
+    "post_state": {
+      "state_id": "state_apply_entry_0e2ad9884555ee4fa7ba9d7fc697f4d2",
+      "display_name": "Choose documents",
+      "availability": "stop_boundary"
+    }
+  },
+  "terminal": {
+    "outcome": "SAFE_STOP",
+    "reason_code": "stop_boundary"
+  },
+  "dispatch_accounting": {
+    "runtime_dispatch_count": 1,
+    "unexpected_dispatch_count": 0
+  },
+  "evidence_grade": "exact_live",
+  "privacy": {
+    "allowlisted_projection": true,
+    "raw_parent_included": false,
+    "raw_capture_included": false,
+    "page_specific_identity_included": false
+  },
+  "claim_boundary": "One bounded exact-live Runtime receipt projection only; not provider accuracy, not general navigation reliability, not unattended execution, and not production readiness."
+}

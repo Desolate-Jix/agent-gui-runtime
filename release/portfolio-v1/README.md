@@ -17,8 +17,8 @@ historical filename. It records:
 
 - `human_review_completed: true` for the executable `job_detail` boundary;
 - `compiled_release_asset_present: true`;
-- `controlled_live_workflow_proven: false` because the public controlled-live
-  evidence package belongs to a later release slice;
+- `controlled_live_workflow_proven: false` while the checked-in public evidence
+  package awaits independent review and explicit release-status promotion;
 - `runtime_dispatch_authorization: false`;
 - `artifact_is_authorization: false` and `execute_binding_enabled: false`.
 
@@ -98,3 +98,20 @@ The focused release test proves:
 - a fresh process reloads the exact active content-addressed asset;
 - all artifacts remain non-authoritative and
   `controlled_live_workflow_proven` remains false.
+
+## Public evidence package
+
+`evidence/manifest.json` content-addresses a privacy-minimized package with:
+
+- an allowlisted projection of one exact-live Runtime receipt;
+- matched deterministic controls that distinguish the exact current asset from
+  a behavior-equivalent historical visibility fixture;
+- an operator cleanup commitment that explicitly records the absence of a raw
+  navigation-restore artifact; and
+- strict JSON Schemas for each public artifact.
+
+The package contains no raw Runtime object, capture, window/process identity,
+full URL, or page-specific personal fields. Its status remains blocked pending
+independent review. Until that review and a separate root/release status-sync
+slice finish, it must not promote `controlled_live_workflow_proven` or broaden
+the claim beyond one bounded live receipt.

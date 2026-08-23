@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "portfolio_v1_public_runtime_receipt_v1"
+    },
+    "projection_kind": {
+      "const": "allowlisted_projection"
+    },
+    "private_parent_object_sha256": {
+      "const": "8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e"
+    },
+    "receipt_id": {
+      "const": "receipt.38d529e464f94dbf858ec4d18de90c7c"
+    },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "const": "portfolio_v1_seek_apply_entry"
+        },
+        "source_workflow_sha256": {
+          "const": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc"
+        },
+        "asset_content_sha256": {
+          "const": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "source_workflow_sha256",
+        "asset_content_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "semantic_action": {
+          "const": "open_apply_flow"
+        },
+        "attempt_count": {
+          "const": 1
+        }
+      },
+      "required": [
+        "semantic_action",
+        "attempt_count"
+      ],
+      "additionalProperties": false
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "allowed"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "backend": {
+      "type": "object",
+      "properties": {
+        "dispatch_status": {
+          "const": "dispatched"
+        }
+      },
+      "required": [
+        "dispatch_status"
+      ],
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "effect_status": {
+          "const": "verified"
+        },
+        "destination_status": {
+          "const": "verified"
+        },
+        "post_state": {
+          "type": "object",
+          "properties": {
+            "state_id": {
+              "const": "state_apply_entry_0e2ad9884555ee4fa7ba9d7fc697f4d2"
+            },
+            "display_name": {
+              "const": "Choose documents"
+            },
+            "availability": {
+              "const": "stop_boundary"
+            }
+          },
+          "required": [
+            "state_id",
+            "display_name",
+            "availability"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "effect_status",
+        "destination_status",
+        "post_state"
+      ],
+      "additionalProperties": false
+    },
+    "terminal": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "const": "SAFE_STOP"
+        },
+        "reason_code": {
+          "const": "stop_boundary"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason_code"
+      ],
+      "additionalProperties": false
+    },
+    "dispatch_accounting": {
+      "type": "object",
+      "properties": {
+        "runtime_dispatch_count": {
+          "const": 1
+        },
+        "unexpected_dispatch_count": {
+          "const": 0
+        }
+      },
+      "required": [
+        "runtime_dispatch_count",
+        "unexpected_dispatch_count"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_grade": {
+      "const": "exact_live"
+    },
+    "privacy": {
+      "type": "object",
+      "properties": {
+        "allowlisted_projection": {
+          "const": true
+        },
+        "raw_parent_included": {
+          "const": false
+        },
+        "raw_capture_included": {
+          "const": false
+        },
+        "page_specific_identity_included": {
+          "const": false
+        }
+      },
+      "required": [
+        "allowlisted_projection",
+        "raw_parent_included",
+        "raw_capture_included",
+        "page_specific_identity_included"
+      ],
+      "additionalProperties": false
+    },
+    "claim_boundary": {
+      "type": "string",
+      "minLength": 40
+    }
+  },
+  "required": [
+    "contract_version",
+    "projection_kind",
+    "private_parent_object_sha256",
+    "receipt_id",
+    "workflow",
+    "action",
+    "gate",
+    "backend",
+    "verification",
+    "terminal",
+    "dispatch_accounting",
+    "evidence_grade",
+    "privacy",
+    "claim_boundary"
+  ],
+  "additionalProperties": false
+}

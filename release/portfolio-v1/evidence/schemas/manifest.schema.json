@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "contract_version": {
+      "const": "portfolio_v1_public_evidence_manifest_v1"
+    },
+    "package_id": {
+      "const": "portfolio_v1_public_evidence"
+    },
+    "workflow": {
+      "type": "object",
+      "properties": {
+        "workflow_id": {
+          "const": "portfolio_v1_seek_apply_entry"
+        },
+        "source_workflow_sha256": {
+          "const": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc"
+        },
+        "asset_content_sha256": {
+          "const": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
+        }
+      },
+      "required": [
+        "workflow_id",
+        "source_workflow_sha256",
+        "asset_content_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "package": {
+          "const": "complete"
+        },
+        "independent_review": {
+          "enum": [
+            "pending",
+            "accepted"
+          ]
+        },
+        "release_status_promotion": {
+          "enum": [
+            "blocked_pending_review",
+            "eligible"
+          ]
+        },
+        "controlled_live_workflow_proven": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "package",
+        "independent_review",
+        "release_status_promotion",
+        "controlled_live_workflow_proven"
+      ],
+      "additionalProperties": false
+    },
+    "evidence_grade_taxonomy": {
+      "type": "object",
+      "properties": {
+        "exact_live": {
+          "type": "string",
+          "minLength": 20
+        },
+        "deterministic_exact_current_asset": {
+          "type": "string",
+          "minLength": 20
+        },
+        "deterministic_behavior_equivalent_historical_asset": {
+          "type": "string",
+          "minLength": 20
+        },
+        "operator_cleanup_commitment": {
+          "type": "string",
+          "minLength": 20
+        }
+      },
+      "required": [
+        "exact_live",
+        "deterministic_exact_current_asset",
+        "deterministic_behavior_equivalent_historical_asset",
+        "operator_cleanup_commitment"
+      ],
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9./-]+\\.json$"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "role": {
+            "enum": [
+              "positive_receipt_projection",
+              "matched_negative_controls",
+              "operator_cleanup",
+              "schema"
+            ]
+          },
+          "schema_path": {
+            "type": "string",
+            "pattern": "^schemas/[a-z0-9][a-z0-9.-]+\\.schema\\.json$"
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "role",
+          "schema_path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "properties": {
+        "projection_only": {
+          "const": true
+        },
+        "contains_raw_runtime_object": {
+          "const": false
+        },
+        "contains_raw_capture": {
+          "const": false
+        },
+        "contains_personal_or_page_specific_fields": {
+          "const": false
+        }
+      },
+      "required": [
+        "projection_only",
+        "contains_raw_runtime_object",
+        "contains_raw_capture",
+        "contains_personal_or_page_specific_fields"
+      ],
+      "additionalProperties": false
+    },
+    "claim_boundary": {
+      "type": "string",
+      "minLength": 40
+    }
+  },
+  "required": [
+    "contract_version",
+    "package_id",
+    "workflow",
+    "status",
+    "evidence_grade_taxonomy",
+    "artifacts",
+    "privacy",
+    "claim_boundary"
+  ],
+  "additionalProperties": false
+}

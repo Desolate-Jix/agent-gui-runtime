@@ -1,0 +1,72 @@
+{
+  "contract_version": "portfolio_v1_public_evidence_manifest_v1",
+  "package_id": "portfolio_v1_public_evidence",
+  "workflow": {
+    "workflow_id": "portfolio_v1_seek_apply_entry",
+    "source_workflow_sha256": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc",
+    "asset_content_sha256": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
+  },
+  "status": {
+    "package": "complete",
+    "independent_review": "pending",
+    "release_status_promotion": "blocked_pending_review",
+    "controlled_live_workflow_proven": false
+  },
+  "evidence_grade_taxonomy": {
+    "exact_live": "A projection of one observed real Runtime receipt.",
+    "deterministic_exact_current_asset": "A deterministic test that loads the exact checked-in current release asset.",
+    "deterministic_behavior_equivalent_historical_asset": "A deterministic Runtime-contract test using a behavior-equivalent historical fixture; it is not exact-current-asset or live evidence.",
+    "operator_cleanup_commitment": "An operator cleanup statement without a retained raw cleanup artifact."
+  },
+  "artifacts": [
+    {
+      "path": "controls/matched-negative-controls.json",
+      "sha256": "16f0bfd6fd9b6e09621086639ae4c9ada28f58b71a0055c07b928b682f60fcf4",
+      "role": "matched_negative_controls",
+      "schema_path": "schemas/matched-negative-controls.schema.json"
+    },
+    {
+      "path": "receipts/controlled-live-receipt.public.json",
+      "sha256": "409a1b4f13b732567c19fc6f23b26b38d76209734a24d6f706f3aab6212d66c2",
+      "role": "positive_receipt_projection",
+      "schema_path": "schemas/public-receipt.schema.json"
+    },
+    {
+      "path": "rollback/navigation-restore.public.json",
+      "sha256": "c14c4c65ed85f5535cace1eb8fb2e45c0d716f18945e3fc9132b4b9871fdc7b1",
+      "role": "operator_cleanup",
+      "schema_path": "schemas/operator-cleanup.schema.json"
+    },
+    {
+      "path": "schemas/matched-negative-controls.schema.json",
+      "sha256": "acbfd1c3dd54579c0363373155bc3bdc9521a6d2b69a178b2d645e3bfd8a051f",
+      "role": "schema",
+      "schema_path": "schemas/matched-negative-controls.schema.json"
+    },
+    {
+      "path": "schemas/operator-cleanup.schema.json",
+      "sha256": "149047bbc582d3fbae4f36a6d75227db3db09eb505e9717a78f65f7ed4b6718c",
+      "role": "schema",
+      "schema_path": "schemas/operator-cleanup.schema.json"
+    },
+    {
+      "path": "schemas/public-receipt.schema.json",
+      "sha256": "8c48601c3e06828b1af3a2a05fd9dad1e93549d788965a65d0b0616a4c1febab",
+      "role": "schema",
+      "schema_path": "schemas/public-receipt.schema.json"
+    },
+    {
+      "path": "schemas/manifest.schema.json",
+      "sha256": "077a80699105f7d03a56a44c5e62666e4f5354834fea41290961e3fbdf47cdf2",
+      "role": "schema",
+      "schema_path": "schemas/manifest.schema.json"
+    }
+  ],
+  "privacy": {
+    "projection_only": true,
+    "contains_raw_runtime_object": false,
+    "contains_raw_capture": false,
+    "contains_personal_or_page_specific_fields": false
+  },
+  "claim_boundary": "One bounded exact-live receipt projection plus matched deterministic controls and an operator cleanup commitment; not general reliability, provider accuracy, or production readiness."
+}
