@@ -37,6 +37,17 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _verification_ref(verification: dict[str, object]) -> str:
+    canonical = json.dumps(
+        verification,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "verification:" + hashlib.sha256(canonical).hexdigest()
+
+
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     path = Path(r"C:\Windows\Fonts\arial.ttf")
     return ImageFont.truetype(str(path), size) if path.exists() else ImageFont.load_default()
@@ -65,11 +76,42 @@ def _write_sources(tmp_path: Path) -> tuple[Path, Path]:
 
 def _receipt_payload(post_sha256: str) -> dict[str, object]:
     backend_ref = "backend-receipt:test-controlled-live"
+    session_id = "session.test-controlled-live"
+    source_observation_id = "observation.test-source"
+    next_observation_id = "observation.test-next"
+    transition_id = "transition.test-open-apply-flow"
+    source_state_id = "state.test-job-detail"
+    target_state_id = "state.test-choose-documents"
+    workflow = {
+        "asset_content_sha256": "a" * 64,
+        "workflow_id": "portfolio_v1_seek_apply_entry",
+    }
     capture = {
         "capture_id": "runtime-capture.test-post",
         "screenshot_sha256": post_sha256,
         "viewport_size": {"height": 1211, "width": 1390},
     }
+    verification = {
+        "contract_version": "transition_verification_v1",
+        "status": "verified",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "state_advanced": True,
+        "asset_content_sha256": workflow["asset_content_sha256"],
+        "selection_sha256": "b" * 64,
+        "transition_id": transition_id,
+        "source_state_id": source_state_id,
+        "target_state_id": target_state_id,
+        "post_capture_lineage": copy.deepcopy(capture),
+        "post_state_resolution": {
+            "status": "resolved",
+            "state_id": target_state_id,
+            "state_availability": "stop_boundary",
+            "capture_lineage": copy.deepcopy(capture),
+        },
+        "evidence_refs": [backend_ref],
+    }
+    verification_ref = _verification_ref(verification)
     return {
         "backend_receipt": {
             "reason_code": "none",
@@ -79,9 +121,12 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
         "runtime_receipt": {
             "receipt_id": "receipt.test-controlled-live",
             "contract_version": "runtime_result_receipt_v1",
+            "session_id": session_id,
+            "observation_id": source_observation_id,
+            "next_observation_id": next_observation_id,
             "attempt_count": 1,
             "action": {
-                "action_id": "transition.test-open-apply-flow",
+                "action_id": transition_id,
                 "semantic_action": "open_apply_flow",
             },
             "gate_status": "allowed",
@@ -91,13 +136,16 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
             "outcome": "SAFE_STOP",
             "reason_code": "stop_boundary",
             "safe_stop": {"reason_code": "stop_boundary", "required": True},
-            "evidence": {"backend_receipt_ref": backend_ref},
-            "workflow": {
-                "asset_content_sha256": "a" * 64,
-                "workflow_id": "portfolio_v1_seek_apply_entry",
+            "evidence": {
+                "backend_receipt_ref": backend_ref,
+                "verification_ref": verification_ref,
             },
+            "workflow": copy.deepcopy(workflow),
         },
         "next_observation": {
+            "session_id": session_id,
+            "observation_id": next_observation_id,
+            "workflow": copy.deepcopy(workflow),
             "current_capture": {
                 "capture_id": capture["capture_id"],
                 "screenshot_sha256": post_sha256,
@@ -107,6 +155,7 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
                 "state_availability": "stop_boundary",
                 "status": "stop_boundary",
                 "surface_type": "application_entry",
+                "state_id": target_state_id,
             },
             "safe_stop": {"reason_code": "stop_boundary", "required": True},
             "available_actions": [
@@ -116,16 +165,7 @@ def _receipt_payload(post_sha256: str) -> dict[str, object]:
                 }
             ],
         },
-        "verification_evidence": {
-            "status": "verified",
-            "state_advanced": True,
-            "post_capture_lineage": copy.deepcopy(capture),
-            "post_state_resolution": {
-                "status": "resolved",
-                "state_availability": "stop_boundary",
-                "capture_lineage": copy.deepcopy(capture),
-            },
-        },
+        "verification_evidence": verification,
     }
 
 
@@ -246,29 +286,51 @@ def test_builder_creates_post_receipt_bound_public_safe_replay(tmp_path: Path) -
 
 
 @pytest.mark.parametrize(
-    ("field", "bad_value"),
+    ("field", "bad_value", "refresh_verification_ref"),
     [
-        ("runtime_receipt.attempt_count", 2),
-        ("runtime_receipt.action.semantic_action", "fill_field"),
-        ("runtime_receipt.gate_status", "blocked"),
-        ("backend_receipt.status", "indeterminate"),
-        ("runtime_receipt.evidence.backend_receipt_ref", "backend-receipt:different"),
-        ("runtime_receipt.effect_status", "failed"),
-        ("next_observation.state.display_name", "Job Detail"),
-        ("next_observation.state.surface_type", "detail"),
-        ("next_observation.safe_stop.required", False),
+        ("runtime_receipt.attempt_count", 2, False),
+        ("runtime_receipt.action.semantic_action", "fill_field", False),
+        ("runtime_receipt.gate_status", "blocked", False),
+        ("backend_receipt.status", "indeterminate", False),
+        ("runtime_receipt.evidence.backend_receipt_ref", "backend-receipt:different", False),
+        ("runtime_receipt.effect_status", "failed", False),
+        ("next_observation.state.display_name", "Job Detail", False),
+        ("next_observation.state.surface_type", "detail", False),
+        ("next_observation.safe_stop.required", False, False),
         (
             "next_observation.available_actions",
             [{"action_id": "runtime.continue", "semantic_action": "continue_next_step"}],
+            False,
         ),
-        ("verification_evidence.status", "failed"),
-        ("verification_evidence.state_advanced", False),
+        ("verification_evidence.status", "failed", True),
+        ("verification_evidence.state_advanced", False, True),
+        ("verification_evidence.transition_id", "transition.different", True),
+        ("verification_evidence.asset_content_sha256", "c" * 64, True),
+        ("next_observation.workflow.asset_content_sha256", "d" * 64, False),
+        ("next_observation.workflow.workflow_id", "different_workflow", False),
+        ("next_observation.session_id", "session.different", False),
+        ("next_observation.observation_id", "observation.different", False),
+        ("runtime_receipt.evidence.verification_ref", "verification:" + "e" * 64, False),
+        ("verification_evidence.target_state_id", "state.different", True),
+        ("verification_evidence.post_state_resolution.state_id", "state.different", True),
     ],
 )
-def test_receipt_claim_validation_rejects_mismatches(field: str, bad_value: object) -> None:
+def test_receipt_claim_validation_rejects_mismatches(
+    field: str,
+    bad_value: object,
+    refresh_verification_ref: bool,
+) -> None:
     post_sha256 = "b" * 64
     payload = _receipt_payload(post_sha256)
     _set_nested(payload, field, bad_value)
+    if refresh_verification_ref:
+        verification = payload["verification_evidence"]
+        runtime = payload["runtime_receipt"]
+        assert isinstance(verification, dict)
+        assert isinstance(runtime, dict)
+        evidence = runtime["evidence"]
+        assert isinstance(evidence, dict)
+        evidence["verification_ref"] = _verification_ref(verification)
 
     with pytest.raises(ValueError):
         BUILDER_MODULE._validate_receipt(payload, post_sha256)

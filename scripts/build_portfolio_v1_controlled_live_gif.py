@@ -247,6 +247,29 @@ def _required_dict(parent: dict[str, object], field: str) -> dict[str, object]:
     return value
 
 
+def _required_text(parent: dict[str, object], field: str) -> str:
+    value = parent.get(field)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"receipt {field} must be a non-empty string")
+    return value
+
+
+def _verification_ref(verification: dict[str, object]) -> str:
+    """与 RuntimeReceiptStore 的 canonical verification 引用算法保持一致。"""
+
+    try:
+        canonical = json.dumps(
+            verification,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("verification evidence must be canonical JSON") from exc
+    return f"verification:{hashlib.sha256(canonical).hexdigest()}"
+
+
 def _validate_receipt(
     payload: dict[str, object],
     expected_post_sha256: str,
@@ -286,6 +309,40 @@ def _validate_receipt(
     if not isinstance(backend_ref, str) or not backend_ref or evidence.get("backend_receipt_ref") != backend_ref:
         raise ValueError("runtime receipt must bind the single dispatched backend receipt")
 
+    # 与 RuntimeReceiptStore._validate_semantic_evidence / _validate_verification_lineage
+    # 保持同一组最小跨对象绑定，防止只凭状态字段生成伪造的 receipt-backed claim。
+    if evidence.get("verification_ref") != _verification_ref(verification):
+        raise ValueError("runtime receipt verification reference mismatch")
+
+    runtime_session_id = _required_text(runtime, "session_id")
+    if _required_text(observation, "session_id") != runtime_session_id:
+        raise ValueError("next observation session mismatch")
+    next_observation_id = _required_text(runtime, "next_observation_id")
+    observation_id = _required_text(observation, "observation_id")
+    if observation_id != next_observation_id:
+        raise ValueError("next observation identity mismatch")
+    if _required_text(runtime, "observation_id") == observation_id:
+        raise ValueError("next observation ID must be new")
+
+    runtime_workflow = _required_dict(runtime, "workflow")
+    observation_workflow = _required_dict(observation, "workflow")
+    if observation_workflow != runtime_workflow:
+        raise ValueError("next observation workflow mismatch")
+    asset_content_sha256 = _required_text(runtime_workflow, "asset_content_sha256")
+    if verification.get("asset_content_sha256") != asset_content_sha256:
+        raise ValueError("verification workflow mismatch")
+    if verification.get("transition_id") != action.get("action_id"):
+        raise ValueError("verification transition mismatch")
+
+    verification_required = {
+        "contract_version": "transition_verification_v1",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    for field, expected in verification_required.items():
+        if verification.get(field) != expected:
+            raise ValueError(f"verification evidence {field} must equal {expected!r}")
+
     state = _required_dict(observation, "state")
     expected_state = {
         "display_name": "Choose documents",
@@ -296,6 +353,9 @@ def _validate_receipt(
     for field, expected in expected_state.items():
         if state.get(field) != expected:
             raise ValueError(f"next observation state {field} must equal {expected!r}")
+    state_id = _required_text(state, "state_id")
+    if verification.get("target_state_id") != state_id:
+        raise ValueError("verification destination mismatch")
 
     for owner, safe_stop in (
         ("runtime receipt", _required_dict(runtime, "safe_stop")),
@@ -316,6 +376,8 @@ def _validate_receipt(
     post_resolution = _required_dict(verification, "post_state_resolution")
     if post_resolution.get("status") != "resolved" or post_resolution.get("state_availability") != "stop_boundary":
         raise ValueError("post state resolution must resolve the stop boundary")
+    if post_resolution.get("state_id") != state_id:
+        raise ValueError("post state resolution destination mismatch")
 
     capture_lineages = (
         _required_dict(observation, "current_capture"),
