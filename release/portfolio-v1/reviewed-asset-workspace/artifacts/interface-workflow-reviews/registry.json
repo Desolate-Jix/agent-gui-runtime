@@ -34,9 +34,19 @@
       "goal": "From an already-open SEEK Job Detail, open the reviewed Quick apply entry once and stop before any form mutation.",
       "node_count": 2,
       "edge_count": 1,
-      "reviewed_node_revision_hashes": {},
-      "reviewed_node_evidence_sha256": {},
-      "source_asset_sha256": "6fa68d618b5cf87d5cec259f15709803a874eab2028f8f0c59d9db83fe4e5601",
+      "reviewed_node_revision_hashes": {
+        "job_detail": "b795cfb8978b44b31d061b22dac8e1bc23b7927ba7d55f4e55d0793ab4bdd5a1"
+      },
+      "reviewed_node_evidence_sha256": {
+        "job_detail": {
+          "source_paths_sha256": "1a1eb15cdfa01e2b105a8ac3827625ab7f7bbb841ef8dc9d00cd6496c00c1b1f",
+          "human_review_overlay_path": "27478cff6c05724a6e5929c7b725764d79f2c5864ecf9c7d61bef503fac877cb",
+          "review_revision_human_review_overlay_path": "27478cff6c05724a6e5929c7b725764d79f2c5864ecf9c7d61bef503fac877cb",
+          "review_revision_source_screenshot_path": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+          "source_screenshot_path": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b"
+        }
+      },
+      "source_asset_sha256": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc",
       "review_status": "needs_human_review",
       "published": false,
       "artifact_is_authorization": false,

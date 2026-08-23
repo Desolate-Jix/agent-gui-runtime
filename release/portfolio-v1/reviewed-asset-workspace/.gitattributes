@@ -1,0 +1,4 @@
+artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/reviewed_workflow.json binary
+artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/*.json binary
+artifacts/learning-draft-review/**/*.json binary
+runtime_state/reviewed-workflow-assets-v2/objects/*.json binary

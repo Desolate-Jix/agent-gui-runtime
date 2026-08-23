@@ -1,0 +1,183 @@
+{
+  "contract_version": "human_review_patch_v1",
+  "revision": 2,
+  "created_at": "2026-08-24T02:51:26.312091",
+  "source_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+  "source_draft_sha256": "caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4",
+  "screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+  "screenshot_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+  "reason": "Add adjacent Save control as non-destructive review-only evidence; no target-app action performed.",
+  "source": "human_panel_editor_v1",
+  "operations": [
+    {
+      "op": "add",
+      "target_kind": "region",
+      "target_id": "manual_region_2",
+      "item": {
+        "label": "Save",
+        "role": "button",
+        "parent_region_id": "",
+        "bbox": {
+          "x": 1339,
+          "y": 892,
+          "w": 87,
+          "h": 48
+        },
+        "target_kind": "region",
+        "target_id": "manual_region_2",
+        "candidate_only": true,
+        "requires_human_review": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "final_submit_forbidden": true,
+        "region_id": "manual_region_2",
+        "description": "Visible Save control on Job Detail; review-only evidence anchor. Do not activate it.",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_2",
+      "before_metadata": {
+        "label": "Manual region 2",
+        "description": null,
+        "semantic_action": null,
+        "action_type": null,
+        "input_semantics": null,
+        "verification_rule": null,
+        "risk_level": null,
+        "requires_confirmation": null,
+        "destination": null
+      },
+      "after_metadata": {
+        "label": "Save",
+        "description": "Visible Save control on Job Detail; review-only evidence anchor. Do not activate it.",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_role",
+      "target_kind": "region",
+      "target_id": "manual_region_2",
+      "before_value": "review_only",
+      "after_value": "button",
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_2",
+      "before_metadata": {
+        "label": "Save",
+        "description": "Visible Save control on Job Detail; review-only evidence anchor. Do not activate it.",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "after_metadata": {
+        "label": "Save",
+        "description": "Visible Save control on Job Detail; review-only evidence anchor. Do not activate it.",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_parent",
+      "target_kind": "region",
+      "target_id": "manual_region_2",
+      "before_value": "",
+      "after_value": "",
+      "reason": ""
+    },
+    {
+      "op": "update_bbox",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_bbox": {
+        "x": 1178,
+        "y": 892,
+        "w": 145,
+        "h": 48
+      },
+      "after_bbox": {
+        "x": 1178,
+        "y": 892,
+        "w": 145,
+        "h": 48
+      },
+      "reason": "Add adjacent Save control as non-destructive review-only evidence; no target-app action performed."
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Quick apply",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        }
+      },
+      "after_metadata": {
+        "label": "Quick apply",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        }
+      },
+      "reason": "Add adjacent Save control as non-destructive review-only evidence; no target-app action performed."
+    }
+  ],
+  "operation_count": 7,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "authorization_scope": "display_and_review_only"
+}

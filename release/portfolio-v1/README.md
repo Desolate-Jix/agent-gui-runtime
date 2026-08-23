@@ -1,72 +1,100 @@
 # Portfolio v1 reviewed-asset workspace
 
-This directory stages the smallest Portfolio v1 review boundary:
+This directory is a portable, tracked export of the smallest reviewed Portfolio
+v1 semantic workflow:
 
 ```text
-Job Detail
-  -> open_apply_flow (human confirmation required)
-Choose documents / Apply Entry
+Job Detail (human_approved)
+  -> Quick apply / open_apply_flow (human confirmation + Runtime Gate required)
+Choose documents / Apply Entry (needs_learning)
   -> SAFE STOP
 ```
 
-## Evidence grade
+## Current release truth
 
-The checked-in workspace is currently a **mixed-grade review draft**. Job Detail
-uses an annotation-free `sanitized_clean_capture` created by a deterministic
-top/bottom crop of a historical clean capture; its original and derived SHA-256
-values and transform are recorded in the node evidence. Review boxes must be
-rendered as independent overlays and must never be baked into this editable
-base. Apply Entry remains a privacy-redacted historical derivative, not raw or
-forensic pixel evidence, and privacy processing may alter non-reviewed pixels.
-Human review is therefore limited to the declared interface responsibility,
-semantic `Quick apply` control, `open_apply_flow` transition, and Apply Entry
-safe-stop boundary. This workspace is not yet:
+`review-draft-manifest.json` is the release manifest despite its retained
+historical filename. It records:
 
-- a human-reviewed release asset;
-- runtime dispatch authority;
-- a deterministic internal composition proof;
-- a controlled live SEEK workflow proof.
+- `human_review_completed: true` for the executable `job_detail` boundary;
+- `compiled_release_asset_present: true`;
+- `controlled_live_workflow_proven: false` because the public controlled-live
+  evidence package belongs to a later release slice;
+- `runtime_dispatch_authorization: false`;
+- `artifact_is_authorization: false` and `execute_binding_enabled: false`.
 
-`review-draft-manifest.json` is the authoritative status marker. Automation must not change `human_review_completed` to `true` or synthesize review confirmation.
+The exported source is byte-exact to the reviewed local source:
 
-## Human-review boundary
+- source SHA-256:
+  `a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc`;
+- compiled asset SHA-256:
+  `8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7`.
 
-Only `job_detail` is intended for approval. Review must confirm:
+## Reviewed boundary
 
-1. the interface responsibility and fixed identity evidence;
-2. the semantic `Quick apply` control and its purpose;
-3. the single `open_apply_flow` transition;
-4. `requires_user_confirmation: true`;
-5. no form fill, Continue/Next, final submit, send, confirm, or payment action;
-6. `apply_entry` remains `needs_learning` and has no outgoing transition.
+The `job_detail` node contains two human-visible reviewed regions:
 
-The Panel approval order is intentional and must not be collapsed into a
-single node confirmation:
+1. **Quick apply** — the only semantic execution candidate. It compiles to one
+   `open_apply_flow` transition and still requires current observation, fresh
+   grounding, user confirmation, the Runtime Gate, one-time authority, and
+   post-action verification.
+2. **Save** — `read_only` evidence only. It has no destination, is absent from
+   compiled transitions, and must never be activated by this workflow.
 
-1. set the `apply` semantic control to `human_approved`;
-2. set the `open_apply_flow` action candidate to `human_approved`;
-3. set the `open_apply_flow` edge to `human_approved`;
-4. confirm the `job_detail` node only after those reviewed semantics are saved;
-5. save and reload the workflow, then verify that `job_detail` is
-   `agent_usable` with exactly one `open_apply_flow` action and that
-   `apply_entry` remains a stop boundary.
+`apply_entry` deliberately remains `needs_learning`, has no outgoing action,
+and compiles only as `stop_boundary`. Form fill, file upload, Continue/Next,
+final submit, send, confirm, and payment remain outside Portfolio v1.
 
-The Panel now exposes the three distinct granular review gestures and requires all three before source-node confirmation; the compiler independently checks each approval before accepting a candidate. The current Portfolio draft is still unreviewed: W2c remains open until the user reviews the target control, exact action candidate, transition edge, and source node, then saves and supplies exact compile/publish/process-restart/reload proof. This implementation status does not claim human approval, Runtime authorization, or live workflow proof.
+## Evidence and geometry boundary
 
-Node confirmation alone does not approve a control, action candidate, or edge.
-Automation must not perform any of these human-review decisions.
+Job Detail uses an annotation-free `sanitized_clean_capture`. Human-review
+boxes are stored as separate overlay evidence. Apply Entry remains a
+privacy-redacted historical derivative rather than raw or forensic pixel
+evidence.
 
-The local ignored `artifacts/` copy is the Panel review surface. After a real Panel review, the exact persisted workflow bytes and evidence provenance are exported back into this portable workspace; the compiler output and release manifest are then generated from those bytes.
+Editable review sources retain bounding boxes because they document what the
+human reviewed. The compiled asset contains no historical `bbox`, `x`, `y`,
+window handle, or click authority. Its safety contract declares
+`historical_coordinates_used: false` and `fresh_grounding_required: true`.
 
-## Required release proof after review
+## Portable workspace layout
 
-The release test must copy this workspace to a temporary project root and prove:
+```text
+reviewed-asset-workspace/
+  artifacts/interface-workflow-reviews/
+    registry.json
+    portfolio_v1_seek_apply_entry/
+      reviewed_workflow.json
+      node-review-sources/
+      node-evidence/
+  artifacts/learning-draft-review/
+    ... reviewed candidate and overlay lineage ...
+  artifacts/portfolio-v1-review-evidence/
+    ... sanitized evidence ...
+  runtime_state/reviewed-workflow-assets-v2/
+    registry.json
+    objects/8284e172...391b7.json
+```
 
-- exact source and registry SHA binding;
-- `job_detail` is `agent_usable` with one `open_apply_flow` action;
-- `apply_entry` compiles only as a stop boundary;
-- compile and publish succeed without historical geometry authority;
-- a fresh Python process reloads the exact content-addressed asset;
-- the release manifest still declares `controlled_live_workflow_proven: false`.
+All registry and evidence paths are workspace-relative. A fresh Python process
+can copy this directory to a new project root and load the exact active asset
+through `ReviewedWorkflowAssetStore`.
 
-Until those checks pass, W2 remains open.
+## Verification
+
+Run:
+
+```powershell
+uv run pytest -q tests/test_portfolio_v1_release_workspace.py
+```
+
+The focused release test proves:
+
+- exact source and compiled-asset SHA binding;
+- `job_detail` human approval and granular Quick apply approval;
+- Save remains read-only and non-executable;
+- `apply_entry` remains a no-mutation stop boundary;
+- source compilation reproduces the checked-in asset byte-for-byte;
+- compiled runtime knowledge contains no historical geometry authority;
+- a fresh process reloads the exact active content-addressed asset;
+- all artifacts remain non-authoritative and
+  `controlled_live_workflow_proven` remains false.

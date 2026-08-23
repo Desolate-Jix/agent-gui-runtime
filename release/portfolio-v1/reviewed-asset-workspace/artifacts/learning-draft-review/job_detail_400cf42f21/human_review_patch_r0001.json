@@ -1,0 +1,70 @@
+{
+  "contract_version": "human_review_patch_v1",
+  "revision": 1,
+  "created_at": "2026-08-24T04:23:04.257412",
+  "source_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+  "source_draft_sha256": "400cf42f21739689ac1cf597713861e89e85e7429a0fc928440f2e7339ea69b4",
+  "screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+  "screenshot_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+  "reason": "",
+  "source": "human_panel_editor_v1",
+  "operations": [
+    {
+      "op": "update_bbox",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_bbox": {
+        "x": 1178,
+        "y": 892,
+        "w": 145,
+        "h": 48
+      },
+      "after_bbox": {
+        "x": 1178,
+        "y": 892,
+        "w": 145,
+        "h": 48
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Quick apply",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        }
+      },
+      "after_metadata": {
+        "label": "Quick apply",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        }
+      },
+      "reason": ""
+    }
+  ],
+  "operation_count": 2,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "authorization_scope": "display_and_review_only"
+}

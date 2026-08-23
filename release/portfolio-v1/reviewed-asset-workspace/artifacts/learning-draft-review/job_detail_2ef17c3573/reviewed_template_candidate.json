@@ -1,12 +1,27 @@
 {
-  "contract_version": "interface_workflow_node_review_source_v1",
-  "workflow_id": "portfolio_v1_seek_apply_entry",
-  "node_id": "job_detail",
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "source_trial_path": null,
+    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "sha256": "2ef17c3573ce8451d0384edf35e6e328b44f1d92727abf015b3267dabd1af364",
+    "attempt_index": null,
+    "readonly": true
+  },
+  "source_after_review": "mixed",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "needs_human_review",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
   "draft": {
     "contract_version": "learning_template_draft_v1",
     "screen_summary": "Job Detail",
     "state_guess": "detail",
-    "state_signature": "seek-job-detail-v1",
     "states": [],
     "regions": [
       {
@@ -70,6 +85,10 @@
             "x": 1250,
             "y": 916
           }
+        },
+        "click_point": {
+          "x": 1250,
+          "y": 916
         }
       },
       {
@@ -153,6 +172,11 @@
         "expected_decision": "safe_stop"
       }
     ],
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "learning_source": "reviewed_multi_interface_workflow",
+    "ui_hierarchy": {},
     "page_details": {
       "screen": {
         "summary": "Job Detail",
@@ -173,17 +197,103 @@
         "sanitization_transform": "crop_top_160_bottom_1380_keep_full_width",
         "annotations_embedded": false
       },
-      "compiled_overlay_path": "artifacts/learning-draft-review/job_detail_400cf42f21/human_review_overlay_r0001.png",
-      "human_review_overlay_path": "artifacts/learning-draft-review/job_detail_400cf42f21/human_review_overlay_r0001.png",
+      "compiled_overlay_path": "artifacts/learning-draft-review/job_detail_2ef17c3573/human_review_overlay_r0001.png",
+      "human_review_overlay_path": "artifacts/learning-draft-review/job_detail_2ef17c3573/human_review_overlay_r0001.png",
       "human_review_overlay_revision": 1
     },
-    "learning_source": "reviewed_multi_interface_workflow",
+    "notes": [],
     "safety": {
       "artifact_is_authorization": false,
       "execute_binding_enabled": false,
       "final_submit_forbidden": true
-    }
+    },
+    "transitions": [],
+    "numbered_map_path": "artifacts/learning-draft-review/job_detail_2ef17c3573/human_review_overlay_r0001.png"
   },
-  "artifact_is_authorization": false,
-  "execute_binding_enabled": false
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "reviewed_at": "2026-08-24T04:14:31.702529",
+    "changes_summary": [
+      "region_bbox:manual_region_1",
+      "manual_label:manual_region_1",
+      "manual_role:manual_region_1",
+      "manual_parent_region_id:manual_region_1",
+      "manual_description:manual_region_1",
+      "manual_may_enter_pathgraph_draft:manual_region_1",
+      "manual_needs_recalibration:manual_region_1",
+      "region_metadata:manual_region_1"
+    ],
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 1,
+      "edited_action_count": 0,
+      "edited_total": 1,
+      "point_inside_bbox_passed": 1,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "available",
+      "checksum_status": "matched",
+      "freshness_status": "verified",
+      "warning_count": 0,
+      "warnings": [],
+      "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+      "source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+      "actual_source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+      "source_image_evidence_source": "page_details.screen.source_image_path",
+      "checksum_binding_status": "provided_by_draft",
+      "edited_geometry_requires_review": false,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 0,
+      "region_count": 3,
+      "bbox_region_count": 2,
+      "action_template_count": 1,
+      "action_click_point_count": 0,
+      "open_detail_transition_hint_count": 0,
+      "blocker_count": 0,
+      "verification_rule_count": 1,
+      "semantic_actions": [
+        "open_apply_flow"
+      ],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "precise_understanding_readiness_summary": {},
+    "evidence_integrity": {},
+    "human_review_patch_path": "artifacts/learning-draft-review/job_detail_2ef17c3573/human_review_patch_r0001.json",
+    "human_review_patch_revision": 1,
+    "reviewed_overlay_path": "artifacts/learning-draft-review/job_detail_2ef17c3573/human_review_overlay_r0001.png",
+    "review_status": "needs_human_review",
+    "authorization_scope": "display_and_review_only",
+    "correction_memory": {
+      "contract_version": "learning_correction_memory_record_v1",
+      "rule_id": "surface_correction_72977741d3250f5d",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_72977741d3250f5d.json",
+      "registry_path": "artifacts/learning-correction-memory/registry.json",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  }
 }

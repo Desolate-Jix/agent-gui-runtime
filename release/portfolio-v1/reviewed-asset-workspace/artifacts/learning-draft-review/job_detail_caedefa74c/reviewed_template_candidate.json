@@ -1,0 +1,285 @@
+{
+  "contract_version": "reviewed_template_candidate_v1",
+  "source": {
+    "source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "source_trial_path": null,
+    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "sha256": "caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4",
+    "attempt_index": null,
+    "readonly": true
+  },
+  "source_after_review": "mixed",
+  "counts_as_pure_model_generated": false,
+  "artifact_is_authorization": false,
+  "draft_only": false,
+  "reviewed_by_human": true,
+  "review_status": "needs_human_review",
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "execute_binding_enabled": false,
+  "authorization_scope": "display_and_review_only",
+  "draft": {
+    "contract_version": "learning_template_draft_v1",
+    "screen_summary": "Job Detail",
+    "state_guess": "detail",
+    "states": [],
+    "regions": [
+      {
+        "region_id": "job_detail_content",
+        "label": "Job detail content",
+        "semantic_name": "Job detail content",
+        "purpose": "Contains the selected job title, company, and description.",
+        "role": "document",
+        "review_status": "needs_human_review"
+      },
+      {
+        "label": "Quick apply",
+        "role": "review_only",
+        "parent_region_id": "",
+        "bbox": {
+          "x": 1178,
+          "y": 892,
+          "w": 145,
+          "h": 48
+        },
+        "target_kind": "region",
+        "target_id": "manual_region_1",
+        "candidate_only": true,
+        "requires_human_review": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "final_submit_forbidden": true,
+        "region_id": "manual_region_1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        },
+        "real_action_requires_gate": true,
+        "may_enter_pathgraph_draft": false,
+        "needs_recalibration": true,
+        "semantic_name": "Quick apply",
+        "click_point": {
+          "x": 1250,
+          "y": 916
+        },
+        "human_review": {
+          "bbox_edited": true,
+          "bbox_edit_source": "human_review_patch_v1",
+          "previous_bbox": {
+            "x": 1178,
+            "y": 892,
+            "w": 145,
+            "h": 48
+          },
+          "previous_click_point": null,
+          "updated_bbox": {
+            "x": 1178,
+            "y": 892,
+            "w": 145,
+            "h": 48
+          },
+          "updated_click_point": {
+            "x": 1250,
+            "y": 916
+          }
+        }
+      },
+      {
+        "label": "Save",
+        "role": "button",
+        "parent_region_id": "",
+        "bbox": {
+          "x": 1339,
+          "y": 892,
+          "w": 87,
+          "h": 48
+        },
+        "target_kind": "region",
+        "target_id": "manual_region_2",
+        "candidate_only": true,
+        "requires_human_review": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "final_submit_forbidden": true,
+        "region_id": "manual_region_2",
+        "description": "Visible Save control on Job Detail; review-only evidence anchor. Do not activate it.",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        },
+        "real_action_requires_gate": true
+      }
+    ],
+    "action_templates": [
+      {
+        "action_template_id": "open_apply_flow",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "source_control_id": "apply",
+        "target_control_id": "apply",
+        "target_interface_id": "apply_entry",
+        "agent_description": "Open the reviewed application entry from the current Job Detail.",
+        "operation_goal": "Activate the currently grounded Quick apply control once.",
+        "verification_rule_ids": [
+          "application_entry_visible"
+        ],
+        "risk_level": "medium",
+        "review_status": "needs_human_review",
+        "display_only": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "label": "open_apply_flow",
+        "target_region_id": "apply",
+        "reviewed_by_human": false
+      }
+    ],
+    "blockers": [],
+    "verification_rules": [
+      {
+        "rule_id": "application_entry_visible",
+        "description": "The Choose documents application-entry surface is visible.",
+        "expected_decision": "safe_stop"
+      }
+    ],
+    "agent_decision_points": [],
+    "operation_skills": [],
+    "gate_contracts": [],
+    "learning_source": "reviewed_multi_interface_workflow",
+    "ui_hierarchy": {},
+    "page_details": {
+      "screen": {
+        "summary": "Job Detail",
+        "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+        "source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "source_image_binding_source": "page_details.screen.source_image_path",
+        "source_image_binding_allows_computed_checksum": false,
+        "source_image_materialized_for_panel": false,
+        "screen_size": {
+          "width": 2576,
+          "height": 1220
+        },
+        "source_image_kind": "sanitized_clean_capture",
+        "editable_base_allowed": true,
+        "source_capture_sha256": "7ef81a1bbf206263204c70f0030ec813e305ef01327a3c3248d5d3cce9d3c0ec",
+        "sanitization_transform": "crop_top_160_bottom_1380_keep_full_width",
+        "annotations_embedded": false
+      },
+      "compiled_overlay_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png",
+      "human_review_overlay_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png",
+      "human_review_overlay_revision": 2
+    },
+    "notes": [],
+    "safety": {
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true
+    },
+    "transitions": [],
+    "numbered_map_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png"
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "final_submit_allowed": false,
+    "final_submit_forbidden": true,
+    "real_action_requires_gate": true,
+    "execute_binding_enabled": false,
+    "authorization_scope": "display_and_review_only"
+  },
+  "audit": {
+    "source_trial_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "reviewed_at": "2026-08-24T02:51:26.376091",
+    "changes_summary": [
+      "region_bbox:manual_region_1",
+      "region_additions:1",
+      "manual_label:manual_region_1",
+      "manual_role:manual_region_1",
+      "manual_parent_region_id:manual_region_1",
+      "manual_description:manual_region_1",
+      "manual_may_enter_pathgraph_draft:manual_region_1",
+      "manual_needs_recalibration:manual_region_1",
+      "region_role:manual_region_2",
+      "region_parent:manual_region_2",
+      "region_metadata:manual_region_1",
+      "region_metadata:manual_region_2",
+      "region_add:manual_region_2"
+    ],
+    "manual_bbox_edit_summary": {
+      "contract_version": "manual_bbox_edit_summary_v1",
+      "edited_region_count": 1,
+      "edited_action_count": 0,
+      "edited_total": 1,
+      "point_inside_bbox_passed": 1,
+      "point_inside_bbox_failed": 0,
+      "invalid_geometry_count": 0,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "source_freshness_summary": {
+      "contract_version": "source_freshness_summary_v1",
+      "source_image_status": "available",
+      "checksum_status": "matched",
+      "freshness_status": "verified",
+      "warning_count": 0,
+      "warnings": [],
+      "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+      "source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+      "actual_source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+      "source_image_evidence_source": "page_details.screen.source_image_path",
+      "checksum_binding_status": "provided_by_draft",
+      "edited_geometry_requires_review": false,
+      "execute_binding_enabled": false,
+      "artifact_is_authorization": false
+    },
+    "precise_understanding_summary": {
+      "contract_version": "precise_understanding_summary_v1",
+      "state_count": 0,
+      "region_count": 3,
+      "bbox_region_count": 2,
+      "action_template_count": 1,
+      "action_click_point_count": 0,
+      "open_detail_transition_hint_count": 0,
+      "blocker_count": 0,
+      "verification_rule_count": 1,
+      "semantic_actions": [
+        "open_apply_flow"
+      ],
+      "candidate_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "final_submit_forbidden": true,
+      "interpretation": "review-only precise understanding summary; not Execute authorization"
+    },
+    "precise_understanding_readiness_summary": {},
+    "evidence_integrity": {},
+    "human_review_patch_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_patch_r0002.json",
+    "human_review_patch_revision": 2,
+    "reviewed_overlay_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png",
+    "review_status": "needs_human_review",
+    "authorization_scope": "display_and_review_only",
+    "correction_memory": {
+      "contract_version": "learning_correction_memory_record_v1",
+      "rule_id": "surface_correction_6f7ecf90d417d9a0",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_6f7ecf90d417d9a0.json",
+      "registry_path": "artifacts/learning-correction-memory/registry.json",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  }
+}

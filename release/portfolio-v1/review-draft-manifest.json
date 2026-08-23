@@ -1,24 +1,32 @@
 {
-  "contract_version": "portfolio_v1_review_draft_manifest_v1",
+  "contract_version": "portfolio_v1_release_manifest_v1",
   "workflow_id": "portfolio_v1_seek_apply_entry",
   "workspace_root": "release/portfolio-v1/reviewed-asset-workspace",
   "source_workflow_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/reviewed_workflow.json",
-  "evidence_grade": "review_draft_with_sanitized_clean_job_detail_and_historical_apply_entry_derivative",
-  "human_review_completed": false,
-  "compiled_release_asset_present": false,
+  "source_workflow_sha256": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc",
+  "compiled_asset_id": "workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0",
+  "compiled_asset_path": "runtime_state/reviewed-workflow-assets-v2/objects/8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7.json",
+  "compiled_asset_registry_path": "runtime_state/reviewed-workflow-assets-v2/registry.json",
+  "compiled_asset_sha256": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7",
+  "evidence_grade": "human_reviewed_source_with_sanitized_evidence_and_compiled_asset",
+  "human_review_completed": true,
+  "compiled_release_asset_present": true,
   "controlled_live_workflow_proven": false,
   "runtime_dispatch_authorization": false,
-  "approved_node_ids": [],
-  "pending_human_review_node_ids": [
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "approved_node_ids": [
     "job_detail"
   ],
+  "pending_human_review_node_ids": [],
   "stop_boundary_node_ids": [
     "apply_entry"
   ],
   "notes": [
-    "This workspace is a portable review draft, not a reviewed release asset.",
-    "Job Detail uses an annotation-free sanitized clean capture; review boxes must be rendered as independent overlays.",
-    "Apply Entry remains a privacy-redacted historical derivative, not raw or forensic pixel evidence and not controlled live workflow proof.",
-    "Automation must not synthesize human approval or promote this draft to execution authority."
+    "Human review is complete for the Job Detail semantic boundary; Apply Entry deliberately remains needs_learning and stop_boundary.",
+    "Quick apply is the only compiled transition; Save is preserved as read_only review evidence and is not executable.",
+    "Review sources may retain evidence bounding boxes, but the compiled asset contains no historical coordinate authority and requires fresh grounding.",
+    "The compiled asset is reviewed knowledge, not dispatch authorization; Gate and one-time Runtime authority remain mandatory.",
+    "controlled_live_workflow_proven remains false because the public controlled-live evidence package is a separate release slice."
   ]
 }

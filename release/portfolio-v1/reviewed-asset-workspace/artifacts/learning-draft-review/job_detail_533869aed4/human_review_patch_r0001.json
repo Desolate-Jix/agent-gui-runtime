@@ -1,0 +1,219 @@
+{
+  "contract_version": "human_review_patch_v1",
+  "revision": 1,
+  "created_at": "2026-08-23T16:35:46.865060",
+  "source_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+  "source_draft_sha256": "533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42",
+  "screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+  "screenshot_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
+  "reason": "",
+  "source": "human_panel_editor_v1",
+  "operations": [
+    {
+      "op": "add",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "item": {
+        "label": "Manual region 1",
+        "role": "button",
+        "parent_region_id": "",
+        "bbox": {
+          "x": 1127,
+          "y": 630,
+          "w": 97,
+          "h": 38
+        },
+        "target_kind": "region",
+        "target_id": "manual_region_1",
+        "candidate_only": true,
+        "requires_human_review": true,
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false,
+        "final_submit_forbidden": true,
+        "region_id": "manual_region_1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Manual region 1",
+        "description": null,
+        "semantic_action": null,
+        "action_type": null,
+        "input_semantics": null,
+        "verification_rule": null,
+        "risk_level": null,
+        "requires_confirmation": null,
+        "destination": null
+      },
+      "after_metadata": {
+        "label": "Manual region 1",
+        "description": "",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_role",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_value": "review_only",
+      "after_value": "button",
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Manual region 1",
+        "description": "",
+        "semantic_action": "read_only",
+        "action_type": "read_only",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "after_metadata": {
+        "label": "Manual region 1",
+        "description": "",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Manual region 1",
+        "description": "",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "after_metadata": {
+        "label": "Manual region 1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Manual region 1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "after_metadata": {
+        "label": "Manual region 1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    },
+    {
+      "op": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before_metadata": {
+        "label": "Manual region 1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "after_metadata": {
+        "label": "Manual region 1",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "none"
+        }
+      },
+      "reason": ""
+    }
+  ],
+  "operation_count": 7,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "authorization_scope": "display_and_review_only"
+}
