@@ -1,0 +1,155 @@
+{
+  "schema_version": "portfolio_controlled_live_media_manifest_v1",
+  "artifact_kind": "receipt-backed controlled-live replay",
+  "continuous_recording": false,
+  "real_runtime_capture": true,
+  "claim_boundary": "Deterministic replay of two real runtime captures bound to one verified receipt; not a continuous screen recording or general reliability claim.",
+  "sources": {
+    "pre": {
+      "path": "artifacts/screenshots/entry-level-sales-recruitment-job-in-penrose-auckland-seek-3-microsoft-edge__runtime-pre-dispatch-freshness__full-window__20260824-065224-473471.png",
+      "sha256": "629535e9bf9318157d14ba6c33250261c1d1c5e23d871d901594b98a617604d1",
+      "crop_xyxy": [
+        190,
+        680,
+        1120,
+        1070
+      ],
+      "source_masks_xyxy": [
+        [
+          0,
+          0,
+          1390,
+          210
+        ]
+      ],
+      "semantic_label": "Reviewed target: Quick Apply"
+    },
+    "post": {
+      "path": "artifacts/screenshots/choose-documents-seek-3-microsoft-edge__runtime-observation__full-window__20260824-065236-691040.png",
+      "sha256": "1d246455801b7a7d505dece207a9343a74ad06770dc49057f9c3d90c7458e58d",
+      "crop_xyxy": [
+        180,
+        200,
+        1200,
+        535
+      ],
+      "source_masks_xyxy": [
+        [
+          0,
+          0,
+          1390,
+          200
+        ],
+        [
+          1120,
+          120,
+          1250,
+          200
+        ],
+        [
+          180,
+          545,
+          930,
+          720
+        ],
+        [
+          180,
+          720,
+          980,
+          1211
+        ]
+      ],
+      "semantic_label": "Choose documents / stop_boundary"
+    }
+  },
+  "receipt": {
+    "path": "runtime_state/runtime-receipts-v1/objects/8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e.json",
+    "object_sha256": "8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e",
+    "receipt_id": "receipt.38d529e464f94dbf858ec4d18de90c7c",
+    "contract_version": "runtime_result_receipt_v1",
+    "workflow_id": "portfolio_v1_seek_apply_entry",
+    "asset_content_sha256": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7",
+    "dispatch_status": "dispatched",
+    "effect_status": "verified",
+    "destination_status": "verified",
+    "outcome": "SAFE_STOP",
+    "reason_code": "stop_boundary",
+    "post_state": "Choose documents"
+  },
+  "render": {
+    "canvas_size": [
+      960,
+      540
+    ],
+    "frame_count": 120,
+    "frame_duration_ms": 100,
+    "duration_ms": 12000,
+    "transition": {
+      "kind": "crossfade",
+      "start_frame": 45,
+      "end_frame": 59,
+      "label": "editorial crossfade — not continuous recording"
+    }
+  },
+  "privacy": {
+    "method": "deterministic source masking followed by allowlisted semantic crops",
+    "post_crop_excludes_y_at_or_below": 535,
+    "source_masks": {
+      "pre": [
+        [
+          0,
+          0,
+          1390,
+          210
+        ]
+      ],
+      "post": [
+        [
+          0,
+          0,
+          1390,
+          200
+        ],
+        [
+          1120,
+          120,
+          1250,
+          200
+        ],
+        [
+          180,
+          545,
+          930,
+          720
+        ],
+        [
+          180,
+          720,
+          980,
+          1211
+        ]
+      ]
+    },
+    "excluded_classes": [
+      "operator_name",
+      "email",
+      "phone",
+      "resume_filename",
+      "account_identifier"
+    ],
+    "extra_forbidden_token_sha256": [
+      "f7f57878815f9566c0bd468813aeab38a7ce00c4803867405501b131a39f92ce"
+    ],
+    "frame_scan": {
+      "engine": "rapidocr_onnxruntime",
+      "frames_scanned": 120,
+      "unique_visuals_ocr_scanned": 29,
+      "forbidden_matches": []
+    }
+  },
+  "output": {
+    "path": "docs/media/portfolio-v1-controlled-live.gif",
+    "sha256": "205f9bd526bbf3e9d90d0a085943c33556f7c703aabe203233970c3518a0bc69",
+    "media_type": "image/gif"
+  }
+}
