@@ -16,35 +16,75 @@ test("image inspector uses mandatory open_apply_flow taxonomy", () => {
   assert.doesNotMatch(html, /value="open_flow"/);
 });
 
-test("operation editor exposes three separate non-execution granular approval gestures", () => {
-  assert.match(html, /id="interfaceWorkflowOperationApproveTargetControlBtn"/);
-  assert.match(html, /id="interfaceWorkflowOperationApproveActionCandidateBtn"/);
-  assert.match(html, /id="interfaceWorkflowOperationApproveEdgeBtn"/);
-  assert.match(source, /confirmOperationTargetControlHumanReview/);
-  assert.match(source, /confirmOperationActionCandidateHumanReview/);
-  assert.match(source, /confirmOperationEdgeHumanReview/);
+test("operation editor exposes one primary review gesture while keeping granular receipts", () => {
+  assert.match(html, /id="interfaceWorkflowOperationApproveBundleBtn"/);
+  assert.match(html, /批准这条操作路径/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveTargetControlBtn"/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveActionCandidateBtn"/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveEdgeBtn"/);
+  assert.match(source, /confirmOperationHumanReviewBundle/);
+  assert.match(html, /id="interfaceWorkflowNodeApproveBtn"/);
+  assert.match(html, /批准当前界面 Revision/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowNodeHumanReviewConfirmed"/);
 });
 
-test("granular approval aborts when the operation editor commit fails", () => {
+test("operation review bundle aborts when the operation editor commit fails", () => {
   const vm = require("node:vm");
-  const start = source.indexOf("function confirmCurrentInterfaceWorkflowOperationGranular");
+  const start = source.indexOf("function confirmCurrentInterfaceWorkflowOperationBundle");
   const end = source.indexOf("async function dryRunInterfaceWorkflowOperation", start);
   let confirmations = 0;
   const sandbox = {
     interfaceWorkflowReviewState: {
-      confirmOperationEdgeHumanReview: () => { confirmations += 1; },
+      confirmOperationHumanReviewBundle: () => { confirmations += 1; },
     },
     interfaceWorkflowSelectedOperationId: "edge_open",
     commitInterfaceWorkflowOperationEditor: () => null,
     $: () => null,
   };
   vm.runInNewContext(
-    `${source.slice(start, end)}; globalThis.result = confirmCurrentInterfaceWorkflowOperationGranular("edge");`,
+    `${source.slice(start, end)}; globalThis.result = confirmCurrentInterfaceWorkflowOperationBundle();`,
     sandbox,
   );
 
   assert.equal(sandbox.result, null);
   assert.equal(confirmations, 0);
+});
+
+test("operation review bundle commits once and records one user gesture", () => {
+  const vm = require("node:vm");
+  const start = source.indexOf("function confirmCurrentInterfaceWorkflowOperationBundle");
+  const end = source.indexOf("async function dryRunInterfaceWorkflowOperation", start);
+  const calls = [];
+  const sandbox = {
+    interfaceWorkflowReviewState: {
+      confirmOperationHumanReviewBundle: (edgeId) => {
+        calls.push(["confirm_bundle", edgeId]);
+        return { edge_id: edgeId };
+      },
+      snapshot: () => ({ saved: false }),
+    },
+    interfaceWorkflowSelectedOperationId: "edge_open",
+    interfaceWorkflowReview: null,
+    commitInterfaceWorkflowOperationEditor: (options) => {
+      calls.push(["commit", options.silent]);
+      return { edge_id: "edge_open" };
+    },
+    markInterfaceWorkflowUnsaved: (message) => calls.push(["dirty", message]),
+    renderInterfaceWorkflowReviewSelection: () => calls.push(["render"]),
+    $: () => null,
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = confirmCurrentInterfaceWorkflowOperationBundle();`,
+    sandbox,
+  );
+
+  assert.equal(sandbox.result.edge_id, "edge_open");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["commit", true],
+    ["confirm_bundle", "edge_open"],
+    ["dirty", "已批准当前操作路径 · 内部审核事实已记录 · 尚未保存"],
+    ["render"],
+  ]);
 });
 
 test("operation editor mutation commits or revokes before rerendering approval badges", () => {
@@ -82,7 +122,7 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
     interfaceWorkflowNodeName: {},
     interfaceWorkflowSurfaceType: {},
     interfaceWorkflowNodeReviewStatus: {},
-    interfaceWorkflowNodeHumanReviewConfirmed: {},
+    interfaceWorkflowNodeApproveBtn: {},
     interfaceWorkflowSaveStatus: {},
   };
   const sandbox = {
@@ -100,5 +140,51 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
   assert.match(html, /option value="needs_learning"/);
   assert.equal(elements.interfaceWorkflowNodeReviewStatus.value, "needs_learning");
   assert.equal(elements.interfaceWorkflowNodeReviewStatus.disabled, true);
-  assert.equal(elements.interfaceWorkflowNodeHumanReviewConfirmed.disabled, true);
+  assert.equal(elements.interfaceWorkflowNodeApproveBtn.disabled, true);
+});
+
+test("approving the current interface commits its revision once without a status gesture", () => {
+  const vm = require("node:vm");
+  const start = source.indexOf("function approveCurrentInterfaceWorkflowNode");
+  const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
+  const calls = [];
+  const elements = {
+    interfaceWorkflowNodeName: { value: "Job Detail" },
+    interfaceWorkflowSurfaceType: { value: "detail" },
+  };
+  const sandbox = {
+    interfaceWorkflowReviewState: {
+      current: () => ({ node: { node_id: "job_detail", review_status: "needs_human_review" } }),
+    },
+    interfaceWorkflowReview: null,
+    window: {
+      InterfaceWorkflowReview: {
+        commitInterfaceWorkflowReviewForSave: (options) => {
+          calls.push(["commit", options.nodeId, options.nodePatch, options.humanReviewConfirmed]);
+          options.commitOperation();
+          return { nodes: [{ node_id: options.nodeId, review_status: "human_approved" }] };
+        },
+      },
+    },
+    commitInterfaceWorkflowOperationEditor: (options) => calls.push(["commit_operation", options.silent]),
+    markInterfaceWorkflowUnsaved: (message) => calls.push(["dirty", message]),
+    renderInterfaceWorkflowReviewSelection: () => calls.push(["render"]),
+    $: (id) => elements[id] || null,
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = approveCurrentInterfaceWorkflowNode();`,
+    sandbox,
+  );
+
+  assert.equal(sandbox.result.nodes[0].review_status, "human_approved");
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["commit", "job_detail", {
+      display_name: "Job Detail",
+      surface_type: "detail",
+      review_status: "needs_human_review",
+    }, true],
+    ["commit_operation", true],
+    ["dirty", "当前界面 Revision 已批准 · 尚未保存"],
+    ["render"],
+  ]);
 });

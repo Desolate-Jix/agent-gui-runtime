@@ -118,9 +118,11 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
     "function restoreInterfaceWorkflowOperationToolbar",
   );
   const tools = { hidden: true };
+  const operationToolbar = { hidden: true };
   const toggle = { textContent: "" };
   const elements = new Map([
     ["interfaceWorkflowReviewToolsColumn", tools],
+    ["interfaceWorkflowOperationToolbar", operationToolbar],
     ["interfaceWorkflowReviewToolsToggle", toggle],
   ]);
   const observations = { evidenceRenders: 0, editorRenders: 0, correctionOpen: false };
@@ -142,6 +144,7 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
 
   assert.equal(observations.correctionOpen, true);
   assert.equal(tools.hidden, false);
+  assert.equal(operationToolbar.hidden, false);
   assert.equal(observations.editorRenders, 1);
   assert.equal(observations.evidenceRenders, 1);
 });

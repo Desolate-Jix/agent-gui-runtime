@@ -979,6 +979,16 @@
       return operationGranularReview(edgeId);
     }
 
+    function confirmOperationHumanReviewBundle(edgeId) {
+      // 一次用户确认对应一条完整操作路径；底层仍保留三个可独立失效的审核事实。
+      const subjects = resolveOperationSubjects(edgeId);
+      confirmGranularHumanReview(subjects.targetControl, "target_control");
+      confirmGranularHumanReview(subjects.actionCandidate, "action_candidate");
+      confirmGranularHumanReview(subjects.edge, "edge");
+      revokeNodeHumanReview(subjects.sourceNode);
+      return operationGranularReview(edgeId);
+    }
+
     function revokeOperationEdgeHumanReview(edgeId) {
       const normalizedEdgeId = String(edgeId || "").trim();
       const matches = edges.filter((edge) => String(edge?.edge_id || "").trim() === normalizedEdgeId);
@@ -1425,6 +1435,7 @@
       confirmNodeHumanReview,
       confirmOperationActionCandidateHumanReview,
       confirmOperationEdgeHumanReview,
+      confirmOperationHumanReviewBundle,
       confirmOperationTargetControlHumanReview,
       current,
       focusControl,

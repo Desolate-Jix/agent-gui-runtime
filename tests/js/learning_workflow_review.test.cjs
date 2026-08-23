@@ -600,6 +600,64 @@ function approveOperationGranularly(state, edgeId = "edge_open") {
   state.confirmOperationEdgeHumanReview(edgeId);
 }
 
+test("one operation review gesture records all immutable granular receipts", () => {
+  const state = createInterfaceWorkflowReviewState(
+    makeOperationExactlyReviewable(reviewFixture()),
+  );
+
+  const result = state.confirmOperationHumanReviewBundle("edge_open");
+  assert.deepEqual(
+    [result.target_control.current, result.action_candidate.current, result.edge.current],
+    [true, true, true],
+  );
+
+  const snapshot = state.snapshot();
+  const control = snapshot.nodes[0].controls[0];
+  const candidate = snapshot.nodes[0].action_candidates[0];
+  const edge = snapshot.edges[0];
+  assert.equal(
+    control.human_review_confirmation.contract_version,
+    "interface_target_control_human_review_confirmation_v1",
+  );
+  assert.equal(
+    candidate.human_review_confirmation.contract_version,
+    "interface_action_candidate_human_review_confirmation_v1",
+  );
+  assert.equal(
+    edge.human_review_confirmation.contract_version,
+    "interface_workflow_edge_human_review_confirmation_v1",
+  );
+  for (const subject of [control, candidate, edge]) {
+    assert.equal(subject.display_only, true);
+    assert.equal(subject.artifact_is_authorization, false);
+    assert.equal(subject.execute_binding_enabled, false);
+  }
+
+  assert.doesNotThrow(() => state.confirmNodeHumanReview("node_list"));
+});
+
+test("operation review gesture is atomic when operation subjects are inconsistent", () => {
+  const review = makeOperationExactlyReviewable(reviewFixture());
+  review.nodes[0].action_candidates[0].target_interface_id = "node_missing";
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(
+    () => state.confirmOperationHumanReviewBundle("edge_open"),
+    /does not match edge/i,
+  );
+
+  const snapshot = state.snapshot();
+  for (const subject of [
+    snapshot.nodes[0].controls[0],
+    snapshot.nodes[0].action_candidates[0],
+    snapshot.edges[0],
+  ]) {
+    assert.notEqual(subject.review_status, "human_approved");
+    assert.equal(subject.reviewed_by_human === true, false);
+    assert.equal("human_review_confirmation" in subject, false);
+  }
+});
+
 test("removes legacy draft wording from user-facing learning labels", () => {
   assert.equal(
     userFacingLearningLabel("UI hierarchy draft: 2 structure regions"),

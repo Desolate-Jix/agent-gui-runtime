@@ -919,21 +919,6 @@
                           <span data-i18n="interface_workflow_surface_type">界面类型</span>
                           <input id="interfaceWorkflowSurfaceType" type="text" placeholder="list / detail / form / dialog" />
                         </label>
-                        <label>
-                          <span data-i18n="interface_workflow_review_status">审核状态</span>
-                          <select id="interfaceWorkflowNodeReviewStatus">
-                            <option value="needs_learning">needs_learning（固定安全停止）</option>
-                            <option value="needs_human_review">needs_human_review</option>
-                            <option value="reviewed_candidate">reviewed_candidate</option>
-                            <option value="human_approved">human_approved（需显式确认）</option>
-                            <option value="rejected">rejected</option>
-                          </select>
-                        </label>
-                        <label class="learning-scoped-confirm">
-                          <input id="interfaceWorkflowNodeHumanReviewConfirmed" type="checkbox" />
-                          <span>确认当前 revision 已人工审核</span>
-                        </label>
-                        <small>一次性确认；修改证据、语义、控件、动作、规则或来源后必须重新确认。</small>
                         <div hidden>
                           <input id="interfaceWorkflowTransitionAction" type="text" />
                           <select id="interfaceWorkflowTransitionTarget">
@@ -943,7 +928,7 @@
                         <section class="interface-workflow-content-editor" id="interfaceWorkflowContentEditor">
                           <div class="interface-workflow-operation-heading">
                             <div>
-                              <strong>框与内容语义</strong>
+                              <strong>2. 审核控件用途</strong>
                               <small>先在下方带框图选择具体控件，再说明它是什么、Agent 如何使用。</small>
                             </div>
                             <span id="interfaceWorkflowContentStatus">尚未选择控件</span>
@@ -1089,19 +1074,48 @@
                             <button id="interfaceWorkflowOperationDeleteBtn" type="button" class="secondary">删除</button>
                             <button id="interfaceWorkflowOperationDryRunBtn" type="button">安全验证</button>
                           </div>
-                          <div class="interface-workflow-operation-actions" aria-label="当前操作的逐项人工审核">
-                            <button id="interfaceWorkflowOperationApproveTargetControlBtn" type="button" class="secondary">批准目标控件</button>
-                            <span id="interfaceWorkflowOperationTargetControlReviewStatus">needs_human_review</span>
-                            <button id="interfaceWorkflowOperationApproveActionCandidateBtn" type="button" class="secondary">批准操作候选</button>
-                            <span id="interfaceWorkflowOperationActionCandidateReviewStatus">needs_human_review</span>
-                            <button id="interfaceWorkflowOperationApproveEdgeBtn" type="button" class="secondary">批准跳转边</button>
-                            <span id="interfaceWorkflowOperationEdgeReviewStatus">needs_human_review</span>
+                          <div class="interface-workflow-operation-actions" aria-label="批准当前操作路径">
+                            <button id="interfaceWorkflowOperationApproveBundleBtn" type="button">批准这条操作路径</button>
+                            <span id="interfaceWorkflowOperationBundleReviewStatus">操作路径待审核</span>
                           </div>
-                          <small>逐项审核只记录当前语义 revision；display_only=true，artifact_is_authorization=false，execute_binding_enabled=false。</small>
+                          <details>
+                            <summary>查看内部审核事实</summary>
+                            <div class="interface-workflow-operation-actions" aria-label="当前操作路径的内部审核事实">
+                              <span>目标控件</span>
+                              <span id="interfaceWorkflowOperationTargetControlReviewStatus">needs_human_review</span>
+                              <span>操作候选</span>
+                              <span id="interfaceWorkflowOperationActionCandidateReviewStatus">needs_human_review</span>
+                              <span>跳转关系</span>
+                              <span id="interfaceWorkflowOperationEdgeReviewStatus">needs_human_review</span>
+                            </div>
+                          </details>
+                          <small>一次确认整条操作路径；内部仍分别记录目标控件、操作候选和跳转关系的当前 revision。它们只用于审核，不授予执行权。</small>
+                        </section>
+                        <section class="interface-workflow-content-editor" aria-label="批准当前界面">
+                          <div class="interface-workflow-operation-heading">
+                            <div>
+                              <strong>4. 批准当前界面</strong>
+                              <small>操作路径批准后，确认当前界面的完整 revision。</small>
+                            </div>
+                          </div>
+                          <label>
+                            <span data-i18n="interface_workflow_review_status">审核状态</span>
+                            <select id="interfaceWorkflowNodeReviewStatus">
+                              <option value="needs_learning">needs_learning（固定安全停止）</option>
+                              <option value="needs_human_review">needs_human_review</option>
+                              <option value="reviewed_candidate">reviewed_candidate</option>
+                              <option value="human_approved">human_approved（需显式确认）</option>
+                              <option value="rejected">rejected</option>
+                            </select>
+                          </label>
+                          <div class="interface-workflow-operation-actions">
+                            <button id="interfaceWorkflowNodeApproveBtn" type="button">批准当前界面 Revision</button>
+                          </div>
+                          <small>修改证据、语义、控件、动作、规则或来源后，当前界面与受影响的操作路径都会要求重新审核。</small>
                         </section>
                         <div class="interface-workflow-editor-actions">
                           <button id="interfaceWorkflowEditBoxesBtn" type="button" data-i18n="interface_workflow_edit_boxes">修改当前界面框</button>
-                          <button id="interfaceWorkflowSaveBtn" type="button" data-i18n="interface_workflow_save_draft">保存学习结果</button>
+                          <button id="interfaceWorkflowSaveBtn" type="button">5. 保存 Reviewed Workflow</button>
                           <button id="interfaceWorkflowMemoryBtn" type="button" class="secondary" data-i18n="interface_workflow_memory_handoff">发布与执行验证</button>
                         </div>
                         <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>

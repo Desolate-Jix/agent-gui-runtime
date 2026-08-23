@@ -4700,8 +4700,11 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowSurfaceType"' in html
     assert 'id="interfaceWorkflowNodeReviewStatus"' in html
     assert '<option value="human_approved">human_approved（需显式确认）</option>' in html
-    assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' in html
-    assert "确认当前 revision 已人工审核" in html
+    assert 'id="interfaceWorkflowNodeApproveBtn"' in html
+    assert "批准当前界面 Revision" in html
+    assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' not in html
+    assert 'id="interfaceWorkflowOperationApproveBundleBtn"' in html
+    assert "批准这条操作路径" in html
     assert 'id="interfaceWorkflowTransitionAction"' in html
     assert 'id="interfaceWorkflowTransitionTarget"' in html
     assert 'id="interfaceWorkflowSourceSelect"' in html

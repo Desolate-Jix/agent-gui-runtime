@@ -77,6 +77,7 @@ Required end state—the live loop is not complete today:
 1. **Explore** an uncertain path.
 2. **Capture evidence** with identity, coordinates, provenance, and freshness.
 3. **Review** semantics, actions, transitions, effects, and risk.
+   - The Panel now presents one primary approval gesture per operation path and one per interface revision. Internally, the operation gesture still records three independently revision-bound facts—target control, action candidate, and transition—so editing any affected evidence invalidates approval without making the user repeat three buttons.
 4. **Compile** an immutable semantic asset that grants no authority.
 5. **Observe again** for an Agent intent.
 6. **Relocate** on the current interface; old coordinates are hints only.
