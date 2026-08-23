@@ -1661,3 +1661,87 @@ def test_live_controller_vertical_slice_dispatches_once_or_gate_blocks(
     else:
         assert len(screenshot.calls) == 2
         assert len(runner.capture_paths) == 2
+
+
+def test_open_apply_flow_matches_contextual_accessible_name_only_for_reviewed_quick_apply(
+    tmp_path: Path,
+) -> None:
+    asset, _ = _synthetic_portfolio_apply_entry_asset(tmp_path)
+    detail_state = next(item for item in asset["states"] if item["source_node_id"] == "job_detail")
+    quick_apply = next(
+        anchor for anchor in detail_state["identity_anchors"] if anchor["label"] == "Quick apply"
+    )
+    asset["transitions"][0]["risk_policy"]["requires_user_confirmation"] = False
+    accessible_name = "Apply for Entry-Level Sales & Recruitment at Hirestaff Limited"
+    accessible = _recognition("Quick apply", role="link", candidate_id="accessible-apply")
+    accessible_candidate = accessible["candidate_result"]["candidates"][0]
+    accessible_candidate.update({"label": accessible_name, "text": accessible_name})
+    accessible_candidate["element"].update({"label": accessible_name, "text": accessible_name})
+    accessible["narrow_search_result"]["results"][0]["matched_text"] = accessible_name
+    decoy = _recognition(
+        "Quick apply", role="text", candidate_id="noninteractive-decoy", score=0.70
+    )
+    decoy_candidate = decoy["candidate_result"]["candidates"][0]
+    decoy_candidate.update(
+        {
+            "label": "If you're allergic to hard work — don't apply.",
+            "text": "If you're allergic to hard work — don't apply.",
+            "rank": 2,
+        }
+    )
+    decoy_candidate["element_id"] = "current-noninteractive-decoy"
+    decoy_candidate["element"].update(
+        {
+            "element_id": "current-noninteractive-decoy",
+            "label": "If you're allergic to hard work — don't apply.",
+            "text": "If you're allergic to hard work — don't apply.",
+        }
+    )
+    decoy["narrow_search_result"]["results"][0].update(
+        {
+            "element_id": "current-noninteractive-decoy",
+            "matched_text": "If you're allergic to hard work — don't apply.",
+        }
+    )
+    accessible["candidate_result"]["candidates"].append(decoy_candidate)
+    accessible["narrow_search_result"]["results"].append(
+        decoy["narrow_search_result"]["results"][0]
+    )
+    payloads = _state_payloads(asset, detail_state["state_id"])
+    payloads[quick_apply["label"]] = accessible
+    adapter, *_ = _adapter(tmp_path, asset, runner=_RecognitionRunner(payloads))
+
+    current = adapter.capture_current(
+        session_id="session-contextual-apply", asset=asset, target_window_handle=4242
+    )
+    assert {item["anchor_id"] for item in current["observed_anchor_evidence"]} >= {
+        quick_apply["anchor_id"]
+    }
+    resolution = resolve_current_state(asset, current)
+    assert resolution["status"] == "resolved"
+    assert resolution["state_id"] == detail_state["state_id"]
+    selection = _selected(asset, current)
+    assert selection["status"] == "selected", selection
+    result = adapter.resolve(
+        session_id="session-contextual-apply",
+        selection=selection,
+        current_observation=current,
+    )
+    assert result["status"] == "resolved"
+    assert result["grounding"]["candidate_id"] == "accessible-apply"
+
+    non_apply_asset = deepcopy(asset)
+    non_apply_asset["transitions"][0]["semantic_action"] = "open_detail"
+    non_apply_payloads = _state_payloads(non_apply_asset, detail_state["state_id"])
+    non_apply_payloads[quick_apply["label"]] = accessible
+    non_apply_adapter, *_ = _adapter(
+        tmp_path, non_apply_asset, runner=_RecognitionRunner(non_apply_payloads)
+    )
+    non_apply_current = non_apply_adapter.capture_current(
+        session_id="session-non-apply",
+        asset=non_apply_asset,
+        target_window_handle=4242,
+    )
+    assert quick_apply["anchor_id"] not in {
+        item["anchor_id"] for item in non_apply_current["observed_anchor_evidence"]
+    }

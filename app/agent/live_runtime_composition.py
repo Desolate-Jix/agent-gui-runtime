@@ -233,7 +233,24 @@ class ExistingWindowsCurrentEvidenceAdapter:
             candidates, local_grounding = _parse_recognition(_json_mapping(recognition_bytes))
         except ValueError:
             return {"status": "unresolved", "reason": "malformed_current_recognition"}
-        matches = _matching_pairs(candidates, local_grounding, anchor)
+        transition = next(
+            (
+                item
+                for item in asset.get("transitions", [])
+                if item.get("transition_id") == selection.get("transition_id")
+            ),
+            None,
+        )
+        matches = _matching_pairs(
+            candidates,
+            local_grounding,
+            anchor,
+            contextual_apply_alias=_selected_transition_allows_contextual_apply_alias(
+                transition,
+                anchor_id=str(anchor["anchor_id"]),
+                element_ref=str(selection.get("element_ref") or ""),
+            ),
+        )
         if not matches:
             return {"status": "unresolved", "reason": "current_target_unmatched"}
         if len(matches) != 1:
@@ -313,14 +330,6 @@ class ExistingWindowsCurrentEvidenceAdapter:
             "click_point": dict(candidate_decision.click_point),
             "evidence_refs": [evidence_ref],
         }
-        transition = next(
-            (
-                item
-                for item in asset.get("transitions", [])
-                if item.get("transition_id") == selection.get("transition_id")
-            ),
-            None,
-        )
         gate_context: dict[str, object] = {
             "candidates": projected_candidates,
             "local_grounding": projected_local,
@@ -397,7 +406,12 @@ class ExistingWindowsCurrentEvidenceAdapter:
                     candidates, local = _parse_recognition(_json_mapping(raw_bytes))
                 except ValueError:
                     continue
-                matches = _matching_pairs(candidates, local, anchor)
+                matches = _matching_pairs(
+                    candidates,
+                    local,
+                    anchor,
+                    contextual_apply_alias=_anchor_allows_contextual_apply_alias(asset, anchor),
+                )
                 if len(matches) != 1:
                     continue
                 candidate, grounded = matches[0]
@@ -777,6 +791,8 @@ def _matching_pairs(
     candidates: CandidateRankResult,
     local: LocalGroundingResult,
     anchor: Mapping[str, Any],
+    *,
+    contextual_apply_alias: bool = False,
 ) -> list[tuple[RecognitionCandidate, LocalGroundingCandidateResult]]:
     expected_goal = _normalized_text(str(anchor.get("label") or ""))
     if (
@@ -794,21 +810,74 @@ def _matching_pairs(
             and grounded is not None
             and grounded.status == "grounded"
             and grounded.confidence >= 0.0
-            and _label_matches(candidate, str(anchor.get("label") or ""))
+            and _label_matches(
+                candidate,
+                str(anchor.get("label") or ""),
+                contextual_apply_alias=contextual_apply_alias,
+            )
             and _role_matches(candidate.role, str(anchor.get("kind") or ""))
         ):
             matches.append((candidate, grounded))
     return matches
 
 
-def _label_matches(candidate: RecognitionCandidate, label: str) -> bool:
+def _label_matches(
+    candidate: RecognitionCandidate,
+    label: str,
+    *,
+    contextual_apply_alias: bool = False,
+) -> bool:
     expected = _normalized_text(label)
-    return bool(expected) and expected in {
+    if not expected:
+        return False
+    if expected in {
         _normalized_text(candidate.label),
         _normalized_text(candidate.text),
         _normalized_text(candidate.element.label),
         _normalized_text(candidate.element.text),
-    }
+    }:
+        return True
+    return (
+        contextual_apply_alias
+        and expected.split()[-1:] == ["apply"]
+        and any(
+            value.startswith("apply for ")
+            for value in (
+                _normalized_text(candidate.label),
+                _normalized_text(candidate.element.label),
+            )
+        )
+    )
+
+
+def _anchor_allows_contextual_apply_alias(
+    asset: Mapping[str, Any],
+    anchor: Mapping[str, Any],
+) -> bool:
+    anchor_id = str(anchor.get("anchor_id") or "")
+    return any(
+        _selected_transition_allows_contextual_apply_alias(
+            transition,
+            anchor_id=anchor_id,
+            element_ref=anchor_id,
+        )
+        for transition in asset.get("transitions", [])
+    )
+
+
+def _selected_transition_allows_contextual_apply_alias(
+    transition: Any,
+    *,
+    anchor_id: str,
+    element_ref: str,
+) -> bool:
+    return (
+        isinstance(transition, Mapping)
+        and bool(anchor_id)
+        and element_ref == anchor_id
+        and str(transition.get("element_ref") or "") == anchor_id
+        and str(transition.get("semantic_action") or "").casefold() == "open_apply_flow"
+    )
 
 
 def _role_matches(role: str, anchor_kind: str) -> bool:
