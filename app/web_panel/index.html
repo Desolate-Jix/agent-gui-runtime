@@ -908,70 +908,15 @@
                             <option value="">没有已观察到的下一界面</option>
                           </select>
                         </div>
-                        <section class="interface-workflow-content-editor" id="interfaceWorkflowContentEditor">
-                          <div class="interface-workflow-operation-heading">
-                            <div>
-                              <strong>2. 审核控件用途</strong>
-                              <small>先在下方带框图选择具体控件，再说明它是什么、Agent 如何使用。</small>
-                            </div>
-                            <span id="interfaceWorkflowContentStatus">尚未选择控件</span>
-                          </div>
-                          <label>
-                            <span>当前控件</span>
-                            <input id="interfaceWorkflowContentTarget" type="text" readonly />
-                          </label>
-                          <div class="interface-workflow-operation-grid">
-                            <label>
-                              <span>内容变化方式</span>
-                              <select id="interfaceWorkflowContentBehavior">
-                                <option value="fixed_structure">固定结构</option>
-                                <option value="fixed_label">固定文字</option>
-                                <option value="dynamic_value">动态值</option>
-                                <option value="dynamic_collection">动态列表</option>
-                                <option value="user_input">用户输入</option>
-                                <option value="ephemeral">临时内容</option>
-                                <option value="sensitive_dynamic">敏感动态内容</option>
-                                <option value="ignore">忽略</option>
-                              </select>
-                            </label>
-                            <label>
-                              <span>Agent 用途</span>
-                              <select id="interfaceWorkflowContentAgentUsage">
-                                <option value="identity_anchor">识别当前界面</option>
-                                <option value="action_target">操作目标</option>
-                                <option value="decision_signal">决策信息</option>
-                                <option value="display_only">仅展示</option>
-                              </select>
-                            </label>
-                            <label>
-                              <span>读取时机</span>
-                              <select id="interfaceWorkflowContentReadPolicy">
-                                <option value="on_interface_match">匹配界面时读取</option>
-                                <option value="on_demand">需要时读取</option>
-                                <option value="never">不读取</option>
-                              </select>
-                            </label>
-                          </div>
-                          <label>
-                            <span>给 Agent 的描述</span>
-                            <textarea
-                              id="interfaceWorkflowContentDescription"
-                              rows="3"
-                              placeholder="例如：这是岗位卡片，读取当前标题和公司；点击后进入岗位详情。"
-                            ></textarea>
-                          </label>
-                          <div class="interface-workflow-operation-actions">
-                            <button id="interfaceWorkflowContentSaveBtn" type="button">保存内容说明</button>
-                          </div>
-                          <small>固定结构进入记忆；Agent 只在当前观察中读取动态值，历史文字不会当作最新内容。</small>
+                        <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>
                         </section>
-                        <div id="interfaceWorkflowOperationToolbarAnchor" hidden></div>
-                        <section
-                          class="interface-workflow-operation-toolbar"
-                          id="interfaceWorkflowOperationToolbar"
-                          aria-label="Agent 操作与跳转路径"
-                          hidden
-                        >
+                        <div id="interfaceWorkflowOperationToolbarParkingHost" hidden>
+                          <section
+                            class="interface-workflow-operation-toolbar"
+                            id="interfaceWorkflowOperationToolbar"
+                            aria-label="Agent 操作与跳转路径"
+                            hidden
+                          >
                           <div class="interface-workflow-operation-heading">
                             <div>
                               <strong>3. 用当前框连接下一个界面</strong>
@@ -1069,9 +1014,8 @@
                             </div>
                           </details>
                           <small>最终确认会一次记录当前界面及其全部操作路径；内部仍分别保存目标控件、操作候选和跳转关系的 revision，且不授予执行权。</small>
-                        </section>
-                        <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>
-                        </section>
+                          </section>
+                        </div>
                         <section class="interface-workflow-v2-panel" aria-label="Reviewed workflow v2">
                           <strong>Reviewed workflow v2</strong>
                           <small>编译和发布只使用服务端流程库绑定；只读预览不会捕获屏幕、不会调用动作接口，也不构成执行授权。</small>
@@ -1677,7 +1621,10 @@
             <strong id="imageInspectorTitle">Image preview</strong>
             <span id="imageInspectorMeta"></span>
           </div>
-          <button id="imageInspectorCloseBtn" type="button" data-i18n="close">Close</button>
+          <div class="image-inspector-header-actions">
+            <button id="imageInspectorOpenOperationBtn" type="button" class="secondary" hidden>查看关联操作</button>
+            <button id="imageInspectorCloseBtn" type="button" data-i18n="close">Close</button>
+          </div>
         </div>
         <div class="image-inspector-body" id="imageInspectorBody">
           <div class="image-inspector-canvas" id="imageInspectorCanvas">
@@ -1691,87 +1638,150 @@
           <aside class="image-inspector-workflow-review-host" id="imageInspectorWorkflowReviewHost" hidden></aside>
         </div>
         <div class="image-inspector-footer" id="imageInspectorFooter" style="display:none">
-          <span id="imageInspectorEditHint"></span>
-          <div class="image-inspector-editor-controls" id="imageInspectorEditorControls" style="display:none">
-            <button id="imageInspectorCompactBoxesBtn" type="button" aria-pressed="true">显示全部框</button>
-            <button id="imageInspectorAddRegionBtn" type="button">Add</button>
-            <button id="imageInspectorDeleteBoxBtn" type="button">Delete</button>
-            <button id="imageInspectorUndoBtn" type="button">Undo</button>
-            <button id="imageInspectorRedoBtn" type="button">Redo</button>
-            <section class="image-inspector-ownership-review" id="imageInspectorOwnershipReview" hidden></section>
-            <label class="image-inspector-label-control">
-              <span>Name</span>
-              <input id="imageInspectorLabel" type="text" placeholder="Search button" />
-            </label>
-            <label class="image-inspector-description-control">
-              <span>Agent description</span>
-              <input id="imageInspectorDescription" type="text" placeholder="What this control does" />
-            </label>
-            <label>
-              <span>Role</span>
-              <select id="imageInspectorRoleSelect">
-                <option value="review_only">review_only</option>
-                <option value="input">input</option>
-                <option value="button">button</option>
-                <option value="card">card</option>
-                <option value="filter">filter</option>
-                <option value="detail">detail</option>
-              </select>
-            </label>
-            <label>
-              <span>Action</span>
-              <select id="imageInspectorActionTypeSelect">
-                <option value="read_only">read_only</option>
-                <option value="click">click</option>
-                <option value="open_detail">open_detail</option>
-                <option value="open_apply_flow">open_apply_flow</option>
-                <option value="open_external_apply">open_external_apply (blocked)</option>
-                <option value="fill_field">fill_field</option>
-                <option value="type_text">type_text</option>
-                <option value="select_option">select_option</option>
-                <option value="scroll">scroll</option>
-                <option value="continue_next_step">continue_next_step</option>
-                <option value="final_submit">final_submit (blocked)</option>
-              </select>
-            </label>
-            <label>
-              <span>Input</span>
-              <input id="imageInspectorInputSemantics" type="text" placeholder="email, query, free text..." />
-            </label>
-            <label>
-              <span>Parent</span>
-              <select id="imageInspectorParentSelect"><option value="">none</option></select>
-            </label>
-            <label>
-              <span>Destination kind</span>
-              <select id="imageInspectorDestinationKind">
-                <option value="none">none</option>
-                <option value="interface">interface</option>
-                <option value="url">URL</option>
-              </select>
-            </label>
-            <label class="image-inspector-destination-control">
-              <span>Target</span>
-              <input id="imageInspectorDestinationValue" type="text" placeholder="interface ID or URL; workflow successor is set in 成功后进入" />
-            </label>
-            <label class="image-inspector-verification-control">
-              <span>Verify</span>
-              <input id="imageInspectorVerificationRule" type="text" placeholder="What should change after the action" />
-            </label>
-            <label>
-              <span>Risk</span>
-              <select id="imageInspectorRiskLevel">
-                <option value="normal">normal</option>
-                <option value="review_required">review required</option>
-                <option value="dangerous">dangerous</option>
-              </select>
-            </label>
-            <label class="image-inspector-reason-control">
-              <span>Reason</span>
-              <input id="imageInspectorReason" type="text" placeholder="why this box changed" />
-            </label>
-          </div>
-          <div class="image-inspector-footer-actions">
+          <section class="image-inspector-selected-box-panel" id="imageInspectorSelectedBoxPanel">
+            <div class="image-inspector-selected-box-heading">
+              <strong>当前选中框</strong>
+              <span id="imageInspectorEditHint"></span>
+            </div>
+            <div class="image-inspector-editor-controls" id="imageInspectorEditorControls" style="display:none">
+              <button id="imageInspectorCompactBoxesBtn" type="button" aria-pressed="true">显示全部框</button>
+              <button id="imageInspectorAddRegionBtn" type="button">Add</button>
+              <button id="imageInspectorDeleteBoxBtn" type="button">Delete</button>
+              <button id="imageInspectorUndoBtn" type="button">Undo</button>
+              <button id="imageInspectorRedoBtn" type="button">Redo</button>
+              <section class="image-inspector-ownership-review" id="imageInspectorOwnershipReview" hidden></section>
+              <label class="image-inspector-label-control">
+                <span>Name</span>
+                <input id="imageInspectorLabel" type="text" placeholder="Search button" />
+              </label>
+              <label class="image-inspector-description-control">
+                <span>Agent description</span>
+                <input id="imageInspectorDescription" type="text" placeholder="What this control does" />
+              </label>
+              <label>
+                <span>Role</span>
+                <select id="imageInspectorRoleSelect">
+                  <option value="review_only">review_only</option>
+                  <option value="input">input</option>
+                  <option value="button">button</option>
+                  <option value="card">card</option>
+                  <option value="filter">filter</option>
+                  <option value="detail">detail</option>
+                </select>
+              </label>
+              <label>
+                <span>Input</span>
+                <input id="imageInspectorInputSemantics" type="text" placeholder="email, query, free text..." />
+              </label>
+              <label>
+                <span>Parent</span>
+                <select id="imageInspectorParentSelect"><option value="">none</option></select>
+              </label>
+              <label class="image-inspector-reason-control">
+                <span>Reason</span>
+                <input id="imageInspectorReason" type="text" placeholder="why this box changed" />
+              </label>
+              <details class="image-inspector-provider-action-suggestion" id="imageInspectorProviderActionSuggestion">
+                <summary>Provider 操作建议</summary>
+                <div class="image-inspector-provider-action-fields">
+                  <label>
+                    <span>Action</span>
+                    <select id="imageInspectorActionTypeSelect">
+                      <option value="read_only">read_only</option>
+                      <option value="click">click</option>
+                      <option value="open_detail">open_detail</option>
+                      <option value="open_apply_flow">open_apply_flow</option>
+                      <option value="open_external_apply">open_external_apply (blocked)</option>
+                      <option value="fill_field">fill_field</option>
+                      <option value="type_text">type_text</option>
+                      <option value="select_option">select_option</option>
+                      <option value="scroll">scroll</option>
+                      <option value="continue_next_step">continue_next_step</option>
+                      <option value="final_submit">final_submit (blocked)</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Destination kind</span>
+                    <select id="imageInspectorDestinationKind">
+                      <option value="none">none</option>
+                      <option value="interface">interface</option>
+                      <option value="url">URL</option>
+                    </select>
+                  </label>
+                  <label class="image-inspector-destination-control">
+                    <span>Target</span>
+                    <input id="imageInspectorDestinationValue" type="text" placeholder="Provider-reported interface ID or URL" />
+                  </label>
+                  <label class="image-inspector-verification-control">
+                    <span>Verify</span>
+                    <input id="imageInspectorVerificationRule" type="text" placeholder="Provider-reported expected change" />
+                  </label>
+                  <label>
+                    <span>Risk</span>
+                    <select id="imageInspectorRiskLevel">
+                      <option value="normal">normal</option>
+                      <option value="review_required">review required</option>
+                      <option value="dangerous">dangerous</option>
+                    </select>
+                  </label>
+                </div>
+              </details>
+            </div>
+            <section class="interface-workflow-content-editor" id="interfaceWorkflowContentEditor" hidden>
+              <div class="interface-workflow-operation-heading">
+                <div>
+                  <strong>Agent 读取语义</strong>
+                  <small>说明当前选中框是什么，以及 Agent 应何时读取。</small>
+                </div>
+                <span id="interfaceWorkflowContentStatus">尚未选择控件</span>
+              </div>
+              <label>
+                <span>当前控件</span>
+                <input id="interfaceWorkflowContentTarget" type="text" readonly />
+              </label>
+              <div class="interface-workflow-operation-grid">
+                <label>
+                  <span>内容变化方式</span>
+                  <select id="interfaceWorkflowContentBehavior">
+                    <option value="fixed_structure">固定结构</option>
+                    <option value="fixed_label">固定文字</option>
+                    <option value="dynamic_value">动态值</option>
+                    <option value="dynamic_collection">动态列表</option>
+                    <option value="user_input">用户输入</option>
+                    <option value="ephemeral">临时内容</option>
+                    <option value="sensitive_dynamic">敏感动态内容</option>
+                    <option value="ignore">忽略</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Agent 用途</span>
+                  <select id="interfaceWorkflowContentAgentUsage">
+                    <option value="identity_anchor">识别当前界面</option>
+                    <option value="action_target">操作目标</option>
+                    <option value="decision_signal">决策信息</option>
+                    <option value="display_only">仅展示</option>
+                  </select>
+                </label>
+                <label>
+                  <span>读取时机</span>
+                  <select id="interfaceWorkflowContentReadPolicy">
+                    <option value="on_interface_match">匹配界面时读取</option>
+                    <option value="on_demand">需要时读取</option>
+                    <option value="never">不读取</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>给 Agent 的描述</span>
+                <textarea id="interfaceWorkflowContentDescription" rows="2" placeholder="例如：这是岗位卡片，读取当前标题和公司。"></textarea>
+              </label>
+              <div class="interface-workflow-operation-actions">
+                <button id="interfaceWorkflowContentSaveBtn" type="button">保存内容说明</button>
+              </div>
+              <small>固定结构进入记忆；Agent 只在当前观察中读取动态值，历史文字不会当作最新内容。</small>
+            </section>
+          </section>
+          <div class="image-inspector-footer-actions" id="imageInspectorFooterActions">
             <button id="imageInspectorApplyBoxBtn" type="button">仅保存草稿</button>
             <button id="imageInspectorConfirmAndStoreBtn" type="button" hidden>确认并入库</button>
           </div>
@@ -1827,8 +1837,8 @@
       <div class="interface-workflow-link-dialog-shell">
         <header>
           <div>
-            <strong>连接两个界面</strong>
-            <span>选择来源界面的控件和操作；保存后路径图会建立连接。</span>
+            <strong id="interfaceWorkflowLinkDialogTitle">连接两个界面</strong>
+            <span id="interfaceWorkflowLinkDialogHint">选择来源界面的控件和操作；保存后路径图会建立连接。</span>
           </div>
           <button id="interfaceWorkflowLinkDialogCloseBtn" type="button" class="secondary" aria-label="关闭">关闭</button>
         </header>

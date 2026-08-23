@@ -4669,7 +4669,10 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowReviewToolsColumn"' in html
     assert 'href="#interfaceWorkflowThreeColumnWorkbench"' in html
     assert "路径图与界面证据" in html
-    assert "先在下方带框图选择具体控件" in html
+    assert 'id="imageInspectorSelectedBoxPanel"' in html
+    assert 'id="imageInspectorProviderActionSuggestion"' in html
+    assert 'id="imageInspectorOpenOperationBtn"' in html
+    assert 'id="interfaceWorkflowOperationToolbarParkingHost"' in html
     assert "先在左侧路径图选择具体控件" not in html
     assert "修正与确认" in html
     assert 'id="interfaceWorkflowGraph"' in html

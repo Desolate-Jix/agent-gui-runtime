@@ -132,12 +132,14 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
       panel.parentElement = this;
     },
   };
-  const operationToolbar = { hidden: true };
+  const parkingHost = {};
+  const operationToolbar = { hidden: true, parentElement: parkingHost };
   const toggle = { textContent: "" };
   const elements = new Map([
     ["interfaceWorkflowCurrentReviewPanel", reviewPanel],
     ["imageInspectorWorkflowReviewHost", reviewHost],
     ["interfaceWorkflowOperationToolbar", operationToolbar],
+    ["interfaceWorkflowOperationToolbarParkingHost", parkingHost],
     ["interfaceWorkflowReviewToolsToggle", toggle],
   ]);
   const observations = { evidenceRenders: 0, editorRenders: 0, correctionOpen: false };
@@ -167,7 +169,8 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   assert.equal(reviewPanel.hidden, false);
   assert.equal(reviewHost.hidden, false);
   assert.equal(reviewPanel.parentElement, reviewHost);
-  assert.equal(operationToolbar.hidden, false);
+  assert.equal(operationToolbar.hidden, true);
+  assert.equal(operationToolbar.parentElement, parkingHost);
   assert.equal(toggle.textContent, "收起修正与确认");
   assert.equal(observations.editorRenders, 1);
   assert.equal(observations.evidenceRenders, 1);
@@ -185,22 +188,60 @@ test("review and correction use one primary entry that opens the full-image work
   assert.doesNotMatch(panelHtml, /id="interfaceWorkflowEditBoxesBtn"/);
 });
 
-test("full-image workbench contains current-interface review but excludes workflow release tools", () => {
+test("full-image workbench separates interface, selected-box, and operation responsibilities", () => {
   const start = panelHtml.indexOf('id="interfaceWorkflowCurrentReviewPanel"');
-  const end = panelHtml.indexOf('id="interfaceWorkflowGenerateV2Btn"', start);
+  const end = panelHtml.indexOf('id="interfaceWorkflowOperationToolbarParkingHost"', start);
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const currentReview = panelHtml.slice(start, end);
-  for (const id of [
-    "interfaceWorkflowNodeName",
-    "interfaceWorkflowContentEditor",
-    "interfaceWorkflowOperationToolbar",
-  ]) {
-    assert.match(currentReview, new RegExp(`id="${id}"`));
-  }
+  assert.match(currentReview, /id="interfaceWorkflowNodeName"/);
+  assert.match(currentReview, /id="interfaceWorkflowSurfaceType"/);
+  assert.doesNotMatch(currentReview, /id="interfaceWorkflowContentEditor"/);
+  assert.doesNotMatch(currentReview, /id="interfaceWorkflowOperationToolbar"/);
   assert.doesNotMatch(currentReview, /id="interfaceWorkflowGenerateV2Btn"/);
   assert.doesNotMatch(currentReview, /id="interfaceWorkflowMemoryBtn"/);
   assert.doesNotMatch(currentReview, /id="interfaceWorkflowOperationDryRunBtn"/);
+
+  const boxStart = panelHtml.indexOf('id="imageInspectorSelectedBoxPanel"');
+  const boxEnd = panelHtml.indexOf('id="imageInspectorFooterActions"', boxStart);
+  assert.notEqual(boxStart, -1);
+  assert.notEqual(boxEnd, -1);
+  const boxReview = panelHtml.slice(boxStart, boxEnd);
+  assert.match(boxReview, /id="imageInspectorEditorControls"/);
+  assert.match(boxReview, /id="interfaceWorkflowContentEditor"/);
+  assert.match(boxReview, /id="imageInspectorProviderActionSuggestion"/);
+  assert.doesNotMatch(boxReview, /id="interfaceWorkflowOperationToolbar"/);
+
+  assert.match(panelHtml, /id="imageInspectorOpenOperationBtn"[^>]*>查看关联操作</);
+  assert.match(panelHtml, /id="interfaceWorkflowOperationToolbarParkingHost"/);
+});
+
+test("selected-box provider action suggestions become read-only in workflow review", () => {
+  const controlsSource = functionSource(
+    "function updateLearningDraftEditorControls",
+    "function applyLearningDraftEditorMetadataFromControls",
+  );
+  assert.match(controlsSource, /workflowBound/);
+  assert.match(controlsSource, /imageInspectorProviderActionSuggestion/);
+  for (const name of ["actionType", "destinationKind", "destinationValue", "verificationRule", "riskLevel"]) {
+    assert.match(controlsSource, new RegExp(`${name}\\.disabled = !selected \\|\\| workflowBound`));
+  }
+});
+
+test("linked operation opens only in the dedicated workflow link dialog", () => {
+  const openSource = functionSource(
+    "function openCurrentImageInspectorWorkflowOperationDialog",
+    "function interfaceWorkflowSourcePathsAfterReview",
+  );
+  assert.match(openSource, /openInterfaceWorkflowLinkDialog\(edge\)/);
+  assert.match(panelSource, /on\("imageInspectorOpenOperationBtn", "click", openCurrentImageInspectorWorkflowOperationDialog\)/);
+  const restoreSource = functionSource(
+    "function restoreInterfaceWorkflowOperationToolbar",
+    "function closeInterfaceWorkflowLinkDialog",
+  );
+  assert.match(restoreSource, /interfaceWorkflowOperationToolbarParkingHost/);
+  assert.match(restoreSource, /parkingHost\.appendChild\(toolbar\)/);
+  assert.match(restoreSource, /toolbar\.hidden = true/);
 });
 
 test("full-image review panel preserves heading and interface fields before review sections", () => {
