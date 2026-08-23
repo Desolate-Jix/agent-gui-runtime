@@ -10,7 +10,7 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 **Perception is replaceable. Reviewed knowledge is durable.**
 
-**Target invariant:** Runtime Authority must be non-bypassable. **The internal Windows composition now covers one-time authority, guarded dispatch, a fresh post-action observation, semantic destination verification, and durable terminal receipts under deterministic tests. This is still not Controlled Live Workflow Proof or a public Agent integration.**
+**Target invariant:** Runtime Authority must be non-bypassable. **The exact released workflow asset now traverses the loopback Agent callsite, server-owned confirmation, production evidence/Gate/controller/claim/receipt path, one fake dispatch, fresh post-action observation, and durable semantic Safe Stop under deterministic tests. This is still not Controlled Live Workflow Proof or physical Windows input.**
 
 > **Target authority model:** Providers propose evidence. Agents propose semantic intent. The runtime alone grants bounded execution authority.
 
@@ -37,9 +37,9 @@ An in-progress Windows GUI runtime designed to turn uncertain exploration into h
 
 *Sanitized historical illustration: results → detail → application-entry blocker / Safe Stop. It is not a recorded Agent run and does not prove any click, form mutation, or submission.*
 
-- **Today:** offline contract foundations; an internal server-owned controller with durable intent, verification-checkpoint, backend, and terminal receipt records; and historical live GUI evidence.
-- **Implemented internally:** reviewed asset → passive bound-window capture → observed UIA origin → pinned recognition → strict Observation/Intent → current re-ground → Gate → exact pre-dispatch pixel freshness → one-shot Windows backend → fresh C2 observation → semantic target-state verification → durable terminal receipt.
-- **Not yet:** physical Windows dispatch + C2 proof, Controlled Live Workflow Proof, public HTTP/demo callsites, external/remote Provider integration, or live external Agent adapters.
+- **Today:** offline contract foundations; a human-reviewed and CAS-published Job Detail workflow; an exact deterministic release-callsite proof through server-owned confirmation, fresh C2 Apply Entry verification, and durable `SAFE_STOP/stop_boundary`; and historical live GUI evidence.
+- **Implemented internally:** exact released asset → loopback `LocalAgentRuntimeCallsite` → production current-evidence adapter → strict Observation/Intent → current re-ground → Gate → one-time authority → exactly one deterministic fake dispatch → fresh C2 observation → semantic Safe Stop → durable terminal receipt.
+- **Not yet:** physical Windows input for this release proof, Controlled Live Workflow Proof, public/external Agent integration, external/remote Provider integration, or live external Agent adapters.
 
 ## Why this runtime exists
 
@@ -83,7 +83,7 @@ Required end state—the live loop is not complete today:
 6. **Relocate** on the current interface; old coordinates are hints only.
 7. **Gate** one attempt using current evidence and danger checks.
 8. **Execute** through the internal Desktop I/O backend seam beneath Runtime Authority. W3b composes the reviewed asset, passive bound-window capture, real UIA origin, pinned recognition, strict intent, current re-ground, Gate, exact pixel freshness, one-shot Windows backend, and durable receipt; deterministic tests verify this internal path.
-9. **Verify** or Safe Stop. The internal W5 slice obtains a fresh C2 observation, verifies the reviewed target-state identity, and promotes only an exactly paired terminal receipt. The production `ExistingWindowsCurrentEvidenceAdapter` class now consumes an unmutated compiler asset and reaches `VERIFIED` for `open_detail` under deterministic dependencies; this is not real Windows/SEEK I/O, and controlled live proof remains open.
+9. **Verify** or Safe Stop. W5 now loads the exact released CAS asset through the loopback callsite, obtains a fresh C2 Apply Entry observation after exactly one fake dispatch, and promotes the durable `SAFE_STOP/stop_boundary` receipt. Duplicate approval and duplicate Intent perform zero redispatch. Deterministic external-boundary doubles and a fake output backend are used; controlled-live proof remains open.
 
 ## Target authority architecture
 
@@ -96,7 +96,7 @@ The public architecture freezes four contracts:
 
 The pinned `WorkflowRef` keeps the exact reviewed source `workflow_id` separate from the compiled `asset_id`. The compiler carries that registry/path/SHA-verified identity into immutable lineage, and Runtime/adapter/controller boundaries reject substitution instead of inferring an ID from an asset name. Older v2 objects without this lineage field fail closed and must be recompiled; no historical geometry gains authority.
 
-Internal W3b/W4/W5 controller slices and the actual-adapter composition are deterministic-test and strict-audit verified. They cover current re-grounding, unique authority, guarded dispatch, fresh post-action observation, semantic destination verification, and exact checkpoint-to-terminal pairing. The actual-adapter proof uses deterministic window/screenshot/UIA/recognition doubles and `DeterministicFakeBackend`; this remains an internal proof—not real Windows/SEEK I/O, physical Windows dispatch + C2, a controlled live proof, public route, or external Agent integration:
+Internal W3b/W4/W5 controller slices and the exact release-callsite composition are deterministic-test verified. Commit `b9309005` binds CAS asset `a9eb42d9439568770735f69ff109e6d93b86085507414d62ee49cfef33bb1d1b` through the loopback `LocalAgentRuntimeCallsite`, production `ExistingWindowsCurrentEvidenceAdapter`, default `LiveController`, Gate, claim, server-owned confirmation, and receipt path. Pre-approval dispatch is zero; reconstructed execution produces exactly one `DeterministicFakeBackend` dispatch, fresh C2 Apply Entry, durable `SAFE_STOP/stop_boundary`, and duplicate approval/Intent zero redispatch. Focused proof: `4 passed`; adjacent matrix: `316 passed, 1 skipped`. This uses deterministic external-boundary doubles and a fake output backend—not physical Windows input, live SEEK proof, provider accuracy, form fill, Continue/Next, upload, final submit, or external Agent integration:
 
 ```text
 Built-in fallback or trusted perception provider
@@ -139,14 +139,14 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 | --- | --- | --- |
 | UEI schemas, refs, registration, static projections | **Current — Contract Proof** | Canonical, provenance-preserving, non-authorizing evidence boundary. |
 | Reviewed Workflow v2 compiler and persistence | **Current — Contract Proof** | Offline compile/store/reload; publication grants no authority. |
-| Agent Observation / Intent / Receipt schemas and internal controller composition | **Partial — deterministic local callsite proof** | A loopback-only `/runtime/agent` callsite now projects server-owned active asset/window state into Observation, accepts only geometry-free intent IDs, and returns the existing Receipt contract. Deterministic route tests replace the physical backend; this is not real Windows/SEEK I/O or live proof. |
-| Server-owned one-shot confirmation and safe resume | **Partial — deterministic local callsite proof** | Immutable request/decision/resume/closed markers bind the exact claim, workflow revision/hashes, transition/action, capture/state evidence, HWND/PID, and fixed expiry. The local approval route accepts only a server confirmation ID and decision, then reloads the persisted exact Intent; approval remains evidence, never authority. There is no panel approval UI or live SEEK proof. |
+| Agent Observation / Intent / Receipt schemas and internal controller composition | **Current — deterministic release-callsite proof** | The loopback-only `/runtime/agent` callsite binds the exact released asset, projects server-owned active asset/window state, accepts only geometry-free intent IDs, and returns the durable Receipt contract. Deterministic external-boundary doubles and a fake output backend replace physical Windows/SEEK I/O. |
+| Server-owned one-shot confirmation and safe resume | **Current — deterministic exact-asset proof** | Immutable request/decision/resume/closed markers bind the exact claim, workflow revision/hashes, transition/action, capture/state evidence, HWND/PID, and fixed expiry. The local approval route accepts only a server confirmation ID and decision, reloads the persisted exact Intent after callsite reconstruction, keeps pre-approval dispatch at zero, and returns duplicate approval/Intent without redispatch. There is no controlled-live SEEK proof. |
 | Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
 | Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
 | Built-in and recorded OmniParser Shadow output entering one provider-neutral review model | **Current — Contract Proof** | A server-owned fixed Built-in OCR capture and recorded OmniParser-shaped worker success/failure are sealed into UEI and render through the same non-authorizing Review summary. This is not live OmniParser inference, provider-accuracy proof, or execution authorization. |
-| Human review and workflow creation | **Partial** | One full-image correction/review workbench, revision receipts, and workflow graphs exist. The Job Detail review base is now an annotation-free sanitized clean capture with independently rendered review boxes; Apply Entry remains a historical privacy-redacted derivative. Exact box-to-control/action/transition binding is required before confirmation. Real user approval and exact restart/reload proof remain open. |
+| Human review and workflow creation | **Current — Portfolio v1 release asset** | The visible Panel flow repaired Quick Apply, added a non-executable Save evidence box, recorded granular Job Detail receipts, generated Reviewed Workflow v2, published it to CAS, survived process restart/exact reload, and reproduced the same hash idempotently. The asset remains non-authorizing; Apply Entry remains the safe-stop boundary. |
 | Current relocation, Gate, and unique dispatch authority (W4) | **Current — verified internal authority proof** | Only `LiveController` mints authority; `ExistingWindowsBackendAdapter` is the sole authority-scope consumer; guarded `InputController` / `WindowManager` raw sinks fail closed. This is deterministic internal evidence, not a live/control-workflow or public-integration claim. |
-| Post-action semantic verification and verified receipt promotion (W5) | **Partial — deterministic actual-adapter proof** | The controller performs a fresh C2 observation, checks the compiler-emitted closed `target_state_identity` rule, preserves exact verification lineage, and terminalizes as `VERIFIED`, `VERIFICATION_FAILED`, or `SAFE_STOP` without blind redispatch. The composed `open_detail` positive path is verified; actual-adapter `open_apply_flow` → application-entry stop-boundary and controlled live evidence remain open. |
+| Post-action semantic verification and verified receipt promotion (W5) | **Current — deterministic exact-asset proof** | The exact released asset reaches one fake `open_apply_flow` dispatch, fresh C2 Apply Entry verification, and durable `SAFE_STOP/stop_boundary`; duplicate approval and duplicate Intent cause zero redispatch. Physical Windows input and controlled-live evidence remain open. |
 | Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded one-shot Windows backend exist. It is not a public HTTP route, agent/demo callsite, or production-readiness claim. |
 | Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
@@ -205,7 +205,7 @@ Or start the local API directly:
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-The bounded local Agent Runtime callsite is exposed at `POST /runtime/agent/session/start`, `POST /runtime/agent/intent/submit`, and `POST /runtime/agent/confirmation/decide`. It is loopback-only and assumes one uvicorn worker. The server—not the client—selects the sole active reviewed asset, current bound window, workflow hashes, semantic action binding, evidence, and production backend. These routes are deterministically tested with injected non-clicking dependencies; no panel or real Windows/SEEK execution is claimed.
+The bounded local Agent Runtime callsite is exposed at `POST /runtime/agent/session/start`, `POST /runtime/agent/intent/submit`, and `POST /runtime/agent/confirmation/decide`. It is loopback-only and assumes one uvicorn worker. The server—not the client—selects the sole active reviewed asset, current bound window, workflow hashes, semantic action binding, evidence, and production backend. The exact release proof exercises these routes with deterministic external-boundary doubles and `DeterministicFakeBackend`; it proves one fake dispatch and fresh C2 Safe Stop, not physical Windows input or live SEEK execution.
 
 Model weights and optional vision services are not distributed. Do not commit private evidence or credentials.
 
@@ -213,9 +213,9 @@ Model weights and optional vision services are not distributed. Do not commit pr
 
 The remaining dependency-ordered release path is **Planned**, not current capability:
 
-> **W2 human-reviewed Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → bind the completed local callsite to that released asset → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out.**
+> **Completed deterministic exact-asset release-callsite proof → already-open Job Detail controlled-live Quick Apply entry → fresh Apply Entry `SAFE_STOP/stop_boundary` receipt → W6 close-out.**
 
-W1 runs in parallel but is required before W6. The server-owned ledger, deterministic Portfolio controller test, and loopback-only API callsite now prove confirmation/restart routing without client geometry or authority, including the internally tested `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP` scope. A portable W2 review draft is now staged, but it remains explicitly unreviewed and non-authorizing; real Panel approval, compiled release publication, exact process-restart reload, runtime intent-confirmation UI, and actual Windows/SEEK execution remain open. Only after the release proof closes should more providers, Agent adapters, or workflow classes be considered.
+W1 contract proof, W2 human review/release packaging, and the W5 deterministic release-callsite proof are complete within their stated evidence levels. The released asset remains non-authorizing, and the deterministic proof uses external-boundary doubles plus `DeterministicFakeBackend`; no physical Windows input, live SEEK proof, provider accuracy, form fill, Continue/Next, upload, or final submit is claimed. The next scoped proof starts from an already-open Job Detail, enters Quick Apply through the controlled-live Runtime path, and stops at fresh Apply Entry before W6 close-out.
 
 Automatic provider selection, remote execution, raw-coordinate Agent authority, ATS traversal, form filling, upload, Continue/Next, and final submission are not Portfolio v1 capabilities.
 
