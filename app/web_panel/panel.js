@@ -18104,8 +18104,12 @@ function setInterfaceWorkflowCorrectionOpen(open, correctionView = null) {
   if (tools) tools.hidden = !next;
   const operationToolbar = $("interfaceWorkflowOperationToolbar");
   if (operationToolbar) operationToolbar.hidden = !next;
-  const toggle = $("interfaceWorkflowReviewToolsToggle");
-  if (toggle) toggle.textContent = next ? t("interface_workflow_collapse_editor") : t("interface_workflow_edit_current");
+  const toggle = $("interfaceWorkflowReviewPanelToggle");
+  if (toggle) {
+    toggle.textContent = currentLanguage === "en-US"
+      ? (next ? "Hide review tools" : "Show review tools")
+      : (next ? "收起审核工具" : "显示审核工具");
+  }
   renderActiveInterfaceWorkflowEvidence();
   if (next) {
     const view = correctionView || currentInterfaceWorkflowCorrectionTarget().view;
@@ -18328,6 +18332,7 @@ function clearInterfaceWorkflowReview(reason = "") {
     "interfaceWorkflowSurfaceType",
     "interfaceWorkflowNodeReviewStatus",
     "interfaceWorkflowNodeApproveBtn",
+    "interfaceWorkflowReviewPanelToggle",
     "interfaceWorkflowTransitionAction",
     "interfaceWorkflowTransitionTarget",
     "interfaceWorkflowOperationActionCandidate",
@@ -19343,6 +19348,7 @@ function renderInterfaceWorkflowEditor(view) {
       );
   }
   if ($("interfaceWorkflowEditBoxesBtn")) $("interfaceWorkflowEditBoxesBtn").disabled = !enabled;
+  if ($("interfaceWorkflowReviewPanelToggle")) $("interfaceWorkflowReviewPanelToggle").disabled = !enabled;
   if ($("interfaceWorkflowRemoveSourceBtn")) $("interfaceWorkflowRemoveSourceBtn").disabled = !enabled;
   if ($("interfaceWorkflowSaveBtn")) $("interfaceWorkflowSaveBtn").disabled = !enabled;
   if ($("interfaceWorkflowMemoryBtn")) $("interfaceWorkflowMemoryBtn").disabled = !enabled;
@@ -22537,6 +22543,11 @@ function bindEvents() {
   on("interfaceWorkflowOperationDryRunBtn", "click", dryRunInterfaceWorkflowOperation);
   on("interfaceWorkflowOperationApproveBundleBtn", "click", confirmCurrentInterfaceWorkflowOperationBundle);
   on("interfaceWorkflowContentSaveBtn", "click", saveInterfaceWorkflowContentDescriptor);
+  on("interfaceWorkflowReviewPanelToggle", "click", () => {
+    setInterfaceWorkflowCorrectionOpen(
+      interfaceWorkflowWorkbenchState.current().correction_open !== true,
+    );
+  });
   on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);
   on("interfaceAssetUnreviewedTab", "click", () => showInterfaceAssetPage("unreviewed"));
   on("interfaceAssetReviewedTab", "click", () => showInterfaceAssetPage("reviewed"));

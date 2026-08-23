@@ -4705,6 +4705,8 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' not in html
     assert 'id="interfaceWorkflowOperationApproveBundleBtn"' in html
     assert "批准这条操作路径" in html
+    assert 'id="interfaceWorkflowReviewPanelToggle"' in html
+    assert "显示审核工具" in html
     assert 'id="interfaceWorkflowTransitionAction"' in html
     assert 'id="interfaceWorkflowTransitionTarget"' in html
     assert 'id="interfaceWorkflowSourceSelect"' in html

@@ -8,6 +8,10 @@ const panelSource = fs.readFileSync(
   path.join(__dirname, "../../app/web_panel/panel.js"),
   "utf8",
 );
+const panelHtml = fs.readFileSync(
+  path.join(__dirname, "../../app/web_panel/index.html"),
+  "utf8",
+);
 
 function functionSource(startMarker, endMarker) {
   const start = panelSource.indexOf(startMarker);
@@ -123,7 +127,7 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   const elements = new Map([
     ["interfaceWorkflowReviewToolsColumn", tools],
     ["interfaceWorkflowOperationToolbar", operationToolbar],
-    ["interfaceWorkflowReviewToolsToggle", toggle],
+    ["interfaceWorkflowReviewPanelToggle", toggle],
   ]);
   const observations = { evidenceRenders: 0, editorRenders: 0, correctionOpen: false };
   const sandbox = { console, globalThis: {}, elements, observations };
@@ -131,6 +135,7 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
     const interfaceWorkflowWorkbenchState = {
       setCorrectionOpen: (open) => { observations.correctionOpen = open; },
     };
+    const currentLanguage = "zh-CN";
     const currentInterfaceWorkflowCorrectionTarget = () => ({ view: null });
     const renderInterfaceWorkflowEditor = () => { observations.editorRenders += 1; };
     const renderActiveInterfaceWorkflowEvidence = () => { observations.evidenceRenders += 1; };
@@ -147,6 +152,13 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   assert.equal(operationToolbar.hidden, false);
   assert.equal(observations.editorRenders, 1);
   assert.equal(observations.evidenceRenders, 1);
+});
+
+test("review workspace has a dedicated toggle separate from the box editor", () => {
+  assert.match(panelHtml, /id="interfaceWorkflowReviewPanelToggle"/);
+  assert.match(panelHtml, /显示审核工具/);
+  assert.match(panelSource, /on\("interfaceWorkflowReviewPanelToggle", "click"/);
+  assert.match(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
 });
 
 test("switching the box editor source preserves the workflow review that owns it", () => {
