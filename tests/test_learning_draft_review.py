@@ -3795,6 +3795,97 @@ def test_save_learning_draft_review_writes_versioned_human_review_patch(tmp_path
     assert reviewed["draft"]["page_details"]["compiled_overlay_path"] == result["reviewed_overlay_path"]
 
 
+def test_human_review_patch_applies_ordered_bbox_updates_to_same_region(tmp_path: Path) -> None:
+    from app.learn.draft_review import save_reviewed_template_candidate
+
+    screenshot_path = tmp_path / "artifacts" / "screenshots" / "ordered-bbox-review.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 240), "white").save(screenshot_path)
+    screenshot_sha256 = hashlib.sha256(screenshot_path.read_bytes()).hexdigest()
+    trial_path = tmp_path / "artifacts" / "learning-runs" / "ordered-bbox-review" / "trial_result.json"
+    _write_trial(trial_path)
+    payload = json.loads(trial_path.read_text(encoding="utf-8"))
+    payload["best_learning_draft"]["page_details"] = {
+        "screen": {
+            "source_image_path": "artifacts/screenshots/ordered-bbox-review.png",
+            "source_image_sha256": screenshot_sha256,
+        }
+    }
+    trial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    result = save_reviewed_template_candidate(
+        "artifacts/learning-runs/ordered-bbox-review/trial_result.json",
+        {
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": "artifacts/screenshots/ordered-bbox-review.png",
+            "screenshot_sha256": screenshot_sha256,
+            "operations": [
+                {
+                    "op": "update_bbox",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                    "after_bbox": {"x": 12, "y": 22, "w": 140, "h": 36},
+                },
+                {
+                    "op": "update_bbox",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_bbox": {"x": 12, "y": 22, "w": 140, "h": 36},
+                    "after_bbox": {"x": 16, "y": 26, "w": 150, "h": 40},
+                },
+            ],
+        },
+        project_root=tmp_path,
+    )
+
+    patch = json.loads((tmp_path / result["human_review_patch_path"]).read_text(encoding="utf-8"))
+    reviewed = json.loads((tmp_path / result["reviewed_template_candidate_path"]).read_text(encoding="utf-8"))
+
+    assert patch["operations"][1]["before_bbox"] == {"x": 12, "y": 22, "w": 140, "h": 36}
+    assert reviewed["draft"]["regions"][0]["bbox"] == {"x": 16, "y": 26, "w": 150, "h": 40}
+    assert reviewed["draft"]["regions"][0]["human_review"]["previous_bbox"] == {
+        "x": 8,
+        "y": 18,
+        "w": 100,
+        "h": 30,
+    }
+
+
+def test_human_review_patch_rejects_stale_second_ordered_bbox_update() -> None:
+    from app.learn.draft_review import _normalize_human_review_operations
+
+    with pytest.raises(ValueError, match="operation 1 before_bbox is stale"):
+        _normalize_human_review_operations(
+            [
+                {
+                    "op": "update_bbox",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                    "after_bbox": {"x": 12, "y": 22, "w": 140, "h": 36},
+                },
+                {
+                    "op": "update_bbox",
+                    "target_kind": "region",
+                    "target_id": "r1",
+                    "before_bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                    "after_bbox": {"x": 16, "y": 26, "w": 150, "h": 40},
+                },
+            ],
+            {
+                "regions": [
+                    {
+                        "region_id": "r1",
+                        "bbox": {"x": 8, "y": 18, "w": 100, "h": 30},
+                    }
+                ],
+                "action_templates": [],
+            },
+            screenshot_size=(320, 240),
+        )
+
+
 def _write_ownership_ambiguity_trial(
     tmp_path: Path,
     *,

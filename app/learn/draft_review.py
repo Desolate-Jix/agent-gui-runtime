@@ -2150,9 +2150,12 @@ def _normalize_human_review_operations(
     screenshot_size: tuple[int, int],
 ) -> list[dict[str, Any]]:
     operations = _list_of_dicts(value)
-    regions = {str(item.get("region_id") or "").strip(): item for item in _list_of_dicts(draft.get("regions"))}
+    regions = {
+        str(item.get("region_id") or "").strip(): deepcopy(item)
+        for item in _list_of_dicts(draft.get("regions"))
+    }
     actions = {
-        str(item.get("action_template_id") or item.get("action_id") or "").strip(): item
+        str(item.get("action_template_id") or item.get("action_id") or "").strip(): deepcopy(item)
         for item in _list_of_dicts(draft.get("action_templates"))
     }
     stage2 = _hierarchy_ownership_stage2(draft)
@@ -2305,6 +2308,7 @@ def _normalize_human_review_operations(
                 "reason": str(operation.get("reason") or "").strip(),
             }
         )
+        item["bbox"] = after_bbox
     _validate_region_parent_graph(regions)
     if has_ownership_operation:
         remaining = _multiple_leaf_ownership(ownership_stage2 or {})
