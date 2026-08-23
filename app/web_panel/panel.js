@@ -11134,6 +11134,19 @@ function showInterfaceAssetPage(page) {
     tab?.setAttribute("aria-selected", active ? "true" : "false");
   });
 
+  const standaloneReviewVisible = normalizedPage === "library";
+  const reviewPanel = $("learningDraftReviewPanel");
+  if (reviewPanel) {
+    reviewPanel.hidden = !standaloneReviewVisible || !learningDraftReview;
+  }
+  const screenshotPanel = $("learningDraftScreenshotPanel");
+  if (screenshotPanel) {
+    const imagePath = learningDraftReview
+      ? learningDraftNumberedMapImagePath(learningDraftReview, learningDraftReview.draft || {})
+      : "";
+    screenshotPanel.hidden = !standaloneReviewVisible || !imagePath;
+  }
+
   const evidencePanel = $("interfaceWorkflowEvidenceColumn");
   const inspectorPanel = $("interfaceWorkflowReviewToolsColumn");
   if (normalizedPage === "workflow") {
@@ -17791,7 +17804,7 @@ function renderLearningDraftScreenshotPanel(review) {
   if (!target) return;
   const draft = review?.draft || {};
   const imagePath = learningDraftNumberedMapImagePath(review, draft);
-  if (panel) panel.hidden = !imagePath;
+  if (panel) panel.hidden = interfaceAssetWorkspaceState.activePage === "workflow" || !imagePath;
   if (!imagePath) {
     target.innerHTML = `<p class="trace-idle">${escapeHtml(t("learning_draft_screenshot_empty"))}</p>`;
     return;
@@ -20678,7 +20691,7 @@ function renderLearningDraftReview(review) {
   learningDraftReview = review || null;
   document.body.dataset.learningDraftReviewOpen = "true";
   const reviewPanel = $("learningDraftReviewPanel");
-  if (reviewPanel) reviewPanel.hidden = false;
+  if (reviewPanel) reviewPanel.hidden = interfaceAssetWorkspaceState.activePage === "workflow";
   const draft = review?.draft || {};
   const canonicalProviderSummary = review?.uei_shadow_provider_summary;
   const states = Array.isArray(draft.states) ? draft.states : [];

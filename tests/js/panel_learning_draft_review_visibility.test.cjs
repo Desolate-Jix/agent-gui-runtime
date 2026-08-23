@@ -25,7 +25,7 @@ function functionSource(startMarker, endMarker) {
   return panelSource.slice(start, end);
 }
 
-function createReviewHarness() {
+function createReviewHarness(activePage = "library") {
   const renderSource = functionSource(
     "function renderLearningDraftReview(review)",
     "function clearLearningDraftReviewDisplay",
@@ -49,6 +49,7 @@ function createReviewHarness() {
   vm.runInNewContext(`
     let learningDraftReview = null;
     let learningDraftReviewBboxEdits = {};
+    const interfaceAssetWorkspaceState = { activePage: ${JSON.stringify(activePage)} };
     const learningDraftOwnershipConflicts = [];
     const $ = (id) => elements.get(id) || null;
     const t = (value) => value;
@@ -77,7 +78,7 @@ function createReviewHarness() {
   return sandbox;
 }
 
-function createScreenshotPanelHarness() {
+function createScreenshotPanelHarness(activePage = "library") {
   const renderSource = functionSource(
     "function renderLearningDraftScreenshotPanel(review)",
     "function learningDraftManualCandidate",
@@ -88,6 +89,7 @@ function createScreenshotPanelHarness() {
   ]);
   const sandbox = { elements, console, globalThis: {} };
   vm.runInNewContext(`
+    const interfaceAssetWorkspaceState = { activePage: ${JSON.stringify(activePage)} };
     const $ = (id) => elements.get(id) || null;
     const escapeHtml = (value) => String(value);
     const t = (value) => value;
@@ -97,6 +99,34 @@ function createScreenshotPanelHarness() {
     const renderLearningDraftScreenshotPath = () => {};
     ${renderSource}
     globalThis.renderScreenshotPanel = renderLearningDraftScreenshotPanel;
+  `, sandbox);
+  return sandbox;
+}
+
+function createWorkspacePageHarness() {
+  const source = functionSource(
+    "function showInterfaceAssetPage(page)",
+    "function setInterfaceWorkflowLibraryOptions",
+  );
+  const elements = new Map([
+    ["interfaceAssetWorkspace", { hidden: false }],
+    ["interfaceAssetLibraryPage", { hidden: false }],
+    ["interfaceWorkflowLibraryPage", { hidden: true }],
+    ["interfaceAssetLibraryTab", { classList: { toggle() {} }, setAttribute() {} }],
+    ["interfaceWorkflowLibraryTab", { classList: { toggle() {} }, setAttribute() {} }],
+    ["learningDraftReviewPanel", { hidden: false }],
+    ["learningDraftScreenshotPanel", { hidden: false }],
+  ]);
+  const sandbox = { elements, globalThis: {} };
+  vm.runInNewContext(`
+    const interfaceAssetWorkspaceState = { activePage: "library" };
+    let learningDraftReview = {
+      draft: { page_details: { screen: { image_path: "capture.png" } } },
+    };
+    const $ = (id) => elements.get(id) || null;
+    const learningDraftNumberedMapImagePath = (review) => review?.draft?.page_details?.screen?.image_path || "";
+    ${source}
+    globalThis.showPage = showInterfaceAssetPage;
   `, sandbox);
   return sandbox;
 }
@@ -155,4 +185,38 @@ test("clearing a reviewed draft hides the screenshot edit panel", () => {
   sandbox.globalThis.renderScreenshotPanel({ draft: { page_details: { screen: { image_path: "capture.png" } } } });
   sandbox.globalThis.renderScreenshotPanel({ draft: { page_details: { screen: { image_path: "" } } } });
   assert.equal(sandbox.elements.get("learningDraftScreenshotPanel").hidden, true);
+});
+
+test("loading workflow-bound evidence does not reveal standalone review panels", () => {
+  const reviewSandbox = createReviewHarness("workflow");
+  reviewSandbox.globalThis.renderReview({
+    review_status: "human_approved",
+    draft: { verification_rules: [] },
+  });
+  assert.equal(reviewSandbox.elements.get("learningDraftReviewPanel").hidden, true);
+
+  const screenshotSandbox = createScreenshotPanelHarness("workflow");
+  screenshotSandbox.globalThis.renderScreenshotPanel({
+    draft: { page_details: { screen: { image_path: "capture.png" } } },
+  });
+  assert.equal(screenshotSandbox.elements.get("learningDraftScreenshotPanel").hidden, true);
+});
+
+test("software workflow page hides the standalone draft review panels", () => {
+  const sandbox = createWorkspacePageHarness();
+
+  sandbox.globalThis.showPage("workflow");
+
+  assert.equal(sandbox.elements.get("learningDraftReviewPanel").hidden, true);
+  assert.equal(sandbox.elements.get("learningDraftScreenshotPanel").hidden, true);
+});
+
+test("returning to interface assets restores the loaded standalone draft review panels", () => {
+  const sandbox = createWorkspacePageHarness();
+
+  sandbox.globalThis.showPage("workflow");
+  sandbox.globalThis.showPage("library");
+
+  assert.equal(sandbox.elements.get("learningDraftReviewPanel").hidden, false);
+  assert.equal(sandbox.elements.get("learningDraftScreenshotPanel").hidden, false);
 });
