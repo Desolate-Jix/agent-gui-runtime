@@ -936,6 +936,43 @@ test("draft subview auto-loads the selected source once", async () => {
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ skipResponse: true }]);
 });
 
+test("recommended draft source discovery preserves an already-open workflow review", () => {
+  const panelSource = fs.readFileSync("app/web_panel/panel.js", "utf8");
+  const start = panelSource.indexOf("function setRecommendedLearningDraftReviewSource");
+  const end = panelSource.indexOf("function setLearningPathGraphCandidatePaths", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const sourceInput = { value: "" };
+  const workflowReview = { workflow_id: "portfolio_v1_seek_apply_entry" };
+  const observed = [];
+  const context = {
+    interfaceWorkflowReviewState: workflowReview,
+    $: (id) => id === "learningDraftReviewSourcePath" ? sourceInput : null,
+    preferredLearningDraftReviewSource: (items) => items[0],
+    learningDraftSourceLoadPath: (item) => item.load_path,
+    setLearningDraftReviewSourcePath: (path, options = {}) => {
+      observed.push({ path, options });
+      sourceInput.value = path;
+      if (options.preserveWorkflowReview !== true) {
+        context.interfaceWorkflowReviewState = null;
+      }
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(panelSource.slice(start, end), context);
+
+  context.setRecommendedLearningDraftReviewSource([
+    { load_path: "artifacts/recommended/pathgraph_candidate.json" },
+  ]);
+
+  assert.equal(context.interfaceWorkflowReviewState, workflowReview);
+  assert.deepEqual(JSON.parse(JSON.stringify(observed)), [{
+    path: "artifacts/recommended/pathgraph_candidate.json",
+    options: { preserveWorkflowReview: true },
+  }]);
+});
+
 test("legacy draft links produce a display-only hierarchy projection", () => {
   const panelSource = fs.readFileSync("app/web_panel/panel.js", "utf8");
   const start = panelSource.indexOf("function buildLearningDraftDisplayHierarchy");

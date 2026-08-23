@@ -11802,7 +11802,7 @@ function setRecommendedLearningDraftReviewSource(sources = []) {
   const recommended = preferredLearningDraftReviewSource(items);
   const sourcePath = learningDraftSourceLoadPath(recommended);
   if (!sourcePath) return;
-  setLearningDraftReviewSourcePath(sourcePath);
+  setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true });
 }
 
 function setLearningPathGraphCandidatePaths(data = {}) {
