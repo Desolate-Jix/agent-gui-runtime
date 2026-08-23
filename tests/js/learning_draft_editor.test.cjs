@@ -939,6 +939,52 @@ test("draft subview auto-loads the selected source once", async () => {
   }]);
 });
 
+test("background draft load preserves workflow when rendering a successful response throws", async () => {
+  const panelSource = fs.readFileSync("app/web_panel/panel.js", "utf8");
+  const start = panelSource.indexOf("async function loadLearningDraftReview");
+  const end = panelSource.indexOf("async function saveLearningDraftReview", start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const clearCalls = [];
+  const context = {
+    console,
+    AbortController,
+    learningDraftReviewLoadPromise: null,
+    learningDraftReviewLoadSourcePath: "",
+    learningDraftReviewLoadRequestToken: 0,
+    learningDraftReviewLoadAbortController: null,
+    learningDraftReviewLoadActiveToken: 0,
+    learningDraftProviderSummary: null,
+    learningDraftReviewBboxEdits: { regions: {}, actions: {} },
+    learningDraftReview: null,
+    learningDraftEditorLoadToken: 0,
+    learningDraftReviewSourcePath: () => "artifacts/background-review.json",
+    clearLearningDraftReviewDisplay: (reason, options = {}) => clearCalls.push({ reason, options }),
+    api: async () => ({
+      success: true,
+      data: { draft: { states: [{ state_id: "screen" }] } },
+    }),
+    resetLearningDraftEditorState: () => {},
+    renderLearningDraftReview: () => {
+      throw new Error("render failed");
+    },
+    renderResponse: () => {
+      throw new Error("background loads must not render a response");
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(panelSource.slice(start, end), context);
+
+  const result = await context.loadLearningDraftReview({
+    skipResponse: true,
+    skipWorkflowReview: true,
+  });
+
+  assert.equal(result, null);
+  assert.deepEqual(clearCalls.map((call) => call.options.preserveWorkflowReview), [true, true]);
+});
+
 test("recommended draft source discovery preserves an already-open workflow review", () => {
   const panelSource = fs.readFileSync("app/web_panel/panel.js", "utf8");
   const start = panelSource.indexOf("function setRecommendedLearningDraftReviewSource");

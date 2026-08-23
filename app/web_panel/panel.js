@@ -21029,7 +21029,9 @@ async function loadLearningDraftReview(options = {}) {
       return data;
     } catch (error) {
       if (loadRequestToken !== learningDraftReviewLoadRequestToken) return null;
-      clearLearningDraftReviewDisplay(`加载失败 · ${sourcePath}`);
+      clearLearningDraftReviewDisplay(`加载失败 · ${sourcePath}`, {
+        preserveWorkflowReview: options.skipWorkflowReview === true,
+      });
       if (!options.skipResponse) {
         renderResponse({
           success: false,
