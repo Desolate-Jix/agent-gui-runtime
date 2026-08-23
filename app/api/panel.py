@@ -1632,10 +1632,11 @@ def _save_interface_workflow_review_transaction(
             project_root=ROOT_DIR,
             out_dir=out_dir,
         )
+        saved_review_path = Path(result["path"])
+        saved_review_bytes = saved_review_path.read_bytes()
+        normalized_review = json.loads(saved_review_bytes.decode("utf-8-sig"))
+        result["saved_review"] = normalized_review
         if result["node_count"] > 0:
-            saved_review_path = Path(result["path"])
-            saved_review_bytes = saved_review_path.read_bytes()
-            normalized_review = json.loads(saved_review_bytes.decode("utf-8-sig"))
             registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
             workflow_record = registry.get("workflows", {}).get(result["workflow_id"])
             trusted_revisions: dict[str, PersistedReviewRevision] = {}

@@ -1330,6 +1330,7 @@ def test_panel_save_persists_client_confirmed_review_with_confirmed_point_metada
     assert body["success"] is True, body
     saved_path = Path(body["data"]["path"])
     saved = json.loads(saved_path.read_text(encoding="utf-8"))
+    assert body["data"]["saved_review"] == saved
     persisted_node = saved["nodes"][0]
     registry = load_interface_workflow_library_registry(project_root=tmp_path)
     record = registry["workflows"][body["data"]["workflow_id"]]
