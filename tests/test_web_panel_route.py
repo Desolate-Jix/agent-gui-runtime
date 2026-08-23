@@ -4698,8 +4698,9 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowSurfaceType"' in html
     assert 'id="interfaceWorkflowNodeReviewStatus"' in html
     assert '<option value="human_approved">human_approved（需显式确认）</option>' in html
-    assert 'id="interfaceWorkflowNodeApproveBtn"' in html
-    assert "批准当前界面 Revision" in html
+    assert 'id="interfaceWorkflowApproveAndSaveBtn"' in html
+    assert 'id="interfaceWorkflowNodeApproveBtn"' not in html
+    assert "批准并保存当前界面" in html
     assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' not in html
     assert 'id="interfaceWorkflowOperationApproveBundleBtn"' in html
     assert "批准这条操作路径" in html
@@ -4724,6 +4725,7 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowEditBoxesBtn"' in html
     assert 'id="interfaceWorkflowReviewToolsToggle"' in html
     assert 'id="interfaceWorkflowSaveBtn"' in html
+    assert "仅保存草稿" in html
     assert 'id="interfaceWorkflowMemoryBtn"' in html
     assert 'id="interfaceWorkflowSaveStatus"' in html
     assert "/panel/assets/learning_workflow_review.js" in html

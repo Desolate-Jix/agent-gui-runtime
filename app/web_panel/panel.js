@@ -18353,7 +18353,7 @@ function clearInterfaceWorkflowReview(reason = "") {
     "interfaceWorkflowNodeName",
     "interfaceWorkflowSurfaceType",
     "interfaceWorkflowNodeReviewStatus",
-    "interfaceWorkflowNodeApproveBtn",
+    "interfaceWorkflowApproveAndSaveBtn",
     "interfaceWorkflowReviewPanelToggle",
     "interfaceWorkflowTransitionAction",
     "interfaceWorkflowTransitionTarget",
@@ -19361,8 +19361,8 @@ function renderInterfaceWorkflowEditor(view) {
       : "needs_human_review";
     $("interfaceWorkflowNodeReviewStatus").disabled = true;
   }
-  if ($("interfaceWorkflowNodeApproveBtn")) {
-    $("interfaceWorkflowNodeApproveBtn").disabled = !enabled
+  if ($("interfaceWorkflowApproveAndSaveBtn")) {
+    $("interfaceWorkflowApproveAndSaveBtn").disabled = !enabled
       || String(node?.review_status || "") === "needs_learning"
       || (
         String(node?.review_status || "") === "human_approved"
@@ -19493,6 +19493,12 @@ function approveCurrentInterfaceWorkflowNode() {
     }
     return null;
   }
+}
+
+async function approveAndSaveCurrentInterfaceWorkflowNode() {
+  const approved = approveCurrentInterfaceWorkflowNode();
+  if (!approved) return null;
+  return saveInterfaceWorkflowReview({ commitEditor: false });
 }
 
 function commitInterfaceWorkflowEditorToState() {
@@ -22604,7 +22610,7 @@ function bindEvents() {
   on("interfaceWorkflowNodeName", "input", handleInterfaceWorkflowEditorMutation);
   on("interfaceWorkflowSurfaceType", "input", handleInterfaceWorkflowEditorMutation);
   on("interfaceWorkflowNodeReviewStatus", "change", handleInterfaceWorkflowEditorMutation);
-  on("interfaceWorkflowNodeApproveBtn", "click", approveCurrentInterfaceWorkflowNode);
+  on("interfaceWorkflowApproveAndSaveBtn", "click", approveAndSaveCurrentInterfaceWorkflowNode);
   on("interfaceWorkflowLibrarySelect", "change", handleInterfaceWorkflowLibrarySelectionChanged);
   for (const [id, eventName] of [
     ["interfaceWorkflowOperationType", "change"],

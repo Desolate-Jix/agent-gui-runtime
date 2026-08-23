@@ -23,8 +23,10 @@ test("operation editor exposes one primary review gesture while keeping granular
   assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveActionCandidateBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveEdgeBtn"/);
   assert.match(source, /confirmOperationHumanReviewBundle/);
-  assert.match(html, /id="interfaceWorkflowNodeApproveBtn"/);
-  assert.match(html, /批准当前界面 Revision/);
+  assert.match(html, /id="interfaceWorkflowApproveAndSaveBtn"/);
+  assert.match(html, /批准并保存当前界面/);
+  assert.match(html, /id="interfaceWorkflowSaveBtn"[^>]*>仅保存草稿/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowNodeApproveBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowNodeHumanReviewConfirmed"/);
 });
 
@@ -122,7 +124,7 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
     interfaceWorkflowNodeName: {},
     interfaceWorkflowSurfaceType: {},
     interfaceWorkflowNodeReviewStatus: {},
-    interfaceWorkflowNodeApproveBtn: {},
+    interfaceWorkflowApproveAndSaveBtn: {},
     interfaceWorkflowSaveStatus: {},
   };
   const sandbox = {
@@ -140,7 +142,56 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
   assert.match(html, /option value="needs_learning"/);
   assert.equal(elements.interfaceWorkflowNodeReviewStatus.value, "needs_learning");
   assert.equal(elements.interfaceWorkflowNodeReviewStatus.disabled, true);
-  assert.equal(elements.interfaceWorkflowNodeApproveBtn.disabled, true);
+  assert.equal(elements.interfaceWorkflowApproveAndSaveBtn.disabled, true);
+});
+
+test("approve and save persists exactly the approved revision without a second editor commit", async () => {
+  const vm = require("node:vm");
+  const start = source.indexOf("async function approveAndSaveCurrentInterfaceWorkflowNode");
+  const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
+  assert.notEqual(start, -1, "approve-and-save handler must exist");
+  const calls = [];
+  const sandbox = {
+    approveCurrentInterfaceWorkflowNode: () => {
+      calls.push(["approve"]);
+      return { nodes: [{ node_id: "job_detail", review_status: "human_approved" }] };
+    },
+    saveInterfaceWorkflowReview: async (options) => {
+      calls.push(["save", options]);
+      return { path: "reviewed_workflow.json" };
+    },
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = approveAndSaveCurrentInterfaceWorkflowNode();`,
+    sandbox,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await sandbox.result)), {
+    path: "reviewed_workflow.json",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["approve"],
+    ["save", { commitEditor: false }],
+  ]);
+});
+
+test("approve and save does not save when node approval is blocked", async () => {
+  const vm = require("node:vm");
+  const start = source.indexOf("async function approveAndSaveCurrentInterfaceWorkflowNode");
+  const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
+  assert.notEqual(start, -1, "approve-and-save handler must exist");
+  let saves = 0;
+  const sandbox = {
+    approveCurrentInterfaceWorkflowNode: () => null,
+    saveInterfaceWorkflowReview: async () => { saves += 1; return {}; },
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = approveAndSaveCurrentInterfaceWorkflowNode();`,
+    sandbox,
+  );
+
+  assert.equal(await sandbox.result, null);
+  assert.equal(saves, 0);
 });
 
 test("approving the current interface commits its revision once without a status gesture", () => {
