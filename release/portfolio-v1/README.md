@@ -11,13 +11,16 @@ Choose documents / Apply Entry
 
 ## Evidence grade
 
-The checked-in workspace is currently a **review draft using privacy-redacted
-visual derivatives of historical captures**. The derivatives remove browser or
-account identity surfaces, but they are not raw or forensic pixel evidence and
-privacy processing may alter non-reviewed pixels. Human review is therefore
-limited to the declared interface responsibility, semantic `Quick apply`
-control, `open_apply_flow` transition, and Apply Entry safe-stop boundary. This
-workspace is not yet:
+The checked-in workspace is currently a **mixed-grade review draft**. Job Detail
+uses an annotation-free `sanitized_clean_capture` created by a deterministic
+top/bottom crop of a historical clean capture; its original and derived SHA-256
+values and transform are recorded in the node evidence. Review boxes must be
+rendered as independent overlays and must never be baked into this editable
+base. Apply Entry remains a privacy-redacted historical derivative, not raw or
+forensic pixel evidence, and privacy processing may alter non-reviewed pixels.
+Human review is therefore limited to the declared interface responsibility,
+semantic `Quick apply` control, `open_apply_flow` transition, and Apply Entry
+safe-stop boundary. This workspace is not yet:
 
 - a human-reviewed release asset;
 - runtime dispatch authority;

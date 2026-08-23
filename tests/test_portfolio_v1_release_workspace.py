@@ -67,7 +67,7 @@ def test_portfolio_v1_review_draft_manifest_is_explicitly_non_authoritative() ->
     manifest = _read(MANIFEST_PATH)
 
     assert manifest["contract_version"] == "portfolio_v1_review_draft_manifest_v1"
-    assert manifest["evidence_grade"] == "review_draft_using_privacy_redacted_historical_derivatives"
+    assert manifest["evidence_grade"] == "review_draft_with_sanitized_clean_job_detail_and_historical_apply_entry_derivative"
     assert manifest["human_review_completed"] is False
     assert manifest["controlled_live_workflow_proven"] is False
     assert manifest["runtime_dispatch_authorization"] is False
@@ -129,6 +129,24 @@ def test_portfolio_v1_node_evidence_is_present_and_hash_bound_to_review_source()
         assert source_image_path.is_relative_to(WORKSPACE_ROOT.resolve())
         assert source_image_path.is_file()
         assert _sha256(source_image_path) == expected_sha256
+
+
+def test_portfolio_v1_job_detail_uses_an_editable_clean_capture_not_a_preboxed_derivative() -> None:
+    source = _read(SOURCE_PATH)
+    job_detail = next(node for node in source["nodes"] if node["node_id"] == "job_detail")
+    evidence = job_detail["evidence"]
+    review_source = _read(WORKSPACE_ROOT / job_detail["editable_review_source_path"])
+    screen = review_source["draft"]["page_details"]["screen"]
+
+    assert evidence["source_image_kind"] == "sanitized_clean_capture"
+    assert evidence["editable_base_allowed"] is True
+    assert len(evidence["source_capture_sha256"]) == 64
+    assert evidence["sanitization_transform"] == "crop_top_160_bottom_1380_keep_full_width"
+    assert screen["source_image_kind"] == "sanitized_clean_capture"
+    assert screen["editable_base_allowed"] is True
+    assert screen["source_capture_sha256"] == evidence["source_capture_sha256"]
+    assert screen["sanitization_transform"] == evidence["sanitization_transform"]
+    assert evidence["source_screenshot_sha256"] != "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad"
 
 
 def test_portfolio_v1_source_is_two_state_one_edge_with_aligned_semantic_identity() -> None:

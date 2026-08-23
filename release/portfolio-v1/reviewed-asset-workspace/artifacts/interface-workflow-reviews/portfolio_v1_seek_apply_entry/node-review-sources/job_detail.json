@@ -52,9 +52,18 @@
       "screen": {
         "summary": "Job Detail",
         "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
-        "source_image_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
+        "source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
         "artifact_is_authorization": false,
-        "execute_binding_enabled": false
+        "execute_binding_enabled": false,
+        "source_image_kind": "sanitized_clean_capture",
+        "editable_base_allowed": true,
+        "source_capture_sha256": "7ef81a1bbf206263204c70f0030ec813e305ef01327a3c3248d5d3cce9d3c0ec",
+        "sanitization_transform": "crop_top_160_bottom_1380_keep_full_width",
+        "annotations_embedded": false,
+        "screen_size": {
+          "width": 2576,
+          "height": 1220
+        }
       }
     },
     "learning_source": "reviewed_multi_interface_workflow",

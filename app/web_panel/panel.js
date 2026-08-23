@@ -4180,7 +4180,6 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
       skipResponse: true,
       skipWorkflowReview: true,
       discoverRelatedSidecars: false,
-      supersedePendingLoad: true,
       skipReviewRender: true,
     });
     if (!review) {

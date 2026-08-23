@@ -36,7 +36,7 @@
       "edge_count": 1,
       "reviewed_node_revision_hashes": {},
       "reviewed_node_evidence_sha256": {},
-      "source_asset_sha256": "10b9c16990577b884757134569721d404d58678af4b20a1c1caf1192cba082c7",
+      "source_asset_sha256": "6fa68d618b5cf87d5cec259f15709803a874eab2028f8f0c59d9db83fe4e5601",
       "review_status": "needs_human_review",
       "published": false,
       "artifact_is_authorization": false,

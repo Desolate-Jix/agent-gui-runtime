@@ -414,6 +414,11 @@ test("switching the box editor source preserves the workflow review that owns it
     openEditorSource.match(/setLearningDraftReviewSourcePath\(sourcePath, \{ preserveWorkflowReview: true \}\);/g)?.length,
     2,
   );
+  assert.doesNotMatch(
+    openEditorSource,
+    /supersedePendingLoad:\s*true/,
+    "the full-image editor must reuse an in-flight load for the same review source",
+  );
 });
 
 test("annotated derivative cannot become the editable full-image review base", () => {

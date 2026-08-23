@@ -41,12 +41,17 @@
       "agent_description": "Identify the currently open SEEK job detail and expose only the reviewed action that opens its application entry.",
       "source_paths": [
         "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
-        "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-historical.png"
+        "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-clean-capture.png"
       ],
       "evidence": {
         "source_screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
-        "review_revision_source_screenshot_path": "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-historical.png",
-        "source_screenshot_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad"
+        "review_revision_source_screenshot_path": "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-clean-capture.png",
+        "source_screenshot_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+        "source_image_kind": "sanitized_clean_capture",
+        "editable_base_allowed": true,
+        "source_capture_sha256": "7ef81a1bbf206263204c70f0030ec813e305ef01327a3c3248d5d3cce9d3c0ec",
+        "sanitization_transform": "crop_top_160_bottom_1380_keep_full_width",
+        "annotations_embedded": false
       },
       "content_descriptors": [
         {
@@ -121,7 +126,7 @@
       "responsibility": "Identify the currently open SEEK job detail and expose only the reviewed action that opens its application entry.",
       "reviewed_revision_hash": "",
       "editable_review_source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
-      "current_revision_hash": "a04a6bbb3d75b0305299b585745d2d3b1a14064abd7065edcc6800d6b4d1458d"
+      "current_revision_hash": "28ad44e348c0614bcb42495f11de10ec935fd9faa15a241b9c9e4a5d77595716"
     },
     {
       "node_id": "apply_entry",

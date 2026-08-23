@@ -3,7 +3,7 @@
   "workflow_id": "portfolio_v1_seek_apply_entry",
   "workspace_root": "release/portfolio-v1/reviewed-asset-workspace",
   "source_workflow_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/reviewed_workflow.json",
-  "evidence_grade": "review_draft_using_privacy_redacted_historical_derivatives",
+  "evidence_grade": "review_draft_with_sanitized_clean_job_detail_and_historical_apply_entry_derivative",
   "human_review_completed": false,
   "compiled_release_asset_present": false,
   "controlled_live_workflow_proven": false,
@@ -17,8 +17,8 @@
   ],
   "notes": [
     "This workspace is a portable review draft, not a reviewed release asset.",
-    "The screenshots are privacy-redacted visual derivatives of historical captures, not raw or forensic pixel evidence and not controlled live workflow proof.",
-    "Privacy redaction may alter non-reviewed pixels; human review is limited to the declared interface responsibility, semantic control, transition, and safe-stop boundary.",
+    "Job Detail uses an annotation-free sanitized clean capture; review boxes must be rendered as independent overlays.",
+    "Apply Entry remains a privacy-redacted historical derivative, not raw or forensic pixel evidence and not controlled live workflow proof.",
     "Automation must not synthesize human approval or promote this draft to execution authority."
   ]
 }
