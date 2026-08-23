@@ -405,10 +405,17 @@ class ExistingWindowsCurrentEvidenceAdapter:
                     local,
                     anchor,
                     contextual_apply_alias=_anchor_allows_contextual_apply_alias(asset, anchor),
+                    allow_text_identity_on_interactive_role=True,
                 )
-                if len(matches) != 1:
+                recommended_matches = [
+                    pair
+                    for pair in matches
+                    if pair[0].candidate_id == candidates.recommended_candidate_id
+                    and pair[0].candidate_id == local.recommended_candidate_id
+                ]
+                if len(recommended_matches) != 1:
                     continue
-                candidate, grounded = matches[0]
+                candidate, grounded = recommended_matches[0]
                 confidence = min(float(candidate.score), float(grounded.confidence))
                 if (
                     not candidates.candidates
@@ -416,7 +423,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
                     or candidates.recommended_candidate_id != candidate.candidate_id
                     or local.recommended_candidate_id != candidate.candidate_id
                     or confidence < self._minimum_confidence
-                    or _rank_margin([candidate]) < self._minimum_score_margin
+                    or _rank_margin([pair[0] for pair in matches]) < self._minimum_score_margin
                 ):
                     continue
                 anchor_evidence.append(
@@ -871,6 +878,7 @@ def _matching_pairs(
     anchor: Mapping[str, Any],
     *,
     contextual_apply_alias: bool = False,
+    allow_text_identity_on_interactive_role: bool = False,
 ) -> list[tuple[RecognitionCandidate, LocalGroundingCandidateResult]]:
     expected_goal = _normalized_text(str(anchor.get("label") or ""))
     if (
@@ -893,7 +901,11 @@ def _matching_pairs(
                 str(anchor.get("label") or ""),
                 contextual_apply_alias=contextual_apply_alias,
             )
-            and _role_matches(candidate.role, str(anchor.get("kind") or ""))
+            and _role_matches(
+                candidate.role,
+                str(anchor.get("kind") or ""),
+                allow_text_identity_on_interactive_role=allow_text_identity_on_interactive_role,
+            )
         ):
             matches.append((candidate, grounded))
     return matches
@@ -958,26 +970,34 @@ def _selected_transition_allows_contextual_apply_alias(
     )
 
 
-def _role_matches(role: str, anchor_kind: str) -> bool:
+def _role_matches(
+    role: str,
+    anchor_kind: str,
+    *,
+    allow_text_identity_on_interactive_role: bool = False,
+) -> bool:
     normalized_role = _normalized_text(role)
     normalized_kind = _normalized_text(anchor_kind)
+    interactive_roles = {
+        "button",
+        "card",
+        "checkbox",
+        "combobox",
+        "control",
+        "link",
+        "list item",
+        "listitem",
+        "menuitem",
+        "radio",
+        "tab",
+        "toggle",
+    }
     if normalized_kind == "control":
-        return normalized_role in {
-            "button",
-            "card",
-            "checkbox",
-            "combobox",
-            "control",
-            "link",
-            "list item",
-            "listitem",
-            "menuitem",
-            "radio",
-            "tab",
-            "toggle",
-        }
+        return normalized_role in interactive_roles
     if normalized_kind == "text":
-        return normalized_role in {"heading", "label", "text"}
+        return normalized_role in {"heading", "label", "text"} or (
+            allow_text_identity_on_interactive_role and normalized_role in interactive_roles
+        )
     if normalized_kind == "region":
         return normalized_role in {"group", "list", "pane", "region", "section"}
     return normalized_role == normalized_kind

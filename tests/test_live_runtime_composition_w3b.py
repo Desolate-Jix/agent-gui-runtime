@@ -877,6 +877,149 @@ def test_anchor_evidence_requires_server_grounding_thresholds(tmp_path: Path, ca
         assert target["anchor_id"] not in observed_anchor_ids
 
 
+def test_text_identity_anchor_uses_unique_recommended_interactive_evidence(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    entry = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
+    entry["identity_anchors"] = [
+        {
+            "anchor_id": "anchor_choose_documents",
+            "label": "Choose documents",
+            "kind": "text",
+        }
+    ]
+    recommended = _recognition(
+        "Choose documents",
+        role="button",
+        candidate_id="choose-documents-button",
+        element_id="choose-documents-button-element",
+        score=0.935,
+    )
+    duplicate = _recognition(
+        "Choose documents",
+        role="listitem",
+        candidate_id="choose-documents-listitem",
+        element_id="choose-documents-listitem-element",
+        score=0.863,
+    )
+    duplicate_candidate = duplicate["candidate_result"]["candidates"][0]
+    duplicate_candidate["rank"] = 2
+    recommended["candidate_result"]["candidates"].append(duplicate_candidate)
+    recommended["narrow_search_result"]["results"].append(
+        duplicate["narrow_search_result"]["results"][0]
+    )
+    import app.agent.live_runtime_composition as composition
+
+    candidates, local = composition._parse_recognition(recommended)
+    matches = composition._matching_pairs(
+        candidates,
+        local,
+        entry["identity_anchors"][0],
+        allow_text_identity_on_interactive_role=True,
+    )
+    assert [pair[0].candidate_id for pair in matches] == [
+        "choose-documents-button",
+        "choose-documents-listitem",
+    ]
+    assert candidates.recommended_candidate_id == "choose-documents-button"
+    assert local.recommended_candidate_id == "choose-documents-button"
+    adapter, *_ = _adapter(
+        tmp_path,
+        asset,
+        runner=_RecognitionRunner({"Choose documents": recommended}),
+    )
+
+    current = adapter.capture_current(
+        session_id="session-text-on-control",
+        asset=asset,
+        target_window_handle=4242,
+    )
+
+    assert [
+        item["anchor_id"] for item in current["observed_anchor_evidence"]
+    ] == ["anchor_choose_documents"]
+
+
+@pytest.mark.parametrize("case", ["low_margin", "recommendation_mismatch"])
+def test_text_identity_interactive_evidence_fails_closed_when_ambiguous(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    asset = _asset()
+    entry = next(item for item in asset["states"] if item["state_id"] == asset["entry_state_id"])
+    entry["identity_anchors"] = [
+        {
+            "anchor_id": "anchor_choose_documents",
+            "label": "Choose documents",
+            "kind": "text",
+        }
+    ]
+    recommended = _recognition(
+        "Choose documents",
+        role="button",
+        candidate_id="choose-documents-button",
+        element_id="choose-documents-button-element",
+        score=0.935,
+    )
+    duplicate = _recognition(
+        "Choose documents",
+        role="listitem",
+        candidate_id="choose-documents-listitem",
+        element_id="choose-documents-listitem-element",
+        score=0.9 if case == "low_margin" else 0.863,
+    )
+    duplicate_candidate = duplicate["candidate_result"]["candidates"][0]
+    duplicate_candidate["rank"] = 2
+    recommended["candidate_result"]["candidates"].append(duplicate_candidate)
+    recommended["narrow_search_result"]["results"].append(
+        duplicate["narrow_search_result"]["results"][0]
+    )
+    if case == "recommendation_mismatch":
+        recommended["narrow_search_result"]["results"] = list(
+            reversed(recommended["narrow_search_result"]["results"])
+        )
+        recommended["narrow_search_result"]["recommended_candidate_id"] = (
+            "choose-documents-listitem"
+        )
+    adapter, *_ = _adapter(
+        tmp_path,
+        asset,
+        runner=_RecognitionRunner({"Choose documents": recommended}),
+    )
+
+    current = adapter.capture_current(
+        session_id=f"session-text-on-control-{case}",
+        asset=asset,
+        target_window_handle=4242,
+    )
+
+    assert current["observed_anchor_evidence"] == []
+
+
+def test_execution_matching_keeps_text_anchor_noninteractive() -> None:
+    import app.agent.live_runtime_composition as composition
+
+    payload = _recognition(
+        "Choose documents",
+        role="button",
+        candidate_id="choose-documents-button",
+        element_id="choose-documents-button-element",
+        score=0.935,
+    )
+    candidates, local = composition._parse_recognition(payload)
+
+    assert composition._matching_pairs(
+        candidates,
+        local,
+        {
+            "anchor_id": "anchor_choose_documents",
+            "label": "Choose documents",
+            "kind": "text",
+        },
+    ) == []
+
+
 def test_create_initial_projects_geometry_free_observation_from_exact_asset(tmp_path: Path) -> None:
     asset, _ = _server_asset(tmp_path)
     adapter, *_ = _adapter(
