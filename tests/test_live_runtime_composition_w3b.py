@@ -706,9 +706,13 @@ def test_anchor_evidence_requires_server_grounding_thresholds(tmp_path: Path, ca
         target_window_handle=4242,
     )
 
-    assert target["anchor_id"] not in {
+    observed_anchor_ids = {
         item["anchor_id"] for item in current["observed_anchor_evidence"]
     }
+    if case == "low_margin":
+        assert target["anchor_id"] in observed_anchor_ids
+    else:
+        assert target["anchor_id"] not in observed_anchor_ids
 
 
 def test_create_initial_projects_geometry_free_observation_from_exact_asset(tmp_path: Path) -> None:
@@ -1679,7 +1683,7 @@ def test_open_apply_flow_matches_contextual_accessible_name_only_for_reviewed_qu
     accessible_candidate["element"].update({"label": accessible_name, "text": accessible_name})
     accessible["narrow_search_result"]["results"][0]["matched_text"] = accessible_name
     decoy = _recognition(
-        "Quick apply", role="text", candidate_id="noninteractive-decoy", score=0.70
+        "Quick apply", role="text", candidate_id="noninteractive-decoy", score=0.95
     )
     decoy_candidate = decoy["candidate_result"]["candidates"][0]
     decoy_candidate.update(
@@ -1729,6 +1733,13 @@ def test_open_apply_flow_matches_contextual_accessible_name_only_for_reviewed_qu
     )
     assert result["status"] == "resolved"
     assert result["grounding"]["candidate_id"] == "accessible-apply"
+    assert result["grounding"]["score_margin"] == 0.95
+    assert [
+        item.candidate_id for item in result["gate_context"]["candidates"].candidates
+    ] == ["accessible-apply"]
+    assert [
+        item.candidate_id for item in result["gate_context"]["local_grounding"].results
+    ] == ["accessible-apply"]
 
     non_apply_asset = deepcopy(asset)
     non_apply_asset["transitions"][0]["semantic_action"] = "open_detail"

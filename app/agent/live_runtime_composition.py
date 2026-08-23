@@ -271,19 +271,12 @@ class ExistingWindowsCurrentEvidenceAdapter:
         )
         projected_candidates = replace(
             candidates,
-            candidates=[
-                projected_candidate if item.candidate_id == candidate.candidate_id else item
-                for item in candidates.candidates
-            ],
+            candidates=[projected_candidate],
+            margin_to_second=_rank_margin([projected_candidate]),
         )
         projected_local = replace(
             local_grounding,
-            results=[
-                replace(item, element_id=element_ref)
-                if item.candidate_id == candidate.candidate_id
-                else item
-                for item in local_grounding.results
-            ],
+            results=[replace(local, element_id=element_ref)],
         )
         preliminary = decide_pre_click(
             goal=projected_candidates.goal,
@@ -304,9 +297,9 @@ class ExistingWindowsCurrentEvidenceAdapter:
         lineage = selection.get("capture_lineage")
         if not isinstance(lineage, Mapping):
             return {"status": "stale", "reason": "capture_lineage_mismatch"}
-        margin = candidates.margin_to_second
+        margin = projected_candidates.margin_to_second
         if margin is None:
-            margin = 1.0 if len(candidates.candidates) == 1 else 0.0
+            margin = _rank_margin(projected_candidates.candidates)
         confidence = min(float(candidate.score), float(local.confidence))
         evidence_ref = (
             f"current-recognition:{bundle.capture_id}:"
@@ -422,7 +415,7 @@ class ExistingWindowsCurrentEvidenceAdapter:
                     or candidates.recommended_candidate_id != candidate.candidate_id
                     or local.recommended_candidate_id != candidate.candidate_id
                     or confidence < self._minimum_confidence
-                    or _rank_margin(candidates.candidates) < self._minimum_score_margin
+                    or _rank_margin([candidate]) < self._minimum_score_margin
                 ):
                     continue
                 anchor_evidence.append(
