@@ -1174,29 +1174,27 @@ def test_interface_workflow_exposes_manual_current_evidence_refresh() -> None:
     assert "skipReviewRender: true" in shared_refresh_body
 
 
-def test_learning_results_entry_splits_workflows_by_interface_review_status() -> None:
+def test_learning_results_entry_uses_one_interface_asset_library() -> None:
     index_html = Path("app/web_panel/index.html").read_text(encoding="utf-8")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
-    assert 'id="interfaceAssetUnreviewedPage"' in index_html
-    assert 'id="interfaceAssetReviewedPage"' in index_html
-    assert 'id="interfaceWorkflowUnreviewedList"' in index_html
-    assert 'id="interfaceWorkflowReviewedList"' in index_html
-    assert "未审核" in index_html
-    assert "已审核" in index_html
+    assert 'id="interfaceAssetLibraryPage"' in index_html
+    assert 'id="interfaceWorkflowAssetList"' in index_html
+    assert 'id="interfaceAssetUnreviewedPage"' not in index_html
+    assert 'id="interfaceAssetReviewedPage"' not in index_html
+    assert 'id="interfaceWorkflowUnreviewedList"' not in index_html
+    assert 'id="interfaceWorkflowReviewedList"' not in index_html
     assert "function renderInterfaceWorkflowReviewGroups" in panel_js
-    assert "buildInterfaceAssetLibrary" in panel_js
+    assert "buildInterfaceAssetLibraryRows" in panel_js
     assert "openInterfaceWorkflowReviewGroupNode" in panel_js
     assert 'class="interface-workflow-existing-selector"' in index_html
     assert 'class="interface-workflow-existing-selector" hidden' not in index_html
-    assert "选择已有软件 / 网站流程" in index_html
-    assert "打开所选流程" in index_html
 
     page_start = panel_js.index("function showInterfaceAssetPage(page)")
     page_end = panel_js.index("\nfunction setInterfaceWorkflowLibraryOptions", page_start)
     page_body = panel_js[page_start:page_end]
-    assert "renderInterfaceWorkflowReviewGroups();" not in page_body
-
+    assert '"library", "workflow"' in page_body
+    assert "interfaceAssetLibraryTab" in page_body
 
 def test_single_interface_review_uses_exact_source_without_sidecar_rescan() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
@@ -5037,34 +5035,29 @@ def test_concurrent_changed_save_cannot_be_overwritten_by_stale_approved_refresh
     ]["agent_usable_count"] == 0
 
 
-def test_learning_assets_use_three_top_level_pages() -> None:
+def test_learning_assets_use_two_top_level_pages() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
 
     for element_id in (
-        "interfaceAssetUnreviewedPage",
-        "interfaceAssetReviewedPage",
+        "interfaceAssetLibraryPage",
         "interfaceWorkflowLibraryPage",
         "interfaceAssetSharedEvidence",
     ):
         assert f'id="{element_id}"' in html
+    assert 'id="interfaceAssetUnreviewedPage"' not in html
+    assert 'id="interfaceAssetReviewedPage"' not in html
+    assert "审核状态决定知识能否复用，但不授予执行权。" in html
     assert "interface-workflow-review-groups" not in html
     assert "interface-workflow-source-manager" not in html
-
-
-def test_unreviewed_page_explains_agent_block() -> None:
-    html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
-
-    assert "未审核界面不会提供给 Agent 直接使用" in html
-    assert "审核通过仍不是执行授权" in html
-
 
 def test_learning_asset_tabs_switch_shared_evidence_workspace() -> None:
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
 
     assert "const interfaceAssetWorkspaceState" in panel_js
     assert "function showInterfaceAssetPage" in panel_js
-    assert 'on("interfaceAssetUnreviewedTab", "click"' in panel_js
-    assert 'on("interfaceAssetReviewedTab", "click"' in panel_js
+    assert 'on("interfaceAssetLibraryTab", "click"' in panel_js
+    assert 'on("interfaceAssetUnreviewedTab", "click"' not in panel_js
+    assert 'on("interfaceAssetReviewedTab", "click"' not in panel_js
     assert 'on("interfaceWorkflowLibraryTab", "click"' in panel_js
     assert "interfaceAssetSharedEvidence.appendChild(evidencePanel)" in panel_js
     assert "workflowWorkbench.appendChild(evidencePanel)" in panel_js

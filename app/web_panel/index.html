@@ -719,20 +719,14 @@
                   </label>
                   <div class="interface-asset-page-tabs" role="tablist" aria-label="学习成果页面">
                     <button
-                      id="interfaceAssetUnreviewedTab"
+                      id="interfaceAssetLibraryTab"
                       type="button"
                       role="tab"
-                      aria-controls="interfaceAssetUnreviewedPage"
+                      aria-controls="interfaceAssetLibraryPage"
                       aria-selected="true"
                       class="is-active"
-                    data-i18n="interface_asset_unreviewed">未审核界面</button>
-                    <button
-                      id="interfaceAssetReviewedTab"
-                      type="button"
-                      role="tab"
-                      aria-controls="interfaceAssetReviewedPage"
-                      aria-selected="false"
-                    data-i18n="interface_asset_reviewed">已审核界面</button>
+                    >界面资产</button>
+
                     <button
                       id="interfaceWorkflowLibraryTab"
                       type="button"
@@ -744,35 +738,19 @@
                   <section class="interface-asset-workspace" id="interfaceAssetWorkspace">
                     <aside class="interface-asset-catalog" aria-label="单界面资产">
                       <section
-                        class="interface-asset-page interface-asset-page-unreviewed"
-                        id="interfaceAssetUnreviewedPage"
+                        class="interface-asset-page interface-asset-page-library"
+                        id="interfaceAssetLibraryPage"
                         role="tabpanel"
-                        aria-labelledby="interfaceAssetUnreviewedTab"
+                        aria-labelledby="interfaceAssetLibraryTab"
                       >
                         <div class="interface-asset-page-heading">
                           <div>
-                            <strong data-i18n="interface_asset_unreviewed">未审核界面</strong>
-                            <small data-i18n="interface_asset_unreviewed_help">未审核界面不会提供给 Agent 直接使用</small>
+                            <strong>界面资产</strong>
+                            <small>审核状态决定知识能否复用，但不授予执行权。</small>
                           </div>
-                          <span id="interfaceWorkflowUnreviewedCount">0</span>
+                          <span id="interfaceWorkflowAssetCount">0</span>
                         </div>
-                        <div id="interfaceWorkflowUnreviewedList" class="interface-asset-list"></div>
-                      </section>
-                      <section
-                        class="interface-asset-page interface-asset-page-reviewed"
-                        id="interfaceAssetReviewedPage"
-                        role="tabpanel"
-                        aria-labelledby="interfaceAssetReviewedTab"
-                        hidden
-                      >
-                        <div class="interface-asset-page-heading">
-                          <div>
-                            <strong data-i18n="interface_asset_reviewed">已审核界面</strong>
-                            <small data-i18n="interface_asset_reviewed_help">审核通过仍不是执行授权</small>
-                          </div>
-                          <span id="interfaceWorkflowReviewedCount">0</span>
-                        </div>
-                        <div id="interfaceWorkflowReviewedList" class="interface-asset-list"></div>
+                        <div id="interfaceWorkflowAssetList" class="interface-asset-list"></div>
                       </section>
                     </aside>
                     <section class="interface-asset-shared-evidence" id="interfaceAssetSharedEvidence">

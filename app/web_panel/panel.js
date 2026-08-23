@@ -95,7 +95,7 @@ let interfaceWorkflowAssetV2LastResponse = null;
 let interfaceWorkflowControlPickMode = false;
 let interfaceWorkflowControlPickDestination = "attach";
 const interfaceAssetWorkspaceState = {
-  activePage: "unreviewed",
+  activePage: "library",
   selectedAssetKey: "",
   attachAssetKey: "",
 };
@@ -10378,73 +10378,98 @@ function setInterfaceWorkflowSourceOptions(sources = []) {
 }
 
 function renderInterfaceWorkflowReviewGroups() {
-  const reviewedList = $("interfaceWorkflowReviewedList");
-  const unreviewedList = $("interfaceWorkflowUnreviewedList");
-  const projector = globalThis.InterfaceWorkflowReview?.buildInterfaceAssetLibrary;
-  if (!reviewedList || !unreviewedList || typeof projector !== "function") return;
-  const assets = projector(interfaceWorkflowLibraryRegistry, interfaceWorkflowAvailableSources);
-
-  const renderBucket = (container, items, emptyText) => {
-    container.innerHTML = "";
-    if (!items.length) {
-      const empty = document.createElement("div");
-      empty.className = "interface-workflow-review-group-empty";
-      empty.textContent = emptyText;
-      container.appendChild(empty);
-      return;
-    }
-    items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "interface-asset-list-row";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = `interface-asset-list-item ${item.agent_usable ? "is-reviewed" : "is-unreviewed"}`;
-      button.classList.toggle("is-selected", item.asset_key === interfaceAssetWorkspaceState.selectedAssetKey);
-      button.dataset.assetKey = String(item.asset_key || "");
-      button.dataset.nodeId = String(item.node_id || "");
-      button.dataset.sourcePath = String(item.source_path || "");
-      const membership = Array.isArray(item.workflow_memberships) ? item.workflow_memberships[0] : null;
-      button.dataset.workflowId = String(membership?.workflow_id || "");
-      const name = document.createElement("strong");
-      name.textContent = InterfaceWorkflowReview.userFacingLearningLabel(
-        item.display_name || item.node_id || (currentLanguage === "en-US" ? "Unnamed interface" : "未命名界面"),
-      );
-      const status = document.createElement("small");
-      const workflowCount = Array.isArray(item.workflow_memberships) ? item.workflow_memberships.length : 0;
-      status.textContent = currentLanguage === "en-US"
-        ? `${item.agent_usable ? "Reviewed" : "Pending review"} · ${workflowCount ? `${workflowCount} workflows` : "Not in a workflow"}`
-        : `${item.agent_usable ? "已审核" : "待审核"} · ${workflowCount ? `${workflowCount} 个流程` : "未加入流程"}`;
-      button.append(name, status);
-      button.addEventListener("click", openInterfaceWorkflowReviewGroupNode);
-      const attach = document.createElement("button");
-      attach.type = "button";
-      attach.className = "interface-asset-list-attach";
-      attach.textContent = currentLanguage === "en-US" ? "Add to workflow" : "加入流程";
-      attach.dataset.assetKey = String(item.asset_key || "");
-      attach.addEventListener("click", openInterfaceAssetAttachDialog);
-      row.append(button, attach);
-      if (isManagedLearningEvidencePath(item.source_path)) {
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "interface-asset-list-delete danger";
-        remove.textContent = currentLanguage === "en-US" ? "Delete" : "删除";
-        remove.dataset.assetKey = String(item.asset_key || "");
-        remove.addEventListener("click", deleteInterfaceAssetEvidence);
-        row.appendChild(remove);
-      }
-      container.appendChild(row);
-    });
-  };
-
-  renderBucket(unreviewedList, assets.unreviewed, currentLanguage === "en-US" ? "No unreviewed interfaces" : "没有未审核界面");
-  renderBucket(reviewedList, assets.reviewed, currentLanguage === "en-US" ? "No reviewed interfaces" : "没有已审核界面");
-  const reviewedCount = assets.reviewed.length;
-  const unreviewedCount = assets.unreviewed.length;
-  if ($("interfaceWorkflowReviewedCount")) {
-    $("interfaceWorkflowReviewedCount").textContent = currentLanguage === "en-US" ? `${reviewedCount} interfaces` : `${reviewedCount} 个界面`;
+  const list = $("interfaceWorkflowAssetList");
+  const projector = globalThis.InterfaceWorkflowReview?.buildInterfaceAssetLibraryRows;
+  if (!list || typeof projector !== "function") return;
+  const rows = projector(interfaceWorkflowLibraryRegistry, interfaceWorkflowAvailableSources);
+  list.innerHTML = "";
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "interface-workflow-review-group-empty";
+    empty.textContent = currentLanguage === "en-US" ? "No interface assets" : "\u6ca1\u6709\u754c\u9762\u8d44\u4ea7";
+    list.appendChild(empty);
   }
-  if ($("interfaceWorkflowUnreviewedCount")) {
-    $("interfaceWorkflowUnreviewedCount").textContent = currentLanguage === "en-US" ? `${unreviewedCount} interfaces` : `${unreviewedCount} 个界面`;
+  const statusLabel = (item) => {
+    const labels = currentLanguage === "en-US"
+      ? {
+        reviewed_current: "Reviewed \u00b7 current revision",
+        needs_learning: "Safe stop \u00b7 needs learning",
+        review_stale: "Review stale \u00b7 re-review required",
+        needs_human_review: "Pending human review",
+      }
+      : {
+        reviewed_current: "\u5df2\u5ba1\u6838 \u00b7 \u5f53\u524d Revision",
+        needs_learning: "\u5b89\u5168\u505c\u6b62 \u00b7 \u4ecd\u9700\u5b66\u4e60",
+        review_stale: "\u5ba1\u6838\u5df2\u8fc7\u671f \u00b7 \u9700\u91cd\u65b0\u5ba1\u6838",
+        needs_human_review: "\u5f85\u4eba\u5de5\u5ba1\u6838",
+      };
+    return labels[item.status_kind] || labels.needs_human_review;
+  };
+  const actionLabel = (item) => {
+    const labels = currentLanguage === "en-US"
+      ? {
+        attach_workflow: "Add to workflow",
+        open_workflow: item.agent_usable ? "View reviewed workflow" : "Continue review",
+        choose_workflow: "Choose workflow",
+      }
+      : {
+        attach_workflow: "\u52a0\u5165\u8f6f\u4ef6\u6d41\u7a0b",
+        open_workflow: item.agent_usable ? "\u67e5\u770b\u5ba1\u6838\u6d41\u7a0b" : "\u7ee7\u7eed\u5ba1\u6838",
+        choose_workflow: "\u9009\u62e9\u8f6f\u4ef6\u6d41\u7a0b",
+      };
+    return labels[item.primary_action] || labels.open_workflow;
+  };
+  rows.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "interface-asset-list-row";
+    const summary = document.createElement("div");
+    summary.className = `interface-asset-list-item ${item.agent_usable ? "is-reviewed" : "is-unreviewed"}`;
+    summary.classList.toggle("is-selected", item.asset_key === interfaceAssetWorkspaceState.selectedAssetKey);
+    const name = document.createElement("strong");
+    name.textContent = InterfaceWorkflowReview.userFacingLearningLabel(
+      item.display_name || item.node_id || (currentLanguage === "en-US" ? "Unnamed interface" : "\u672a\u547d\u540d\u754c\u9762"),
+    );
+    const status = document.createElement("small");
+    const membershipCount = item.workflow_memberships.length;
+    status.textContent = `${statusLabel(item)} \u00b7 ${membershipCount
+      ? (currentLanguage === "en-US" ? `${membershipCount} workflows` : `${membershipCount} \u4e2a\u8f6f\u4ef6\u6d41\u7a0b`)
+      : (currentLanguage === "en-US" ? "Not in a workflow" : "\u672a\u52a0\u5165\u8f6f\u4ef6\u6d41\u7a0b")}`;
+    summary.append(name, status);
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "interface-asset-list-attach";
+    action.textContent = actionLabel(item);
+    action.dataset.assetKey = String(item.asset_key || "");
+    action.dataset.nodeId = String(item.node_id || "");
+    action.dataset.sourcePath = String(item.source_path || "");
+    const membership = membershipCount === 1 ? item.workflow_memberships[0] : null;
+    action.dataset.workflowId = String(membership?.workflow_id || "");
+    if (item.primary_action === "attach_workflow") {
+      action.addEventListener("click", openInterfaceAssetAttachDialog);
+    } else if (item.primary_action === "open_workflow") {
+      action.addEventListener("click", openInterfaceWorkflowReviewGroupNode);
+    } else {
+      action.disabled = true;
+      action.title = currentLanguage === "en-US"
+        ? "This interface belongs to multiple workflows; choose one from the workflow page."
+        : "\u6b64\u754c\u9762\u5c5e\u4e8e\u591a\u4e2a\u8f6f\u4ef6\u6d41\u7a0b\uff1b\u8bf7\u5148\u5728\u8f6f\u4ef6\u6d41\u7a0b\u9875\u9009\u62e9\u3002";
+    }
+    row.append(summary, action);
+    if (isManagedLearningEvidencePath(item.source_path)) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "interface-asset-list-delete danger";
+      remove.textContent = currentLanguage === "en-US" ? "Delete" : "\u5220\u9664";
+      remove.dataset.assetKey = String(item.asset_key || "");
+      remove.addEventListener("click", deleteInterfaceAssetEvidence);
+      row.appendChild(remove);
+    }
+    list.appendChild(row);
+  });
+  if ($("interfaceWorkflowAssetCount")) {
+    $("interfaceWorkflowAssetCount").textContent = currentLanguage === "en-US"
+      ? `${rows.length} interfaces`
+      : `${rows.length} \u4e2a\u754c\u9762`;
   }
 }
 
@@ -10672,22 +10697,19 @@ async function openInterfaceWorkflowReviewGroupNode(event) {
 }
 
 function showInterfaceAssetPage(page) {
-  const normalizedPage = ["unreviewed", "reviewed", "workflow"].includes(page)
+  const normalizedPage = ["library", "workflow"].includes(page)
     ? page
-    : "unreviewed";
+    : "library";
   interfaceAssetWorkspaceState.activePage = normalizedPage;
   const assetWorkspace = $("interfaceAssetWorkspace");
-  const unreviewedPage = $("interfaceAssetUnreviewedPage");
-  const reviewedPage = $("interfaceAssetReviewedPage");
+  const assetLibraryPage = $("interfaceAssetLibraryPage");
   const workflowPage = $("interfaceWorkflowLibraryPage");
   if (assetWorkspace) assetWorkspace.hidden = normalizedPage === "workflow";
-  if (unreviewedPage) unreviewedPage.hidden = normalizedPage !== "unreviewed";
-  if (reviewedPage) reviewedPage.hidden = normalizedPage !== "reviewed";
+  if (assetLibraryPage) assetLibraryPage.hidden = normalizedPage !== "library";
   if (workflowPage) workflowPage.hidden = normalizedPage !== "workflow";
 
   const tabState = [
-    ["interfaceAssetUnreviewedTab", "unreviewed"],
-    ["interfaceAssetReviewedTab", "reviewed"],
+    ["interfaceAssetLibraryTab", "library"],
     ["interfaceWorkflowLibraryTab", "workflow"],
   ];
   tabState.forEach(([tabId, tabPage]) => {
@@ -22549,8 +22571,7 @@ function bindEvents() {
     );
   });
   on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);
-  on("interfaceAssetUnreviewedTab", "click", () => showInterfaceAssetPage("unreviewed"));
-  on("interfaceAssetReviewedTab", "click", () => showInterfaceAssetPage("reviewed"));
+  on("interfaceAssetLibraryTab", "click", () => showInterfaceAssetPage("library"));
   on("interfaceWorkflowLibraryTab", "click", () => showInterfaceAssetPage("workflow"));
   on("interfaceWorkflowLoadSavedBtn", "click", loadSavedInterfaceWorkflowReview);
   on("interfaceWorkflowDeleteBtn", "click", deleteSelectedInterfaceWorkflow);

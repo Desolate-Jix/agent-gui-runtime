@@ -1748,6 +1748,36 @@
     return result;
   }
 
+  function buildInterfaceAssetLibraryRows(registry = {}, sources = []) {
+    const library = buildInterfaceAssetLibrary(registry, sources);
+    return [...library.unreviewed, ...library.reviewed]
+      .map((asset) => {
+        const memberships = Array.isArray(asset.workflow_memberships)
+          ? asset.workflow_memberships
+          : [];
+        const status = String(asset.review_status || "needs_human_review").trim();
+        const reason = String(asset.agent_eligibility_reason || "").trim();
+        const statusKind = asset.agent_usable === true
+          ? "reviewed_current"
+          : status === "needs_learning"
+            ? "needs_learning"
+            : ["human_review_revision_missing", "human_review_revision_mismatch"].includes(reason)
+              ? "review_stale"
+              : "needs_human_review";
+        return {
+          ...clone(asset),
+          workflow_memberships: memberships.map((membership) => clone(membership)),
+          status_kind: statusKind,
+          primary_action: memberships.length === 0
+            ? "attach_workflow"
+            : memberships.length === 1
+              ? "open_workflow"
+              : "choose_workflow",
+        };
+      })
+      .sort((left, right) => left.display_name.localeCompare(right.display_name, "zh-CN"));
+  }
+
   function buildAttachDialogModel(asset = {}, workflows = []) {
     const sourcePath = String(
       asset.source_path
@@ -1779,6 +1809,7 @@
     CONTRACT_VERSION,
     buildAttachDialogModel,
     buildInterfaceAssetLibrary,
+    buildInterfaceAssetLibraryRows,
     buildLearningResultsReviewGroups,
     commitInterfaceWorkflowReviewForSave,
     createEmptyInterfaceWorkflowReview,
