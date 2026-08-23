@@ -15,7 +15,7 @@ from rapidocr_onnxruntime import RapidOCR
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ARTIFACT_KIND = "receipt-backed controlled-live replay"
+ARTIFACT_KIND = "post-receipt-bound controlled-live replay"
 CANVAS_SIZE = (960, 540)
 FRAME_DURATION_MS = 100
 FRAME_COUNT = 120
@@ -32,8 +32,9 @@ POST_MASKS = (
 )
 FORBIDDEN_PATTERNS = (
     ("email", re.compile(r"[a-z0-9._%+\-]+\s*@\s*[a-z0-9.\-]+\s*\.\s*[a-z]{2,}", re.IGNORECASE)),
-    ("new_zealand_phone", re.compile(r"(?:\+|＋)\s*64\b", re.IGNORECASE)),
-    ("pdf_filename", re.compile(r"(?:\b(?:resume|resum[eé]|cv)\b[^\n]{0,100})?\.\s*pdf\b", re.IGNORECASE)),
+    ("new_zealand_phone_+64", re.compile(r"(?:\+|＋)\s*64\b", re.IGNORECASE)),
+    ("new_zealand_phone_local_02x", re.compile(r"(?<!\d)02\d(?:[\s().-]*\d){6,8}(?!\d)", re.IGNORECASE)),
+    ("pdf_or_resume_filename", re.compile(r"(?:\.\s*pdf\b|\b(?:resume|resum[eé]|cv)(?:[\s_.-]|$))", re.IGNORECASE)),
 )
 
 
@@ -95,8 +96,12 @@ def _compose_scene(source: Image.Image, *, phase: str, crop: tuple[int, int, int
     canvas = Image.new("RGB", CANVAS_SIZE, "#f5f7fb")
     draw = ImageDraw.Draw(canvas)
     draw.rectangle((0, 0, 960, 90), fill="#081a3b")
-    draw.text((30, 17), "RECEIPT-BACKED CONTROLLED-LIVE REPLAY", font=_font(17, bold=True), fill="#8ee6d2")
-    phase_text = "1  PRE — reviewed target: Quick Apply" if phase == "pre" else "2  POST — semantic state: Choose documents"
+    draw.text((30, 17), "CONTROLLED-LIVE EVIDENCE REPLAY", font=_font(17, bold=True), fill="#8ee6d2")
+    phase_text = (
+        "1  PRE — supplemental target (not receipt-bound)"
+        if phase == "pre"
+        else "2  POST — receipt-bound state: Choose documents"
+    )
     draw.text((30, 45), phase_text, font=_font(25, bold=True), fill="white")
 
     masked = _mask_source(source, masks)
@@ -140,10 +145,10 @@ def _compose_transition(pre_scene: Image.Image, post_scene: Image.Image, alpha: 
     frame = Image.blend(pre_scene, post_scene, alpha)
     draw = ImageDraw.Draw(frame)
     draw.rectangle((0, 0, 960, 90), fill="#081a3b")
-    draw.text((30, 17), "RECEIPT-BACKED CONTROLLED-LIVE REPLAY", font=_font(17, bold=True), fill="#8ee6d2")
+    draw.text((30, 17), "CONTROLLED-LIVE EVIDENCE REPLAY", font=_font(17, bold=True), fill="#8ee6d2")
     draw.text((30, 45), "TRANSITION — one bounded semantic action", font=_font(25, bold=True), fill="white")
     draw.rectangle((0, 476, 960, 540), fill="#081a3b")
-    draw.text((30, 489), "Receipt binds PRE target evidence → fresh POST observation", font=_font(19, bold=True), fill="white")
+    draw.text((30, 489), "PRE: separately hashed/unbound  →  POST: receipt-bound", font=_font(19, bold=True), fill="white")
     draw.text((30, 516), "Editorial crossfade • not continuous recording or elapsed real-time footage", font=_font(15), fill="#c6d4ee")
     return frame
 
@@ -218,7 +223,7 @@ def audit_public_gif(path: Path, extra_forbidden_tokens: Iterable[str] = ()) -> 
                     matches.append({"frame": frame_index, "category": category})
             for token_sha256, token in token_hashes:
                 if token and token in text:
-                    matches.append({"frame": frame_index, "category": "operator_name", "token_sha256": token_sha256})
+                    matches.append({"frame": frame_index, "category": "required_denylist_token", "token_sha256": token_sha256})
     return PublicFrameAudit(
         frames_scanned=frames_scanned,
         unique_visuals_ocr_scanned=len(cache),
@@ -235,12 +240,31 @@ def _source_ref(path: Path) -> str:
         return resolved.name
 
 
-def _validate_receipt(payload: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+def _required_dict(parent: dict[str, object], field: str) -> dict[str, object]:
+    value = parent.get(field)
+    if not isinstance(value, dict):
+        raise ValueError(f"receipt {field} must be an object")
+    return value
+
+
+def _validate_receipt(
+    payload: dict[str, object],
+    expected_post_sha256: str,
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     runtime = payload.get("runtime_receipt")
     observation = payload.get("next_observation")
-    if not isinstance(runtime, dict) or not isinstance(observation, dict):
-        raise ValueError("receipt must contain runtime_receipt and next_observation objects")
+    backend = payload.get("backend_receipt")
+    verification = payload.get("verification_evidence")
+    if not all(isinstance(value, dict) for value in (runtime, observation, backend, verification)):
+        raise ValueError("receipt must contain backend_receipt, runtime_receipt, next_observation, and verification_evidence objects")
+    assert isinstance(runtime, dict)
+    assert isinstance(observation, dict)
+    assert isinstance(backend, dict)
+    assert isinstance(verification, dict)
     required = {
+        "contract_version": "runtime_result_receipt_v1",
+        "attempt_count": 1,
+        "gate_status": "allowed",
         "dispatch_status": "dispatched",
         "effect_status": "verified",
         "destination_status": "verified",
@@ -250,27 +274,95 @@ def _validate_receipt(payload: dict[str, object]) -> tuple[dict[str, object], di
     for field, expected in required.items():
         if runtime.get(field) != expected:
             raise ValueError(f"receipt {field} must equal {expected!r}")
-    state = observation.get("state")
-    if not isinstance(state, dict) or state.get("display_name") != "Choose documents" or state.get("state_availability") != "stop_boundary":
-        raise ValueError("next observation must resolve Choose documents as stop_boundary")
+
+    action = _required_dict(runtime, "action")
+    if action.get("semantic_action") != "open_apply_flow":
+        raise ValueError("receipt semantic_action must equal 'open_apply_flow'")
+
+    if backend.get("status") != "dispatched":
+        raise ValueError("backend receipt status must equal 'dispatched'")
+    backend_ref = backend.get("receipt_ref")
+    evidence = _required_dict(runtime, "evidence")
+    if not isinstance(backend_ref, str) or not backend_ref or evidence.get("backend_receipt_ref") != backend_ref:
+        raise ValueError("runtime receipt must bind the single dispatched backend receipt")
+
+    state = _required_dict(observation, "state")
+    expected_state = {
+        "display_name": "Choose documents",
+        "state_availability": "stop_boundary",
+        "status": "stop_boundary",
+        "surface_type": "application_entry",
+    }
+    for field, expected in expected_state.items():
+        if state.get(field) != expected:
+            raise ValueError(f"next observation state {field} must equal {expected!r}")
+
+    for owner, safe_stop in (
+        ("runtime receipt", _required_dict(runtime, "safe_stop")),
+        ("next observation", _required_dict(observation, "safe_stop")),
+    ):
+        if safe_stop.get("required") is not True or safe_stop.get("reason_code") != "stop_boundary":
+            raise ValueError(f"{owner} must require stop_boundary SAFE_STOP")
+
+    available_actions = observation.get("available_actions")
+    if not isinstance(available_actions, list) or len(available_actions) != 1:
+        raise ValueError("next observation must expose exactly one safe_stop action")
+    available_action = available_actions[0]
+    if not isinstance(available_action, dict) or available_action.get("semantic_action") != "safe_stop":
+        raise ValueError("next observation must expose safe_stop only")
+
+    if verification.get("status") != "verified" or verification.get("state_advanced") is not True:
+        raise ValueError("verification evidence must prove the state advanced")
+    post_resolution = _required_dict(verification, "post_state_resolution")
+    if post_resolution.get("status") != "resolved" or post_resolution.get("state_availability") != "stop_boundary":
+        raise ValueError("post state resolution must resolve the stop boundary")
+
+    capture_lineages = (
+        _required_dict(observation, "current_capture"),
+        _required_dict(verification, "post_capture_lineage"),
+        _required_dict(post_resolution, "capture_lineage"),
+    )
+    for capture in capture_lineages:
+        if capture.get("screenshot_sha256") != expected_post_sha256:
+            raise ValueError("receipt post capture lineage must match the supplied post screenshot SHA-256")
+    capture_ids = {capture.get("capture_id") for capture in capture_lineages}
+    if len(capture_ids) != 1 or None in capture_ids:
+        raise ValueError("receipt post capture lineage must bind one capture_id")
+
     if not isinstance(runtime.get("receipt_id"), str) or not runtime["receipt_id"]:
         raise ValueError("receipt_id is required")
-    return runtime, state
+    validated_claims: dict[str, object] = {
+        "attempt_count": 1,
+        "semantic_action": "open_apply_flow",
+        "gate_status": "allowed",
+        "backend_dispatch_count": 1,
+        "effect_status": "verified",
+        "destination": "Choose documents / application_entry",
+        "safe_stop_required": True,
+        "next_action_projection": ["safe_stop"],
+        "form_mutation_or_followup_dispatch_evidenced": False,
+    }
+    return runtime, state, validated_claims
 
 
 def build(args: argparse.Namespace) -> dict[str, object]:
+    forbidden_tokens = [token.strip() for token in args.forbidden_token if token.strip()]
+    if not forbidden_tokens:
+        raise ValueError("at least one non-empty --forbidden-token is required")
+
     pre_path = Path(args.pre).resolve()
     post_path = Path(args.post).resolve()
     receipt_path = Path(args.receipt).resolve()
     output_path = Path(args.output).resolve()
     manifest_path = Path(args.manifest).resolve()
 
+    post_sha256 = _sha256(post_path)
     receipt_payload = json.loads(receipt_path.read_text(encoding="utf-8"))
-    runtime, state = _validate_receipt(receipt_payload)
+    runtime, state, validated_claims = _validate_receipt(receipt_payload, post_sha256)
     with Image.open(pre_path) as pre_image, Image.open(post_path) as post_image:
         frames = _render_frames(pre_image.convert("RGB"), post_image.convert("RGB"), str(runtime["receipt_id"]))
     _save_gif(frames, output_path)
-    audit = audit_public_gif(output_path, args.forbidden_token)
+    audit = audit_public_gif(output_path, forbidden_tokens)
     if audit.forbidden_matches:
         output_path.unlink(missing_ok=True)
         raise ValueError(f"public GIF privacy scan failed: {audit.forbidden_matches}")
@@ -280,27 +372,35 @@ def build(args: argparse.Namespace) -> dict[str, object]:
         "schema_version": "portfolio_controlled_live_media_manifest_v1",
         "artifact_kind": ARTIFACT_KIND,
         "continuous_recording": False,
-        "real_runtime_capture": True,
-        "claim_boundary": "Deterministic replay of two real runtime captures bound to one verified receipt; not a continuous screen recording or general reliability claim.",
+        "claim_boundary": (
+            "Deterministic editorial replay: the post capture is cryptographically bound by one verified receipt; "
+            "the pre capture is separately hashed and is not receipt-bound. The receipt proves one allowed "
+            "open_apply_flow backend dispatch, verified arrival at Choose documents, and a SAFE_STOP-only next "
+            "action projection. It is not a continuous recording, proof of out-of-band behavior, or a general reliability claim."
+        ),
         "sources": {
             "pre": {
-                "path": _source_ref(pre_path),
-                "sha256": _sha256(pre_path),
+                "content_ref": f"sha256:{_sha256(pre_path)}",
+                "availability": "not_published",
+                "provenance_claim": "operator-provided runtime pre-dispatch capture",
+                "receipt_binding": "unbound_supplemental_capture",
                 "crop_xyxy": list(PRE_CROP),
                 "source_masks_xyxy": [list(box) for box in PRE_MASKS],
                 "semantic_label": "Reviewed target: Quick Apply",
             },
             "post": {
-                "path": _source_ref(post_path),
-                "sha256": _sha256(post_path),
+                "content_ref": f"sha256:{post_sha256}",
+                "availability": "not_published",
+                "provenance_claim": "runtime post-action capture bound by receipt screenshot_sha256",
+                "receipt_binding": "bound_by_receipt_screenshot_sha256",
                 "crop_xyxy": list(POST_CROP),
                 "source_masks_xyxy": [list(box) for box in POST_MASKS],
                 "semantic_label": "Choose documents / stop_boundary",
             },
         },
         "receipt": {
-            "path": _source_ref(receipt_path),
-            "object_sha256": _sha256(receipt_path),
+            "content_ref": f"sha256:{_sha256(receipt_path)}",
+            "availability": "not_published",
             "receipt_id": runtime["receipt_id"],
             "contract_version": runtime.get("contract_version"),
             "workflow_id": workflow.get("workflow_id"),
@@ -311,6 +411,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "outcome": runtime.get("outcome"),
             "reason_code": runtime.get("reason_code"),
             "post_state": state.get("display_name"),
+            "validated_claims": validated_claims,
         },
         "render": {
             "canvas_size": list(CANVAS_SIZE),
@@ -331,8 +432,20 @@ def build(args: argparse.Namespace) -> dict[str, object]:
                 "pre": [list(box) for box in PRE_MASKS],
                 "post": [list(box) for box in POST_MASKS],
             },
-            "excluded_classes": ["operator_name", "email", "phone", "resume_filename", "account_identifier"],
-            "extra_forbidden_token_sha256": [hashlib.sha256(token.casefold().encode("utf-8")).hexdigest() for token in args.forbidden_token if token.strip()],
+            "source_mask_intent": [
+                "operator identity regions",
+                "contact and profile details",
+                "resume filenames",
+                "account identifiers",
+            ],
+            "automated_scan_scope": [
+                "required_denylist_token",
+                "email",
+                "new_zealand_phone_+64",
+                "new_zealand_phone_local_02x",
+                "pdf_or_resume_filename",
+            ],
+            "extra_forbidden_token_sha256": [hashlib.sha256(token.casefold().encode("utf-8")).hexdigest() for token in forbidden_tokens],
             "frame_scan": {
                 "engine": audit.engine,
                 "frames_scanned": audit.frames_scanned,

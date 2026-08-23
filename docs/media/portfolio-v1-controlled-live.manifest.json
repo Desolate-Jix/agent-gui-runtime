@@ -1,13 +1,14 @@
 {
   "schema_version": "portfolio_controlled_live_media_manifest_v1",
-  "artifact_kind": "receipt-backed controlled-live replay",
+  "artifact_kind": "post-receipt-bound controlled-live replay",
   "continuous_recording": false,
-  "real_runtime_capture": true,
-  "claim_boundary": "Deterministic replay of two real runtime captures bound to one verified receipt; not a continuous screen recording or general reliability claim.",
+  "claim_boundary": "Deterministic editorial replay: the post capture is cryptographically bound by one verified receipt; the pre capture is separately hashed and is not receipt-bound. The receipt proves one allowed open_apply_flow backend dispatch, verified arrival at Choose documents, and a SAFE_STOP-only next action projection. It is not a continuous recording, proof of out-of-band behavior, or a general reliability claim.",
   "sources": {
     "pre": {
-      "path": "artifacts/screenshots/entry-level-sales-recruitment-job-in-penrose-auckland-seek-3-microsoft-edge__runtime-pre-dispatch-freshness__full-window__20260824-065224-473471.png",
-      "sha256": "629535e9bf9318157d14ba6c33250261c1d1c5e23d871d901594b98a617604d1",
+      "content_ref": "sha256:629535e9bf9318157d14ba6c33250261c1d1c5e23d871d901594b98a617604d1",
+      "availability": "not_published",
+      "provenance_claim": "operator-provided runtime pre-dispatch capture",
+      "receipt_binding": "unbound_supplemental_capture",
       "crop_xyxy": [
         190,
         680,
@@ -25,8 +26,10 @@
       "semantic_label": "Reviewed target: Quick Apply"
     },
     "post": {
-      "path": "artifacts/screenshots/choose-documents-seek-3-microsoft-edge__runtime-observation__full-window__20260824-065236-691040.png",
-      "sha256": "1d246455801b7a7d505dece207a9343a74ad06770dc49057f9c3d90c7458e58d",
+      "content_ref": "sha256:1d246455801b7a7d505dece207a9343a74ad06770dc49057f9c3d90c7458e58d",
+      "availability": "not_published",
+      "provenance_claim": "runtime post-action capture bound by receipt screenshot_sha256",
+      "receipt_binding": "bound_by_receipt_screenshot_sha256",
       "crop_xyxy": [
         180,
         200,
@@ -63,8 +66,8 @@
     }
   },
   "receipt": {
-    "path": "runtime_state/runtime-receipts-v1/objects/8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e.json",
-    "object_sha256": "8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e",
+    "content_ref": "sha256:8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e",
+    "availability": "not_published",
     "receipt_id": "receipt.38d529e464f94dbf858ec4d18de90c7c",
     "contract_version": "runtime_result_receipt_v1",
     "workflow_id": "portfolio_v1_seek_apply_entry",
@@ -74,7 +77,20 @@
     "destination_status": "verified",
     "outcome": "SAFE_STOP",
     "reason_code": "stop_boundary",
-    "post_state": "Choose documents"
+    "post_state": "Choose documents",
+    "validated_claims": {
+      "attempt_count": 1,
+      "semantic_action": "open_apply_flow",
+      "gate_status": "allowed",
+      "backend_dispatch_count": 1,
+      "effect_status": "verified",
+      "destination": "Choose documents / application_entry",
+      "safe_stop_required": true,
+      "next_action_projection": [
+        "safe_stop"
+      ],
+      "form_mutation_or_followup_dispatch_evidenced": false
+    }
   },
   "render": {
     "canvas_size": [
@@ -130,12 +146,18 @@
         ]
       ]
     },
-    "excluded_classes": [
-      "operator_name",
+    "source_mask_intent": [
+      "operator identity regions",
+      "contact and profile details",
+      "resume filenames",
+      "account identifiers"
+    ],
+    "automated_scan_scope": [
+      "required_denylist_token",
       "email",
-      "phone",
-      "resume_filename",
-      "account_identifier"
+      "new_zealand_phone_+64",
+      "new_zealand_phone_local_02x",
+      "pdf_or_resume_filename"
     ],
     "extra_forbidden_token_sha256": [
       "f7f57878815f9566c0bd468813aeab38a7ce00c4803867405501b131a39f92ce"
@@ -143,13 +165,13 @@
     "frame_scan": {
       "engine": "rapidocr_onnxruntime",
       "frames_scanned": 120,
-      "unique_visuals_ocr_scanned": 29,
+      "unique_visuals_ocr_scanned": 27,
       "forbidden_matches": []
     }
   },
   "output": {
     "path": "docs/media/portfolio-v1-controlled-live.gif",
-    "sha256": "205f9bd526bbf3e9d90d0a085943c33556f7c703aabe203233970c3518a0bc69",
+    "sha256": "792edbd35dd7ae0fc5d3f2b2387352c2fe81b63d28a4fc36da1a89095d8ed3c8",
     "media_type": "image/gif"
   }
 }
