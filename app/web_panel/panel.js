@@ -17945,6 +17945,8 @@ function startInterfaceWorkflowOperationControlPick() {
 function selectInterfaceWorkflowEvidenceControl(controlId) {
   const normalizedControlId = String(controlId || "").trim();
   if (!normalizedControlId) return;
+  const explicitPickMode = interfaceWorkflowControlPickMode;
+  const pickDestination = interfaceWorkflowControlPickDestination;
   const state = currentInterfaceWorkflowEvidenceState();
   try {
     state?.focusControl?.(normalizedControlId);
@@ -17952,7 +17954,7 @@ function selectInterfaceWorkflowEvidenceControl(controlId) {
     renderResponse({ success: false, message: error?.message || "控件选择失败" }, "Interface workflow review");
     return;
   }
-  if (interfaceWorkflowControlPickDestination === "attach") {
+  if (explicitPickMode && pickDestination === "attach") {
     const select = $("interfaceWorkflowAttachTargetControl");
     if (select && Array.from(select.options).some((option) => option.value === normalizedControlId)) {
       select.value = normalizedControlId;
@@ -17960,13 +17962,17 @@ function selectInterfaceWorkflowEvidenceControl(controlId) {
     if ($("interfaceWorkflowSourceStatus")) {
       $("interfaceWorkflowSourceStatus").textContent = "来源控件已选择；内部 ID 已自动填写。";
     }
-  } else if ($("interfaceWorkflowOperationTargetControl")) {
+  } else if (explicitPickMode && $("interfaceWorkflowOperationTargetControl")) {
     $("interfaceWorkflowOperationTargetControl").value = normalizedControlId;
   }
   interfaceWorkflowControlPickMode = false;
+  if (!explicitPickMode) {
+    renderInterfaceWorkflowReviewSelection();
+    return;
+  }
   renderActiveInterfaceWorkflowEvidence();
   renderInterfaceWorkflowGraph(interfaceWorkflowReviewState?.graph?.() || { nodes: [], edges: [] });
-  if (interfaceWorkflowControlPickDestination === "operation") {
+  if (pickDestination === "operation") {
     closeInterfaceWorkflowControlPickerDialog({ resumeLinkDialog: true });
   }
 }
@@ -18096,6 +18102,7 @@ function setInterfaceWorkflowCorrectionOpen(open, correctionView = null) {
   if (tools) tools.hidden = !next;
   const toggle = $("interfaceWorkflowReviewToolsToggle");
   if (toggle) toggle.textContent = next ? t("interface_workflow_collapse_editor") : t("interface_workflow_edit_current");
+  renderActiveInterfaceWorkflowEvidence();
   if (next) {
     const view = correctionView || currentInterfaceWorkflowCorrectionTarget().view;
     if (view) renderInterfaceWorkflowEditor(view);
@@ -18490,7 +18497,10 @@ function renderInterfaceWorkflowControlPickTargets(view, viewportOverride = null
   const stage = evidence?.querySelector(".interface-workflow-evidence-stage");
   if (!stage) return;
   stage.querySelectorAll("[data-interface-workflow-control-id]").forEach((entry) => entry.remove());
-  if (!interfaceWorkflowControlPickMode || !view?.node) return;
+  const workbench = interfaceWorkflowWorkbenchState.current();
+  const correctionSelectionEnabled = workbench.correction_open === true
+    && workbench.evidence_mode === "workflow";
+  if ((!interfaceWorkflowControlPickMode && !correctionSelectionEnabled) || !view?.node) return;
   const choices = globalThis.InterfaceWorkflowReview?.interfaceWorkflowControlChoices?.(view.node) || [];
   choices.forEach((choice) => {
     const targetEvidence = globalThis.InterfaceWorkflowGraph?.resolveInterfaceWorkflowTargetEvidence?.(
