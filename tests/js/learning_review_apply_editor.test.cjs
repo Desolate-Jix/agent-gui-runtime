@@ -559,8 +559,30 @@ test("reviewed evidence transition advances its session explicitly and preserves
       action_template_id: "open_apply_flow_candidate",
     }),
   };
+  const canonicalReview = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "seek_flow" },
+    nodes: [{ node_id: "job_detail", review_status: "needs_human_review" }],
+    edges: [],
+  };
+  const canonicalState = {
+    selected: "",
+    focused: "",
+    select(nodeId) { this.selected = nodeId; },
+    focusControl(controlId) { this.focused = controlId; },
+    current() {
+      return {
+        node: canonicalReview.nodes[0],
+        selected_control: this.focused ? { control_id: this.focused } : null,
+      };
+    },
+    snapshot: () => structuredClone(canonicalReview),
+  };
   const calls = [];
-  const sandbox = { globalThis: {}, state, binding, draftEditor, reviewedEditor, calls };
+  const sandbox = {
+    globalThis: {}, state, binding, draftEditor, reviewedEditor,
+    canonicalReview, canonicalState, calls,
+  };
   vm.runInNewContext(`
     let interfaceWorkflowReviewState = state;
     let learningDraftEditorWorkflowBinding = binding;
@@ -581,8 +603,10 @@ test("reviewed evidence transition advances its session explicitly and preserves
     };
     let currentSource = "draft.json";
     const currentInterfaceWorkflowMutationTarget = () => ({
-      state,
-      view: { node: { node_id: "job_detail" } },
+      state: interfaceWorkflowReviewState,
+      view: interfaceWorkflowReviewState === canonicalState
+        ? canonicalState.current()
+        : { node: { node_id: "job_detail" } },
     });
     const learningDraftReviewSourcePath = () => currentSource;
     const learningDraftEditorSelectedItem = () => learningDraftEditorState?.getItem?.(
@@ -619,7 +643,14 @@ test("reviewed evidence transition advances its session explicitly and preserves
       calls.push(["select", kind, id]);
     };
     const applyReviewedEvidenceToCurrentWorkflowNode = () => { calls.push(["merge"]); return true; };
-    const saveInterfaceWorkflowReview = async () => { calls.push(["persist"]); return { path: "workflow.json" }; };
+    const saveInterfaceWorkflowReview = async () => {
+      calls.push(["persist"]);
+      return { path: "workflow.json", saved_review: canonicalReview };
+    };
+    const renderInterfaceWorkflowReviewSelection = () => calls.push(["render_canonical"]);
+    globalThis.InterfaceWorkflowReview = {
+      createInterfaceWorkflowReviewState: () => canonicalState,
+    };
     const $ = () => null;
     ${guardSource}
     ${refreshSource}
@@ -660,6 +691,10 @@ test("reviewed evidence transition advances its session explicitly and preserves
   assert.equal(sandbox.globalThis.session.phase, "reviewed");
   assert.equal(sandbox.globalThis.session.expected_source_path, "reviewed.json");
   assert.equal(sandbox.globalThis.session.editor_state, reviewedEditor);
+  assert.equal(sandbox.globalThis.session.state, canonicalState);
+  assert.equal(sandbox.globalThis.session.binding.state, canonicalState);
+  assert.equal(canonicalState.selected, "job_detail");
+  assert.equal(canonicalState.focused, "apply");
   assert.equal(sandbox.globalThis.session.opening_selection_key, sandbox.globalThis.session.selection_key);
   assert.equal(sandbox.globalThis.beginAgain(), false);
   assert.equal(JSON.stringify(calls), JSON.stringify([
@@ -667,6 +702,7 @@ test("reviewed evidence transition advances its session explicitly and preserves
     ["select", "action", "open_apply_flow_candidate"],
     ["merge"],
     ["persist"],
+    ["render_canonical"],
   ]));
 });
 

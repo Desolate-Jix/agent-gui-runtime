@@ -4483,6 +4483,47 @@ function completeInterfaceWorkflowReviewedEvidenceTransition(session, reviewedPa
   return interfaceWorkflowReviewSessionIsCurrent(session);
 }
 
+function rebindInterfaceWorkflowReviewSessionFromSavedReview(
+  session,
+  saveResult,
+  { requireApproved = false } = {},
+) {
+  if (!session || !interfaceWorkflowReviewSessionIsCurrent(session)) return null;
+  const savedReview = saveResult?.saved_review;
+  const workflowId = String(savedReview?.workflow?.workflow_id || "").trim();
+  if (!savedReview || workflowId !== String(session.workflow_id || "").trim()) return null;
+  const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+  if (typeof factory !== "function") return null;
+  const canonicalState = factory(savedReview);
+  try {
+    canonicalState.select(session.node_id);
+    const controlId = String(learningDraftEditorWorkflowSelection?.control_id || "").trim();
+    if (controlId) canonicalState.focusControl(controlId);
+  } catch (_error) {
+    return null;
+  }
+  const canonicalNode = canonicalState.current?.()?.node;
+  if (
+    requireApproved
+    && (
+      String(canonicalNode?.review_status || "") !== "human_approved"
+      || canonicalNode?.reviewed_by_human !== true
+    )
+  ) return null;
+  const canonicalBinding = {
+    ...session.binding,
+    source_path: session.source_path,
+    state: canonicalState,
+  };
+  interfaceWorkflowReviewState = canonicalState;
+  interfaceWorkflowReview = savedReview;
+  learningDraftEditorWorkflowBinding = canonicalBinding;
+  session.state = canonicalState;
+  session.binding = canonicalBinding;
+  renderInterfaceWorkflowReviewSelection();
+  return canonicalState;
+}
+
 async function refreshSavedLearningDraftReview({
   previousSourcePath,
   reviewedPath,
@@ -4531,8 +4572,16 @@ async function refreshSavedLearningDraftReview({
       workflowSession,
     });
     if (!saveResult) return null;
-    if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
-    refreshedWorkflow = interfaceWorkflowReviewState?.snapshot?.() || null;
+    if (workflowSession) {
+      const canonicalState = rebindInterfaceWorkflowReviewSessionFromSavedReview(
+        workflowSession,
+        saveResult,
+      );
+      if (!canonicalState || !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
+      refreshedWorkflow = canonicalState.snapshot();
+    } else {
+      refreshedWorkflow = interfaceWorkflowReviewState?.snapshot?.() || null;
+    }
   } else if (binding === "not_bound") {
     if ($("interfaceWorkflowSourceStatus")) $("interfaceWorkflowSourceStatus").textContent = "审核证据未精确匹配现有流程节点；候选已保留，未从单界面重建流程。";
   } else {
