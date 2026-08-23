@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 from io import BytesIO
 import json
+import math
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -579,6 +580,7 @@ class ExistingWindowsCurrentEvidenceVisibilityChecker:
         capture_lineage: Mapping[str, Any],
         target_window_handle: int,
         click_point: tuple[float, float],
+        target_bbox: tuple[float, float, float, float],
     ) -> Mapping[str, Any]:
         bundle = self._evidence_adapter._find_bundle_for_visibility(
             session_id=session_id,
@@ -629,17 +631,53 @@ class ExistingWindowsCurrentEvidenceVisibilityChecker:
                 "viewport_changed",
                 bound_window_handle=target_window_handle,
             )
-        if sha256(image_bytes).hexdigest() != bundle.screenshot_sha256:
+        fresh_screenshot_sha256 = sha256(image_bytes).hexdigest()
+        try:
+            cached_image_bytes = Path(bundle.image_path).read_bytes()
+            if sha256(cached_image_bytes).hexdigest() != bundle.screenshot_sha256:
+                return self._blocked(
+                    "cached_capture_changed",
+                    bound_window_handle=target_window_handle,
+                )
+            cached_target_region_sha256 = _target_region_sha256(
+                cached_image_bytes,
+                click_point=click_point,
+                target_bbox=target_bbox,
+            )
+            fresh_target_region_sha256 = _target_region_sha256(
+                image_bytes,
+                click_point=click_point,
+                target_bbox=target_bbox,
+            )
+        except Exception:
             return self._blocked(
-                "pixel_hash_changed",
+                "target_region_unavailable",
                 bound_window_handle=target_window_handle,
             )
-        return self._delegate.check(
-            session_id=session_id,
-            capture_lineage=capture_lineage,
-            target_window_handle=target_window_handle,
-            click_point=click_point,
+        if fresh_target_region_sha256 != cached_target_region_sha256:
+            return self._blocked(
+                "target_region_changed",
+                bound_window_handle=target_window_handle,
+            )
+        result = dict(
+            self._delegate.check(
+                session_id=session_id,
+                capture_lineage=capture_lineage,
+                target_window_handle=target_window_handle,
+                click_point=click_point,
+                target_bbox=target_bbox,
+            )
         )
+        result["freshness"] = {
+            "status": "allowed",
+            "reason": "target_region_unchanged",
+            "full_frame_status": (
+                "unchanged"
+                if fresh_screenshot_sha256 == bundle.screenshot_sha256
+                else "changed"
+            ),
+        }
+        return result
 
     @staticmethod
     def _blocked(
@@ -702,6 +740,53 @@ def _validated_saved_capture(
     ):
         raise ValueError("passive screenshot viewport does not match the bound window")
     return image_path, image_bytes, {"width": actual_size[0], "height": actual_size[1]}
+
+
+def _target_region_sha256(
+    image_bytes: bytes,
+    *,
+    click_point: tuple[float, float],
+    target_bbox: tuple[float, float, float, float],
+    margin: int = 8,
+) -> str:
+    """比较完整目标框及少量边缘，允许无关区域发生动态变化。"""
+    from PIL import Image
+
+    with Image.open(BytesIO(image_bytes)) as image:
+        width, height = int(image.width), int(image.height)
+        x, y = int(click_point[0]), int(click_point[1])
+        bbox_x, bbox_y, bbox_w, bbox_h = target_bbox
+        values = (bbox_x, bbox_y, bbox_w, bbox_h)
+        if (
+            any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                for value in values
+            )
+            or any(not math.isfinite(float(value)) for value in values)
+            or bbox_w <= 0
+            or bbox_h <= 0
+            or not (
+                0 <= bbox_x < width
+                and 0 <= bbox_y < height
+                and bbox_x + bbox_w <= width
+                and bbox_y + bbox_h <= height
+            )
+            or not (bbox_x <= x <= bbox_x + bbox_w)
+            or not (bbox_y <= y <= bbox_y + bbox_h)
+        ):
+            raise ValueError("target bbox does not contain the click point in the viewport")
+        box = (
+            max(0, math.floor(bbox_x) - margin),
+            max(0, math.floor(bbox_y) - margin),
+            min(width, math.ceil(bbox_x + bbox_w) + margin),
+            min(height, math.ceil(bbox_y + bbox_h) + margin),
+        )
+        region = image.convert("RGB").crop(box)
+        encoded = (
+            f"{box[0]},{box[1]},{box[2]},{box[3]}:".encode("ascii")
+            + region.tobytes()
+        )
+    return sha256(encoded).hexdigest()
 
 
 def _require_unchanged_screenshot(image_path: Path, *, expected_sha256: str) -> None:

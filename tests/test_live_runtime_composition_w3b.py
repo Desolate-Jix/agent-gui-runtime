@@ -113,6 +113,32 @@ class _SequencedScreenshotService(_ScreenshotService):
         return result
 
 
+class _OutsideTargetChangeScreenshotService(_SequencedScreenshotService):
+    def capture_window(self, **kwargs: object) -> dict[str, object]:
+        result = super().capture_window(**kwargs)
+        if len(self.calls) == 2:
+            with Image.open(str(result["image_path"])) as image:
+                changed = image.copy()
+            for x in range(0, 24):
+                for y in range(0, 24):
+                    changed.putpixel((x, y), (200, 20, 30))
+            changed.save(str(result["image_path"]))
+        return result
+
+
+class _WithinTargetBBoxChangeScreenshotService(_SequencedScreenshotService):
+    def capture_window(self, **kwargs: object) -> dict[str, object]:
+        result = super().capture_window(**kwargs)
+        if len(self.calls) == 2:
+            with Image.open(str(result["image_path"])) as image:
+                changed = image.copy()
+            for x in range(44, 60):
+                for y in range(90, 111):
+                    changed.putpixel((x, y), (200, 20, 30))
+            changed.save(str(result["image_path"]))
+        return result
+
+
 class _OriginReader:
     def __init__(self, *, status: str = "observed", origin: str | None = "https://nz.seek.com") -> None:
         self.status = status
@@ -587,7 +613,7 @@ def test_capture_rejects_origin_drift_after_pinned_recognition(tmp_path: Path) -
         ("capture_failure", False, 2),
     ],
 )
-def test_pre_dispatch_visibility_requires_exact_cached_pixels(
+def test_pre_dispatch_visibility_requires_fresh_target_region(
     tmp_path: Path,
     case: str,
     expected_allowed: bool,
@@ -627,6 +653,7 @@ def test_pre_dispatch_visibility_requires_exact_cached_pixels(
         },
         target_window_handle=4242,
         click_point=(100.0, 100.0),
+        target_bbox=(80.0, 80.0, 40.0, 40.0),
     )
 
     assert result["point_visibility"]["allowed"] is expected_allowed
@@ -638,6 +665,141 @@ def test_pre_dispatch_visibility_requires_exact_cached_pixels(
             "focus_window": False,
             "purpose": "runtime-pre-dispatch-freshness",
         }
+
+
+def test_pre_dispatch_visibility_allows_unrelated_full_frame_pixel_change(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    screenshot = _OutsideTargetChangeScreenshotService(
+        tmp_path,
+        colors=[(1, 20, 30), (1, 20, 30)],
+    )
+    manager = _WindowManager(*[_bound() for _ in range(5)])
+    adapter, _, _, _, _ = _adapter(
+        tmp_path,
+        asset,
+        manager=manager,
+        screenshot=screenshot,
+    )
+    current = adapter.capture_current(
+        session_id="session-current",
+        asset=asset,
+        target_window_handle=4242,
+    )
+    checker = ExistingWindowsCurrentEvidenceVisibilityChecker(
+        evidence_adapter=adapter,
+        delegate=_Visibility(),
+    )
+
+    result = checker.check(
+        session_id="session-current",
+        capture_lineage={
+            "capture_id": current["capture_id"],
+            "screenshot_sha256": current["screenshot_sha256"],
+            "viewport_size": current["viewport_size"],
+        },
+        target_window_handle=4242,
+        click_point=(100.0, 100.0),
+        target_bbox=(80.0, 80.0, 40.0, 40.0),
+    )
+
+    assert result["point_visibility"]["allowed"] is True
+    assert result["freshness"] == {
+        "status": "allowed",
+        "reason": "target_region_unchanged",
+        "full_frame_status": "changed",
+    }
+
+
+def test_pre_dispatch_visibility_blocks_change_inside_full_target_bbox(
+    tmp_path: Path,
+) -> None:
+    asset = _asset()
+    screenshot = _WithinTargetBBoxChangeScreenshotService(
+        tmp_path,
+        colors=[(1, 20, 30), (1, 20, 30)],
+    )
+    manager = _WindowManager(*[_bound() for _ in range(5)])
+    adapter, _, _, _, _ = _adapter(
+        tmp_path,
+        asset,
+        manager=manager,
+        screenshot=screenshot,
+    )
+    current = adapter.capture_current(
+        session_id="session-current",
+        asset=asset,
+        target_window_handle=4242,
+    )
+    checker = ExistingWindowsCurrentEvidenceVisibilityChecker(
+        evidence_adapter=adapter,
+        delegate=_Visibility(),
+    )
+
+    result = checker.check(
+        session_id="session-current",
+        capture_lineage={
+            "capture_id": current["capture_id"],
+            "screenshot_sha256": current["screenshot_sha256"],
+            "viewport_size": current["viewport_size"],
+        },
+        target_window_handle=4242,
+        click_point=(100.0, 100.0),
+        target_bbox=(40.0, 80.0, 120.0, 40.0),
+    )
+
+    assert result == {
+        "bound_window_handle": 4242,
+        "point_visibility": {"allowed": False},
+        "freshness": {"status": "blocked", "reason": "target_region_changed"},
+    }
+
+
+def test_pre_dispatch_visibility_blocks_tampered_cached_capture(tmp_path: Path) -> None:
+    asset = _asset()
+    screenshot = _SequencedScreenshotService(
+        tmp_path,
+        colors=[(1, 20, 30), (1, 20, 30)],
+    )
+    manager = _WindowManager(*[_bound() for _ in range(5)])
+    adapter, _, _, _, _ = _adapter(
+        tmp_path,
+        asset,
+        manager=manager,
+        screenshot=screenshot,
+    )
+    current = adapter.capture_current(
+        session_id="session-current",
+        asset=asset,
+        target_window_handle=4242,
+    )
+    with Image.open(screenshot.paths[0]) as image:
+        tampered = image.copy()
+    tampered.putpixel((0, 0), (200, 20, 30))
+    tampered.save(screenshot.paths[0])
+    checker = ExistingWindowsCurrentEvidenceVisibilityChecker(
+        evidence_adapter=adapter,
+        delegate=_Visibility(),
+    )
+
+    result = checker.check(
+        session_id="session-current",
+        capture_lineage={
+            "capture_id": current["capture_id"],
+            "screenshot_sha256": current["screenshot_sha256"],
+            "viewport_size": current["viewport_size"],
+        },
+        target_window_handle=4242,
+        click_point=(100.0, 100.0),
+        target_bbox=(80.0, 80.0, 40.0, 40.0),
+    )
+
+    assert result == {
+        "bound_window_handle": 4242,
+        "point_visibility": {"allowed": False},
+        "freshness": {"status": "blocked", "reason": "cached_capture_changed"},
+    }
 
 
 @pytest.mark.parametrize(
@@ -1168,6 +1330,7 @@ class _Visibility:
         capture_lineage: dict,
         target_window_handle: int,
         click_point: tuple[float, float],
+        target_bbox: tuple[float, float, float, float],
     ) -> dict:
         return {
             "bound_window_handle": target_window_handle,

@@ -158,6 +158,7 @@ class WindowVisibilityChecker(Protocol):
         capture_lineage: Mapping[str, Any],
         target_window_handle: int,
         click_point: tuple[float, float],
+        target_bbox: tuple[float, float, float, float],
     ) -> Mapping[str, Any]: ...
 
 
@@ -178,6 +179,7 @@ class ExistingWindowManagerVisibilityChecker:
         capture_lineage: Mapping[str, Any],
         target_window_handle: int,
         click_point: tuple[float, float],
+        target_bbox: tuple[float, float, float, float],
     ) -> Mapping[str, Any]:
         try:
             bound = self._window_manager.get_bound_window()
@@ -1078,6 +1080,13 @@ class LiveController:
 
         point = grounding["click_point"]
         click_point = (float(point["x"]), float(point["y"]))
+        bbox = grounding["bbox"]
+        target_bbox = (
+            float(bbox["x"]),
+            float(bbox["y"]),
+            float(bbox["w"]),
+            float(bbox["h"]),
+        )
         try:
             visibility = dict(
                 self._window_visibility_checker.check(
@@ -1085,6 +1094,7 @@ class LiveController:
                     capture_lineage=selection["capture_lineage"],
                     target_window_handle=session.snapshot.target_window_handle,
                     click_point=click_point,
+                    target_bbox=target_bbox,
                 )
             )
         except Exception:
