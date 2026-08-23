@@ -410,6 +410,52 @@ def test_windows_backend_settles_once_only_after_successful_dispatch() -> None:
     assert events == [("click", 220, 240), ("sleep", 0.75)]
 
 
+def test_windows_backend_does_not_settle_by_default_after_successful_dispatch() -> None:
+    from app.agent.desktop_backend import (
+        DesktopDispatchCommand,
+        ExistingWindowsBackendAdapter,
+        _mint_execution_authority,
+    )
+
+    events: list[object] = []
+
+    class SpyInputController:
+        def click_point(self, x: int, y: int) -> dict[str, object]:
+            events.append(("click", x, y))
+            return {"clicked": True}
+
+    backend = ExistingWindowsBackendAdapter(
+        input_controller=SpyInputController(),
+        window_manager=_WindowManager(),
+        sleeper=lambda seconds: events.append(("sleep", seconds)),
+    )
+    command = DesktopDispatchCommand(
+        semantic_action="open_detail",
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+    )
+    authority = _mint_execution_authority(
+        session_id="session-1",
+        observation_id="observation-1",
+        intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
+        selection_sha256="a" * 64,
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+        gate_decision_ref="gate:current",
+    )
+
+    receipt = backend.dispatch(command, authority=authority)
+
+    assert receipt.status == "dispatched"
+    assert events == [("click", 220, 240)]
+
+
 def test_windows_backend_does_not_settle_when_click_is_not_dispatched() -> None:
     from app.agent.desktop_backend import (
         DesktopDispatchCommand,

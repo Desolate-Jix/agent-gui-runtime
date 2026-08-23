@@ -190,7 +190,7 @@ class ExistingWindowsBackendAdapter:
         *,
         input_controller: Any | None = None,
         window_manager: Any | None = None,
-        post_dispatch_settle_seconds: float = 0.75,
+        post_dispatch_settle_seconds: float = 0.0,
         sleeper: Callable[[float], None] | None = None,
     ) -> None:
         if (
