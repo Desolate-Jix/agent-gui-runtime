@@ -636,6 +636,55 @@ test("one operation review gesture records all immutable granular receipts", () 
   assert.doesNotThrow(() => state.confirmNodeHumanReview("node_list"));
 });
 
+test("one interface confirmation records the node and all outgoing operation receipts", () => {
+  const state = createInterfaceWorkflowReviewState(
+    makeOperationExactlyReviewable(reviewFixture()),
+  );
+
+  state.confirmNodeAndOutgoingHumanReview("node_list");
+
+  const snapshot = state.snapshot();
+  const node = snapshot.nodes.find((item) => item.node_id === "node_list");
+  const control = node.controls[0];
+  const candidate = node.action_candidates[0];
+  const edge = snapshot.edges.find((item) => item.edge_id === "edge_open");
+  for (const subject of [node, control, candidate, edge]) {
+    assert.equal(subject.review_status, "human_approved");
+    assert.equal(subject.reviewed_by_human, true);
+    assert.equal(subject.artifact_is_authorization, false);
+    assert.equal(subject.execute_binding_enabled, false);
+  }
+  assert.equal(node.display_only, true);
+  assert.equal(
+    node.human_review_confirmation.contract_version,
+    "interface_node_human_review_confirmation_v1",
+  );
+});
+
+test("one interface confirmation is atomic when an outgoing operation is invalid", () => {
+  const review = makeOperationExactlyReviewable(reviewFixture());
+  review.nodes[0].action_candidates[0].target_interface_id = "node_missing";
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(
+    () => state.confirmNodeAndOutgoingHumanReview("node_list"),
+    /does not match edge/i,
+  );
+
+  const snapshot = state.snapshot();
+  const node = snapshot.nodes.find((item) => item.node_id === "node_list");
+  for (const subject of [
+    node,
+    node.controls[0],
+    node.action_candidates[0],
+    snapshot.edges.find((item) => item.edge_id === "edge_open"),
+  ]) {
+    assert.notEqual(subject.review_status, "human_approved");
+    assert.equal(subject.reviewed_by_human === true, false);
+    assert.equal("human_review_confirmation" in subject, false);
+  }
+});
+
 test("operation review gesture is atomic when operation subjects are inconsistent", () => {
   const review = makeOperationExactlyReviewable(reviewFixture());
   review.nodes[0].action_candidates[0].target_interface_id = "node_missing";

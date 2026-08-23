@@ -881,14 +881,19 @@
                         hidden
                       ></section>
                     </section>
-                    <section class="interface-workflow-inspector-panel" id="interfaceWorkflowReviewToolsColumn" hidden>
+                    <section class="interface-workflow-inspector-panel" id="interfaceWorkflowReviewToolsColumn">
                       <div class="panel-header compact">
                         <div>
-                          <strong>界面修正与确认</strong>
-                          <small>检查当前界面；需要时修改，再明确确认当前 revision</small>
+                          <strong>工作流输出与验证</strong>
+                          <small>界面修正与确认已集中到大图窗口；这里保留工作流级生成与验证。</small>
                         </div>
                       </div>
                       <div class="interface-workflow-editor">
+                        <section class="interface-workflow-current-review-panel" id="interfaceWorkflowCurrentReviewPanel" hidden>
+                          <div class="interface-workflow-modal-review-heading">
+                            <strong>当前界面审核</strong>
+                            <small>点击左侧识别框检查内容；修改后一次确认并入库。</small>
+                          </div>
                         <label>
                           <span data-i18n="interface_workflow_node_name">界面名称</span>
                           <input id="interfaceWorkflowNodeName" type="text" />
@@ -1050,12 +1055,8 @@
                             <button id="interfaceWorkflowOperationAddBtn" type="button">添加</button>
                             <button id="interfaceWorkflowOperationUpdateBtn" type="button" class="secondary">更新</button>
                             <button id="interfaceWorkflowOperationDeleteBtn" type="button" class="secondary">删除</button>
-                            <button id="interfaceWorkflowOperationDryRunBtn" type="button">安全验证</button>
                           </div>
-                          <div class="interface-workflow-operation-actions" aria-label="批准当前操作路径">
-                            <button id="interfaceWorkflowOperationApproveBundleBtn" type="button">批准这条操作路径</button>
-                            <span id="interfaceWorkflowOperationBundleReviewStatus">操作路径待审核</span>
-                          </div>
+                          <span id="interfaceWorkflowOperationBundleReviewStatus">确认并入库时一并记录操作路径审核事实</span>
                           <details>
                             <summary>查看内部审核事实</summary>
                             <div class="interface-workflow-operation-actions" aria-label="当前操作路径的内部审核事实">
@@ -1067,36 +1068,10 @@
                               <span id="interfaceWorkflowOperationEdgeReviewStatus">needs_human_review</span>
                             </div>
                           </details>
-                          <small>一次确认整条操作路径；内部仍分别记录目标控件、操作候选和跳转关系的当前 revision。它们只用于审核，不授予执行权。</small>
+                          <small>最终确认会一次记录当前界面及其全部操作路径；内部仍分别保存目标控件、操作候选和跳转关系的 revision，且不授予执行权。</small>
                         </section>
-                        <section class="interface-workflow-content-editor" aria-label="批准当前界面">
-                          <div class="interface-workflow-operation-heading">
-                            <div>
-                              <strong>4. 批准当前界面</strong>
-                              <small>操作路径批准后，确认当前界面的完整 revision。</small>
-                            </div>
-                          </div>
-                          <label>
-                            <span data-i18n="interface_workflow_review_status">审核状态</span>
-                            <select id="interfaceWorkflowNodeReviewStatus">
-                              <option value="needs_learning">needs_learning（固定安全停止）</option>
-                              <option value="needs_human_review">needs_human_review</option>
-                              <option value="reviewed_candidate">reviewed_candidate</option>
-                              <option value="human_approved">human_approved（需显式确认）</option>
-                              <option value="rejected">rejected</option>
-                            </select>
-                          </label>
-                          <div class="interface-workflow-operation-actions">
-                            <button id="interfaceWorkflowApproveAndSaveBtn" type="button">确认正确并保存</button>
-                          </div>
-                          <small>修改证据、语义、控件、动作、规则或来源后，当前界面与受影响的操作路径都会要求重新审核。</small>
-                        </section>
-                        <div class="interface-workflow-editor-actions">
-                          <button id="interfaceWorkflowEditBoxesBtn" type="button" data-i18n="interface_workflow_edit_boxes">修改当前界面框</button>
-                          <button id="interfaceWorkflowSaveBtn" type="button">仅保存草稿</button>
-                          <button id="interfaceWorkflowMemoryBtn" type="button" class="secondary" data-i18n="interface_workflow_memory_handoff">发布与执行验证</button>
-                        </div>
                         <p class="interface-workflow-save-status" id="interfaceWorkflowSaveStatus" data-i18n="interface_workflow_save_hint">学习结果会正式保存；真实操作仍需实时识别、Gate 与 Trace。</p>
+                        </section>
                         <section class="interface-workflow-v2-panel" aria-label="Reviewed workflow v2">
                           <strong>Reviewed workflow v2</strong>
                           <small>编译和发布只使用服务端流程库绑定；只读预览不会捕获屏幕、不会调用动作接口，也不构成执行授权。</small>
@@ -1105,6 +1080,8 @@
                             <button id="interfaceWorkflowCompileV2Btn" type="button" disabled hidden>编译 v2</button>
                             <button id="interfaceWorkflowPublishV2Btn" type="button" class="secondary" disabled hidden>发布到 CAS</button>
                             <button id="interfaceWorkflowReplayPreviewV2Btn" type="button" class="secondary" disabled>只读验证（不执行）</button>
+                            <button id="interfaceWorkflowOperationDryRunBtn" type="button" class="secondary">当前路径安全验证</button>
+                            <button id="interfaceWorkflowMemoryBtn" type="button" class="secondary" data-i18n="interface_workflow_memory_handoff">发布与执行验证</button>
                           </div>
                           <label class="wide-label">
                             <span>当前观察 JSON（必须显式提供）</span>
@@ -1703,12 +1680,15 @@
           <button id="imageInspectorCloseBtn" type="button" data-i18n="close">Close</button>
         </div>
         <div class="image-inspector-body" id="imageInspectorBody">
-          <div class="image-inspector-stage" id="imageInspectorStage">
-            <img id="imageInspectorImage" alt="" />
-            <div class="image-inspector-draft-boxes" id="imageInspectorDraftBoxes"></div>
-            <div class="image-inspector-box" id="imageInspectorBox"></div>
-            <div class="image-inspector-point" id="imageInspectorPoint"></div>
+          <div class="image-inspector-canvas" id="imageInspectorCanvas">
+            <div class="image-inspector-stage" id="imageInspectorStage">
+              <img id="imageInspectorImage" alt="" />
+              <div class="image-inspector-draft-boxes" id="imageInspectorDraftBoxes"></div>
+              <div class="image-inspector-box" id="imageInspectorBox"></div>
+              <div class="image-inspector-point" id="imageInspectorPoint"></div>
+            </div>
           </div>
+          <aside class="image-inspector-workflow-review-host" id="imageInspectorWorkflowReviewHost" hidden></aside>
         </div>
         <div class="image-inspector-footer" id="imageInspectorFooter" style="display:none">
           <span id="imageInspectorEditHint"></span>
@@ -1791,7 +1771,10 @@
               <input id="imageInspectorReason" type="text" placeholder="why this box changed" />
             </label>
           </div>
-          <button id="imageInspectorApplyBoxBtn" type="button" data-i18n="learning_draft_apply_selected_bbox">Use selected box</button>
+          <div class="image-inspector-footer-actions">
+            <button id="imageInspectorApplyBoxBtn" type="button">仅保存草稿</button>
+            <button id="imageInspectorConfirmAndStoreBtn" type="button" hidden>确认并入库</button>
+          </div>
         </div>
       </div>
     </div>

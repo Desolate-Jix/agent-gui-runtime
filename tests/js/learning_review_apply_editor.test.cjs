@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "../../app/web_panel/panel.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "../../app/web_panel/index.html"), "utf8");
 test("learning review render binds dynamically inserted region/action preview buttons", () => {
@@ -16,18 +17,89 @@ test("image inspector uses mandatory open_apply_flow taxonomy", () => {
   assert.doesNotMatch(html, /value="open_flow"/);
 });
 
-test("operation editor exposes one primary review gesture while keeping granular receipts", () => {
-  assert.match(html, /id="interfaceWorkflowOperationApproveBundleBtn"/);
-  assert.match(html, /批准这条操作路径/);
+test("full-image confirmation is the only user-facing approval gesture while keeping granular receipts", () => {
+  assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveBundleBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveTargetControlBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveActionCandidateBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveEdgeBtn"/);
-  assert.match(source, /confirmOperationHumanReviewBundle/);
-  assert.match(html, /id="interfaceWorkflowApproveAndSaveBtn"/);
-  assert.match(html, /确认正确并保存/);
-  assert.match(html, /id="interfaceWorkflowSaveBtn"[^>]*>仅保存草稿/);
+  assert.match(source, /confirmNodeAndOutgoingHumanReview/);
+  assert.match(html, /id="imageInspectorConfirmAndStoreBtn"/);
+  assert.match(html, /确认并入库/);
+  assert.match(html, /id="imageInspectorApplyBoxBtn"[^>]*>仅保存草稿/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowApproveAndSaveBtn"/);
+  assert.doesNotMatch(html, /id="interfaceWorkflowNodeReviewStatus"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowNodeApproveBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowNodeHumanReviewConfirmed"/);
+});
+
+test("confirm and store saves the current evidence before approving its workflow revision", async () => {
+  const start = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview");
+  const end = source.indexOf("async function publishLearningOperationalMemory", start);
+  assert.notEqual(start, -1, "confirm-and-store handler must exist");
+  const calls = [];
+  const button = { disabled: false, textContent: "确认并入库" };
+  const reviewState = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+  const sandbox = {
+    currentLanguage: "zh-CN",
+    learningDraftEditorActive: true,
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+    },
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: reviewState,
+      view: { node: { node_id: "job_detail" } },
+      reason: "",
+    }),
+    saveLearningDraftReview: async (options) => {
+      calls.push(["save_evidence", options]);
+      return { reviewed_template_candidate_path: "reviewed.json" };
+    },
+    approveAndSaveCurrentInterfaceWorkflowNode: async () => {
+      calls.push(["approve_and_save"]);
+      return { path: "workflow.json" };
+    },
+    closeImageInspector: () => calls.push(["close"]),
+    renderResponse: () => {},
+    $: (id) => id === "imageInspectorConfirmAndStoreBtn"
+      ? button
+      : (id === "imageInspectorOverlay" ? { style: { display: "none" } } : null),
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = confirmAndStoreCurrentInterfaceWorkflowReview();`,
+    sandbox,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(await sandbox.result)), { path: "workflow.json" });
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    ["save_evidence", { closeEditor: false, preserveWorkflowBinding: true }],
+    ["approve_and_save"],
+    ["close"],
+  ]);
+});
+
+test("confirm and store rejects a standalone source preview", async () => {
+  const start = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview");
+  const end = source.indexOf("async function publishLearningOperationalMemory", start);
+  assert.notEqual(start, -1, "confirm-and-store handler must exist");
+  let saves = 0;
+  const sandbox = {
+    learningDraftEditorActive: true,
+    learningDraftEditorWorkflowBinding: { authority: "source_preview", node_id: "asset_a" },
+    saveLearningDraftReview: async () => { saves += 1; return {}; },
+    approveAndSaveCurrentInterfaceWorkflowNode: async () => { saves += 1; return {}; },
+    closeImageInspector: () => {},
+    renderResponse: () => {},
+    $: () => null,
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = confirmAndStoreCurrentInterfaceWorkflowReview();`,
+    sandbox,
+  );
+
+  assert.equal(await sandbox.result, null);
+  assert.equal(saves, 0);
 });
 
 test("operation review bundle aborts when the operation editor commit fails", () => {
@@ -127,16 +199,12 @@ test("operation editor mutation commits or revokes before rerendering approval b
   assert.deepEqual(calls, [["clear"], ["revoke", "edge_open"], ["dirty"], ["render_badges"]]);
 });
 
-test("editing a previously approved interface immediately enables approve and save", () => {
-  const vm = require("node:vm");
+test("editing a previously approved interface refreshes confirm-and-store eligibility", () => {
   const start = source.indexOf("function handleInterfaceWorkflowEditorMutation");
   const end = source.indexOf("function handleInterfaceWorkflowOperationEditorMutation", start);
   assert.notEqual(start, -1);
-  const elements = {
-    interfaceWorkflowApproveAndSaveBtn: { disabled: true },
-  };
+  let eligibilityRefreshes = 0;
   const sandbox = {
-    $: (id) => elements[id] || null,
     interfaceWorkflowReviewState: {
       current: () => ({
         node: {
@@ -149,24 +217,61 @@ test("editing a previously approved interface immediately enables approve and sa
     clearInterfaceWorkflowNodeHumanReviewConfirmation: () => {},
     currentInterfaceWorkflowMutationTarget: () => ({ state: {}, view: null, reason: "" }),
     markInterfaceWorkflowUnsaved: () => {},
+    syncImageInspectorConfirmAndStoreButton: () => { eligibilityRefreshes += 1; },
   };
   vm.runInNewContext(
     `${source.slice(start, end)}; handleInterfaceWorkflowEditorMutation();`,
     sandbox,
   );
 
-  assert.equal(elements.interfaceWorkflowApproveAndSaveBtn.disabled, false);
+  assert.equal(eligibilityRefreshes, 1);
+});
+
+test("an edited approved interface becomes eligible for confirm and store", () => {
+  const start = source.indexOf("function syncImageInspectorConfirmAndStoreButton");
+  const end = source.indexOf("function syncInterfaceWorkflowCorrectionToggleLabel", start);
+  const button = { hidden: true, disabled: true, textContent: "", title: "" };
+  const sandbox = {
+    currentLanguage: "zh-CN",
+    learningDraftEditorActive: true,
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+    },
+    learningDraftEditorState: { exportOperations: () => [] },
+    interfaceWorkflowHasUnsavedChanges: false,
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) },
+      view: {
+        node: {
+          node_id: "job_detail",
+          review_status: "human_approved",
+          reviewed_by_human: true,
+        },
+      },
+    }),
+    $: (id) => id === "imageInspectorConfirmAndStoreBtn" ? button : null,
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.sync = syncImageInspectorConfirmAndStoreButton;`,
+    sandbox,
+  );
+
+  sandbox.sync();
+  assert.equal(button.disabled, true);
+  sandbox.interfaceWorkflowHasUnsavedChanges = true;
+  sandbox.sync();
+  assert.equal(button.disabled, false);
 });
 
 test("needs_learning renders as a locked stop boundary instead of an approvable node", () => {
-  const vm = require("node:vm");
   const start = source.indexOf("function renderInterfaceWorkflowEditor");
   const end = source.indexOf("function clearInterfaceWorkflowNodeHumanReviewConfirmation", start);
   const elements = {
     interfaceWorkflowNodeName: {},
     interfaceWorkflowSurfaceType: {},
-    interfaceWorkflowNodeReviewStatus: {},
-    interfaceWorkflowApproveAndSaveBtn: {},
+    imageInspectorConfirmAndStoreBtn: { disabled: false },
     interfaceWorkflowSaveStatus: {},
   };
   const sandbox = {
@@ -176,6 +281,9 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
     currentInterfaceWorkflowMutationTarget: (view) => ({ state: {}, view, reason: "" }),
     renderInterfaceWorkflowContentEditor: () => {},
     renderInterfaceWorkflowOperationEditor: () => {},
+    syncImageInspectorConfirmAndStoreButton: (view) => {
+      elements.imageInspectorConfirmAndStoreBtn.disabled = view?.node?.review_status === "needs_learning";
+    },
     t: () => "saved",
   };
   vm.runInNewContext(
@@ -183,10 +291,7 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
     sandbox,
   );
 
-  assert.match(html, /option value="needs_learning"/);
-  assert.equal(elements.interfaceWorkflowNodeReviewStatus.value, "needs_learning");
-  assert.equal(elements.interfaceWorkflowNodeReviewStatus.disabled, true);
-  assert.equal(elements.interfaceWorkflowApproveAndSaveBtn.disabled, true);
+  assert.equal(elements.imageInspectorConfirmAndStoreBtn.disabled, true);
 });
 
 test("approve and save persists exactly the approved revision without a second editor commit", async () => {
@@ -219,6 +324,43 @@ test("approve and save persists exactly the approved revision without a second e
   ]);
 });
 
+test("workflow editor commits preserve the current review status without a removed status selector", () => {
+  const start = source.indexOf("function commitInterfaceWorkflowEditorToState");
+  const end = source.indexOf("async function saveInterfaceWorkflowReview", start);
+  let patch = null;
+  const reviewState = { snapshot: () => ({}) };
+  const sandbox = {
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: reviewState,
+      view: {
+        node: {
+          node_id: "job_detail",
+          review_status: "human_approved",
+        },
+      },
+    }),
+    window: {
+      InterfaceWorkflowReview: {
+        commitInterfaceWorkflowReviewForSave: (options) => {
+          patch = options.nodePatch;
+          return { nodes: [] };
+        },
+      },
+    },
+    commitInterfaceWorkflowOperationEditor: () => null,
+    $: (id) => ({
+      interfaceWorkflowNodeName: { value: "Job Detail" },
+      interfaceWorkflowSurfaceType: { value: "detail" },
+    }[id] || null),
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; commitInterfaceWorkflowEditorToState();`,
+    sandbox,
+  );
+
+  assert.equal(patch.review_status, "human_approved");
+});
+
 test("approve and save does not save when node approval is blocked", async () => {
   const vm = require("node:vm");
   const start = source.indexOf("async function approveAndSaveCurrentInterfaceWorkflowNode");
@@ -238,8 +380,7 @@ test("approve and save does not save when node approval is blocked", async () =>
   assert.equal(saves, 0);
 });
 
-test("approving the current interface commits its revision once without a status gesture", () => {
-  const vm = require("node:vm");
+test("approving the current interface commits then confirms the node and all outgoing paths", () => {
   const start = source.indexOf("function approveCurrentInterfaceWorkflowNode");
   const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
   const calls = [];
@@ -250,6 +391,8 @@ test("approving the current interface commits its revision once without a status
   const sandbox = {
     interfaceWorkflowReviewState: {
       current: () => ({ node: { node_id: "job_detail", review_status: "needs_human_review" } }),
+      confirmNodeAndOutgoingHumanReview: (nodeId) => calls.push(["confirm_all", nodeId]),
+      snapshot: () => ({ nodes: [{ node_id: "job_detail", review_status: "human_approved" }] }),
     },
     interfaceWorkflowReview: null,
     window: {
@@ -282,9 +425,10 @@ test("approving the current interface commits its revision once without a status
       display_name: "Job Detail",
       surface_type: "detail",
       review_status: "needs_human_review",
-    }, true],
+    }, false],
     ["commit_operation", true],
-    ["dirty", "当前界面 Revision 已批准 · 尚未保存"],
+    ["confirm_all", "job_detail"],
+    ["dirty", "当前界面及操作路径已确认 · 尚未入库"],
     ["render"],
   ]);
 });

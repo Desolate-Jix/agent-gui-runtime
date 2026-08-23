@@ -77,6 +77,7 @@ screenshot → model → coordinate → click
 1. **Explore** 不确定的 Windows 或浏览器路径。
 2. **Capture evidence**，记录 capture identity、coordinate space、provider provenance 和 freshness。
 3. **Review** 语义、候选动作、转移、预期效果与风险边界。
+   - Panel 的“修正与确认”会直接打开一个大图工作台。用户点击任意识别框即可查看对应语义，必要时修改 geometry、说明和当前 outgoing operation；workflow-bound 界面最后只需一次“确认并入库”。系统会先验证全部 outgoing operation，再记录 target control/region、exact action candidate、transition edge 与 source node 四类独立 revision receipt。standalone source 只能“仅保存草稿”，不能批准 workflow。
 4. **Compile** 不可变 reviewed workflow asset。它描述要找什么、如何验证，但不授权动作。
 5. **Observe again**：Agent 请求语义动作时重新观察。
 6. **Relocate**：针对当前界面重新定位已审核目标；历史坐标只能作为 hint。
@@ -141,7 +142,7 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 | 受限 SEEK 浏览器导航录屏 | **Partial** | 有界的历史 live GUI 录屏；不是 Portfolio v1 Controlled Live Workflow Proof，也不证明 saved-workflow replay 或 semantic verification。 |
 | 内置 Windows perception baseline/fallback | **Partial** | 已有 screenshot、UIA、OCR 和本地 recognition 路径；未证明陌生界面可靠性。 |
 | Built-in 与 OmniParser 进入同一 provider-neutral Review model | **Partial** | 已有 UEI 和 Shadow 基础；release 纵向切片尚未闭合。 |
-| 人工审核和应用范围 workflow 创建 | **Partial** | 已有 review UI、候选、revision 和 workflow graph；Portfolio v1 证据包尚未完成。 |
+| 人工审核和应用范围 workflow 创建 | **Partial** | 已有单一大图修正/审核工作台、revision receipt 和 workflow graph；最终确认会先验证全部 outgoing operation，standalone evidence 不能批准 workflow。Portfolio v1 的真实用户审核与 exact restart/reload 证据仍未完成。 |
 | Current relocation、Gate 与唯一 dispatch authority（W4） | **Current — verified internal authority proof** | 只有 `LiveController` 能签发 authority；`ExistingWindowsBackendAdapter` 是唯一 authority-scope consumer；受保护的 `InputController` / `WindowManager` raw sink 默认拒绝绕过。这是确定性的内部证据，不是 live workflow 或公开 integration 主张。 |
 | 动作后 semantic verification 与 verified receipt promotion（W5） | **Partial — deterministic actual-adapter proof** | controller 会执行全新 C2 observation、检查 compiler 输出的封闭 `target_state_identity` rule、保存精确 verification lineage，并在不盲目重新 dispatch 的前提下终结为 `VERIFIED`、`VERIFICATION_FAILED` 或 `SAFE_STOP`。已验证 composed `open_detail` 正向路径；actual-adapter `open_apply_flow` → application-entry stop-boundary 与 controlled live evidence 仍未完成。 |
 | Desktop I/O Backend SPI | **Partial** | 已有内部 SPI、deterministic fake backend 和受保护的 one-shot Windows backend；它不是公开 HTTP route、agent/demo callsite 或 production-readiness 主张。 |
@@ -212,7 +213,7 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 > **W2 人工审核的 Job Detail → `open_apply_flow` → Apply Entry stop-boundary release asset + save/restart/reload evidence → 把已完成的本地 callsite 绑定到该 release asset → actual-adapter `open_apply_flow` → application-entry terminal `SAFE_STOP` deterministic proof → controlled live SEEK proof → W6 close-out。**
 
-W1 并行推进，但必须在 W6 前完成。Server-owned ledger、确定性 Portfolio controller test 与 loopback-only API callsite 已证明 confirmation/restart routing 不接受客户端 geometry 或 authority，并覆盖内部测试的 `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP` 范围。当前 fixture 与 ignored artifacts 仍不满足 W2 人工审核 release evidence；当前没有 panel approval UI，也没有运行真实 Windows/SEEK 执行。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
+W1 并行推进，但必须在 W6 前完成。Server-owned ledger、确定性 Portfolio controller test 与 loopback-only API callsite 已证明 confirmation/restart routing 不接受客户端 geometry 或 authority，并覆盖内部测试的 `Job Detail` → `open_apply_flow` → `Apply Entry` terminal `SAFE_STOP` 范围。Panel 已有 W2 修正/审核 UI，但当前 fixture 与 ignored artifacts 仍不满足真实用户审核的 release evidence，也没有运行真实 Windows/SEEK 执行。只有 release proof 闭合后，才考虑更多 Provider、外部 Agent adapter 或受限 workflow class。
 
 Automatic provider selection、remote execution、raw-coordinate Agent authority、ATS traversal、表单填写、上传、Continue/Next 和 final submission 都不是 Portfolio v1 能力。
 

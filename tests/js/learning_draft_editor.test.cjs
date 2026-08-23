@@ -37,6 +37,7 @@ function loadSaveLearningDraftReview(overrides = {}) {
   };
   const context = {
     console,
+    currentLanguage: "en-US",
     learningDraftEditorActive: true,
     learningDraftEditorSelected: { target_kind: "region", target_id: "r1" },
     learningDraftEditorWorkflowBinding: {
@@ -588,7 +589,7 @@ test("learning draft editor saves standalone candidate without workflow binding"
   assert.equal(result.reviewed_template_candidate_path, "artifacts/reviewed.json");
   assert.deepEqual(calls, ["close", "response:true"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Saved");
+  assert.equal(button.textContent, "Draft saved");
 });
 
 test("learning draft editor stays open and reports failure when parent refresh fails", async () => {
@@ -607,7 +608,7 @@ test("learning draft editor stays open and reports failure when parent refresh f
   assert.equal(result, null);
   assert.deepEqual(calls, ["parent_refresh", "response:false"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Save draft only");
 });
 
 test("learning draft editor stays open when workflow evidence replacement fails", async () => {
@@ -640,7 +641,7 @@ test("learning draft editor stays open when workflow evidence replacement fails"
   assert.equal(result, null);
   assert.deepEqual(calls, ["replace", "response:false"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Save draft only");
 });
 
 test("workflow-context save stays open when the exact origin node is not bound", async () => {
@@ -673,7 +674,7 @@ test("workflow-context save stays open when the exact origin node is not bound",
   assert.equal(result, null);
   assert.deepEqual(calls, ["response:false"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Save draft only");
 });
 
 test("workflow-context save rejects source drift before writing a derivative", async () => {
@@ -692,7 +693,7 @@ test("workflow-context save rejects source drift before writing a derivative", a
   assert.equal(result, null);
   assert.deepEqual(calls, ["response:false:Learning draft review source changed while the editor was open"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Save draft only");
 });
 
 test("workflow-context save rejects a binding without captured state", async () => {
@@ -714,7 +715,7 @@ test("workflow-context save rejects a binding without captured state", async () 
   assert.deepEqual(calls.filter((call) => call === "workflow_save" || call.startsWith("replace:")), []);
   assert.ok(calls.includes("response:false"));
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Save draft only");
 });
 
 test("learning draft editor stays open when workflow save fails", async () => {
@@ -733,7 +734,7 @@ test("learning draft editor stays open when workflow save fails", async () => {
   assert.equal(result, null);
   assert.deepEqual(calls, ["workflow_save", "response:false"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Save review");
+  assert.equal(button.textContent, "Save draft only");
 });
 
 test("learning draft editor saves standalone candidate without current workflow", async () => {
@@ -750,7 +751,7 @@ test("learning draft editor saves standalone candidate without current workflow"
   assert.equal(result.reviewed_template_candidate_path, "artifacts/reviewed.json");
   assert.deepEqual(calls, ["close", "response:true"]);
   assert.equal(button.disabled, false);
-  assert.equal(button.textContent, "Saved");
+  assert.equal(button.textContent, "Draft saved");
 });
 
 test("reviewed operational memory publish uses the current registry revision", async () => {

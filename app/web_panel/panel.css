@@ -6395,8 +6395,8 @@ label {
 .image-inspector-dialog {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  width: min(96vw, 1600px);
-  max-height: 94vh;
+  width: min(98vw, 1900px);
+  max-height: 96vh;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35);
@@ -6420,8 +6420,58 @@ label {
 }
 
 .image-inspector-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+  background: #0f172a;
+}
+
+.image-inspector-canvas {
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
   background: #0f172a;
+}
+
+.image-inspector-workflow-review-host {
+  width: clamp(380px, 31vw, 520px);
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid #cbd5e1;
+  background: #ffffff;
+}
+
+.image-inspector-workflow-review-host[hidden],
+.interface-workflow-current-review-panel[hidden] {
+  display: none;
+}
+
+.interface-workflow-current-review-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+}
+
+.interface-workflow-current-review-panel > * {
+  order: 0;
+}
+
+.interface-workflow-modal-review-heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 3px;
+  margin: -14px -14px 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.interface-workflow-modal-review-heading small {
+  color: #64748b;
 }
 
 .image-inspector-stage {
@@ -6639,6 +6689,25 @@ label {
   min-width: 120px;
 }
 
+.image-inspector-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#imageInspectorConfirmAndStoreBtn {
+  border-color: #047857;
+  background: #047857;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+#imageInspectorConfirmAndStoreBtn:disabled {
+  border-color: #94a3b8;
+  background: #cbd5e1;
+  color: #64748b;
+}
+
 .image-inspector-editor-controls {
   display: flex;
   align-items: center;
@@ -6694,6 +6763,23 @@ label {
 .image-inspector-editor-controls input {
   min-width: 120px;
   height: 34px;
+}
+
+@media (max-width: 1100px) {
+  .image-inspector-overlay {
+    padding: 8px;
+  }
+
+  .image-inspector-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(45vh, 1fr) minmax(260px, 42vh);
+  }
+
+  .image-inspector-workflow-review-host {
+    width: auto;
+    border-top: 1px solid #cbd5e1;
+    border-left: 0;
+  }
 }
 
 .image-inspector-reason-control {

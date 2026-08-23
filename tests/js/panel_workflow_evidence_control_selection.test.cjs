@@ -12,6 +12,10 @@ const panelHtml = fs.readFileSync(
   path.join(__dirname, "../../app/web_panel/index.html"),
   "utf8",
 );
+const panelCss = fs.readFileSync(
+  path.join(__dirname, "../../app/web_panel/panel.css"),
+  "utf8",
+);
 
 function functionSource(startMarker, endMarker) {
   const start = panelSource.indexOf(startMarker);
@@ -121,11 +125,18 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
     "function setInterfaceWorkflowCorrectionOpen",
     "function restoreInterfaceWorkflowOperationToolbar",
   );
-  const tools = { hidden: true };
+  const reviewPanel = { hidden: true, parentElement: null };
+  const reviewHost = {
+    hidden: true,
+    appendChild(panel) {
+      panel.parentElement = this;
+    },
+  };
   const operationToolbar = { hidden: true };
   const toggle = { textContent: "" };
   const elements = new Map([
-    ["interfaceWorkflowReviewToolsColumn", tools],
+    ["interfaceWorkflowCurrentReviewPanel", reviewPanel],
+    ["imageInspectorWorkflowReviewHost", reviewHost],
     ["interfaceWorkflowOperationToolbar", operationToolbar],
     ["interfaceWorkflowReviewToolsToggle", toggle],
   ]);
@@ -137,6 +148,9 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
       current: () => ({ correction_open: observations.correctionOpen }),
     };
     const currentLanguage = "zh-CN";
+    const learningDraftEditorWorkflowBinding = null;
+    const learningDraftEditorState = null;
+    const learningDraftEditorActive = false;
     const currentInterfaceWorkflowCorrectionTarget = () => ({ view: null });
     const currentInterfaceWorkflowMutationTarget = (view) => ({ state: {}, view, reason: "" });
     const renderInterfaceWorkflowEditor = () => { observations.editorRenders += 1; };
@@ -150,22 +164,50 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   sandbox.globalThis.setCorrectionOpen(true, { node: { node_id: "job_detail" } });
 
   assert.equal(observations.correctionOpen, true);
-  assert.equal(tools.hidden, false);
+  assert.equal(reviewPanel.hidden, false);
+  assert.equal(reviewHost.hidden, false);
+  assert.equal(reviewPanel.parentElement, reviewHost);
   assert.equal(operationToolbar.hidden, false);
   assert.equal(toggle.textContent, "收起修正与确认");
   assert.equal(observations.editorRenders, 1);
   assert.equal(observations.evidenceRenders, 1);
 });
 
-test("review and correction use one primary entry while box editing remains contextual", () => {
+test("review and correction use one primary entry that opens the full-image workbench", () => {
   assert.doesNotMatch(panelHtml, /id="interfaceWorkflowReviewPanelToggle"/);
   assert.doesNotMatch(panelHtml, /显示审核工具|收起审核工具/);
   assert.match(panelHtml, /id="interfaceWorkflowReviewToolsToggle"[^>]*>修正与确认</);
-  assert.match(panelHtml, />界面修正与确认</);
-  assert.match(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", \(\) => \{\s*setInterfaceWorkflowCorrectionOpen\(/);
-  assert.doesNotMatch(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
-  assert.match(panelSource, /on\("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
-  assert.match(panelSource, /function applyLanguage[\s\S]*?syncInterfaceWorkflowCorrectionToggleLabel\(\);/);
+  assert.match(panelHtml, /id="imageInspectorWorkflowReviewHost"/);
+  assert.match(panelHtml, /id="interfaceWorkflowCurrentReviewPanel"/);
+  assert.match(panelHtml, /id="imageInspectorConfirmAndStoreBtn"[^>]*>确认并入库</);
+  assert.match(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
+  assert.doesNotMatch(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", \(\) => \{\s*setInterfaceWorkflowCorrectionOpen\(/);
+  assert.doesNotMatch(panelHtml, /id="interfaceWorkflowEditBoxesBtn"/);
+});
+
+test("full-image workbench contains current-interface review but excludes workflow release tools", () => {
+  const start = panelHtml.indexOf('id="interfaceWorkflowCurrentReviewPanel"');
+  const end = panelHtml.indexOf('id="interfaceWorkflowGenerateV2Btn"', start);
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const currentReview = panelHtml.slice(start, end);
+  for (const id of [
+    "interfaceWorkflowNodeName",
+    "interfaceWorkflowContentEditor",
+    "interfaceWorkflowOperationToolbar",
+  ]) {
+    assert.match(currentReview, new RegExp(`id="${id}"`));
+  }
+  assert.doesNotMatch(currentReview, /id="interfaceWorkflowGenerateV2Btn"/);
+  assert.doesNotMatch(currentReview, /id="interfaceWorkflowMemoryBtn"/);
+  assert.doesNotMatch(currentReview, /id="interfaceWorkflowOperationDryRunBtn"/);
+});
+
+test("full-image review panel preserves heading and interface fields before review sections", () => {
+  assert.match(
+    panelCss,
+    /\.interface-workflow-current-review-panel\s*>\s*\*\s*\{[^}]*order:\s*0;/s,
+  );
 });
 
 test("standalone source preview cannot acquire workflow mutation authority", () => {
@@ -200,13 +242,10 @@ test("standalone source preview exposes box correction but disables workflow rev
   const elements = new Map([
     ["interfaceWorkflowNodeName", { value: "", disabled: false }],
     ["interfaceWorkflowSurfaceType", { value: "", disabled: false }],
-    ["interfaceWorkflowNodeReviewStatus", { value: "", disabled: false }],
-    ["interfaceWorkflowApproveAndSaveBtn", { disabled: false }],
-    ["interfaceWorkflowEditBoxesBtn", { disabled: true }],
+    ["imageInspectorConfirmAndStoreBtn", { disabled: false }],
     ["interfaceWorkflowReviewToolsToggle", { disabled: false }],
     ["interfaceWorkflowRefreshEvidenceBtn", { disabled: false }],
     ["interfaceWorkflowRemoveSourceBtn", { disabled: false }],
-    ["interfaceWorkflowSaveBtn", { disabled: false }],
     ["interfaceWorkflowMemoryBtn", { disabled: false }],
     ["interfaceWorkflowSaveStatus", { textContent: "" }],
     ["interfaceWorkflowOperationToolbar", { hidden: false }],
@@ -227,6 +266,9 @@ test("standalone source preview exposes box correction but disables workflow rev
     const renderInterfaceWorkflowOperationEditor = (_view, options) => {
       calls.operationEditable = options?.editable;
     };
+    const syncImageInspectorConfirmAndStoreButton = () => {
+      elements.get("imageInspectorConfirmAndStoreBtn").disabled = true;
+    };
     const t = (key) => key;
     const $ = (id) => elements.get(id) || null;
     ${renderSource}
@@ -238,10 +280,9 @@ test("standalone source preview exposes box correction but disables workflow rev
   });
 
   assert.equal(elements.get("interfaceWorkflowNodeName").disabled, true);
-  assert.equal(elements.get("interfaceWorkflowApproveAndSaveBtn").disabled, true);
-  assert.equal(elements.get("interfaceWorkflowSaveBtn").disabled, true);
+  assert.equal(elements.get("imageInspectorConfirmAndStoreBtn").disabled, true);
   assert.equal(elements.get("interfaceWorkflowRefreshEvidenceBtn").disabled, true);
-  assert.equal(elements.get("interfaceWorkflowEditBoxesBtn").disabled, false);
+  assert.equal(elements.get("interfaceWorkflowReviewToolsToggle").disabled, false);
   assert.equal(elements.get("interfaceWorkflowOperationToolbar").hidden, true);
   assert.match(elements.get("interfaceWorkflowSaveStatus").textContent, /加入软件流程/);
   assert.equal(calls.contentEditable, false);
@@ -263,8 +304,11 @@ test("workflow mutation handlers reject a displayed standalone source preview", 
     );
   }
   assert.match(
-    panelSource,
-    /on\("interfaceWorkflowSaveBtn", "click", \(\) => saveInterfaceWorkflowReview\(\{ requireDisplayedWorkflow: true \}\)\)/,
+    functionSource(
+      "async function confirmAndStoreCurrentInterfaceWorkflowReview",
+      "async function publishLearningOperationalMemory",
+    ),
+    /binding\?\.authority !== "workflow"/,
   );
 });
 

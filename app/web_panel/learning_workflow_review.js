@@ -1030,6 +1030,21 @@
       return current();
     }
 
+    function confirmNodeAndOutgoingHumanReview(nodeId) {
+      const node = nodeById.get(nodeId);
+      if (!node) {
+        throw new Error(`unknown interface workflow node: ${nodeId}`);
+      }
+      if (stopBoundaryNodeIds.has(String(nodeId || "").trim())) {
+        throw new Error(`needs_learning stop-boundary node cannot be human approved: ${nodeId}`);
+      }
+      const outgoing = edges.filter((edge) => String(edge?.source_node_id || "").trim() === nodeId);
+      // 先验证全部路径，再写入任何审核事实，避免一次确认留下部分批准。
+      outgoing.forEach((edge) => resolveOperationSubjects(edge.edge_id));
+      outgoing.forEach((edge) => confirmOperationHumanReviewBundle(edge.edge_id));
+      return confirmNodeHumanReview(nodeId);
+    }
+
     function updateNode(nodeId, patch) {
       const node = nodeById.get(nodeId);
       if (!node) {
@@ -1432,6 +1447,7 @@
       addOperation,
       addPlaceholderNode,
       clearFocus,
+      confirmNodeAndOutgoingHumanReview,
       confirmNodeHumanReview,
       confirmOperationActionCandidateHumanReview,
       confirmOperationEdgeHumanReview,

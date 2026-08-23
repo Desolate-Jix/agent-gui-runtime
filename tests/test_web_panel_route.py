@@ -1136,7 +1136,8 @@ def test_learning_draft_box_save_refreshes_parent_before_closing_editor() -> Non
     assert "Reviewed template candidate save response is missing reviewed_template_candidate_path" in save_body
     assert "try {" in save_body
     assert "} finally {" in save_body
-    assert 'apply.textContent = saveSucceeded ? "Saved" : "Save review";' in save_body
+    assert 'currentLanguage === "en-US" ? "Draft saved" : "草稿已保存"' in save_body
+    assert 'currentLanguage === "en-US" ? "Save draft only" : "仅保存草稿"' in save_body
     assert "apply.disabled = false" in save_body
     assert "previousSourcePath: sourcePath" in save_body
     assert "discoverRelatedSidecars: false" in panel_js
@@ -4696,14 +4697,14 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowLayerTabs"' in html
     assert 'id="interfaceWorkflowNodeName"' in html
     assert 'id="interfaceWorkflowSurfaceType"' in html
-    assert 'id="interfaceWorkflowNodeReviewStatus"' in html
-    assert '<option value="human_approved">human_approved（需显式确认）</option>' in html
-    assert 'id="interfaceWorkflowApproveAndSaveBtn"' in html
+    assert 'id="interfaceWorkflowCurrentReviewPanel"' in html
+    assert 'id="imageInspectorWorkflowReviewHost"' in html
+    assert 'id="imageInspectorConfirmAndStoreBtn"' in html
+    assert 'id="interfaceWorkflowNodeReviewStatus"' not in html
+    assert 'id="interfaceWorkflowApproveAndSaveBtn"' not in html
     assert 'id="interfaceWorkflowNodeApproveBtn"' not in html
-    assert "确认正确并保存" in html
     assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' not in html
-    assert 'id="interfaceWorkflowOperationApproveBundleBtn"' in html
-    assert "批准这条操作路径" in html
+    assert 'id="interfaceWorkflowOperationApproveBundleBtn"' not in html
     assert 'id="interfaceWorkflowReviewPanelToggle"' not in html
     assert "显示审核工具" not in html
     assert 'id="interfaceWorkflowReviewToolsToggle"' in html
@@ -4725,9 +4726,9 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert 'id="interfaceWorkflowAddSourceBtn"' in html
     assert 'id="interfaceWorkflowRemoveSourceBtn"' in html
     assert 'id="interfaceWorkflowSourceStatus"' in html
-    assert 'id="interfaceWorkflowEditBoxesBtn"' in html
+    assert 'id="interfaceWorkflowEditBoxesBtn"' not in html
     assert 'id="interfaceWorkflowReviewToolsToggle"' in html
-    assert 'id="interfaceWorkflowSaveBtn"' in html
+    assert 'id="interfaceWorkflowSaveBtn"' not in html
     assert "仅保存草稿" in html
     assert 'id="interfaceWorkflowMemoryBtn"' in html
     assert 'id="interfaceWorkflowSaveStatus"' in html
@@ -5223,17 +5224,13 @@ def _extract_javascript_function(source: str, marker: str) -> str:
 def test_interface_workflow_correction_opens_existing_full_image_box_editor() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
-    workspace_handler_start = panel_js.index('on("interfaceWorkflowReviewToolsToggle"')
-    workspace_handler_end = panel_js.index("\n  });", workspace_handler_start) + len("\n  });")
-    workspace_handler_body = panel_js[workspace_handler_start:workspace_handler_end]
     function_body = _extract_javascript_function(
         panel_js,
         "async function openCurrentInterfaceWorkflowBoxEditor",
     )
 
-    assert "setInterfaceWorkflowCorrectionOpen" in workspace_handler_body
-    assert "openCurrentInterfaceWorkflowBoxEditor" not in workspace_handler_body
-    assert 'on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);' in panel_js
+    assert 'on("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor);' in panel_js
+    assert 'on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);' not in panel_js
     assert "function openCurrentInterfaceWorkflowBoxEditor" in panel_js
     correction_open_index = function_body.index("setInterfaceWorkflowCorrectionOpen(true, view);")
     current_source_index = function_body.index("if (currentLearningDraftReviewMatchesSource(sourcePath))")
@@ -5280,7 +5277,7 @@ def test_interface_workflow_correction_opens_existing_full_image_box_editor() ->
     )
     assert "closeImageInspector();" in function_body
     assert "setInterfaceWorkflowCorrectionOpen(false);" in function_body
-    assert function_body.index('toggle.textContent = "正在打开框编辑器...";') < function_body.index(
+    assert function_body.index('toggle.textContent = "正在打开大图审核窗口...";') < function_body.index(
         "await loadLearningDraftReview({"
     )
     assert 'id="interfaceWorkflowBoxEditorStatus"' in html
@@ -5334,7 +5331,7 @@ def test_reviewed_node_refresh_preserves_the_saved_multi_interface_graph() -> No
     save_start = panel_js.index("async function saveInterfaceWorkflowReview")
     save_end = panel_js.index("\nasync function loadInterfaceWorkflowReview", save_start)
     save_body = panel_js[save_start:save_end]
-    assert "{ commitEditor = true } = {}" in save_body
+    assert "{ commitEditor = true, requireDisplayedWorkflow = false } = {}" in save_body
     assert "commitEditor" in save_body
     assert "interfaceWorkflowReviewState.snapshot()" in save_body
 
