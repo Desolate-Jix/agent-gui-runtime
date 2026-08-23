@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import shutil
 import threading
@@ -2375,6 +2376,51 @@ def test_web_panel_trace_list_filters_by_agent_mode(tmp_path, monkeypatch) -> No
     assert [item["name"] for item in execute_items] == [execute_trace.name]
     assert execute_items[0]["operation"] == "execute-mode-plan-preview"
     assert execute_items[0]["agent_mode"] == "execute"
+
+
+def test_web_panel_trace_list_reads_only_enough_recent_metadata_for_limit(
+    tmp_path, monkeypatch
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trace_dir = tmp_path / "logs" / "traces" / "panel"
+    trace_dir.mkdir(parents=True)
+    for index in range(120):
+        trace_path = trace_dir / f"{index:03d}__operation__trace.json"
+        trace_path.write_text("{}", encoding="utf-8")
+        timestamp = 1_700_000_000 + index
+        trace_path.touch()
+        os.utime(trace_path, (timestamp, timestamp))
+
+    pytest_scans: list[str] = []
+    metadata_reads: list[str] = []
+
+    def references_pytest_temp(path: Path) -> bool:
+        pytest_scans.append(path.name)
+        return False
+
+    def trace_metadata(path: Path) -> dict[str, str]:
+        metadata_reads.append(path.name)
+        return {
+            "operation": "operation",
+            "agent_mode": "",
+            "mode_contract_version": "",
+            "contract_version": "",
+        }
+
+    monkeypatch.setattr(panel_api, "_trace_references_pytest_temp", references_pytest_temp)
+    monkeypatch.setattr(panel_api, "_trace_list_metadata", trace_metadata)
+
+    response = client.get("/panel/list_traces", params={"limit": 3})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["data"]["traces"]] == [
+        "119__operation__trace.json",
+        "118__operation__trace.json",
+        "117__operation__trace.json",
+    ]
+    assert pytest_scans == metadata_reads
+    assert len(metadata_reads) == 3
 
 
 def test_web_panel_renders_manual_candidate_box() -> None:

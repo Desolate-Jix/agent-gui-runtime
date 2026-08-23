@@ -4189,29 +4189,47 @@ def list_traces(limit: int = 50, include_tests: bool = False, mode: Optional[str
         traces_dir = ROOT_DIR / "logs" / "traces"
         if not traces_dir.exists():
             return APIResponse(success=True, message="No traces yet", data={"traces": []}, error=None)
-        files = []
+        requested_limit = max(0, min(int(limit), 500))
+        if requested_limit == 0:
+            return APIResponse(success=True, message="0 traces", data={"traces": []}, error=None)
+        candidates: list[tuple[int, str, Path, str, int, float]] = []
         for category_dir in sorted(traces_dir.iterdir(), reverse=True):
             if not category_dir.is_dir():
                 continue
-            for tf in sorted(category_dir.iterdir(), reverse=True):
+            for tf in category_dir.iterdir():
                 if tf.suffix != ".json":
                     continue
-                if not include_tests and _trace_references_pytest_temp(tf):
+                try:
+                    stat = tf.stat()
+                except OSError:
                     continue
-                meta = _trace_list_metadata(tf)
-                if mode_filter and meta.get("agent_mode") != mode_filter:
-                    continue
-                stat = tf.stat()
-                files.append({
-                    "name": tf.name,
-                    "path": str(tf.resolve()),
-                    "category": category_dir.name,
-                    **meta,
-                    "size": stat.st_size,
-                    "modified": stat.st_mtime,
-                })
-        files.sort(key=lambda f: f["modified"], reverse=True)
-        return APIResponse(success=True, message=f"{len(files)} traces", data={"traces": files[:limit]}, error=None)
+                candidates.append((
+                    stat.st_mtime_ns,
+                    tf.name,
+                    tf,
+                    category_dir.name,
+                    stat.st_size,
+                    stat.st_mtime,
+                ))
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        files = []
+        for _, _, tf, category, size, modified in candidates:
+            if len(files) >= requested_limit:
+                break
+            if not include_tests and _trace_references_pytest_temp(tf):
+                continue
+            meta = _trace_list_metadata(tf)
+            if mode_filter and meta.get("agent_mode") != mode_filter:
+                continue
+            files.append({
+                "name": tf.name,
+                "path": str(tf.resolve()),
+                "category": category,
+                **meta,
+                "size": size,
+                "modified": modified,
+            })
+        return APIResponse(success=True, message=f"{len(files)} traces", data={"traces": files}, error=None)
     except Exception as exc:
         return APIResponse(success=False, message="List failed", data=None, error=ErrorModel(code="trace_list_failed", details=str(exc)))
 
