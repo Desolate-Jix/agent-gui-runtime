@@ -4670,7 +4670,7 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert "路径图与界面证据" in html
     assert "先在下方带框图选择具体控件" in html
     assert "先在左侧路径图选择具体控件" not in html
-    assert "修正当前界面" in html
+    assert "修正与确认" in html
     assert 'id="interfaceWorkflowGraph"' in html
     assert 'id="interfaceWorkflowGraphCanvas"' in html
     assert 'id="interfaceWorkflowGraphTooltip"' in html
@@ -4700,12 +4700,15 @@ def test_panel_contains_generic_interface_workflow_review_workspace() -> None:
     assert '<option value="human_approved">human_approved（需显式确认）</option>' in html
     assert 'id="interfaceWorkflowApproveAndSaveBtn"' in html
     assert 'id="interfaceWorkflowNodeApproveBtn"' not in html
-    assert "批准并保存当前界面" in html
+    assert "确认正确并保存" in html
     assert 'id="interfaceWorkflowNodeHumanReviewConfirmed"' not in html
     assert 'id="interfaceWorkflowOperationApproveBundleBtn"' in html
     assert "批准这条操作路径" in html
-    assert 'id="interfaceWorkflowReviewPanelToggle"' in html
-    assert "显示审核工具" in html
+    assert 'id="interfaceWorkflowReviewPanelToggle"' not in html
+    assert "显示审核工具" not in html
+    assert 'id="interfaceWorkflowReviewToolsToggle"' in html
+    assert "修正与确认" in html
+    assert "界面修正与确认" in html
     assert 'id="interfaceWorkflowTransitionAction"' in html
     assert 'id="interfaceWorkflowTransitionTarget"' in html
     assert 'id="interfaceWorkflowSourceSelect"' in html
@@ -5220,16 +5223,17 @@ def _extract_javascript_function(source: str, marker: str) -> str:
 def test_interface_workflow_correction_opens_existing_full_image_box_editor() -> None:
     html = Path("app/web_panel/index.html").read_text(encoding="utf-8-sig")
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
-    handler_start = panel_js.index('on("interfaceWorkflowReviewToolsToggle"')
-    handler_end = panel_js.index("\n  });", handler_start) + len("\n  });")
-    handler_body = panel_js[handler_start:handler_end]
+    workspace_handler_start = panel_js.index('on("interfaceWorkflowReviewToolsToggle"')
+    workspace_handler_end = panel_js.index("\n  });", workspace_handler_start) + len("\n  });")
+    workspace_handler_body = panel_js[workspace_handler_start:workspace_handler_end]
     function_body = _extract_javascript_function(
         panel_js,
         "async function openCurrentInterfaceWorkflowBoxEditor",
     )
 
-    assert "openCurrentInterfaceWorkflowBoxEditor" in handler_body
-    assert "setInterfaceWorkflowCorrectionOpen" not in handler_body
+    assert "setInterfaceWorkflowCorrectionOpen" in workspace_handler_body
+    assert "openCurrentInterfaceWorkflowBoxEditor" not in workspace_handler_body
+    assert 'on("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor);' in panel_js
     assert "function openCurrentInterfaceWorkflowBoxEditor" in panel_js
     correction_open_index = function_body.index("setInterfaceWorkflowCorrectionOpen(true, view);")
     current_source_index = function_body.index("if (currentLearningDraftReviewMatchesSource(sourcePath))")

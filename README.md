@@ -77,7 +77,7 @@ Required end state—the live loop is not complete today:
 1. **Explore** an uncertain path.
 2. **Capture evidence** with identity, coordinates, provenance, and freshness.
 3. **Review** semantics, actions, transitions, effects, and risk.
-   - The Panel now uses one interface-asset library with explicit reusable, pending-review, safe-stop, and stale-review states. Each operation path has one approval gesture, each interface has one **approve-and-save** gesture, and compilation plus CAS publication is exposed as one **Generate workflow version** action. The operation gesture still records three independently revision-bound facts—target control, action candidate, and transition—and every generated version remains non-authorizing.
+   - The Panel now uses one interface-asset library with explicit reusable, pending-review, safe-stop, and stale-review states. One **Correct and confirm** entry opens the complete interface workspace: standalone assets can correct evidence boxes, while workflow-bound interfaces can be confirmed as-is or corrected before approval. Each operation path still requires its own explicit approval gesture, each workflow-bound interface ends with one **Confirm correct and save** gesture, and compilation plus CAS publication is exposed as one **Generate workflow version** action. The operation gesture records three independently revision-bound facts—target control, action candidate, and transition—and every generated version remains non-authorizing.
 4. **Compile** an immutable semantic asset that grants no authority.
 5. **Observe again** for an Agent intent.
 6. **Relocate** on the current interface; old coordinates are hints only.

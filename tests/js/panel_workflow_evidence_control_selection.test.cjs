@@ -127,16 +127,18 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   const elements = new Map([
     ["interfaceWorkflowReviewToolsColumn", tools],
     ["interfaceWorkflowOperationToolbar", operationToolbar],
-    ["interfaceWorkflowReviewPanelToggle", toggle],
+    ["interfaceWorkflowReviewToolsToggle", toggle],
   ]);
   const observations = { evidenceRenders: 0, editorRenders: 0, correctionOpen: false };
   const sandbox = { console, globalThis: {}, elements, observations };
   vm.runInNewContext(`
     const interfaceWorkflowWorkbenchState = {
       setCorrectionOpen: (open) => { observations.correctionOpen = open; },
+      current: () => ({ correction_open: observations.correctionOpen }),
     };
     const currentLanguage = "zh-CN";
     const currentInterfaceWorkflowCorrectionTarget = () => ({ view: null });
+    const currentInterfaceWorkflowMutationTarget = (view) => ({ state: {}, view, reason: "" });
     const renderInterfaceWorkflowEditor = () => { observations.editorRenders += 1; };
     const renderActiveInterfaceWorkflowEvidence = () => { observations.evidenceRenders += 1; };
     const t = (value) => value;
@@ -150,15 +152,192 @@ test("opening correction tools refreshes evidence so selectable hit targets are 
   assert.equal(observations.correctionOpen, true);
   assert.equal(tools.hidden, false);
   assert.equal(operationToolbar.hidden, false);
+  assert.equal(toggle.textContent, "收起修正与确认");
   assert.equal(observations.editorRenders, 1);
   assert.equal(observations.evidenceRenders, 1);
 });
 
-test("review workspace has a dedicated toggle separate from the box editor", () => {
-  assert.match(panelHtml, /id="interfaceWorkflowReviewPanelToggle"/);
-  assert.match(panelHtml, /显示审核工具/);
-  assert.match(panelSource, /on\("interfaceWorkflowReviewPanelToggle", "click"/);
-  assert.match(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
+test("review and correction use one primary entry while box editing remains contextual", () => {
+  assert.doesNotMatch(panelHtml, /id="interfaceWorkflowReviewPanelToggle"/);
+  assert.doesNotMatch(panelHtml, /显示审核工具|收起审核工具/);
+  assert.match(panelHtml, /id="interfaceWorkflowReviewToolsToggle"[^>]*>修正与确认</);
+  assert.match(panelHtml, />界面修正与确认</);
+  assert.match(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", \(\) => \{\s*setInterfaceWorkflowCorrectionOpen\(/);
+  assert.doesNotMatch(panelSource, /on\("interfaceWorkflowReviewToolsToggle", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
+  assert.match(panelSource, /on\("interfaceWorkflowEditBoxesBtn", "click", openCurrentInterfaceWorkflowBoxEditor\)/);
+  assert.match(panelSource, /function applyLanguage[\s\S]*?syncInterfaceWorkflowCorrectionToggleLabel\(\);/);
+});
+
+test("standalone source preview cannot acquire workflow mutation authority", () => {
+  const authoritySource = functionSource(
+    "function currentInterfaceWorkflowMutationTarget",
+    "function interfaceWorkflowEditableImagePath",
+  );
+  const workflowB = { node: { node_id: "workflow_b" } };
+  const sourceA = { node: { node_id: "asset_a" } };
+  const sandbox = { globalThis: {} };
+  vm.runInNewContext(`
+    const interfaceWorkflowWorkbenchState = {
+      current: () => ({ evidence_mode: "source_preview", evidence_node_id: "asset_a" }),
+    };
+    const interfaceWorkflowReviewState = { current: () => workflowB };
+    ${authoritySource}
+    globalThis.resolveMutation = currentInterfaceWorkflowMutationTarget;
+  `, { ...sandbox, workflowB });
+
+  const target = sandbox.globalThis.resolveMutation(sourceA);
+
+  assert.equal(target.state, null);
+  assert.equal(target.view.node.node_id, "asset_a");
+  assert.equal(target.reason, "source_preview_requires_workflow_attachment");
+});
+
+test("standalone source preview exposes box correction but disables workflow review controls", () => {
+  const renderSource = functionSource(
+    "function renderInterfaceWorkflowEditor",
+    "function clearInterfaceWorkflowNodeHumanReviewConfirmation",
+  );
+  const elements = new Map([
+    ["interfaceWorkflowNodeName", { value: "", disabled: false }],
+    ["interfaceWorkflowSurfaceType", { value: "", disabled: false }],
+    ["interfaceWorkflowNodeReviewStatus", { value: "", disabled: false }],
+    ["interfaceWorkflowApproveAndSaveBtn", { disabled: false }],
+    ["interfaceWorkflowEditBoxesBtn", { disabled: true }],
+    ["interfaceWorkflowReviewToolsToggle", { disabled: false }],
+    ["interfaceWorkflowRefreshEvidenceBtn", { disabled: false }],
+    ["interfaceWorkflowRemoveSourceBtn", { disabled: false }],
+    ["interfaceWorkflowSaveBtn", { disabled: false }],
+    ["interfaceWorkflowMemoryBtn", { disabled: false }],
+    ["interfaceWorkflowSaveStatus", { textContent: "" }],
+    ["interfaceWorkflowOperationToolbar", { hidden: false }],
+  ]);
+  const calls = { contentEditable: null, operationEditable: null };
+  const sandbox = { globalThis: {}, elements, calls };
+  vm.runInNewContext(`
+    let interfaceWorkflowHasUnsavedChanges = false;
+    const interfaceWorkflowWorkbenchState = { current: () => ({ correction_open: true }) };
+    const currentInterfaceWorkflowMutationTarget = (view) => ({
+      state: null,
+      view,
+      reason: "source_preview_requires_workflow_attachment",
+    });
+    const renderInterfaceWorkflowContentEditor = (_view, options) => {
+      calls.contentEditable = options?.editable;
+    };
+    const renderInterfaceWorkflowOperationEditor = (_view, options) => {
+      calls.operationEditable = options?.editable;
+    };
+    const t = (key) => key;
+    const $ = (id) => elements.get(id) || null;
+    ${renderSource}
+    globalThis.renderEditor = renderInterfaceWorkflowEditor;
+  `, sandbox);
+
+  sandbox.globalThis.renderEditor({
+    node: { node_id: "asset_a", display_name: "Asset A", review_status: "needs_human_review" },
+  });
+
+  assert.equal(elements.get("interfaceWorkflowNodeName").disabled, true);
+  assert.equal(elements.get("interfaceWorkflowApproveAndSaveBtn").disabled, true);
+  assert.equal(elements.get("interfaceWorkflowSaveBtn").disabled, true);
+  assert.equal(elements.get("interfaceWorkflowRefreshEvidenceBtn").disabled, true);
+  assert.equal(elements.get("interfaceWorkflowEditBoxesBtn").disabled, false);
+  assert.equal(elements.get("interfaceWorkflowOperationToolbar").hidden, true);
+  assert.match(elements.get("interfaceWorkflowSaveStatus").textContent, /加入软件流程/);
+  assert.equal(calls.contentEditable, false);
+  assert.equal(calls.operationEditable, false);
+});
+
+test("workflow mutation handlers reject a displayed standalone source preview", () => {
+  const guardedFunctions = [
+    ["function saveInterfaceWorkflowContentDescriptor", "function renderInterfaceWorkflowEditor"],
+    ["function commitInterfaceWorkflowOperationEditor", "function confirmCurrentInterfaceWorkflowOperationBundle"],
+    ["function approveCurrentInterfaceWorkflowNode", "async function approveAndSaveCurrentInterfaceWorkflowNode"],
+    ["function commitInterfaceWorkflowEditorToState", "async function saveInterfaceWorkflowReview"],
+  ];
+  for (const [start, end] of guardedFunctions) {
+    assert.match(
+      functionSource(start, end),
+      /currentInterfaceWorkflowMutationTarget\(/,
+      `${start} must fail closed unless the displayed evidence owns workflow authority`,
+    );
+  }
+  assert.match(
+    panelSource,
+    /on\("interfaceWorkflowSaveBtn", "click", \(\) => saveInterfaceWorkflowReview\(\{ requireDisplayedWorkflow: true \}\)\)/,
+  );
+});
+
+test("refresh current evidence rejects a displayed standalone source preview without saving workflow B", async () => {
+  const refreshSource = functionSource(
+    "async function refreshCurrentInterfaceWorkflowEvidence",
+    "function closeImageInspector",
+  );
+  let refreshes = 0;
+  const button = { disabled: false, textContent: "刷新当前证据" };
+  const sandbox = {
+    globalThis: {},
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: null,
+      view: { node: { node_id: "asset_a" } },
+      reason: "source_preview_requires_workflow_attachment",
+    }),
+    refreshSavedLearningDraftReview: async () => { refreshes += 1; return {}; },
+    renderResponse: () => {},
+    $: (id) => id === "interfaceWorkflowRefreshEvidenceBtn" ? button : null,
+  };
+  vm.runInNewContext(
+    `${refreshSource}; globalThis.refreshEvidence = refreshCurrentInterfaceWorkflowEvidence;`,
+    sandbox,
+  );
+
+  const result = await sandbox.globalThis.refreshEvidence();
+
+  assert.equal(result, null);
+  assert.equal(refreshes, 0);
+  assert.equal(button.disabled, true);
+});
+
+test("refresh current evidence preserves workflow-bound refresh and save", async () => {
+  const refreshSource = functionSource(
+    "async function refreshCurrentInterfaceWorkflowEvidence",
+    "function closeImageInspector",
+  );
+  const reviewState = { snapshot: () => ({ workflow: { workflow_id: "workflow_b" } }) };
+  const workflowView = {
+    node: {
+      node_id: "workflow_b",
+      editable_review_source_path: "artifacts/workflow-b/review.json",
+    },
+  };
+  const button = { disabled: false, textContent: "刷新当前证据" };
+  const calls = [];
+  const sandbox = {
+    globalThis: {},
+    currentInterfaceWorkflowMutationTarget: () => ({ state: reviewState, view: workflowView, reason: "" }),
+    interfaceWorkflowEditableReviewSourcePath: () => "artifacts/workflow-b/review.json",
+    buildLearningDraftEditorBinding: (options) => { calls.push(["binding", options]); return options; },
+    refreshSavedLearningDraftReview: async (options) => {
+      calls.push(["refresh", options]);
+      return { review: {}, workflow: { workflow_id: "workflow_b" } };
+    },
+    renderResponse: () => {},
+    $: (id) => id === "interfaceWorkflowRefreshEvidenceBtn" ? button : null,
+  };
+  vm.runInNewContext(
+    `${refreshSource}; globalThis.refreshEvidence = refreshCurrentInterfaceWorkflowEvidence;`,
+    sandbox,
+  );
+
+  const result = await sandbox.globalThis.refreshEvidence();
+
+  assert.equal(result.workflow.workflow_id, "workflow_b");
+  assert.equal(calls[0][0], "binding");
+  assert.equal(calls[0][1].authority, "workflow");
+  assert.equal(calls[0][1].state, reviewState);
+  assert.equal(calls[1][0], "refresh");
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "刷新当前证据");
 });
 
 test("switching the box editor source preserves the workflow review that owns it", () => {

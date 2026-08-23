@@ -24,6 +24,7 @@ function loadHarness({ apiResult = {} } = {}) {
   const calls = [];
   const sandbox = { globalThis: null, interfaceWorkflowAssetV2State: null, interfaceWorkflowAssetV2Binding: { key: "", generation: 0, loaded: false }, interfaceWorkflowAssetV2Pending: { compile: false, publish: false, preview: false }, interfaceWorkflowAssetV2LastResponse: null, interfaceWorkflowHasUnsavedChanges: false, interfaceWorkflowReviewState: null,
     interfaceWorkflowLoadGuard: { begin() { return 1; } },
+    currentInterfaceWorkflowMutationTarget: () => ({ state: {}, view: null, reason: "" }),
     interfaceWorkflowLibraryRegistry: { workflows: { workflow_a: { source_asset_sha256: "a".repeat(64) } } },
     $: (id) => elements[id] || null,
     api: async (method, route, payload) => { calls.push({ method, route, payload }); return typeof apiResult === "function" ? apiResult(method, route, payload) : apiResult; }, renderResponse() {},

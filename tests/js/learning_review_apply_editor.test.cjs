@@ -24,7 +24,7 @@ test("operation editor exposes one primary review gesture while keeping granular
   assert.doesNotMatch(html, /id="interfaceWorkflowOperationApproveEdgeBtn"/);
   assert.match(source, /confirmOperationHumanReviewBundle/);
   assert.match(html, /id="interfaceWorkflowApproveAndSaveBtn"/);
-  assert.match(html, /批准并保存当前界面/);
+  assert.match(html, /确认正确并保存/);
   assert.match(html, /id="interfaceWorkflowSaveBtn"[^>]*>仅保存草稿/);
   assert.doesNotMatch(html, /id="interfaceWorkflowNodeApproveBtn"/);
   assert.doesNotMatch(html, /id="interfaceWorkflowNodeHumanReviewConfirmed"/);
@@ -39,6 +39,11 @@ test("operation review bundle aborts when the operation editor commit fails", ()
     interfaceWorkflowReviewState: {
       confirmOperationHumanReviewBundle: () => { confirmations += 1; },
     },
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: sandbox.interfaceWorkflowReviewState,
+      view: null,
+      reason: "",
+    }),
     interfaceWorkflowSelectedOperationId: "edge_open",
     commitInterfaceWorkflowOperationEditor: () => null,
     $: () => null,
@@ -67,6 +72,11 @@ test("operation review bundle commits once and records one user gesture", () => 
     },
     interfaceWorkflowSelectedOperationId: "edge_open",
     interfaceWorkflowReview: null,
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: sandbox.interfaceWorkflowReviewState,
+      view: null,
+      reason: "",
+    }),
     commitInterfaceWorkflowOperationEditor: (options) => {
       calls.push(["commit", options.silent]);
       return { edge_id: "edge_open" };
@@ -102,6 +112,7 @@ test("operation editor mutation commits or revokes before rerendering approval b
     },
     interfaceWorkflowSelectedOperationId: "edge_open",
     interfaceWorkflowReview: null,
+    currentInterfaceWorkflowMutationTarget: () => ({ state: {}, view: null, reason: "" }),
     commitInterfaceWorkflowOperationEditor: () => null,
     clearInterfaceWorkflowNodeHumanReviewConfirmation: () => calls.push(["clear"]),
     currentInterfaceWorkflowOperation: () => ({ edge_id: "edge_open" }),
@@ -136,6 +147,7 @@ test("editing a previously approved interface immediately enables approve and sa
       }),
     },
     clearInterfaceWorkflowNodeHumanReviewConfirmation: () => {},
+    currentInterfaceWorkflowMutationTarget: () => ({ state: {}, view: null, reason: "" }),
     markInterfaceWorkflowUnsaved: () => {},
   };
   vm.runInNewContext(
@@ -160,6 +172,8 @@ test("needs_learning renders as a locked stop boundary instead of an approvable 
   const sandbox = {
     $: (id) => elements[id] || null,
     interfaceWorkflowHasUnsavedChanges: false,
+    interfaceWorkflowWorkbenchState: { current: () => ({ correction_open: true }) },
+    currentInterfaceWorkflowMutationTarget: (view) => ({ state: {}, view, reason: "" }),
     renderInterfaceWorkflowContentEditor: () => {},
     renderInterfaceWorkflowOperationEditor: () => {},
     t: () => "saved",
@@ -201,7 +215,7 @@ test("approve and save persists exactly the approved revision without a second e
   });
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     ["approve"],
-    ["save", { commitEditor: false }],
+    ["save", { commitEditor: false, requireDisplayedWorkflow: true }],
   ]);
 });
 
@@ -252,6 +266,11 @@ test("approving the current interface commits its revision once without a status
     renderInterfaceWorkflowReviewSelection: () => calls.push(["render"]),
     $: (id) => elements[id] || null,
   };
+  sandbox.currentInterfaceWorkflowMutationTarget = () => ({
+    state: sandbox.interfaceWorkflowReviewState,
+    view: sandbox.interfaceWorkflowReviewState.current(),
+    reason: "",
+  });
   vm.runInNewContext(
     `${source.slice(start, end)}; globalThis.result = approveCurrentInterfaceWorkflowNode();`,
     sandbox,
