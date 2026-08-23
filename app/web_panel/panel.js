@@ -20314,15 +20314,12 @@ async function approveAndSaveCurrentInterfaceWorkflowNode(session = null) {
     if (!saved) return null;
     if (!interfaceWorkflowReviewSessionIsCurrent(session)) return null;
     if (JSON.stringify(session.state.snapshot()) !== openingSnapshotKey) return null;
-    interfaceWorkflowReviewState = draftState;
-    interfaceWorkflowReview = approvedReview;
-    learningDraftEditorWorkflowBinding = {
-      ...session.binding,
-      state: draftState,
-    };
-    session.state = draftState;
-    session.binding = learningDraftEditorWorkflowBinding;
-    renderInterfaceWorkflowReviewSelection();
+    const canonicalState = rebindInterfaceWorkflowReviewSessionFromSavedReview(
+      session,
+      saved,
+      { requireApproved: true },
+    );
+    if (!canonicalState) return null;
     return saved;
   }
   const mutationTarget = currentInterfaceWorkflowMutationTarget();

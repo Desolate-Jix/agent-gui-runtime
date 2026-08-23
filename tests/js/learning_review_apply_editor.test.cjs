@@ -1349,7 +1349,20 @@ test("successful session approval rerenders the canonical approved live state af
     },
   };
   const binding = { authority: "workflow", state: liveState };
+  const canonicalApprovedReview = {
+    ...structuredClone(originalSnapshot),
+    nodes: [{
+      node_id: "job_detail",
+      review_status: "human_approved",
+      reviewed_by_human: true,
+    }],
+  };
+  const canonicalApprovedState = {
+    current: () => ({ node: canonicalApprovedReview.nodes[0] }),
+    snapshot: () => structuredClone(canonicalApprovedReview),
+  };
   const renderStatuses = [];
+  const rebindCalls = [];
   const sandbox = {
     interfaceWorkflowReviewState: liveState,
     interfaceWorkflowReview: originalSnapshot,
@@ -1360,7 +1373,21 @@ test("successful session approval rerenders the canonical approved live state af
       draftState.approved = true;
       return draftState.snapshot();
     },
-    saveInterfaceWorkflowReview: async () => ({ path: "reviewed_workflow.json" }),
+    saveInterfaceWorkflowReview: async () => ({
+      path: "reviewed_workflow.json",
+      saved_review: canonicalApprovedReview,
+    }),
+    rebindInterfaceWorkflowReviewSessionFromSavedReview: (session, saved, options) => {
+      rebindCalls.push({ saved, requireApproved: options?.requireApproved === true });
+      const canonicalBinding = { ...session.binding, state: canonicalApprovedState };
+      sandbox.interfaceWorkflowReviewState = canonicalApprovedState;
+      sandbox.interfaceWorkflowReview = canonicalApprovedReview;
+      sandbox.learningDraftEditorWorkflowBinding = canonicalBinding;
+      session.state = canonicalApprovedState;
+      session.binding = canonicalBinding;
+      sandbox.renderInterfaceWorkflowReviewSelection();
+      return canonicalApprovedState;
+    },
     renderInterfaceWorkflowReviewSelection: () => {
       renderStatuses.push(
         sandbox.interfaceWorkflowReviewState.current().node.review_status,
@@ -1382,9 +1409,12 @@ test("successful session approval rerenders the canonical approved live state af
 
   assert.deepEqual(JSON.parse(JSON.stringify(await sandbox.result)), {
     path: "reviewed_workflow.json",
+    saved_review: canonicalApprovedReview,
   });
-  assert.equal(sandbox.interfaceWorkflowReviewState, draftState);
-  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, draftState);
+  assert.equal(sandbox.interfaceWorkflowReviewState, canonicalApprovedState);
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, canonicalApprovedState);
+  assert.equal(rebindCalls.length, 1);
+  assert.equal(rebindCalls[0].requireApproved, true);
   assert.deepEqual(renderStatuses, ["human_approved"]);
 });
 
