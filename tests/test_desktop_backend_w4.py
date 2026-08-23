@@ -279,9 +279,11 @@ def test_windows_backend_exception_is_indeterminate_not_safe_to_retry() -> None:
             raise RuntimeError("SendInput response lost")
 
     input_controller = FailingInputController()
+    settle_calls: list[float] = []
     backend = ExistingWindowsBackendAdapter(
         input_controller=input_controller,
         window_manager=_WindowManager(),
+        sleeper=settle_calls.append,
     )
     command = DesktopDispatchCommand(
         semantic_action="open_detail",
@@ -309,6 +311,7 @@ def test_windows_backend_exception_is_indeterminate_not_safe_to_retry() -> None:
     assert receipt.status == "indeterminate"
     assert receipt.reason_code == "backend_result_lost"
     assert input_controller.calls == 1
+    assert settle_calls == []
 
 
 def test_windows_backend_rechecks_server_bound_window_before_input() -> None:
@@ -357,3 +360,104 @@ def test_windows_backend_rechecks_server_bound_window_before_input() -> None:
     assert receipt.status == "not_started"
     assert receipt.reason_code == "backend_failed"
     assert input_controller.calls == 0
+
+
+
+def test_windows_backend_settles_once_only_after_successful_dispatch() -> None:
+    from app.agent.desktop_backend import (
+        DesktopDispatchCommand,
+        ExistingWindowsBackendAdapter,
+        _mint_execution_authority,
+    )
+
+    events: list[object] = []
+
+    class SpyInputController:
+        def click_point(self, x: int, y: int) -> dict[str, object]:
+            events.append(("click", x, y))
+            return {"clicked": True}
+
+    backend = ExistingWindowsBackendAdapter(
+        input_controller=SpyInputController(),
+        window_manager=_WindowManager(),
+        post_dispatch_settle_seconds=0.75,
+        sleeper=lambda seconds: events.append(("sleep", seconds)),
+    )
+    command = DesktopDispatchCommand(
+        semantic_action="open_detail",
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+    )
+    authority = _mint_execution_authority(
+        session_id="session-1",
+        observation_id="observation-1",
+        intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
+        selection_sha256="a" * 64,
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+        gate_decision_ref="gate:current",
+    )
+
+    receipt = backend.dispatch(command, authority=authority)
+
+    assert receipt.status == "dispatched"
+    assert events == [("click", 220, 240), ("sleep", 0.75)]
+
+
+def test_windows_backend_does_not_settle_when_click_is_not_dispatched() -> None:
+    from app.agent.desktop_backend import (
+        DesktopDispatchCommand,
+        ExistingWindowsBackendAdapter,
+        _mint_execution_authority,
+    )
+
+    settle_calls: list[float] = []
+
+    class NonDispatchingInputController:
+        def click_point(self, x: int, y: int) -> dict[str, object]:
+            return {"clicked": False}
+
+    backend = ExistingWindowsBackendAdapter(
+        input_controller=NonDispatchingInputController(),
+        window_manager=_WindowManager(),
+        sleeper=settle_calls.append,
+    )
+    command = DesktopDispatchCommand(
+        semantic_action="open_detail",
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+    )
+    authority = _mint_execution_authority(
+        session_id="session-1",
+        observation_id="observation-1",
+        intent_id="intent-1",
+        workflow_revision_hash="b" * 64,
+        semantic_action="open_detail",
+        selection_sha256="a" * 64,
+        capture_id="capture-current",
+        candidate_id="candidate-current",
+        click_point=(220.0, 240.0),
+        target_window_handle=4242,
+        gate_decision_ref="gate:current",
+    )
+
+    receipt = backend.dispatch(command, authority=authority)
+
+    assert receipt.status == "not_started"
+    assert settle_calls == []
+
+
+@pytest.mark.parametrize("settle_seconds", [-0.01, float("nan"), float("inf"), float("-inf"), True])
+def test_windows_backend_rejects_invalid_post_dispatch_settle_seconds(settle_seconds: object) -> None:
+    from app.agent.desktop_backend import ExistingWindowsBackendAdapter
+
+    with pytest.raises(ValueError, match="post_dispatch_settle_seconds"):
+        ExistingWindowsBackendAdapter(post_dispatch_settle_seconds=settle_seconds)

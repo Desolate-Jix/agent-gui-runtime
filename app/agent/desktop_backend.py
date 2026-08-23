@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from threading import Lock
-from typing import Any, Literal, Protocol
+import time
+from typing import Any, Callable, Literal, Protocol
 from uuid import uuid4
 
 
@@ -188,7 +190,18 @@ class ExistingWindowsBackendAdapter:
         *,
         input_controller: Any | None = None,
         window_manager: Any | None = None,
+        post_dispatch_settle_seconds: float = 0.75,
+        sleeper: Callable[[float], None] | None = None,
     ) -> None:
+        if (
+            isinstance(post_dispatch_settle_seconds, bool)
+            or not isinstance(post_dispatch_settle_seconds, (int, float))
+            or not math.isfinite(float(post_dispatch_settle_seconds))
+            or float(post_dispatch_settle_seconds) < 0
+        ):
+            raise ValueError("post_dispatch_settle_seconds must be finite and nonnegative")
+        if sleeper is not None and not callable(sleeper):
+            raise TypeError("sleeper must be callable")
         if input_controller is None:
             from app.core.input_controller import InputController
 
@@ -199,6 +212,8 @@ class ExistingWindowsBackendAdapter:
             window_manager = active_window_manager
         self._input_controller = input_controller
         self._window_manager = window_manager
+        self._post_dispatch_settle_seconds = float(post_dispatch_settle_seconds)
+        self._sleeper = sleeper or time.sleep
 
     def dispatch(
         self,
@@ -238,6 +253,8 @@ class ExistingWindowsBackendAdapter:
                 status="not_started",
                 reason_code="backend_failed",
             )
+        if self._post_dispatch_settle_seconds > 0:
+            self._sleeper(self._post_dispatch_settle_seconds)
         return BackendDispatchReceipt(
             receipt_ref=receipt_ref,
             status="dispatched",
