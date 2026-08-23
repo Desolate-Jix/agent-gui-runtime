@@ -5248,16 +5248,17 @@ def test_interface_workflow_correction_opens_existing_full_image_box_editor() ->
     assert "loadRequestToken !== learningDraftReviewLoadRequestToken" in load_review_body
     assert "learningDraftReview = data;" in load_review_body
     assert "if (!options.skipReviewRender)" in load_review_body
-    assert "function interfaceWorkflowEditableImagePath" in panel_js
+    assert "function interfaceWorkflowEditableImageSource" in panel_js
     assert 'entry?.layer === "source"' in panel_js
     editable_image_body = _extract_javascript_function(
         panel_js,
-        "function interfaceWorkflowEditableImagePath",
+        "function interfaceWorkflowEditableImageSource",
     )
     assert "view?.active_image_path" not in editable_image_body
-    assert "const editorImagePath = interfaceWorkflowEditableImagePath(view);" in function_body
-    assert "const currentEditorImagePath = learningDraftSourceImagePath(learningDraftReview?.draft || {})" in function_body
-    assert "const loadedEditorImagePath = learningDraftSourceImagePath(review.draft);" in function_body
+    assert "const editorImage = interfaceWorkflowEditableImageSource(view);" in function_body
+    assert "const editorImagePath = editorImage.path;" in function_body
+    assert "const currentEditorImagePath = editorImagePath;" in function_body
+    assert "const loadedEditorImagePath = editorImagePath;" in function_body
     assert 'if (!loadedEditorImagePath)' in function_body
     assert "当前界面缺少可编辑原图" in function_body
     assert "openLearningDraftBoxEditor(currentEditorImagePath, { preserveWorkflowBinding: true })" in function_body

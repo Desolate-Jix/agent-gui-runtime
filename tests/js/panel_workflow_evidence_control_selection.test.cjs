@@ -415,10 +415,10 @@ test("switching the box editor source preserves the workflow review that owns it
     openEditorSource.match(/setLearningDraftReviewSourcePath\(sourcePath, \{ preserveWorkflowReview: true \}\);/g)?.length,
     2,
   );
-  assert.doesNotMatch(
+  assert.match(
     openEditorSource,
     /supersedePendingLoad:\s*true/,
-    "the full-image editor must reuse an in-flight load for the same review source",
+    "an explicit full-image review must supersede a stale in-flight load, even for the same source",
   );
 });
 
