@@ -1,0 +1,451 @@
+{
+  "contract_version": "single_application_workflow_review_v1",
+  "workflow": {
+    "workflow_id": "portfolio_v1_seek_apply_entry",
+    "goal": "From an already-open SEEK Job Detail, open the reviewed Quick apply entry once and stop before any form mutation.",
+    "application_identity": {
+      "contract_version": "application_identity_v1",
+      "identity_schema_version": 1,
+      "kind": "web",
+      "identity_key": "web:nz.seek.com",
+      "identity_status": "resolved",
+      "name": "nz.seek.com",
+      "display_name": "nz.seek.com",
+      "canonical_domain": "nz.seek.com",
+      "canonical_origin": "https://nz.seek.com",
+      "executable_identity": null,
+      "product_identity": null,
+      "source_evidence": {
+        "url_or_domain_provided": true,
+        "browser_process_detected": false
+      },
+      "artifact_is_authorization": false
+    },
+    "entry_node_id": "job_detail",
+    "node_ids": [
+      "job_detail",
+      "apply_entry"
+    ],
+    "edge_ids": [
+      "open_apply_flow"
+    ],
+    "review_status": "needs_human_review",
+    "published_memory_version": null
+  },
+  "nodes": [
+    {
+      "node_id": "job_detail",
+      "display_name": "Job Detail",
+      "surface_type": "detail",
+      "state_signature": "seek-job-detail-v1",
+      "agent_description": "Identify the currently open SEEK job detail and expose only the reviewed action that opens its application entry.",
+      "source_paths": [
+        "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+        "artifacts/learning-draft-review/job_detail_caedefa74c/reviewed_template_candidate.json",
+        "artifacts/learning-draft-review/job_detail_533869aed4/reviewed_template_candidate.json",
+        "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-clean-capture.png"
+      ],
+      "evidence": {
+        "source_screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+        "review_revision_source_screenshot_path": "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-clean-capture.png",
+        "source_screenshot_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+        "source_image_kind": "sanitized_clean_capture",
+        "editable_base_allowed": true,
+        "source_capture_sha256": "7ef81a1bbf206263204c70f0030ec813e305ef01327a3c3248d5d3cce9d3c0ec",
+        "sanitization_transform": "crop_top_160_bottom_1380_keep_full_width",
+        "annotations_embedded": false,
+        "human_review_overlay_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/human_review_overlay_path.png",
+        "review_revision_human_review_overlay_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png"
+      },
+      "content_descriptors": [
+        {
+          "content_id": "job_detail_structure",
+          "label": "Job detail content",
+          "source_kind": "region",
+          "source_id": "job_detail_content",
+          "content_behavior": "fixed_structure",
+          "agent_usage": "identity_anchor",
+          "read_policy": "on_interface_match",
+          "agent_description": "Distinguish the current Job Detail from results and application entry."
+        },
+        {
+          "content_id": "job_detail_apply",
+          "label": "Quick apply",
+          "source_kind": "control",
+          "source_id": "apply",
+          "content_behavior": "fixed_structure",
+          "agent_usage": "display_only",
+          "read_policy": "on_demand",
+          "agent_description": ""
+        }
+      ],
+      "regions": [
+        {
+          "region_id": "job_detail_content",
+          "label": "Job detail content",
+          "semantic_name": "Job detail content",
+          "purpose": "Contains the selected job title, company, and description.",
+          "role": "document",
+          "review_status": "needs_human_review"
+        },
+        {
+          "label": "Quick apply",
+          "role": "review_only",
+          "parent_region_id": "",
+          "bbox": {
+            "x": 1178,
+            "y": 892,
+            "w": 145,
+            "h": 48
+          },
+          "target_kind": "region",
+          "target_id": "manual_region_1",
+          "candidate_only": true,
+          "requires_human_review": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false,
+          "final_submit_forbidden": true,
+          "region_id": "manual_region_1",
+          "description": "Open the Quick Apply entry and stop before any form mutation.",
+          "semantic_action": "open_apply_flow",
+          "action_type": "open_apply_flow",
+          "input_semantics": "",
+          "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+          "risk_level": "normal",
+          "requires_confirmation": false,
+          "destination": {
+            "kind": "interface",
+            "target_interface_id": "apply_entry"
+          },
+          "real_action_requires_gate": true,
+          "may_enter_pathgraph_draft": false,
+          "needs_recalibration": true,
+          "semantic_name": "Quick apply",
+          "human_review": {
+            "bbox_edited": true,
+            "bbox_edit_source": "human_review_patch_v1",
+            "previous_bbox": {
+              "x": 1178,
+              "y": 892,
+              "w": 145,
+              "h": 48
+            },
+            "previous_click_point": null,
+            "updated_bbox": {
+              "x": 1178,
+              "y": 892,
+              "w": 145,
+              "h": 48
+            },
+            "updated_click_point": {
+              "x": 1250,
+              "y": 916
+            }
+          }
+        },
+        {
+          "label": "Save",
+          "role": "button",
+          "parent_region_id": "",
+          "bbox": {
+            "x": 1339,
+            "y": 892,
+            "w": 87,
+            "h": 48
+          },
+          "target_kind": "region",
+          "target_id": "manual_region_2",
+          "candidate_only": true,
+          "requires_human_review": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false,
+          "final_submit_forbidden": true,
+          "region_id": "manual_region_2",
+          "description": "Visible Save control on Job Detail; review-only evidence anchor. Do not activate it.",
+          "semantic_action": "read_only",
+          "action_type": "read_only",
+          "input_semantics": "",
+          "verification_rule": "",
+          "risk_level": "normal",
+          "requires_confirmation": false,
+          "destination": {
+            "kind": "none"
+          },
+          "real_action_requires_gate": true
+        }
+      ],
+      "controls": [
+        {
+          "control_id": "apply",
+          "label": "Quick apply",
+          "semantic_name": "Quick apply",
+          "purpose": "Open application entry without filling or submitting anything.",
+          "role": "button",
+          "visible_text_anchors": [
+            "Quick apply",
+            "Apply"
+          ],
+          "risk_class": "medium",
+          "review_status": "human_approved",
+          "bbox": {
+            "x": 1178,
+            "y": 892,
+            "w": 145,
+            "h": 48
+          },
+          "evidence_region_id": "manual_region_1",
+          "reviewed_by_human": true,
+          "display_only": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false,
+          "human_review_confirmation": {
+            "contract_version": "interface_target_control_human_review_confirmation_v1",
+            "revision": {
+              "control_id": "apply",
+              "label": "Quick apply",
+              "semantic_name": "Quick apply",
+              "purpose": "Open application entry without filling or submitting anything.",
+              "role": "button",
+              "visible_text_anchors": [
+                "Quick apply",
+                "Apply"
+              ],
+              "risk_class": "medium",
+              "bbox": {
+                "x": 1178,
+                "y": 892,
+                "w": 145,
+                "h": 48
+              },
+              "evidence_region_id": "manual_region_1"
+            }
+          }
+        }
+      ],
+      "action_candidates": [
+        {
+          "action_template_id": "open_apply_flow",
+          "semantic_action": "open_apply_flow",
+          "action_type": "open_apply_flow",
+          "source_control_id": "apply",
+          "target_control_id": "apply",
+          "target_interface_id": "apply_entry",
+          "agent_description": "Open the reviewed application entry from the current Job Detail.",
+          "operation_goal": "Activate the currently grounded Quick apply control once.",
+          "verification_rule_ids": [
+            "application_entry_visible"
+          ],
+          "risk_level": "medium",
+          "review_status": "human_approved",
+          "display_only": true,
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false,
+          "label": "open_apply_flow",
+          "target_region_id": "",
+          "reviewed_by_human": true,
+          "human_review_confirmation": {
+            "contract_version": "interface_action_candidate_human_review_confirmation_v1",
+            "revision": {
+              "action_template_id": "open_apply_flow",
+              "semantic_action": "open_apply_flow",
+              "action_type": "open_apply_flow",
+              "source_control_id": "apply",
+              "target_control_id": "apply",
+              "target_interface_id": "apply_entry",
+              "agent_description": "Open the reviewed application entry from the current Job Detail.",
+              "operation_goal": "Activate the currently grounded Quick apply control once.",
+              "verification_rule_ids": [
+                "application_entry_visible"
+              ],
+              "risk_level": "medium",
+              "label": "open_apply_flow",
+              "target_region_id": ""
+            }
+          }
+        }
+      ],
+      "verification_rules": [
+        {
+          "rule_id": "application_entry_visible",
+          "description": "The Choose documents application-entry surface is visible.",
+          "expected_decision": "safe_stop"
+        }
+      ],
+      "blockers": [],
+      "review_status": "human_approved",
+      "reviewed_by_human": true,
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "responsibility": "Identify the currently open SEEK job detail and expose only the reviewed action that opens its application entry.",
+      "editable_review_source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+      "manual_revision": {
+        "source_path": "artifacts/learning-draft-review/job_detail_caedefa74c/reviewed_template_candidate.json",
+        "source_after_review": "mixed",
+        "artifact_is_authorization": false,
+        "execute_binding_enabled": false
+      },
+      "page_details": {
+        "screen": {
+          "summary": "Job Detail",
+          "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+          "source_image_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false,
+          "source_image_binding_source": "page_details.screen.source_image_path",
+          "source_image_binding_allows_computed_checksum": false,
+          "source_image_materialized_for_panel": false,
+          "screen_size": {
+            "width": 2576,
+            "height": 1220
+          },
+          "source_image_kind": "sanitized_clean_capture",
+          "editable_base_allowed": true,
+          "source_capture_sha256": "7ef81a1bbf206263204c70f0030ec813e305ef01327a3c3248d5d3cce9d3c0ec",
+          "sanitization_transform": "crop_top_160_bottom_1380_keep_full_width",
+          "annotations_embedded": false
+        },
+        "compiled_overlay_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png",
+        "human_review_overlay_path": "artifacts/learning-draft-review/job_detail_caedefa74c/human_review_overlay_r0002.png",
+        "human_review_overlay_revision": 2
+      },
+      "reviewed_revision_hash": "4d58e3774612275359a5627753e159697b036c66c614103d272b44c7612432c1",
+      "current_revision_hash": "4d58e3774612275359a5627753e159697b036c66c614103d272b44c7612432c1"
+    },
+    {
+      "node_id": "apply_entry",
+      "display_name": "Choose documents",
+      "surface_type": "application_entry",
+      "state_signature": "seek-quick-apply-entry-stop-v1",
+      "agent_description": "Recognize the SEEK application entry and stop before form fill, Continue, Next, or final submit.",
+      "source_paths": [
+        "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/apply_entry.json",
+        "artifacts/portfolio-v1-review-evidence/apply-entry-sanitized-historical.png"
+      ],
+      "evidence": {
+        "source_screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/apply_entry/source_screenshot_path.png",
+        "review_revision_source_screenshot_path": "artifacts/portfolio-v1-review-evidence/apply-entry-sanitized-historical.png",
+        "source_screenshot_sha256": "a15c86847704f5d94984006491ef3071d366b5a1b077180807ac9f6f11248322"
+      },
+      "content_descriptors": [
+        {
+          "content_id": "application_entry_surface",
+          "label": "Choose documents",
+          "source_kind": "region",
+          "source_id": "application_entry_surface",
+          "content_behavior": "fixed_structure",
+          "agent_usage": "identity_anchor",
+          "read_policy": "on_interface_match",
+          "agent_description": "Recognize the application entry only so Runtime can stop safely."
+        }
+      ],
+      "regions": [
+        {
+          "region_id": "application_entry_surface",
+          "label": "Choose documents",
+          "semantic_name": "Application entry",
+          "purpose": "Marks the reviewed boundary where execution must stop.",
+          "role": "document",
+          "review_status": "needs_learning"
+        }
+      ],
+      "controls": [],
+      "action_candidates": [],
+      "verification_rules": [
+        {
+          "rule_id": "application_entry_visible",
+          "description": "The Choose documents application-entry surface is visible.",
+          "expected_decision": "safe_stop"
+        }
+      ],
+      "blockers": [
+        {
+          "blocker_id": "portfolio_v1_application_entry_stop",
+          "description": "Stop before form fill, Continue, Next, or final submit.",
+          "safe_stop_required": true
+        }
+      ],
+      "review_status": "needs_learning",
+      "reviewed_by_human": false,
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "reviewed_revision_hash": "",
+      "editable_review_source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/apply_entry.json",
+      "current_revision_hash": "f07b1c7687df17e2260f891e29e3d53f02c4098e07d75082e9e0193971e2adf6"
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "open_apply_flow",
+      "operation_id": "open_apply_flow",
+      "display_name": "Open Quick apply entry",
+      "agent_description": "Open the reviewed Quick apply entry from the current Job Detail and stop before any form mutation.",
+      "source_node_id": "job_detail",
+      "target_node_id": "apply_entry",
+      "action_type": "open_apply_flow",
+      "semantic_action": "open_apply_flow",
+      "source_control_id": "apply",
+      "target_control_id": "apply",
+      "target_region_id": "",
+      "risk_level": "medium",
+      "requires_user_confirmation": true,
+      "preconditions": [
+        "Job Detail identity is uniquely visible and the current Quick apply control is freshly grounded."
+      ],
+      "success_conditions": [
+        "Choose documents application entry is visible."
+      ],
+      "failure_conditions": [
+        "An unexpected destination, external site, or form mutation is observed."
+      ],
+      "review_status": "human_approved",
+      "display_only": true,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false,
+      "action_template_id": "open_apply_flow",
+      "reviewed_by_human": true,
+      "human_review_confirmation": {
+        "contract_version": "interface_workflow_edge_human_review_confirmation_v1",
+        "revision": {
+          "edge_id": "open_apply_flow",
+          "operation_id": "open_apply_flow",
+          "display_name": "Open Quick apply entry",
+          "agent_description": "Open the reviewed Quick apply entry from the current Job Detail and stop before any form mutation.",
+          "source_node_id": "job_detail",
+          "target_node_id": "apply_entry",
+          "action_type": "open_apply_flow",
+          "semantic_action": "open_apply_flow",
+          "source_control_id": "apply",
+          "target_control_id": "apply",
+          "target_region_id": "",
+          "risk_level": "medium",
+          "requires_user_confirmation": true,
+          "preconditions": [
+            "Job Detail identity is uniquely visible and the current Quick apply control is freshly grounded."
+          ],
+          "success_conditions": [
+            "Choose documents application entry is visible."
+          ],
+          "failure_conditions": [
+            "An unexpected destination, external site, or form mutation is observed."
+          ],
+          "action_template_id": "open_apply_flow"
+        }
+      }
+    }
+  ],
+  "safety": {
+    "final_submit_forbidden": true,
+    "form_fill_forbidden": true,
+    "continue_next_step_forbidden": true,
+    "review_draft_only": true,
+    "runtime_requires_fresh_capture": true,
+    "runtime_requires_fresh_grounding": true,
+    "runtime_requires_gate": true,
+    "send_delete_confirm_payment_forbidden": true
+  },
+  "display_only": true,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false
+}

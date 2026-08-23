@@ -1,0 +1,43 @@
+{
+  "contract_version": "portfolio_v1_release_callsite_fixture_v1",
+  "asset_id": "workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0",
+  "asset_content_sha256": "a9eb42d9439568770735f69ff109e6d93b86085507414d62ee49cfef33bb1d1b",
+  "source_workflow_id": "portfolio_v1_seek_apply_entry",
+  "source_workflow_sha256": "9ca9de68ae7a6dcd9f18c10384f2cefb63b6d83648ea10a95e1c5ef9c4283968",
+  "reviewed_revision_hash": "8e512cb94091ad8fd1c67afeba55ff68477c542da28de9da8f05de6416ce4ed7",
+  "current_revision_hash": "8e512cb94091ad8fd1c67afeba55ff68477c542da28de9da8f05de6416ce4ed7",
+  "evidence_sha256": "a201d537ebba727167bc0005e1a246213a5b6aa4a105fdbfb2ea011078a41fab",
+  "job_detail_node_revision_hash": "4d58e3774612275359a5627753e159697b036c66c614103d272b44c7612432c1",
+  "source_screenshot_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+  "human_review_overlay_sha256": "27478cff6c05724a6e5929c7b725764d79f2c5864ecf9c7d61bef503fac877cb",
+  "application_identity_key": "web:nz.seek.com",
+  "canonical_origin": "https://nz.seek.com",
+  "application_identity": {
+    "contract_version": "application_identity_v1",
+    "identity_schema_version": 1,
+    "kind": "web",
+    "identity_key": "web:nz.seek.com",
+    "identity_status": "resolved",
+    "name": "nz.seek.com",
+    "display_name": "nz.seek.com",
+    "canonical_domain": "nz.seek.com",
+    "canonical_origin": "https://nz.seek.com",
+    "executable_identity": null,
+    "product_identity": null,
+    "source_evidence": {
+      "url_or_domain_provided": true,
+      "browser_process_detected": false
+    },
+    "artifact_is_authorization": false
+  },
+  "human_approved_node_ids": [
+    "job_detail"
+  ],
+  "reviewed_state_source_node_id": "job_detail",
+  "stop_boundary_source_node_id": "apply_entry",
+  "semantic_action": "open_apply_flow",
+  "requires_user_confirmation": true,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "fixture_is_live_proof": false
+}
