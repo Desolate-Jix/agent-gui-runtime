@@ -104,16 +104,25 @@ class _ObservationSource:
         *,
         current: dict | None = None,
         post_current: dict | None = None,
+        post_current_sequence: list[dict] | None = None,
         target_process_id: int = 9001,
         post_target_process_id: int | None = None,
     ) -> None:
         self.asset = asset
         self.current = current or _current_observation(asset)
-        self.post_current = post_current or _current_observation(
+        default_post_current = post_current or _current_observation(
             asset,
             capture_id="capture-post",
             anchors=("anchor_detail", "quick_apply"),
         )
+        self.post_current_sequence = (
+            list(post_current_sequence)
+            if post_current_sequence is not None
+            else [default_post_current]
+        )
+        if not self.post_current_sequence:
+            raise ValueError("post_current_sequence must contain at least one observation")
+        self.post_current = self.post_current_sequence[0]
         self.target_process_id = target_process_id
         self.post_target_process_id = post_target_process_id or target_process_id
         self.initial_calls = 0
@@ -158,7 +167,14 @@ class _ObservationSource:
         from app.agent.runtime_contracts import WorkflowRefV1
 
         self.projected_calls += 1
-        raw = self.current if self.projected_calls == 1 else self.post_current
+        if self.projected_calls == 1:
+            raw = self.current
+        else:
+            post_index = min(
+                self.projected_calls - 2,
+                len(self.post_current_sequence) - 1,
+            )
+            raw = self.post_current_sequence[post_index]
         return ProjectedObservationCapture(
             session_id=session_id,
             workflow=WorkflowRefV1.model_validate(workflow),
@@ -283,11 +299,17 @@ def _controller(
     backend_fail: bool = False,
     current: dict | None = None,
     post_current: dict | None = None,
+    post_current_sequence: list[dict] | None = None,
     post_target_process_id: int | None = None,
     backend_override=None,
     target_window_handle: int = 4242,
     visibility_checker=None,
     workflow_id: str = "workflow.seek.portfolio",
+    verification_max_capture_attempts: int = 1,
+    verification_poll_interval_seconds: float = 0.0,
+    verification_total_budget_seconds: float = 5.0,
+    verification_sleeper=lambda _seconds: None,
+    verification_monotonic_clock=lambda: 0.0,
 ):
     from app.agent.desktop_backend import DeterministicFakeBackend
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
@@ -300,6 +322,7 @@ def _controller(
         asset,
         current=current,
         post_current=post_current,
+        post_current_sequence=post_current_sequence,
         post_target_process_id=post_target_process_id,
     )
     resolver = _TargetResolver(resolver_status)
@@ -326,6 +349,11 @@ def _controller(
             receipt_store=RuntimeReceiptStore(project_root=tmp_path),
         ),
         grounding_policy={"minimum_confidence": 0.9, "minimum_score_margin": 0.2},
+        verification_max_capture_attempts=verification_max_capture_attempts,
+        verification_poll_interval_seconds=verification_poll_interval_seconds,
+        verification_total_budget_seconds=verification_total_budget_seconds,
+        verification_sleeper=verification_sleeper,
+        verification_monotonic_clock=verification_monotonic_clock,
     )
     return controller, source, resolver, gate, backend
 
@@ -595,6 +623,215 @@ def test_definitive_dispatch_verification_failures_are_terminal(post_current, re
         assert result.effect_status == "not_verified"
         assert result.destination_status == "not_evaluated"
     assert source.projected_calls == 2
+    assert backend.dispatch_count == 1
+
+
+def test_bounded_verification_poll_retries_source_state_then_verifies_target(tmp_path) -> None:
+    asset = _asset()
+    waits: list[float] = []
+    source_state = _current_observation(
+        asset,
+        capture_id="capture-post-source",
+    )
+    target_state = _current_observation(
+        asset,
+        capture_id="capture-post-target",
+        anchors=("anchor_detail", "quick_apply"),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        post_current_sequence=[source_state, target_state],
+        verification_max_capture_attempts=2,
+        verification_sleeper=waits.append,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("VERIFIED", "none")
+    assert result.next_observation_id == "observation-capture-post-target"
+    assert source.projected_calls == 3
+    assert waits == [0.0]
+    assert backend.dispatch_count == 1
+
+
+def test_bounded_verification_poll_retries_unresolved_state_then_verifies_target(tmp_path) -> None:
+    asset = _asset()
+    waits: list[float] = []
+    unresolved = _current_observation(
+        asset,
+        capture_id="capture-post-unresolved",
+        anchors=(),
+    )
+    target_state = _current_observation(
+        asset,
+        capture_id="capture-post-target",
+        anchors=("anchor_detail", "quick_apply"),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        post_current_sequence=[unresolved, target_state],
+        verification_max_capture_attempts=2,
+        verification_sleeper=waits.append,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == ("VERIFIED", "none")
+    assert result.next_observation_id == "observation-capture-post-target"
+    assert source.projected_calls == 3
+    assert waits == [0.0]
+    assert backend.dispatch_count == 1
+
+
+def test_bounded_verification_poll_repeated_capture_id_is_terminal_without_retry(tmp_path) -> None:
+    asset = _asset()
+    waits: list[float] = []
+    repeated_c1 = _current_observation(asset)
+    target_state = _current_observation(
+        asset,
+        capture_id="capture-post-target",
+        anchors=("anchor_detail", "quick_apply"),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        post_current_sequence=[repeated_c1, target_state],
+        verification_max_capture_attempts=2,
+        verification_sleeper=waits.append,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == (
+        "VERIFICATION_FAILED",
+        "post_capture_not_new",
+    )
+    assert source.projected_calls == 2
+    assert waits == []
+    assert backend.dispatch_count == 1
+
+
+def test_bounded_verification_poll_third_reviewed_state_is_terminal_without_retry(
+    tmp_path,
+) -> None:
+    asset = _asset()
+    unexpected_state = deepcopy(
+        next(state for state in asset["states"] if state["state_id"] == "detail")
+    )
+    unexpected_state.update(
+        {
+            "state_id": "unexpected_reviewed",
+            "source_node_id": "node_unexpected_reviewed",
+            "display_name": "Unexpected Reviewed",
+            "identity_anchors": [
+                {
+                    "anchor_id": "anchor_unexpected_reviewed",
+                    "label": "unexpected reviewed",
+                    "kind": "text",
+                }
+            ],
+            "allowed_transition_ids": [],
+        }
+    )
+    asset["states"].append(unexpected_state)
+    asset["source_review_lineage"]["human_approved_node_ids"].append(
+        "node_unexpected_reviewed"
+    )
+    waits: list[float] = []
+    unexpected = _current_observation(
+        asset,
+        capture_id="capture-post-unexpected",
+        anchors=("anchor_unexpected_reviewed",),
+    )
+    target_state = _current_observation(
+        asset,
+        capture_id="capture-post-target",
+        anchors=("anchor_detail", "quick_apply"),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        asset_override=asset,
+        post_current_sequence=[unexpected, target_state],
+        verification_max_capture_attempts=2,
+        verification_sleeper=waits.append,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == (
+        "VERIFICATION_FAILED",
+        "destination_mismatch",
+    )
+    assert source.projected_calls == 2
+    assert waits == []
+    assert backend.dispatch_count == 1
+
+
+def test_bounded_verification_poll_stops_at_capture_attempt_limit_without_redispatch(
+    tmp_path,
+) -> None:
+    asset = _asset()
+    waits: list[float] = []
+    source_states = [
+        _current_observation(
+            asset,
+            capture_id=f"capture-post-source-{attempt}",
+        )
+        for attempt in range(1, 4)
+    ]
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        post_current_sequence=source_states,
+        verification_max_capture_attempts=3,
+        verification_sleeper=waits.append,
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == (
+        "VERIFICATION_FAILED",
+        "destination_mismatch",
+    )
+    assert source.projected_calls == 4
+    assert waits == [0.0, 0.0]
+    assert backend.dispatch_count == 1
+
+
+def test_bounded_verification_poll_stops_when_total_budget_is_exhausted(tmp_path) -> None:
+    asset = _asset()
+    clock_values = iter((0.0, 5.0))
+    waits: list[float] = []
+    source_state = _current_observation(
+        asset,
+        capture_id="capture-post-source",
+    )
+    target_state = _current_observation(
+        asset,
+        capture_id="capture-post-target",
+        anchors=("anchor_detail", "quick_apply"),
+    )
+    controller, source, _, _, backend = _controller(
+        tmp_path,
+        post_current_sequence=[source_state, target_state],
+        verification_max_capture_attempts=3,
+        verification_total_budget_seconds=5.0,
+        verification_sleeper=waits.append,
+        verification_monotonic_clock=lambda: next(clock_values),
+    )
+    session = controller.start_session()
+
+    result = controller.submit_intent(_intent(session))
+
+    assert (result.outcome, result.reason_code) == (
+        "VERIFICATION_FAILED",
+        "destination_mismatch",
+    )
+    assert source.projected_calls == 2
+    assert waits == []
     assert backend.dispatch_count == 1
 
 

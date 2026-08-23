@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from threading import RLock
+import time
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 from weakref import WeakValueDictionary
@@ -250,6 +252,11 @@ class LiveController:
         grounding_policy: Mapping[str, Any],
         asset_loader: AssetLoader | None = None,
         project_root: str | Path | None = None,
+        verification_max_capture_attempts: int = 4,
+        verification_poll_interval_seconds: float = 0.25,
+        verification_total_budget_seconds: float = 5.0,
+        verification_sleeper: Callable[[float], None] | None = None,
+        verification_monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         if asset_loader is None:
             if project_root is None:
@@ -257,6 +264,38 @@ class LiveController:
             asset_loader = ReviewedWorkflowAssetStore(project_root=project_root)
         if not isinstance(intent_claim_store, RuntimeIntentClaimStore):
             raise ValueError("intent_claim_store is required")
+        if (
+            isinstance(verification_max_capture_attempts, bool)
+            or not isinstance(verification_max_capture_attempts, int)
+            or verification_max_capture_attempts < 1
+        ):
+            raise ValueError("verification_max_capture_attempts must be a positive integer")
+        for name, value, allow_zero in (
+            (
+                "verification_poll_interval_seconds",
+                verification_poll_interval_seconds,
+                True,
+            ),
+            (
+                "verification_total_budget_seconds",
+                verification_total_budget_seconds,
+                False,
+            ),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or (float(value) < 0 if allow_zero else float(value) <= 0)
+            ):
+                qualifier = "finite and nonnegative" if allow_zero else "finite and positive"
+                raise ValueError(f"{name} must be {qualifier}")
+        if verification_sleeper is not None and not callable(verification_sleeper):
+            raise TypeError("verification_sleeper must be callable")
+        if verification_monotonic_clock is not None and not callable(
+            verification_monotonic_clock
+        ):
+            raise TypeError("verification_monotonic_clock must be callable")
         self._binding = binding
         self._asset_loader = asset_loader
         self._observation_source = observation_source
@@ -268,6 +307,23 @@ class LiveController:
         self._backend = backend
         self._intent_claim_store = intent_claim_store
         self._grounding_policy = dict(grounding_policy)
+        self._verification_max_capture_attempts = verification_max_capture_attempts
+        self._verification_poll_interval_seconds = float(
+            verification_poll_interval_seconds
+        )
+        self._verification_total_budget_seconds = float(
+            verification_total_budget_seconds
+        )
+        self._verification_sleeper = (
+            verification_sleeper
+            if verification_sleeper is not None
+            else time.sleep
+        )
+        self._verification_monotonic_clock = (
+            verification_monotonic_clock
+            if verification_monotonic_clock is not None
+            else time.monotonic
+        )
         self._sessions: dict[str, _LiveSession] = {}
         self._lock = RLock()
 
@@ -1161,120 +1217,171 @@ class LiveController:
         intent: AgentIntentV1,
         checkpoint: RuntimeVerificationPendingCheckpoint,
     ) -> _ExecutionResult | LiveControllerDecision:
-        try:
-            projected = self._observation_source.capture_projected(
-                session_id=session.snapshot.session_id,
-                workflow=session.snapshot.workflow.model_dump(mode="json"),
-                asset=session.asset,
-                target_window_handle=session.snapshot.target_window_handle,
-            )
-        except Exception:
-            return LiveControllerDecision("RECOVERY_REQUIRED", "post_capture_failed")
-        projection_failure = self._projected_capture_failure(
-            projected,
-            session=session,
-            expected_process_id=checkpoint.target_process_id,
-        )
-        if projection_failure is not None:
-            return LiveControllerDecision(
-                "RECOVERY_REQUIRED",
-                "post_capture_lineage_mismatch",
-            )
-
         selection = checkpoint.selection
         grounding = checkpoint.grounding
-        gate = checkpoint.gate
         selection_ref = f"selection:{selection['selection_sha256']}"
         candidate_ref = f"candidate:{grounding['capture_id']}:{grounding['candidate_id']}"
-        receipt_id = f"receipt.{uuid4().hex}"
-        trace_ref = f"trace:live-controller:{receipt_id}"
-        server_refs = [
-            selection_ref,
-            candidate_ref,
-            checkpoint.gate_decision_ref,
-            checkpoint.backend_receipt.receipt_ref,
-            trace_ref,
-            *(
-                [session.confirmation.evidence_ref]
-                if session.confirmation is not None
-                and session.confirmation.evidence_ref
-                else []
-            ),
-        ]
-        try:
-            verification = verify_server_dispatched_transition_result(
-                session.asset,
-                selection,
-                checkpoint.current_observation,
-                projected.current_observation,
-                server_evidence_refs=server_refs,
-            )
-        except Exception:
-            return LiveControllerDecision("RECOVERY_REQUIRED", "post_verification_integrity_failed")
+        deadline = (
+            self._verification_monotonic_clock()
+            + self._verification_total_budget_seconds
+        )
+        seen_post_capture_ids: set[str] = set()
 
-        status = verification.get("status")
-        failure = str(verification.get("failure_code") or "")
-        if status == "blocked" and failure not in {
-            "post_capture_not_new",
-            "destination_mismatch",
-            "post_action_failure",
-        }:
-            return LiveControllerDecision(
-                "RECOVERY_REQUIRED",
-                failure or "post_verification_integrity_failed",
+        for capture_attempt in range(self._verification_max_capture_attempts):
+            receipt_id = f"receipt.{uuid4().hex}"
+            trace_ref = f"trace:live-controller:{receipt_id}"
+            server_refs = [
+                selection_ref,
+                candidate_ref,
+                checkpoint.gate_decision_ref,
+                checkpoint.backend_receipt.receipt_ref,
+                trace_ref,
+                *(
+                    [session.confirmation.evidence_ref]
+                    if session.confirmation is not None
+                    and session.confirmation.evidence_ref
+                    else []
+                ),
+            ]
+            try:
+                projected = self._observation_source.capture_projected(
+                    session_id=session.snapshot.session_id,
+                    workflow=session.snapshot.workflow.model_dump(mode="json"),
+                    asset=session.asset,
+                    target_window_handle=session.snapshot.target_window_handle,
+                )
+            except Exception:
+                return LiveControllerDecision("RECOVERY_REQUIRED", "post_capture_failed")
+            projection_failure = self._projected_capture_failure(
+                projected,
+                session=session,
+                expected_process_id=checkpoint.target_process_id,
             )
-        if status not in {"verified", "blocked"}:
-            return LiveControllerDecision("RECOVERY_REQUIRED", "post_verification_integrity_failed")
+            if projection_failure is not None:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "post_capture_lineage_mismatch",
+                )
 
-        verification_ref = self._verification_ref(verification)
-        common = {
-            "session": session,
-            "intent": intent,
-            "receipt_id": receipt_id,
-            "attempt_count": 1,
-            "gate_status": "allowed",
-            "dispatch_status": "dispatched",
-            "selection_ref": selection_ref,
-            "candidate_ref": candidate_ref,
-            "gate_ref": checkpoint.gate_decision_ref,
-            "backend_ref": checkpoint.backend_receipt.receipt_ref,
-            "verification_ref": verification_ref,
-        }
-        if status == "blocked":
+            try:
+                verification = verify_server_dispatched_transition_result(
+                    session.asset,
+                    selection,
+                    checkpoint.current_observation,
+                    projected.current_observation,
+                    server_evidence_refs=server_refs,
+                )
+            except Exception:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "post_verification_integrity_failed",
+                )
+
+            post_capture_id = str(
+                projected.current_observation.get("capture_id") or ""
+            )
+            if post_capture_id and post_capture_id in seen_post_capture_ids:
+                verification = {
+                    **verification,
+                    "status": "blocked",
+                    "failure_code": "post_capture_not_new",
+                    "state_advanced": False,
+                }
+            if post_capture_id:
+                seen_post_capture_ids.add(post_capture_id)
+
+            status = verification.get("status")
+            failure = str(verification.get("failure_code") or "")
+            if status == "blocked" and failure not in {
+                "post_capture_not_new",
+                "destination_mismatch",
+                "post_action_failure",
+            }:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    failure or "post_verification_integrity_failed",
+                )
+            if status not in {"verified", "blocked"}:
+                return LiveControllerDecision(
+                    "RECOVERY_REQUIRED",
+                    "post_verification_integrity_failed",
+                )
+
+            if (
+                status == "blocked"
+                and self._should_poll_verification_failure(
+                    verification,
+                    source_state_id=str(selection["source_state_id"]),
+                )
+                and capture_attempt + 1 < self._verification_max_capture_attempts
+            ):
+                remaining = deadline - self._verification_monotonic_clock()
+                if remaining > 0:
+                    delay = min(self._verification_poll_interval_seconds, remaining)
+                    try:
+                        self._verification_sleeper(delay)
+                    except Exception:
+                        return LiveControllerDecision(
+                            "RECOVERY_REQUIRED",
+                            "post_verification_wait_failed",
+                        )
+                    if self._verification_monotonic_clock() < deadline:
+                        continue
+
+            verification_ref = self._verification_ref(verification)
+            common = {
+                "session": session,
+                "intent": intent,
+                "receipt_id": receipt_id,
+                "attempt_count": 1,
+                "gate_status": "allowed",
+                "dispatch_status": "dispatched",
+                "selection_ref": selection_ref,
+                "candidate_ref": candidate_ref,
+                "gate_ref": checkpoint.gate_decision_ref,
+                "backend_ref": checkpoint.backend_receipt.receipt_ref,
+                "verification_ref": verification_ref,
+            }
+            if status == "blocked":
+                receipt = self._receipt(
+                    **common,
+                    outcome="VERIFICATION_FAILED",
+                    reason_code=failure,
+                    effect_status="not_verified",
+                    destination_status=(
+                        "not_evaluated"
+                        if failure == "post_capture_not_new"
+                        else "not_verified"
+                    ),
+                )
+                return _ExecutionResult(
+                    receipt,
+                    checkpoint.backend_receipt,
+                    verification,
+                    None,
+                )
+
+            availability = verification["post_state_resolution"]["state_availability"]
+            outcome = "SAFE_STOP" if availability == "stop_boundary" else "VERIFIED"
+            reason_code = "stop_boundary" if availability == "stop_boundary" else "none"
             receipt = self._receipt(
                 **common,
-                outcome="VERIFICATION_FAILED",
-                reason_code=failure,
-                effect_status="not_verified",
-                destination_status=(
-                    "not_evaluated"
-                    if failure == "post_capture_not_new"
-                    else "not_verified"
-                ),
+                outcome=outcome,
+                reason_code=reason_code,
+                effect_status="verified",
+                destination_status="verified",
+                next_observation_id=projected.agent_observation.observation_id,
             )
             return _ExecutionResult(
                 receipt,
                 checkpoint.backend_receipt,
                 verification,
-                None,
+                projected.agent_observation,
             )
 
-        availability = verification["post_state_resolution"]["state_availability"]
-        outcome = "SAFE_STOP" if availability == "stop_boundary" else "VERIFIED"
-        reason_code = "stop_boundary" if availability == "stop_boundary" else "none"
-        receipt = self._receipt(
-            **common,
-            outcome=outcome,
-            reason_code=reason_code,
-            effect_status="verified",
-            destination_status="verified",
-            next_observation_id=projected.agent_observation.observation_id,
-        )
-        return _ExecutionResult(
-            receipt,
-            checkpoint.backend_receipt,
-            verification,
-            projected.agent_observation,
+        return LiveControllerDecision(
+            "RECOVERY_REQUIRED",
+            "post_verification_integrity_failed",
         )
 
     def _projected_capture_failure(
@@ -1389,6 +1496,28 @@ class LiveController:
                 return False
             ids.add(rule["rule_id"].strip())
         return True
+
+    @staticmethod
+    def _should_poll_verification_failure(
+        verification: Mapping[str, object],
+        *,
+        source_state_id: str,
+    ) -> bool:
+        failure = verification.get("failure_code")
+        post_resolution = verification.get("post_state_resolution")
+        if not isinstance(post_resolution, Mapping):
+            return False
+        if failure == "destination_mismatch":
+            return (
+                post_resolution.get("status") == "resolved"
+                and post_resolution.get("state_id") == source_state_id
+            )
+        if failure == "post_action_failure":
+            return post_resolution.get("failure_code") in {
+                "current_state_unresolved",
+                "current_state_ambiguous",
+            }
+        return False
 
     @staticmethod
     def _verification_ref(verification: Mapping[str, object]) -> str:
