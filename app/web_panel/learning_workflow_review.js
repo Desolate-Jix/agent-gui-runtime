@@ -1240,9 +1240,9 @@
       const node = matches[0];
       const normalizedPatch = patch && typeof patch === "object" ? { ...patch } : {};
       const reviewedRegions = Array.isArray(normalizedPatch.regions) ? normalizedPatch.regions : [];
-      const reviewedActions = Array.isArray(normalizedPatch.action_candidates)
+      const reviewedActions = clone(Array.isArray(normalizedPatch.action_candidates)
         ? normalizedPatch.action_candidates
-        : (Array.isArray(node.action_candidates) ? node.action_candidates : []);
+        : (Array.isArray(node.action_candidates) ? node.action_candidates : []));
       const existingControls = Array.isArray(node.controls) ? clone(node.controls) : [];
       const actionableReviewedRegions = reviewedRegions.filter((region) => {
         const semanticAction = String(region?.semantic_action || region?.action_type || "").trim();
@@ -1287,6 +1287,15 @@
         const controlMatches = existingControls.filter((control) => String(control?.control_id || "").trim() === controlId);
         if (!controlId || controlMatches.length !== 1) {
           throw new Error(`reviewed bbox action candidate must match exactly one target control: ${controlId || semanticAction}`);
+        }
+        const targetRegionId = String(action?.target_region_id || "").trim();
+        if (targetRegionId) {
+          if (targetRegionId !== controlId) {
+            throw new Error(`reviewed action candidate has conflicting target control and region: ${semanticAction}`);
+          }
+          action.target_control_id = controlId;
+          action.target_region_id = "";
+          normalizedPatch.action_candidates = reviewedActions;
         }
         const controlIndex = existingControls.indexOf(controlMatches[0]);
         const updatedControl = {

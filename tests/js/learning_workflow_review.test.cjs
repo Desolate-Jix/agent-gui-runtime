@@ -812,6 +812,102 @@ test("replacing reviewed node evidence preserves identity but revokes the old hu
   assert.deepEqual(snapshot.workflow.edge_ids, ["edge_open", "edge_next"]);
 });
 
+test("reviewed control action binding drops a redundant region alias without mutating the candidate", () => {
+  const review = reviewFixture();
+  const sourceNode = review.nodes[0];
+  sourceNode.editable_review_source_path = "artifacts/node-review-sources/list.json";
+  sourceNode.source_paths = [sourceNode.editable_review_source_path];
+  sourceNode.controls = [{ control_id: "apply", label: "Quick apply", role: "button" }];
+  sourceNode.action_candidates = [];
+  Object.assign(review.edges[0], {
+    action_template_id: "open_apply_flow",
+    action_type: "open_apply_flow",
+    target_control_id: "apply",
+    target_region_id: "",
+  });
+  const candidate = {
+    action_template_id: "open_apply_flow",
+    semantic_action: "open_apply_flow",
+    action_type: "open_apply_flow",
+    source_control_id: "apply",
+    target_control_id: "apply",
+    target_region_id: "apply",
+    target_interface_id: "node_detail",
+  };
+  const originalCandidate = structuredClone(candidate);
+  const state = createInterfaceWorkflowReviewState(review);
+
+  state.replaceReviewedNodeEvidenceBySource(
+    sourceNode.editable_review_source_path,
+    "artifacts/learning-draft-review/list/reviewed.json",
+    {
+      regions: [
+        {
+          region_id: "reviewed_apply",
+          label: "Quick apply",
+          semantic_action: "open_apply_flow",
+          bbox: { x: 120, y: 240, w: 180, h: 44 },
+        },
+        {
+          region_id: "reviewed_save",
+          label: "Save",
+          semantic_action: "read_only",
+          bbox: { x: 320, y: 240, w: 100, h: 44 },
+        },
+      ],
+      action_candidates: [candidate],
+    },
+  );
+  approveOperationGranularly(state);
+  state.confirmNodeHumanReview("node_list");
+
+  const snapshot = state.snapshot();
+  const attachedNode = snapshot.nodes[0];
+  const attachedAction = attachedNode.action_candidates[0];
+  assert.equal(attachedAction.target_control_id, "apply");
+  assert.equal(attachedAction.target_region_id, "");
+  assert.deepEqual(candidate, originalCandidate);
+  assert.deepEqual(attachedNode.controls.map((control) => control.control_id), ["apply"]);
+  assert.deepEqual(attachedNode.controls[0].bbox, { x: 120, y: 240, w: 180, h: 44 });
+  assert.equal(attachedNode.controls[0].evidence_region_id, "reviewed_apply");
+  assert.deepEqual(attachedNode.action_candidates.map((action) => action.action_template_id), ["open_apply_flow"]);
+  assert.equal(attachedNode.regions.some((region) => region.region_id === "reviewed_save"), true);
+  for (const subject of [attachedNode, attachedNode.controls[0], attachedAction, snapshot.edges[0]]) {
+    assert.equal(subject.review_status, "human_approved");
+  }
+});
+
+test("reviewed control action binding rejects a conflicting region subject", () => {
+  const review = reviewFixture();
+  review.nodes[0].editable_review_source_path = "artifacts/node-review-sources/list.json";
+  review.nodes[0].source_paths = [review.nodes[0].editable_review_source_path];
+  review.nodes[0].controls = [{ control_id: "apply", label: "Quick apply", role: "button" }];
+  const state = createInterfaceWorkflowReviewState(review);
+
+  assert.throws(
+    () => state.replaceReviewedNodeEvidenceBySource(
+      review.nodes[0].editable_review_source_path,
+      "artifacts/learning-draft-review/list/reviewed.json",
+      {
+        regions: [{
+          region_id: "reviewed_apply",
+          label: "Quick apply",
+          semantic_action: "open_apply_flow",
+          bbox: { x: 120, y: 240, w: 180, h: 44 },
+        }],
+        action_candidates: [{
+          action_template_id: "open_apply_flow",
+          semantic_action: "open_apply_flow",
+          target_control_id: "apply",
+          target_region_id: "different_region",
+          target_interface_id: "node_detail",
+        }],
+      },
+    ),
+    /conflicting target control and region/i,
+  );
+});
+
 test("saved workflow membership wins over a standalone source preview on reopen", () => {
   assert.deepEqual(resolveInterfaceAssetOpenTarget({
     sourcePath: "artifacts/node-review-sources/list.json",
