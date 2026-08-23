@@ -21403,6 +21403,10 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
     if (!captureSession(session)) return null;
     const saved = await approveAndSaveCurrentInterfaceWorkflowNode(session);
     if (!saved) return null;
+    await loadInterfaceWorkflowLibraryRegistry({
+      preferredWorkflowId: workflowId,
+      openSelected: true,
+    });
     closeImageInspector();
     renderResponse({
       success: true,

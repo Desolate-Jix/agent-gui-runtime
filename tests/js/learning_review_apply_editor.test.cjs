@@ -113,6 +113,10 @@ test("confirm and store saves the current evidence before approving its workflow
       calls.push(["approve_and_save", reviewState.snapshot().nodes[0].content_descriptors[0]]);
       return { path: "workflow.json" };
     },
+    loadInterfaceWorkflowLibraryRegistry: async (options) => {
+      calls.push(["refresh_workflow_library", options]);
+      return { workflow_id: "seek_flow" };
+    },
     closeImageInspector: () => calls.push(["close"]),
     renderResponse: () => {},
     $: (id) => id === "imageInspectorConfirmAndStoreBtn"
@@ -135,6 +139,7 @@ test("confirm and store saves the current evidence before approving its workflow
       { source_id: "apply", agent_description: "Read the current Quick Apply control" },
     ],
     ["approve_and_save", { source_id: "apply", agent_description: "Read the current Quick Apply control" }],
+    ["refresh_workflow_library", { preferredWorkflowId: "seek_flow", openSelected: true }],
     ["close"],
   ]);
 });
