@@ -398,6 +398,7 @@ test("switching the box editor source preserves the workflow review that owns it
   const sandbox = { console, globalThis: {}, sourceInput, observations };
   vm.runInNewContext(`
     let learningDraftReviewLoadRequestToken = 4;
+    let learningDraftReviewLoadAbortController = null;
     const clearLearningDraftReviewDisplay = (_reason, options) => {
       observations.clearOptions = options;
     };

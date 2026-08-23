@@ -1677,6 +1677,10 @@ test("panel asset switch invalidates and clears the previous editor selection", 
     let learningDraftReviewLoadRequestToken = 7;
     let learningDraftReviewLoadPromise = { pending: true };
     let learningDraftReviewLoadSourcePath = "artifacts/old/source.json";
+    let learningDraftReviewLoadAbortController = {
+      signal: { aborted: false },
+      abort() { this.signal.aborted = true; },
+    };
     let learningDraftReview = { draft: { source_path: "artifacts/old/source.json" } };
     let learningDraftReviewBboxEdits = { regions: { old: true }, actions: {} };
     let resetValue = "not-called";
@@ -1692,6 +1696,7 @@ test("panel asset switch invalidates and clears the previous editor selection", 
       token: learningDraftReviewLoadRequestToken,
       promise: learningDraftReviewLoadPromise,
       sourcePath: learningDraftReviewLoadSourcePath,
+      aborted: learningDraftReviewLoadAbortController.signal.aborted,
       review: learningDraftReview,
       edits: learningDraftReviewBboxEdits,
       resetValue,
@@ -1701,8 +1706,9 @@ test("panel asset switch invalidates and clears the previous editor selection", 
   `, sandbox);
 
   assert.equal(sandbox.snapshot.token, 8);
-  assert.equal(sandbox.snapshot.promise, null);
-  assert.equal(sandbox.snapshot.sourcePath, "");
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.snapshot.promise)), { pending: true });
+  assert.equal(sandbox.snapshot.sourcePath, "artifacts/old/source.json");
+  assert.equal(sandbox.snapshot.aborted, true);
   assert.equal(sandbox.snapshot.review, null);
   assert.equal(sandbox.snapshot.resetValue, null);
   assert.equal(sandbox.snapshot.inspectorClosed, true);

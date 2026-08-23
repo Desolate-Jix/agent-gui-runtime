@@ -77,6 +77,8 @@ let learningDraftProviderSummary = null;
 let learningDraftReviewLoadPromise = null;
 let learningDraftReviewLoadSourcePath = "";
 let learningDraftReviewLoadRequestToken = 0;
+let learningDraftReviewLoadActiveToken = 0;
+let learningDraftReviewLoadAbortController = null;
 let interfaceWorkflowReview = null;
 let interfaceWorkflowReviewState = null;
 let interfaceWorkflowDraftSourcePaths = [];
@@ -10185,6 +10187,9 @@ function learningDraftReviewSourcePath() {
 
 function invalidateLearningDraftReviewSource(options = {}) {
   learningDraftReviewLoadRequestToken += 1;
+  if (learningDraftReviewLoadAbortController && !learningDraftReviewLoadAbortController.signal.aborted) {
+    learningDraftReviewLoadAbortController.abort();
+  }
   clearLearningDraftReviewDisplay("source changed", {
     preserveWorkflowReview: options.preserveWorkflowReview === true,
   });
@@ -10819,8 +10824,9 @@ async function attachInterfaceAssetToWorkflow({ connect = false } = {}) {
 
 function clearInterfaceWorkflowCorrectionSelection() {
   learningDraftReviewLoadRequestToken += 1;
-  learningDraftReviewLoadPromise = null;
-  learningDraftReviewLoadSourcePath = "";
+  if (learningDraftReviewLoadAbortController && !learningDraftReviewLoadAbortController.signal.aborted) {
+    learningDraftReviewLoadAbortController.abort();
+  }
   learningDraftReview = null;
   learningDraftReviewBboxEdits = { regions: {}, actions: {} };
   resetLearningDraftEditorState(null);
@@ -20436,16 +20442,28 @@ async function loadLearningDraftReview(options = {}) {
     return null;
   }
 
-  if (options.supersedePendingLoad !== true) {
-    while (learningDraftReviewLoadPromise) {
-      if (learningDraftReviewLoadSourcePath === sourcePath) {
-        return learningDraftReviewLoadPromise;
-      }
-      await learningDraftReviewLoadPromise;
+  while (learningDraftReviewLoadPromise) {
+    if (
+      learningDraftReviewLoadSourcePath === sourcePath
+      && options.supersedePendingLoad !== true
+    ) {
+      return learningDraftReviewLoadPromise;
     }
+    if (
+      options.supersedePendingLoad === true
+      && learningDraftReviewLoadAbortController
+      && !learningDraftReviewLoadAbortController.signal.aborted
+    ) {
+      if (learningDraftReviewLoadRequestToken === learningDraftReviewLoadActiveToken) {
+        learningDraftReviewLoadRequestToken += 1;
+      }
+      learningDraftReviewLoadAbortController.abort();
+    }
+    await learningDraftReviewLoadPromise;
   }
 
   const loadRequestToken = ++learningDraftReviewLoadRequestToken;
+  const loadAbortController = new AbortController();
   const loadPromise = (async () => {
     clearLearningDraftReviewDisplay(`loading · ${sourcePath}`, {
       preserveWorkflowReview: options.skipWorkflowReview === true,
@@ -20457,7 +20475,12 @@ async function loadLearningDraftReview(options = {}) {
       const response = await api("POST", "/panel/load_learning_draft_review", {
         source_path: sourcePath,
         discover_related_sidecars: options.discoverRelatedSidecars !== false,
-      }, { summary: "POST /panel/load_learning_draft_review", workflowStep: "load_learning_draft_review", skipRender: true });
+      }, {
+        summary: "POST /panel/load_learning_draft_review",
+        workflowStep: "load_learning_draft_review",
+        skipRender: true,
+        signal: loadAbortController.signal,
+      });
       if (!response?.success) {
         if (loadRequestToken !== learningDraftReviewLoadRequestToken) return null;
         clearLearningDraftReviewDisplay(`加载失败 · ${sourcePath}`, {
@@ -20500,6 +20523,8 @@ async function loadLearningDraftReview(options = {}) {
     }
   })();
   learningDraftReviewLoadSourcePath = sourcePath;
+  learningDraftReviewLoadActiveToken = loadRequestToken;
+  learningDraftReviewLoadAbortController = loadAbortController;
   learningDraftReviewLoadPromise = loadPromise;
   try {
     return await loadPromise;
@@ -20507,6 +20532,8 @@ async function loadLearningDraftReview(options = {}) {
     if (learningDraftReviewLoadPromise === loadPromise) {
       learningDraftReviewLoadPromise = null;
       learningDraftReviewLoadSourcePath = "";
+      learningDraftReviewLoadActiveToken = 0;
+      learningDraftReviewLoadAbortController = null;
     }
   }
 }
@@ -22787,7 +22814,7 @@ function bindEvents() {
   on("learningTrialCaptureBtn", "click", captureLearningDraftWindow);
   on("learningTrialRunBtn", "click", runLearningDraftTrial);
   on("learningDraftReviewSourcePath", "input", invalidateLearningDraftReviewSource);
-  on("learningDraftReviewLoadBtn", "click", loadLearningDraftReview);
+  on("learningDraftReviewLoadBtn", "click", () => loadLearningDraftReview({ supersedePendingLoad: true }));
   on("learningDraftRecommendedLoadBtn", "click", loadRecommendedLearningDraftReview);
   on("learningDraftFreshnessDemoBtn", "click", loadLearningDraftFreshnessDemo);
   on("learningDraftOpenBoxEditorBtn", "click", () => openLearningDraftBoxEditor());
