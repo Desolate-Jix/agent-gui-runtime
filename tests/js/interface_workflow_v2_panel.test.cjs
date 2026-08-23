@@ -22,7 +22,7 @@ function loadHarness({ apiResult = {} } = {}) {
     interfaceWorkflowAssetV2Status: element(), interfaceWorkflowAssetV2Hash: element(), interfaceWorkflowAssetV2BlockedReasons: element(), interfaceWorkflowReplayObservationV2: element(),
   };
   const calls = [];
-  const sandbox = { globalThis: null, interfaceWorkflowAssetV2State: null, interfaceWorkflowAssetV2Binding: { key: "", generation: 0, loaded: false }, interfaceWorkflowAssetV2Pending: { compile: false, publish: false, preview: false }, interfaceWorkflowAssetV2LastResponse: null, interfaceWorkflowHasUnsavedChanges: false,
+  const sandbox = { globalThis: null, interfaceWorkflowAssetV2State: null, interfaceWorkflowAssetV2Binding: { key: "", generation: 0, loaded: false }, interfaceWorkflowAssetV2Pending: { compile: false, publish: false, preview: false }, interfaceWorkflowAssetV2LastResponse: null, interfaceWorkflowHasUnsavedChanges: false, interfaceWorkflowReviewState: null,
     interfaceWorkflowLoadGuard: { begin() { return 1; } },
     interfaceWorkflowLibraryRegistry: { workflows: { workflow_a: { source_asset_sha256: "a".repeat(64) } } },
     $: (id) => elements[id] || null,
@@ -43,7 +43,7 @@ test("v2 controls and explicit observation input are visible in the workflow lib
 
 test("one generate action compiles then publishes without preview or action calls", async () => {
   const responses = [
-    { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } },
+    { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } },
     { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, publish_result: { asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } } } },
   ];
   const { harness, calls } = loadHarness({ apiResult: () => responses.shift() });
@@ -87,7 +87,7 @@ test("generate rejects stale selection and double click without an extra publish
   elements.interfaceWorkflowLibrarySelect.value = "workflow_b";
   elements.interfaceWorkflowLibrarySelect.selectedOptions = [{ dataset: { applicationIdentityKey: "web:other.example" } }];
   harness.selected();
-  resolveCompile({ success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } });
+  resolveCompile({ success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } });
   await Promise.all([first, duplicate]);
   assert.equal(calls.length, 1, "stale compile must never continue to publish");
   assert.equal(harness.state(), null);
@@ -105,7 +105,7 @@ test("generate double click produces one compile and one publish", async () => {
   harness.loaded();
   const first = harness.generate();
   const duplicate = harness.generate();
-  resolveCompile({ success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } });
+  resolveCompile({ success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } });
   await Promise.all([first, duplicate]);
   assert.deepEqual(calls.map((call) => call.route), [
     "/panel/compile_reviewed_workflow_asset",
@@ -126,7 +126,7 @@ test("generate fails closed for unsaved or missing binding", async () => {
 
 test("publish response must retain the non-authorizing contract", async () => {
   const responses = [
-    { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } },
+    { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } },
     { success: true, data: { artifact_is_authorization: true, execute_binding_enabled: false, publish_result: { asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } } } },
   ];
   const { harness, calls, elements } = loadHarness({ apiResult: () => responses.shift() });
@@ -137,15 +137,37 @@ test("publish response must retain the non-authorizing contract", async () => {
   assert.equal(elements.interfaceWorkflowReplayPreviewV2Btn.disabled, true);
   assert.match(elements.interfaceWorkflowAssetV2BlockedReasons.textContent, /publish_response_authorization_contract_invalid/);
 });
+
+test("generate stops before publish when compile response violates the non-authorizing contract", async () => {
+  const { harness, calls, elements } = loadHarness({ apiResult: {
+    success: true,
+    data: {
+      artifact_is_authorization: true,
+      execute_binding_enabled: false,
+      result: {
+        status: "compiled",
+        asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) },
+      },
+      registry_revision: 4,
+    },
+  } });
+  harness.loaded();
+  await harness.generate();
+  assert.deepEqual(calls.map((call) => call.route), [
+    "/panel/compile_reviewed_workflow_asset",
+  ]);
+  assert.equal(harness.state(), null);
+  assert.match(elements.interfaceWorkflowAssetV2BlockedReasons.textContent, /compile_response_authorization_contract_invalid/);
+});
 test("compile sends only registry-derived identity workflow and source hash", async () => {
-  const { harness, calls } = loadHarness({ apiResult: { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 3 } } });
+  const { harness, calls } = loadHarness({ apiResult: { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 3 } } });
   harness.loaded();
   await harness.compile();
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [{ method: "POST", route: "/panel/compile_reviewed_workflow_asset", payload: { application_identity_key: "web:seek.com", workflow_id: "workflow_a", expected_source_workflow_sha256: "a".repeat(64) } }]);
   assert.equal(harness.state().compile.registry_revision, 3);
 });
 test("publish forwards compile registry revision and never accepts a client asset", async () => {
-  const { harness, calls } = loadHarness({ apiResult: { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } } });
+  const { harness, calls } = loadHarness({ apiResult: { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } } });
   harness.loaded(); await harness.compile(); await harness.publish();
   assert.deepEqual(JSON.parse(JSON.stringify(calls[1])), { method: "POST", route: "/panel/publish_reviewed_workflow_asset", payload: { application_identity_key: "web:seek.com", workflow_id: "workflow_a", expected_source_workflow_sha256: "a".repeat(64), expected_registry_revision: 4 } });
   assert.equal(Object.hasOwn(calls[1].payload, "asset"), false);
@@ -188,7 +210,7 @@ test("deferred compile and double click cannot resurrect state or duplicate the 
   const second = harness.compile();
   assert.equal(calls.length, 1);
   harness.reset();
-  resolveCompile({ success: true, data: { result: { status: "compiled", asset: { asset_id: "old", content_sha256: "c".repeat(64) } }, registry_revision: 1 } });
+  resolveCompile({ success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "old", content_sha256: "c".repeat(64) } }, registry_revision: 1 } });
   await Promise.all([first, second]);
   assert.equal(harness.state(), null);
 });
@@ -235,7 +257,7 @@ test("one global v2 busy lock blocks cross-operation calls", async () => {
 
 test("actual handler retains backend preview and publish blocked codes after pending cleanup", async () => {
   const responses = [
-    { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 2 } },
+    { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 2 } },
     { success: false, error: { code: "reviewed_workflow_publish_failed" }, data: { compile_result: { blocked_reasons: [{ code: "registry_revision_mismatch" }] } } },
   ];
   const { harness, elements } = loadHarness({ apiResult: () => responses.shift() });

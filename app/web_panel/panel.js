@@ -18719,6 +18719,11 @@ async function loadInterfaceWorkflowSafeFillPreflight() {
 function handleInterfaceWorkflowEditorMutation({ clearConfirmation = true } = {}) {
   if (clearConfirmation && typeof clearInterfaceWorkflowNodeHumanReviewConfirmation === "function") clearInterfaceWorkflowNodeHumanReviewConfirmation();
   markInterfaceWorkflowUnsaved();
+  const node = interfaceWorkflowReviewState?.current?.()?.node;
+  const approveButton = $("interfaceWorkflowApproveAndSaveBtn");
+  if (approveButton) {
+    approveButton.disabled = !node || String(node.review_status || "") === "needs_learning";
+  }
 }
 
 function handleInterfaceWorkflowOperationEditorMutation() {
@@ -18824,8 +18829,21 @@ async function compileReviewedWorkflowAssetV2() {
     if (!interfaceWorkflowAssetV2OperationCurrent("compile", generation, binding.key)) return response;
     interfaceWorkflowAssetV2LastResponse = response;
     const result = response?.data?.result;
-    interfaceWorkflowAssetV2State = response?.success && result?.status === "compiled" && result?.asset ? { asset_id: "", content_sha256: "", published: false, binding_key: binding.key, compile: { result, registry_revision: response.data.registry_revision, binding_key: binding.key }, preview: null, last_response: response } : null;
-    renderInterfaceWorkflowAssetV2State(response); return response;
+    const nonAuthorizing = response?.data?.artifact_is_authorization === false
+      && response?.data?.execute_binding_enabled === false;
+    interfaceWorkflowAssetV2State = response?.success && nonAuthorizing && result?.status === "compiled" && result?.asset ? { asset_id: "", content_sha256: "", published: false, binding_key: binding.key, compile: { result, registry_revision: response.data.registry_revision, binding_key: binding.key }, preview: null, last_response: response } : null;
+    if (response?.success && !nonAuthorizing) {
+      interfaceWorkflowAssetV2LastResponse = {
+        success: false,
+        data: { blocked_reason_codes: ["compile_response_authorization_contract_invalid"] },
+      };
+    }
+    renderInterfaceWorkflowAssetV2State(
+      interfaceWorkflowAssetV2LastResponse?.success === false
+        ? interfaceWorkflowAssetV2LastResponse
+        : response,
+    );
+    return response;
   } finally { if (interfaceWorkflowAssetV2OperationCurrent("compile", generation, binding.key)) { interfaceWorkflowAssetV2Pending.compile = false; renderInterfaceWorkflowAssetV2State(); } }
 }
 

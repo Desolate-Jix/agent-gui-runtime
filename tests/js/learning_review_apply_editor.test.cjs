@@ -116,6 +116,36 @@ test("operation editor mutation commits or revokes before rerendering approval b
   assert.deepEqual(calls, [["clear"], ["revoke", "edge_open"], ["dirty"], ["render_badges"]]);
 });
 
+test("editing a previously approved interface immediately enables approve and save", () => {
+  const vm = require("node:vm");
+  const start = source.indexOf("function handleInterfaceWorkflowEditorMutation");
+  const end = source.indexOf("function handleInterfaceWorkflowOperationEditorMutation", start);
+  assert.notEqual(start, -1);
+  const elements = {
+    interfaceWorkflowApproveAndSaveBtn: { disabled: true },
+  };
+  const sandbox = {
+    $: (id) => elements[id] || null,
+    interfaceWorkflowReviewState: {
+      current: () => ({
+        node: {
+          node_id: "job_detail",
+          review_status: "human_approved",
+          reviewed_by_human: true,
+        },
+      }),
+    },
+    clearInterfaceWorkflowNodeHumanReviewConfirmation: () => {},
+    markInterfaceWorkflowUnsaved: () => {},
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; handleInterfaceWorkflowEditorMutation();`,
+    sandbox,
+  );
+
+  assert.equal(elements.interfaceWorkflowApproveAndSaveBtn.disabled, false);
+});
+
 test("needs_learning renders as a locked stop boundary instead of an approvable node", () => {
   const vm = require("node:vm");
   const start = source.indexOf("function renderInterfaceWorkflowEditor");
