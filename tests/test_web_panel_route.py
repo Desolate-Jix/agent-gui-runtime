@@ -2392,24 +2392,22 @@ def test_web_panel_trace_list_reads_only_enough_recent_metadata_for_limit(
         trace_path.touch()
         os.utime(trace_path, (timestamp, timestamp))
 
-    pytest_scans: list[str] = []
-    metadata_reads: list[str] = []
+    content_reads: dict[str, int] = {}
+    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
 
-    def references_pytest_temp(path: Path) -> bool:
-        pytest_scans.append(path.name)
-        return False
+    def counted_read_text(path: Path, *args, **kwargs) -> str:
+        if path.parent == trace_dir:
+            content_reads[path.name] = content_reads.get(path.name, 0) + 1
+        return original_read_text(path, *args, **kwargs)
 
-    def trace_metadata(path: Path) -> dict[str, str]:
-        metadata_reads.append(path.name)
-        return {
-            "operation": "operation",
-            "agent_mode": "",
-            "mode_contract_version": "",
-            "contract_version": "",
-        }
+    def counted_read_bytes(path: Path) -> bytes:
+        if path.parent == trace_dir:
+            content_reads[path.name] = content_reads.get(path.name, 0) + 1
+        return original_read_bytes(path)
 
-    monkeypatch.setattr(panel_api, "_trace_references_pytest_temp", references_pytest_temp)
-    monkeypatch.setattr(panel_api, "_trace_list_metadata", trace_metadata)
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
 
     response = client.get("/panel/list_traces", params={"limit": 3})
 
@@ -2419,8 +2417,109 @@ def test_web_panel_trace_list_reads_only_enough_recent_metadata_for_limit(
         "118__operation__trace.json",
         "117__operation__trace.json",
     ]
-    assert pytest_scans == metadata_reads
-    assert len(metadata_reads) == 3
+    assert content_reads == {
+        "119__operation__trace.json": 1,
+        "118__operation__trace.json": 1,
+        "117__operation__trace.json": 1,
+    }
+
+
+def test_web_panel_trace_list_mode_filter_reads_each_visited_candidate_once(
+    tmp_path, monkeypatch
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trace_dir = tmp_path / "logs" / "traces" / "panel"
+    trace_dir.mkdir(parents=True)
+    for index in range(33):
+        agent_mode = "learn" if index <= 2 else "execute"
+        trace_path = trace_dir / f"{index:03d}__operation__trace.json"
+        trace_path.write_text(
+            json.dumps({"result": {"agent_mode": agent_mode}}),
+            encoding="utf-8",
+        )
+        timestamp = 1_700_000_000 + index
+        os.utime(trace_path, (timestamp, timestamp))
+
+    content_reads: dict[str, int] = {}
+    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
+
+    def counted_read_text(path: Path, *args, **kwargs) -> str:
+        if path.parent == trace_dir:
+            content_reads[path.name] = content_reads.get(path.name, 0) + 1
+        return original_read_text(path, *args, **kwargs)
+
+    def counted_read_bytes(path: Path) -> bytes:
+        if path.parent == trace_dir:
+            content_reads[path.name] = content_reads.get(path.name, 0) + 1
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
+
+    response = client.get("/panel/list_traces", params={"limit": 2, "mode": "learn"})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["data"]["traces"]] == [
+        "002__operation__trace.json",
+        "001__operation__trace.json",
+    ]
+    assert content_reads.get("000__operation__trace.json", 0) == 0
+    assert len(content_reads) == 32
+    assert set(content_reads.values()) == {1}
+
+
+def test_web_panel_trace_list_pytest_exclusions_read_each_visited_candidate_once(
+    tmp_path, monkeypatch
+) -> None:
+    client = TestClient(app)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    trace_dir = tmp_path / "logs" / "traces" / "panel"
+    trace_dir.mkdir(parents=True)
+    for index in range(33):
+        trace_path = trace_dir / f"{index:03d}__operation__trace.json"
+        if index in {0, 2}:
+            trace_path.write_text("{}", encoding="utf-8")
+        elif index == 1:
+            trace_path.write_text("malformed trace without metadata", encoding="utf-8")
+        else:
+            trace_path.write_text(
+                f"malformed trace \\pytest-of-user\\pytest-{index}\\asset.json",
+                encoding="utf-8",
+            )
+        timestamp = 1_700_000_000 + index
+        os.utime(trace_path, (timestamp, timestamp))
+
+    content_reads: dict[str, int] = {}
+    original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
+
+    def counted_read_text(path: Path, *args, **kwargs) -> str:
+        if path.parent == trace_dir:
+            content_reads[path.name] = content_reads.get(path.name, 0) + 1
+        return original_read_text(path, *args, **kwargs)
+
+    def counted_read_bytes(path: Path) -> bytes:
+        if path.parent == trace_dir:
+            content_reads[path.name] = content_reads.get(path.name, 0) + 1
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_text", counted_read_text)
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
+
+    response = client.get("/panel/list_traces", params={"limit": 2})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["data"]["traces"]] == [
+        "002__operation__trace.json",
+        "001__operation__trace.json",
+    ]
+    assert response.json()["data"]["traces"][1]["agent_mode"] == ""
+    assert response.json()["data"]["traces"][1]["operation"] == "operation"
+    assert content_reads.get("000__operation__trace.json", 0) == 0
+    assert len(content_reads) == 32
+    assert set(content_reads.values()) == {1}
 
 
 def test_web_panel_renders_manual_candidate_box() -> None:
