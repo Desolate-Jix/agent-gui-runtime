@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import json
 import re
 from copy import deepcopy
@@ -12,7 +13,7 @@ from PIL import Image, ImageDraw, UnidentifiedImageError
 
 from app.learn.correction_memory import record_human_review_correction
 from app.learn.recognition.uei.learning_shadow import (
-    load_uei_shadow_provider_summary,
+    load_uei_shadow_provider_review,
     strip_uei_shadow_review_cache,
 )
 
@@ -68,6 +69,7 @@ def load_learning_draft_review(
     )
 
     draft, attempt_index = _select_draft(payload)
+    selected_draft = draft
     source_ref = {
         "source_path": _relative_path(resolved, root),
         "source_trial_path": _relative_path(resolved, root) if _is_trial(payload) else None,
@@ -77,17 +79,49 @@ def load_learning_draft_review(
         "readonly": True,
     }
     normalized_draft = _normalized_draft(draft)
-    shadow_summary = load_uei_shadow_provider_summary(
-        normalized_draft, project_root=root,
-        current_capture_lineage_ref=_server_capture_lineage_ref(payload, normalized_draft),
+    displayed_source_image = _bind_review_source_image(normalized_draft, root)
+    current_capture_lineage_ref, current_capture_lineage_error = _server_capture_lineage_ref(
+        payload,
+        selected_draft,
+        normalized_draft,
     )
+    shadow_review = load_uei_shadow_provider_review(
+        normalized_draft,
+        project_root=root,
+        current_capture_lineage_ref=current_capture_lineage_ref,
+        current_capture_lineage_error=current_capture_lineage_error,
+        displayed_source_sha256=(
+            str(displayed_source_image.get("sha256") or "")
+            if isinstance(displayed_source_image, dict)
+            else None
+        ),
+        displayed_source_size=(
+            deepcopy(displayed_source_image.get("image_size"))
+            if isinstance(displayed_source_image, dict)
+            and isinstance(displayed_source_image.get("image_size"), dict)
+            else None
+        ),
+        existing_region_ids={
+            str(region.get("region_id"))
+            for region in normalized_draft.get("regions", [])
+            if isinstance(region, dict) and str(region.get("region_id") or "").strip()
+        },
+    )
+    shadow_summary = shadow_review.get("summary") if isinstance(shadow_review, dict) else None
     if shadow_summary is not None:
         normalized_draft.pop("provider_summary", None)
         page_details = normalized_draft.get("page_details")
         if isinstance(page_details, dict):
             page_details.pop("provider_summary", None)
+    if isinstance(shadow_review, dict) and isinstance(shadow_review.get("regions"), list):
+        normalized_draft["regions"].extend(deepcopy(shadow_review["regions"]))
+        if shadow_review["regions"]:
+            _bind_projected_review_source_copy(
+                normalized_draft,
+                displayed_source_image=displayed_source_image,
+                root=root,
+            )
     strip_uei_shadow_review_cache(normalized_draft)
-    _bind_review_source_image(normalized_draft, root)
     result = {
         "contract_version": REVIEW_CONTRACT,
         "source": source_ref,
@@ -108,6 +142,8 @@ def load_learning_draft_review(
     }
     if shadow_summary is not None:
         result["uei_shadow_provider_summary"] = shadow_summary
+    if isinstance(shadow_review, dict) and isinstance(shadow_review.get("projection"), dict):
+        result["uei_shadow_review_projection"] = deepcopy(shadow_review["projection"])
     if workflow_node_identity:
         result["workflow_node_identity"] = workflow_node_identity
     if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT:
@@ -128,14 +164,32 @@ def load_learning_draft_review(
     return result
 
 
-def _server_capture_lineage_ref(payload: dict[str, Any], draft: dict[str, Any]) -> dict[str, str] | None:
+def _server_capture_lineage_ref(
+    payload: dict[str, Any], *drafts: dict[str, Any],
+) -> tuple[dict[str, str] | None, str | None]:
     """只接受已加载服务器产物中精确的当前 capture 引用。"""
-    for value in (payload.get("capture_lineage_ref"), draft.get("capture_lineage_ref"),
-                  draft.get("page_details", {}).get("capture_lineage_ref") if isinstance(draft.get("page_details"), dict) else None):
+    candidates = [payload, *drafts]
+    for key in ("draft", "learning_draft", "best_learning_draft"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    values: list[object] = []
+    for candidate in candidates:
+        values.append(candidate.get("capture_lineage_ref"))
+        page_details = candidate.get("page_details")
+        if isinstance(page_details, dict):
+            values.append(page_details.get("capture_lineage_ref"))
+    unique: dict[tuple[str, str], dict[str, str]] = {}
+    for value in values:
         if (isinstance(value, dict) and set(value) == {"id", "content_sha256"}
                 and all(isinstance(value.get(name), str) for name in ("id", "content_sha256"))):
-            return {"id": value["id"], "content_sha256": value["content_sha256"]}
-    return None
+            reference = {"id": value["id"], "content_sha256": value["content_sha256"]}
+            unique[(reference["id"], reference["content_sha256"])] = reference
+    if len(unique) > 1:
+        return None, "current_capture_lineage_ambiguous"
+    if unique:
+        return next(iter(unique.values())), None
+    return None, None
 
 
 def _workflow_node_identity(payload: dict[str, Any], root: Path) -> dict[str, str]:
@@ -3463,27 +3517,33 @@ def _draft_source_image_path(draft: dict[str, Any]) -> str:
     return _draft_source_image_evidence(draft)["path"]
 
 
-def _bind_review_source_image(draft: dict[str, Any], root: Path) -> None:
+def _bind_review_source_image(
+    draft: dict[str, Any], root: Path,
+) -> dict[str, Any] | None:
     source = _draft_source_image_evidence(draft)
     image_path = str(source.get("path") or "").strip()
     if not image_path:
-        return
+        return None
     resolved = _resolve_optional_under_root(image_path, root)
     if not resolved.exists() or not resolved.is_file():
-        return
+        return None
     source_bytes = resolved.read_bytes()
     actual_sha256 = hashlib.sha256(source_bytes).hexdigest()
     expected_sha256 = str(source.get("sha256") or "").strip().lower()
-    if expected_sha256 and expected_sha256 != actual_sha256:
-        return
-    source_image_size: dict[str, int] = {}
     try:
-        with Image.open(resolved) as source_image:
+        with Image.open(BytesIO(source_bytes)) as source_image:
+            source_image.load()
             width, height = source_image.size
         source_image_size = {"width": int(width), "height": int(height)}
-    except (OSError, UnidentifiedImageError):
-        # 损坏图片仍沿用原有完整性处理链；这里只为可读取证据补充坐标空间。
-        pass
+    except (OSError, UnidentifiedImageError, SyntaxError):
+        return None
+    if expected_sha256 and expected_sha256 != actual_sha256:
+        return {
+            "sha256": actual_sha256,
+            "image_size": source_image_size,
+            "source_bytes": source_bytes,
+            "source_path": resolved,
+        }
     panel_source = _materialize_panel_review_source_image(
         resolved,
         root=root,
@@ -3503,6 +3563,46 @@ def _bind_review_source_image(draft: dict[str, Any], root: Path) -> None:
     screen["execute_binding_enabled"] = False
     page_details["screen"] = screen
     draft["page_details"] = page_details
+    return {
+        "sha256": actual_sha256,
+        "image_size": source_image_size,
+        "source_bytes": source_bytes,
+        "source_path": resolved,
+    }
+
+
+def _bind_projected_review_source_copy(
+    draft: dict[str, Any],
+    *,
+    displayed_source_image: dict[str, Any] | None,
+    root: Path,
+) -> None:
+    if not isinstance(displayed_source_image, dict):
+        return
+    source_path = displayed_source_image.get("source_path")
+    source_bytes = displayed_source_image.get("source_bytes")
+    source_sha256 = displayed_source_image.get("sha256")
+    if (
+        not isinstance(source_path, Path)
+        or not isinstance(source_bytes, bytes)
+        or not isinstance(source_sha256, str)
+        or hashlib.sha256(source_bytes).hexdigest() != source_sha256
+    ):
+        return
+    panel_source = _materialize_panel_review_source_image(
+        source_path,
+        root=root,
+        source_bytes=source_bytes,
+        source_sha256=source_sha256,
+        force_content_addressed=True,
+    )
+    page_details = draft.get("page_details") if isinstance(draft.get("page_details"), dict) else {}
+    screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
+    screen["source_image_path"] = _relative_path(panel_source, root)
+    screen["source_image_sha256"] = source_sha256
+    screen["source_image_materialized_for_panel"] = True
+    page_details["screen"] = screen
+    draft["page_details"] = page_details
 
 
 def _materialize_panel_review_source_image(
@@ -3511,12 +3611,14 @@ def _materialize_panel_review_source_image(
     root: Path,
     source_bytes: bytes,
     source_sha256: str,
+    force_content_addressed: bool = False,
 ) -> Path:
-    try:
-        source_path.relative_to(root)
-        return source_path
-    except ValueError:
-        pass
+    if not force_content_addressed:
+        try:
+            source_path.relative_to(root)
+            return source_path
+        except ValueError:
+            pass
 
     suffix = source_path.suffix.lower() or ".png"
     output_path = (

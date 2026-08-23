@@ -376,6 +376,47 @@ test("learning draft editor preserves agent-readable metadata with undo", () => 
   assert.equal(editor.getItem("region", "r1").semantic_action, "open_search");
 });
 
+test("provider-safe review region remains non-authorizing in LearningDraftEditorState", () => {
+  const editor = createLearningDraftEditorState([
+    {
+      target_kind: "region",
+      target_id: "uei_review_region_1234",
+      label: "Quick Apply",
+      role: "review_only",
+      kind: "text",
+      bbox: { x: 10, y: 20, w: 100, h: 30 },
+      provider_evidence: {
+        provider_id: "local.runtime/builtin-ocr",
+        profile_id: "local.runtime/builtin-ocr/v1",
+        provider_version: "built-in-v1",
+        confidence: 0.88,
+        safe_role: null,
+        safe_states: [],
+      },
+      candidate_only: true,
+      requires_human_review: true,
+      review_only: true,
+      grounding_eligible: false,
+      artifact_is_authorization: false,
+      execute_binding_enabled: false,
+      action_candidates: [],
+      final_submit_forbidden: true,
+      real_action_requires_gate: true,
+    },
+  ]);
+
+  const region = editor.getItem("region", "uei_review_region_1234");
+  assert.equal(region.role, "review_only");
+  assert.equal(region.candidate_only, true);
+  assert.equal(region.requires_human_review, true);
+  assert.equal(region.artifact_is_authorization, false);
+  assert.equal(region.execute_binding_enabled, false);
+  assert.equal(region.final_submit_forbidden, true);
+  assert.equal(region.real_action_requires_gate, true);
+  assert.deepEqual(region.action_candidates, []);
+  assert.equal(Object.prototype.hasOwnProperty.call(region, "semantic_action"), false);
+});
+
 test("learning draft editor save refreshes the parent before closing", async () => {
   const { context, calls } = loadSaveLearningDraftReview();
 
