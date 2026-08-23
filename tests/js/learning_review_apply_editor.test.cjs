@@ -55,6 +55,7 @@ test("confirm and store saves the current evidence before approving its workflow
     },
   };
   const contentDescription = { value: "Read the current Quick Apply control" };
+  const editorState = {};
   const sandbox = {
     currentLanguage: "zh-CN",
     learningDraftEditorActive: true,
@@ -71,6 +72,11 @@ test("confirm and store saves the current evidence before approving its workflow
       control_id: "apply",
       edge_id: "edge_apply",
       action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    },
+    learningDraftEditorState: editorState,
+    learningDraftEditorSelected: {
       target_kind: "action",
       target_id: "open_apply_flow_candidate",
     },
@@ -344,11 +350,13 @@ test("confirm and store rejects a standalone source preview", async () => {
 });
 
 test("draft evidence save stops before merge when the captured workflow state is replaced in flight", async () => {
-  const start = source.indexOf("function interfaceWorkflowReviewSessionIdentityIsCurrent");
-  const end = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview", start);
+  const start = source.indexOf("function normalizedInterfaceWorkflowReviewSourcePath");
+  const helperEnd = source.indexOf("async function refreshCurrentInterfaceWorkflowEvidence", start);
+  const saveStart = source.indexOf("async function saveLearningDraftReview");
+  const saveEnd = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview", saveStart);
   assert.notEqual(start, -1, "workflow session identity guard must exist");
-  assert.notEqual(end, -1, "workflow session guard boundary must exist");
-  const body = source.slice(start, end);
+  assert.notEqual(saveEnd, -1, "workflow session guard boundary must exist");
+  const body = source.slice(start, helperEnd) + source.slice(saveStart, saveEnd);
   const calls = [];
   const state = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
   const replacementState = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
@@ -364,7 +372,17 @@ test("draft evidence save stops before merge when the captured workflow state is
     let interfaceWorkflowReviewState = state;
     let learningDraftEditorWorkflowBinding = binding;
     let learningDraftEditorActive = true;
-    let learningDraftEditorSelected = null;
+    let learningDraftEditorState = state;
+    let learningDraftEditorSelected = { target_kind: "action", target_id: "open_apply_flow_candidate" };
+    let learningDraftEditorWorkflowSelection = {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    };
     const currentInterfaceWorkflowMutationTarget = () => ({
       state: interfaceWorkflowReviewState,
       view: { node: { node_id: "job_detail" } },
@@ -377,7 +395,9 @@ test("draft evidence save stops before merge when the captured workflow state is
       return { success: true, data: { reviewed_template_candidate_path: "reviewed.json" } };
     };
     const setLearningPathGraphCandidatePaths = () => calls.push("paths");
-    const refreshSavedLearningDraftReview = async () => { calls.push("merge"); return {}; };
+    const setLearningDraftReviewSourcePath = () => calls.push("merge");
+    const bumpPanelImageRevision = () => {};
+    const loadLearningDraftReview = async () => null;
     const renderResponse = () => {};
     const loadLearningCorrectionMemoryRegistry = async () => {};
     const buildLearningDraftEditorBinding = () => null;
@@ -391,12 +411,259 @@ test("draft evidence save stops before merge when the captured workflow state is
       workflow_id: "seek_flow",
       node_id: "job_detail",
       source_path: "draft.json",
+      expected_source_path: "draft.json",
+      editor_state: state,
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      selection_key: JSON.stringify({
+        target_kind: "action",
+        target_id: "open_apply_flow_candidate",
+        control_id: "apply",
+        action_template_id: "open_apply_flow_candidate",
+        edge_id: "edge_apply",
+      }),
+      phase: "draft",
     };
     globalThis.result = saveLearningDraftReview({ closeEditor: false, preserveWorkflowBinding: true }, session);
   `, sandbox);
 
   assert.equal(await sandbox.globalThis.result, null);
   assert.deepEqual(calls, []);
+});
+
+for (const drift of ["selection", "source_editor"]) {
+  test(`draft evidence save rejects in-flight ${drift} drift without refresh or approval`, async () => {
+    const start = source.indexOf("function normalizedInterfaceWorkflowReviewSourcePath");
+    const helperEnd = source.indexOf("async function refreshCurrentInterfaceWorkflowEvidence", start);
+    const saveStart = source.indexOf("async function saveLearningDraftReview");
+    const saveEnd = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview", saveStart);
+    const body = source.slice(start, helperEnd) + source.slice(saveStart, saveEnd);
+    let resolveApi;
+    const apiPromise = new Promise((resolve) => { resolveApi = resolve; });
+    const calls = [];
+    const state = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+    const binding = {
+      authority: "workflow",
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      source_path: "draft.json",
+      state,
+    };
+    const editorState = {};
+    const replacementEditorState = {};
+    const selection = {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    };
+    const sandbox = {
+      globalThis: {}, state, binding, editorState, replacementEditorState, selection, apiPromise, calls,
+    };
+    vm.runInNewContext(`
+      let interfaceWorkflowReviewState = state;
+      let learningDraftEditorWorkflowBinding = binding;
+      let learningDraftEditorWorkflowSelection = selection;
+      let learningDraftEditorState = editorState;
+      let learningDraftEditorRevision = 1;
+      let learningDraftEditorSelected = { target_kind: "action", target_id: "open_apply_flow_candidate" };
+      let currentSource = "draft.json";
+      let learningDraftEditorActive = true;
+      const selectedItem = {
+        target_kind: "action",
+        target_id: "open_apply_flow_candidate",
+        action_template_id: "open_apply_flow_candidate",
+      };
+      const learningDraftEditorSelectedItem = () => selectedItem;
+      const currentInterfaceWorkflowMutationTarget = () => ({
+        state,
+        view: { node: { node_id: "job_detail" } },
+      });
+      const learningDraftReviewSourcePath = () => currentSource;
+      const learningDraftReviewPatch = () => ({});
+      const applyLearningDraftEditorMetadataFromControls = () => {};
+      const api = async () => apiPromise;
+      const setLearningPathGraphCandidatePaths = () => calls.push("paths");
+      const setLearningDraftReviewSourcePath = () => calls.push("refresh");
+      const bumpPanelImageRevision = () => {};
+      const loadLearningDraftReview = async () => null;
+      const renderResponse = () => {};
+      const loadLearningCorrectionMemoryRegistry = async () => {};
+      const buildLearningDraftEditorBinding = () => null;
+      const syncImageInspectorWorkflowReviewPanel = () => {};
+      const closeImageInspector = () => {};
+      const $ = () => null;
+      ${body}
+      const session = {
+        state,
+        binding,
+        workflow_id: "seek_flow",
+        node_id: "job_detail",
+        source_path: "draft.json",
+        expected_source_path: "draft.json",
+        editor_state: editorState,
+        editor_revision: 1,
+        target_kind: "action",
+        target_id: "open_apply_flow_candidate",
+        selection_key: JSON.stringify({
+          target_kind: "action",
+          target_id: "open_apply_flow_candidate",
+          control_id: "apply",
+          action_template_id: "open_apply_flow_candidate",
+          edge_id: "edge_apply",
+        }),
+        phase: "draft",
+      };
+      globalThis.result = saveLearningDraftReview({ closeEditor: false, preserveWorkflowBinding: true }, session);
+      globalThis.drift = (kind) => {
+        if (kind === "selection") {
+          learningDraftEditorWorkflowSelection = { ...selection, target_id: "other_candidate" };
+        } else {
+          currentSource = "other.json";
+          learningDraftEditorState = replacementEditorState;
+          learningDraftEditorRevision += 1;
+        }
+      };
+    `, sandbox);
+
+    sandbox.globalThis.drift(drift);
+    resolveApi({ success: true, data: { reviewed_template_candidate_path: "reviewed.json" } });
+    assert.equal(await sandbox.globalThis.result, null);
+    assert.deepEqual(calls, []);
+  });
+}
+
+test("reviewed evidence transition advances its session explicitly and preserves the exact selection", async () => {
+  const guardStart = source.indexOf("function normalizedInterfaceWorkflowReviewSourcePath");
+  const refreshStart = source.indexOf("async function refreshSavedLearningDraftReview");
+  const refreshEnd = source.indexOf("async function refreshCurrentInterfaceWorkflowEvidence", refreshStart);
+  assert.notEqual(guardStart, -1, "full review session guard must exist");
+  const guardSource = source.slice(guardStart, refreshStart);
+  const refreshSource = source.slice(refreshStart, refreshEnd);
+  const state = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+  const binding = {
+    authority: "workflow",
+    workflow_id: "seek_flow",
+    node_id: "job_detail",
+    source_path: "draft.json",
+    state,
+  };
+  const draftEditor = {};
+  const reviewedEditor = {
+    getItem: () => ({
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      action_template_id: "open_apply_flow_candidate",
+    }),
+  };
+  const calls = [];
+  const sandbox = { globalThis: {}, state, binding, draftEditor, reviewedEditor, calls };
+  vm.runInNewContext(`
+    let interfaceWorkflowReviewState = state;
+    let learningDraftEditorWorkflowBinding = binding;
+    let learningDraftEditorState = draftEditor;
+    let learningDraftEditorRevision = 1;
+    let learningDraftEditorLoadToken = 0;
+    let learningDraftReviewLoadRequestToken = 0;
+    let learningDraftReview = null;
+    let learningDraftEditorSelected = { target_kind: "action", target_id: "open_apply_flow_candidate" };
+    let learningDraftEditorWorkflowSelection = {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    };
+    let currentSource = "draft.json";
+    const currentInterfaceWorkflowMutationTarget = () => ({
+      state,
+      view: { node: { node_id: "job_detail" } },
+    });
+    const learningDraftReviewSourcePath = () => currentSource;
+    const learningDraftEditorSelectedItem = () => learningDraftEditorState?.getItem?.(
+      learningDraftEditorSelected?.target_kind,
+      learningDraftEditorSelected?.target_id,
+    ) || null;
+    const setLearningDraftReviewSourcePath = (value, options) => {
+      calls.push(["source", value, options?.preserveWorkflowReview === true]);
+      currentSource = value;
+      learningDraftEditorState = null;
+      learningDraftEditorSelected = null;
+      learningDraftEditorWorkflowSelection = null;
+    };
+    const bumpPanelImageRevision = () => {};
+    const loadLearningDraftReview = async () => {
+      learningDraftReviewLoadRequestToken += 1;
+      learningDraftEditorRevision += 1;
+      learningDraftEditorState = reviewedEditor;
+      learningDraftReview = { draft: {} };
+      learningDraftEditorLoadToken = learningDraftReviewLoadRequestToken;
+      return learningDraftReview;
+    };
+    const selectLearningDraftEditorItem = (kind, id) => {
+      learningDraftEditorSelected = { target_kind: kind, target_id: id };
+      learningDraftEditorWorkflowSelection = {
+        status: "matched",
+        node_id: "job_detail",
+        control_id: "apply",
+        edge_id: "edge_apply",
+        action_template_id: "open_apply_flow_candidate",
+        target_kind: kind,
+        target_id: id,
+      };
+      calls.push(["select", kind, id]);
+    };
+    const applyReviewedEvidenceToCurrentWorkflowNode = () => { calls.push(["merge"]); return true; };
+    const saveInterfaceWorkflowReview = async () => { calls.push(["persist"]); return { path: "workflow.json" }; };
+    const $ = () => null;
+    ${guardSource}
+    ${refreshSource}
+    const selectionKey = JSON.stringify({
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      control_id: "apply",
+      action_template_id: "open_apply_flow_candidate",
+      edge_id: "edge_apply",
+    });
+    const session = {
+      state,
+      binding,
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      source_path: "draft.json",
+      expected_source_path: "draft.json",
+      editor_state: draftEditor,
+      editor_revision: 1,
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      selection_key: selectionKey,
+      phase: "draft",
+    };
+    globalThis.session = session;
+    globalThis.result = refreshSavedLearningDraftReview({
+      previousSourcePath: "draft.json",
+      reviewedPath: "reviewed.json",
+      workflowBinding: binding,
+      workflowSession: session,
+    });
+  `, sandbox);
+
+  const result = await sandbox.globalThis.result;
+  assert.equal(result.workflow.workflow.workflow_id, "seek_flow");
+  assert.equal(sandbox.globalThis.session.phase, "reviewed");
+  assert.equal(sandbox.globalThis.session.expected_source_path, "reviewed.json");
+  assert.equal(sandbox.globalThis.session.editor_state, reviewedEditor);
+  assert.equal(JSON.stringify(calls), JSON.stringify([
+    ["source", "reviewed.json", true],
+    ["select", "action", "open_apply_flow_candidate"],
+    ["merge"],
+    ["persist"],
+  ]));
 });
 
 test("workflow-bound evidence refresh preserves the captured workflow while switching to reviewed evidence", () => {
@@ -745,6 +1012,7 @@ test("session approval is built in an isolated state and persistence failure lea
     interfaceWorkflowHasUnsavedChanges: true,
     interfaceWorkflowSavedReviewPath: "workflow.json",
     learningDraftEditorWorkflowBinding: binding,
+    interfaceWorkflowReviewSessionIsCurrent: () => true,
     currentInterfaceWorkflowMutationTarget: () => ({
       state: liveState,
       view: { node: { node_id: "job_detail" } },

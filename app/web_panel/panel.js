@@ -124,6 +124,8 @@ let learningDraftOwnershipSelections = {};
 let imageInspectorEditContext = null;
 let imageInspectorSelection = null;
 let learningDraftEditorState = null;
+let learningDraftEditorRevision = 0;
+let learningDraftEditorLoadToken = 0;
 let learningDraftEditorSelected = null;
 let learningDraftEditorActive = false;
 let learningDraftEditorWorkflowBinding = null;
@@ -4395,6 +4397,86 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
   return true;
 }
 
+function normalizedInterfaceWorkflowReviewSourcePath(value) {
+  return String(value || "").trim().replace(/\\/g, "/").toLowerCase();
+}
+
+function currentInterfaceWorkflowReviewSelectionKey() {
+  const selection = learningDraftEditorWorkflowSelection;
+  const selected = learningDraftEditorSelected;
+  return JSON.stringify({
+    target_kind: String(selection?.target_kind || selected?.target_kind || "").trim(),
+    target_id: String(selection?.target_id || selected?.target_id || "").trim(),
+    control_id: String(selection?.control_id || "").trim(),
+    action_template_id: String(selection?.action_template_id || "").trim(),
+    edge_id: String(selection?.edge_id || "").trim(),
+  });
+}
+
+function interfaceWorkflowReviewSessionIdentityIsCurrent(session) {
+  if (!session) return true;
+  const binding = learningDraftEditorWorkflowBinding;
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  const workflowId = String(mutationTarget.state?.snapshot?.()?.workflow?.workflow_id || "").trim();
+  const nodeId = String(mutationTarget.view?.node?.node_id || "").trim();
+  return mutationTarget.state === session.state
+    && binding === session.binding
+    && binding?.state === session.state
+    && workflowId === String(session.workflow_id || "").trim()
+    && nodeId === String(session.node_id || "").trim();
+}
+
+function interfaceWorkflowReviewSessionIsCurrent(session) {
+  if (!interfaceWorkflowReviewSessionIdentityIsCurrent(session)) return false;
+  if (!session) return true;
+  const expectedSourcePath = normalizedInterfaceWorkflowReviewSourcePath(
+    session.expected_source_path || session.source_path,
+  );
+  const currentSourcePath = normalizedInterfaceWorkflowReviewSourcePath(learningDraftReviewSourcePath());
+  if (!expectedSourcePath || currentSourcePath !== expectedSourcePath) return false;
+  if (learningDraftEditorState !== session.editor_state) return false;
+  if (
+    Number.isInteger(session.editor_revision)
+    && learningDraftEditorRevision !== session.editor_revision
+  ) return false;
+  return currentInterfaceWorkflowReviewSelectionKey() === String(session.selection_key || "");
+}
+
+function beginInterfaceWorkflowReviewedEvidenceTransition(session, reviewedPath) {
+  if (!interfaceWorkflowReviewSessionIsCurrent(session)) return false;
+  const normalizedReviewedPath = normalizedInterfaceWorkflowReviewSourcePath(reviewedPath);
+  if (!normalizedReviewedPath) return false;
+  session.phase = "loading_reviewed";
+  session.expected_source_path = normalizedReviewedPath;
+  session.transition_load_token_before = learningDraftReviewLoadRequestToken;
+  return true;
+}
+
+function completeInterfaceWorkflowReviewedEvidenceTransition(session, reviewedPath, refreshedReview) {
+  if (!interfaceWorkflowReviewSessionIdentityIsCurrent(session)) return false;
+  if (session?.phase !== "loading_reviewed") return false;
+  if (
+    normalizedInterfaceWorkflowReviewSourcePath(learningDraftReviewSourcePath())
+    !== normalizedInterfaceWorkflowReviewSourcePath(reviewedPath)
+  ) return false;
+  if (learningDraftReview !== refreshedReview) return false;
+  if (learningDraftEditorWorkflowSelection !== null || learningDraftEditorSelected !== null) return false;
+  if (!learningDraftEditorState || !learningDraftEditorLoadToken) return false;
+  if (learningDraftEditorLoadToken !== learningDraftReviewLoadRequestToken) return false;
+  if (learningDraftReviewLoadRequestToken <= Number(session.transition_load_token_before || 0)) return false;
+  const selectedItem = learningDraftEditorState.getItem?.(session.target_kind, session.target_id);
+  if (!selectedItem) return false;
+  selectLearningDraftEditorItem(session.target_kind, session.target_id);
+  session.phase = "reviewed";
+  session.source_path = normalizedInterfaceWorkflowReviewSourcePath(reviewedPath);
+  session.expected_source_path = session.source_path;
+  session.editor_state = learningDraftEditorState;
+  session.editor_revision = learningDraftEditorRevision;
+  session.editor_load_token = learningDraftEditorLoadToken;
+  session.selection_key = currentInterfaceWorkflowReviewSelectionKey();
+  return interfaceWorkflowReviewSessionIsCurrent(session);
+}
+
 async function refreshSavedLearningDraftReview({
   previousSourcePath,
   reviewedPath,
@@ -4403,7 +4485,7 @@ async function refreshSavedLearningDraftReview({
 }) {
   const sourcePath = String(reviewedPath || "").trim();
   if (!sourcePath) return null;
-  if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) return null;
+  if (workflowSession && !beginInterfaceWorkflowReviewedEvidenceTransition(workflowSession, sourcePath)) return null;
   setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true });
   bumpPanelImageRevision();
   const refreshedReview = await loadLearningDraftReview({
@@ -4414,19 +4496,19 @@ async function refreshSavedLearningDraftReview({
     skipReviewRender: true,
   });
   if (!refreshedReview) return null;
-  if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) return null;
-  if (workflowSession) {
-    const selectedItem = learningDraftEditorState?.getItem?.(
-      workflowSession.target_kind,
-      workflowSession.target_id,
-    );
-    if (!selectedItem) return null;
-    selectLearningDraftEditorItem(workflowSession.target_kind, workflowSession.target_id);
-  }
+  if (
+    workflowSession
+    && !completeInterfaceWorkflowReviewedEvidenceTransition(
+      workflowSession,
+      sourcePath,
+      refreshedReview,
+    )
+  ) return null;
   if (workflowBinding?.authority !== "workflow") {
     return { review: refreshedReview, workflow: null };
   }
   let refreshedWorkflow = null;
+  if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
   const binding = applyReviewedEvidenceToCurrentWorkflowNode({
     previousSourcePath,
     reviewedPath: sourcePath,
@@ -4434,14 +4516,16 @@ async function refreshSavedLearningDraftReview({
     workflowBinding,
   });
   if (binding === true) {
-    if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) return null;
+    if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
     const saveResult = await saveInterfaceWorkflowReview({
       commitEditor: false,
       expectedState: workflowSession?.state || null,
       expectedBinding: workflowSession?.binding || null,
       preserveStateSession: Boolean(workflowSession),
+      workflowSession,
     });
     if (!saveResult) return null;
+    if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
     refreshedWorkflow = interfaceWorkflowReviewState?.snapshot?.() || null;
   } else if (binding === "not_bound") {
     if ($("interfaceWorkflowSourceStatus")) $("interfaceWorkflowSourceStatus").textContent = "审核证据未精确匹配现有流程节点；候选已保留，未从单界面重建流程。";
@@ -15317,6 +15401,8 @@ function learningReviewTextareaItems(text, idKey, idPrefix) {
 }
 
 function resetLearningDraftEditorState(review = null) {
+  learningDraftEditorRevision += 1;
+  if (!review) learningDraftEditorLoadToken = 0;
   const factory = globalThis.LearningDraftEditorState
     ? globalThis.LearningDraftEditorState.createLearningDraftEditorState
     : null;
@@ -20142,11 +20228,7 @@ function approveCurrentInterfaceWorkflowNode(options = {}) {
 
 async function approveAndSaveCurrentInterfaceWorkflowNode(session = null) {
   if (session) {
-    if (
-      interfaceWorkflowReviewState !== session.state
-      || learningDraftEditorWorkflowBinding !== session.binding
-      || learningDraftEditorWorkflowBinding?.state !== session.state
-    ) return null;
+    if (!interfaceWorkflowReviewSessionIsCurrent(session)) return null;
     const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
     const openingSnapshot = session.state?.snapshot?.();
     if (!openingSnapshot || typeof factory !== "function") return null;
@@ -20171,13 +20253,11 @@ async function approveAndSaveCurrentInterfaceWorkflowNode(session = null) {
       expectedSnapshotKey: openingSnapshotKey,
       preserveStateSession: true,
       reviewOverride: approvedReview,
+      workflowSession: session,
     });
     if (!saved) return null;
-    if (
-      interfaceWorkflowReviewState !== session.state
-      || learningDraftEditorWorkflowBinding !== session.binding
-      || JSON.stringify(session.state.snapshot()) !== openingSnapshotKey
-    ) return null;
+    if (!interfaceWorkflowReviewSessionIsCurrent(session)) return null;
+    if (JSON.stringify(session.state.snapshot()) !== openingSnapshotKey) return null;
     interfaceWorkflowReviewState = draftState;
     interfaceWorkflowReview = approvedReview;
     learningDraftEditorWorkflowBinding = {
@@ -20253,11 +20333,13 @@ async function saveInterfaceWorkflowReview({
   expectedSnapshotKey = "",
   preserveStateSession = false,
   reviewOverride = null,
+  workflowSession = null,
 } = {}) {
   const expectedSessionIsCurrent = () => (
     (!expectedState || interfaceWorkflowReviewState === expectedState)
     && (!expectedBinding || learningDraftEditorWorkflowBinding === expectedBinding)
     && (!expectedSnapshotKey || JSON.stringify(expectedState?.snapshot?.()) === expectedSnapshotKey)
+    && (!workflowSession || interfaceWorkflowReviewSessionIsCurrent(workflowSession))
   );
   if (!expectedSessionIsCurrent()) return null;
   if (requireDisplayedWorkflow && !currentInterfaceWorkflowMutationTarget().state) {
@@ -20281,6 +20363,7 @@ async function saveInterfaceWorkflowReview({
   if (!reviewToSave) return null;
   if (!reviewOverride) interfaceWorkflowReview = reviewToSave;
   renderInterfaceWorkflowReviewSelection();
+  if (!expectedSessionIsCurrent()) return null;
   if ($("interfaceWorkflowSaveStatus")) $("interfaceWorkflowSaveStatus").textContent = "正在保存学习结果…";
 
   const response = await api("POST", "/panel/save_interface_workflow_review", {
@@ -20908,6 +20991,7 @@ async function loadLearningDraftReview(options = {}) {
       learningDraftReviewBboxEdits = { regions: {}, actions: {} };
       learningDraftReview = data;
       resetLearningDraftEditorState(data);
+      learningDraftEditorLoadToken = loadRequestToken;
       if (!options.skipReviewRender) {
         renderLearningDraftReview(data);
       }
@@ -20948,19 +21032,6 @@ async function loadLearningDraftReview(options = {}) {
   }
 }
 
-function interfaceWorkflowReviewSessionIdentityIsCurrent(session) {
-  if (!session) return true;
-  const binding = learningDraftEditorWorkflowBinding;
-  const mutationTarget = currentInterfaceWorkflowMutationTarget();
-  const workflowId = String(mutationTarget.state?.snapshot?.()?.workflow?.workflow_id || "").trim();
-  const nodeId = String(mutationTarget.view?.node?.node_id || "").trim();
-  return mutationTarget.state === session.state
-    && binding === session.binding
-    && binding?.state === session.state
-    && workflowId === String(session.workflow_id || "").trim()
-    && nodeId === String(session.node_id || "").trim();
-}
-
 async function saveLearningDraftReview(options = {}, workflowSession = null) {
   const apply = $("imageInspectorApplyBoxBtn");
   let saveSucceeded = false;
@@ -20969,7 +21040,7 @@ async function saveLearningDraftReview(options = {}, workflowSession = null) {
     apply.textContent = "Saving review...";
   }
   try {
-    if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) {
+    if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) {
       renderResponse({ success: false, message: "Workflow review state changed before evidence save" }, "Learning draft review");
       return null;
     }
@@ -20998,6 +21069,10 @@ async function saveLearningDraftReview(options = {}, workflowSession = null) {
       applyLearningDraftEditorMetadataFromControls();
     }
     const reviewPatch = learningDraftReviewPatch();
+    if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) {
+      renderResponse({ success: false, message: "Workflow review state changed before evidence dispatch" }, "Learning draft review");
+      return null;
+    }
     const response = await api("POST", "/panel/save_learning_draft_review", {
       source_path: sourcePath,
       review_patch: reviewPatch,
@@ -21006,7 +21081,7 @@ async function saveLearningDraftReview(options = {}, workflowSession = null) {
       renderResponse(response || { success: false, message: "Learning draft review save failed" }, "Learning draft review");
       return null;
     }
-    if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) {
+    if (workflowSession && !interfaceWorkflowReviewSessionIsCurrent(workflowSession)) {
       renderResponse({ success: false, message: "Workflow review state changed during evidence save" }, "Learning draft review");
       return null;
     }
@@ -21066,8 +21141,13 @@ async function saveLearningDraftReview(options = {}, workflowSession = null) {
       learningDraftEditorWorkflowBinding = rebound;
       if (workflowSession) {
         workflowSession.binding = rebound;
-        workflowSession.source_path = reviewedPath.replace(/\\/g, "/").toLowerCase();
+        workflowSession.source_path = normalizedInterfaceWorkflowReviewSourcePath(reviewedPath);
+        workflowSession.expected_source_path = workflowSession.source_path;
+        workflowSession.editor_state = learningDraftEditorState;
+        workflowSession.editor_revision = learningDraftEditorRevision;
         selectLearningDraftEditorItem(workflowSession.target_kind, workflowSession.target_id);
+        workflowSession.selection_key = currentInterfaceWorkflowReviewSelectionKey();
+        if (!interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
       }
       syncImageInspectorWorkflowReviewPanel();
     } else {
@@ -21138,14 +21218,18 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
     const selectedItemId = String(
       selectedItem?.target_id || selectedItem?.region_id || selectedItem?.action_template_id || "",
     ).trim();
+    const editorState = typeof learningDraftEditorState === "undefined"
+      ? selectedItem
+      : learningDraftEditorState;
+    const editorRevision = typeof learningDraftEditorRevision === "undefined"
+      ? null
+      : learningDraftEditorRevision;
     const selectionKey = JSON.stringify({
-      status: selection?.status,
-      node_id: selection?.node_id,
+      target_kind: String(selection?.target_kind || selectedItem?.target_kind || "").trim(),
+      target_id: selectionTargetId,
       control_id: selection?.control_id,
-      edge_id: selection?.edge_id,
       action_template_id: selection?.action_template_id,
-      target_kind: selection?.target_kind,
-      target_id: selection?.target_id,
+      edge_id: selection?.edge_id,
     });
     const valid = currentBinding?.authority === "workflow"
       && state
@@ -21174,6 +21258,11 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
       || workflowId !== expectedSession.workflow_id
       || nodeId !== expectedSession.node_id
       || sourcePath !== expectedSession.source_path
+      || editorState !== expectedSession.editor_state
+      || (
+        Number.isInteger(expectedSession.editor_revision)
+        && editorRevision !== expectedSession.editor_revision
+      )
       || selectionKey !== expectedSession.selection_key
     )) return null;
     return expectedSession || {
@@ -21182,9 +21271,13 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
       workflow_id: workflowId,
       node_id: nodeId,
       source_path: sourcePath,
+      expected_source_path: sourcePath,
+      editor_state: editorState,
+      editor_revision: editorRevision,
       target_kind: String(selectedItem?.target_kind || "").trim(),
       target_id: selectedItemId,
       selection_key: selectionKey,
+      phase: "draft",
     };
   };
   const session = captureSession();
