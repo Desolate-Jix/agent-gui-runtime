@@ -964,6 +964,22 @@
                                 placeholder="例如：点击当前卡片，进入详情后确认标题与所选条目一致。"
                               ></textarea>
                             </label>
+                            <label class="interface-workflow-operation-description">
+                              <span>成功验证条件</span>
+                              <textarea
+                                id="interfaceWorkflowOperationSuccessConditions"
+                                rows="2"
+                                placeholder="每行一个条件，例如：目标详情标题可见"
+                              ></textarea>
+                            </label>
+                            <label class="interface-workflow-operation-description">
+                              <span>失败与安全停止条件</span>
+                              <textarea
+                                id="interfaceWorkflowOperationFailureConditions"
+                                rows="2"
+                                placeholder="每行一个条件，例如：出现登录弹窗或目标不唯一"
+                              ></textarea>
+                            </label>
                             <div class="interface-workflow-control-picker">
                               <label>
                                 <span>目标控件</span>
@@ -1775,10 +1791,7 @@
                 <span>给 Agent 的描述</span>
                 <textarea id="interfaceWorkflowContentDescription" rows="2" placeholder="例如：这是岗位卡片，读取当前标题和公司。"></textarea>
               </label>
-              <div class="interface-workflow-operation-actions">
-                <button id="interfaceWorkflowContentSaveBtn" type="button">保存内容说明</button>
-              </div>
-              <small>固定结构进入记忆；Agent 只在当前观察中读取动态值，历史文字不会当作最新内容。</small>
+              <small>内容说明会随“确认并入库”原子提交；固定结构进入记忆，Agent 只在当前观察中读取动态值，历史文字不会当作最新内容。</small>
             </section>
           </section>
           <div class="image-inspector-footer-actions" id="imageInspectorFooterActions">

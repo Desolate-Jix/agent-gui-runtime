@@ -5664,6 +5664,8 @@ def test_panel_contains_reviewed_operation_toolbar() -> None:
         "interfaceWorkflowOperationLabel",
         "interfaceWorkflowOperationTargetControl",
         "interfaceWorkflowOperationTargetNode",
+        "interfaceWorkflowOperationSuccessConditions",
+        "interfaceWorkflowOperationFailureConditions",
         "interfaceWorkflowOperationPlaceholderName",
         "interfaceWorkflowOperationConfirmation",
         "interfaceWorkflowOperationAddBtn",
@@ -5767,13 +5769,16 @@ def test_interface_workflow_content_semantics_editor_is_available() -> None:
         "interfaceWorkflowContentAgentUsage",
         "interfaceWorkflowContentReadPolicy",
         "interfaceWorkflowContentDescription",
-        "interfaceWorkflowContentSaveBtn",
         "interfaceWorkflowContentStatus",
     ):
         assert f'id="{element_id}"' in html
 
     assert "function renderInterfaceWorkflowContentEditor" in panel_js
     assert "function saveInterfaceWorkflowContentDescriptor" in panel_js
+    assert 'id="interfaceWorkflowContentSaveBtn"' not in html
+    confirm_start = panel_js.index("async function confirmAndStoreCurrentInterfaceWorkflowReview")
+    confirm_end = panel_js.index("\nasync function publishLearningOperationalMemory", confirm_start)
+    assert "saveInterfaceWorkflowContentDescriptor()" in panel_js[confirm_start:confirm_end]
     assert "content_descriptors" in panel_js
     assert "Agent 只在当前观察中读取动态值" in html
 

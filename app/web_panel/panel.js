@@ -87,6 +87,7 @@ let interfaceWorkflowLibraryRegistry = null;
 let interfaceWorkflowSourcePreview = null;
 let interfaceWorkflowSourceReviewState = null;
 let interfaceWorkflowSelectedOperationId = "";
+let interfaceWorkflowOperationDialogSession = null;
 let interfaceWorkflowSavedReviewPath = "";
 let interfaceWorkflowHasUnsavedChanges = false;
 let interfaceWorkflowSafeFillPreflight = null;
@@ -4239,19 +4240,48 @@ async function openCurrentInterfaceWorkflowBoxEditor() {
   }
 }
 
-function openCurrentImageInspectorWorkflowOperationDialog() {
+function openInterfaceWorkflowLinkedOperationDialog() {
   const binding = learningDraftEditorWorkflowBinding;
   const mutationTarget = currentInterfaceWorkflowMutationTarget();
   const view = mutationTarget.view;
-  const edgeId = String(learningDraftEditorWorkflowSelection?.edge_id || "").trim();
+  const selection = learningDraftEditorWorkflowSelection;
+  const edgeId = String(selection?.edge_id || "").trim();
   const edge = (Array.isArray(view?.outgoing_edges) ? view.outgoing_edges : []).find(
     (candidate) => String(candidate?.edge_id || "").trim() === edgeId,
   );
+  const workflowId = String(mutationTarget.state?.snapshot?.()?.workflow?.workflow_id || "").trim();
+  const nodeId = String(view?.node?.node_id || "").trim();
+  const controlId = String(selection?.control_id || "").trim();
+  const edgeControlId = String(edge?.target_control_id || edge?.target_region_id || "").trim();
+  const actionTemplateId = String(selection?.action_template_id || "").trim();
+  const edgeActionTemplateId = String(edge?.action_template_id || "").trim();
+  const selectedAction = String(
+    learningDraftEditorSelectedItem()?.semantic_action
+    || learningDraftEditorSelectedItem()?.action_type
+    || "",
+  ).trim();
+  const edgeAction = String(edge?.semantic_action || edge?.action_type || "").trim();
   if (
     binding?.authority !== "workflow"
     || !mutationTarget.state
+    || mutationTarget.state !== binding?.state
+    || selection?.status !== "matched"
+    || !workflowId
+    || workflowId !== String(binding?.workflow_id || "").trim()
+    || !nodeId
+    || nodeId !== String(binding?.node_id || "").trim()
+    || nodeId !== String(selection?.node_id || "").trim()
     || !edge
-    || String(view?.node?.node_id || "").trim() !== String(binding?.node_id || "").trim()
+    || String(edge?.source_node_id || "").trim() !== nodeId
+    || !controlId
+    || edgeControlId !== controlId
+    || !actionTemplateId
+    || edgeActionTemplateId !== actionTemplateId
+    || (selectedAction && edgeAction !== selectedAction)
+    || (
+      String(selection?.target_node_id || "").trim()
+      && String(edge?.target_node_id || "").trim() !== String(selection.target_node_id).trim()
+    )
   ) {
     renderResponse({
       success: false,
@@ -4261,9 +4291,11 @@ function openCurrentImageInspectorWorkflowOperationDialog() {
   }
   interfaceWorkflowSelectedOperationId = edgeId;
   renderInterfaceWorkflowOperationEditor(view);
-  openInterfaceWorkflowLinkDialog(edge);
+  openInterfaceWorkflowLinkDialog(edge, { scope: "scoped" });
   return edge;
 }
+
+const openCurrentImageInspectorWorkflowOperationDialog = openInterfaceWorkflowLinkedOperationDialog;
 
 function interfaceWorkflowSourcePathsAfterReview(previousSourcePath, reviewedPath) {
   const previous = String(previousSourcePath || "").trim();
@@ -18469,15 +18501,51 @@ function restoreInterfaceWorkflowOperationToolbar() {
   toolbar.hidden = true;
 }
 
+function restoreInterfaceWorkflowOperationDialogSnapshot() {
+  const session = interfaceWorkflowOperationDialogSession;
+  const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+  if (!session?.snapshot || typeof factory !== "function") return false;
+  if (interfaceWorkflowReviewState !== session.state) return false;
+  const restoredState = factory(session.snapshot);
+  if (!restoredState) return false;
+  interfaceWorkflowReviewState = restoredState;
+  interfaceWorkflowReview = restoredState.snapshot();
+  interfaceWorkflowSelectedOperationId = String(session.selected_operation_id || "").trim();
+  interfaceWorkflowHasUnsavedChanges = session.had_unsaved_changes === true;
+  interfaceWorkflowSavedReviewPath = String(session.saved_review_path || "").trim();
+  if (
+    learningDraftEditorWorkflowBinding?.authority === "workflow"
+    && learningDraftEditorWorkflowBinding.state === session.state
+  ) {
+    learningDraftEditorWorkflowBinding = {
+      ...learningDraftEditorWorkflowBinding,
+      state: restoredState,
+    };
+  }
+  const nodeId = String(session.node_id || "").trim();
+  if (nodeId) restoredState.select(nodeId);
+  renderInterfaceWorkflowReviewSelection();
+  return true;
+}
+
 function closeInterfaceWorkflowLinkDialog(options = {}) {
   const dialog = $("interfaceWorkflowLinkDialog");
   if (dialog?.open) dialog.close();
+  if (options.preserveToolbar === true) return;
+  if (options.committed !== true) restoreInterfaceWorkflowOperationDialogSnapshot();
   if (options.preserveToolbar !== true) restoreInterfaceWorkflowOperationToolbar();
   if (dialog) delete dialog.dataset.mode;
+  if (dialog) delete dialog.dataset.scope;
+  interfaceWorkflowOperationDialogSession = null;
   if (options.cancelled === true) {
     interfaceWorkflowWorkbenchState.clearLink();
     setInterfaceWorkflowGraphLinkStatus(currentLanguage === "en-US" ? "Link creation cancelled." : "已取消创建连接。");
   }
+}
+
+function cancelInterfaceWorkflowLinkDialog(event = null) {
+  event?.preventDefault?.();
+  closeInterfaceWorkflowLinkDialog({ cancelled: true });
 }
 
 function restoreInterfaceWorkflowEvidence() {
@@ -18528,7 +18596,26 @@ function openInterfaceWorkflowControlPickerDialog() {
   }
 }
 
-function openInterfaceWorkflowLinkDialog(link) {
+function configureInterfaceWorkflowOperationDialogScope(scope = "full") {
+  const scoped = scope === "scoped";
+  const operationList = $("interfaceWorkflowOperationList");
+  if (operationList) {
+    operationList.disabled = scoped;
+    if (operationList.parentElement) operationList.parentElement.hidden = scoped;
+  }
+  for (const id of [
+    "interfaceWorkflowOperationAddBtn",
+    "interfaceWorkflowOperationUpdateBtn",
+    "interfaceWorkflowOperationDeleteBtn",
+  ]) {
+    const button = $(id);
+    if (!button) continue;
+    button.hidden = scoped;
+    button.disabled = scoped;
+  }
+}
+
+function openInterfaceWorkflowLinkDialog(link, options = {}) {
   const dialog = $("interfaceWorkflowLinkDialog");
   const body = $("interfaceWorkflowLinkDialogBody");
   const toolbar = $("interfaceWorkflowOperationToolbar");
@@ -18539,7 +18626,22 @@ function openInterfaceWorkflowLinkDialog(link) {
   const sourceNode = interfaceWorkflowNodeById(link?.source_node_id);
   const targetNode = interfaceWorkflowNodeById(link?.target_node_id);
   const editingExisting = Boolean(String(link?.edge_id || "").trim());
+  const scope = options.scope === "scoped" ? "scoped" : "full";
   dialog.dataset.mode = editingExisting ? "edit" : "create";
+  dialog.dataset.scope = scope;
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  interfaceWorkflowOperationDialogSession = mutationTarget.state ? {
+    state: mutationTarget.state,
+    snapshot: mutationTarget.state.snapshot(),
+    node_id: String(mutationTarget.view?.node?.node_id || link?.source_node_id || "").trim(),
+    selected_operation_id: String(interfaceWorkflowSelectedOperationId || link?.edge_id || "").trim(),
+    had_unsaved_changes: interfaceWorkflowHasUnsavedChanges,
+    saved_review_path: interfaceWorkflowSavedReviewPath,
+    mode: editingExisting ? "edit" : "create",
+    scope,
+    dirty: false,
+  } : null;
+  configureInterfaceWorkflowOperationDialogScope(scope);
   if ($("interfaceWorkflowLinkDialogTitle")) {
     $("interfaceWorkflowLinkDialogTitle").textContent = editingExisting
       ? "查看与编辑关联操作"
@@ -19060,6 +19162,13 @@ function handleInterfaceWorkflowEditorMutation({ clearConfirmation = true } = {}
 
 function handleInterfaceWorkflowOperationEditorMutation() {
   if (!currentInterfaceWorkflowMutationTarget().state) return;
+  if (interfaceWorkflowOperationDialogSession) {
+    interfaceWorkflowOperationDialogSession.dirty = true;
+    if ($("interfaceWorkflowOperationStatus")) {
+      $("interfaceWorkflowOperationStatus").textContent = "操作修改尚未保存；取消将恢复打开前的 revision。";
+    }
+    return;
+  }
   clearInterfaceWorkflowNodeHumanReviewConfirmation();
   if (interfaceWorkflowReviewState && interfaceWorkflowSelectedOperationId) {
     const committed = commitInterfaceWorkflowOperationEditor({ silent: true });
@@ -19267,6 +19376,13 @@ function currentInterfaceWorkflowOperation(view = null) {
   return operations.find((edge) => edge.edge_id === interfaceWorkflowSelectedOperationId) || null;
 }
 
+function interfaceWorkflowConditionLines(elementId) {
+  return String($(elementId)?.value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function interfaceWorkflowOperationPatch() {
   const targetId = String($("interfaceWorkflowOperationTargetControl")?.value || "").trim();
   const node = interfaceWorkflowReviewState?.current()?.node;
@@ -19286,6 +19402,8 @@ function interfaceWorkflowOperationPatch() {
     target_node_id: String($("interfaceWorkflowOperationTargetNode")?.value || "").trim(),
     risk_level: String($("interfaceWorkflowOperationRisk")?.value || "low").trim(),
     requires_user_confirmation: $("interfaceWorkflowOperationConfirmation")?.checked === true,
+    success_conditions: interfaceWorkflowConditionLines("interfaceWorkflowOperationSuccessConditions"),
+    failure_conditions: interfaceWorkflowConditionLines("interfaceWorkflowOperationFailureConditions"),
   };
 }
 
@@ -19332,6 +19450,7 @@ function renderInterfaceWorkflowOperationEditor(view, { editable = true } = {}) 
   const node = view?.node;
   const operations = editable && Array.isArray(view?.outgoing_edges) ? view.outgoing_edges : [];
   const enabled = Boolean(node && editable);
+  const scopedDialog = interfaceWorkflowOperationDialogSession?.scope === "scoped";
   if (!operations.some((edge) => edge.edge_id === interfaceWorkflowSelectedOperationId)) {
     interfaceWorkflowSelectedOperationId = "";
   }
@@ -19342,7 +19461,8 @@ function renderInterfaceWorkflowOperationEditor(view, { editable = true } = {}) 
       `<option value="${escapeHtml(edge.edge_id)}">${escapeHtml(edge.display_name || edge.action_type || edge.edge_id)}</option>`
     )).join("")}`;
     operationList.value = String(operation?.edge_id || "");
-    operationList.disabled = !enabled;
+    operationList.disabled = !enabled || scopedDialog;
+    if (operationList.parentElement) operationList.parentElement.hidden = scopedDialog;
   }
 
   const typeSelect = $("interfaceWorkflowOperationType");
@@ -19360,6 +19480,18 @@ function renderInterfaceWorkflowOperationEditor(view, { editable = true } = {}) 
   if ($("interfaceWorkflowOperationDescription")) {
     $("interfaceWorkflowOperationDescription").value = String(operation?.agent_description || "");
     $("interfaceWorkflowOperationDescription").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationSuccessConditions")) {
+    $("interfaceWorkflowOperationSuccessConditions").value = Array.isArray(operation?.success_conditions)
+      ? operation.success_conditions.map((item) => String(item || "").trim()).filter(Boolean).join("\n")
+      : "";
+    $("interfaceWorkflowOperationSuccessConditions").disabled = !enabled;
+  }
+  if ($("interfaceWorkflowOperationFailureConditions")) {
+    $("interfaceWorkflowOperationFailureConditions").value = Array.isArray(operation?.failure_conditions)
+      ? operation.failure_conditions.map((item) => String(item || "").trim()).filter(Boolean).join("\n")
+      : "";
+    $("interfaceWorkflowOperationFailureConditions").disabled = !enabled;
   }
   const actionCandidateSelect = $("interfaceWorkflowOperationActionCandidate");
   if (actionCandidateSelect) {
@@ -19426,9 +19558,12 @@ function renderInterfaceWorkflowOperationEditor(view, { editable = true } = {}) 
     $("interfaceWorkflowTransitionTarget").dataset.edgeId = String(operation?.edge_id || "");
   }
 
-  if ($("interfaceWorkflowOperationAddBtn")) $("interfaceWorkflowOperationAddBtn").disabled = !enabled;
-  if ($("interfaceWorkflowOperationUpdateBtn")) $("interfaceWorkflowOperationUpdateBtn").disabled = !operation;
-  if ($("interfaceWorkflowOperationDeleteBtn")) $("interfaceWorkflowOperationDeleteBtn").disabled = !operation;
+  for (const id of ["interfaceWorkflowOperationAddBtn", "interfaceWorkflowOperationUpdateBtn", "interfaceWorkflowOperationDeleteBtn"]) {
+    const button = $(id);
+    if (!button) continue;
+    button.hidden = scopedDialog;
+    button.disabled = scopedDialog || (id === "interfaceWorkflowOperationAddBtn" ? !enabled : !operation);
+  }
   if ($("interfaceWorkflowOperationDryRunBtn")) {
     $("interfaceWorkflowOperationDryRunBtn").disabled = !operation || interfaceWorkflowHasUnsavedChanges;
   }
@@ -19451,6 +19586,39 @@ function createInterfaceWorkflowPlaceholderNode() {
     $("interfaceWorkflowOperationPlaceholderName").value = "";
   }
   return node;
+}
+
+function stageInterfaceWorkflowOperationCreate() {
+  if (!interfaceWorkflowOperationDialogSession || interfaceWorkflowOperationDialogSession.scope === "scoped") return;
+  interfaceWorkflowSelectedOperationId = "";
+  interfaceWorkflowOperationDialogSession.mode = "create";
+  interfaceWorkflowOperationDialogSession.pending_action = "create";
+  interfaceWorkflowOperationDialogSession.dirty = true;
+  const dialog = $("interfaceWorkflowLinkDialog");
+  if (dialog) dialog.dataset.mode = "create";
+  renderInterfaceWorkflowOperationEditor(currentInterfaceWorkflowMutationTarget().view);
+  if ($("interfaceWorkflowLinkDialogSaveBtn")) $("interfaceWorkflowLinkDialogSaveBtn").textContent = "保存路径";
+  if ($("interfaceWorkflowOperationStatus")) $("interfaceWorkflowOperationStatus").textContent = "新操作尚未保存";
+}
+
+function stageInterfaceWorkflowOperationUpdate() {
+  if (!interfaceWorkflowOperationDialogSession || !interfaceWorkflowSelectedOperationId) return;
+  interfaceWorkflowOperationDialogSession.pending_action = "update";
+  interfaceWorkflowOperationDialogSession.dirty = true;
+  if ($("interfaceWorkflowLinkDialogSaveBtn")) $("interfaceWorkflowLinkDialogSaveBtn").textContent = "更新路径";
+  if ($("interfaceWorkflowOperationStatus")) $("interfaceWorkflowOperationStatus").textContent = "操作修改尚未保存";
+}
+
+function stageInterfaceWorkflowOperationDelete() {
+  if (
+    !interfaceWorkflowOperationDialogSession
+    || interfaceWorkflowOperationDialogSession.scope === "scoped"
+    || !interfaceWorkflowSelectedOperationId
+  ) return;
+  interfaceWorkflowOperationDialogSession.pending_action = "delete";
+  interfaceWorkflowOperationDialogSession.dirty = true;
+  if ($("interfaceWorkflowLinkDialogSaveBtn")) $("interfaceWorkflowLinkDialogSaveBtn").textContent = "删除路径";
+  if ($("interfaceWorkflowOperationStatus")) $("interfaceWorkflowOperationStatus").textContent = "删除尚未保存；取消将恢复当前路径";
 }
 
 function addInterfaceWorkflowOperation() {
@@ -19698,9 +19866,6 @@ function renderInterfaceWorkflowContentEditor(view, { editable = true } = {}) {
     "interfaceWorkflowContentDescription",
     descriptor?.agent_description || "",
   );
-  if ($("interfaceWorkflowContentSaveBtn")) {
-    $("interfaceWorkflowContentSaveBtn").disabled = !enabled;
-  }
   if ($("interfaceWorkflowContentStatus")) {
     $("interfaceWorkflowContentStatus").textContent = !editable && node
       ? "加入软件流程后可审核控件用途"
@@ -19923,9 +20088,40 @@ function approveCurrentInterfaceWorkflowNode() {
 }
 
 async function approveAndSaveCurrentInterfaceWorkflowNode() {
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  const originalState = mutationTarget.state;
+  const originalSnapshot = originalState?.snapshot?.();
+  const originalNodeId = String(mutationTarget.view?.node?.node_id || "").trim();
+  const originalUnsaved = interfaceWorkflowHasUnsavedChanges;
+  const originalSavedPath = interfaceWorkflowSavedReviewPath;
+  const restoreUnapprovedSnapshot = () => {
+    const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+    if (!originalSnapshot || typeof factory !== "function") return;
+    const restoredState = factory(originalSnapshot);
+    interfaceWorkflowReviewState = restoredState;
+    interfaceWorkflowReview = restoredState.snapshot();
+    interfaceWorkflowHasUnsavedChanges = originalUnsaved;
+    interfaceWorkflowSavedReviewPath = originalSavedPath;
+    if (
+      learningDraftEditorWorkflowBinding?.authority === "workflow"
+      && learningDraftEditorWorkflowBinding.state === originalState
+    ) {
+      learningDraftEditorWorkflowBinding = {
+        ...learningDraftEditorWorkflowBinding,
+        state: restoredState,
+      };
+    }
+    if (originalNodeId) restoredState.select(originalNodeId);
+    renderInterfaceWorkflowReviewSelection();
+  };
   const approved = approveCurrentInterfaceWorkflowNode();
-  if (!approved) return null;
-  return saveInterfaceWorkflowReview({ commitEditor: false, requireDisplayedWorkflow: true });
+  if (!approved) {
+    restoreUnapprovedSnapshot();
+    return null;
+  }
+  const saved = await saveInterfaceWorkflowReview({ commitEditor: false, requireDisplayedWorkflow: true });
+  if (!saved) restoreUnapprovedSnapshot();
+  return saved;
 }
 
 function commitInterfaceWorkflowEditorToState() {
@@ -20789,6 +20985,16 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
     button.textContent = currentLanguage === "en-US" ? "Confirming..." : "正在确认并入库...";
   }
   try {
+    if (mutationTarget.view?.selected_control) {
+      const contentDescriptor = saveInterfaceWorkflowContentDescriptor();
+      if (!contentDescriptor) {
+        renderResponse({
+          success: false,
+          message: "当前选中框的 Agent 读取语义未能提交，未执行批准。",
+        }, "Interface workflow review");
+        return null;
+      }
+    }
     const evidence = await saveLearningDraftReview({
       closeEditor: false,
       preserveWorkflowBinding: true,
@@ -23004,9 +23210,12 @@ function bindEvents() {
   });
   on("interfaceWorkflowLinkDialogSaveBtn", "click", () => {
     const editingExisting = $("interfaceWorkflowLinkDialog")?.dataset?.mode === "edit";
-    const edge = editingExisting
-      ? updateInterfaceWorkflowOperation()
-      : addInterfaceWorkflowOperation();
+    const pendingAction = String(interfaceWorkflowOperationDialogSession?.pending_action || "").trim();
+    const edge = pendingAction === "delete"
+      ? removeInterfaceWorkflowOperation()
+      : editingExisting
+        ? updateInterfaceWorkflowOperation()
+        : addInterfaceWorkflowOperation();
     if (!edge) {
       if ($("interfaceWorkflowLinkDialogStatus")) {
         $("interfaceWorkflowLinkDialogStatus").textContent = $("interfaceWorkflowOperationStatus")?.textContent
@@ -23014,24 +23223,19 @@ function bindEvents() {
       }
       return;
     }
-    closeInterfaceWorkflowLinkDialog();
+    closeInterfaceWorkflowLinkDialog({ committed: true });
     setInterfaceWorkflowGraphLinkStatus(
-      `${editingExisting ? "已更新路径" : "已添加连接"}“${edge.display_name}”；请保存学习结果。`,
+      `${pendingAction === "delete" ? "已删除路径" : editingExisting ? "已更新路径" : "已添加连接"}“${edge.display_name}”；请保存学习结果。`,
     );
   });
-  on("interfaceWorkflowLinkDialogCancelBtn", "click", () => {
-    closeInterfaceWorkflowLinkDialog({ cancelled: true });
-  });
-  on("interfaceWorkflowLinkDialogCloseBtn", "click", () => {
-    closeInterfaceWorkflowLinkDialog({ cancelled: true });
-  });
+  on("interfaceWorkflowLinkDialogCancelBtn", "click", cancelInterfaceWorkflowLinkDialog);
+  on("interfaceWorkflowLinkDialogCloseBtn", "click", cancelInterfaceWorkflowLinkDialog);
   $("interfaceWorkflowLinkDialog")?.addEventListener("cancel", (event) => {
-    event.preventDefault();
-    closeInterfaceWorkflowLinkDialog({ cancelled: true });
+    cancelInterfaceWorkflowLinkDialog(event);
   });
   $("interfaceWorkflowLinkDialog")?.addEventListener("click", (event) => {
     if (event.target === $("interfaceWorkflowLinkDialog")) {
-      closeInterfaceWorkflowLinkDialog({ cancelled: true });
+      cancelInterfaceWorkflowLinkDialog(event);
     }
   });
   on("interfaceWorkflowControlPickerDialogCancelBtn", "click", () => {
@@ -23083,6 +23287,15 @@ function bindEvents() {
     interfaceWorkflowSelectedOperationId = String($("interfaceWorkflowOperationList")?.value || "").trim();
     const view = interfaceWorkflowReviewState?.current();
     renderInterfaceWorkflowOperationEditor(view);
+    if (interfaceWorkflowOperationDialogSession) {
+      if (interfaceWorkflowSelectedOperationId) {
+        const dialog = $("interfaceWorkflowLinkDialog");
+        if (dialog) dialog.dataset.mode = "edit";
+        stageInterfaceWorkflowOperationUpdate();
+      } else {
+        stageInterfaceWorkflowOperationCreate();
+      }
+    }
     showInterfaceWorkflowEvidenceMode("workflow");
     renderInterfaceWorkflowGraph(interfaceWorkflowReviewState?.graph() || { nodes: [], edges: [] });
   });
@@ -23098,11 +23311,10 @@ function bindEvents() {
     renderActiveInterfaceWorkflowEvidence();
   });
   on("interfaceWorkflowOperationPickControlBtn", "click", startInterfaceWorkflowOperationControlPick);
-  on("interfaceWorkflowOperationAddBtn", "click", addInterfaceWorkflowOperation);
-  on("interfaceWorkflowOperationUpdateBtn", "click", updateInterfaceWorkflowOperation);
-  on("interfaceWorkflowOperationDeleteBtn", "click", removeInterfaceWorkflowOperation);
+  on("interfaceWorkflowOperationAddBtn", "click", stageInterfaceWorkflowOperationCreate);
+  on("interfaceWorkflowOperationUpdateBtn", "click", stageInterfaceWorkflowOperationUpdate);
+  on("interfaceWorkflowOperationDeleteBtn", "click", stageInterfaceWorkflowOperationDelete);
   on("interfaceWorkflowOperationDryRunBtn", "click", dryRunInterfaceWorkflowOperation);
-  on("interfaceWorkflowContentSaveBtn", "click", saveInterfaceWorkflowContentDescriptor);
   on("interfaceAssetLibraryTab", "click", () => showInterfaceAssetPage("library"));
   on("interfaceWorkflowLibraryTab", "click", () => showInterfaceAssetPage("workflow"));
   on("interfaceWorkflowLoadSavedBtn", "click", loadSavedInterfaceWorkflowReview);
@@ -23143,6 +23355,8 @@ function bindEvents() {
     ["interfaceWorkflowOperationActionCandidate", "change"],
     ["interfaceWorkflowOperationLabel", "input"],
     ["interfaceWorkflowOperationDescription", "input"],
+    ["interfaceWorkflowOperationSuccessConditions", "input"],
+    ["interfaceWorkflowOperationFailureConditions", "input"],
     ["interfaceWorkflowOperationTargetControl", "change"],
     ["interfaceWorkflowOperationRisk", "change"],
     ["interfaceWorkflowOperationTargetNode", "change"],
