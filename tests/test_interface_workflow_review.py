@@ -116,6 +116,26 @@ def _confirm_current_node_revision(review: dict, node: dict) -> None:
     }
 
 
+def test_editable_action_templates_do_not_copy_control_ids_into_region_namespace() -> None:
+    templates = workflow_review_module._editable_action_templates(
+        {
+            "action_candidates": [
+                {
+                    "action_template_id": "open_apply_flow",
+                    "semantic_action": "open_apply_flow",
+                    "source_control_id": "apply",
+                    "target_control_id": "apply",
+                    "target_region_id": "",
+                    "target_interface_id": "apply_entry",
+                }
+            ]
+        }
+    )
+
+    assert templates[0]["target_control_id"] == "apply"
+    assert templates[0]["target_region_id"] == ""
+
+
 def _write_review_evidence(tmp_path: Path, *reviews: dict) -> None:
     for index, review in enumerate(reviews, start=1):
         draft = review["draft"]

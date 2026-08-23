@@ -627,12 +627,7 @@ def _editable_action_templates(node: dict[str, Any]) -> list[dict[str, Any]]:
                     or action.get("action_type")
                     or "read"
                 ),
-                "target_region_id": str(
-                    action.get("target_region_id")
-                    or action.get("source_control_id")
-                    or action.get("target_control_id")
-                    or ""
-                ),
+                "target_region_id": str(action.get("target_region_id") or "").strip(),
                 "display_only": True,
                 "artifact_is_authorization": False,
                 "execute_binding_enabled": False,
