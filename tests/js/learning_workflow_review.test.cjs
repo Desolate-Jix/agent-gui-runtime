@@ -1935,6 +1935,52 @@ test("panel asset switch invalidates and clears the previous editor selection", 
   assert.deepEqual(JSON.parse(JSON.stringify(sandbox.snapshot.edits)), { regions: {}, actions: {} });
 });
 
+test("graph interface switch clears the previous draft before focusing the next node", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const vm = require("node:vm");
+  const panelSource = fs.readFileSync(
+    path.join(__dirname, "../../app/web_panel/panel.js"),
+    "utf8",
+  );
+  const start = panelSource.indexOf("function selectInterfaceWorkflowGraphNode");
+  const end = panelSource.indexOf("function interfaceWorkflowGraphPointFromEvent", start);
+  assert.notEqual(start, -1, "graph node selector must exist");
+
+  const events = [];
+  const sandbox = {
+    console,
+    globalThis: null,
+    interfaceWorkflowSelectedOperationId: "old-edge",
+    interfaceWorkflowControlPickMode: true,
+    interfaceWorkflowReviewState: {
+      current: () => ({ node: { node_id: "job_detail" } }),
+      focusInterface: (nodeId) => events.push(`focus:${nodeId}`),
+    },
+    interfaceWorkflowWorkbenchState: {
+      showWorkflowNode: (nodeId) => events.push(`workbench:${nodeId}`),
+    },
+    commitInterfaceWorkflowEditorToState: () => events.push("commit"),
+    clearInterfaceWorkflowCorrectionSelection: () => events.push("clear"),
+    renderInterfaceWorkflowReviewSelection: () => events.push("render"),
+    centerInterfaceWorkflowGraphNode: (nodeId) => events.push(`center:${nodeId}`),
+  };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(
+    `${panelSource.slice(start, end)}; selectInterfaceWorkflowGraphNode({ kind: "interface", ref_id: "apply_entry" });`,
+    sandbox,
+  );
+
+  assert.deepEqual(events, [
+    "commit",
+    "clear",
+    "focus:apply_entry",
+    "workbench:apply_entry",
+    "render",
+    "center:apply_entry",
+  ]);
+});
+
 test("the learning draft box editor click handler does not pass the browser event as an image path", () => {
   const fs = require("node:fs");
   const path = require("node:path");

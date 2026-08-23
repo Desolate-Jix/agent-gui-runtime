@@ -18273,6 +18273,9 @@ function selectInterfaceWorkflowGraphNode(layoutNode) {
   if (!layoutNode || !interfaceWorkflowReviewState) return;
   commitInterfaceWorkflowEditorToState();
   if (layoutNode.kind !== "interface") return;
+  const currentNodeId = String(interfaceWorkflowReviewState.current()?.node?.node_id || "").trim();
+  const nextNodeId = String(layoutNode.ref_id || "").trim();
+  if (currentNodeId !== nextNodeId) clearInterfaceWorkflowCorrectionSelection();
   interfaceWorkflowSelectedOperationId = "";
   interfaceWorkflowReviewState.focusInterface(layoutNode.ref_id);
   interfaceWorkflowWorkbenchState.showWorkflowNode(layoutNode.ref_id);
