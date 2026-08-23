@@ -1,9 +1,9 @@
 {
   "contract_version": "reviewed_template_candidate_v1",
   "source": {
-    "source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "source_path": "artifacts/learning-draft-review/job_detail_533869aed4/unresolved-source-draft-533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42.json",
     "source_trial_path": null,
-    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "original_draft_path": "artifacts/learning-draft-review/job_detail_533869aed4/unresolved-source-draft-533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42.json",
     "sha256": "533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42",
     "attempt_index": null,
     "readonly": true
@@ -103,7 +103,7 @@
     "page_details": {
       "screen": {
         "summary": "Job Detail",
-        "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+        "source_image_path": "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-historical.png",
         "source_image_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
         "artifact_is_authorization": false,
         "execute_binding_enabled": false,
@@ -137,8 +137,8 @@
     "authorization_scope": "display_and_review_only"
   },
   "audit": {
-    "source_trial_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
-    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "source_trial_path": "artifacts/learning-draft-review/job_detail_533869aed4/unresolved-source-draft-533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42.json",
+    "original_draft_path": "artifacts/learning-draft-review/job_detail_533869aed4/unresolved-source-draft-533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42.json",
     "reviewed_at": "2026-08-23T16:35:47.009060",
     "changes_summary": [
       "region_additions:1",
@@ -170,7 +170,7 @@
       "freshness_status": "verified",
       "warning_count": 0,
       "warnings": [],
-      "source_image_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+      "source_image_path": "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-historical.png",
       "source_image_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
       "actual_source_image_sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
       "source_image_evidence_source": "page_details.screen.source_image_path",

@@ -1,9 +1,9 @@
 {
   "contract_version": "reviewed_template_candidate_v1",
   "source": {
-    "source_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "source_path": "artifacts/learning-draft-review/job_detail_caedefa74c/unresolved-source-draft-caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4.json",
     "source_trial_path": null,
-    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "original_draft_path": "artifacts/learning-draft-review/job_detail_caedefa74c/unresolved-source-draft-caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4.json",
     "sha256": "caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4",
     "attempt_index": null,
     "readonly": true
@@ -200,8 +200,8 @@
     "authorization_scope": "display_and_review_only"
   },
   "audit": {
-    "source_trial_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
-    "original_draft_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "source_trial_path": "artifacts/learning-draft-review/job_detail_caedefa74c/unresolved-source-draft-caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4.json",
+    "original_draft_path": "artifacts/learning-draft-review/job_detail_caedefa74c/unresolved-source-draft-caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4.json",
     "reviewed_at": "2026-08-24T02:51:26.376091",
     "changes_summary": [
       "region_bbox:manual_region_1",

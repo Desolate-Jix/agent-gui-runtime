@@ -1,0 +1,177 @@
+{
+  "contract_version": "learning_surface_rule_registry_v1",
+  "updated_at": "2026-08-24T04:23:04.324412",
+  "rules": [
+    {
+      "rule_id": "surface_correction_a27572d96faec2a8",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_a27572d96faec2a8.json",
+      "correction_sha256": "5456cfa896b1064c2e198df59768c8ea6723e7bdf70d32570c4cf090ad5513e6",
+      "surface": {
+        "adapter_id": "generic",
+        "decision_status": "surface_evidence_not_available",
+        "selection_evidence": [],
+        "app_name_used_as_final_decision": false,
+        "surface_evidence_required_for_reuse": true
+      },
+      "created_at": "2026-08-24T04:23:04.324412",
+      "updated_at": "2026-08-24T04:23:04.324412",
+      "transition_history": [
+        {
+          "from_status": null,
+          "to_status": "candidate",
+          "actor_type": "system",
+          "actor_id": "human_review_correction_recorder",
+          "evidence": {
+            "source_type": "human_review_patch"
+          },
+          "changed_at": "2026-08-24T04:23:04.324412"
+        }
+      ],
+      "requires_regression_verification": true,
+      "requires_human_approval": true,
+      "model_activation_allowed": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "rule_id": "surface_correction_72977741d3250f5d",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_72977741d3250f5d.json",
+      "correction_sha256": "61eb6061c5629dc85fd1d97a868e885a0e56d29196caf34779dc213a66bd3216",
+      "surface": {
+        "adapter_id": "generic",
+        "decision_status": "surface_evidence_not_available",
+        "selection_evidence": [],
+        "app_name_used_as_final_decision": false,
+        "surface_evidence_required_for_reuse": true
+      },
+      "created_at": "2026-08-24T04:14:31.705529",
+      "updated_at": "2026-08-24T04:14:31.705529",
+      "transition_history": [
+        {
+          "from_status": null,
+          "to_status": "candidate",
+          "actor_type": "system",
+          "actor_id": "human_review_correction_recorder",
+          "evidence": {
+            "source_type": "human_review_patch"
+          },
+          "changed_at": "2026-08-24T04:14:31.705529"
+        }
+      ],
+      "requires_regression_verification": true,
+      "requires_human_approval": true,
+      "model_activation_allowed": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "rule_id": "surface_correction_53891f6e1a1d030b",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_53891f6e1a1d030b.json",
+      "correction_sha256": "57b66d1cf572e49bb8da5aeef72c2a73c2a3b9da941151cc6d1f778f38196c55",
+      "surface": {
+        "adapter_id": "generic",
+        "decision_status": "surface_evidence_not_available",
+        "selection_evidence": [],
+        "app_name_used_as_final_decision": false,
+        "surface_evidence_required_for_reuse": true
+      },
+      "created_at": "2026-08-24T04:10:12.979482",
+      "updated_at": "2026-08-24T04:10:12.979482",
+      "transition_history": [
+        {
+          "from_status": null,
+          "to_status": "candidate",
+          "actor_type": "system",
+          "actor_id": "human_review_correction_recorder",
+          "evidence": {
+            "source_type": "human_review_patch"
+          },
+          "changed_at": "2026-08-24T04:10:12.979482"
+        }
+      ],
+      "requires_regression_verification": true,
+      "requires_human_approval": true,
+      "model_activation_allowed": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "rule_id": "surface_correction_6f7ecf90d417d9a0",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_6f7ecf90d417d9a0.json",
+      "correction_sha256": "544b7de7a345ff0898f3eb59d24f651a96edf80b305af6c354e0de7483032d97",
+      "surface": {
+        "adapter_id": "generic",
+        "decision_status": "surface_evidence_not_available",
+        "selection_evidence": [],
+        "app_name_used_as_final_decision": false,
+        "surface_evidence_required_for_reuse": true
+      },
+      "created_at": "2026-08-24T02:51:26.380091",
+      "updated_at": "2026-08-24T02:51:26.380091",
+      "transition_history": [
+        {
+          "from_status": null,
+          "to_status": "candidate",
+          "actor_type": "system",
+          "actor_id": "human_review_correction_recorder",
+          "evidence": {
+            "source_type": "human_review_patch"
+          },
+          "changed_at": "2026-08-24T02:51:26.380091"
+        }
+      ],
+      "requires_regression_verification": true,
+      "requires_human_approval": true,
+      "model_activation_allowed": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "rule_id": "surface_correction_780aacd5420e5b71",
+      "status": "candidate",
+      "production_eligible": false,
+      "correction_entry_path": "artifacts/learning-correction-memory/entries/surface_correction_780aacd5420e5b71.json",
+      "correction_sha256": "c7699b8f91d9a422c1c415a228d98a869dfb129fa1a62d0b9a113d345a077545",
+      "surface": {
+        "adapter_id": "generic",
+        "decision_status": "surface_evidence_not_available",
+        "selection_evidence": [],
+        "app_name_used_as_final_decision": false,
+        "surface_evidence_required_for_reuse": true
+      },
+      "created_at": "2026-08-23T16:35:47.013059",
+      "updated_at": "2026-08-23T16:35:47.013059",
+      "transition_history": [
+        {
+          "from_status": null,
+          "to_status": "candidate",
+          "actor_type": "system",
+          "actor_id": "human_review_correction_recorder",
+          "evidence": {
+            "source_type": "human_review_patch"
+          },
+          "changed_at": "2026-08-23T16:35:47.013059"
+        }
+      ],
+      "requires_regression_verification": true,
+      "requires_human_approval": true,
+      "model_activation_allowed": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  ],
+  "production_rule_source": "active_only",
+  "candidate_rules_affect_production": false,
+  "model_activation_allowed": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "export_scope": "portfolio_v1_referenced_candidate_rules_only"
+}

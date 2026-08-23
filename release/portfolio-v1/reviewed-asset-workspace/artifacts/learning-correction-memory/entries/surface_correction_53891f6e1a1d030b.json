@@ -1,0 +1,99 @@
+{
+  "contract_version": "learning_correction_memory_entry_v1",
+  "rule_id": "surface_correction_53891f6e1a1d030b",
+  "created_at": "2026-08-24T04:10:12.977481",
+  "initial_status": "candidate",
+  "source_type": "human_review_patch",
+  "source_patch_path": "artifacts/learning-draft-review/job_detail_28eafc9015/human_review_patch_r0001.json",
+  "source": {
+    "draft_path": "artifacts/learning-draft-review/job_detail_28eafc9015/unresolved-source-draft-28eafc9015e88a767276593eb89db45367f6aa6d210e1c678fcf53221ab8b4c8.json",
+    "draft_sha256": "28eafc9015e88a767276593eb89db45367f6aa6d210e1c678fcf53221ab8b4c8",
+    "human_patch_revision": 1
+  },
+  "surface": {
+    "adapter_id": "generic",
+    "decision_status": "surface_evidence_not_available",
+    "selection_evidence": [],
+    "app_name_used_as_final_decision": false,
+    "surface_evidence_required_for_reuse": true
+  },
+  "evidence": {
+    "screenshot_path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-evidence/job_detail/source_screenshot_path.png",
+    "screenshot_sha256": "274658095317e1aed1a9a68d6a3e7a80a6edddcde2e3d94bb11937932258ff1b",
+    "human_reason": "",
+    "editor_source": "human_panel_editor_v1"
+  },
+  "corrections": [
+    {
+      "correction_id": "correction_1",
+      "edit_type": "update_bbox",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before": {
+        "x": 1178,
+        "y": 892,
+        "w": 145,
+        "h": 48
+      },
+      "after": {
+        "x": 1178,
+        "y": 892,
+        "w": 145,
+        "h": 48
+      }
+    },
+    {
+      "correction_id": "correction_2",
+      "edit_type": "update_metadata",
+      "target_kind": "region",
+      "target_id": "manual_region_1",
+      "before": {
+        "label": "Quick apply",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        }
+      },
+      "after": {
+        "label": "Quick apply",
+        "description": "Open the Quick Apply entry and stop before any form mutation.",
+        "semantic_action": "open_apply_flow",
+        "action_type": "open_apply_flow",
+        "input_semantics": "",
+        "verification_rule": "Quick Apply entry or Choose documents interface is visible",
+        "risk_level": "normal",
+        "requires_confirmation": false,
+        "destination": {
+          "kind": "interface",
+          "target_interface_id": "apply_entry"
+        }
+      }
+    }
+  ],
+  "correction_count": 2,
+  "applicability": {
+    "adapter_ids": [
+      "generic"
+    ],
+    "requires_visible_surface_evidence": true,
+    "app_name_only_forbidden": true,
+    "scope_status": "candidate_scope_requires_regression"
+  },
+  "counterexamples": {
+    "items": [],
+    "required_before_activation": true
+  },
+  "model_generated_rule": false,
+  "model_may_suggest_counterexamples": true,
+  "model_may_activate": false,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true
+}

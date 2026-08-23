@@ -21,6 +21,9 @@ SOURCE_SHA256 = "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027b
 ASSET_SHA256 = "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
 ASSET_ID = "workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0"
 ASSET_PATH = WORKSPACE_ROOT / "runtime_state" / "reviewed-workflow-assets-v2" / "objects" / f"{ASSET_SHA256}.json"
+ARCHIVAL_LINEAGE_PATH = WORKSPACE_ROOT / "archival-lineage.json"
+CORRECTION_MEMORY_ROOT = WORKSPACE_ROOT / "artifacts" / "learning-correction-memory"
+HISTORICAL_PREBOXED_SHA256 = "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad"
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -29,6 +32,14 @@ def _read(path: Path) -> dict[str, Any]:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _json_files() -> list[Path]:
+    return sorted(
+        path
+        for path in WORKSPACE_ROOT.rglob("*.json")
+        if path != ARCHIVAL_LINEAGE_PATH
+    )
 
 
 def _walk_path_values(value: Any, key: str = "") -> list[tuple[str, str]]:
@@ -113,6 +124,184 @@ def test_portfolio_v1_workspace_registry_and_source_paths_are_portable() -> None
     assert record["path"] == "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/reviewed_workflow.json"
     assert (WORKSPACE_ROOT / Path(record["path"])).resolve() == SOURCE_PATH.resolve()
     assert record["source_asset_sha256"] == SOURCE_SHA256 == _sha256(SOURCE_PATH)
+
+
+def test_portfolio_v1_exported_json_paths_are_recursively_complete_or_explicitly_unresolved() -> None:
+    lineage = _read(ARCHIVAL_LINEAGE_PATH)
+
+    assert lineage["contract_version"] == "portfolio_v1_archival_lineage_v1"
+    assert lineage["source_workflow_sha256"] == SOURCE_SHA256
+    assert lineage["compiled_asset_sha256"] == ASSET_SHA256
+    assert lineage["artifact_is_authorization"] is False
+    assert lineage["execute_binding_enabled"] is False
+    _assert_project_relative_paths(lineage)
+    current_review_source = lineage["current_review_source"]
+    current_review_source_path = WORKSPACE_ROOT / current_review_source["path"]
+    assert current_review_source["authoritative_for_current_review"] is True
+    assert current_review_source_path.is_file()
+    assert _sha256(current_review_source_path) == current_review_source["sha256"]
+    unresolved = lineage["unresolved_archival_artifacts"]
+    allowlisted = {item["expected_path"]: item for item in unresolved}
+    referenced_missing: set[str] = set()
+
+    for document_path in _json_files():
+        payload = _read(document_path)
+        _assert_project_relative_paths(payload)
+        for key, raw_path in _walk_path_values(payload):
+            if not raw_path:
+                continue
+            resolved = (WORKSPACE_ROOT / raw_path).resolve()
+            assert resolved.is_relative_to(WORKSPACE_ROOT.resolve()), f"{key} escapes workspace"
+            if resolved.is_file():
+                continue
+            referenced_missing.add(raw_path)
+            assert raw_path in allowlisted, (
+                f"{document_path.relative_to(WORKSPACE_ROOT).as_posix()}:{key} "
+                f"is missing without an explicit archival allowlist entry: {raw_path}"
+            )
+
+    assert referenced_missing == set(allowlisted)
+    for expected_path, item in allowlisted.items():
+        expected_sha256 = item["expected_sha256"]
+        assert item["status"] == "unresolved_archival_source_snapshot"
+        assert item["non_authoritative"] is True
+        assert item["required_for_compiled_asset"] is False
+        assert item["artifact_is_authorization"] is False
+        assert item["execute_binding_enabled"] is False
+        assert expected_sha256 in Path(expected_path).name
+        assert not (WORKSPACE_ROOT / expected_path).exists()
+
+
+def test_portfolio_v1_archival_candidates_bind_recovered_evidence_and_declare_missing_source_snapshots() -> None:
+    source = _read(SOURCE_PATH)
+    job_detail = next(node for node in source["nodes"] if node["node_id"] == "job_detail")
+    candidate_paths = [
+        Path(path)
+        for path in job_detail["source_paths"]
+        if path.endswith("reviewed_template_candidate.json")
+    ]
+
+    assert len(candidate_paths) == 5
+    for candidate_path in candidate_paths:
+        candidate = _read(WORKSPACE_ROOT / candidate_path)
+        candidate_dir = candidate_path.parent
+        source_sha256 = candidate["source"]["sha256"]
+        unresolved_source_path = candidate["source"]["source_path"]
+        assert unresolved_source_path == candidate["source"]["original_draft_path"]
+        assert unresolved_source_path == candidate["audit"]["source_trial_path"]
+        assert unresolved_source_path == candidate["audit"]["original_draft_path"]
+        assert source_sha256 in Path(unresolved_source_path).name
+        assert not (WORKSPACE_ROOT / unresolved_source_path).exists()
+
+        patch = _read(WORKSPACE_ROOT / candidate["audit"]["human_review_patch_path"])
+        assert patch["source_draft_path"] == unresolved_source_path
+        assert patch["source_draft_sha256"] == source_sha256
+
+        correction = candidate["audit"]["correction_memory"]
+        correction_path = WORKSPACE_ROOT / correction["correction_entry_path"]
+        assert correction_path.is_file()
+        correction_entry = _read(correction_path)
+        assert correction_entry["source"]["draft_path"] == unresolved_source_path
+        assert correction_entry["source"]["draft_sha256"] == source_sha256
+        assert correction_entry["artifact_is_authorization"] is False
+        assert correction_entry["execute_binding_enabled"] is False
+
+        screenshot_path = WORKSPACE_ROOT / candidate["draft"]["page_details"]["screen"]["source_image_path"]
+        screenshot_sha256 = candidate["draft"]["page_details"]["screen"]["source_image_sha256"]
+        assert screenshot_path.is_file()
+        assert _sha256(screenshot_path) == screenshot_sha256
+        assert patch["screenshot_path"] == screenshot_path.relative_to(WORKSPACE_ROOT).as_posix()
+        assert patch["screenshot_sha256"] == screenshot_sha256
+        assert correction_entry["evidence"]["screenshot_path"] == screenshot_path.relative_to(WORKSPACE_ROOT).as_posix()
+        assert correction_entry["evidence"]["screenshot_sha256"] == screenshot_sha256
+
+        assert candidate_dir.name.startswith("job_detail_")
+
+    registry = _read(CORRECTION_MEMORY_ROOT / "registry.json")
+    assert registry["contract_version"] == "learning_surface_rule_registry_v1"
+    assert registry["candidate_rules_affect_production"] is False
+    assert registry["model_activation_allowed"] is False
+    assert registry["artifact_is_authorization"] is False
+    assert registry["execute_binding_enabled"] is False
+    assert len(registry["rules"]) == 5
+    for rule in registry["rules"]:
+        entry_path = WORKSPACE_ROOT / rule["correction_entry_path"]
+        assert entry_path.is_file()
+        assert _sha256(entry_path) == rule["correction_sha256"]
+        assert rule["status"] == "candidate"
+        assert rule["production_eligible"] is False
+
+
+def test_portfolio_v1_historical_preboxed_capture_is_a_non_authoritative_negative_control() -> None:
+    lineage = _read(ARCHIVAL_LINEAGE_PATH)
+    negative_control = lineage["negative_controls"]["historical_preboxed_capture"]
+    image_path = WORKSPACE_ROOT / negative_control["path"]
+
+    assert negative_control["sha256"] == HISTORICAL_PREBOXED_SHA256
+    assert negative_control["source_image_kind"] == "historical_preboxed_capture"
+    assert negative_control["editable_base_allowed"] is False
+    assert negative_control["authoritative_current_source"] is False
+    assert negative_control["artifact_is_authorization"] is False
+    assert image_path.is_file()
+    assert _sha256(image_path) == HISTORICAL_PREBOXED_SHA256
+
+
+def test_portfolio_v1_critical_json_is_reviewable_without_hash_normalization() -> None:
+    expected_attributes = {
+        path: {
+            "text": "unset",
+            "eol": "unspecified",
+            "diff": "set",
+            "binary": "unspecified",
+            "whitespace": "cr-at-eol",
+        }
+        for path in (SOURCE_PATH, ASSET_PATH)
+    }
+    paths = list(expected_attributes)
+    command = [
+        "git",
+        "check-attr",
+        "text",
+        "eol",
+        "diff",
+        "binary",
+        "whitespace",
+        "--",
+        *(path.relative_to(REPO_ROOT).as_posix() for path in paths),
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+    for path in paths:
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        for attribute, expected in expected_attributes[path].items():
+            assert f"{relative}: {attribute}: {expected}" in completed.stdout
+        filtered = subprocess.run(
+            ["git", "hash-object", "--path", relative, relative],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+        raw = subprocess.run(
+            ["git", "hash-object", "--no-filters", relative],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+        assert filtered == raw, f"Git attributes must preserve exact staged bytes for {relative}"
+
+    assert _sha256(SOURCE_PATH) == SOURCE_SHA256
+    assert _sha256(ASSET_PATH) == ASSET_SHA256
 
 
 def test_portfolio_v1_review_source_may_keep_evidence_geometry_but_compiled_asset_cannot() -> None:

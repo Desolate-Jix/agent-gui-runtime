@@ -1,0 +1,84 @@
+{
+  "contract_version": "portfolio_v1_archival_lineage_v1",
+  "source_workflow_sha256": "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc",
+  "compiled_asset_sha256": "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7",
+  "lineage_status": "current_review_and_compiled_asset_complete_archival_draft_snapshots_partial",
+  "current_review_source": {
+    "path": "artifacts/interface-workflow-reviews/portfolio_v1_seek_apply_entry/node-review-sources/job_detail.json",
+    "sha256": "e993ecf1ce6532968c924d93aa8b917fd4d9b8d50fc868ac73693d4a703e9a59",
+    "authoritative_for_current_review": true
+  },
+  "unresolved_archival_artifacts": [
+    {
+      "expected_path": "artifacts/learning-draft-review/job_detail_400cf42f21/unresolved-source-draft-400cf42f21739689ac1cf597713861e89e85e7429a0fc928440f2e7339ea69b4.json",
+      "expected_sha256": "400cf42f21739689ac1cf597713861e89e85e7429a0fc928440f2e7339ea69b4",
+      "status": "unresolved_archival_source_snapshot",
+      "reason": "The historical draft bytes were not present in the source workspace; the current reviewed source is not substituted for them.",
+      "non_authoritative": true,
+      "required_for_compiled_asset": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "expected_path": "artifacts/learning-draft-review/job_detail_2ef17c3573/unresolved-source-draft-2ef17c3573ce8451d0384edf35e6e328b44f1d92727abf015b3267dabd1af364.json",
+      "expected_sha256": "2ef17c3573ce8451d0384edf35e6e328b44f1d92727abf015b3267dabd1af364",
+      "status": "unresolved_archival_source_snapshot",
+      "reason": "The historical draft bytes were not present in the source workspace; the current reviewed source is not substituted for them.",
+      "non_authoritative": true,
+      "required_for_compiled_asset": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "expected_path": "artifacts/learning-draft-review/job_detail_28eafc9015/unresolved-source-draft-28eafc9015e88a767276593eb89db45367f6aa6d210e1c678fcf53221ab8b4c8.json",
+      "expected_sha256": "28eafc9015e88a767276593eb89db45367f6aa6d210e1c678fcf53221ab8b4c8",
+      "status": "unresolved_archival_source_snapshot",
+      "reason": "The historical draft bytes were not present in the source workspace; the current reviewed source is not substituted for them.",
+      "non_authoritative": true,
+      "required_for_compiled_asset": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "expected_path": "artifacts/learning-draft-review/job_detail_caedefa74c/unresolved-source-draft-caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4.json",
+      "expected_sha256": "caedefa74cd14759450b5695f54ea2cb2d17504ad39b6fdc8692c0d8787f95b4",
+      "status": "unresolved_archival_source_snapshot",
+      "reason": "The historical draft bytes were not present in the source workspace; the current reviewed source is not substituted for them.",
+      "non_authoritative": true,
+      "required_for_compiled_asset": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    },
+    {
+      "expected_path": "artifacts/learning-draft-review/job_detail_533869aed4/unresolved-source-draft-533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42.json",
+      "expected_sha256": "533869aed4c869153e93e08fa81c8cf425fb4206566f4d857715f1926eea0c42",
+      "status": "unresolved_archival_source_snapshot",
+      "reason": "The historical draft bytes were not present in the source workspace; the current reviewed source is not substituted for them.",
+      "non_authoritative": true,
+      "required_for_compiled_asset": false,
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  ],
+  "negative_controls": {
+    "historical_preboxed_capture": {
+      "path": "artifacts/portfolio-v1-review-evidence/job-detail-sanitized-historical.png",
+      "sha256": "321370fa2098ff4db67440db2041b40a8ebe02d4c275d74c33a1bab61c4d31ad",
+      "source_image_kind": "historical_preboxed_capture",
+      "editable_base_allowed": false,
+      "authoritative_current_source": false,
+      "purpose": "negative_control_only",
+      "artifact_is_authorization": false,
+      "execute_binding_enabled": false
+    }
+  },
+  "claims": {
+    "current_review_source_hash_bound": true,
+    "compiled_asset_hash_bound": true,
+    "archival_candidate_source_snapshots_complete": false,
+    "correction_memory_references_materialized": true,
+    "historical_preboxed_negative_control_restored": true
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false
+}
