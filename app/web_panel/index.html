@@ -1102,9 +1102,10 @@
                           <strong>Reviewed workflow v2</strong>
                           <small>编译和发布只使用服务端流程库绑定；只读预览不会捕获屏幕、不会调用动作接口，也不构成执行授权。</small>
                           <div class="interface-workflow-operation-actions">
-                            <button id="interfaceWorkflowCompileV2Btn" type="button" disabled>编译 v2</button>
-                            <button id="interfaceWorkflowPublishV2Btn" type="button" class="secondary" disabled>发布到 CAS</button>
-                            <button id="interfaceWorkflowReplayPreviewV2Btn" type="button" class="secondary" disabled>只读预览</button>
+                            <button id="interfaceWorkflowGenerateV2Btn" type="button" disabled>生成流程版本</button>
+                            <button id="interfaceWorkflowCompileV2Btn" type="button" disabled hidden>编译 v2</button>
+                            <button id="interfaceWorkflowPublishV2Btn" type="button" class="secondary" disabled hidden>发布到 CAS</button>
+                            <button id="interfaceWorkflowReplayPreviewV2Btn" type="button" class="secondary" disabled>只读验证（不执行）</button>
                           </div>
                           <label class="wide-label">
                             <span>当前观察 JSON（必须显式提供）</span>

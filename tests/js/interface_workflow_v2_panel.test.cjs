@@ -18,7 +18,7 @@ function element(value = "") { return { value, textContent: "", disabled: false,
 function loadHarness({ apiResult = {} } = {}) {
   const elements = {
     interfaceWorkflowLibrarySelect: Object.assign(element("workflow_a"), { selectedOptions: [{ dataset: { applicationIdentityKey: "web:seek.com" } }] }),
-    interfaceWorkflowCompileV2Btn: element(), interfaceWorkflowPublishV2Btn: element(), interfaceWorkflowReplayPreviewV2Btn: element(),
+    interfaceWorkflowGenerateV2Btn: element(), interfaceWorkflowCompileV2Btn: element(), interfaceWorkflowPublishV2Btn: element(), interfaceWorkflowReplayPreviewV2Btn: element(),
     interfaceWorkflowAssetV2Status: element(), interfaceWorkflowAssetV2Hash: element(), interfaceWorkflowAssetV2BlockedReasons: element(), interfaceWorkflowReplayObservationV2: element(),
   };
   const calls = [];
@@ -29,13 +29,113 @@ function loadHarness({ apiResult = {} } = {}) {
     api: async (method, route, payload) => { calls.push({ method, route, payload }); return typeof apiResult === "function" ? apiResult(method, route, payload) : apiResult; }, renderResponse() {},
   };
   sandbox.globalThis = sandbox;
-  vm.runInNewContext(`function markInterfaceWorkflowUnsaved() { interfaceWorkflowHasUnsavedChanges = true; invalidateInterfaceWorkflowAssetV2Binding(); } ${panelV2Source()}; globalThis.harness = { reset: resetInterfaceWorkflowAssetV2State, render: renderInterfaceWorkflowAssetV2State, compile: compileReviewedWorkflowAssetV2, publish: publishReviewedWorkflowAssetV2, preview: previewReviewedWorkflowReplayV2, state: () => interfaceWorkflowAssetV2State, unsaved: (value) => { interfaceWorkflowHasUnsavedChanges = value; }, loaded: () => completeInterfaceWorkflowAssetV2Load(interfaceWorkflowAssetV2BindingCandidate().key), selected: handleInterfaceWorkflowLibrarySelectionChanged, beginLoad: beginInterfaceWorkflowAssetV2Load, completeLoad: (key) => completeInterfaceWorkflowAssetV2Load(key), bindingKey: () => interfaceWorkflowAssetV2BindingCandidate()?.key || "", editorMutation: handleInterfaceWorkflowEditorMutation, operationSelection: () => {}, dirty: () => interfaceWorkflowHasUnsavedChanges, clean: () => { interfaceWorkflowHasUnsavedChanges = false; } };`, sandbox);
+  vm.runInNewContext(`function markInterfaceWorkflowUnsaved() { interfaceWorkflowHasUnsavedChanges = true; invalidateInterfaceWorkflowAssetV2Binding(); } ${panelV2Source()}; globalThis.harness = { reset: resetInterfaceWorkflowAssetV2State, render: renderInterfaceWorkflowAssetV2State, generate: typeof generateReviewedWorkflowVersionV2 === "function" ? generateReviewedWorkflowVersionV2 : null, compile: compileReviewedWorkflowAssetV2, publish: publishReviewedWorkflowAssetV2, preview: previewReviewedWorkflowReplayV2, state: () => interfaceWorkflowAssetV2State, unsaved: (value) => { interfaceWorkflowHasUnsavedChanges = value; }, loaded: () => completeInterfaceWorkflowAssetV2Load(interfaceWorkflowAssetV2BindingCandidate().key), selected: handleInterfaceWorkflowLibrarySelectionChanged, beginLoad: beginInterfaceWorkflowAssetV2Load, completeLoad: (key) => completeInterfaceWorkflowAssetV2Load(key), bindingKey: () => interfaceWorkflowAssetV2BindingCandidate()?.key || "", editorMutation: handleInterfaceWorkflowEditorMutation, operationSelection: () => {}, dirty: () => interfaceWorkflowHasUnsavedChanges, clean: () => { interfaceWorkflowHasUnsavedChanges = false; } };`, sandbox);
   return { harness: sandbox.harness, elements, calls };
 }
 test("v2 controls and explicit observation input are visible in the workflow library", () => {
   const html = fs.readFileSync(htmlPath, "utf8");
-  for (const id of ["interfaceWorkflowCompileV2Btn", "interfaceWorkflowPublishV2Btn", "interfaceWorkflowReplayPreviewV2Btn", "interfaceWorkflowAssetV2Status", "interfaceWorkflowAssetV2Hash", "interfaceWorkflowAssetV2BlockedReasons", "interfaceWorkflowReplayObservationV2"]) assert.match(html, new RegExp(`id=["']${id}["']`));
-  assert.match(html, /只读预览/);
+  for (const id of ["interfaceWorkflowGenerateV2Btn", "interfaceWorkflowCompileV2Btn", "interfaceWorkflowPublishV2Btn", "interfaceWorkflowReplayPreviewV2Btn", "interfaceWorkflowAssetV2Status", "interfaceWorkflowAssetV2Hash", "interfaceWorkflowAssetV2BlockedReasons", "interfaceWorkflowReplayObservationV2"]) assert.match(html, new RegExp(`id=["']${id}["']`));
+  assert.match(html, /id="interfaceWorkflowGenerateV2Btn"[^>]*>生成流程版本</);
+  assert.match(html, /id="interfaceWorkflowCompileV2Btn"[^>]*hidden/);
+  assert.match(html, /id="interfaceWorkflowPublishV2Btn"[^>]*hidden/);
+  assert.match(html, /只读验证（不执行）/);
+});
+
+test("one generate action compiles then publishes without preview or action calls", async () => {
+  const responses = [
+    { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } },
+    { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, publish_result: { asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } } } },
+  ];
+  const { harness, calls } = loadHarness({ apiResult: () => responses.shift() });
+  assert.equal(typeof harness.generate, "function");
+  harness.loaded();
+  await harness.generate();
+  assert.deepEqual(calls.map((call) => call.route), [
+    "/panel/compile_reviewed_workflow_asset",
+    "/panel/publish_reviewed_workflow_asset",
+  ]);
+  assert.equal(calls.some((call) => /preview|action|capture|runtime/.test(call.route)), false);
+  assert.equal(harness.state().published, true);
+});
+
+test("generate stops after blocked compile", async () => {
+  const { harness, calls } = loadHarness({ apiResult: {
+    success: false,
+    error: { code: "reviewed_workflow_compile_blocked" },
+    data: { result: { status: "blocked", blocked_reasons: [{ code: "source_node_not_human_reviewed" }] } },
+  } });
+  harness.loaded();
+  await harness.generate();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].route, "/panel/compile_reviewed_workflow_asset");
+  assert.equal(harness.state(), null);
+});
+
+test("generate rejects stale selection and double click without an extra publish", async () => {
+  let resolveCompile;
+  const pendingCompile = new Promise((resolve) => { resolveCompile = resolve; });
+  let requestCount = 0;
+  const { harness, calls, elements } = loadHarness({ apiResult: () => {
+    requestCount += 1;
+    if (requestCount === 1) return pendingCompile;
+    return { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, publish_result: { asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } } } };
+  } });
+  harness.loaded();
+  const first = harness.generate();
+  const duplicate = harness.generate();
+  assert.equal(calls.length, 1);
+  elements.interfaceWorkflowLibrarySelect.value = "workflow_b";
+  elements.interfaceWorkflowLibrarySelect.selectedOptions = [{ dataset: { applicationIdentityKey: "web:other.example" } }];
+  harness.selected();
+  resolveCompile({ success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } });
+  await Promise.all([first, duplicate]);
+  assert.equal(calls.length, 1, "stale compile must never continue to publish");
+  assert.equal(harness.state(), null);
+});
+
+test("generate double click produces one compile and one publish", async () => {
+  let resolveCompile;
+  const pendingCompile = new Promise((resolve) => { resolveCompile = resolve; });
+  let requestCount = 0;
+  const { harness, calls } = loadHarness({ apiResult: () => {
+    requestCount += 1;
+    if (requestCount === 1) return pendingCompile;
+    return { success: true, data: { artifact_is_authorization: false, execute_binding_enabled: false, publish_result: { asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } } } };
+  } });
+  harness.loaded();
+  const first = harness.generate();
+  const duplicate = harness.generate();
+  resolveCompile({ success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } });
+  await Promise.all([first, duplicate]);
+  assert.deepEqual(calls.map((call) => call.route), [
+    "/panel/compile_reviewed_workflow_asset",
+    "/panel/publish_reviewed_workflow_asset",
+  ]);
+  assert.equal(harness.state().published, true);
+});
+
+test("generate fails closed for unsaved or missing binding", async () => {
+  const { harness, calls } = loadHarness();
+  assert.equal(typeof harness.generate, "function");
+  await harness.generate();
+  harness.loaded();
+  harness.unsaved(true);
+  await harness.generate();
+  assert.equal(calls.length, 0);
+});
+
+test("publish response must retain the non-authorizing contract", async () => {
+  const responses = [
+    { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 4 } },
+    { success: true, data: { artifact_is_authorization: true, execute_binding_enabled: false, publish_result: { asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } } } },
+  ];
+  const { harness, calls, elements } = loadHarness({ apiResult: () => responses.shift() });
+  harness.loaded();
+  await harness.generate();
+  assert.equal(calls.length, 2);
+  assert.equal(harness.state(), null);
+  assert.equal(elements.interfaceWorkflowReplayPreviewV2Btn.disabled, true);
+  assert.match(elements.interfaceWorkflowAssetV2BlockedReasons.textContent, /publish_response_authorization_contract_invalid/);
 });
 test("compile sends only registry-derived identity workflow and source hash", async () => {
   const { harness, calls } = loadHarness({ apiResult: { success: true, data: { result: { status: "compiled", asset: { asset_id: "asset_a", content_sha256: "b".repeat(64) } }, registry_revision: 3 } } });

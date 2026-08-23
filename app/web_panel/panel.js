@@ -18798,18 +18798,19 @@ function renderInterfaceWorkflowAssetV2State(response = null) {
   const state = interfaceWorkflowAssetV2State;
   const visibleResponse = response || state?.last_response || interfaceWorkflowAssetV2LastResponse;
   const binding = interfaceWorkflowAssetV2RequestBinding();
-  const compileButton = $("interfaceWorkflowCompileV2Btn"), publishButton = $("interfaceWorkflowPublishV2Btn"), previewButton = $("interfaceWorkflowReplayPreviewV2Btn");
+  const generateButton = $("interfaceWorkflowGenerateV2Btn"), compileButton = $("interfaceWorkflowCompileV2Btn"), publishButton = $("interfaceWorkflowPublishV2Btn"), previewButton = $("interfaceWorkflowReplayPreviewV2Btn");
   const status = $("interfaceWorkflowAssetV2Status"), hash = $("interfaceWorkflowAssetV2Hash"), blocked = $("interfaceWorkflowAssetV2BlockedReasons");
   const compiled = state?.compile?.result?.status === "compiled" && state?.compile?.binding_key === binding?.key;
   const published = state?.published === true && state?.binding_key === binding?.key && state.asset_id && /^[0-9a-f]{64}$/.test(state.content_sha256 || "");
   const busy = interfaceWorkflowAssetV2Busy();
+  if (generateButton) generateButton.disabled = !binding || interfaceWorkflowHasUnsavedChanges || busy || published;
   if (compileButton) compileButton.disabled = !binding || interfaceWorkflowHasUnsavedChanges || busy;
   if (publishButton) publishButton.disabled = !compiled || !binding || interfaceWorkflowHasUnsavedChanges || busy;
   if (previewButton) previewButton.disabled = !published || interfaceWorkflowHasUnsavedChanges || busy;
   if (hash) hash.textContent = published ? `sha256=${state.content_sha256}` : "--";
   const codes = interfaceWorkflowAssetV2BlockedCodes(visibleResponse || {});
   if (blocked) blocked.textContent = codes.length ? codes.join(", ") : "--";
-  if (status) status.textContent = interfaceWorkflowHasUnsavedChanges ? "流程有未保存修改；v2 编译、发布和只读预览已失效。" : (visibleResponse?.data?.execution_authorized === false || state?.preview?.execution_authorized === false) ? "只读预览结果不构成执行授权。" : published ? "已发布 reviewed workflow v2；仅可使用显式观察 JSON 进行只读预览。" : compiled ? "已编译，等待 CAS 发布；发布时服务端会重新编译。" : "先打开已保存流程，再编译 reviewed workflow v2。";
+  if (status) status.textContent = interfaceWorkflowHasUnsavedChanges ? "流程有未保存修改；流程版本与只读验证已失效。" : (visibleResponse?.data?.execution_authorized === false || state?.preview?.execution_authorized === false) ? "只读验证结果不构成执行授权。" : published ? "流程版本已生成；这是非授权知识资产，可另行提供当前观察 JSON 做只读验证，不会启动 Agent 或执行桌面操作。" : compiled ? "已完成内部编译，等待服务端重新编译并发布。" : "先保存流程，再生成流程版本。";
 }
 
 async function compileReviewedWorkflowAssetV2() {
@@ -18839,10 +18840,62 @@ async function publishReviewedWorkflowAssetV2() {
     if (!interfaceWorkflowAssetV2OperationCurrent("publish", generation, binding.key)) return response;
     interfaceWorkflowAssetV2LastResponse = response;
     const publish = response?.data?.publish_result || response?.data?.result?.asset || response?.data?.asset || {}, asset = publish?.asset || publish;
-    if (response?.success && String(asset?.asset_id || "").trim() && /^[0-9a-f]{64}$/.test(String(asset?.content_sha256 || "").trim().toLowerCase())) interfaceWorkflowAssetV2State = { asset_id: String(asset.asset_id).trim(), content_sha256: String(asset.content_sha256).trim().toLowerCase(), published: true, binding_key: binding.key, compile: state.compile, preview: null, last_response: response };
-    else if (!response?.success && interfaceWorkflowAssetV2State?.binding_key === binding.key) interfaceWorkflowAssetV2State = null;
-    renderInterfaceWorkflowAssetV2State(response); return response;
+    const nonAuthorizing = response?.data?.artifact_is_authorization === false
+      && response?.data?.execute_binding_enabled === false;
+    const validAsset = String(asset?.asset_id || "").trim()
+      && /^[0-9a-f]{64}$/.test(String(asset?.content_sha256 || "").trim().toLowerCase());
+    if (response?.success && nonAuthorizing && validAsset) {
+      interfaceWorkflowAssetV2State = { asset_id: String(asset.asset_id).trim(), content_sha256: String(asset.content_sha256).trim().toLowerCase(), published: true, binding_key: binding.key, compile: state.compile, preview: null, last_response: response };
+    } else if (interfaceWorkflowAssetV2State?.binding_key === binding.key) {
+      interfaceWorkflowAssetV2State = null;
+      if (response?.success && (!nonAuthorizing || !validAsset)) {
+        interfaceWorkflowAssetV2LastResponse = {
+          success: false,
+          data: { blocked_reason_codes: ["publish_response_authorization_contract_invalid"] },
+        };
+      }
+    }
+    renderInterfaceWorkflowAssetV2State(
+      interfaceWorkflowAssetV2LastResponse?.success === false
+        ? interfaceWorkflowAssetV2LastResponse
+        : response,
+    );
+    return response;
   } finally { if (interfaceWorkflowAssetV2OperationCurrent("publish", generation, binding.key)) { interfaceWorkflowAssetV2Pending.publish = false; renderInterfaceWorkflowAssetV2State(); } }
+}
+
+async function generateReviewedWorkflowVersionV2() {
+  if (interfaceWorkflowAssetV2Busy()) return null;
+  if (interfaceWorkflowHasUnsavedChanges) {
+    renderInterfaceWorkflowAssetV2State({ success: false, data: { blocked_reason_codes: ["workflow_unsaved_changes"] } });
+    return null;
+  }
+  const binding = interfaceWorkflowAssetV2RequestBinding();
+  if (!binding) {
+    renderInterfaceWorkflowAssetV2State({ success: false, data: { blocked_reason_codes: ["workflow_registry_binding_required"] } });
+    return null;
+  }
+  const generation = interfaceWorkflowAssetV2Binding.generation;
+  const compileResponse = await compileReviewedWorkflowAssetV2();
+  if (!compileResponse?.success) return null;
+  const currentBinding = interfaceWorkflowAssetV2RequestBinding();
+  const compiled = interfaceWorkflowAssetV2State?.compile;
+  if (
+    interfaceWorkflowAssetV2Binding.generation !== generation
+    || currentBinding?.key !== binding.key
+    || compiled?.binding_key !== binding.key
+    || compiled?.result?.status !== "compiled"
+    || !Number.isInteger(compiled?.registry_revision)
+  ) return null;
+  await publishReviewedWorkflowAssetV2();
+  const published = interfaceWorkflowAssetV2State;
+  if (
+    interfaceWorkflowAssetV2Binding.generation !== generation
+    || interfaceWorkflowAssetV2RequestBinding()?.key !== binding.key
+    || published?.binding_key !== binding.key
+    || published?.published !== true
+  ) return null;
+  return published;
 }
 
 async function previewReviewedWorkflowReplayV2() {
@@ -22632,6 +22685,7 @@ function bindEvents() {
     ["interfaceWorkflowContentDescription", "input"],
   ]) on(id, eventName, handleInterfaceWorkflowEditorMutation);
   on("interfaceWorkflowSaveBtn", "click", saveInterfaceWorkflowReview);
+  on("interfaceWorkflowGenerateV2Btn", "click", generateReviewedWorkflowVersionV2);
   on("interfaceWorkflowCompileV2Btn", "click", compileReviewedWorkflowAssetV2);
   on("interfaceWorkflowPublishV2Btn", "click", publishReviewedWorkflowAssetV2);
   on("interfaceWorkflowReplayPreviewV2Btn", "click", previewReviewedWorkflowReplayV2);
