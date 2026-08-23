@@ -641,10 +641,12 @@ test("reviewed evidence transition advances its session explicitly and preserves
       editor_revision: 1,
       target_kind: "action",
       target_id: "open_apply_flow_candidate",
+      opening_selection_key: selectionKey,
       selection_key: selectionKey,
       phase: "draft",
     };
     globalThis.session = session;
+    globalThis.beginAgain = () => beginInterfaceWorkflowReviewedEvidenceTransition(session, "reviewed.json");
     globalThis.result = refreshSavedLearningDraftReview({
       previousSourcePath: "draft.json",
       reviewedPath: "reviewed.json",
@@ -658,12 +660,104 @@ test("reviewed evidence transition advances its session explicitly and preserves
   assert.equal(sandbox.globalThis.session.phase, "reviewed");
   assert.equal(sandbox.globalThis.session.expected_source_path, "reviewed.json");
   assert.equal(sandbox.globalThis.session.editor_state, reviewedEditor);
+  assert.equal(sandbox.globalThis.session.opening_selection_key, sandbox.globalThis.session.selection_key);
+  assert.equal(sandbox.globalThis.beginAgain(), false);
   assert.equal(JSON.stringify(calls), JSON.stringify([
     ["source", "reviewed.json", true],
     ["select", "action", "open_apply_flow_candidate"],
     ["merge"],
     ["persist"],
   ]));
+});
+
+test("reviewed evidence transition rejects a changed control or edge mapping without replacing the opening key", () => {
+  const start = source.indexOf("function normalizedInterfaceWorkflowReviewSourcePath");
+  const end = source.indexOf("async function refreshSavedLearningDraftReview", start);
+  const helperSource = source.slice(start, end);
+  const state = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+  const binding = {
+    authority: "workflow",
+    workflow_id: "seek_flow",
+    node_id: "job_detail",
+    source_path: "draft.json",
+    state,
+  };
+  const refreshedReview = { draft: {} };
+  const reviewedEditor = {
+    getItem: () => ({
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      action_template_id: "open_apply_flow_candidate",
+    }),
+  };
+  const openingSelectionKey = JSON.stringify({
+    target_kind: "action",
+    target_id: "open_apply_flow_candidate",
+    control_id: "apply",
+    action_template_id: "open_apply_flow_candidate",
+    edge_id: "edge_apply",
+  });
+  const calls = [];
+  const sandbox = {
+    globalThis: {}, state, binding, refreshedReview, reviewedEditor, openingSelectionKey, calls,
+  };
+  vm.runInNewContext(`
+    let interfaceWorkflowReviewState = state;
+    let learningDraftEditorWorkflowBinding = binding;
+    let learningDraftEditorState = reviewedEditor;
+    let learningDraftEditorRevision = 2;
+    let learningDraftEditorLoadToken = 2;
+    let learningDraftReviewLoadRequestToken = 2;
+    let learningDraftReview = refreshedReview;
+    let learningDraftEditorSelected = null;
+    let learningDraftEditorWorkflowSelection = null;
+    const currentInterfaceWorkflowMutationTarget = () => ({
+      state,
+      view: { node: { node_id: "job_detail" } },
+    });
+    const learningDraftReviewSourcePath = () => "reviewed.json";
+    const selectLearningDraftEditorItem = (kind, id) => {
+      learningDraftEditorSelected = { target_kind: kind, target_id: id };
+      learningDraftEditorWorkflowSelection = {
+        status: "matched",
+        node_id: "job_detail",
+        control_id: "different_control",
+        edge_id: "different_edge",
+        action_template_id: "open_apply_flow_candidate",
+        target_kind: kind,
+        target_id: id,
+      };
+      calls.push("select");
+    };
+    ${helperSource}
+    const session = {
+      state,
+      binding,
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      source_path: "draft.json",
+      expected_source_path: "reviewed.json",
+      editor_state: {},
+      editor_revision: 1,
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      opening_selection_key: openingSelectionKey,
+      selection_key: openingSelectionKey,
+      phase: "loading_reviewed",
+      transition_load_token_before: 1,
+    };
+    globalThis.session = session;
+    globalThis.result = completeInterfaceWorkflowReviewedEvidenceTransition(
+      session,
+      "reviewed.json",
+      refreshedReview,
+    );
+  `, sandbox);
+
+  assert.equal(sandbox.globalThis.result, false);
+  assert.equal(sandbox.globalThis.session.opening_selection_key, openingSelectionKey);
+  assert.equal(sandbox.globalThis.session.selection_key, openingSelectionKey);
+  assert.deepEqual(calls, ["select"]);
 });
 
 test("workflow-bound evidence refresh preserves the captured workflow while switching to reviewed evidence", () => {

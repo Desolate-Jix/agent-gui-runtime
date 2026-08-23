@@ -4413,6 +4413,10 @@ function currentInterfaceWorkflowReviewSelectionKey() {
   });
 }
 
+function interfaceWorkflowReviewOpeningSelectionKey(session) {
+  return String(session?.opening_selection_key || session?.selection_key || "");
+}
+
 function interfaceWorkflowReviewSessionIdentityIsCurrent(session) {
   if (!session) return true;
   const binding = learningDraftEditorWorkflowBinding;
@@ -4439,10 +4443,11 @@ function interfaceWorkflowReviewSessionIsCurrent(session) {
     Number.isInteger(session.editor_revision)
     && learningDraftEditorRevision !== session.editor_revision
   ) return false;
-  return currentInterfaceWorkflowReviewSelectionKey() === String(session.selection_key || "");
+  return currentInterfaceWorkflowReviewSelectionKey() === interfaceWorkflowReviewOpeningSelectionKey(session);
 }
 
 function beginInterfaceWorkflowReviewedEvidenceTransition(session, reviewedPath) {
+  if (session?.phase !== "draft") return false;
   if (!interfaceWorkflowReviewSessionIsCurrent(session)) return false;
   const normalizedReviewedPath = normalizedInterfaceWorkflowReviewSourcePath(reviewedPath);
   if (!normalizedReviewedPath) return false;
@@ -4467,13 +4472,14 @@ function completeInterfaceWorkflowReviewedEvidenceTransition(session, reviewedPa
   const selectedItem = learningDraftEditorState.getItem?.(session.target_kind, session.target_id);
   if (!selectedItem) return false;
   selectLearningDraftEditorItem(session.target_kind, session.target_id);
+  const reviewedSelectionKey = currentInterfaceWorkflowReviewSelectionKey();
+  if (reviewedSelectionKey !== interfaceWorkflowReviewOpeningSelectionKey(session)) return false;
   session.phase = "reviewed";
   session.source_path = normalizedInterfaceWorkflowReviewSourcePath(reviewedPath);
   session.expected_source_path = session.source_path;
   session.editor_state = learningDraftEditorState;
   session.editor_revision = learningDraftEditorRevision;
   session.editor_load_token = learningDraftEditorLoadToken;
-  session.selection_key = currentInterfaceWorkflowReviewSelectionKey();
   return interfaceWorkflowReviewSessionIsCurrent(session);
 }
 
@@ -21146,7 +21152,10 @@ async function saveLearningDraftReview(options = {}, workflowSession = null) {
         workflowSession.editor_state = learningDraftEditorState;
         workflowSession.editor_revision = learningDraftEditorRevision;
         selectLearningDraftEditorItem(workflowSession.target_kind, workflowSession.target_id);
-        workflowSession.selection_key = currentInterfaceWorkflowReviewSelectionKey();
+        if (
+          currentInterfaceWorkflowReviewSelectionKey()
+          !== interfaceWorkflowReviewOpeningSelectionKey(workflowSession)
+        ) return null;
         if (!interfaceWorkflowReviewSessionIsCurrent(workflowSession)) return null;
       }
       syncImageInspectorWorkflowReviewPanel();
@@ -21263,7 +21272,9 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
         Number.isInteger(expectedSession.editor_revision)
         && editorRevision !== expectedSession.editor_revision
       )
-      || selectionKey !== expectedSession.selection_key
+      || selectionKey !== String(
+        expectedSession.opening_selection_key || expectedSession.selection_key || "",
+      )
     )) return null;
     return expectedSession || {
       state,
@@ -21276,6 +21287,7 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
       editor_revision: editorRevision,
       target_kind: String(selectedItem?.target_kind || "").trim(),
       target_id: selectedItemId,
+      opening_selection_key: selectionKey,
       selection_key: selectionKey,
       phase: "draft",
     };
