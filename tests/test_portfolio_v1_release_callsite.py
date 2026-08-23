@@ -4,14 +4,17 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 from typing import Any
 
 import pytest
 
 from app.agent.reviewed_workflow_asset import (
+    ReviewedWorkflowAssetStore,
     content_sha256,
     validate_reviewed_workflow_asset,
 )
+from app.learn.interface_workflow_review import load_interface_workflow_agent_context
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "portfolio_v1_release_callsite"
@@ -92,6 +95,141 @@ def _load_release_fixture() -> tuple[dict[str, Any], dict[str, Any], dict[str, A
     return manifest, workflow, asset
 
 
+def _materialized_fixture_path(project_root: Path, declared_path: object) -> Path:
+    declared_text = str(declared_path or "").strip()
+    assert declared_text
+    relative_path = Path(declared_text)
+    assert not relative_path.is_absolute()
+    resolved = (project_root / relative_path).resolve()
+    assert project_root == resolved or project_root in resolved.parents
+    return resolved
+
+
+def _materialize_release_project(
+    tmp_path: Path,
+) -> tuple[dict[str, Any], ReviewedWorkflowAssetStore]:
+    project_root = tmp_path.resolve()
+    manifest, workflow, asset = _load_release_fixture()
+
+    materialized_workflow_path = (
+        project_root
+        / "artifacts"
+        / "interface-workflow-reviews"
+        / SOURCE_WORKFLOW_ID
+        / "reviewed_workflow.json"
+    )
+    materialized_workflow_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(
+        FIXTURE_ROOT / "reviewed_workflow.json",
+        materialized_workflow_path,
+    )
+    assert (
+        sha256(materialized_workflow_path.read_bytes()).hexdigest()
+        == SOURCE_WORKFLOW_SHA256
+    )
+
+    job_detail = next(
+        node for node in workflow["nodes"] if node.get("node_id") == "job_detail"
+    )
+    evidence = job_detail["evidence"]
+    for evidence_key in (
+        "source_screenshot_path",
+        "review_revision_source_screenshot_path",
+    ):
+        destination = _materialized_fixture_path(
+            project_root,
+            evidence[evidence_key],
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURE_ROOT / "source_screenshot.png", destination)
+        assert sha256(destination.read_bytes()).hexdigest() == SOURCE_SCREENSHOT_SHA256
+    for evidence_key in (
+        "human_review_overlay_path",
+        "review_revision_human_review_overlay_path",
+    ):
+        destination = _materialized_fixture_path(
+            project_root,
+            evidence[evidence_key],
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(FIXTURE_ROOT / "human_review_overlay.png", destination)
+        assert (
+            sha256(destination.read_bytes()).hexdigest()
+            == HUMAN_REVIEW_OVERLAY_SHA256
+        )
+
+    normalized_source_paths = [
+        str(value or "").strip()
+        for value in job_detail["source_paths"]
+        if str(value or "").strip()
+    ]
+    expected_source_paths_sha256 = sha256(
+        json.dumps(
+            normalized_source_paths,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    registry = {
+        "contract_version": "interface_workflow_library_registry_v1",
+        "registry_revision": 1,
+        "applications": {
+            "web:nz.seek.com": {
+                "application_identity": deepcopy(manifest["application_identity"]),
+                "workflow_ids": [SOURCE_WORKFLOW_ID],
+                "artifact_is_authorization": False,
+            }
+        },
+        "workflows": {
+            SOURCE_WORKFLOW_ID: {
+                "path": str(materialized_workflow_path),
+                "application_identity_key": "web:nz.seek.com",
+                "goal": workflow["workflow"]["goal"],
+                "node_count": 2,
+                "edge_count": 1,
+                "reviewed_node_revision_hashes": {
+                    "job_detail": manifest["job_detail_node_revision_hash"],
+                },
+                "reviewed_node_evidence_sha256": {
+                    "job_detail": {
+                        "source_paths_sha256": expected_source_paths_sha256,
+                        "human_review_overlay_path": HUMAN_REVIEW_OVERLAY_SHA256,
+                        "review_revision_human_review_overlay_path": (
+                            HUMAN_REVIEW_OVERLAY_SHA256
+                        ),
+                        "review_revision_source_screenshot_path": (
+                            SOURCE_SCREENSHOT_SHA256
+                        ),
+                        "source_screenshot_path": SOURCE_SCREENSHOT_SHA256,
+                    }
+                },
+                "source_asset_sha256": SOURCE_WORKFLOW_SHA256,
+                "review_status": "needs_human_review",
+                "published": False,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        },
+        "artifact_is_authorization": False,
+    }
+    registry_path = (
+        project_root / "artifacts" / "interface-workflow-reviews" / "registry.json"
+    )
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_bytes(
+        (json.dumps(registry, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    )
+
+    asset_before_publish = deepcopy(asset)
+    store = ReviewedWorkflowAssetStore(project_root=project_root)
+    publish_result = store.publish(asset, expected_registry_revision=0)
+    assert publish_result["status"] == "published"
+    assert publish_result["object_sha256"] == ASSET_SHA256
+    assert publish_result["content_sha256"] == ASSET_SHA256
+    assert asset == asset_before_publish
+    return asset, store
+
+
 def test_exact_portfolio_release_fixture_is_content_addressed_and_non_authorizing() -> None:
     manifest_path = FIXTURE_ROOT / "manifest.json"
     workflow_path = FIXTURE_ROOT / "reviewed_workflow.json"
@@ -145,3 +283,32 @@ def test_release_manifest_rejects_frozen_contract_drift() -> None:
 
     with pytest.raises(AssertionError):
         _validate_release_manifest(manifest)
+
+
+def test_release_fixture_materializes_exact_active_asset_and_agent_context(
+    tmp_path: Path,
+) -> None:
+    asset, store = _materialize_release_project(tmp_path)
+    registry = store.registry()
+    assert registry["registry_revision"] == 1
+    assert registry["active_by_asset"] == {ASSET_ID: ASSET_SHA256}
+    assert content_sha256(store.load_active(ASSET_ID)) == ASSET_SHA256
+
+    context = load_interface_workflow_agent_context(
+        project_root=tmp_path,
+        application_identity_key="web:nz.seek.com",
+    )
+    assert context["artifact_is_authorization"] is False
+    assert context["execute_binding_enabled"] is False
+    assert context["agent_usable_interfaces"] == [
+        {
+            "workflow_id": SOURCE_WORKFLOW_ID,
+            "interface_id": "job_detail",
+            "display_name": "Job Detail",
+            "agent_usable": True,
+        }
+    ]
+    assert any(
+        item.get("interface_id") == "apply_entry"
+        for item in context["blocked_interfaces"]
+    )
