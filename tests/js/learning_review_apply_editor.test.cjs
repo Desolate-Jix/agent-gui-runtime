@@ -62,12 +62,35 @@ test("confirm and store saves the current evidence before approving its workflow
       authority: "workflow",
       workflow_id: "seek_flow",
       node_id: "job_detail",
+      source_path: "draft.json",
+      state: reviewState,
     },
+    learningDraftEditorWorkflowSelection: {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    },
+    learningDraftReviewSourcePath: () => "draft.json",
+    learningDraftEditorSelectedItem: () => ({
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      action_template_id: "open_apply_flow_candidate",
+    }),
     currentInterfaceWorkflowMutationTarget: () => ({
       state: reviewState,
       view: {
         node: { node_id: "job_detail" },
         selected_control: { control_id: "apply" },
+        outgoing_edges: [{
+          edge_id: "edge_apply",
+          source_node_id: "job_detail",
+          target_control_id: "apply",
+          action_template_id: "open_apply_flow_candidate",
+        }],
       },
       reason: "",
     }),
@@ -114,6 +137,9 @@ test("confirm and store never approves or closes when the selected content descr
   const start = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview");
   const end = source.indexOf("async function publishLearningOperationalMemory", start);
   const calls = [];
+  const reviewState = {
+    snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }),
+  };
   const sandbox = {
     currentLanguage: "zh-CN",
     learningDraftEditorActive: true,
@@ -121,12 +147,35 @@ test("confirm and store never approves or closes when the selected content descr
       authority: "workflow",
       workflow_id: "seek_flow",
       node_id: "job_detail",
+      source_path: "draft.json",
+      state: reviewState,
     },
+    learningDraftEditorWorkflowSelection: {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    },
+    learningDraftReviewSourcePath: () => "draft.json",
+    learningDraftEditorSelectedItem: () => ({
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      action_template_id: "open_apply_flow_candidate",
+    }),
     currentInterfaceWorkflowMutationTarget: () => ({
-      state: { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) },
+      state: reviewState,
       view: {
         node: { node_id: "job_detail" },
         selected_control: { control_id: "apply" },
+        outgoing_edges: [{
+          edge_id: "edge_apply",
+          source_node_id: "job_detail",
+          target_control_id: "apply",
+          action_template_id: "open_apply_flow_candidate",
+        }],
       },
     }),
     saveInterfaceWorkflowContentDescriptor: () => null,
@@ -143,6 +192,132 @@ test("confirm and store never approves or closes when the selected content descr
 
   assert.equal(await sandbox.result, null);
   assert.deepEqual(calls, []);
+});
+
+test("confirm and store fails closed when the displayed workflow was replaced by a same-id state", async () => {
+  const start = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview");
+  const end = source.indexOf("async function publishLearningOperationalMemory", start);
+  const calls = [];
+  const boundState = {
+    snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }),
+  };
+  const replacementState = {
+    snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }),
+  };
+  const sandbox = {
+    currentLanguage: "zh-CN",
+    learningDraftEditorActive: true,
+    learningDraftEditorWorkflowBinding: {
+      authority: "workflow",
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      source_path: "draft.json",
+      state: boundState,
+    },
+    learningDraftEditorWorkflowSelection: {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    },
+    learningDraftReviewSourcePath: () => "draft.json",
+    learningDraftEditorSelectedItem: () => ({
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+      action_template_id: "open_apply_flow_candidate",
+    }),
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: replacementState,
+      view: {
+        node: { node_id: "job_detail" },
+        selected_control: { control_id: "apply" },
+        outgoing_edges: [{
+          edge_id: "edge_apply",
+          source_node_id: "job_detail",
+          target_control_id: "apply",
+          action_template_id: "open_apply_flow_candidate",
+        }],
+      },
+    }),
+    saveInterfaceWorkflowContentDescriptor: () => { calls.push("content"); return {}; },
+    saveLearningDraftReview: async () => { calls.push("evidence"); return {}; },
+    approveAndSaveCurrentInterfaceWorkflowNode: async () => { calls.push("approve"); return {}; },
+    closeImageInspector: () => calls.push("close"),
+    renderResponse: () => {},
+    $: () => null,
+  };
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = confirmAndStoreCurrentInterfaceWorkflowReview();`,
+    sandbox,
+  );
+
+  assert.equal(await sandbox.result, null);
+  assert.deepEqual(calls, []);
+});
+
+test("confirm and store rejects source-path and selected-box revision drift before mutation", async () => {
+  const start = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview");
+  const end = source.indexOf("async function publishLearningOperationalMemory", start);
+  for (const scenario of ["source_drift", "selection_drift"]) {
+    const calls = [];
+    const state = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+    const selection = {
+      status: "matched",
+      node_id: "job_detail",
+      control_id: "apply",
+      edge_id: "edge_apply",
+      action_template_id: "open_apply_flow_candidate",
+      target_kind: "action",
+      target_id: "open_apply_flow_candidate",
+    };
+    if (scenario === "selection_drift") selection.target_id = "stale_candidate";
+    const sandbox = {
+      currentLanguage: "zh-CN",
+      learningDraftEditorActive: true,
+      learningDraftEditorWorkflowBinding: {
+        authority: "workflow",
+        workflow_id: "seek_flow",
+        node_id: "job_detail",
+        source_path: "draft.json",
+        state,
+      },
+      learningDraftEditorWorkflowSelection: selection,
+      learningDraftReviewSourcePath: () => scenario === "source_drift" ? "other.json" : "draft.json",
+      learningDraftEditorSelectedItem: () => ({
+        target_kind: "action",
+        target_id: "open_apply_flow_candidate",
+        action_template_id: "open_apply_flow_candidate",
+      }),
+      currentInterfaceWorkflowMutationTarget: () => ({
+        state,
+        view: {
+          node: { node_id: "job_detail" },
+          selected_control: { control_id: "apply" },
+          outgoing_edges: [{
+            edge_id: "edge_apply",
+            source_node_id: "job_detail",
+            target_control_id: "apply",
+            action_template_id: "open_apply_flow_candidate",
+          }],
+        },
+      }),
+      saveInterfaceWorkflowContentDescriptor: () => { calls.push("content"); return {}; },
+      saveLearningDraftReview: async () => { calls.push("evidence"); return {}; },
+      approveAndSaveCurrentInterfaceWorkflowNode: async () => { calls.push("approve"); return {}; },
+      closeImageInspector: () => calls.push("close"),
+      renderResponse: () => {},
+      $: () => null,
+    };
+    vm.runInNewContext(
+      `${source.slice(start, end)}; globalThis.result = confirmAndStoreCurrentInterfaceWorkflowReview();`,
+      sandbox,
+    );
+    assert.equal(await sandbox.result, null, scenario);
+    assert.deepEqual(calls, [], scenario);
+  }
 });
 
 test("confirm and store rejects a standalone source preview", async () => {
@@ -166,6 +341,69 @@ test("confirm and store rejects a standalone source preview", async () => {
 
   assert.equal(await sandbox.result, null);
   assert.equal(saves, 0);
+});
+
+test("draft evidence save stops before merge when the captured workflow state is replaced in flight", async () => {
+  const start = source.indexOf("function interfaceWorkflowReviewSessionIdentityIsCurrent");
+  const end = source.indexOf("async function confirmAndStoreCurrentInterfaceWorkflowReview", start);
+  assert.notEqual(start, -1, "workflow session identity guard must exist");
+  assert.notEqual(end, -1, "workflow session guard boundary must exist");
+  const body = source.slice(start, end);
+  const calls = [];
+  const state = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+  const replacementState = { snapshot: () => ({ workflow: { workflow_id: "seek_flow" } }) };
+  const binding = {
+    authority: "workflow",
+    workflow_id: "seek_flow",
+    node_id: "job_detail",
+    source_path: "draft.json",
+    state,
+  };
+  const sandbox = { globalThis: {}, state, replacementState, binding, calls };
+  vm.runInNewContext(`
+    let interfaceWorkflowReviewState = state;
+    let learningDraftEditorWorkflowBinding = binding;
+    let learningDraftEditorActive = true;
+    let learningDraftEditorSelected = null;
+    const currentInterfaceWorkflowMutationTarget = () => ({
+      state: interfaceWorkflowReviewState,
+      view: { node: { node_id: "job_detail" } },
+    });
+    const learningDraftReviewSourcePath = () => "draft.json";
+    const learningDraftReviewPatch = () => ({});
+    const applyLearningDraftEditorMetadataFromControls = () => {};
+    const api = async () => {
+      interfaceWorkflowReviewState = replacementState;
+      return { success: true, data: { reviewed_template_candidate_path: "reviewed.json" } };
+    };
+    const setLearningPathGraphCandidatePaths = () => calls.push("paths");
+    const refreshSavedLearningDraftReview = async () => { calls.push("merge"); return {}; };
+    const renderResponse = () => {};
+    const loadLearningCorrectionMemoryRegistry = async () => {};
+    const buildLearningDraftEditorBinding = () => null;
+    const syncImageInspectorWorkflowReviewPanel = () => {};
+    const closeImageInspector = () => {};
+    const $ = () => null;
+    ${body}
+    const session = {
+      state,
+      binding,
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      source_path: "draft.json",
+    };
+    globalThis.result = saveLearningDraftReview({ closeEditor: false, preserveWorkflowBinding: true }, session);
+  `, sandbox);
+
+  assert.equal(await sandbox.globalThis.result, null);
+  assert.deepEqual(calls, []);
+});
+
+test("workflow-bound evidence refresh preserves the captured workflow while switching to reviewed evidence", () => {
+  const start = source.indexOf("async function refreshSavedLearningDraftReview");
+  const end = source.indexOf("async function refreshCurrentInterfaceWorkflowEvidence", start);
+  const body = source.slice(start, end);
+  assert.match(body, /setLearningDraftReviewSourcePath\(sourcePath, \{ preserveWorkflowReview: true \}\)/);
 });
 
 test("operation review bundle aborts when the operation editor commit fails", () => {
@@ -477,6 +715,71 @@ test("approve and save does not save when node approval is blocked", async () =>
 
   assert.equal(await sandbox.result, null);
   assert.equal(saves, 0);
+});
+
+test("session approval is built in an isolated state and persistence failure leaves live state unapproved", async () => {
+  const start = source.indexOf("async function approveAndSaveCurrentInterfaceWorkflowNode");
+  const end = source.indexOf("function commitInterfaceWorkflowEditorToState", start);
+  const originalSnapshot = {
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "seek_flow" },
+    nodes: [{ node_id: "job_detail", review_status: "needs_human_review" }],
+    edges: [],
+  };
+  const liveState = { snapshot: () => structuredClone(originalSnapshot) };
+  const draftState = {
+    approved: false,
+    select: () => {},
+    current: () => ({ node: { node_id: "job_detail", review_status: "needs_human_review" } }),
+    snapshot() {
+      const value = structuredClone(originalSnapshot);
+      if (this.approved) value.nodes[0].review_status = "human_approved";
+      return value;
+    },
+  };
+  const binding = { authority: "workflow", state: liveState };
+  const calls = [];
+  const sandbox = {
+    interfaceWorkflowReviewState: liveState,
+    interfaceWorkflowReview: originalSnapshot,
+    interfaceWorkflowHasUnsavedChanges: true,
+    interfaceWorkflowSavedReviewPath: "workflow.json",
+    learningDraftEditorWorkflowBinding: binding,
+    currentInterfaceWorkflowMutationTarget: () => ({
+      state: liveState,
+      view: { node: { node_id: "job_detail" } },
+    }),
+    InterfaceWorkflowReview: { createInterfaceWorkflowReviewState: () => draftState },
+    approveCurrentInterfaceWorkflowNode: (options) => {
+      calls.push(["approve_state", options?.state === draftState]);
+      draftState.approved = true;
+      return draftState.snapshot();
+    },
+    saveInterfaceWorkflowReview: async (options) => {
+      calls.push(["persist", options?.reviewOverride?.nodes?.[0]?.review_status || "missing_override"]);
+      return null;
+    },
+    renderInterfaceWorkflowReviewSelection: () => calls.push(["render"]),
+  };
+  const session = {
+    state: liveState,
+    binding,
+    workflow_id: "seek_flow",
+    node_id: "job_detail",
+    source_path: "draft.json",
+  };
+  sandbox.session = session;
+  vm.runInNewContext(
+    `${source.slice(start, end)}; globalThis.result = approveAndSaveCurrentInterfaceWorkflowNode(session);`,
+    sandbox,
+  );
+
+  assert.equal(await sandbox.result, null);
+  assert.equal(sandbox.interfaceWorkflowReviewState, liveState);
+  assert.equal(sandbox.learningDraftEditorWorkflowBinding.state, liveState);
+  assert.equal(liveState.snapshot().nodes[0].review_status, "needs_human_review");
+  assert.deepEqual(calls.slice(0, 2), [["approve_state", true], ["persist", "human_approved"]]);
+  assert.equal(calls.some(([name]) => name === "render"), false);
 });
 
 test("approve and save restores the unapproved revision when persistence fails", async () => {

@@ -4395,10 +4395,16 @@ function applyReviewedEvidenceToCurrentWorkflowNode({
   return true;
 }
 
-async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPath, workflowBinding = null }) {
+async function refreshSavedLearningDraftReview({
+  previousSourcePath,
+  reviewedPath,
+  workflowBinding = null,
+  workflowSession = null,
+}) {
   const sourcePath = String(reviewedPath || "").trim();
   if (!sourcePath) return null;
-  setLearningDraftReviewSourcePath(sourcePath);
+  if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) return null;
+  setLearningDraftReviewSourcePath(sourcePath, { preserveWorkflowReview: true });
   bumpPanelImageRevision();
   const refreshedReview = await loadLearningDraftReview({
     skipResponse: true,
@@ -4408,6 +4414,15 @@ async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPat
     skipReviewRender: true,
   });
   if (!refreshedReview) return null;
+  if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) return null;
+  if (workflowSession) {
+    const selectedItem = learningDraftEditorState?.getItem?.(
+      workflowSession.target_kind,
+      workflowSession.target_id,
+    );
+    if (!selectedItem) return null;
+    selectLearningDraftEditorItem(workflowSession.target_kind, workflowSession.target_id);
+  }
   if (workflowBinding?.authority !== "workflow") {
     return { review: refreshedReview, workflow: null };
   }
@@ -4419,7 +4434,13 @@ async function refreshSavedLearningDraftReview({ previousSourcePath, reviewedPat
     workflowBinding,
   });
   if (binding === true) {
-    const saveResult = await saveInterfaceWorkflowReview({ commitEditor: false });
+    if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) return null;
+    const saveResult = await saveInterfaceWorkflowReview({
+      commitEditor: false,
+      expectedState: workflowSession?.state || null,
+      expectedBinding: workflowSession?.binding || null,
+      preserveStateSession: Boolean(workflowSession),
+    });
     if (!saveResult) return null;
     refreshedWorkflow = interfaceWorkflowReviewState?.snapshot?.() || null;
   } else if (binding === "not_bound") {
@@ -18501,30 +18522,26 @@ function restoreInterfaceWorkflowOperationToolbar() {
   toolbar.hidden = true;
 }
 
-function restoreInterfaceWorkflowOperationDialogSnapshot() {
+function restoreInterfaceWorkflowOperationDialogUi() {
   const session = interfaceWorkflowOperationDialogSession;
-  const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
-  if (!session?.snapshot || typeof factory !== "function") return false;
-  if (interfaceWorkflowReviewState !== session.state) return false;
-  const restoredState = factory(session.snapshot);
-  if (!restoredState) return false;
-  interfaceWorkflowReviewState = restoredState;
-  interfaceWorkflowReview = restoredState.snapshot();
-  interfaceWorkflowSelectedOperationId = String(session.selected_operation_id || "").trim();
-  interfaceWorkflowHasUnsavedChanges = session.had_unsaved_changes === true;
-  interfaceWorkflowSavedReviewPath = String(session.saved_review_path || "").trim();
-  if (
-    learningDraftEditorWorkflowBinding?.authority === "workflow"
-    && learningDraftEditorWorkflowBinding.state === session.state
-  ) {
-    learningDraftEditorWorkflowBinding = {
-      ...learningDraftEditorWorkflowBinding,
-      state: restoredState,
-    };
-  }
+  if (!session) return false;
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  if (mutationTarget.state !== session.state) return false;
+  const outgoingEdges = Array.isArray(mutationTarget.view?.outgoing_edges)
+    ? mutationTarget.view.outgoing_edges
+    : [];
+  const selectedOperationId = String(session.selected_operation_id || "").trim();
+  interfaceWorkflowSelectedOperationId = outgoingEdges.some(
+    (edge) => String(edge?.edge_id || "").trim() === selectedOperationId,
+  ) ? selectedOperationId : "";
   const nodeId = String(session.node_id || "").trim();
-  if (nodeId) restoredState.select(nodeId);
-  renderInterfaceWorkflowReviewSelection();
+  if (nodeId && String(mutationTarget.view?.node?.node_id || "").trim() !== nodeId) {
+    try {
+      session.state.select(nodeId);
+    } catch (_error) {
+      interfaceWorkflowSelectedOperationId = "";
+    }
+  }
   return true;
 }
 
@@ -18532,7 +18549,7 @@ function closeInterfaceWorkflowLinkDialog(options = {}) {
   const dialog = $("interfaceWorkflowLinkDialog");
   if (dialog?.open) dialog.close();
   if (options.preserveToolbar === true) return;
-  if (options.committed !== true) restoreInterfaceWorkflowOperationDialogSnapshot();
+  if (options.committed !== true) restoreInterfaceWorkflowOperationDialogUi();
   if (options.preserveToolbar !== true) restoreInterfaceWorkflowOperationToolbar();
   if (dialog) delete dialog.dataset.mode;
   if (dialog) delete dialog.dataset.scope;
@@ -18630,13 +18647,14 @@ function openInterfaceWorkflowLinkDialog(link, options = {}) {
   dialog.dataset.mode = editingExisting ? "edit" : "create";
   dialog.dataset.scope = scope;
   const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  const openingSnapshot = mutationTarget.state?.snapshot?.() || null;
   interfaceWorkflowOperationDialogSession = mutationTarget.state ? {
     state: mutationTarget.state,
-    snapshot: mutationTarget.state.snapshot(),
+    opening_snapshot_key: JSON.stringify(openingSnapshot),
+    workflow_id: String(openingSnapshot?.workflow?.workflow_id || "").trim(),
     node_id: String(mutationTarget.view?.node?.node_id || link?.source_node_id || "").trim(),
     selected_operation_id: String(interfaceWorkflowSelectedOperationId || link?.edge_id || "").trim(),
-    had_unsaved_changes: interfaceWorkflowHasUnsavedChanges,
-    saved_review_path: interfaceWorkflowSavedReviewPath,
+    scoped_edge_id: scope === "scoped" ? String(link?.edge_id || "").trim() : "",
     mode: editingExisting ? "edit" : "create",
     scope,
     dirty: false,
@@ -19588,15 +19606,44 @@ function createInterfaceWorkflowPlaceholderNode() {
   return node;
 }
 
+function validateInterfaceWorkflowOperationDialogSession() {
+  const session = interfaceWorkflowOperationDialogSession;
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  const state = mutationTarget.state;
+  const snapshot = state?.snapshot?.() || null;
+  const workflowId = String(snapshot?.workflow?.workflow_id || "").trim();
+  const nodeId = String(mutationTarget.view?.node?.node_id || "").trim();
+  if (!session || !state || state !== session.state) {
+    return { ok: false, reason: "operation_dialog_state_replaced" };
+  }
+  if (!workflowId || workflowId !== String(session.workflow_id || "").trim()) {
+    return { ok: false, reason: "operation_dialog_workflow_changed" };
+  }
+  if (!nodeId || nodeId !== String(session.node_id || "").trim()) {
+    return { ok: false, reason: "operation_dialog_node_changed" };
+  }
+  if (JSON.stringify(snapshot) !== String(session.opening_snapshot_key || "")) {
+    return { ok: false, reason: "operation_dialog_revision_changed" };
+  }
+  const scopedEdgeId = String(session.scoped_edge_id || "").trim();
+  if (session.scope === "scoped") {
+    const edge = (Array.isArray(mutationTarget.view?.outgoing_edges)
+      ? mutationTarget.view.outgoing_edges
+      : []).find((candidate) => String(candidate?.edge_id || "").trim() === scopedEdgeId);
+    if (!scopedEdgeId || !edge || String(interfaceWorkflowSelectedOperationId || "").trim() !== scopedEdgeId) {
+      return { ok: false, reason: "operation_dialog_scoped_edge_changed" };
+    }
+  }
+  return { ok: true, reason: "" };
+}
+
 function stageInterfaceWorkflowOperationCreate() {
   if (!interfaceWorkflowOperationDialogSession || interfaceWorkflowOperationDialogSession.scope === "scoped") return;
-  interfaceWorkflowSelectedOperationId = "";
   interfaceWorkflowOperationDialogSession.mode = "create";
   interfaceWorkflowOperationDialogSession.pending_action = "create";
   interfaceWorkflowOperationDialogSession.dirty = true;
   const dialog = $("interfaceWorkflowLinkDialog");
   if (dialog) dialog.dataset.mode = "create";
-  renderInterfaceWorkflowOperationEditor(currentInterfaceWorkflowMutationTarget().view);
   if ($("interfaceWorkflowLinkDialogSaveBtn")) $("interfaceWorkflowLinkDialogSaveBtn").textContent = "保存路径";
   if ($("interfaceWorkflowOperationStatus")) $("interfaceWorkflowOperationStatus").textContent = "新操作尚未保存";
 }
@@ -20046,8 +20093,10 @@ function renderInterfaceWorkflowReviewSelection() {
   syncInterfaceWorkflowAttachFromNodeOptions();
 }
 
-function approveCurrentInterfaceWorkflowNode() {
-  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+function approveCurrentInterfaceWorkflowNode(options = {}) {
+  const mutationTarget = options.state
+    ? { state: options.state, view: options.view || options.state.current?.() || null }
+    : currentInterfaceWorkflowMutationTarget();
   if (!mutationTarget.state) {
     if ($("interfaceWorkflowSaveStatus")) {
       $("interfaceWorkflowSaveStatus").textContent = "请先把当前资产加入软件流程，再确认界面 revision。";
@@ -20060,7 +20109,7 @@ function approveCurrentInterfaceWorkflowNode() {
   const nodeId = String(node?.node_id || "").trim();
   if (!nodeId) return null;
   try {
-    interfaceWorkflowReview = window.InterfaceWorkflowReview.commitInterfaceWorkflowReviewForSave({
+    const committedReview = window.InterfaceWorkflowReview.commitInterfaceWorkflowReviewForSave({
       state: reviewState,
       nodeId,
       nodePatch: {
@@ -20068,14 +20117,18 @@ function approveCurrentInterfaceWorkflowNode() {
         surface_type: String($("interfaceWorkflowSurfaceType")?.value || "").trim() || "unknown_surface",
         review_status: String(node.review_status || "needs_human_review"),
       },
-      commitOperation: () => commitInterfaceWorkflowOperationEditor({ silent: true }),
+      commitOperation: options.isolated === true
+        ? () => currentInterfaceWorkflowOperation(reviewState.current?.() || view)
+        : () => commitInterfaceWorkflowOperationEditor({ silent: true }),
       humanReviewConfirmed: false,
     });
     if (typeof reviewState.confirmNodeAndOutgoingHumanReview !== "function") {
       throw new Error("current interface confirmation bundle is unavailable");
     }
     reviewState.confirmNodeAndOutgoingHumanReview(nodeId);
-    interfaceWorkflowReview = reviewState.snapshot();
+    const approvedReview = reviewState.snapshot();
+    if (options.isolated === true) return approvedReview;
+    interfaceWorkflowReview = approvedReview || committedReview;
     markInterfaceWorkflowUnsaved("当前界面及操作路径已确认 · 尚未入库");
     renderInterfaceWorkflowReviewSelection();
     return interfaceWorkflowReview;
@@ -20087,7 +20140,54 @@ function approveCurrentInterfaceWorkflowNode() {
   }
 }
 
-async function approveAndSaveCurrentInterfaceWorkflowNode() {
+async function approveAndSaveCurrentInterfaceWorkflowNode(session = null) {
+  if (session) {
+    if (
+      interfaceWorkflowReviewState !== session.state
+      || learningDraftEditorWorkflowBinding !== session.binding
+      || learningDraftEditorWorkflowBinding?.state !== session.state
+    ) return null;
+    const factory = globalThis.InterfaceWorkflowReview?.createInterfaceWorkflowReviewState;
+    const openingSnapshot = session.state?.snapshot?.();
+    if (!openingSnapshot || typeof factory !== "function") return null;
+    const openingSnapshotKey = JSON.stringify(openingSnapshot);
+    const draftState = factory(openingSnapshot);
+    try {
+      draftState.select(session.node_id);
+    } catch (_error) {
+      return null;
+    }
+    const approvedReview = approveCurrentInterfaceWorkflowNode({
+      state: draftState,
+      view: draftState.current?.(),
+      isolated: true,
+    });
+    if (!approvedReview) return null;
+    const saved = await saveInterfaceWorkflowReview({
+      commitEditor: false,
+      requireDisplayedWorkflow: true,
+      expectedState: session.state,
+      expectedBinding: session.binding,
+      expectedSnapshotKey: openingSnapshotKey,
+      preserveStateSession: true,
+      reviewOverride: approvedReview,
+    });
+    if (!saved) return null;
+    if (
+      interfaceWorkflowReviewState !== session.state
+      || learningDraftEditorWorkflowBinding !== session.binding
+      || JSON.stringify(session.state.snapshot()) !== openingSnapshotKey
+    ) return null;
+    interfaceWorkflowReviewState = draftState;
+    interfaceWorkflowReview = approvedReview;
+    learningDraftEditorWorkflowBinding = {
+      ...session.binding,
+      state: draftState,
+    };
+    session.state = draftState;
+    session.binding = learningDraftEditorWorkflowBinding;
+    return saved;
+  }
   const mutationTarget = currentInterfaceWorkflowMutationTarget();
   const originalState = mutationTarget.state;
   const originalSnapshot = originalState?.snapshot?.();
@@ -20145,7 +20245,21 @@ function commitInterfaceWorkflowEditorToState() {
   return interfaceWorkflowReview;
 }
 
-async function saveInterfaceWorkflowReview({ commitEditor = true, requireDisplayedWorkflow = false } = {}) {
+async function saveInterfaceWorkflowReview({
+  commitEditor = true,
+  requireDisplayedWorkflow = false,
+  expectedState = null,
+  expectedBinding = null,
+  expectedSnapshotKey = "",
+  preserveStateSession = false,
+  reviewOverride = null,
+} = {}) {
+  const expectedSessionIsCurrent = () => (
+    (!expectedState || interfaceWorkflowReviewState === expectedState)
+    && (!expectedBinding || learningDraftEditorWorkflowBinding === expectedBinding)
+    && (!expectedSnapshotKey || JSON.stringify(expectedState?.snapshot?.()) === expectedSnapshotKey)
+  );
+  if (!expectedSessionIsCurrent()) return null;
   if (requireDisplayedWorkflow && !currentInterfaceWorkflowMutationTarget().state) {
     if ($("interfaceWorkflowSaveStatus")) {
       $("interfaceWorkflowSaveStatus").textContent = "请先把当前资产加入软件流程，再保存流程审核结果。";
@@ -20161,15 +20275,16 @@ async function saveInterfaceWorkflowReview({ commitEditor = true, requireDisplay
   const selectedNodeId = String(
     interfaceWorkflowReviewState.current()?.node?.node_id || "",
   ).trim();
-  interfaceWorkflowReview = commitEditor
+  const reviewToSave = reviewOverride || (commitEditor
     ? commitInterfaceWorkflowEditorToState()
-    : interfaceWorkflowReviewState.snapshot();
-  if (!interfaceWorkflowReview) return null;
+    : interfaceWorkflowReviewState.snapshot());
+  if (!reviewToSave) return null;
+  if (!reviewOverride) interfaceWorkflowReview = reviewToSave;
   renderInterfaceWorkflowReviewSelection();
   if ($("interfaceWorkflowSaveStatus")) $("interfaceWorkflowSaveStatus").textContent = "正在保存学习结果…";
 
   const response = await api("POST", "/panel/save_interface_workflow_review", {
-    review: interfaceWorkflowReview,
+    review: reviewToSave,
   }, {
     summary: "POST /panel/save_interface_workflow_review",
     workflowStep: "save_interface_workflow_review",
@@ -20181,19 +20296,27 @@ async function saveInterfaceWorkflowReview({ commitEditor = true, requireDisplay
     }
     return null;
   }
+  if (!expectedSessionIsCurrent()) {
+    if ($("interfaceWorkflowSaveStatus")) {
+      $("interfaceWorkflowSaveStatus").textContent = "流程 revision 在保存期间变化；未替换当前审核状态。";
+    }
+    return null;
+  }
   if ($("interfaceWorkflowSaveStatus")) {
     $("interfaceWorkflowSaveStatus").textContent = `已保存 · ${response.data?.path || ""} · 未发布`;
   }
   interfaceWorkflowSavedReviewPath = String(response.data?.path || "").trim();
   interfaceWorkflowHasUnsavedChanges = false;
-  await loadInterfaceWorkflowLibraryRegistry({
-    preferredWorkflowId: String(response.data?.workflow_id || "").trim(),
-    openSelected: true,
-  });
-  if (selectedNodeId && interfaceWorkflowReviewState) {
-    interfaceWorkflowReviewState.select(selectedNodeId);
-    interfaceWorkflowWorkbenchState.showWorkflowNode(selectedNodeId);
-    renderInterfaceWorkflowReviewSelection();
+  if (!preserveStateSession) {
+    await loadInterfaceWorkflowLibraryRegistry({
+      preferredWorkflowId: String(response.data?.workflow_id || "").trim(),
+      openSelected: true,
+    });
+    if (selectedNodeId && interfaceWorkflowReviewState) {
+      interfaceWorkflowReviewState.select(selectedNodeId);
+      interfaceWorkflowWorkbenchState.showWorkflowNode(selectedNodeId);
+      renderInterfaceWorkflowReviewSelection();
+    }
   }
   renderInterfaceWorkflowOperationEditor(interfaceWorkflowReviewState.current());
   return response.data || {};
@@ -20825,7 +20948,20 @@ async function loadLearningDraftReview(options = {}) {
   }
 }
 
-async function saveLearningDraftReview(options = {}) {
+function interfaceWorkflowReviewSessionIdentityIsCurrent(session) {
+  if (!session) return true;
+  const binding = learningDraftEditorWorkflowBinding;
+  const mutationTarget = currentInterfaceWorkflowMutationTarget();
+  const workflowId = String(mutationTarget.state?.snapshot?.()?.workflow?.workflow_id || "").trim();
+  const nodeId = String(mutationTarget.view?.node?.node_id || "").trim();
+  return mutationTarget.state === session.state
+    && binding === session.binding
+    && binding?.state === session.state
+    && workflowId === String(session.workflow_id || "").trim()
+    && nodeId === String(session.node_id || "").trim();
+}
+
+async function saveLearningDraftReview(options = {}, workflowSession = null) {
   const apply = $("imageInspectorApplyBoxBtn");
   let saveSucceeded = false;
   if (learningDraftEditorActive && apply) {
@@ -20833,7 +20969,11 @@ async function saveLearningDraftReview(options = {}) {
     apply.textContent = "Saving review...";
   }
   try {
-    const workflowBinding = learningDraftEditorWorkflowBinding;
+    if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) {
+      renderResponse({ success: false, message: "Workflow review state changed before evidence save" }, "Learning draft review");
+      return null;
+    }
+    const workflowBinding = workflowSession?.binding || learningDraftEditorWorkflowBinding;
     const currentSourcePath = String(learningDraftReviewSourcePath() || "").trim();
     const boundSourcePath = String(workflowBinding?.source_path || "").trim();
     const normalizedCurrentSource = currentSourcePath.replace(/\\/g, "/").toLowerCase();
@@ -20866,6 +21006,10 @@ async function saveLearningDraftReview(options = {}) {
       renderResponse(response || { success: false, message: "Learning draft review save failed" }, "Learning draft review");
       return null;
     }
+    if (workflowSession && !interfaceWorkflowReviewSessionIdentityIsCurrent(workflowSession)) {
+      renderResponse({ success: false, message: "Workflow review state changed during evidence save" }, "Learning draft review");
+      return null;
+    }
     const data = response.data || {};
     const reviewedPath = String(data.reviewed_template_candidate_path || "").trim();
     if (!reviewedPath) {
@@ -20881,6 +21025,7 @@ async function saveLearningDraftReview(options = {}) {
       previousSourcePath: sourcePath,
       reviewedPath,
       workflowBinding,
+      workflowSession,
     });
     if (!refreshed?.review) {
       renderResponse({
@@ -20919,6 +21064,11 @@ async function saveLearningDraftReview(options = {}) {
         return null;
       }
       learningDraftEditorWorkflowBinding = rebound;
+      if (workflowSession) {
+        workflowSession.binding = rebound;
+        workflowSession.source_path = reviewedPath.replace(/\\/g, "/").toLowerCase();
+        selectLearningDraftEditorItem(workflowSession.target_kind, workflowSession.target_id);
+      }
       syncImageInspectorWorkflowReviewPanel();
     } else {
       closeImageInspector();
@@ -20966,6 +21116,85 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
     }, "Interface workflow review");
     return null;
   }
+  const captureSession = (expectedSession = null) => {
+    const currentBinding = learningDraftEditorWorkflowBinding;
+    const target = currentInterfaceWorkflowMutationTarget();
+    const state = target.state;
+    const view = target.view;
+    const snapshot = state?.snapshot?.() || null;
+    const workflowId = String(snapshot?.workflow?.workflow_id || "").trim();
+    const nodeId = String(view?.node?.node_id || "").trim();
+    const sourcePath = String(learningDraftReviewSourcePath() || "").trim().replace(/\\/g, "/").toLowerCase();
+    const boundSourcePath = String(currentBinding?.source_path || "").trim().replace(/\\/g, "/").toLowerCase();
+    const selection = learningDraftEditorWorkflowSelection;
+    const selectedItem = learningDraftEditorSelectedItem();
+    const selectedControlId = String(view?.selected_control?.control_id || view?.selected_control?.region_id || "").trim();
+    const edgeId = String(selection?.edge_id || "").trim();
+    const edge = (Array.isArray(view?.outgoing_edges) ? view.outgoing_edges : []).find(
+      (candidate) => String(candidate?.edge_id || "").trim() === edgeId,
+    );
+    const edgeControlId = String(edge?.target_control_id || edge?.target_region_id || "").trim();
+    const selectionTargetId = String(selection?.target_id || "").trim();
+    const selectedItemId = String(
+      selectedItem?.target_id || selectedItem?.region_id || selectedItem?.action_template_id || "",
+    ).trim();
+    const selectionKey = JSON.stringify({
+      status: selection?.status,
+      node_id: selection?.node_id,
+      control_id: selection?.control_id,
+      edge_id: selection?.edge_id,
+      action_template_id: selection?.action_template_id,
+      target_kind: selection?.target_kind,
+      target_id: selection?.target_id,
+    });
+    const valid = currentBinding?.authority === "workflow"
+      && state
+      && state === currentBinding.state
+      && workflowId
+      && workflowId === String(currentBinding.workflow_id || "").trim()
+      && nodeId
+      && nodeId === String(currentBinding.node_id || "").trim()
+      && sourcePath
+      && sourcePath === boundSourcePath
+      && selection?.status === "matched"
+      && nodeId === String(selection.node_id || "").trim()
+      && selectedControlId
+      && selectedControlId === String(selection.control_id || "").trim()
+      && selectionTargetId
+      && selectedItemId === selectionTargetId
+      && String(selectedItem?.target_kind || "").trim() === String(selection.target_kind || "").trim()
+      && edge
+      && String(edge?.source_node_id || "").trim() === nodeId
+      && edgeControlId === selectedControlId
+      && String(edge?.action_template_id || "").trim() === String(selection.action_template_id || "").trim();
+    if (!valid) return null;
+    if (expectedSession && (
+      state !== expectedSession.state
+      || currentBinding !== expectedSession.binding
+      || workflowId !== expectedSession.workflow_id
+      || nodeId !== expectedSession.node_id
+      || sourcePath !== expectedSession.source_path
+      || selectionKey !== expectedSession.selection_key
+    )) return null;
+    return expectedSession || {
+      state,
+      binding: currentBinding,
+      workflow_id: workflowId,
+      node_id: nodeId,
+      source_path: sourcePath,
+      target_kind: String(selectedItem?.target_kind || "").trim(),
+      target_id: selectedItemId,
+      selection_key: selectionKey,
+    };
+  };
+  const session = captureSession();
+  if (!session) {
+    renderResponse({
+      success: false,
+      message: "当前大图的流程、证据来源或选中框 revision 已变化，请重新打开审核。",
+    }, "Interface workflow review");
+    return null;
+  }
   const mutationTarget = currentInterfaceWorkflowMutationTarget();
   const workflowId = String(mutationTarget.state?.snapshot?.()?.workflow?.workflow_id || "").trim();
   const nodeId = String(mutationTarget.view?.node?.node_id || "").trim();
@@ -20998,9 +21227,10 @@ async function confirmAndStoreCurrentInterfaceWorkflowReview() {
     const evidence = await saveLearningDraftReview({
       closeEditor: false,
       preserveWorkflowBinding: true,
-    });
+    }, session);
     if (!evidence) return null;
-    const saved = await approveAndSaveCurrentInterfaceWorkflowNode();
+    if (!captureSession(session)) return null;
+    const saved = await approveAndSaveCurrentInterfaceWorkflowNode(session);
     if (!saved) return null;
     closeImageInspector();
     renderResponse({
@@ -23209,6 +23439,13 @@ function bindEvents() {
     }
   });
   on("interfaceWorkflowLinkDialogSaveBtn", "click", () => {
+    const sessionValidation = validateInterfaceWorkflowOperationDialogSession();
+    if (!sessionValidation.ok) {
+      if ($("interfaceWorkflowLinkDialogStatus")) {
+        $("interfaceWorkflowLinkDialogStatus").textContent = `当前流程 revision 已变化，未保存操作（${sessionValidation.reason}）。`;
+      }
+      return;
+    }
     const editingExisting = $("interfaceWorkflowLinkDialog")?.dataset?.mode === "edit";
     const pendingAction = String(interfaceWorkflowOperationDialogSession?.pending_action || "").trim();
     const edge = pendingAction === "delete"

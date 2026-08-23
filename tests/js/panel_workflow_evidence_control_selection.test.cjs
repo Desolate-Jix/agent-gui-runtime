@@ -327,7 +327,7 @@ test("full-image linked operation entry fails closed on stale or ambiguous bindi
   }
 });
 
-test("operation dialog keeps input staged and cancel restores its opening snapshot", () => {
+test("operation dialog cancel discards UI draft without rolling back concurrent workflow state", () => {
   const mutationSource = functionSource(
     "function handleInterfaceWorkflowOperationEditorMutation",
     "function interfaceWorkflowAssetV2BindingCandidate",
@@ -344,11 +344,8 @@ test("operation dialog keeps input staged and cancel restores its opening snapsh
   const mutatedState = {
     snapshot: () => ({ ...originalSnapshot, edges: [{ edge_id: "edge_open", display_name: "Mutated" }] }),
   };
-  const restoredState = {
-    selected: "",
-    select(nodeId) { this.selected = nodeId; },
-    snapshot: () => originalSnapshot,
-  };
+  mutatedState.selected = "";
+  mutatedState.select = function select(nodeId) { this.selected = nodeId; };
   const toolbar = { hidden: false, parentElement: null };
   const parkingHost = { appendChild(node) { node.parentElement = this; } };
   const dialog = {
@@ -364,13 +361,13 @@ test("operation dialog keeps input staged and cancel restores its opening snapsh
     ["interfaceWorkflowOperationStatus", status],
   ]);
   const calls = [];
-  const sandbox = { console, globalThis: {}, originalSnapshot, mutatedState, restoredState, elements, calls };
+  const sandbox = { console, globalThis: {}, originalSnapshot, mutatedState, elements, calls };
   vm.runInNewContext(`
     let interfaceWorkflowReviewState = mutatedState;
     let interfaceWorkflowReview = mutatedState.snapshot();
     let interfaceWorkflowSelectedOperationId = "edge_open";
-    let interfaceWorkflowHasUnsavedChanges = false;
-    let interfaceWorkflowSavedReviewPath = "workflow.json";
+    let interfaceWorkflowHasUnsavedChanges = true;
+    let interfaceWorkflowSavedReviewPath = "concurrent-workflow.json";
     let learningDraftEditorWorkflowBinding = { authority: "workflow", state: mutatedState };
     let interfaceWorkflowOperationDialogSession = {
       state: mutatedState,
@@ -382,7 +379,13 @@ test("operation dialog keeps input staged and cancel restores its opening snapsh
       dirty: false,
     };
     const currentLanguage = "zh-CN";
-    const currentInterfaceWorkflowMutationTarget = () => ({ state: interfaceWorkflowReviewState, view: null });
+    const currentInterfaceWorkflowMutationTarget = () => ({
+      state: interfaceWorkflowReviewState,
+      view: {
+        node: { node_id: "job_detail" },
+        outgoing_edges: [{ edge_id: "edge_open" }],
+      },
+    });
     const clearInterfaceWorkflowNodeHumanReviewConfirmation = () => calls.push("clear");
     const commitInterfaceWorkflowOperationEditor = () => calls.push("commit");
     const markInterfaceWorkflowUnsaved = () => calls.push("dirty");
@@ -392,7 +395,10 @@ test("operation dialog keeps input staged and cancel restores its opening snapsh
     const setInterfaceWorkflowGraphLinkStatus = () => {};
     const interfaceWorkflowWorkbenchState = { clearLink: () => {} };
     globalThis.InterfaceWorkflowReview = {
-      createInterfaceWorkflowReviewState: () => restoredState,
+      createInterfaceWorkflowReviewState: () => {
+        calls.push("business-rollback");
+        return { snapshot: () => originalSnapshot, select: () => {} };
+      },
     };
     const $ = (id) => elements.get(id) || null;
     ${mutationSource}
@@ -404,6 +410,8 @@ test("operation dialog keeps input staged and cancel restores its opening snapsh
       bindingState: learningDraftEditorWorkflowBinding.state,
       selectedOperationId: interfaceWorkflowSelectedOperationId,
       dirty: interfaceWorkflowHasUnsavedChanges,
+      savedPath: interfaceWorkflowSavedReviewPath,
+      businessSnapshot: interfaceWorkflowReviewState.snapshot(),
     });
   `, sandbox);
 
@@ -415,12 +423,135 @@ test("operation dialog keeps input staged and cancel restores its opening snapsh
   sandbox.globalThis.cancelDialog({ preventDefault: () => { prevented += 1; } });
   const restored = sandbox.globalThis.snapshot();
   assert.equal(prevented, 1);
-  assert.equal(restored.state, restoredState);
-  assert.equal(restored.bindingState, restoredState);
+  assert.equal(restored.state, mutatedState);
+  assert.equal(restored.bindingState, mutatedState);
   assert.equal(restored.selectedOperationId, "edge_open");
-  assert.equal(restored.dirty, false);
+  assert.equal(restored.dirty, true);
+  assert.equal(restored.savedPath, "concurrent-workflow.json");
+  assert.equal(restored.businessSnapshot.edges[0].display_name, "Mutated");
   assert.equal(dialog.open, false);
   assert.equal(toolbar.parentElement, parkingHost);
+  assert.equal(calls.includes("business-rollback"), false);
+});
+
+test("staging Add preserves every prefilled operation draft field until footer save", () => {
+  const stageSource = functionSource(
+    "function stageInterfaceWorkflowOperationCreate",
+    "function addInterfaceWorkflowOperation",
+  );
+  const fields = new Map([
+    ["interfaceWorkflowOperationType", { value: "open_apply_flow" }],
+    ["interfaceWorkflowOperationTargetNode", { value: "apply_entry" }],
+    ["interfaceWorkflowOperationLabel", { value: "Open Quick Apply" }],
+    ["interfaceWorkflowOperationTargetControl", { value: "quick_apply" }],
+    ["interfaceWorkflowOperationSuccessConditions", { value: "Choose documents visible" }],
+    ["interfaceWorkflowOperationFailureConditions", { value: "Login appears" }],
+    ["interfaceWorkflowLinkDialog", { dataset: { mode: "edit" } }],
+    ["interfaceWorkflowLinkDialogSaveBtn", { textContent: "" }],
+    ["interfaceWorkflowOperationStatus", { textContent: "" }],
+  ]);
+  const sandbox = { globalThis: {}, fields };
+  vm.runInNewContext(`
+    let interfaceWorkflowSelectedOperationId = "edge_apply";
+    let interfaceWorkflowOperationDialogSession = { scope: "full", dirty: false };
+    let renderCount = 0;
+    const currentInterfaceWorkflowMutationTarget = () => ({ view: {} });
+    const renderInterfaceWorkflowOperationEditor = () => {
+      renderCount += 1;
+      for (const element of fields.values()) {
+        if (Object.prototype.hasOwnProperty.call(element, "value")) element.value = "";
+      }
+    };
+    const $ = (id) => fields.get(id) || null;
+    ${stageSource}
+    globalThis.stageCreate = stageInterfaceWorkflowOperationCreate;
+    globalThis.result = () => ({
+      renderCount,
+      selectedOperationId: interfaceWorkflowSelectedOperationId,
+      values: Array.from(fields.entries()).filter(([, value]) => "value" in value).map(([id, value]) => [id, value.value]),
+    });
+  `, sandbox);
+
+  sandbox.globalThis.stageCreate();
+  const result = JSON.parse(JSON.stringify(sandbox.globalThis.result()));
+  assert.equal(result.renderCount, 0);
+  assert.equal(result.selectedOperationId, "edge_apply");
+  assert.deepEqual(result.values, [
+    ["interfaceWorkflowOperationType", "open_apply_flow"],
+    ["interfaceWorkflowOperationTargetNode", "apply_entry"],
+    ["interfaceWorkflowOperationLabel", "Open Quick Apply"],
+    ["interfaceWorkflowOperationTargetControl", "quick_apply"],
+    ["interfaceWorkflowOperationSuccessConditions", "Choose documents visible"],
+    ["interfaceWorkflowOperationFailureConditions", "Login appears"],
+  ]);
+});
+
+test("Link Dialog save session rejects state replacement and same-state revision drift", () => {
+  const start = panelSource.indexOf("function validateInterfaceWorkflowOperationDialogSession");
+  const end = panelSource.indexOf("function stageInterfaceWorkflowOperationCreate", start);
+  assert.notEqual(start, -1, "dialog session validator must exist");
+  assert.notEqual(end, -1, "dialog session validator boundary must exist");
+  const validatorSource = panelSource.slice(start, end);
+  const openingSnapshot = {
+    workflow: { workflow_id: "seek_flow" },
+    nodes: [{ node_id: "job_detail", display_name: "Job Detail" }],
+    edges: [{
+      edge_id: "edge_apply",
+      source_node_id: "job_detail",
+      target_node_id: "apply_entry",
+      target_control_id: "quick_apply",
+      action_template_id: "open_apply_flow_candidate",
+    }],
+  };
+  let currentSnapshot = structuredClone(openingSnapshot);
+  const state = { snapshot: () => structuredClone(currentSnapshot) };
+  const replacementState = { snapshot: () => structuredClone(openingSnapshot) };
+  const view = {
+    node: { node_id: "job_detail" },
+    outgoing_edges: openingSnapshot.edges,
+  };
+  const sandbox = { globalThis: {}, openingSnapshot, state, replacementState, view };
+  vm.runInNewContext(`
+    let currentState = state;
+    let interfaceWorkflowSelectedOperationId = "edge_apply";
+    let interfaceWorkflowOperationDialogSession = {
+      state,
+      opening_snapshot_key: JSON.stringify(openingSnapshot),
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      selected_operation_id: "edge_apply",
+      scoped_edge_id: "edge_apply",
+      scope: "scoped",
+    };
+    const currentInterfaceWorkflowMutationTarget = () => ({ state: currentState, view });
+    ${validatorSource}
+    globalThis.validate = validateInterfaceWorkflowOperationDialogSession;
+    globalThis.replaceState = () => { currentState = replacementState; };
+  `, sandbox);
+
+  assert.equal(sandbox.globalThis.validate().ok, true);
+  sandbox.globalThis.replaceState();
+  assert.equal(sandbox.globalThis.validate().ok, false);
+  sandbox.globalThis.replaceState = () => {};
+  // 重新创建 VM 能确保第二个失败只来自同一 state 的业务 revision 漂移。
+  currentSnapshot.nodes[0].display_name = "Concurrent update";
+  const driftSandbox = { globalThis: {}, openingSnapshot, state, view };
+  vm.runInNewContext(`
+    let interfaceWorkflowSelectedOperationId = "edge_apply";
+    let interfaceWorkflowOperationDialogSession = {
+      state,
+      opening_snapshot_key: JSON.stringify(openingSnapshot),
+      workflow_id: "seek_flow",
+      node_id: "job_detail",
+      selected_operation_id: "edge_apply",
+      scoped_edge_id: "edge_apply",
+      scope: "scoped",
+    };
+    const currentInterfaceWorkflowMutationTarget = () => ({ state, view });
+    ${validatorSource}
+    globalThis.validate = validateInterfaceWorkflowOperationDialogSession;
+  `, driftSandbox);
+  assert.equal(driftSandbox.globalThis.validate().ok, false);
 });
 
 test("all Link Dialog cancellation routes use the restoring cancel handler", () => {
