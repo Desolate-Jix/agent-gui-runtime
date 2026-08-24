@@ -551,3 +551,74 @@ CONCERNS. The open C1-A/B/C, I4-A/B, I7, and I8 lifecycle findings are closed in
 ## Commit
 
 `fix(learn): close qwen ownership graph` (exact hash recorded after commit creation).
+
+
+---
+
+# Task 4 independent-review repair — Fix Round 5
+
+## Status
+
+DONE. Closed every Critical/Important finding from the round-4 independent re-review within the Task 4 allowlist. No public Runtime/action authority, Task 3 contract, dependency, provider API, GUI path, or product scope changed.
+
+## Findings closed
+
+- **C1-B common lifecycle:** all managed Qwen consumers now share the same process-inherited cancellation event and the same cancel-vs-ensure/start-to-durable-lease transition. Cancellation that wins before publication returns `request_not_active` without guessing a mutable profile; cancellation that follows publication sees durable ownership. Recognition, two-stage understanding, model review, Hybrid Qwen, and local/default `vision_observe_screen` are in the same ownership domain. A saved-image observation with no image and an explicitly non-local observation mode remain outside acquisition because they cannot reach the local provider boundary.
+- **C1-B pending finalizers:** pending no-endpoint cancellation preserves the attached/detached finalizer for every common Qwen owner instead of terminating the only reconciler. Non-Hybrid owners conservatively mark their lease `request_in_flight` inside the protected publication transition and mark completion only after their managed provider task returns.
+- **C1-C request-time re-attestation:** immediately before the canonical screenshot request, the sealed process PID/create-time and sealed socket are re-attested. The exact socket must have one unambiguous listener owner equal to the sealed PID; process or socket drift fails closed before `urlopen`.
+- **I4-A legacy lifecycle migration:** new state uses sealed `qwen_model_server_lease_state_v3`. Accepted v2 leases missing `lifecycle_state` migrate in memory to `unknown_in_flight`, the lifecycle enum is closed, and retry/cancellation cannot release unknown legacy compute as proven `not_started`.
+- **I8 immutable finalization:** terminal proof persistence is a phase CAS from an allowed unproven phase. An existing `termination_proven` result is immutable and returned to concurrent writers. Deleted state recovers the exact matching token/lease/incarnation result from the owner tombstone. Legacy finalizations without `finalizer_pid` can finish only after exact-process absence is proven and never invoke termination again.
+- **Process-inherited hard deny:** `AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER=1` is installed by every Task 4 test module and enforced in production before the wrapper/Popen boundary. A spawned Python regression proves the sentinel is inherited and the fake real-wrapper tripwire is never reached.
+
+## TDD evidence
+
+### RED
+
+- `uv run python -m pytest -q tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py -k "ensure_to_lease_publication_is_atomic or every_managed_qwen_consumer or shared_no_endpoint_cancel or replaced_endpoint_socket or legacy_v2_missing_lifecycle or legacy_finalization_without_finalizer_pid or terminal_proof_is_phase_cas or spawned_python_inherits_hard_deny"`
+  - exit 1; `14 failed, 6 passed, 76 deselected`. Expected failures covered unprotected non-Hybrid acquisition, missing observation ownership, killed pending finalizers, absent request-time socket proof, unsafe v2 lifecycle default, unrecoverable legacy finalization, mutable terminal proof, and non-inherited wrapper denial.
+- `uv run python -m pytest -q tests/test_model_request_cancellation.py -k "managed_qwen_cancel_before_lease_publication"`
+  - exit 1; `4 failed, 1 passed, 47 deselected`. Non-Hybrid/observe cancellation guessed profiles before ownership publication.
+
+### GREEN
+
+- Final Task 4 focused matrix:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_qwen_binding.py tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py tests/test_web_panel_route.py -k "qwen or hybrid or cancellation"`
+  - exit 0; `114 passed, 190 deselected in 7.18s`.
+- Full worker and model-cancellation suites:
+  - `uv run python -m pytest -q tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py`
+  - exit 0; `103 passed in 9.63s`.
+- Relevant panel suite:
+  - `uv run python -m pytest -q tests/test_web_panel_route.py -k "qwen or hybrid or cancellation or task_kind"`
+  - exit 0; `4 passed, 167 deselected in 1.80s`.
+- Relevant Hybrid regressions:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_contracts.py tests/test_learning_hybrid_vertical_slice.py tests/test_learn_hybrid_omni_discovery.py`
+  - exit 0; `68 passed in 6.04s`.
+- `uv run python -m py_compile` over every Task 4 production/test path: exit 0.
+- Explicit UTF-8 reads of every changed Python file: `utf8-ok`.
+- `git diff --cached --check`: exit 0; only the expected `core.autocrlf=true` normalization warning for `app/core/model_server.py` was emitted by Git staging.
+
+## Process/UI cleanup evidence
+
+- No real Qwen/llama/model/GPU/browser/GUI/action path was launched in Fix Round 5.
+- The only spawned process was the controlled Python hard-deny regression; it exited within the test and replaced `subprocess.Popen` with a tripwire before calling the wrapper boundary.
+- Final observation checked process names matching `llama|qwen` and listening ports `1234`/`13240`: `qwen_llama_process_count=0`, `guarded_listener_count=0`.
+- No test UI, HWND, browser, or GUI action was created; therefore no owned UI handle required cleanup. Pre-existing user windows were not touched.
+- The denylisted untracked `tests/test_agent_runtime_actual_adapter_portfolio_v1.py` was not read, edited, staged, deleted, or committed.
+
+## Files changed
+
+- `app/core/model_server.py`
+- `app/learn/workflow_worker.py`
+- `tests/test_learn_hybrid_qwen_binding.py`
+- `tests/test_learning_workflow_stage_worker.py`
+- `tests/test_model_request_cancellation.py`
+- `tests/test_web_panel_route.py`
+- this report
+
+## Commit
+
+- `fe38c10e7f2e3b91ed75d42e197c07f50aab29e8` — `fix(learn): finalize common qwen lifecycle`
+
+## Remaining concerns
+
+- None within the round-5 finding set. A real model/GPU request was intentionally not run because the task explicitly forbade it; behavior is verified through controlled HTTP, process, socket, lifecycle, crash-recovery, cancellation, and spawn regressions.
