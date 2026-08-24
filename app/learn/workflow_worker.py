@@ -60,6 +60,14 @@ _MODEL_STAGE_BY_TASK_KIND = {
     "panel_learning_calibration_sequence": "locate",
     "panel_learning_hybrid_qwen_binding": "understanding",
 }
+_MANAGED_QWEN_TASK_KINDS = frozenset(
+    {
+        "panel_learning_recognition_trial",
+        "panel_learning_two_stage_understanding",
+        "panel_learning_model_review_repair",
+        "panel_learning_hybrid_qwen_binding",
+    }
+)
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -117,54 +125,72 @@ def execute_learning_stage_worker_task(
         cancellation_event=cancellation_event,
     )
 
-    if normalized_kind == "panel_learning_hybrid_qwen_binding":
-        response = run_hybrid_qwen_task(
-            payload,
-            cancellation_event=cancellation_event,
-            model_lease=model_lease,
-        )
-    elif normalized_kind == "panel_learning_hybrid_omni_discovery":
-        response = run_hybrid_omni_task(
-            payload,
-            cancellation_event=cancellation_event,
-        )
-    elif normalized_kind == "panel_learning_recognition_trial":
-        response = recognition_result_to_legacy_response(
-            run_recognition_task(
-                RecognitionTaskInput.model_validate(payload),
-                project_root=_PROJECT_ROOT,
+    try:
+        if normalized_kind == "panel_learning_hybrid_qwen_binding":
+            response = run_hybrid_qwen_task(
+                payload,
+                cancellation_event=cancellation_event,
+                model_lease=model_lease,
             )
-        )
-    elif normalized_kind == "panel_learning_two_stage_understanding":
-        response = two_stage_result_to_legacy_response(
-            run_two_stage_understanding_task(
-                TwoStageUnderstandingTaskInput.model_validate(payload),
-                project_root=_PROJECT_ROOT,
+        elif normalized_kind == "panel_learning_hybrid_omni_discovery":
+            response = run_hybrid_omni_task(
+                payload,
+                cancellation_event=cancellation_event,
             )
-        )
-    elif normalized_kind == "panel_learning_model_review_repair":
-        response = model_review_result_to_legacy_response(
-            run_model_review_task(
-                ModelReviewTaskInput.model_validate(payload),
-                project_root=_PROJECT_ROOT,
+        elif normalized_kind == "panel_learning_recognition_trial":
+            response = recognition_result_to_legacy_response(
+                run_recognition_task(
+                    RecognitionTaskInput.model_validate(payload),
+                    project_root=_PROJECT_ROOT,
+                )
             )
-        )
-    elif normalized_kind == "panel_learning_calibration_sequence":
-        from app.learn.calibration_sequence import run_learning_calibration_sequence
+        elif normalized_kind == "panel_learning_two_stage_understanding":
+            response = two_stage_result_to_legacy_response(
+                run_two_stage_understanding_task(
+                    TwoStageUnderstandingTaskInput.model_validate(payload),
+                    project_root=_PROJECT_ROOT,
+                )
+            )
+        elif normalized_kind == "panel_learning_model_review_repair":
+            response = model_review_result_to_legacy_response(
+                run_model_review_task(
+                    ModelReviewTaskInput.model_validate(payload),
+                    project_root=_PROJECT_ROOT,
+                )
+            )
+        elif normalized_kind == "panel_learning_calibration_sequence":
+            from app.learn.calibration_sequence import run_learning_calibration_sequence
 
-        response = run_learning_calibration_sequence(payload)
-    elif normalized_kind == "vision_observe_screen":
-        response = observe_result_to_legacy_response(
-            run_observe_task(
-                ObserveScreenTaskInput.model_validate(payload),
-                project_root=_PROJECT_ROOT,
+            response = run_learning_calibration_sequence(payload)
+        elif normalized_kind == "vision_observe_screen":
+            response = observe_result_to_legacy_response(
+                run_observe_task(
+                    ObserveScreenTaskInput.model_validate(payload),
+                    project_root=_PROJECT_ROOT,
+                )
             )
-        )
-    else:
-        from app.api.models.request import VisionLocateTargetRequestModel
-        from app.api.vision import locate_target
+        else:
+            from app.api.models.request import VisionLocateTargetRequestModel
+            from app.api.vision import locate_target
 
-        response = locate_target(VisionLocateTargetRequestModel.model_validate(payload))
+            response = locate_target(VisionLocateTargetRequestModel.model_validate(payload))
+    except BaseException:
+        if model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
+            from app.core.model_server import reconcile_qwen_model_lease_failure
+
+            reconcile_qwen_model_lease_failure(
+                model_lease=model_lease,
+                compute_completed=False,
+                reason="managed_consumer_failed",
+            )
+        raise
+    if model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
+        from app.core.model_server import release_managed_qwen_model_lease
+
+        release_managed_qwen_model_lease(
+            model_lease,
+            "managed_consumer_completed",
+        )
 
     if hasattr(response, "model_dump"):
         return response.model_dump(mode="json")
@@ -197,31 +223,33 @@ def _ensure_learning_stage_model_ready(
     from app.core.model_server import (
         ensure_and_acquire_qwen_model_lease,
         ensure_model_server,
+        _mark_qwen_model_request_in_flight,
         profile_for_stage,
     )
 
-    profile = profile_for_stage(stage, profile_id)
-    provider_mode = str(profile.get("provider_mode") or "").strip().casefold()
-    if not provider_mode.startswith("local"):
-        return None
-
-    preflight = build_model_resource_preflight(profile)
-    if (
-        str(preflight.get("resource_mode") or "").strip().casefold() == "critical"
-        or preflight.get("model_launch_allowed") is False
-    ):
-        reason_codes = preflight.get("reason_codes")
-        reasons = (
-            ", ".join(str(item) for item in reason_codes)
-            if isinstance(reason_codes, list)
-            else "critical_resource_load"
-        )
-        raise LearningStageWorkerError(
-            f"model resource preflight blocked {stage}: {reasons}"
-        )
+    def validate_profile(profile: dict[str, Any]) -> None:
+        provider_mode = str(profile.get("provider_mode") or "").strip().casefold()
+        if not provider_mode.startswith("local"):
+            raise LearningStageWorkerError(
+                f"managed Qwen profile is not local for {stage}"
+            )
+        preflight = build_model_resource_preflight(profile)
+        if (
+            str(preflight.get("resource_mode") or "").strip().casefold() == "critical"
+            or preflight.get("model_launch_allowed") is False
+        ):
+            reason_codes = preflight.get("reason_codes")
+            reasons = (
+                ", ".join(str(item) for item in reason_codes)
+                if isinstance(reason_codes, list)
+                else "critical_resource_load"
+            )
+            raise LearningStageWorkerError(
+                f"model resource preflight blocked {stage}: {reasons}"
+            )
 
     def ensure_and_publish() -> dict[str, Any] | None:
-        if task_kind == "panel_learning_hybrid_qwen_binding":
+        if task_kind in _MANAGED_QWEN_TASK_KINDS:
             request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
             if not request_id:
                 raise LearningStageWorkerError("Qwen model request identity is unavailable")
@@ -229,12 +257,17 @@ def _ensure_learning_stage_model_ready(
                 return ensure_and_acquire_qwen_model_lease(
                     stage=stage,
                     profile_id=profile_id,
-                    profile=profile,
                     request_id=request_id,
                     wait_seconds=_MODEL_READY_WAIT_SECONDS,
+                    profile_validator=validate_profile,
                 )
             except RuntimeError as error:
                 raise LearningStageWorkerError(str(error)) from error
+        profile = profile_for_stage(stage, profile_id)
+        provider_mode = str(profile.get("provider_mode") or "").strip().casefold()
+        if not provider_mode.startswith("local"):
+            return None
+        validate_profile(profile)
         readiness = ensure_model_server(
             stage=stage,
             profile_id=profile_id,
@@ -265,7 +298,14 @@ def _ensure_learning_stage_model_ready(
         if not allowed:
             raise LearningStageWorkerError("Qwen cancelled before model acquisition")
         return result
-    return ensure_and_publish()
+    result = ensure_and_publish()
+    if (
+        result is not None
+        and task_kind in _MANAGED_QWEN_TASK_KINDS
+        and task_kind != "panel_learning_hybrid_qwen_binding"
+    ):
+        _mark_qwen_model_request_in_flight(result)
+    return result
 
 
 def _run_learning_stage_worker_entry(
@@ -771,6 +811,39 @@ class LearningStageWorkerRegistry:
 
             process = record.get("process")
             if process is None:
+                if record["task_kind"] == "panel_learning_hybrid_qwen_binding":
+                    try:
+                        model_cancellation = self._model_request_cancel(
+                            request_id=record["model_request_id"],
+                            task_kind=record["task_kind"],
+                            payload=deepcopy(record.get("payload") or {}),
+                        )
+                    except Exception as exc:
+                        model_cancellation = {
+                            "contract_version": "model_request_cancellation_v1",
+                            "status": "cancel_failed",
+                            "request_id": record["model_request_id"],
+                            "model_service_compute_termination": "cancel_failed",
+                            "error": str(exc),
+                        }
+                    termination = model_cancellation.get(
+                        "model_service_compute_termination",
+                        "cancellation_acknowledged_pending",
+                    )
+                    if termination not in {"terminated", "request_not_active"}:
+                        record["cancellation_pending"] = deepcopy(model_cancellation)
+                        self._persist_record_journal(record)
+                    return {
+                        **self._public_record(record),
+                        "status": (
+                            str(record.get("status") or "detached_running")
+                            if termination in {"terminated", "request_not_active"}
+                            else "cancellation_pending"
+                        ),
+                        "backend_compute_termination": "not_covered",
+                        "model_service_compute_termination": termination,
+                        "model_request_cancellation": deepcopy(model_cancellation),
+                    }
                 return {
                     **self._public_record(record),
                     "backend_compute_termination": "not_covered",

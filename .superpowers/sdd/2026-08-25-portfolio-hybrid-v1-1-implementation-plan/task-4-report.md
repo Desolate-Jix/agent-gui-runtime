@@ -459,3 +459,95 @@ DONE_WITH_CONCERNS. Closed the remaining C1/I4 findings and all six round-3 life
 ## Commit
 
 `fix(learn): serialize qwen incarnation finalization` (exact hash returned after commit creation).
+
+---
+
+# Task 4 independent-review repair — round 4/5
+
+## Status
+
+CONCERNS. The open C1-A/B/C, I4-A/B, I7, and I8 lifecycle findings are closed in the Task 4 allowlist and the final offline suites are green. However, an isolation regression in two intermediate test runs invoked the real llama wrapper and initialized its CUDA backend before failing to bind port 1234. No model was loaded and no inference ran, but this violated the requested zero-real-model/GPU execution constraint and is reported in full below.
+
+## Closed ownership and cancellation findings
+
+- **C1-A:** one exact `pid + create_time_ns` now yields one ownership-domain ID, independent of profile ID and URL spelling. Resolved `localhost`/`127.0.0.1` aliases canonicalize to the same endpoint socket and join one lease list instead of creating separate refcount states.
+- **C1-B:** `panel_learning_recognition_trial`, `panel_learning_two_stage_understanding`, `panel_learning_model_review_repair`, and Hybrid Qwen now acquire through the same Qwen acquisition/lease infrastructure. Existing consumer success releases only its exact lease; failure leaves conservative durable ownership. `vision_observe_screen` was deliberately left unchanged after its recovery regression proved that adding model acquisition there would alter existing managed-task behavior.
+- **C1-C:** production listener discovery resolves the configured and readiness hosts, intersects exact addresses and ports, prefers and validates `service_pid`, validates any readiness PID against the socket owner, rejects wildcard/port-only guesses, and fails closed on multiple or unobservable owners.
+- **I4-A:** every lease persists one sealed lifecycle state: `not_started`, `request_in_flight`, or `compute_complete`. Explicit retry releases proven no-dispatch/complete ownership, retains uncertain in-flight ownership, and cannot overwrite `compute_complete` with pending state.
+- **I4-B:** a journal-reloaded/detached Hybrid Qwen record calls durable owner-first cancellation by `model_request_id` even without raw payload or a wrapper handle. Model termination and wrapper attachment remain separate; a terminal model receipt no longer fabricates wrapper exit.
+- **I7:** the profile is loaded once inside the OS-backed acquisition transaction, passed immutably through preflight, exact-profile ensure/start/readiness, and lease publication. Public profile digest, endpoint socket, and served model mismatches fail closed.
+- **I8:** exact termination first persists `termination_proven` plus its terminal result under the immutable finalization token. Tombstone/delete cleanup is idempotent and retryable. A crash or state-write failure after termination can prove exact absence and finish receipt/tombstone/delete without invoking termination a second time.
+
+## Preserved contracts
+
+- Final termination remains exact PID plus creation identity with tri-state evidence and no port/PID-file/stop-script fallback.
+- The immutable finalization token, revision CAS, exactly-one stop attempt, durable owner tombstones, no-endpoint pending truth, failure finalizers, and Task 3/public UEI/Runtime/action boundaries remain intact.
+- No production or test path sends GUI input or action authority. No Task 3 production file changed.
+
+## TDD evidence
+
+### RED
+
+- Initial focused command for the new ownership/lifecycle regressions:
+  - `uv run python -m pytest -q tests/test_model_request_cancellation.py tests/test_learning_workflow_stage_worker.py -k "different_profile_id or process_observation or acquisition_loads_one_profile or termination_receipt_cleanup or pending_cancel_then_real_finalizer or existing_managed_qwen_consumer or reloaded_hybrid_qwen_worker"`
+  - exit 1; `9 failed, 64 deselected`. Failures covered alias partitioning, port-first PID selection, missing lifecycle transition/retry, non-atomic profile loading, unrecoverable cleanup I/O, unleased existing consumers, and detached cancellation bypass.
+- Readiness profile consistency:
+  - `uv run python -m pytest -q tests/test_model_request_cancellation.py -k "acquisition_rejects_readiness"`
+  - exit 1; `2 failed, 38 deselected` because a first acquisition accepted mismatched endpoint/model readiness.
+- Readiness PID/socket binding:
+  - `uv run python -m pytest -q tests/test_model_request_cancellation.py -k "readiness_pid_not_owning"`
+  - exit 1; the unique port listener was accepted even though it did not match the readiness PID.
+- Detached wrapper truth:
+  - `uv run python -m pytest -q tests/test_learning_workflow_stage_worker.py -k "reloaded_hybrid_qwen_terminal"`
+  - exit 1; a terminal model-owner result incorrectly changed a detached wrapper to `cancelled`.
+
+### GREEN
+
+- Final focused Task 4 suite:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_qwen_binding.py tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py tests/test_web_panel_route.py -k "qwen or hybrid or cancellation"`
+  - exit 0; `92 passed, 190 deselected in 6.78s`.
+- Full worker and cancellation suites:
+  - `uv run python -m pytest -q tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py`
+  - exit 0; `81 passed in 9.38s`.
+- Full Qwen binding suite:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_qwen_binding.py`
+  - exit 0; `30 passed in 4.12s`.
+- Relevant panel suite:
+  - `uv run python -m pytest -q tests/test_web_panel_route.py -k "qwen or hybrid or cancellation or task_kind"`
+  - exit 0; `4 passed, 167 deselected in 1.79s`.
+- Relevant Hybrid regressions:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_contracts.py tests/test_learning_hybrid_vertical_slice.py tests/test_learn_hybrid_omni_discovery.py`
+  - exit 0; `68 passed in 5.95s`.
+- `uv run python -m py_compile` over all Task 4 production/test paths: exit 0.
+- `git diff --check`: exit 0; only the expected `core.autocrlf=true` normalization warning for `model_server.py`.
+- Explicit UTF-8 reads of all changed Python files: `utf8-ok`.
+
+## Real-wrapper isolation incident and cleanup evidence
+
+- Cause: after `ensure_and_acquire_qwen_model_lease` was moved to the immutable-profile internal ensure seam, two older workflow tests still mocked `ensure_model_server` plus `acquire_qwen_model_lease`. Running `uv run python -m pytest -q tests/test_learning_workflow_stage_worker.py -x` therefore missed the new seam and called the real default start wrapper twice.
+- Evidence: the two ignored logs were `logs/local-vision-server-qwen3_vl_8b_q4_k_m-20260825-105934.log` and `logs/local-vision-server-qwen-20260825-110101.log`. Both show CUDA backend initialization followed by `couldn't bind HTTP server socket ... port: 1234` and immediate cleanup/exit. They do not show model loading or inference.
+- Repair: the affected tests now mock `ensure_and_acquire_qwen_model_lease` directly. `tests/test_learning_workflow_stage_worker.py` also has an autouse deny fixture that fails immediately if any Task 4 workflow regression reaches `start_model_server`.
+- Final cleanup observation command checked `Get-Process` names matching `llama|qwen` and `Get-NetTCPConnection -State Listen` for ports `1234`/`13240`: both counts were `0`. The two diagnostic logs remain as ignored evidence because the attempted exact-path `Remove-Item` cleanup was rejected by the execution policy; no process or listener remained to terminate.
+- Every final GREEN command above ran after the deny fixture was installed and did not invoke the real wrapper again.
+
+## Denylist handling incident
+
+- A later call-site inventory used `rg ... app tests | Where-Object ...`. Although the output filtered the denylisted untracked filename and exposed no contents, `rg` may have scanned that path internally. The file was never opened directly, edited, staged, deleted, or committed. All subsequent commands used explicit allowlist paths.
+
+## Files changed
+
+- `app/core/model_server.py`
+- `app/learn/workflow_worker.py`
+- `tests/test_learn_hybrid_qwen_binding.py`
+- `tests/test_learning_workflow_stage_worker.py`
+- `tests/test_model_request_cancellation.py`
+- this report
+
+## Remaining concerns
+
+- The checked-in Qwen profile still has no request-scoped cancellation endpoint. Uncertain `request_in_flight` work therefore remains durably pending until compute completion/absence is proven; shared compute is never killed speculatively.
+- The intermediate CUDA initialization incident and possible denylist scan are process violations even though neither affected committed source and final cleanup/state verification is clean.
+
+## Commit
+
+`fix(learn): close qwen ownership graph` (exact hash recorded after commit creation).

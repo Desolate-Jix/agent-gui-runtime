@@ -18,6 +18,16 @@ from app.learn.workflow_worker import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _deny_real_model_server_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.core.model_server.start_model_server",
+        lambda profile: pytest.fail(
+            f"real model server start is forbidden in Task 4 tests: {profile.get('profile_id')}"
+        ),
+    )
+
+
 
 def _spawned_managed_omni_test_entry(target, args, control: dict[str, str]) -> None:
     from app.learn.hybrid import omni_discovery
@@ -1125,24 +1135,24 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
         lambda payload: events.append(("validate", payload)),
     )
 
-    monkeypatch.setattr(
-        "app.core.model_server.profile_for_stage",
-        lambda stage, profile_id: events.append(("profile", stage, profile_id))
-        or {"profile_id": "qwen3_vl_8b_q4_k_m", "provider_mode": "local_understanding"},
-    )
+    profile = {
+        "profile_id": "qwen3_vl_8b_q4_k_m",
+        "provider_mode": "local_understanding",
+    }
     monkeypatch.setattr(
         "app.core.gpu_resources.build_model_resource_preflight",
         lambda profile: events.append(("preflight", profile["profile_id"]))
         or {"resource_mode": "normal", "model_launch_allowed": True},
     )
+    def acquire(**kwargs):
+        validator = kwargs.pop("profile_validator")
+        events.append(("acquire", kwargs))
+        validator(profile)
+        return lease
+
     monkeypatch.setattr(
-        "app.core.model_server.ensure_model_server",
-        lambda **kwargs: events.append(("ensure", kwargs))
-        or {"before": {"status": "running"}, "started": False},
-    )
-    monkeypatch.setattr(
-        "app.core.model_server.acquire_qwen_model_lease",
-        lambda **kwargs: events.append(("lease", kwargs)) or lease,
+        "app.core.model_server.ensure_and_acquire_qwen_model_lease",
+        acquire,
     )
     monkeypatch.setattr(
         workflow_worker,
@@ -1161,27 +1171,132 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
     assert response == {"contract_version": "hybrid_qwen_bindings_v1"}
     assert events == [
         ("validate", {"run_id": "run-qwen"}),
-        ("profile", "understanding", None),
-        ("preflight", "qwen3_vl_8b_q4_k_m"),
         (
-            "ensure",
+            "acquire",
             {
                 "stage": "understanding",
                 "profile_id": None,
-                "wait_until_ready": True,
+                "request_id": "learn-qwen-request",
                 "wait_seconds": 180.0,
             },
         ),
-        (
-            "lease",
-            {
-                "profile": {"profile_id": "qwen3_vl_8b_q4_k_m", "provider_mode": "local_understanding"},
-                "request_id": "learn-qwen-request",
-                "readiness": {"before": {"status": "running"}, "started": False},
-            },
-        ),
+        ("preflight", "qwen3_vl_8b_q4_k_m"),
         ("task", {"run_id": "run-qwen"}, None, lease),
     ]
+
+
+def test_existing_managed_qwen_consumer_uses_shared_lease_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    events: list[object] = []
+    lease = {"lease_id": "observe-lease", "owner_request_id": "observe-owner"}
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "observe-owner")
+    monkeypatch.setattr(
+        "app.core.model_server.ensure_and_acquire_qwen_model_lease",
+        lambda **kwargs: events.append(("acquire", kwargs)) or lease,
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.ensure_model_server",
+        lambda **kwargs: pytest.fail("managed Qwen consumer bypassed shared acquisition"),
+    )
+    monkeypatch.setattr(
+        "app.core.model_server._mark_qwen_model_request_in_flight",
+        lambda model_lease: events.append(("in_flight", model_lease)),
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.profile_for_stage",
+        lambda *args, **kwargs: {
+            "profile_id": "qwen3_vl_8b_q4_k_m",
+            "provider_mode": "local_understanding",
+        },
+    )
+    monkeypatch.setattr(
+        "app.core.gpu_resources.build_model_resource_preflight",
+        lambda profile: {"resource_mode": "normal", "model_launch_allowed": True},
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.release_managed_qwen_model_lease",
+        lambda model_lease, reason: events.append(("release", model_lease, reason))
+        or {"status": "released"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_recognition_task",
+        lambda *args, **kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "recognition_result_to_legacy_response",
+        lambda value: value,
+    )
+
+    response = execute_learning_stage_worker_task(
+        "panel_learning_recognition_trial",
+        {"app_name": "test"},
+    )
+
+    assert response == {"ok": True}
+    assert events[0][0] == "acquire"
+    assert events[0][1]["request_id"] == "observe-owner"
+    assert events[1] == ("in_flight", lease)
+    assert events[-1] == ("release", lease, "managed_consumer_completed")
+
+
+@pytest.mark.parametrize(
+    "task_kind",
+    [
+        "panel_learning_two_stage_understanding",
+        "panel_learning_model_review_repair",
+        "panel_learning_hybrid_qwen_binding",
+    ],
+)
+def test_every_managed_qwen_consumer_acquires_the_common_owner_domain(
+    monkeypatch: pytest.MonkeyPatch,
+    task_kind: str,
+) -> None:
+    from app.learn import workflow_worker
+
+    calls = []
+    lease = {"lease_id": f"lease-{task_kind}"}
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", f"request-{task_kind}")
+
+    def acquire(**kwargs):
+        calls.append(kwargs)
+        kwargs["profile_validator"](
+            {
+                "profile_id": "qwen3_vl_8b_q4_k_m",
+                "provider_mode": "local_understanding",
+            }
+        )
+        return lease
+
+    monkeypatch.setattr(
+        "app.core.model_server.ensure_and_acquire_qwen_model_lease",
+        acquire,
+    )
+    monkeypatch.setattr(
+        "app.core.model_server._mark_qwen_model_request_in_flight",
+        lambda selected: calls.append({"marked_in_flight": selected}),
+    )
+    monkeypatch.setattr(
+        "app.core.gpu_resources.build_model_resource_preflight",
+        lambda profile: {"resource_mode": "normal", "model_launch_allowed": True},
+    )
+
+    acquired = workflow_worker._ensure_learning_stage_model_ready(
+        task_kind,
+        {},
+    )
+
+    assert acquired == lease
+    assert calls[0]["request_id"] == f"request-{task_kind}"
+    if task_kind == "panel_learning_hybrid_qwen_binding":
+        assert len(calls) == 1
+    else:
+        assert calls[1] == {"marked_in_flight": lease}
 
 
 def test_managed_qwen_rejects_unsealed_inventory_before_model_acquisition(
@@ -1223,15 +1338,16 @@ def test_qwen_ensure_to_lease_publication_is_atomic_with_cancellation(
     )
 
     def ensure(**kwargs):
-        del kwargs
+        validator = kwargs.pop("profile_validator")
+        validator(profile)
         entered_ensure.set()
         release_ensure.wait(timeout=2.0)
-        return {"started": True, "after": {"status": "running"}}
+        published.set()
+        return {"lease_id": "published"}
 
-    monkeypatch.setattr("app.core.model_server.ensure_model_server", ensure)
     monkeypatch.setattr(
-        "app.core.model_server.acquire_qwen_model_lease",
-        lambda **kwargs: published.set() or {"lease_id": "published"},
+        "app.core.model_server.ensure_and_acquire_qwen_model_lease",
+        ensure,
     )
     outcome: dict[str, object] = {}
 
@@ -1316,6 +1432,86 @@ def test_managed_hybrid_qwen_cancel_uses_existing_model_cancellation(
             "payload": payload,
         }
     ]
+
+
+def test_reloaded_hybrid_qwen_worker_cancels_durable_owner_before_wrapper_status(
+    tmp_path: Path,
+) -> None:
+    first = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = first.start(
+        run_id="run-reload-qwen",
+        stage="screen_understanding",
+        operation_id="operation-reload-qwen",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={"run_id": "run-reload-qwen", "omni_inventory": {"immutable": True}},
+    )
+    calls: list[dict[str, object]] = []
+    reloaded = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=lambda **kwargs: calls.append(kwargs) or {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "cancellation_acknowledged_pending",
+            "model_service_compute_termination": "cancellation_acknowledged_pending",
+        },
+    )
+
+    cancelled = reloaded.cancel_by_operation(
+        run_id="run-reload-qwen",
+        stage="screen_understanding",
+        operation_id="operation-reload-qwen",
+    )
+
+    assert calls == [{
+        "request_id": started["model_request_id"],
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "payload": {},
+    }]
+    assert cancelled["status"] == "cancellation_pending"
+    assert cancelled["backend_compute_termination"] == "not_covered"
+    assert cancelled["model_service_compute_termination"] == (
+        "cancellation_acknowledged_pending"
+    )
+    assert cancelled["runtime_attached"] is False
+
+
+def test_reloaded_hybrid_qwen_terminal_owner_result_does_not_claim_wrapper_exit(
+    tmp_path: Path,
+) -> None:
+    first = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    first.start(
+        run_id="run-reload-terminal",
+        stage="screen_understanding",
+        operation_id="operation-reload-terminal",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={"run_id": "run-reload-terminal", "omni_inventory": {"immutable": True}},
+    )
+    reloaded = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=lambda **kwargs: {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "request_not_active",
+            "model_service_compute_termination": "request_not_active",
+        },
+    )
+
+    cancelled = reloaded.cancel_by_operation(
+        run_id="run-reload-terminal",
+        stage="screen_understanding",
+        operation_id="operation-reload-terminal",
+    )
+
+    assert cancelled["status"] == "detached_running"
+    assert cancelled["backend_compute_termination"] == "not_covered"
+    assert cancelled["model_service_compute_termination"] == "request_not_active"
+    assert cancelled["runtime_attached"] is False
 
 
 def test_managed_qwen_shared_no_endpoint_cancel_remains_attached_pending(
@@ -1442,8 +1638,17 @@ def test_managed_qwen_pending_cancel_real_finalizer_then_owner_retry_closes(
             "base_url": "http://127.0.0.1:13240/v1",
             "model_id": "qwen",
             "server_process_identity": {"pid": 9101, "create_time_ns": 111},
+            "server_socket": {"host": "127.0.0.1", "port": 13240},
         },
     }
+    monkeypatch.setattr(
+        model_server,
+        "_observe_qwen_server_binding",
+        lambda selected, current: {
+            "server_process_identity": dict(current["after"]["server_process_identity"]),
+            "server_socket": dict(current["after"]["server_socket"]),
+        },
+    )
     owned = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id=str(started["model_request_id"]),
@@ -1454,6 +1659,7 @@ def test_managed_qwen_pending_cancel_real_finalizer_then_owner_retry_closes(
         request_id="other-active-owner",
         readiness={**readiness, "started": False},
     )
+    model_server._mark_qwen_model_request_in_flight(owned)
     monkeypatch.setattr(
         model_server,
         "_terminate_exact_qwen_server_process",

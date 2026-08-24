@@ -638,8 +638,17 @@ def test_workflow_release_failure_uses_production_reconciler_and_removes_complet
             "base_url": "http://127.0.0.1:13240/v1",
             "model_id": "qwen",
             "server_process_identity": {"pid": 9101, "create_time_ns": 111},
+            "server_socket": {"host": "127.0.0.1", "port": 13240},
         },
     }
+    monkeypatch.setattr(
+        model_server,
+        "_observe_qwen_server_binding",
+        lambda selected, current: {
+            "server_process_identity": dict(current["before"]["server_process_identity"]),
+            "server_socket": dict(current["before"]["server_socket"]),
+        },
+    )
     lease = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="release-failure-request",
