@@ -41,6 +41,7 @@ EXPECTED_WEIGHT_HASHES = {
     "icon_caption_florence/model.safetensors": "01b934b0fe2d07b181e2d07752f16ae27c9d0ea88ddffe13a9a003aa9680f233",
 }
 _AUTO = object()
+EMPTY_OCR_SENTINEL = "__omniparser_empty_ocr_sentinel__"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -306,9 +307,10 @@ def _run_once(*, input_path: Path, detector: Any, caption: Any, check_ocr_box: A
         str(input_path), display_img=False, output_bb_format="xyxy", goal_filtering=None,
         easyocr_args={"paragraph": False, "text_threshold": 0.9}, use_paddleocr=False,
     )
-    # 稀疏界面可能没有 OCR 命中；官方解析器仍要求可迭代的证据集合。
-    texts = texts if texts is not None else []
-    ocr_boxes = ocr_boxes if ocr_boxes is not None else []
+    # 官方 v2.0.1 的空 OCR 分支会破坏返回形状；屏幕外哨兵会在输出边界被移除。
+    if not texts or not ocr_boxes:
+        texts = [EMPTY_OCR_SENTINEL]
+        ocr_boxes = [[-2, -2, -1, -1]]
     _, _, parsed_content_list = get_som_labeled_img(
         str(input_path), detector, BOX_TRESHOLD=0.01, output_coord_in_ratio=True,
         ocr_bbox=ocr_boxes, caption_model_processor=caption, ocr_text=texts,
@@ -316,6 +318,10 @@ def _run_once(*, input_path: Path, detector: Any, caption: Any, check_ocr_box: A
     )
     if not isinstance(parsed_content_list, list):
         raise OmniparserProviderError("protocol_invalid", "Official parsed_content_list must be a list")
+    parsed_content_list = [
+        item for item in parsed_content_list
+        if not isinstance(item, dict) or item.get("content") != EMPTY_OCR_SENTINEL
+    ]
     return parsed_content_list, (time.perf_counter() - started) * 1000
 
 

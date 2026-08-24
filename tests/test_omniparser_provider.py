@@ -139,7 +139,7 @@ def test_benchmark_mode_requires_three_warm_repetitions() -> None:
     assert runner._validate_warm_repetitions(3) == 3
 
 
-def test_run_once_treats_missing_ocr_result_as_an_empty_evidence_set(tmp_path) -> None:
+def test_run_once_supplies_a_filtered_noop_box_when_official_parser_has_no_ocr(tmp_path) -> None:
     observed: dict[str, object] = {}
 
     def check_ocr_box(*args, **kwargs):
@@ -148,7 +148,10 @@ def test_run_once_treats_missing_ocr_result_as_an_empty_evidence_set(tmp_path) -
     def get_som_labeled_img(*args, **kwargs):
         observed["ocr_bbox"] = kwargs["ocr_bbox"]
         observed["ocr_text"] = kwargs["ocr_text"]
-        return None, None, []
+        return None, None, [
+            {"type": "text", "content": kwargs["ocr_text"][0], "bbox": [0.0, 0.0, 0.01, 0.01]},
+            {"type": "icon", "content": "New", "bbox": [0.1, 0.1, 0.3, 0.4]},
+        ]
 
     items, _ = runner._run_once(
         input_path=tmp_path / "sparse-screen.png",
@@ -158,8 +161,9 @@ def test_run_once_treats_missing_ocr_result_as_an_empty_evidence_set(tmp_path) -
         get_som_labeled_img=get_som_labeled_img,
     )
 
-    assert items == []
-    assert observed == {"ocr_bbox": [], "ocr_text": []}
+    assert items == [{"type": "icon", "content": "New", "bbox": [0.1, 0.1, 0.3, 0.4]}]
+    assert observed["ocr_bbox"] == [[-2, -2, -1, -1]]
+    assert observed["ocr_text"] == [runner.EMPTY_OCR_SENTINEL]
 
 
 def test_per_run_metrics_include_element_interactivity_and_invalid_bbox_counts() -> None:
