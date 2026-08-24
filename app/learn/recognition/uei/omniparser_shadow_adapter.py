@@ -47,6 +47,7 @@ class OmniParserShadowAdapterError(AdapterFailure):
             "runtime_worker_failed": ("failed", "runtime_worker_failed", True, "clean"),
             "runtime_cleanup_failed": ("failed", "runtime_cleanup_failed", False, "failed"),
             "runtime_capture_hash_mismatch": ("rejected", "policy_rejected", False, "not_required"),
+            "runtime_cancelled": ("failed", "runtime_cancelled", True, "clean"),
         }
         disposition, reason, retryable, cleanup = outcomes.get(code, ("failed", "runtime_provider_failed", False, "failed"))
         super().__init__(disposition=disposition, reason_class=reason, retryable=retryable, cleanup_status=cleanup)
@@ -188,16 +189,24 @@ class OmniParserShadowAdapter:
 
     def invoke(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
-        invocation_id: str, cancellation: Event | None = None,
+        invocation_id: str, cancellation_event: Event | None = None,
     ) -> NormalizedScreenParseOutput:
         self._validate_preflight(capture=capture, budget=budget, invocation_id=invocation_id)
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise OmniParserShadowAdapterError("runtime_cancelled")
         if self._gpu_free_gib() < self._configuration.minimum_free_gpu_gib:
             raise OmniParserShadowAdapterError("runtime_resource_rejected")
         resource_lease = self._lease_manager(budget.resource_group)
         if resource_lease is None:
             raise OmniParserShadowAdapterError("runtime_resource_rejected")
         try:
-            return self._invoke_worker(capture=capture, budget=budget, cancellation=cancellation)
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise OmniParserShadowAdapterError("runtime_cancelled")
+            return self._invoke_worker(
+                capture=capture,
+                budget=budget,
+                cancellation_event=cancellation_event,
+            )
         finally:
             resource_lease.release()
 
@@ -217,7 +226,7 @@ class OmniParserShadowAdapter:
             raise OmniParserShadowAdapterError("runtime_capture_hash_mismatch")
 
     def _invoke_worker(self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
-                       cancellation: Event | None) -> NormalizedScreenParseOutput:
+                       cancellation_event: Event | None) -> NormalizedScreenParseOutput:
         with tempfile.TemporaryDirectory(prefix="uei-omniparser-shadow-") as directory:
             exchange = Path(directory)
             input_path = exchange / "input.json"
@@ -242,9 +251,9 @@ class OmniParserShadowAdapter:
                 )
                 deadline = time.monotonic() + budget.timeout_ms / 1000
                 while process.poll() is None:
-                    if cancellation is not None and cancellation.is_set():
+                    if cancellation_event is not None and cancellation_event.is_set():
                         self._terminate_tree(process)
-                        raise OmniParserShadowAdapterError("runtime_timeout")
+                        raise OmniParserShadowAdapterError("runtime_cancelled")
                     if output_path.exists() and output_path.stat().st_size > budget.max_output_bytes:
                         self._terminate_tree(process)
                         raise OmniParserShadowAdapterError("runtime_output_limit")

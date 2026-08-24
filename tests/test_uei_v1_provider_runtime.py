@@ -37,7 +37,7 @@ class FakeAdapter:
         self.release = release
         self.output = output
 
-    def invoke(self, *, capture, budget, invocation_id):
+    def invoke(self, *, capture, budget, invocation_id, cancellation_event=None):
         from app.learn.recognition.uei.provider_adapters import (
             NormalizedProviderItem,
             NormalizedScreenParseOutput,
@@ -45,6 +45,7 @@ class FakeAdapter:
 
         self.calls += 1
         self.last_budget = budget
+        self.last_cancellation_event = cancellation_event
         if self.started is not None:
             self.started.set()
         if self.release is not None:
@@ -168,6 +169,25 @@ def test_capture_lease_identity_mismatch_rejects_before_adapter(tmp_path: Path, 
         )
     assert adapter.calls == 0
 
+
+
+def test_runtime_propagates_internal_cancellation_event_without_result_contract_change(
+    tmp_path: Path,
+):
+    store, request_ref, (registration_ref, manifest_ref, lease) = _context(tmp_path)
+    adapter = FakeAdapter()
+    cancellation_event = Event()
+
+    reply = _runtime(store, registration_ref, manifest_ref, adapter).invoke(
+        request_ref=request_ref,
+        capture_lease=lease,
+        cancellation_event=cancellation_event,
+    )
+
+    assert adapter.last_cancellation_event is cancellation_event
+    result = store.get(reply["result_ref"], contract_version="provider_safe_result_v1")
+    assert result["contract_version"] == "provider_safe_result_v1"
+    assert "cancellation_event" not in result
 
 def test_success_persists_review_only_result_and_is_idempotent(tmp_path: Path):
     store, request_ref, (registration_ref, manifest_ref, lease) = _context(tmp_path)

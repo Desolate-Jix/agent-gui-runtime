@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from threading import Event, Thread
 
 import pytest
 
@@ -124,17 +125,29 @@ def test_invalid_or_secret_worker_output_fails_closed_and_cleans_exchange(tmp_pa
     assert process.killed is False and not calls[0]["output_path"].exists()
 
 
-def test_timeout_terminates_worker_tree_and_cleans_exchange(tmp_path: Path, monkeypatch):
-    from app.learn.recognition.uei.omniparser_shadow_adapter import OmniParserShadowAdapter, OmniParserShadowAdapterError
+def test_timeout_terminates_worker_tree_and_releases_lease_without_orphan(tmp_path: Path, monkeypatch):
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        OmniParserShadowAdapter,
+        OmniParserShadowAdapterError,
+        ProcessResourceLeaseManager,
+    )
 
     process = FakeProcess(payload={}, timeout=True)
     calls: list[dict[str, object]] = []
+    lease_root = tmp_path / "timeout-leases"
     monkeypatch.setattr("app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen", _fake_popen(process, calls))
-    with pytest.raises(OmniParserShadowAdapterError, match="timeout"):
-        OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke(
+    with pytest.raises(OmniParserShadowAdapterError, match="timeout") as captured:
+        OmniParserShadowAdapter(
+            configuration=_config(tmp_path),
+            resource_lease_manager=ProcessResourceLeaseManager(root=lease_root),
+        ).invoke(
             capture=_capture(tmp_path), budget=_budget(), invocation_id="invocation/1",
         )
-    assert process.killed is True and not calls[0]["output_path"].exists()
+    assert captured.value.cleanup_status == "clean"
+    assert process.killed is True
+    assert process.poll() is not None
+    assert list(lease_root.glob("*.lock")) == []
+    assert not calls[0]["output_path"].exists()
 
 
 def test_resource_rejection_happens_before_spawn(tmp_path: Path, monkeypatch):
@@ -220,34 +233,98 @@ def test_benchmark_diagnostics_fail_closed_and_normal_mode_rejects_them(tmp_path
         )
 
 
-def test_default_file_lease_is_process_wide_and_cancellation_cleans(tmp_path: Path, monkeypatch):
-    from threading import Event
+def test_cancellation_before_spawn_does_not_acquire_lease_or_start_child(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        OmniParserShadowAdapter,
+        OmniParserShadowAdapterError,
+    )
+
+    calls: list[dict[str, object]] = []
+    lease_calls: list[str] = []
+    monkeypatch.setattr(
+        "app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen",
+        lambda *args, **kwargs: calls.append({"args": args, "kwargs": kwargs}),
+    )
+    cancelled = Event()
+    cancelled.set()
+
+    with pytest.raises(OmniParserShadowAdapterError, match="cancel") as captured:
+        OmniParserShadowAdapter(
+            configuration=_config(tmp_path),
+            resource_lease_manager=lambda group: lease_calls.append(group),
+        ).invoke(
+            capture=_capture(tmp_path),
+            budget=_budget(),
+            invocation_id="invocation/cancel-before",
+            cancellation_event=cancelled,
+        )
+
+    assert captured.value.cleanup_status == "clean"
+    assert calls == []
+    assert lease_calls == []
+
+
+def test_cancellation_during_worker_terminates_tree_releases_lease_and_leaves_no_orphan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.learn.recognition.uei.omniparser_shadow_adapter import (
         OmniParserShadowAdapter,
         OmniParserShadowAdapterError,
         ProcessResourceLeaseManager,
     )
 
-    first = ProcessResourceLeaseManager(root=tmp_path / "leases")
-    second = ProcessResourceLeaseManager(root=tmp_path / "leases")
-    lease = first("gpu_vision")
-    assert lease is not None and second("gpu_vision") is None
-    lease.release()
-    second_lease = second("gpu_vision")
-    assert second_lease is not None
-    second_lease.release()
-
+    lease_root = tmp_path / "leases"
+    manager = ProcessResourceLeaseManager(root=lease_root)
     process = FakeProcess(payload={}, timeout=True)
     calls: list[dict[str, object]] = []
-    monkeypatch.setattr("app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen", _fake_popen(process, calls))
+    monkeypatch.setattr(
+        "app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen",
+        _fake_popen(process, calls),
+    )
     cancelled = Event()
-    cancelled.set()
-    with pytest.raises(OmniParserShadowAdapterError, match="timeout"):
-        OmniParserShadowAdapter(configuration=_config(tmp_path), resource_lease_manager=first).invoke(
-            capture=_capture(tmp_path), budget=_budget(), invocation_id="invocation/cancel", cancellation=cancelled,
-        )
-    assert process.killed is True and not calls[0]["output_path"].exists()
+    errors: list[BaseException] = []
+    adapter = OmniParserShadowAdapter(
+        configuration=_config(tmp_path),
+        resource_lease_manager=manager,
+    )
 
+    thread = Thread(
+        target=lambda: _capture_adapter_error(
+            errors,
+            adapter,
+            capture=_capture(tmp_path),
+            budget=_budget(),
+            invocation_id="invocation/cancel-during",
+            cancellation_event=cancelled,
+        )
+    )
+    thread.start()
+    deadline = time.monotonic() + 3
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    cancelled.set()
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], OmniParserShadowAdapterError)
+    assert "cancel" in str(errors[0])
+    assert errors[0].cleanup_status == "clean"
+    assert process.killed is True
+    assert process.poll() is not None
+    assert list(lease_root.glob("*.lock")) == []
+    assert not calls[0]["output_path"].exists()
+
+
+def _capture_adapter_error(errors: list[BaseException], adapter, **kwargs) -> None:
+    try:
+        adapter.invoke(**kwargs)
+    except BaseException as exc:
+        errors.append(exc)
 
 def test_file_lease_release_fails_closed_when_lock_token_is_tampered(tmp_path: Path):
     from app.learn.recognition.uei.omniparser_shadow_adapter import (

@@ -92,6 +92,7 @@ def build_omni_candidate_ledger(
             "provider_result_ref": result_ref,
             "source_item_id": source_item_id,
         })
+        provider_inactive = _provider_reports_inactive(item)
         candidates.append({
             "candidate_id": stable_candidate_id(
                 provider_result_ref=result_ref,
@@ -102,8 +103,12 @@ def build_omni_candidate_ledger(
             "bbox_original": deepcopy(item.get("capture_bbox")),
             "coordinate_space": "capture_pixel_xyxy",
             "confidence": item.get("provider_confidence"),
-            "active": True,
-            "inactive_reason": None,
+            "active": not provider_inactive,
+            "inactive_reason": (
+                "provider_reported_inactive"
+                if provider_inactive
+                else None
+            ),
             "provenance": provenance,
         })
 
@@ -118,6 +123,29 @@ def build_omni_candidate_ledger(
         **_NON_AUTHORIZING,
     })
     return _seal_ledger(inventory=inventory, bundle_ref=verified_bundle_ref)
+
+
+def omni_inventory_from_ledger(value: Mapping[str, Any]) -> dict[str, Any]:
+    """从已验证 ledger 重建封闭的公开 Omni inventory。"""
+    ledger = validate_omni_candidate_ledger(value)
+    return seal_immutable(validate_omni_inventory({
+        "contract_version": "hybrid_omni_inventory_v1",
+        "capture_identity": ledger["capture_identity"],
+        "provider_result_ref": ledger["provider_result_ref"],
+        "provider_result": ledger["provider_result"],
+        "provider_id": ledger["provider_id"],
+        "provider_revision": ledger["provider_revision"],
+        "candidates": ledger["candidates"],
+        **_NON_AUTHORIZING,
+    }))
+
+
+def _provider_reports_inactive(item: Mapping[str, Any]) -> bool:
+    states = item.get("safe_states")
+    if not isinstance(states, list):
+        return False
+    inactive_states = {"disabled", "hidden", "inactive", "unavailable"}
+    return bool({str(value).strip().casefold() for value in states} & inactive_states)
 
 
 def validate_omni_candidate_ledger(value: Mapping[str, Any]) -> dict[str, Any]:

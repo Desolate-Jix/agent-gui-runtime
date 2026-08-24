@@ -6457,3 +6457,20 @@ def test_learning_interface_scoped_capture_cancellation_aborts_bind_capture_sequ
     assert "activeScopedLearningCaptureContext" in cancel_body
     assert "activeScopedLearningCaptureContext.controller.abort()" in cancel_body
     assert "cancelled" in cancel_body
+
+
+def test_panel_start_worker_request_accepts_hybrid_omni_task_kind() -> None:
+    from app.api.panel import PanelStartLearningStageWorkerRequest
+
+    request = PanelStartLearningStageWorkerRequest.model_validate(
+        {
+            "run_id": "run-hybrid",
+            "expected_revision": 7,
+            "stage": "screen_understanding",
+            "operation_id": "operation-hybrid",
+            "task_kind": "panel_learning_hybrid_omni_discovery",
+            "payload": {},
+        }
+    )
+
+    assert request.task_kind == "panel_learning_hybrid_omni_discovery"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 from typing import Protocol
 
 from app.learn.recognition.uei.contracts import UEIValidationError, is_namespaced_provider_profile_id
@@ -78,7 +79,7 @@ class ScreenParseProviderAdapter(Protocol):
 
     def invoke(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
-        invocation_id: str,
+        invocation_id: str, cancellation_event: Event | None = None,
     ) -> NormalizedScreenParseOutput: ...
 
 

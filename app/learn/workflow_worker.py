@@ -24,6 +24,7 @@ from app.learn.workflow_task_result_adapter import (
     two_stage_result_to_legacy_response,
 )
 from app.learn.workflow_tasks.model_review import run_model_review_task
+from app.learn.workflow_tasks.hybrid_omni import run_hybrid_omni_task
 from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
 from app.learn.workflow_tasks.two_stage import run_two_stage_understanding_task
@@ -42,6 +43,7 @@ SUPPORTED_LEARNING_STAGE_TASK_KINDS = frozenset(
         "panel_learning_two_stage_understanding",
         "panel_learning_model_review_repair",
         "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_omni_discovery",
         "vision_observe_screen",
         "vision_locate_target",
     }
@@ -63,6 +65,8 @@ class LearningStageWorkerError(ValueError):
 def execute_learning_stage_worker_task(
     task_kind: str,
     payload: dict[str, Any],
+    *,
+    cancellation_event: Any | None = None,
 ) -> dict[str, Any]:
     """在隔离进程内执行白名单 API 处理器，并返回可序列化响应。"""
 
@@ -74,7 +78,12 @@ def execute_learning_stage_worker_task(
 
     _ensure_learning_stage_model_ready(normalized_kind, payload)
 
-    if normalized_kind == "panel_learning_recognition_trial":
+    if normalized_kind == "panel_learning_hybrid_omni_discovery":
+        response = run_hybrid_omni_task(
+            payload,
+            cancellation_event=cancellation_event,
+        )
+    elif normalized_kind == "panel_learning_recognition_trial":
         response = recognition_result_to_legacy_response(
             run_recognition_task(
                 RecognitionTaskInput.model_validate(payload),
@@ -184,12 +193,17 @@ def _run_learning_stage_worker_entry(
     payload: dict[str, Any],
     model_request_id: str,
     identity: dict[str, Any],
+    cancellation_event: Any,
 ) -> None:
     result_file = Path(result_path)
     previous_request_id = os.environ.get("AGENT_GUI_MODEL_REQUEST_ID")
     os.environ["AGENT_GUI_MODEL_REQUEST_ID"] = model_request_id
     try:
-        response = execute_learning_stage_worker_task(task_kind, payload)
+        response = execute_learning_stage_worker_task(
+            task_kind,
+            payload,
+            cancellation_event=cancellation_event,
+        )
         envelope = {
             "contract_version": LEARNING_STAGE_WORKER_RESULT_CONTRACT_VERSION,
             **deepcopy(identity),
@@ -233,6 +247,7 @@ class LearningStageWorkerRegistry:
         self._result_root = Path(result_root).resolve()
         self._result_root.mkdir(parents=True, exist_ok=True)
         context = multiprocessing.get_context("spawn")
+        self._process_context = context
         self._process_factory = process_factory or context.Process
         self._model_request_cancel = model_request_cancel or cancel_model_request
         self._lock = RLock()
@@ -372,6 +387,11 @@ class LearningStageWorkerRegistry:
                 "model_request_id": model_request_id,
                 "payload_sha256": payload_sha256,
             }
+            cancellation_event = (
+                self._process_context.Event()
+                if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                else None
+            )
             process = self._process_factory(
                 target=_run_learning_stage_worker_entry,
                 args=(
@@ -380,6 +400,7 @@ class LearningStageWorkerRegistry:
                     deepcopy(payload),
                     model_request_id,
                     deepcopy(identity),
+                    cancellation_event,
                 ),
                 name=f"learning-stage-{normalized_stage}-{worker_id[:8]}",
             )
@@ -393,6 +414,7 @@ class LearningStageWorkerRegistry:
                 "journal_path": str(journal_path),
                 "process": process,
                 "payload": deepcopy(payload),
+                "cancellation_event": cancellation_event,
                 "recovered_from_journal": False,
             }
             self._persist_record_journal(record)
@@ -633,22 +655,36 @@ class LearningStageWorkerRegistry:
                         "reason": "worker process handle is detached after API restart",
                     },
                 }
-            try:
-                model_cancellation = self._model_request_cancel(
-                    request_id=record["model_request_id"],
-                    task_kind=record["task_kind"],
-                    payload=deepcopy(record["payload"]),
-                )
-            except Exception as exc:
+            if record["task_kind"] == "panel_learning_hybrid_omni_discovery":
+                cancellation_event = record.get("cancellation_event")
+                if cancellation_event is not None:
+                    cancellation_event.set()
                 model_cancellation = {
                     "contract_version": "model_request_cancellation_v1",
-                    "status": "cancel_failed",
+                    "status": "not_covered",
                     "request_id": record["model_request_id"],
-                    "model_service_compute_termination": "cancel_failed",
-                    "error": str(exc),
+                    "model_service_compute_termination": "not_covered",
+                    "reason": "Hybrid Omni uses its internal cooperative cancellation event",
                 }
-            process.terminate()
-            process.join(timeout=3.0)
+                process.join(timeout=3.0)
+            else:
+                try:
+                    model_cancellation = self._model_request_cancel(
+                        request_id=record["model_request_id"],
+                        task_kind=record["task_kind"],
+                        payload=deepcopy(record["payload"]),
+                    )
+                except Exception as exc:
+                    model_cancellation = {
+                        "contract_version": "model_request_cancellation_v1",
+                        "status": "cancel_failed",
+                        "request_id": record["model_request_id"],
+                        "model_service_compute_termination": "cancel_failed",
+                        "error": str(exc),
+                    }
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=3.0)
             if process.is_alive():
                 process.kill()
                 process.join(timeout=2.0)
@@ -831,6 +867,7 @@ class LearningStageWorkerRegistry:
                 "process",
                 "worker_result",
                 "result_adoption",
+                "cancellation_event",
             }
         }
         process = record.get("process")
@@ -1009,6 +1046,7 @@ def _load_worker_journal(
         "journal_path": str(journal_path.resolve()),
         "process": None,
         "payload": None,
+        "cancellation_event": None,
         "result_adoption": result_adoption,
         "recovered_from_journal": True,
     }

@@ -9,7 +9,7 @@ import json
 import os
 import re
 import stat
-from threading import RLock
+from threading import Event, RLock
 from typing import Any
 from uuid import uuid4
 
@@ -62,6 +62,7 @@ class ShadowProviderRuntime:
 
     def invoke(
         self, *, request_ref: dict[str, str], capture_lease: RestrictedCaptureLease,
+        cancellation_event: Event | None = None,
     ) -> dict[str, object]:
         context = resolve_projection_context(store=self._store, request_ref=request_ref)
         self._verify_lease(context=context, request_ref=request_ref, lease=capture_lease)
@@ -102,7 +103,14 @@ class ShadowProviderRuntime:
             self._states[invocation_id] = {"state": "in_progress"}
         try:
             budget = self._effective_budget(profile)
-            output = adapter.invoke(capture=capture_lease, budget=budget, invocation_id=invocation_id)
+            invocation = {
+                "capture": capture_lease,
+                "budget": budget,
+                "invocation_id": invocation_id,
+            }
+            if cancellation_event is not None:
+                invocation["cancellation_event"] = cancellation_event
+            output = adapter.invoke(**invocation)
             reply = self._persist_success(
                 context=context, profile=profile, adapter=adapter, output=output, invocation_id=invocation_id, budget=budget,
             )

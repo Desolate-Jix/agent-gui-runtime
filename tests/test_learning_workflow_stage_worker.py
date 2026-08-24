@@ -989,3 +989,64 @@ def test_real_worker_process_is_terminated_by_operation_cancel(
     assert cancelled["backend_compute_termination"] == "terminated"
     process = registry._records[started["worker_id"]]["process"]
     assert process.is_alive() is False
+
+
+def test_worker_dispatches_managed_hybrid_omni_with_internal_cancellation_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from threading import Event
+    from app.learn import workflow_worker
+
+    seen: dict[str, object] = {}
+
+    def fake_run(payload, *, cancellation_event=None):
+        seen["payload"] = payload
+        seen["cancellation_event"] = cancellation_event
+        return {"contract_version": "hybrid_omni_discovery_result_v1", "outcome": "completed"}
+
+    monkeypatch.setattr(workflow_worker, "run_hybrid_omni_task", fake_run)
+    cancellation_event = Event()
+    response = execute_learning_stage_worker_task(
+        "panel_learning_hybrid_omni_discovery",
+        {"run_id": "run-hybrid"},
+        cancellation_event=cancellation_event,
+    )
+
+    assert response["outcome"] == "completed"
+    assert seen == {
+        "payload": {"run_id": "run-hybrid"},
+        "cancellation_event": cancellation_event,
+    }
+
+
+def test_hybrid_omni_registry_cancel_signals_worker_before_forced_termination(
+    tmp_path: Path,
+) -> None:
+    cancellation_calls: list[dict[str, object]] = []
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=lambda **kwargs: cancellation_calls.append(kwargs),
+    )
+    started = registry.start(
+        run_id="run-hybrid",
+        stage="screen_understanding",
+        operation_id="operation-hybrid",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        payload={"run_id": "run-hybrid"},
+    )
+    process = registry._records[started["worker_id"]]["process"]
+    cancellation_event = process.args[5]
+
+    cancelled = registry.cancel_by_operation(
+        run_id="run-hybrid",
+        stage="screen_understanding",
+        operation_id="operation-hybrid",
+    )
+
+    assert cancellation_event.is_set()
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["backend_compute_termination"] == "terminated"
+    assert cancelled["model_service_compute_termination"] == "not_covered"
+    assert cancellation_calls == []
+    assert process.terminated is True
