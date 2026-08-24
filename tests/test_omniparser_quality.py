@@ -32,6 +32,27 @@ def test_quality_filter_removes_only_sub_ten_pixel_candidates() -> None:
     }
 
 
+def test_quality_filter_keeps_fixed_ten_pixel_default_on_small_captures() -> None:
+    from app.learn.recognition.omniparser_quality import filter_omniparser_candidates
+
+    filtered, summary = filter_omniparser_candidates(
+        [
+            {
+                "type": "icon",
+                "content": "sub-ten",
+                "bbox": [0.0, 0.0, 8.5 / 569, 0.5],
+                "interactivity": True,
+                "source": "yolo",
+            }
+        ],
+        image_size={"width": 569, "height": 530},
+    )
+
+    assert filtered == []
+    assert summary["minimum_capture_side_px"] == 10
+    assert summary["removed_tiny_count"] == 1
+
+
 def test_quality_filter_dedupes_only_equivalent_high_overlap_candidates() -> None:
     from app.learn.recognition.omniparser_quality import filter_omniparser_candidates
 

@@ -26,7 +26,7 @@ def filter_omniparser_candidates(
     if minimum_capture_side_px is None:
         minimum_capture_side_px = min(
             DEFAULT_MINIMUM_CAPTURE_SIDE_PX,
-            max(1, round(min(width, height) * 0.0125)),
+            max(1, round(min(width, height) * 0.02)),
         )
     if not isinstance(minimum_capture_side_px, int) or minimum_capture_side_px < 1:
         raise ValueError("omniparser_candidate_invalid")
