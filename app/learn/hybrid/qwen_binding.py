@@ -5,9 +5,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from hashlib import sha256
+from io import BytesIO
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable
+import unicodedata
 
 from PIL import Image, UnidentifiedImageError
 
@@ -68,6 +71,10 @@ _FORBIDDEN_FIELDS = {
     "xy",
     "xyxy",
 }
+_MAX_JSON_DEPTH = 16
+_MAX_MODEL_STRING_BYTES = 4096
+_MAX_ORPHAN_SEMANTICS = 64
+_MAX_MODEL_JSON_BYTES = 1024 * 1024
 
 
 class QwenBindingCancelled(ValueError):
@@ -76,6 +83,11 @@ class QwenBindingCancelled(ValueError):
 
 class QwenBindingTimeout(ValueError):
     """受管 Qwen 模型调用超时。"""
+
+
+def validate_sealed_omni_inventory(value: object) -> dict[str, Any]:
+    """在模型获取前验证 Task 3 inventory 的精确不可变密封。"""
+    return _validated_inventory(value)
 
 
 def build_qwen_binding_request(
@@ -125,6 +137,7 @@ def parse_qwen_candidate_bindings(
     if not isinstance(raw, Mapping) or set(raw) != {"bindings", "orphan_semantics"}:
         raise ValueError("unbound Qwen prose or non-closed output")
     value = deepcopy(dict(raw))
+    _validate_model_json_bounds(value)
     forbidden = _first_forbidden_field(value)
     if forbidden is not None:
         raise ValueError(f"forbidden Qwen field: {forbidden}")
@@ -132,6 +145,10 @@ def parse_qwen_candidate_bindings(
         raise ValueError("Qwen bindings must be a list")
     if not isinstance(value["orphan_semantics"], list):
         raise ValueError("Qwen orphan_semantics must be a list")
+    if len(value["bindings"]) != len(inventory["candidates"]):
+        raise ValueError("candidate omission in Qwen bindings")
+    if len(value["orphan_semantics"]) > _MAX_ORPHAN_SEMANTICS:
+        raise ValueError("Qwen orphan count exceeds limit")
     for index, binding in enumerate(value["bindings"]):
         if not isinstance(binding, Mapping) or set(binding) != _BINDING_FIELDS:
             raise ValueError(f"binding[{index}] is not closed")
@@ -156,16 +173,21 @@ def parse_qwen_candidate_bindings(
     actual_ids = [binding["candidate_id"] for binding in validated["bindings"]]
     if set(actual_ids) != set(expected_ids) or len(actual_ids) != len(expected_ids):
         raise ValueError("candidate omission in Qwen bindings")
-    semantic_targets: dict[tuple[str, str, str, str], str] = {}
+    semantic_targets: dict[tuple[str, str, str], str] = {}
     for binding in validated["bindings"]:
-        target = tuple(
-            binding[field]
-            for field in ("role", "label", "description", "relation")
-        )
+        target = _semantic_target_key(binding)
         previous = semantic_targets.get(target)
         if previous is not None and previous != binding["candidate_id"]:
             raise ValueError("semantic target bound to multiple candidate IDs")
         semantic_targets[target] = binding["candidate_id"]
+    orphan_targets: set[tuple[str, str, str]] = set()
+    for orphan in validated["orphan_semantics"]:
+        target = _semantic_target_key(orphan)
+        if target in semantic_targets:
+            raise ValueError("semantic target bound and orphaned")
+        if target in orphan_targets:
+            raise ValueError("duplicate orphan semantic target")
+        orphan_targets.add(target)
     return validated
 
 
@@ -174,6 +196,7 @@ def run_qwen_candidate_binding(
     *,
     model_runner: Callable[..., object],
     cancellation_event: Any | None = None,
+    model_lease: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """重新验证 Task 2/3 artifact，调用 Qwen，并在返回前密封绑定。"""
     request_payload = _validated_payload(payload)
@@ -187,25 +210,34 @@ def run_qwen_candidate_binding(
         expected_workflow_revision=request_payload["workflow_revision"],
     )
     image_path = _capture_path(root, request_payload["capture_image_path"])
-    inventory = _validated_inventory(request_payload["omni_inventory"])
-    model_request = build_qwen_binding_request(bundle, inventory)
-    _verify_capture_bytes(image_path, inventory["capture_identity"])
+    sealed_inventory = deepcopy(request_payload["omni_inventory"])
+    inventory = _validated_inventory(sealed_inventory)
+    model_request = build_qwen_binding_request(bundle, sealed_inventory)
+    screenshot_bytes, screenshot_media_type, screenshot_sha256 = _read_verified_capture(
+        image_path,
+        inventory["capture_identity"],
+    )
     try:
         raw = model_runner(
             request=deepcopy(model_request),
-            image_path=image_path,
+            screenshot_bytes=screenshot_bytes,
+            screenshot_media_type=screenshot_media_type,
+            screenshot_sha256=screenshot_sha256,
             cancellation_event=cancellation_event,
+            model_lease=deepcopy(model_lease),
         )
     except TimeoutError as error:
         raise QwenBindingTimeout("Qwen model timeout") from error
     if cancellation_event is not None and cancellation_event.is_set():
         raise QwenBindingCancelled("Qwen candidate binding cancelled")
     if isinstance(raw, str):
+        if len(raw.encode("utf-8")) > _MAX_MODEL_JSON_BYTES:
+            raise ValueError("Qwen model JSON exceeds byte limit")
         try:
             raw = json.loads(raw)
         except json.JSONDecodeError as error:
             raise ValueError("unbound Qwen prose or invalid JSON") from error
-    parsed = parse_qwen_candidate_bindings(raw, inventory)
+    parsed = parse_qwen_candidate_bindings(raw, sealed_inventory)
     return seal_immutable(parsed)
 
 
@@ -214,8 +246,12 @@ def _validated_inventory(value: object) -> dict[str, Any]:
         raise ValueError("omni_inventory must be an object")
     candidate = deepcopy(dict(value))
     declared = candidate.pop("content_sha256", None)
-    if declared is not None and declared != content_sha256(dict(value)):
-        raise ValueError("Omni inventory content_sha256 mismatch")
+    if (
+        not isinstance(declared, str)
+        or re.fullmatch(r"[0-9a-f]{64}", declared) is None
+        or declared != content_sha256(dict(value))
+    ):
+        raise ValueError("sealed Omni inventory content_sha256 mismatch")
     return validate_omni_inventory(candidate)
 
 
@@ -277,17 +313,59 @@ def _capture_path(root: Path, value: str) -> Path:
     return resolved
 
 
-def _verify_capture_bytes(path: Path, identity: dict[str, Any]) -> None:
+def _read_verified_capture(
+    path: Path,
+    identity: dict[str, Any],
+) -> tuple[bytes, str, str]:
     try:
         raw = path.read_bytes()
-        with Image.open(path) as image:
+        with Image.open(BytesIO(raw)) as image:
+            image_format = str(image.format or "").upper()
             image.verify()
-        with Image.open(path) as image:
+        with Image.open(BytesIO(raw)) as image:
             size = {"width": image.width, "height": image.height}
     except (OSError, SyntaxError, UnidentifiedImageError):
         raise ValueError("canonical screenshot is unreadable") from None
-    if sha256(raw).hexdigest() != identity["screenshot_sha256"] or size != identity["image_size"]:
+    digest = sha256(raw).hexdigest()
+    if digest != identity["screenshot_sha256"] or size != identity["image_size"]:
         raise ValueError("canonical screenshot capture mismatch")
+    media_types = {"PNG": "image/png", "JPEG": "image/jpeg"}
+    media_type = media_types.get(image_format)
+    if media_type is None:
+        raise ValueError("canonical screenshot media type is unsupported")
+    return raw, media_type, digest
+
+
+def _canonical_semantic_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("semantic target fields must be strings")
+    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+
+def _semantic_target_key(value: Mapping[str, Any]) -> tuple[str, str, str]:
+    return tuple(
+        _canonical_semantic_text(value.get(field))
+        for field in ("role", "label", "description")
+    )
+
+
+def _validate_model_json_bounds(value: object) -> None:
+    stack: list[tuple[object, int]] = [(value, 1)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > _MAX_JSON_DEPTH:
+            raise ValueError("Qwen output exceeds maximum JSON depth")
+        if isinstance(current, str):
+            if len(current.encode("utf-8")) > _MAX_MODEL_STRING_BYTES:
+                raise ValueError("Qwen model string exceeds UTF-8 byte limit")
+            continue
+        if isinstance(current, Mapping):
+            for key, child in current.items():
+                if len(str(key).encode("utf-8")) > _MAX_MODEL_STRING_BYTES:
+                    raise ValueError("Qwen model string exceeds UTF-8 byte limit")
+                stack.append((child, depth + 1))
+        elif isinstance(current, list):
+            stack.extend((child, depth + 1) for child in current)
 
 
 def _first_forbidden_field(value: object) -> str | None:

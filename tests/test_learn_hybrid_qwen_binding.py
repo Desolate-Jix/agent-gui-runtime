@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import base64
+import json
 from pathlib import Path
 from threading import Event
 
 import pytest
 
 from app.learn.recognition.uei.canonical import content_sha256
+
+
+def _sealed_inventory(value: dict[str, object]) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    return seal_immutable(value)
 
 
 def _binding(candidate_id: str, *, label: str = "申请职位") -> dict[str, object]:
@@ -117,11 +125,40 @@ def test_request_rejects_extra_or_cross_capture_ocr_uia_source(
         build_qwen_binding_request(bundle, facts["inventory"])
 
 
+def test_direct_and_managed_boundaries_reject_unsealed_or_mismatched_omni_inventory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.qwen_binding import run_qwen_candidate_binding
+    from app.learn.workflow_tasks import hybrid_qwen
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    for inventory in (
+        {key: deepcopy(value) for key, value in facts["inventory"].items() if key != "content_sha256"},
+        {**deepcopy(facts["inventory"]), "content_sha256": "A" * 64},
+    ):
+        payload = deepcopy(facts["qwen_payload"])
+        payload["omni_inventory"] = inventory
+        with pytest.raises(ValueError, match="sealed Omni inventory"):
+            run_qwen_candidate_binding(payload, model_runner=lambda **kwargs: pytest.fail(kwargs))
+
+        managed = deepcopy(payload)
+        managed.pop("project_root")
+        monkeypatch.setattr(hybrid_qwen, "_PROJECT_ROOT", tmp_path)
+        with pytest.raises(ValueError, match="sealed Omni inventory"):
+            hybrid_qwen.run_hybrid_qwen_task(
+                managed,
+                model_runner=lambda **kwargs: pytest.fail(kwargs),
+                model_releaser=lambda **kwargs: pytest.fail(kwargs),
+                model_lease={"lease_id": "controlled"},
+            )
+
+
 def test_parser_preserves_exact_utf8_labels_and_covers_every_candidate() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture(candidate_count=2)
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
     parsed = parse_qwen_candidate_bindings(_raw_for(inventory), inventory)
 
     assert [item["label"] for item in parsed["bindings"]] == ["申请职位 0", "申请职位 1"]
@@ -134,7 +171,7 @@ def test_parser_rejects_unknown_duplicate_and_omitted_candidate_ids() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture(candidate_count=2)
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
     raw = _raw_for(inventory)
     raw["bindings"][0]["candidate_id"] = "candidate/foreign"
     with pytest.raises(ValueError, match="unknown candidate_id"):
@@ -155,12 +192,90 @@ def test_parser_rejects_one_semantic_target_bound_to_multiple_ids() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture(candidate_count=2)
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
     raw = _raw_for(inventory)
     for field in ("role", "label", "description", "relation"):
         raw["bindings"][1][field] = raw["bindings"][0][field]
 
     with pytest.raises(ValueError, match="semantic target bound to multiple candidate IDs"):
+        parse_qwen_candidate_bindings(raw, inventory)
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ("Apply Now", "  apply\tNOW "),
+        ("Ｃｏｎｔｉｎｕｅ", "continue"),
+        ("Cafe\u0301", "CAFÉ"),
+    ],
+)
+def test_parser_rejects_canonical_case_whitespace_and_unicode_duplicates(
+    left: str,
+    right: str,
+) -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    raw = _raw_for(inventory)
+    raw["bindings"][0]["label"] = left
+    raw["bindings"][1]["label"] = right
+    raw["bindings"][1]["role"] = raw["bindings"][0]["role"].upper()
+    raw["bindings"][1]["description"] = "  打开申请流程  "
+
+    with pytest.raises(ValueError, match="semantic target bound to multiple candidate IDs"):
+        parse_qwen_candidate_bindings(raw, inventory)
+
+
+def test_parser_rejects_same_semantic_target_as_binding_and_orphan() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture())
+    raw = _raw_for(inventory)
+    binding = raw["bindings"][0]
+    raw["orphan_semantics"] = [{
+        "semantic_id": "semantic/duplicate",
+        "role": binding["role"].upper(),
+        "label": f"  {binding['label']}  ",
+        "description": binding["description"],
+        "reason": "ORPHAN_SEMANTIC",
+    }]
+
+    with pytest.raises(ValueError, match="semantic target bound and orphaned"):
+        parse_qwen_candidate_bindings(raw, inventory)
+
+
+def test_parser_bounds_depth_orphans_and_every_model_string() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture())
+    raw = _raw_for(inventory)
+    deep: object = "leaf"
+    for _ in range(40):
+        deep = {"nested": deep}
+    raw["bindings"][0]["ambiguity"] = deep
+    with pytest.raises(ValueError, match="maximum JSON depth"):
+        parse_qwen_candidate_bindings(raw, inventory)
+
+    raw = _raw_for(inventory)
+    raw["orphan_semantics"] = [
+        {
+            "semantic_id": f"semantic/{index}",
+            "role": "text",
+            "label": str(index),
+            "description": "orphan",
+            "reason": "ORPHAN_SEMANTIC",
+        }
+        for index in range(65)
+    ]
+    with pytest.raises(ValueError, match="orphan count"):
+        parse_qwen_candidate_bindings(raw, inventory)
+
+    raw = _raw_for(inventory)
+    raw["bindings"][0]["label"] = "界" * 2000
+    with pytest.raises(ValueError, match="UTF-8 byte limit"):
         parse_qwen_candidate_bindings(raw, inventory)
 
 
@@ -178,7 +293,7 @@ def test_qwen_output_cannot_inject_geometry_authority_or_candidates(injection: d
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture()
+    inventory = _sealed_inventory(inventory_fixture())
     raw = _raw_for(inventory)
     raw["bindings"][0].update(injection)
 
@@ -190,7 +305,7 @@ def test_parser_rejects_unbound_prose() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture()
+    inventory = _sealed_inventory(inventory_fixture())
     raw = {**_raw_for(inventory), "summary": "可以点击此按钮"}
 
     with pytest.raises(ValueError, match="unbound Qwen prose"):
@@ -201,7 +316,7 @@ def test_important_element_without_candidate_is_orphan_semantic_only() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture()
+    inventory = _sealed_inventory(inventory_fixture())
     raw = _raw_for(inventory)
     raw["orphan_semantics"] = [
         {
@@ -225,7 +340,7 @@ def test_orphan_semantic_cannot_fabricate_candidate_shaped_identity() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
-    inventory = inventory_fixture()
+    inventory = _sealed_inventory(inventory_fixture())
     raw = _raw_for(inventory)
     raw["orphan_semantics"] = [
         {
@@ -251,20 +366,103 @@ def test_run_seals_binding_and_passes_cancellation_token(
     cancellation = Event()
     seen: dict[str, object] = {}
 
-    def runner(*, request, image_path, cancellation_event=None):
-        seen.update(request=request, image_path=image_path, cancellation_event=cancellation_event)
+    expected_bytes = Path(facts["image"]).read_bytes()
+
+    def runner(
+        *, request, screenshot_bytes, screenshot_media_type, screenshot_sha256,
+        cancellation_event=None, model_lease=None
+    ):
+        seen.update(
+            request=request,
+            screenshot_bytes=screenshot_bytes,
+            screenshot_media_type=screenshot_media_type,
+            screenshot_sha256=screenshot_sha256,
+            cancellation_event=cancellation_event,
+            model_lease=model_lease,
+        )
         return _raw_for(facts["inventory"])
 
     result = run_qwen_candidate_binding(
         deepcopy(facts["qwen_payload"]),
         model_runner=runner,
         cancellation_event=cancellation,
+        model_lease={"lease_id": "exact-controlled-lease"},
     )
 
     assert result["contract_version"] == "hybrid_qwen_bindings_v1"
     assert result["content_sha256"] == content_sha256(result)
     assert seen["cancellation_event"] is cancellation
-    assert seen["image_path"] == Path(facts["image"]).resolve()
+    assert seen["model_lease"] == {"lease_id": "exact-controlled-lease"}
+    assert seen["screenshot_bytes"] == expected_bytes
+    assert seen["screenshot_media_type"] == "image/png"
+    assert seen["screenshot_sha256"] == facts["inventory"]["capture_identity"]["screenshot_sha256"]
+
+
+def test_capture_file_mutation_after_single_read_cannot_change_runner_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.qwen_binding import run_qwen_candidate_binding
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    image = Path(facts["image"])
+    expected = image.read_bytes()
+
+    def runner(*, screenshot_bytes, **kwargs):
+        del kwargs
+        image.write_bytes(b"mutated-after-verification")
+        assert screenshot_bytes == expected
+        return _raw_for(facts["inventory"])
+
+    run_qwen_candidate_binding(deepcopy(facts["qwen_payload"]), model_runner=runner)
+
+
+def test_http_runner_encodes_exact_task2_bytes_despite_file_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid.qwen_binding import run_qwen_candidate_binding
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    image = Path(facts["image"])
+    expected = image.read_bytes()
+    seen: dict[str, object] = {}
+    profile = {
+        "profile_id": "qwen3_vl_8b_q4_k_m",
+        "model_name": "controlled-qwen",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+    }
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda stage: profile)
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, size=-1):
+            raw = json.dumps({
+                "choices": [{"message": {"content": json.dumps(_raw_for(facts["inventory"]), ensure_ascii=False)}}]
+            }, ensure_ascii=False).encode("utf-8")
+            return raw if size < 0 else raw[:size]
+
+    def urlopen(request, timeout):
+        del timeout
+        image.write_bytes(b"mutated-before-http-send")
+        seen["body"] = json.loads(request.data.decode("utf-8"))
+        return Response()
+
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", urlopen)
+    run_qwen_candidate_binding(
+        deepcopy(facts["qwen_payload"]),
+        model_runner=model_server.run_qwen_binding_model,
+    )
+
+    body = seen["body"]
+    image_url = body["messages"][1]["content"][1]["image_url"]["url"]
+    assert base64.b64decode(image_url.split(",", 1)[1]) == expected
 
 
 def test_model_timeout_and_cancel_leave_prior_omni_inventory_unchanged(
@@ -319,8 +517,12 @@ def test_workflow_task_releases_qwen_only_after_sealed_binding(
         events.append("model")
         return _raw_for(facts["inventory"])
 
-    def release(*, sealed_artifact):
+    lease = {"lease_id": "controlled-lease", "owner_request_id": "controlled-request"}
+
+    def release(*, sealed_artifact, omni_inventory, model_lease):
         assert sealed_artifact["content_sha256"] == content_sha256(sealed_artifact)
+        assert omni_inventory == facts["inventory"]
+        assert model_lease == lease
         events.append("release")
         return {"status": "released"}
 
@@ -328,6 +530,7 @@ def test_workflow_task_releases_qwen_only_after_sealed_binding(
         payload,
         model_runner=runner,
         model_releaser=release,
+        model_lease=lease,
     )
 
     assert result["content_sha256"] == content_sha256(result)

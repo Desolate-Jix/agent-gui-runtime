@@ -1110,6 +1110,20 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
     from app.learn import workflow_worker
 
     events: list[object] = []
+    lease = {
+        "contract_version": "qwen_model_server_lease_v1",
+        "lease_id": "lease-qwen",
+        "owner_request_id": "learn-qwen-request",
+        "profile_id": "qwen3_vl_8b_q4_k_m",
+        "server_base_url": "http://127.0.0.1:13240/v1",
+        "server_model_id": "qwen",
+    }
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "learn-qwen-request")
+    monkeypatch.setattr(
+        workflow_worker,
+        "validate_hybrid_qwen_task_payload",
+        lambda payload: events.append(("validate", payload)),
+    )
 
     monkeypatch.setattr(
         "app.core.model_server.profile_for_stage",
@@ -1127,10 +1141,14 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
         or {"before": {"status": "running"}, "started": False},
     )
     monkeypatch.setattr(
+        "app.core.model_server.acquire_qwen_model_lease",
+        lambda **kwargs: events.append(("lease", kwargs)) or lease,
+    )
+    monkeypatch.setattr(
         workflow_worker,
         "run_hybrid_qwen_task",
-        lambda payload, cancellation_event=None: events.append(
-            ("task", payload, cancellation_event)
+        lambda payload, cancellation_event=None, model_lease=None: events.append(
+            ("task", payload, cancellation_event, model_lease)
         )
         or {"contract_version": "hybrid_qwen_bindings_v1"},
     )
@@ -1142,6 +1160,7 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
 
     assert response == {"contract_version": "hybrid_qwen_bindings_v1"}
     assert events == [
+        ("validate", {"run_id": "run-qwen"}),
         ("profile", "understanding", None),
         ("preflight", "qwen3_vl_8b_q4_k_m"),
         (
@@ -1153,23 +1172,57 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
                 "wait_seconds": 180.0,
             },
         ),
-        ("task", {"run_id": "run-qwen"}, None),
+        (
+            "lease",
+            {
+                "profile": {"profile_id": "qwen3_vl_8b_q4_k_m", "provider_mode": "local_understanding"},
+                "request_id": "learn-qwen-request",
+                "readiness": {"before": {"status": "running"}, "started": False},
+            },
+        ),
+        ("task", {"run_id": "run-qwen"}, None, lease),
     ]
+
+
+def test_managed_qwen_rejects_unsealed_inventory_before_model_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *args, **kwargs: pytest.fail("unsealed inventory reached model acquisition"),
+    )
+    with pytest.raises(ValueError, match="sealed Omni inventory"):
+        execute_learning_stage_worker_task(
+            "panel_learning_hybrid_qwen_binding",
+            {"run_id": "run-qwen", "omni_inventory": {"content_sha256": "0" * 64}},
+        )
 
 
 def test_managed_hybrid_qwen_cancel_uses_existing_model_cancellation(
     tmp_path: Path,
 ) -> None:
     cancellation_calls: list[dict[str, object]] = []
-    registry = LearningStageWorkerRegistry(
-        result_root=tmp_path,
-        process_factory=_fake_process_factory,
-        model_request_cancel=lambda **kwargs: cancellation_calls.append(kwargs)
-        or {
+    registry: LearningStageWorkerRegistry
+    started: dict[str, object]
+
+    def cancel_request(**kwargs):
+        event = registry._records[str(started["worker_id"])]["cancellation_event"]
+        assert event is not None
+        assert event.is_set() is True
+        cancellation_calls.append(kwargs)
+        return {
             "contract_version": "model_request_cancellation_v1",
             "status": "terminated",
             "model_service_compute_termination": "terminated",
-        },
+        }
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=cancel_request,
     )
     payload = {"run_id": "run-qwen", "omni_inventory": {"immutable": True}}
     started = registry.start(

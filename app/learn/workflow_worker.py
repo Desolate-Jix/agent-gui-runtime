@@ -25,7 +25,10 @@ from app.learn.workflow_task_result_adapter import (
 )
 from app.learn.workflow_tasks.model_review import run_model_review_task
 from app.learn.workflow_tasks.hybrid_omni import run_hybrid_omni_task
-from app.learn.workflow_tasks.hybrid_qwen import run_hybrid_qwen_task
+from app.learn.workflow_tasks.hybrid_qwen import (
+    run_hybrid_qwen_task,
+    validate_hybrid_qwen_task_payload,
+)
 from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
 from app.learn.workflow_tasks.two_stage import run_two_stage_understanding_task
@@ -106,12 +109,15 @@ def execute_learning_stage_worker_task(
     if not isinstance(payload, dict):
         raise LearningStageWorkerError("worker payload must be an object")
 
-    _ensure_learning_stage_model_ready(normalized_kind, payload)
+    if normalized_kind == "panel_learning_hybrid_qwen_binding":
+        validate_hybrid_qwen_task_payload(payload)
+    model_lease = _ensure_learning_stage_model_ready(normalized_kind, payload)
 
     if normalized_kind == "panel_learning_hybrid_qwen_binding":
         response = run_hybrid_qwen_task(
             payload,
             cancellation_event=cancellation_event,
+            model_lease=model_lease,
         )
     elif normalized_kind == "panel_learning_hybrid_omni_discovery":
         response = run_hybrid_omni_task(
@@ -168,12 +174,12 @@ def execute_learning_stage_worker_task(
 def _ensure_learning_stage_model_ready(
     task_kind: str,
     payload: dict[str, Any],
-) -> None:
+) -> dict[str, Any] | None:
     """后端 worker 自行完成模型资源检查和服务准备。"""
 
     stage = _MODEL_STAGE_BY_TASK_KIND.get(task_kind)
     if not stage:
-        return
+        return None
     if task_kind == "panel_learning_model_review_repair":
         profile_id = str(payload.get("model_profile_id") or "").strip() or None
     elif task_kind == "panel_learning_calibration_sequence":
@@ -187,7 +193,7 @@ def _ensure_learning_stage_model_ready(
     profile = profile_for_stage(stage, profile_id)
     provider_mode = str(profile.get("provider_mode") or "").strip().casefold()
     if not provider_mode.startswith("local"):
-        return
+        return None
 
     preflight = build_model_resource_preflight(profile)
     if (
@@ -220,6 +226,18 @@ def _ensure_learning_stage_model_ready(
         raise LearningStageWorkerError(
             f"model service not ready for {stage}: {status or 'unknown'}"
         )
+    if task_kind == "panel_learning_hybrid_qwen_binding":
+        from app.core.model_server import acquire_qwen_model_lease
+
+        request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
+        if not request_id:
+            raise LearningStageWorkerError("Qwen model request identity is unavailable")
+        return acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+    return None
 
 
 def _run_learning_stage_worker_entry(
@@ -430,7 +448,10 @@ class LearningStageWorkerRegistry:
                     event=self._process_context.Event(),
                     lock=self._process_context.Lock(),
                 )
-                if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                if normalized_task_kind in {
+                    "panel_learning_hybrid_omni_discovery",
+                    "panel_learning_hybrid_qwen_binding",
+                }
                 else None
             )
             completion_event = (
@@ -749,6 +770,10 @@ class LearningStageWorkerRegistry:
                     "cooperative_cleanup": cooperative_cleanup,
                 }
             else:
+                if record["task_kind"] == "panel_learning_hybrid_qwen_binding":
+                    cancellation_event = record.get("cancellation_event")
+                    if cancellation_event is not None:
+                        cancellation_event.set()
                 try:
                     model_cancellation = self._model_request_cancel(
                         request_id=record["model_request_id"],
