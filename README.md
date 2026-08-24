@@ -1,6 +1,6 @@
 # agent-gui-runtime
 
-**Version 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 in progress**
+**Version 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 frozen · bounded Quick Apply-only release**
 
 [简体中文](README.zh-CN.md)
 
@@ -147,7 +147,7 @@ The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth 
 | Human review and workflow creation | **Current — Portfolio v1 release asset** | The visible Panel flow repaired Quick Apply, added a non-executable Save evidence box, and now rebinds to backend-canonical saved_review before accepting human_approved. The tracked release workspace recompiles and reloads active asset workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0 byte-exactly at content SHA 8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7. Five unavailable archival draft snapshots are explicitly marked unresolved and non-authoritative; they do not affect the current asset. The asset remains non-authorizing; Apply Entry remains the safe-stop boundary. |
 | Current relocation, Gate, and unique dispatch authority (W4) | **Current — internal + one bounded live proof** | Only `LiveController` mints authority; `ExistingWindowsBackendAdapter` is the sole authority-scope consumer; guarded raw sinks fail closed. The scoped live run passed current target-region freshness and dispatched once; this does not prove general reliability or public integration. |
 | Post-action semantic verification and verified receipt promotion (W5) | **Current — deterministic + one bounded live proof** | The active released asset reached one real `open_apply_flow` dispatch, fresh `Choose documents` resolution, verified effect/destination, and durable `SAFE_STOP/stop_boundary`; `attempt_count=1` and there was no form fill, upload, Continue/Next, submission, or redispatch. |
-| Portfolio v1 close-out (W6) | **Partial — one acceptance gap remains** | The tracked release workspace, 12-second privacy-checked GIF, public receipt/negative-control/cleanup package, exact active-revision reload, and bounded `open_apply_flow` proof are complete and independently reviewed. A current Runtime-owned semantic `open_detail` proof is still missing; historical click/diff recordings are insufficient because their semantic verifier was not applicable. |
+| Portfolio v1 close-out (W6) | **Frozen — bounded Quick Apply-only release** | The tracked release workspace, 12-second privacy-checked GIF, public receipt/negative-control/cleanup package, exact active-revision reload, and bounded `open_apply_flow` proof are complete and independently reviewed. Current semantic `open_detail` live proof is deferred to post-v1 and is not a Portfolio v1 acceptance predicate. |
 | Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded one-shot Windows backend exist. It is not a public HTTP route, agent/demo callsite, or production-readiness claim. |
 | Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
 | Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
@@ -195,7 +195,7 @@ This proves one bounded runtime path only. It does **not** prove Provider accura
 
 This 16-second historical recording covers SEEK home/list, job detail, and same-site Apply entry; application content is redacted, with no fill, typing, upload, Continue/Next, or submission. It is bounded visual corroboration—not Portfolio v1 Controlled Live Workflow Proof. Without a matching current runtime trace and receipt, it does **not** establish which component produced each click or prove restart/reload, relocation, Gate lineage, semantic verification, receipts, or autonomous replay.
 
-SEEK is a **reference workflow**, not the product. The v1 target is **Job Detail → `open_apply_flow` → Apply Entry → Safe Stop**. `open_detail` is a separate target proof, not homepage traversal.
+SEEK is a **reference workflow**, not the product. The frozen v1 target is **Job Detail → `open_apply_flow` → Apply Entry → Safe Stop**. `open_detail` is a post-v1 engineering target, not a v1 acceptance predicate or a homepage-traversal claim.
 
 ## Engineering highlights
 
@@ -229,11 +229,11 @@ Model weights and optional vision services are not distributed. Do not commit pr
 
 ## Target state and roadmap
 
-Portfolio v1 has a tracked and independently reviewed evidence package for one scoped controlled-live receipt, but **W6 remains Partial** because one acceptance predicate is still open:
+Portfolio v1 is **frozen as a bounded Quick Apply-only release** with a tracked and independently reviewed evidence package for one scoped controlled-live receipt:
 
 > **Reviewed release asset → exact reload → deterministic exact-asset proof → one controlled-live `open_apply_flow` → fresh Apply Entry `SAFE_STOP/stop_boundary` receipt → public evidence review passed.**
 
-Still missing: a current Runtime-owned semantic `open_detail` proof with before/after expected-effect verification. Historical `open_detail` artifacts prove a real click and visual change only; their semantic verifier was marked not applicable, so they are not promoted. Creating a new proof would leave the user-approved Quick Apply-only scope and therefore remains a separate approval decision. No Provider accuracy, general SEEK navigation, form fill, Continue/Next, upload, final submit, unattended reliability, or production readiness is claimed.
+Current semantic `open_detail` live proof is deferred to **post-v1** and is not a Portfolio v1 acceptance predicate. Historical `open_detail` artifacts remain unpromoted because their semantic verifier was marked not applicable. Frozen means the declared bounded scope is closed; it does **not** mean Stable, general reliability, Provider accuracy, general SEEK navigation, form fill, Continue/Next, upload, final submit, unattended operation, or production readiness.
 
 Automatic provider selection, remote execution, raw-coordinate Agent authority, ATS traversal, form filling, upload, Continue/Next, and final submission are not Portfolio v1 capabilities.
 

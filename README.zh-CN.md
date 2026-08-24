@@ -1,6 +1,6 @@
 # agent-gui-runtime
 
-**版本 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 进行中**
+**版本 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 已冻结 · 受限 Quick Apply-only release**
 
 [English](README.md)
 
@@ -145,7 +145,7 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 | 人工审核和应用范围 workflow 创建 | **Current — Portfolio v1 release asset** | Job Detail 已在单一大图工作台中修正 Quick Apply，并加入第二个不可执行的 Save evidence box。tracked release workspace 可按 content SHA `8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7` 逐字节重新编译并由新进程 reload active asset。5 个无法恢复的历史 draft snapshot 已明确标为 unresolved、non-authoritative，不影响当前资产。Apply Entry 仍是 `needs_learning/stop_boundary`。 |
 | Current relocation、Gate 与唯一 dispatch authority（W4） | **Current — internal + one bounded live proof** | 只有 `LiveController` 能签发 authority；生产 Windows backend 是唯一 authority-scope consumer。受限 live run 通过当前 target-region freshness 后只 dispatch 一次；这不证明通用可靠性或公开 integration。 |
 | 动作后 semantic verification 与 verified receipt promotion（W5） | **Current — deterministic + one bounded live proof** | 当前 release asset 真实执行一次 `open_apply_flow`，全新解析 `Choose documents`，验证 effect/destination 并持久化 `SAFE_STOP/stop_boundary`；`attempt_count=1`，没有 form fill、upload、Continue/Next、submit 或 redispatch。 |
-| Portfolio v1 收口（W6） | **Partial — 还剩一个验收缺口** | tracked release workspace、12 秒隐私检查 GIF、公开 receipt/negative-control/cleanup package、active revision 精确 reload 和受限 `open_apply_flow` proof 已完成并通过独立审查。仍缺当前由 Runtime 所有的 semantic `open_detail` proof；历史 click/diff 录制的 semantic verifier 不适用，因此不能冒充该证明。 |
+| Portfolio v1 收口（W6） | **已冻结 — 受限 Quick Apply-only release** | tracked release workspace、12 秒隐私检查 GIF、公开 receipt/negative-control/cleanup package、active revision 精确 reload 和受限 `open_apply_flow` proof 已完成并通过独立审查。current semantic `open_detail` live proof 已移入 post-v1，不是 Portfolio v1 验收条件。 |
 | Desktop I/O Backend SPI | **Partial** | 已有内部 SPI、deterministic fake backend 和受保护的 one-shot Windows backend；它不是公开 HTTP route、agent/demo callsite 或 production-readiness 主张。 |
 | Primary / Assist / Automatic provider routing 和远程 Provider | **Planned** | 仅为 Target State；尚未实现自动 Provider fallback。 |
 | Live external Computer-Use Agent adapters | **Planned** | 今天没有任何 live-integrated 实现。 |
@@ -193,7 +193,7 @@ Desktop I/O Backend SPI 是位于 Runtime Authority 下方的内部实现边界�
 
 这段经过脱敏的 16 秒历史录屏覆盖 SEEK 首页/列表上下文、岗位详情和同站点 Apply entry。它没有填写表单、输入文字、上传文件、点击 Continue/Next，也没有 final submission。它只是有界 GUI 转移的视觉佐证，不是 Portfolio v1 Controlled Live Workflow Proof。它本身**不能**证明 restart/reload、current relocation、Gate lineage、semantic verification、receipt 或已保存 workflow graph 的自主遍历。
 
-SEEK 只是 **reference workflow**，不是产品定位。Portfolio v1 的目标证明刻意更窄：**Job Detail → `open_apply_flow` → Apply Entry → Safe Stop**。`open_detail` 是独立的目标 proof，不属于 Homepage traversal 主张。
+SEEK 只是 **reference workflow**，不是产品定位。冻结的 Portfolio v1 目标刻意更窄：**Job Detail → `open_apply_flow` → Apply Entry → Safe Stop**。`open_detail` 是 post-v1 工程目标，不是 v1 验收条件或 Homepage traversal 主张。
 
 ## 工程亮点
 
@@ -227,11 +227,11 @@ uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 ## Target State 与 Roadmap
 
-Portfolio v1 已拥有经过独立审查的 tracked public evidence package，但 **W6 仍是 Partial**，因为还有一个验收 predicate 没有闭合：
+Portfolio v1 已作为**受限 Quick Apply-only release 冻结**，并拥有经过独立审查的 tracked public evidence package：
 
 > **W2 人工审核的 Job Detail → release asset 精确 reload → deterministic exact-asset proof → 一次 controlled-live `open_apply_flow` → 全新 Apply Entry `SAFE_STOP/stop_boundary` receipt → public evidence review 已通过。**
 
-仍缺：带 before/after expected-effect verification、由当前 Runtime 所有的 semantic `open_detail` proof。历史 `open_detail` artifact 只证明真实点击和视觉变化；其中 semantic verifier 标记为不适用，所以不会被提升为当前证明。新做这项 proof 会离开用户已经批准的 Quick Apply-only 范围，因此保留为一次独立 scope 决策。更多 Provider、外部 Agent adapter 或 workflow class 属于后续 release。
+current semantic `open_detail` live proof 已移入 **post-v1**，不再是 Portfolio v1 验收条件。历史 `open_detail` artifact 的 semantic verifier 不适用，因此仍不会被提升为 live proof。“已冻结”只表示声明的受限范围已闭合，不表示 Stable、通用可靠性、Provider accuracy、通用 SEEK 导航、表单填写、Continue/Next、上传、final submit、无人值守或 production readiness。
 
 Automatic provider selection、remote execution、raw-coordinate Agent authority、ATS traversal、表单填写、上传、Continue/Next 和 final submission 都不是 Portfolio v1 能力。
 

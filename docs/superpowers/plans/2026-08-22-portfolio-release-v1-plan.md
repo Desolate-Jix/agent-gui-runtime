@@ -1,11 +1,13 @@
 # Portfolio Release v1 — Frozen Project Plan
 
-**Status:** Frozen planning baseline<br>
+**Status:** Frozen bounded Quick Apply-only release<br>
 **Plan date:** 2026-08-22<br>
 **Evidence status updated:** 2026-08-24<br>
 **Release target:** 2026-09-13<br>
 **Scope owner:** Main Codex / repository owner<br>
 **Change rule:** After this document is accepted, only verified runtime failures may change tasks. They must not redefine the product or expand the release scope.
+
+**2026-08-24 freeze decision:** Portfolio v1 acceptance is exactly the bounded already-open Job Detail → confirmed `open_apply_flow` → fresh Apply Entry → `SAFE_STOP/stop_boundary` slice. `open_detail` is post-v1: current semantic `open_detail` live proof is deferred and is not a Portfolio v1 acceptance predicate.
 
 ## 1. Frozen Product Position
 
@@ -123,7 +125,7 @@ Fixture、recorded replay、synthetic harness 和 live GUI 证据必须分别标
 | Runtime Result & Verification Receipt Contract | Current for one bounded live receipt | receipt `receipt.38d529e464f94dbf858ec4d18de90c7c` 绑定 current asset、Gate、one dispatch、fresh C2、verified effect/destination 与 `SAFE_STOP/stop_boundary` | 只证明一个 `open_apply_flow` path；不证明通用 live reliability |
 | Current capture / runtime relocation | Current for one bounded live path | server-owned current capture、current re-ground、exact pre-dispatch freshness 与一次 physical Windows dispatch 已进入同一 receipt | 仅限已经打开的 Job Detail，不含 homepage/list traversal |
 | Gate / zero-click rejection | Current — one bounded live allow + deterministic negative matrix | real action 经过 Gate；六类 canonical negative controls 与两个 supplemental controls 通过 typed Runtime decision/Receipt 形成公开投影 | negative controls 主要是 deterministic exact-current 或 behavior-equivalent synthetic evidence，不冒充 live fault injection |
-| Semantic effect verification | Partial — `open_apply_flow` live; `open_detail` deterministic only | `open_apply_flow` fresh C2 匹配 `Choose documents`，effect/destination verified；internal composition 仍证明 deterministic `open_detail` | 当前 Runtime-owned semantic `open_detail` before/after proof 缺失 |
+| Semantic effect verification | Current for frozen bounded scope | `open_apply_flow` fresh C2 匹配 `Choose documents`，effect/destination verified；internal composition 仍保留 deterministic `open_detail` proof | current semantic `open_detail` live proof 属于 post-v1，不是冻结 release 验收项 |
 | Safe stop | Current for bounded Quick Apply path | verified Apply Entry observation 只投影 `safe_stop`，terminal Receipt 为 `SAFE_STOP/stop_boundary`，无后续 mutation/redispatch | 不表示完整 application flow 或表单能力 |
 | Trace lineage | Current for bounded Quick Apply path | public projection可从 reviewed source/active asset 追到 Observation/Intent/Gate/backend/effect/next state/safe stop | 只覆盖该 receipt，不是通用 tracing reliability claim |
 | Public demo | Partial | controlled GIF 与一次 receipt-backed bounded live `open_apply_flow` 已有记录 | 不是完整 semantic workflow replay，也不是 unattended apply |
@@ -135,7 +137,7 @@ Fixture、recorded replay、synthetic harness 和 live GUI 证据必须分别标
 - **Portfolio v1 Contract Foundation:** schema/validator、server-owned/server-loaded reviewed-context Observation adapter（current capture/state/fact freshness 与 integrity bindings、geometry-free action projection、blocker/state fail-closed）、reviewed replay Receipt adapter（validated reviewed asset + strict post observation 内部重算 existing replay verifier、canonical application/source/next-observation lineage、拒绝 unproven dispatch/Gate 与 arbitrary operation refs）组成的 focused combined suite 为 `394 passed, 2 skipped`。它证明 offline Contract Foundation 与真实代码边界映射，不证明 Live Controller、Session mutation ledger、唯一 Gate dispatch、GUI dispatch、backend receipt、semantic verification owner 或 durable runtime persistence。
 - **Release-focused W3b/W4 implementation proof:** `595 passed, 3 skipped in 25.10s`。它覆盖 internal composition、durable dispatch receipt、current re-ground/freshness 与 unique raw-input authority；独立严格审计为 PASS，W4 Stop Condition MET。它是保留的历史 focused baseline，不是 full-repository baseline 或 live Windows/SEEK proof。
 - **Release-focused W5 + actual-adapter composition proof:** compiler/replay/Observation/claim/receipt/controller/Gate/composition suites 为 `351 passed, 2 skipped in 23.65s`。production `ExistingWindowsCurrentEvidenceAdapter` 类在 deterministic window/screenshot/UIA/recognition doubles 与 `DeterministicFakeBackend` 下消费未经修改的 compiler asset，使 `open_detail` source → target 到达 `VERIFIED`，restart 返回 exact receipt 且 zero redispatch。它不是真实 Windows/SEEK I/O、physical Windows dispatch + C2、Controlled Live Workflow Proof、public integration、external Agent integration 或 full-repository baseline。
-- **2026-08-24 W6 close-out verification:** integrated Portfolio v1 matrix `301 passed`；full JavaScript panel/workflow suite `270 passed`；GIF lineage/privacy suite `38 passed`；canonical negative-control/callsite/controller focused suite `113 passed`。公开矩阵包含六类 canonical controls + 两类 supplemental controls，严格区分 exact-current 与 behavior-equivalent synthetic evidence，并区分 `runtime_result_receipt_v1` 与 `live_controller_decision`。这些仍不替代 current semantic `open_detail` proof。
+- **2026-08-24 W6 close-out verification:** integrated Portfolio v1 matrix `301 passed`；full JavaScript panel/workflow suite `270 passed`；GIF lineage/privacy suite `38 passed`；canonical negative-control/callsite/controller focused suite `113 passed`。公开矩阵包含六类 canonical controls + 两类 supplemental controls，严格区分 exact-current 与 behavior-equivalent synthetic evidence，并区分 `runtime_result_receipt_v1` 与 `live_controller_decision`。该证据闭合 frozen Quick Apply-only acceptance；不支持 post-v1 `open_detail` live claim。
 
 ## 5. Portfolio v1 Proofs
 
@@ -170,7 +172,7 @@ Semantic Verify: Apply Entry
 Safe Stop
 ```
 
-Reference scope 是受控的 **SEEK Job Detail → Apply Entry → Safe Stop**。`open_detail` 作为一个独立、受控的 semantic-effect proof 保留，用于证明当前候选可打开预期 Job Detail；它不属于 Proof B 的连续主链，也不能重新引入 Homepage/list traversal。Homepage 只有在完全不引入 scroll、列表遍历、virtualization、ranking/filtering 或 infinite scroll 时才可作为 stretch。
+Reference scope 是受控的 **SEEK Job Detail → Apply Entry → Safe Stop**。`open_detail` 的 deterministic internal proof 保留为工程证据，但 current semantic live proof 已移入 post-v1，不属于 frozen Portfolio v1 acceptance，也不能重新引入 Homepage/list traversal。Homepage 只有在完全不引入 scroll、列表遍历、virtualization、ranking/filtering 或 infinite scroll 时才可作为 post-v1 stretch。
 
 ### Proof C — Agent-side boundary
 
@@ -201,7 +203,7 @@ Portfolio v1 不要求 OpenAI/Qwen/Anthropic 的真实外部 adapter。它要求
 | 7 | Action is re-grounded before dispatch | Current for one bounded live path | current Quick apply target 经 fresh recognition/ranking 与 exact pre-dispatch pixel freshness产生 click point；历史 bbox 不授予 authority | current-grounding tests + controlled-live receipt | #6 | current candidate and freshness refs | L |
 | 8 | Stale/wrong/ambiguous means zero click | Current — deterministic release evidence | stale、wrong-window/occlusion、ambiguous 均产生 typed BLOCKED Receipt 与 zero dispatch；exact-current/synthetic grade 分离 | public six-control matrix + strict W4 audit | #6–7 | matched negative-control decisions/receipts | M |
 | 9 | Every real action passes Gate | Current for one bounded live path | public receipt记录 Gate allowed 后才发生一次 Windows dispatch；authority audit仍保持唯一 caller/sink guards | controlled-live receipt + authority audit/tests | #7–8 | one-step dispatch budget + Gate ref | L |
-| 10 | `open_detail` / `open_apply_flow` have real semantic verification | Partial — `open_apply_flow` live proven | `open_apply_flow` fresh C2 匹配 `Choose documents` 且 effect/destination verified；deterministic `open_detail` internal proof保留 | public receipt + W5 suites | #9 | 仍缺 current semantic `open_detail` before/after proof | L |
+| 10 | `open_apply_flow` has current semantic verification | Current for frozen bounded scope | `open_apply_flow` fresh C2 匹配 `Choose documents` 且 effect/destination verified；deterministic `open_detail` internal proof保留但 live proof 属于 post-v1 | public receipt + W5 suites | #9 | exact before/after effect + destination + safe-stop receipt | L |
 | 11 | Safe stop at application entry | Current for bounded live path | Apply Entry 只暴露 `safe_stop`；terminal为 `SAFE_STOP/stop_boundary`；zero later mutation/redispatch | exact live receipt + exact-current stop control | #10 | `safe_stop=true`, reason/boundary, zero later action | M |
 | 12 | Trace follows workflow to observed effect | Current for bounded live path | public receipt projection解析 source/asset、intent、Gate、backend、verification、fresh C2 和 safe stop refs | public evidence package | #5–11 | one resolvable bounded trace graph | M |
 
@@ -261,8 +263,8 @@ W5 now extends this internal path through a durable pre-C2 verification checkpoi
 
 ### W5 — Semantic verification, safe stop and lineage
 
-完成 #10–12，并把 W3b receipt 绑定到 fresh observed effect。`open_detail` 是独立 effect proof；Proof B 主链只执行 `open_apply_flow` 后 safe stop。**2026-08-24 status:** internal W5 与 actual-adapter deterministic composition 已闭合；当前 active asset 的一条 controlled-live `open_apply_flow` path 也已产生 exact receipt，包含 Gate、one physical Windows dispatch、fresh Apply Entry C2、verified effect/destination 与 `SAFE_STOP/stop_boundary`。release acceptance 仍为 Partial，仅因为 current semantic `open_detail` before/after proof 缺失。<br>
-**Immediate dependency path:** W1/W2/W3a/W4/W3b/W5 的 Quick Apply 主链已形成受限证据闭环；W6 public package、GIF、canonical negative-control matrix 和 docs close-out 已完成。不得把这个单路径证明扩大为 general reliability。下一功能性缺口是独立 current semantic `open_detail` proof，必须先取得范围决定。
+完成 #10–12，并把 W3b receipt 绑定到 fresh observed effect。Proof B 主链只执行 `open_apply_flow` 后 safe stop。**2026-08-24 status:** internal W5 与 actual-adapter deterministic composition 已闭合；当前 active asset 的一条 controlled-live `open_apply_flow` path 也已产生 exact receipt，包含 Gate、one physical Windows dispatch、fresh Apply Entry C2、verified effect/destination 与 `SAFE_STOP/stop_boundary`。frozen Quick Apply-only release acceptance 已闭合；current semantic `open_detail` live proof 属于 post-v1。<br>
+**Immediate dependency path:** frozen release 范围内无剩余依赖。W1/W2/W3a/W4/W3b/W5 与 W6 public package、GIF、canonical negative-control matrix、docs close-out 均已完成。不得把这个单路径证明扩大为 general reliability。
 
 ### W6 — Evidence package and public close-out
 
@@ -271,7 +273,7 @@ W5 now extends this internal path through a durable pre-C2 verification checkpoi
 - 生成 10–15 秒真实受控 GIF；
 - 最后才更新 README / architecture diagram / status claims。
 
-**2026-08-24 status:** tracked release workspace、exact active-asset reload、12 秒隐私检查 editorial GIF、exact-live receipt projection、六类 canonical negative controls + 两类 supplemental controls、cleanup commitment 与 README/Architecture status sync 已完成。controls 严格区分 exact-current 与 behavior-equivalent synthetic evidence，并区分 Receipt 与 pre-dispatch decision。W6 仍为 Partial，只因 current semantic `open_detail` proof 不在已批准的 Quick Apply-only scope 内。
+**2026-08-24 status:** tracked release workspace、exact active-asset reload、12 秒隐私检查 editorial GIF、exact-live receipt projection、六类 canonical negative controls + 两类 supplemental controls、cleanup commitment 与 README/Architecture status sync 已完成。controls 严格区分 exact-current 与 behavior-equivalent synthetic evidence，并区分 Receipt 与 pre-dispatch decision。W6 已在声明的 bounded Quick Apply-only scope 内完成并冻结。
 
 ```text
 W1 ─────────────────────┐
@@ -281,7 +283,7 @@ W2 ─────→ W4 → W3b → W5 ┤
 W3a ───────┘─────────────┘
 ```
 
-依赖摘要（冻结设计）：**`{W2, W3a} → W4 → W3b → W5`；W1 parallel；W6 close-out。** 该 DAG 保留为历史设计和验收依赖；截至 2026-08-24，W1/W2/W3a/W4/W3b/W5 的 Quick Apply-only release slice 与 W6 证据包已完成。当前唯一未闭合项是不在已批准范围内的 Runtime-owned current semantic `open_detail` before/after proof；不得用 internal deterministic composition proof 冒充 live proof。
+依赖摘要（冻结设计）：**`{W2, W3a} → W4 → W3b → W5`；W1 parallel；W6 close-out。** 该 DAG 保留为历史设计和验收依赖；截至 2026-08-24，W1/W2/W3a/W4/W3b/W5 的 Quick Apply-only release slice 与 W6 证据包已完成并冻结。post-v1 `open_detail` live proof 不得用 internal deterministic composition proof 冒充。
 
 ## 9. Effort and Calendar Estimate
 
@@ -297,7 +299,7 @@ W3a ───────┘─────────────┘
 | **Total engineering effort（去除重叠）** | **40h** | **58h** | **78h** | 可并行，但不能简单折算为日历时间 |
 
 **Expected focused calendar:** 单人按每天 6 个有效工程小时约 7 / 10 / 13 个工作日；保留真实 GUI 复测、证据清理和 README close-out 时间。<br>
-**Remaining runtime critical path:** 已批准的 Quick Apply-only 路径已闭合；若用户另行批准扩大范围，下一个唯一主线是 Runtime-owned current semantic `open_detail` before/after proof → 刷新 W6 证据与文档。上表保留的是初始总工程估算，不对已完成的 W1–W6 Quick Apply-only slice 重复计费。<br>
+**Remaining runtime critical path:** frozen Portfolio v1 scope 内为 none。任何 current semantic `open_detail` live proof 必须进入新的 post-v1 plan 或由用户显式解冻。上表保留的是初始总工程估算，不对已完成的 W1–W6 Quick Apply-only slice 重复计费。<br>
 如果 W4 或 W5 进入 `XL`，必须缩小实现，不得把 scope 扩大到 Homepage、scroll、表单或新 adapter。
 
 ## 10. Negative Controls
@@ -322,6 +324,7 @@ Negative controls 与 positive live path 使用同一 production LiveController/
 2026-09-13 前不做：
 
 - SEEK Homepage traversal（除非零新增复杂度的 stretch）；
+- current semantic `open_detail` controlled-live proof（post-v1）；
 - scrolling、long screenshot runtime replay、list virtualization、job ranking/filtering；
 - ATS、跨站跳转、表单填写、上传、Continue/Next、final submit；
 - Qwen/OpenAI/Anthropic 多个 perception adapter；
@@ -343,4 +346,4 @@ Negative controls 与 positive live path 使用同一 production LiveController/
 6. 无敏感数据、个人信息、token、私有路径或错误媒体链接进入公开提交；
 7. release receipt 能从 reviewed workflow revision 追到 observed effect 和 safe stop。
 
-满足后停止主动开发并冻结项目。后续只修复已记录 defect；新 provider、新 agent adapter、raw computer use、scroll/form/ATS 均进入独立 post-v1 roadmap。
+上述条件已在 bounded Quick Apply-only boundary 内满足，Portfolio v1 于 2026-08-24 冻结。后续只修复已记录 defect；`open_detail` live proof、新 provider、新 agent adapter、raw computer use、scroll/form/ATS 均进入独立 post-v1 roadmap。

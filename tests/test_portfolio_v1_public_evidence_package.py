@@ -12,7 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = ROOT / "release" / "portfolio-v1" / "evidence"
 RELEASE_MANIFEST = ROOT / "release" / "portfolio-v1" / "review-draft-manifest.json"
 ROOT_README = ROOT / "README.md"
+ROOT_README_ZH = ROOT / "README.zh-CN.md"
 RELEASE_README = ROOT / "release" / "portfolio-v1" / "README.md"
+CANONICAL_PLAN = (
+    ROOT
+    / "docs"
+    / "superpowers"
+    / "plans"
+    / "2026-08-22-portfolio-release-v1-plan.md"
+)
 
 SOURCE_WORKFLOW_SHA256 = "a934acc82708cfd956110ba2bba35e8d0bc317af9e095606efab87c5f3e027bc"
 ASSET_SHA256 = "8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7"
@@ -543,14 +551,32 @@ def test_reviewed_package_promotes_only_the_bounded_live_workflow_claim() -> Non
     package = _json(PACKAGE_ROOT / "manifest.json")
     release = _json(RELEASE_MANIFEST)
     readme = ROOT_README.read_text(encoding="utf-8-sig")
+    readme_zh = ROOT_README_ZH.read_text(encoding="utf-8-sig")
     release_readme = RELEASE_README.read_text(encoding="utf-8-sig")
+    canonical_plan = CANONICAL_PLAN.read_text(encoding="utf-8-sig")
 
     assert package["status"]["independent_review"] == "accepted"
     assert package["status"]["release_status_promotion"] == "eligible"
     assert package["status"]["controlled_live_workflow_proven"] is True
     assert release["controlled_live_workflow_proven"] is True
-    assert "Portfolio v1 close-out (W6) | **Partial" in readme
+    assert (
+        "Portfolio v1 close-out (W6) | **Frozen — bounded Quick Apply-only release**"
+        in readme
+    )
     assert "Portfolio v1 close-out (W6) | **Stable" not in readme
+    assert "Portfolio v1 close-out (W6) | **Partial" not in readme
+    assert "Portfolio v1 收口（W6） | **已冻结 — 受限 Quick Apply-only release**" in readme_zh
+    assert "Portfolio v1 收口（W6） | **Partial" not in readme_zh
+    assert "Portfolio v1 收口（W6） | **Stable" not in readme_zh
+    assert "`open_detail` is a post-v1 engineering target" in readme
+    assert "`open_detail` 是 post-v1 工程目标" in readme_zh
     assert "evidence/manifest.json" in release_readme
     assert "independent review" in release_readme.lower()
-    assert "belongs to a later release slice" not in release_readme
+    assert "Frozen release scope" in release_readme
+    assert "post-v1" in release_readme
+    assert "already-open reviewed Job Detail" in release_readme
+    assert "one confirmed, Runtime-authorized open_apply_flow" in release_readme
+    assert "fresh Choose documents / Apply Entry" in release_readme
+    assert "SAFE_STOP/stop_boundary" in release_readme
+    assert "**Status:** Frozen bounded Quick Apply-only release" in canonical_plan
+    assert "`open_detail` is post-v1" in canonical_plan

@@ -12,6 +12,26 @@ Choose documents / Apply Entry (needs_learning)
 
 ## Current release truth
 
+### Frozen release scope
+
+Portfolio v1 is frozen as one bounded Quick Apply-only release:
+
+```text
+already-open reviewed Job Detail
+  -> one confirmed, Runtime-authorized open_apply_flow
+  -> fresh Choose documents / Apply Entry
+  -> SAFE_STOP/stop_boundary
+```
+
+The accepted package includes exact active-asset reload, one receipt-backed live
+`open_apply_flow`, six canonical plus two supplemental controls, an operator
+cleanup commitment, and the privacy-checked editorial GIF. Current semantic
+`open_detail` live proof is deferred to post-v1 and is not a Portfolio v1
+acceptance predicate. Its deterministic internal proof must not be described as
+live evidence. Frozen means complete only within this declared boundary; it is
+not a Stable, general-reliability, Provider-accuracy, or production-readiness
+claim.
+
 `review-draft-manifest.json` is the release manifest despite its retained
 historical filename. It records:
 

@@ -48,4 +48,6 @@ The release check is intentionally narrow: metadata parsing, lockfile synchroniz
 
 ## Unreleased
 
-The next mainline is controlled local current-observation smoke for the panel flow, followed by generic window/coordinate mapping, long-screenshot and scroll-container performance benchmarks. Read/scroll executable replay remains gated on a typed effect verifier.
+- Portfolio v1 is frozen as one bounded Quick Apply-only release: already-open reviewed Job Detail → one confirmed and Runtime-authorized `open_apply_flow` → fresh Apply Entry / `Choose documents` → `SAFE_STOP/stop_boundary`.
+- The release includes one scoped controlled-live receipt only. It does not claim general reliability, Provider accuracy, Homepage/list traversal, external Agent compatibility, form mutation, unattended operation, or production readiness.
+- Current semantic `open_detail` live proof is deferred to post-v1. Its deterministic internal proof remains engineering evidence and must not be described as live proof.
