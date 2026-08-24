@@ -15,6 +15,7 @@ UEI_CONTRACTS = (
     "affine_coordinate_transform_v1", "provider_manifest_v1", "screen_parse_request_v1",
     "provider_safe_result_v1", "provider_error_v1", "provider_runtime_receipt_v1",
     "hybrid_capture_context_v1", "hybrid_capture_bundle_v1",
+    "hybrid_review_projection_v1",
 )
 _SCHEMA_DIR = Path(__file__).resolve().parents[4] / "schemas" / "uei" / "v1"
 _LOCAL_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"

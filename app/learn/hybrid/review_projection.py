@@ -1,16 +1,28 @@
-"""Read-only Large Review projection for immutable Hybrid candidates."""
+"""UEI-native persistence and read-only projection of Hybrid candidates."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
-from app.learn.hybrid.contracts import validate_omni_inventory
-from app.learn.hybrid.omni_candidates import validate_current_capture_bundle
-from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256, seal_immutable
+from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
+from app.learn.hybrid.omni_candidates import (
+    build_omni_candidate_ledger,
+    validate_omni_candidate_ledger,
+)
+from app.learn.recognition.uei.canonical import (
+    canonical_json_bytes,
+    content_sha256,
+    seal_immutable,
+)
+from app.learn.recognition.uei.contracts import validate_contract
+from app.learn.recognition.uei.store import UEIObjectStore
 
 
+_STORE_RELATIVE_PATH = Path("artifacts") / "uei-shadow-store"
 _NON_AUTHORIZING = {
     "artifact_is_authorization": False,
     "execute_binding_enabled": False,
@@ -18,154 +30,131 @@ _NON_AUTHORIZING = {
     "real_action_requires_gate": True,
     "authorization_scope": "display_and_review_only",
 }
-_PROJECTION_FIELDS = {
-    "contract_version", "status", "capture_lineage_ref", "displayed_image",
-    "omni_inventory", "candidates", "warnings", "display_only", "review_only",
-    "action_candidates", "content_sha256", *_NON_AUTHORIZING,
-}
 
 
 def project_hybrid_review(
     *,
-    omni_inventory: Mapping[str, Any],
-    capture_bundle: Mapping[str, Any],
-    current_capture_lineage_ref: Mapping[str, str],
+    project_root: Path,
+    omni_ledger: Mapping[str, Any],
     displayed_image_sha256: str,
     displayed_image_size: Mapping[str, int],
 ) -> dict[str, Any]:
-    """Create a closed, non-authorizing projection without dropping candidates."""
-    bundle = validate_current_capture_bundle(capture_bundle)
-    inventory = validate_omni_inventory(omni_inventory)
-    capture = bundle["capture_identity"]
-    if canonical_json_bytes(inventory["capture_identity"]) != canonical_json_bytes(capture):
-        raise ValueError("Omni inventory conflicts with current capture bundle")
-    _require_display_binding(
-        capture=capture,
-        current_capture_lineage_ref=current_capture_lineage_ref,
+    """Persist one closed projection after resolving all authoritative parents."""
+    root = _project_root(project_root)
+    ledger = validate_omni_candidate_ledger(omni_ledger)
+    store = UEIObjectStore(root=root / _STORE_RELATIVE_PATH)
+    bundle_ref = deepcopy(ledger["hybrid_capture_bundle_ref"])
+    bundle_record = store.get(bundle_ref, contract_version="hybrid_capture_bundle_v1")
+    bundle = load_and_verify_hybrid_capture_bundle(
+        project_root=root,
+        bundle_ref=bundle_ref,
+        expected_run_id=bundle_record["run_id"],
+        expected_workflow_revision=bundle_record["workflow_revision"],
+    )
+    bundle["bundle_ref"] = bundle_ref
+    provider_result = store.get(
+        ledger["provider_result_ref"], contract_version="provider_safe_result_v1"
+    )
+    rebuilt = build_omni_candidate_ledger(
+        safe_result=provider_result,
+        capture_bundle=bundle,
+    )
+    if canonical_json_bytes(rebuilt) != canonical_json_bytes(ledger):
+        raise ValueError("Omni ledger does not match persisted evidence")
+    projection = build_hybrid_review_projection(
+        omni_ledger=rebuilt,
         displayed_image_sha256=displayed_image_sha256,
         displayed_image_size=displayed_image_size,
     )
+    projection_ref = store.put(projection)
+    return {**deepcopy(projection), "projection_ref": projection_ref}
 
-    items_by_id = {
-        item["source_item_id"]: item
-        for item in inventory["provider_result"]["items"]
-    }
-    candidates: list[dict[str, Any]] = []
-    warnings: list[str] = []
-    for candidate in inventory["candidates"]:
-        item = items_by_id[candidate["source_item_id"]]
-        projected_candidate = _candidate_projection(
-            inventory=inventory,
-            candidate=candidate,
-            item=item,
-        )
-        candidate_warnings = projected_candidate["warnings"]
-        warnings.extend(
-            warning for warning in candidate_warnings if warning not in warnings
-        )
-        candidates.append(projected_candidate)
-    projection = seal_immutable({
-        "contract_version": "hybrid_large_review_projection_v1",
-        "status": "projected",
+
+def build_hybrid_review_projection(
+    *,
+    omni_ledger: Mapping[str, Any],
+    displayed_image_sha256: str,
+    displayed_image_size: Mapping[str, int],
+) -> dict[str, Any]:
+    """Deterministically rebuild the stored projection from verified parents."""
+    ledger = validate_omni_candidate_ledger(omni_ledger)
+    capture = ledger["capture_identity"]
+    _require_display_binding(
+        capture=capture,
+        displayed_image_sha256=displayed_image_sha256,
+        displayed_image_size=displayed_image_size,
+    )
+    warnings = _projection_warnings(ledger["candidates"])
+    base: dict[str, Any] = {
+        "contract_version": "hybrid_review_projection_v1",
+        "projection_id": "",
+        "hybrid_capture_bundle_ref": deepcopy(ledger["hybrid_capture_bundle_ref"]),
+        "provider_result_ref": deepcopy(ledger["provider_result_ref"]),
         "capture_lineage_ref": deepcopy(capture["capture_lineage_ref"]),
         "displayed_image": {
             "sha256": displayed_image_sha256,
             "image_size": deepcopy(dict(displayed_image_size)),
         },
-        "omni_inventory": inventory,
-        "candidates": candidates,
+        "candidates": deepcopy(ledger["candidates"]),
         "warnings": warnings,
         "display_only": True,
         "review_only": True,
         "action_candidates": [],
         **_NON_AUTHORIZING,
-    })
-    return validate_hybrid_review_projection(
-        projection,
-        current_capture_lineage_ref=current_capture_lineage_ref,
-        displayed_image_sha256=displayed_image_sha256,
-        displayed_image_size=displayed_image_size,
-    )
+    }
+    base["projection_id"] = "hybrid-review-projection/" + sha256(
+        canonical_json_bytes(base)
+    ).hexdigest()
+    return validate_hybrid_review_projection(seal_immutable(base))
 
 
-def validate_hybrid_review_projection(
-    value: Mapping[str, Any],
-    *,
-    current_capture_lineage_ref: Mapping[str, str],
-    displayed_image_sha256: str,
-    displayed_image_size: Mapping[str, int],
-) -> dict[str, Any]:
-    """Revalidate a persisted projection before Large Review renders it."""
+def validate_hybrid_review_projection(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate one closed stored projection without trusting draft-derived data."""
     if not isinstance(value, Mapping):
         raise ValueError("Hybrid review projection must be an object")
     projection = deepcopy(dict(value))
-    if set(projection) != _PROJECTION_FIELDS:
-        raise ValueError("Hybrid review projection is not closed")
     canonical_json_bytes(projection)
+    validate_contract(projection, "hybrid_review_projection_v1")
     if projection.get("content_sha256") != content_sha256(projection):
         raise ValueError("Hybrid review projection content_sha256 mismatch")
-    if projection.get("contract_version") != "hybrid_large_review_projection_v1" or projection.get("status") != "projected":
-        raise ValueError("Hybrid review projection identity is invalid")
     _require_non_authorizing(projection)
-    if projection.get("display_only") is not True or projection.get("review_only") is not True or projection.get("action_candidates") != []:
+    if (
+        projection.get("display_only") is not True
+        or projection.get("review_only") is not True
+        or projection.get("action_candidates") != []
+    ):
         raise ValueError("Hybrid review projection is not read-only")
-    inventory = validate_omni_inventory(projection.get("omni_inventory"))
-    capture = inventory["capture_identity"]
-    _require_display_binding(
-        capture=capture,
-        current_capture_lineage_ref=current_capture_lineage_ref,
-        displayed_image_sha256=displayed_image_sha256,
-        displayed_image_size=displayed_image_size,
-    )
-    if projection.get("capture_lineage_ref") != capture["capture_lineage_ref"]:
-        raise ValueError("Hybrid review projection capture lineage mismatch")
-    if projection.get("displayed_image") != {
-        "sha256": displayed_image_sha256,
-        "image_size": dict(displayed_image_size),
-    }:
-        raise ValueError("Hybrid review projection displayed image mismatch")
-    projected = projection.get("candidates")
-    if not isinstance(projected, list) or len(projected) != len(inventory["candidates"]):
-        raise ValueError("Hybrid review projection candidate omission")
-    items_by_id = {
-        item["source_item_id"]: item
-        for item in inventory["provider_result"]["items"]
-    }
-    expected_candidates = [
-        _candidate_projection(
-            inventory=inventory,
-            candidate=candidate,
-            item=items_by_id[candidate["source_item_id"]],
-        )
-        for candidate in inventory["candidates"]
-    ]
-    if canonical_json_bytes(projected) != canonical_json_bytes(expected_candidates):
-        raise ValueError("Hybrid review projection mutated or omitted a candidate")
-    expected_warnings: list[str] = []
-    for candidate in expected_candidates:
-        expected_warnings.extend(
-            warning for warning in candidate["warnings"] if warning not in expected_warnings
-        )
-    if projection.get("warnings") != expected_warnings:
-        raise ValueError("Hybrid review projection warnings are invalid")
-    projection["omni_inventory"] = inventory
+    expected_id = deepcopy(projection)
+    expected_id.pop("content_sha256", None)
+    expected_id["projection_id"] = ""
+    if projection["projection_id"] != "hybrid-review-projection/" + sha256(
+        canonical_json_bytes(expected_id)
+    ).hexdigest():
+        raise ValueError("Hybrid review projection_id mismatch")
     return projection
 
 
-def _require_display_binding(
-    *, capture: Mapping[str, Any], current_capture_lineage_ref: Mapping[str, str],
-    displayed_image_sha256: str, displayed_image_size: Mapping[str, int],
-) -> None:
-    if dict(current_capture_lineage_ref) != capture["capture_lineage_ref"]:
-        raise ValueError("current capture lineage mismatch")
-    if displayed_image_sha256 != capture["screenshot_sha256"]:
-        raise ValueError("displayed image SHA mismatch")
-    if not isinstance(displayed_image_size, Mapping) or dict(displayed_image_size) != capture["image_size"]:
-        raise ValueError("displayed image dimensions mismatch")
+def render_hybrid_review_candidates(
+    *, omni_ledger: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Create non-authorizing Large Review regions from a rebuilt ledger."""
+    ledger = validate_omni_candidate_ledger(omni_ledger)
+    items = {
+        item["source_item_id"]: item
+        for item in ledger["provider_result"]["items"]
+    }
+    return [
+        _candidate_projection(
+            ledger=ledger,
+            candidate=candidate,
+            item=items[candidate["source_item_id"]],
+        )
+        for candidate in ledger["candidates"]
+    ]
 
 
 def _candidate_projection(
-    *, inventory: Mapping[str, Any], candidate: Mapping[str, Any], item: Mapping[str, Any]
+    *, ledger: Mapping[str, Any], candidate: Mapping[str, Any], item: Mapping[str, Any]
 ) -> dict[str, Any]:
     bbox = deepcopy(candidate["bbox_original"])
     warnings: list[str] = []
@@ -173,12 +162,11 @@ def _candidate_projection(
         warnings.append("low_provider_confidence")
     if not candidate["active"]:
         warnings.append("inactive_candidate_visible_for_audit")
-    label = item.get("safe_text") or item.get("safe_role") or item["kind"]
     return {
         "candidate_id": candidate["candidate_id"],
         "region_id": candidate["candidate_id"],
         "source_item_id": candidate["source_item_id"],
-        "label": label,
+        "label": item.get("safe_text") or item.get("safe_role") or item["kind"],
         "role": "review_only",
         "kind": item["kind"],
         "bbox": {
@@ -191,11 +179,11 @@ def _candidate_projection(
         "active": candidate["active"],
         "inactive_reason": candidate["inactive_reason"],
         "provider_provenance": {
-            "provider_id": inventory["provider_id"],
-            "profile_id": inventory["provider_result"]["profile_id"],
-            "provider_revision": inventory["provider_revision"],
-            "provider_result_ref": deepcopy(inventory["provider_result_ref"]),
-            "capture_lineage_ref": deepcopy(inventory["capture_identity"]["capture_lineage_ref"]),
+            "provider_id": ledger["provider_id"],
+            "profile_id": ledger["provider_result"]["profile_id"],
+            "provider_revision": ledger["provider_revision"],
+            "provider_result_ref": deepcopy(ledger["provider_result_ref"]),
+            "capture_lineage_ref": deepcopy(ledger["capture_identity"]["capture_lineage_ref"]),
             "candidate_provenance": deepcopy(candidate["provenance"]),
             "raw_provider_item": deepcopy(dict(item)),
         },
@@ -213,7 +201,38 @@ def _candidate_projection(
     }
 
 
+def _projection_warnings(candidates: list[dict[str, Any]]) -> list[str]:
+    warnings: list[str] = []
+    if any(candidate["confidence"] < 0.5 for candidate in candidates):
+        warnings.append("low_provider_confidence")
+    if any(not candidate["active"] for candidate in candidates):
+        warnings.append("inactive_candidate_visible_for_audit")
+    return warnings
+
+
+def _require_display_binding(
+    *, capture: Mapping[str, Any], displayed_image_sha256: str,
+    displayed_image_size: Mapping[str, int],
+) -> None:
+    if displayed_image_sha256 != capture["screenshot_sha256"]:
+        raise ValueError("displayed image SHA mismatch")
+    if (
+        not isinstance(displayed_image_size, Mapping)
+        or dict(displayed_image_size) != capture["image_size"]
+    ):
+        raise ValueError("displayed image dimensions mismatch")
+
+
 def _require_non_authorizing(value: Mapping[str, Any]) -> None:
     for field, expected in _NON_AUTHORIZING.items():
         if value.get(field) != expected or type(value.get(field)) is not type(expected):
             raise ValueError(f"non-authorizing invariant violated: {field}")
+
+
+def _project_root(project_root: Path) -> Path:
+    if not isinstance(project_root, Path):
+        raise ValueError("project_root must be a Path")
+    root = project_root.resolve()
+    if not root.is_dir():
+        raise ValueError("project_root must be a directory")
+    return root

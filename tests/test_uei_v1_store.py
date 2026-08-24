@@ -51,6 +51,18 @@ def test_store_uses_stable_ids_for_hybrid_context_and_bundle(tmp_path: Path):
     assert store.get(bundle_ref, contract_version="hybrid_capture_bundle_v1") == bundle
 
 
+def test_store_uses_stable_id_for_hybrid_review_projection(tmp_path: Path):
+    from app.learn.recognition.uei.store import UEIObjectStore
+    from tests.test_uei_v1_schemas import minimal_contract_values
+
+    store = UEIObjectStore(root=tmp_path / "objects")
+    projection = seal_immutable(minimal_contract_values()["hybrid_review_projection_v1"])
+    ref = store.put(projection)
+
+    assert ref["id"] == "hybrid-review-projection/1"
+    assert store.get(ref, contract_version="hybrid_review_projection_v1") == projection
+
+
 @pytest.mark.parametrize("mutation", [
     lambda value: value.__setitem__("byte_length", 2),
     lambda value: value.__setitem__("content_sha256", "b" * 64),

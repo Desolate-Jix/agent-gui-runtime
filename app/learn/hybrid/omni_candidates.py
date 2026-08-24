@@ -48,6 +48,10 @@ def build_omni_candidate_ledger(
 ) -> dict[str, Any]:
     """Project every recorded Omni item into one stable, immutable inventory."""
     bundle = validate_current_capture_bundle(capture_bundle)
+    bundle_ref = bundle.get("bundle_ref")
+    if not isinstance(bundle_ref, Mapping):
+        raise ValueError("capture bundle is missing persisted bundle_ref")
+    verified_bundle_ref = _ref(bundle_ref, name="hybrid_capture_bundle_ref")
     if not isinstance(safe_result, Mapping):
         raise ValueError("safe_result must be an immutable object")
     result = deepcopy(dict(safe_result))
@@ -103,7 +107,7 @@ def build_omni_candidate_ledger(
             "provenance": provenance,
         })
 
-    return validate_omni_inventory({
+    inventory = validate_omni_inventory({
         "contract_version": "hybrid_omni_inventory_v1",
         "capture_identity": deepcopy(capture_identity),
         "provider_result_ref": result_ref,
@@ -111,6 +115,54 @@ def build_omni_candidate_ledger(
         "provider_id": _OMNI_PROVIDER_ID,
         "provider_revision": result["provider_version"],
         "candidates": candidates,
+        **_NON_AUTHORIZING,
+    })
+    return _seal_ledger(inventory=inventory, bundle_ref=verified_bundle_ref)
+
+
+def validate_omni_candidate_ledger(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Revalidate the closed ledger wrapper and its Task 1 Omni inventory."""
+    if not isinstance(value, Mapping):
+        raise ValueError("Omni candidate ledger must be an object")
+    ledger = deepcopy(dict(value))
+    expected_fields = {
+        "contract_version", "hybrid_capture_bundle_ref", "provider_result_ref",
+        "capture_identity", "provider_result", "provider_id", "provider_revision",
+        "candidates", "content_sha256", *_NON_AUTHORIZING,
+    }
+    if set(ledger) != expected_fields:
+        raise ValueError("Omni candidate ledger is not closed")
+    canonical_json_bytes(ledger)
+    if ledger.get("contract_version") != "hybrid_omni_candidate_ledger_v1":
+        raise ValueError("Omni candidate ledger contract_version is invalid")
+    if ledger.get("content_sha256") != content_sha256(ledger):
+        raise ValueError("Omni candidate ledger content_sha256 mismatch")
+    bundle_ref = _ref(ledger["hybrid_capture_bundle_ref"], name="hybrid_capture_bundle_ref")
+    inventory = validate_omni_inventory({
+        "contract_version": "hybrid_omni_inventory_v1",
+        "capture_identity": ledger["capture_identity"],
+        "provider_result_ref": ledger["provider_result_ref"],
+        "provider_result": ledger["provider_result"],
+        "provider_id": ledger["provider_id"],
+        "provider_revision": ledger["provider_revision"],
+        "candidates": ledger["candidates"],
+        **_NON_AUTHORIZING,
+    })
+    return _seal_ledger(inventory=inventory, bundle_ref=bundle_ref)
+
+
+def _seal_ledger(
+    *, inventory: Mapping[str, Any], bundle_ref: Mapping[str, str]
+) -> dict[str, Any]:
+    return seal_immutable({
+        "contract_version": "hybrid_omni_candidate_ledger_v1",
+        "hybrid_capture_bundle_ref": deepcopy(dict(bundle_ref)),
+        "provider_result_ref": deepcopy(inventory["provider_result_ref"]),
+        "capture_identity": deepcopy(inventory["capture_identity"]),
+        "provider_result": deepcopy(inventory["provider_result"]),
+        "provider_id": inventory["provider_id"],
+        "provider_revision": inventory["provider_revision"],
+        "candidates": deepcopy(inventory["candidates"]),
         **_NON_AUTHORIZING,
     })
 

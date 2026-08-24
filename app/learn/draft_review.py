@@ -65,6 +65,8 @@ def load_learning_draft_review(
     *,
     project_root: str | Path | None = None,
     discover_related_sidecars: bool = True,
+    expected_hybrid_run_id: str | None = None,
+    expected_hybrid_workflow_revision: int | None = None,
 ) -> dict[str, Any]:
     """加载模型学习草稿，生成只用于展示和人工审核的面板模型。"""
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
@@ -89,7 +91,9 @@ def load_learning_draft_review(
 
     draft, attempt_index = _select_draft(payload)
     selected_draft = draft
-    hybrid_projection_source = deepcopy(draft.get("hybrid_review_projection"))
+    hybrid_projection_source = deepcopy(draft.get("hybrid_review_projection_ref"))
+    if draft.get("hybrid_review_projection") is not None:
+        hybrid_projection_source = deepcopy(draft.get("hybrid_review_projection"))
     source_ref = {
         "source_path": _relative_path(resolved, root),
         "source_trial_path": _relative_path(resolved, root) if _is_trial(payload) else None,
@@ -144,7 +148,9 @@ def load_learning_draft_review(
             )
     hybrid_review = load_hybrid_large_review_projection(
         hybrid_projection_source,
-        current_capture_lineage_ref=current_capture_lineage_ref,
+        project_root=root,
+        expected_hybrid_run_id=expected_hybrid_run_id,
+        expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
         displayed_source_sha256=(
             str(displayed_source_image.get("sha256") or "")
             if isinstance(displayed_source_image, dict)
@@ -195,6 +201,10 @@ def load_learning_draft_review(
         result["uei_shadow_review_projection"] = deepcopy(shadow_review["projection"])
     if isinstance(hybrid_review, dict) and isinstance(hybrid_review.get("projection"), dict):
         result["hybrid_review_projection"] = deepcopy(hybrid_review["projection"])
+    if isinstance(hybrid_review, dict) and isinstance(hybrid_review.get("projection_ref"), dict):
+        result["hybrid_review_projection_ref"] = deepcopy(hybrid_review["projection_ref"])
+    if isinstance(hybrid_review, dict) and isinstance(hybrid_review.get("status"), dict):
+        result["hybrid_review_projection_status"] = deepcopy(hybrid_review["status"])
     if workflow_node_identity:
         result["workflow_node_identity"] = workflow_node_identity
     if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT:

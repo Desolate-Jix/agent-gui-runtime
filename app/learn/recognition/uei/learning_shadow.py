@@ -7,7 +7,13 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from app.learn.hybrid.review_projection import validate_hybrid_review_projection
+from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
+from app.learn.hybrid.omni_candidates import build_omni_candidate_ledger
+from app.learn.hybrid.review_projection import (
+    build_hybrid_review_projection,
+    render_hybrid_review_candidates,
+    validate_hybrid_review_projection,
+)
 from app.learn.recognition.bbox_alignment import bbox_overlap, cross_evidence_overlap_is_acceptable
 from app.learn.recognition.uei.canonical import canonical_json_bytes
 from app.learn.recognition.uei.contracts import UEIValidationError
@@ -19,55 +25,95 @@ _REF_KEYS = frozenset({"id", "content_sha256"})
 
 
 def load_hybrid_large_review_projection(
-    projection: object,
+    projection_ref: object,
     *,
-    current_capture_lineage_ref: dict[str, str] | None,
+    project_root: Path,
+    expected_hybrid_run_id: str | None,
+    expected_hybrid_workflow_revision: int | None,
     displayed_source_sha256: str | None,
     displayed_source_size: dict[str, int] | None,
     existing_region_ids: set[str],
 ) -> dict[str, object] | None:
-    """Revalidate and adapt a sealed Hybrid projection to Large Review regions."""
-    if projection is None:
+    """Resolve every Hybrid parent from UEI storage before rendering regions."""
+    if projection_ref is None:
         return None
     if (
-        not isinstance(projection, dict)
-        or not _is_ref(current_capture_lineage_ref)
+        not isinstance(expected_hybrid_run_id, str)
+        or not expected_hybrid_run_id
+        or isinstance(expected_hybrid_workflow_revision, bool)
+        or not isinstance(expected_hybrid_workflow_revision, int)
+        or expected_hybrid_workflow_revision < 0
+    ):
+        return _invalid_hybrid_review("hybrid_expectations_missing")
+    if (
+        not _is_ref(projection_ref)
         or not isinstance(displayed_source_sha256, str)
         or not isinstance(displayed_source_size, dict)
     ):
         return _invalid_hybrid_review("hybrid_projection_context_invalid")
     try:
-        validated = validate_hybrid_review_projection(
-            projection,
-            current_capture_lineage_ref=current_capture_lineage_ref,
+        store = UEIObjectStore(root=project_root / _STORE_RELATIVE_PATH)
+        stored_projection = validate_hybrid_review_projection(store.get(
+            projection_ref,
+            contract_version="hybrid_review_projection_v1",
+        ))
+        bundle_ref = deepcopy(stored_projection["hybrid_capture_bundle_ref"])
+        bundle = load_and_verify_hybrid_capture_bundle(
+            project_root=project_root,
+            bundle_ref=bundle_ref,
+            expected_run_id=expected_hybrid_run_id,
+            expected_workflow_revision=expected_hybrid_workflow_revision,
+        )
+        bundle["bundle_ref"] = bundle_ref
+        provider_result = store.get(
+            stored_projection["provider_result_ref"],
+            contract_version="provider_safe_result_v1",
+        )
+        ledger = build_omni_candidate_ledger(
+            safe_result=provider_result,
+            capture_bundle=bundle,
+        )
+        rebuilt_projection = build_hybrid_review_projection(
+            omni_ledger=ledger,
             displayed_image_sha256=displayed_source_sha256,
             displayed_image_size=displayed_source_size,
         )
-        regions = deepcopy(validated["candidates"])
+        if canonical_json_bytes(rebuilt_projection) != canonical_json_bytes(stored_projection):
+            return _invalid_hybrid_review("hybrid_projection_evidence_mismatch")
+        regions = render_hybrid_review_candidates(omni_ledger=ledger)
         generated = [str(region.get("region_id") or "") for region in regions]
         if len(generated) != len(set(generated)) or set(generated) & existing_region_ids:
             return _invalid_hybrid_review("hybrid_region_id_collision")
-        return {"projection": validated, "regions": regions}
-    except (TypeError, ValueError):
-        return _invalid_hybrid_review("hybrid_projection_invalid")
+        return {
+            "projection_ref": deepcopy(dict(projection_ref)),
+            "projection": deepcopy(rebuilt_projection),
+            "status": _hybrid_review_status(status="projected", reason=None),
+            "regions": deepcopy(regions),
+        }
+    except (OSError, TypeError, ValueError):
+        return _invalid_hybrid_review("hybrid_projection_evidence_mismatch")
 
 
 def _invalid_hybrid_review(reason: str) -> dict[str, object]:
     return {
-        "projection": {
-            "contract_version": "hybrid_large_review_projection_status_v1",
-            "status": "rejected",
-            "reason": reason,
-            "display_only": True,
-            "review_only": True,
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-            "final_submit_forbidden": True,
-            "real_action_requires_gate": True,
-            "authorization_scope": "display_and_review_only",
-            "action_candidates": [],
-        },
+        "status": _hybrid_review_status(status="rejected", reason=reason),
         "regions": [],
+    }
+
+
+def _hybrid_review_status(*, status: str, reason: str | None) -> dict[str, object]:
+    return {
+        "contract_version": "hybrid_large_review_projection_status_v1",
+        "status": status,
+        "reason": reason,
+        "display_only": True,
+        "review_only": True,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "final_submit_forbidden": True,
+        "real_action_requires_gate": True,
+        "authorization_scope": "display_and_review_only",
+        "action_candidates": [],
     }
 
 

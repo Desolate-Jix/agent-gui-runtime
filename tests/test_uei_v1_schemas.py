@@ -33,6 +33,20 @@ def minimal_contract_values() -> dict[str, dict[str, object]]:
             "context_ref": ref, "artifact_is_authorization": False, "execute_binding_enabled": False,
             "final_submit_forbidden": True, "real_action_requires_gate": True,
             "authorization_scope": "display_and_review_only", **common},
+        "hybrid_review_projection_v1": {"contract_version": "hybrid_review_projection_v1",
+            "projection_id": "hybrid-review-projection/1", "hybrid_capture_bundle_ref": ref,
+            "provider_result_ref": ref, "capture_lineage_ref": ref,
+            "displayed_image": {"sha256": SHA, "image_size": {"width": 1, "height": 1}},
+            "candidates": [{"candidate_id": "candidate/" + "1" * 64, "provider_result_ref": ref,
+                "source_item_id": "item/1", "bbox_original": [0, 0, 1, 1],
+                "coordinate_space": "capture_pixel_xyxy", "confidence": 0.5,
+                "active": True, "inactive_reason": None,
+                "provenance": {"contract_version": "hybrid_candidate_provenance_v1",
+                    "provider_result_ref": ref, "source_item_id": "item/1", "content_sha256": SHA}}],
+            "warnings": [], "display_only": True, "review_only": True, "action_candidates": [],
+            "artifact_is_authorization": False, "execute_binding_enabled": False,
+            "final_submit_forbidden": True, "real_action_requires_gate": True,
+            "authorization_scope": "display_and_review_only", **common},
     }
 
 
@@ -57,6 +71,7 @@ def test_all_contract_legal_minima_validate(contract, value):
     "affine_coordinate_transform_v1", "provider_manifest_v1", "screen_parse_request_v1",
     "provider_safe_result_v1", "provider_error_v1",
     "hybrid_capture_context_v1", "hybrid_capture_bundle_v1",
+    "hybrid_review_projection_v1",
 ])
 def test_schema_has_closed_top_level_and_version(contract):
     from app.learn.recognition.uei.contracts import load_contract_schema
@@ -168,3 +183,11 @@ def test_namespaced_provider_and_profile_ids_reject_unnamespaced_or_malformed_va
     value["provider_id"] = identifier
     with pytest.raises(UEIValidationError, match="pattern"):
         validate_contract(value, contract_version="provider_safe_result_v1")
+
+
+def test_hybrid_projection_rejects_nested_extra_fields():
+    from app.learn.recognition.uei.contracts import UEIValidationError, validate_contract
+    value = minimal_contract_values()["hybrid_review_projection_v1"]
+    value["candidates"][0]["unexpected"] = True
+    with pytest.raises(UEIValidationError, match="additionalProperties"):
+        validate_contract(value, contract_version="hybrid_review_projection_v1")

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hybrid_review_projection_v1",
+  "type": "object",
+  "required": [
+    "contract_version", "projection_id", "hybrid_capture_bundle_ref",
+    "provider_result_ref", "capture_lineage_ref", "displayed_image",
+    "candidates", "warnings", "display_only", "review_only", "action_candidates",
+    "artifact_is_authorization", "execute_binding_enabled", "final_submit_forbidden",
+    "real_action_requires_gate", "authorization_scope", "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {"const": "hybrid_review_projection_v1"},
+    "projection_id": {"type": "string", "pattern": "^hybrid-review-projection/[0-9a-fA-F/-]+$", "maxLength": 512},
+    "hybrid_capture_bundle_ref": {"$ref": "#/$defs/immutable_ref"},
+    "provider_result_ref": {"$ref": "#/$defs/immutable_ref"},
+    "capture_lineage_ref": {"$ref": "#/$defs/immutable_ref"},
+    "displayed_image": {"$ref": "#/$defs/displayed_image"},
+    "candidates": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/candidate"}},
+    "warnings": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+    "display_only": {"const": true},
+    "review_only": {"const": true},
+    "action_candidates": {"type": "array", "maxItems": 0},
+    "artifact_is_authorization": {"const": false},
+    "execute_binding_enabled": {"const": false},
+    "final_submit_forbidden": {"const": true},
+    "real_action_requires_gate": {"const": true},
+    "authorization_scope": {"const": "display_and_review_only"},
+    "content_sha256": {"$ref": "#/$defs/sha"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "immutable_ref": {
+      "type": "object",
+      "required": ["id", "content_sha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "image_size": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "height": {"type": "integer", "minimum": 1, "maximum": 100000}
+      },
+      "additionalProperties": false
+    },
+    "displayed_image": {
+      "type": "object",
+      "required": ["sha256", "image_size"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/sha"},
+        "image_size": {"$ref": "#/$defs/image_size"}
+      },
+      "additionalProperties": false
+    },
+    "bbox": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "items": {"type": "number"}
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["contract_version", "provider_result_ref", "source_item_id", "content_sha256"],
+      "properties": {
+        "contract_version": {"const": "hybrid_candidate_provenance_v1"},
+        "provider_result_ref": {"$ref": "#/$defs/immutable_ref"},
+        "source_item_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "candidate_id", "provider_result_ref", "source_item_id", "bbox_original",
+        "coordinate_space", "confidence", "active", "inactive_reason", "provenance"
+      ],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^candidate/[0-9a-f]{64}$"},
+        "provider_result_ref": {"$ref": "#/$defs/immutable_ref"},
+        "source_item_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "bbox_original": {"$ref": "#/$defs/bbox"},
+        "coordinate_space": {"const": "capture_pixel_xyxy"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "active": {"type": "boolean"},
+        "inactive_reason": {"type": ["string", "null"], "maxLength": 256},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      },
+      "additionalProperties": false
+    },
+    "opaque_scalar": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "null"}]},
+    "opaque_value": {"oneOf": [{"$ref": "#/$defs/opaque_scalar"}, {"type": "array", "items": {"$ref": "#/$defs/opaque_value"}, "maxItems": 256}, {"type": "object", "maxProperties": 64, "additionalProperties": {"$ref": "#/$defs/opaque_value"}}]}
+  }
+}
