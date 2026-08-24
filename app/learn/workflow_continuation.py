@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 
@@ -109,13 +110,25 @@ def interpret_learning_stage_worker_result(
 
 
 def _screen_observe_decision(result: dict[str, Any]) -> dict[str, Any]:
+    raw_bundle_ref = result.get("hybrid_capture_bundle_ref")
+    bundle_ref = _screen_observe_bundle_ref(raw_bundle_ref)
+    if raw_bundle_ref is not None and bundle_ref is None:
+        return _decision(
+            stage="screen_understanding",
+            task_kind="vision_observe_screen",
+            stage_finished=True,
+            continuation_status="terminal_result",
+            outcome="failed",
+            reason="observe result contains an invalid hybrid capture bundle ref",
+            evidence_refs={},
+        )
     image_path = _first_text(
         result.get("image_path"),
         _nested(result, "capture", "image_path"),
         _nested(result, "live_capture", "image_path"),
         _nested(result, "operation_context", "capture_id"),
     )
-    if not image_path:
+    if not image_path and bundle_ref is None:
         return _decision(
             stage="screen_understanding",
             task_kind="vision_observe_screen",
@@ -161,6 +174,45 @@ def _screen_observe_decision(result: dict[str, Any]) -> dict[str, Any]:
         _nested(result, "screen_map", "state_id"),
     )
     evidence_count = _screen_map_evidence_count(screen_map)
+    observation_evidence = {
+        "contract_version": "panel_learning_draft_observation_evidence_v1",
+        "evidence_source": "backend_adopted_observe_result",
+        "evidence_quality": (
+            "screen_map_available_no_recent_learn_deep"
+            if evidence_count > 0
+            else "screenshot_only_no_recent_learn_deep"
+        ),
+        "screen_size": screen_size,
+        "screen_summary": screen_summary,
+        "interface_classification": interface_classification,
+        "screen_map": screen_map,
+        "model_roles": {
+            "screen_understanding": {
+                "stage": "Learn Fast",
+                "trace_path": trace_path,
+            },
+            "coordinate_calibration": {
+                "stage": "Learn Deep",
+                "status": "not_run",
+                "trace_path": "",
+            },
+        },
+        "calibrated_targets": [],
+        "review_boxes": [],
+        "learn_all_targets_summary": {
+            "status": "",
+            "target_count": 0,
+            "calibration_target_count": 0,
+            "validated_count": 0,
+            "coordinate_calibration_status": "not_run",
+        },
+        "no_click_authorization": True,
+        "execute_binding_enabled": False,
+    }
+    if bundle_ref is not None:
+        observation_evidence["hybrid_capture_bundle_ref"] = bundle_ref
+    else:
+        observation_evidence["current_image_path"] = image_path
     next_worker = {
         "task_kind": "panel_learning_recognition_trial",
         "payload": {
@@ -170,42 +222,7 @@ def _screen_observe_decision(result: dict[str, Any]) -> dict[str, Any]:
                 screen_summary
                 or "learn a reusable UI workflow template from this screen"
             ),
-            "observation_evidence": {
-                "contract_version": "panel_learning_draft_observation_evidence_v1",
-                "evidence_source": "backend_adopted_observe_result",
-                "evidence_quality": (
-                    "screen_map_available_no_recent_learn_deep"
-                    if evidence_count > 0
-                    else "screenshot_only_no_recent_learn_deep"
-                ),
-                "current_image_path": image_path,
-                "screen_size": screen_size,
-                "screen_summary": screen_summary,
-                "interface_classification": interface_classification,
-                "screen_map": screen_map,
-                "model_roles": {
-                    "screen_understanding": {
-                        "stage": "Learn Fast",
-                        "trace_path": trace_path,
-                    },
-                    "coordinate_calibration": {
-                        "stage": "Learn Deep",
-                        "status": "not_run",
-                        "trace_path": "",
-                    },
-                },
-                "calibrated_targets": [],
-                "review_boxes": [],
-                "learn_all_targets_summary": {
-                    "status": "",
-                    "target_count": 0,
-                    "calibration_target_count": 0,
-                    "validated_count": 0,
-                    "coordinate_calibration_status": "not_run",
-                },
-                "no_click_authorization": True,
-                "execute_binding_enabled": False,
-            },
+            "observation_evidence": observation_evidence,
             "two_stage_report_path": None,
         },
     }
@@ -216,13 +233,28 @@ def _screen_observe_decision(result: dict[str, Any]) -> dict[str, Any]:
         continuation_status="next_worker_ready",
         outcome=None,
         reason="observe result accepted; recognition trial worker is required",
-        evidence_refs={
-            "image_path": image_path,
-            "trace_path": trace_path,
-        },
+        evidence_refs=(
+            {"hybrid_capture_bundle_ref": bundle_ref, "trace_path": trace_path}
+            if bundle_ref is not None
+            else {"image_path": image_path, "trace_path": trace_path}
+        ),
     )
     decision["next_worker"] = next_worker
     return decision
+
+
+def _screen_observe_bundle_ref(value: Any) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"id", "content_sha256"}:
+        return None
+    identifier = value.get("id")
+    digest = value.get("content_sha256")
+    if not isinstance(identifier, str) or not identifier.startswith("hybrid-capture/"):
+        return None
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return None
+    return {"id": identifier, "content_sha256": digest}
 
 
 def _screen_trial_decision(result: dict[str, Any]) -> dict[str, Any]:

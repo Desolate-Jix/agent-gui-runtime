@@ -6,14 +6,12 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
-
+from app.learn.hybrid.capture import _seal_server_owned_capture
 from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.projections import project_ocr_result
 from app.learn.recognition.uei.store import UEIObjectStore
 
 
-_STORE_RELATIVE_PATH = Path("artifacts") / "uei-shadow-store"
 _PROVIDER_ID = "local.runtime/builtin-ocr"
 _PROFILE_ID = "local.runtime/builtin-ocr/v1"
 _SAFE_LIMITS: dict[str, object] = {
@@ -37,14 +35,6 @@ def seal_builtin_ocr_evidence(
     expected_image_size: dict[str, int] | None = None,
 ) -> dict[str, str]:
     """把服务端截图与内置 OCR 结果封装成仅供审阅的 UEI 引用。"""
-    root = project_root.resolve()
-    image = image_path.resolve()
-    try:
-        image.relative_to(root)
-    except ValueError as error:
-        raise ValueError("server-owned image must be inside project root") from error
-    if not image.is_file() or image.is_symlink():
-        raise ValueError("server-owned image must be a regular project file")
     if not isinstance(capture_id, str) or not capture_id.strip():
         raise ValueError("capture_id is required")
     if not isinstance(captured_at, str) or not captured_at.strip():
@@ -52,34 +42,20 @@ def seal_builtin_ocr_evidence(
     if not isinstance(ocr_result, dict):
         raise ValueError("built-in OCR result must be an object")
 
-    image_bytes = image.read_bytes()
-    artifact_sha256 = sha256(image_bytes).hexdigest()
-    with Image.open(image) as opened:
-        image_size = {"width": int(opened.width), "height": int(opened.height)}
-    if expected_image_sha256 is not None and expected_image_sha256 != artifact_sha256:
-        raise ValueError("server-owned image SHA-256 mismatch")
-    if expected_image_size is not None and expected_image_size != image_size:
-        raise ValueError("server-owned image dimensions mismatch")
-
-    store = UEIObjectStore(root=root / _STORE_RELATIVE_PATH)
+    capture = _seal_server_owned_capture(
+        project_root=project_root,
+        image_path=image_path,
+        capture_id=capture_id,
+        captured_at=captured_at,
+        expected_image_sha256=expected_image_sha256,
+        expected_image_size=expected_image_size,
+    )
+    root = capture["project_root"]
+    artifact_sha256 = capture["artifact_sha256"]
+    image_size = capture["image_size"]
+    store = capture["store"]
     capture_token = sha256((capture_id + artifact_sha256).encode("utf-8")).hexdigest()[:24]
-    artifact_ref = _put(store, {
-        "contract_version": "artifact_ref_v1",
-        "artifact_id": f"artifact/server-owned/{artifact_sha256}",
-        "artifact_sha256": artifact_sha256,
-        "media_type": "image/png",
-        "byte_length": len(image_bytes),
-        "restricted": True,
-    })
-    capture_ref = _put(store, {
-        "contract_version": "capture_lineage_v1",
-        "capture_id": capture_id,
-        "artifact_ref": artifact_ref,
-        "artifact_sha256": artifact_sha256,
-        "image_size": image_size,
-        "capture_coordinate_space": "capture_pixel_xyxy",
-        "captured_at": captured_at,
-    })
+    capture_ref = capture["capture_lineage_ref"]
     request_ref = _put(store, {
         "contract_version": "screen_parse_request_v1",
         "request_id": f"request/server-owned/{capture_token}",
@@ -123,7 +99,7 @@ def seal_builtin_ocr_evidence(
         }],
     })
     fixture = {
-        "image_path": image.relative_to(root).as_posix(),
+        "image_path": capture["image_relative_path"],
         "matches": ocr_result.get("matches", []),
         "metadata": ocr_result.get("metadata", {}),
     }
