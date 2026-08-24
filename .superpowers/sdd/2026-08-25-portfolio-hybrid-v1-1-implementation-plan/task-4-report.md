@@ -364,3 +364,98 @@ DONE_WITH_CONCERNS. Closed the remaining C1/I4 and the round-2 lifecycle finding
 ## Commit
 
 `fix(learn): bind qwen leases to exact server incarnation` (exact hash returned after commit creation).
+
+---
+
+# Task 4 independent-review repair — round 3
+
+## Status
+
+DONE_WITH_CONCERNS. Closed the remaining C1/I4 findings and all six round-3 lifecycle issues inside the Task 4 allowlist. No model, GPU, GUI, browser, or action path was invoked.
+
+## Finalization CAS and exact termination
+
+- A non-null finalization token is now immutable and single-owner. A concurrent release/cancel attaches to the persisted token and returns `finalization_pending`; it never overwrites the token or launches another stop.
+- A completed finalizer writes a sealed owner receipt before deleting the active lease state. A concurrent or later retry recovers the same durable result as `request_not_active` instead of attempting another stop.
+- Request-owned finalization no longer calls the generic port/PID-file stop script. It uses one exact PID plus nanosecond creation identity and bounded `terminate -> wait -> kill -> wait` through psutil's PID-reuse guarded process object.
+- Process evidence is tri-state: `exact_live`, `proven_absent`, or `unobservable`. `AccessDenied`/`OSError` is `owned_pending` and never terminal process-exit proof.
+- A PID replacement observed before or during termination is never terminated. The old exact process must be proven absent before the lease becomes terminal.
+
+## Acquisition transaction and incarnation deduplication
+
+- Qwen ensure/start/readiness and durable lease publication now run under a dedicated OS-backed cross-process acquisition transaction lock.
+- The existing per-operation managed cancellation transition remains outside that global transaction, so cancellation that wins first prevents ensure/start; otherwise cancellation observes the durably published exact lease.
+- Acquisition scans every active state by canonical server base URL plus exact PID/create-time, independent of profile ID. A renamed or incompatible profile cannot create a second refcount partition for the same listener process.
+
+## Durable pending ownership and reconciliation
+
+- No-endpoint cancellation persists closed evidence fields on the exact lease: `pending_reason`, `capability_blocker`, and `reconciliation_trigger=worker_http_completion_or_explicit_retry`.
+- Finalized owners have sealed, request-keyed tombstones containing the exact lease/incarnation and terminal release receipt.
+- A real managed cancellation regression now covers: initial deployed-style no-endpoint pending response, real compute-complete finalizer removal while another lease remains, worker exit, and real retry recovery as `request_not_active` without any process termination.
+
+## TDD evidence
+
+### RED
+
+- Initial focused lifecycle command:
+  - `python -m pytest tests/test_model_request_cancellation.py -q -k "different_profile_id or pending_reason or single_owner or existing_qwen_finalization or post_stop_access_denied or exact_qwen_termination or global_acquisition_transaction or owner_tombstone"`
+  - exit 1; `7 failed, 26 deselected`. Valid failures proved missing cross-profile rejection, finalization CAS/termination APIs, acquisition transaction, and tombstone recovery. Two artifact-based cases also exposed a pre-existing test-module import setup fault; the helper import was corrected before using those cases as evidence.
+- CAS wrapper regression after the first implementation pass:
+  - the focused command returned `1 failed, 7 passed`; the concurrent cancel attached to the immutable token but `_release_qwen_request_lease` incorrectly relabeled pending as `terminated`. The wrapper was fixed to preserve the pending lifecycle truth.
+- Managed real-finalizer reconciliation was added before its production path was accepted; the first direct run was blocked at collection by invoking system Python without project dependencies. Re-running under the project environment exercised the production tombstone path.
+
+### GREEN
+
+- Focused round-3 lifecycle slice:
+  - `uv run python -m pytest tests/test_model_request_cancellation.py -q -k "different_profile_id or no_endpoint_shared or single_owner or existing_qwen_finalization or post_stop_access_denied or exact_qwen_termination or global_acquisition_transaction or owner_tombstone"`
+  - exit 0; `8 passed, 25 deselected in 0.33s`.
+- Full request cancellation suite:
+  - `uv run python -m pytest tests/test_model_request_cancellation.py -q`
+  - exit 0; `33 passed in 0.64s`.
+- Required focused Task 4 suite:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_qwen_binding.py tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py tests/test_web_panel_route.py -k "qwen or hybrid or cancellation"`
+  - exit 0; `77 passed, 190 deselected in 6.68s`.
+- Full worker and cancellation suites:
+  - `uv run python -m pytest -q tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py`
+  - exit 0; `66 passed in 9.15s`.
+- Full Qwen binding suite:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_qwen_binding.py`
+  - exit 0; `30 passed in 4.12s`.
+- Relevant panel suite:
+  - `uv run python -m pytest -q tests/test_web_panel_route.py -k "qwen or hybrid or cancellation or task_kind"`
+  - exit 0; `4 passed, 167 deselected in 1.78s`.
+- Relevant Hybrid regressions:
+  - `uv run python -m pytest -q tests/test_learn_hybrid_contracts.py tests/test_learning_hybrid_vertical_slice.py tests/test_learn_hybrid_omni_discovery.py`
+  - exit 0; `68 passed in 5.99s`.
+- `uv run python -m py_compile` over every Task 4 production/test path: exit 0.
+- `git diff --check`: exit 0; only Git's expected `core.autocrlf=true` normalization warning for `model_server.py` was emitted.
+- Explicit UTF-8 verification of all changed Python files: `utf8-ok`.
+
+## Self-review
+
+- The state lock is never held over bounded process termination. The finalization token is published under lock, process work occurs outside it, and the same token/revision is verified before the single terminal transition.
+- A second caller can observe pending or the durable owner receipt only; it cannot become a second finalization owner.
+- The exact termination primitive contains no port, PID-file, shell, or stop-script path. psutil performs PID-reuse checks again at terminate/kill boundaries.
+- Health remains secondary evidence and cannot convert an unobservable exact process into terminal success.
+- The acquisition transaction is OS-backed and covers the entire first ensure/start-to-publication window; direct lease acquisition itself creates no process side effect.
+- Owner-first cancellation does not consult mutable current profile configuration and survives active-state deletion through a sealed tombstone.
+- I1/I2/I3/I5/I6, Task 3 managed cancellation, public UEI/Runtime boundaries, and action authority remain unchanged.
+- The denylisted untracked `tests/test_agent_runtime_actual_adapter_portfolio_v1.py` was not read, edited, staged, deleted, or committed.
+
+## Files changed in repair
+
+- `app/core/model_server.py`
+- `app/learn/workflow_worker.py`
+- `tests/test_learning_workflow_stage_worker.py`
+- `tests/test_model_request_cancellation.py`
+- this report
+
+## Concerns
+
+- The checked-in Qwen profile still lacks request-scoped cancellation support. The runtime now retains an explicit non-terminal capability blocker until the worker HTTP boundary proves completion or an explicit retry reconciles a sealed owner receipt; it intentionally does not kill shared compute.
+- No real Qwen/GPU run was performed, as explicitly forbidden. Process, HTTP, cancellation, lease, and concurrency behavior was exercised with controlled production seams.
+- The previously documented unrelated full-panel fixture/mojibake baseline remains outside this Task 4 repair.
+
+## Commit
+
+`fix(learn): serialize qwen incarnation finalization` (exact hash returned after commit creation).

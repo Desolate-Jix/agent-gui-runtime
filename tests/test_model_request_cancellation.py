@@ -10,6 +10,7 @@ from threading import Event, Thread
 import time
 
 import pytest
+import psutil
 
 from app.core import model_server
 from app.learn.recognition.uei.canonical import seal_immutable
@@ -52,7 +53,7 @@ def _server_readiness(
 
 def _valid_binding_artifacts() -> tuple[dict, dict]:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
-    from tests.test_learn_hybrid_contracts import inventory_fixture
+    from test_learn_hybrid_contracts import inventory_fixture
 
     inventory = seal_immutable(inventory_fixture())
     candidate_id = inventory["candidates"][0]["candidate_id"]
@@ -267,6 +268,31 @@ def test_same_profile_id_rejects_incompatible_server_incarnation(
         )
 
 
+def test_different_profile_id_cannot_partition_same_qwen_listener_process(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    first = {
+        "profile_id": "qwen-before-rename",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+    }
+    renamed = {**first, "profile_id": "qwen-after-rename"}
+    readiness = _server_readiness(started=True, pid=9101, created_ns=111)
+    model_server.acquire_qwen_model_lease(
+        profile=first,
+        request_id="request-a",
+        readiness=readiness,
+    )
+
+    with pytest.raises(ValueError, match="server incarnation mismatch"):
+        model_server.acquire_qwen_model_lease(
+            profile=renamed,
+            request_id="request-b",
+            readiness={**readiness, "started": False},
+        )
+
+
 def test_qwen_cancellation_finds_lease_by_owner_when_current_profile_id_changes(
     tmp_path,
     monkeypatch,
@@ -335,8 +361,128 @@ def test_no_endpoint_shared_cancel_stays_owned_pending(
 
     assert result["status"] == "cancellation_acknowledged_pending"
     assert result["model_service_compute_termination"] == "cancellation_acknowledged_pending"
+    provider = result["provider_results"][0]
+    assert provider["pending_reason"] == "request_cancel_endpoint_unavailable"
+    assert provider["capability_blocker"] == "request_cancel_endpoint_unavailable"
+    assert provider["reconciliation_trigger"] == "worker_http_completion_or_explicit_retry"
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease_a["incarnation_id"])
+        exact = model_server._find_exact_lease(state, lease_a)
+    assert exact["pending_reason"] == "request_cancel_endpoint_unavailable"
+    assert exact["capability_blocker"] == "request_cancel_endpoint_unavailable"
+    assert exact["reconciliation_trigger"] == "worker_http_completion_or_explicit_retry"
     assert model_server.qwen_model_lease_is_active(lease_a) is True
     assert model_server.qwen_model_lease_is_active(lease_b) is True
+
+
+def test_qwen_finalization_token_is_single_owner_during_release_cancel_race(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    inventory, artifact = _valid_binding_artifacts()
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="release-cancel-owner",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    entered = Event()
+    finish = Event()
+    terminations: list[dict] = []
+
+    def terminate(expected):
+        terminations.append(expected)
+        entered.set()
+        finish.wait(timeout=2.0)
+        return {"status": "proven_absent", "method": "terminate_wait"}
+
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
+    )
+    monkeypatch.setattr(model_server, "_terminate_exact_qwen_server_process", terminate)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    released: dict[str, object] = {}
+    worker = Thread(
+        target=lambda: released.update(
+            model_server.release_qwen_model_server(
+                sealed_artifact=artifact,
+                omni_inventory=inventory,
+                model_lease=lease,
+            )
+        )
+    )
+    worker.start()
+    assert entered.wait(timeout=1.0) is True
+
+    concurrent = model_server.cancel_model_request(
+        request_id="release-cancel-owner",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={},
+    )
+    assert concurrent["status"] == "cancellation_acknowledged_pending"
+    assert concurrent["provider_results"][0]["server_termination"] == "finalization_pending"
+    assert len(terminations) == 1
+
+    finish.set()
+    worker.join(timeout=2.0)
+    assert worker.is_alive() is False
+    assert released["server_termination"] == "verified_exact_process_exited"
+    assert len(terminations) == 1
+    retry = model_server.cancel_model_request(
+        request_id="release-cancel-owner",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={},
+    )
+    assert retry["status"] == "request_not_active"
+    assert retry["provider_results"][0]["owner_receipt"]["status"] == "finalized"
+
+
+def test_existing_qwen_finalization_token_is_immutable_and_never_stops_twice(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="existing-token-owner",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        state["revision"] += 1
+        state["finalization"] = {
+            "token": "immutable-token",
+            "revision": state["revision"],
+            "lease_id": lease["lease_id"],
+            "phase": "stop_pending",
+            "reason": "completed",
+        }
+        model_server._write_qwen_lease_state(state)
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: pytest.fail("second finalizer attempted exact termination"),
+    )
+
+    pending = model_server._release_exact_qwen_lease(lease, reason="cancelled")
+
+    assert pending["status"] == "cancellation_acknowledged_pending"
+    assert pending["finalization"]["token"] == "immutable-token"
+    with model_server._qwen_lease_lock():
+        persisted = model_server._load_qwen_lease_state(lease["incarnation_id"])
+    assert persisted["finalization"]["token"] == "immutable-token"
 
 
 def test_qwen_failure_reconciliation_persists_timeout_pending_and_removes_completed_parser_lease(
@@ -375,6 +521,58 @@ def test_qwen_failure_reconciliation_persists_timeout_pending_and_removes_comple
     assert model_server.qwen_model_lease_is_active(timeout_lease) is True
 
 
+def test_qwen_pending_cancel_then_real_finalizer_retry_uses_owner_tombstone(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    pending_lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="pending-owner",
+        readiness=_server_readiness(started=True),
+    )
+    retained = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="retained-owner",
+        readiness=_server_readiness(started=False),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: pytest.fail("shared process must not be terminated"),
+    )
+
+    first = model_server.cancel_model_request(
+        request_id="pending-owner",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={},
+    )
+    assert first["status"] == "cancellation_acknowledged_pending"
+
+    finalized = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=pending_lease,
+        compute_completed=True,
+        reason="worker_http_completed_after_cancel",
+    )
+    assert finalized["status"] == "released"
+    assert model_server.qwen_model_lease_is_active(pending_lease) is False
+    assert model_server.qwen_model_lease_is_active(retained) is True
+
+    retry = model_server.cancel_model_request(
+        request_id="pending-owner",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={},
+    )
+    assert retry["status"] == "request_not_active"
+    assert retry["model_service_compute_termination"] == "request_not_active"
+    assert retry["provider_results"][0]["owner_receipt"]["status"] == "finalized"
+
+
 def test_qwen_timeout_finalizer_stops_only_sole_exact_owned_incarnation(
     tmp_path,
     monkeypatch,
@@ -386,9 +584,16 @@ def test_qwen_timeout_finalizer_stops_only_sole_exact_owned_incarnation(
         request_id="timeout-request",
         readiness=_server_readiness(started=True, pid=9101, created_ns=111),
     )
-    identities = iter([{"pid": 9101, "create_time_ns": 111}, None])
-    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
-    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: {"stopped": True})
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: {"status": "proven_absent", "identity": None},
+    )
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "unreachable"})
 
     reconciled = model_server.reconcile_qwen_model_lease_failure(
@@ -471,14 +676,15 @@ def test_qwen_release_refcounts_and_stops_only_after_last_runtime_owned_lease(
     )
     monkeypatch.setattr(
         model_server,
-        "stop_model_server",
-        lambda selected: stopped.append(selected) or {"stopped": True, "after": {"status": "unreachable"}},
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
     )
-    identities = iter([
-        {"pid": 9101, "create_time_ns": 123456789},
-        None,
-    ])
-    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: stopped.append(expected)
+        or {"status": "proven_absent", "reason": "terminate_wait"},
+    )
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "unreachable"})
 
     first = model_server.release_qwen_model_server(
@@ -498,7 +704,7 @@ def test_qwen_release_refcounts_and_stops_only_after_last_runtime_owned_lease(
     )
     assert second["status"] == "released"
     assert second["server_termination"] == "verified_exact_process_exited"
-    assert stopped == [profile]
+    assert stopped == [lease_b["server_process_identity"]]
 
 
 def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_retained(
@@ -526,12 +732,17 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
         "status": "cancellation_acknowledged",
         "request_id": "owned-request",
     }))
-    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: stopped.append(selected) or {"stopped": True})
-    identities = iter([
-        {"pid": 9101, "create_time_ns": 123456789},
-        None,
-    ])
-    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: stopped.append(expected)
+        or {"status": "proven_absent", "reason": "terminate_wait"},
+    )
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {
         "status": "unreachable",
         "health": {"active_request": None},
@@ -544,7 +755,7 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
     )
     assert cancelled["status"] == "terminated"
     assert cancelled["provider_results"][0]["server_termination"] == "verified_exact_process_exited"
-    assert stopped == [profile]
+    assert stopped == [first["server_process_identity"]]
     assert model_server.qwen_model_lease_is_active(first) is False
 
     external = model_server.acquire_qwen_model_lease(
@@ -627,11 +838,16 @@ def test_qwen_stop_script_success_but_server_running_is_not_released(
         request_id="request-a",
         readiness=_server_readiness(started=True),
     )
-    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: {"stopped": True})
-    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: {
-        "pid": 9101,
-        "create_time_ns": 123456789,
-    })
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
+    )
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "running", "model_id": "qwen"})
 
     with pytest.raises(RuntimeError, match="still running"):
@@ -657,10 +873,18 @@ def test_qwen_release_never_stops_replacement_process(
     )
     monkeypatch.setattr(
         model_server,
-        "_current_process_identity",
-        lambda pid: {"pid": 9101, "create_time_ns": 222},
+        "_probe_exact_qwen_process",
+        lambda expected: {
+            "status": "proven_absent",
+            "identity": {"pid": 9101, "create_time_ns": 222},
+            "reason": "pid_reused",
+        },
     )
-    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: pytest.fail("replacement stopped"))
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: pytest.fail("replacement stopped"),
+    )
 
     with pytest.raises(RuntimeError, match="server incarnation ownership changed"):
         model_server.release_qwen_model_server(
@@ -669,6 +893,157 @@ def test_qwen_release_never_stops_replacement_process(
             model_lease=lease,
         )
     assert model_server.qwen_model_lease_is_active(lease) is True
+
+
+def test_qwen_post_stop_access_denied_remains_owned_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    inventory, artifact = _valid_binding_artifacts()
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="access-denied-owner",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+
+    class AccessDeniedProcess:
+        pid = 9101
+
+        def is_running(self):
+            return True
+
+        def status(self):
+            return "running"
+
+        def create_time(self):
+            return 111 / 1_000_000_000
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout):
+            del timeout
+            raise psutil.AccessDenied(pid=9101)
+
+    monkeypatch.setattr(model_server.psutil, "Process", lambda pid: AccessDeniedProcess())
+
+    with pytest.raises(RuntimeError, match="process exit is unobservable"):
+        model_server.release_qwen_model_server(
+            sealed_artifact=artifact,
+            omni_inventory=inventory,
+            model_lease=lease,
+        )
+    assert model_server.qwen_model_lease_is_active(lease) is True
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+    assert state["finalization"]["phase"] == "owned_pending"
+    assert state["finalization"]["failure_reason"] == "process_exit_unobservable"
+
+
+def test_exact_qwen_termination_never_kills_pid_replacement(monkeypatch) -> None:
+    expected = {"pid": 9101, "create_time_ns": 111}
+    killed: list[int] = []
+
+    class OriginalProcess:
+        pid = 9101
+
+        def is_running(self):
+            return True
+
+        def status(self):
+            return "running"
+
+        def create_time(self):
+            return 111 / 1_000_000_000
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout):
+            del timeout
+            raise psutil.TimeoutExpired(seconds=0.1, pid=9101)
+
+        def kill(self):
+            killed.append(self.pid)
+
+    probes = iter([
+        {"status": "exact_live", "identity": expected},
+        {
+            "status": "proven_absent",
+            "identity": {"pid": 9101, "create_time_ns": 222},
+            "reason": "pid_reused",
+        },
+    ])
+    monkeypatch.setattr(model_server.psutil, "Process", lambda pid: OriginalProcess())
+    monkeypatch.setattr(model_server, "_probe_exact_qwen_process", lambda identity: next(probes))
+
+    result = model_server._terminate_exact_qwen_server_process(expected)
+
+    assert result["status"] == "proven_absent"
+    assert result["reason"] == "pid_reused"
+    assert killed == []
+
+
+def test_qwen_global_acquisition_transaction_serializes_first_start_and_publication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    first_started = Event()
+    release_first = Event()
+    active_calls = 0
+    max_active_calls = 0
+    call_lock = __import__("threading").Lock()
+    ensure_calls = 0
+
+    def ensure(**kwargs):
+        nonlocal active_calls, max_active_calls, ensure_calls
+        del kwargs
+        with call_lock:
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            ensure_calls += 1
+            call_number = ensure_calls
+        if call_number == 1:
+            first_started.set()
+            release_first.wait(timeout=2.0)
+        with call_lock:
+            active_calls -= 1
+        return _server_readiness(
+            started=call_number == 1,
+            pid=9101,
+            created_ns=111,
+        )
+
+    monkeypatch.setattr(model_server, "ensure_model_server", ensure)
+    leases: list[dict] = []
+
+    def acquire(owner):
+        leases.append(model_server.ensure_and_acquire_qwen_model_lease(
+            stage="understanding",
+            profile_id=None,
+            profile=profile,
+            request_id=owner,
+            wait_seconds=1.0,
+        ))
+
+    one = Thread(target=acquire, args=("owner-a",))
+    two = Thread(target=acquire, args=("owner-b",))
+    one.start()
+    assert first_started.wait(timeout=1.0) is True
+    two.start()
+    time.sleep(0.05)
+    assert ensure_calls == 1
+    release_first.set()
+    one.join(timeout=2.0)
+    two.join(timeout=2.0)
+
+    assert max_active_calls == 1
+    assert len(leases) == 2
+    assert leases[0]["incarnation_id"] == leases[1]["incarnation_id"]
 
 
 def test_qwen_final_stop_runs_outside_os_state_lock_and_proves_exact_pid_exit(
@@ -683,20 +1058,19 @@ def test_qwen_final_stop_runs_outside_os_state_lock_and_proves_exact_pid_exit(
         request_id="request-a",
         readiness=_server_readiness(started=True, pid=9101, created_ns=111),
     )
-    identities = iter([
-        {"pid": 9101, "create_time_ns": 111},
-        None,
-    ])
-    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
+    )
     stop_observed_lock = Event()
 
-    def stop(selected):
-        del selected
+    def stop(expected):
         with model_server._qwen_lease_lock():
             stop_observed_lock.set()
-        return {"stopped": True}
+        return {"status": "proven_absent", "identity": None, "expected": expected}
 
-    monkeypatch.setattr(model_server, "stop_model_server", stop)
+    monkeypatch.setattr(model_server, "_terminate_exact_qwen_server_process", stop)
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "unreachable"})
 
     released = model_server.release_qwen_model_server(

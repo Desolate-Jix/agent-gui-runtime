@@ -194,7 +194,11 @@ def _ensure_learning_stage_model_ready(
         profile_id = None
 
     from app.core.gpu_resources import build_model_resource_preflight
-    from app.core.model_server import ensure_model_server, profile_for_stage
+    from app.core.model_server import (
+        ensure_and_acquire_qwen_model_lease,
+        ensure_model_server,
+        profile_for_stage,
+    )
 
     profile = profile_for_stage(stage, profile_id)
     provider_mode = str(profile.get("provider_mode") or "").strip().casefold()
@@ -217,6 +221,20 @@ def _ensure_learning_stage_model_ready(
         )
 
     def ensure_and_publish() -> dict[str, Any] | None:
+        if task_kind == "panel_learning_hybrid_qwen_binding":
+            request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
+            if not request_id:
+                raise LearningStageWorkerError("Qwen model request identity is unavailable")
+            try:
+                return ensure_and_acquire_qwen_model_lease(
+                    stage=stage,
+                    profile_id=profile_id,
+                    profile=profile,
+                    request_id=request_id,
+                    wait_seconds=_MODEL_READY_WAIT_SECONDS,
+                )
+            except RuntimeError as error:
+                raise LearningStageWorkerError(str(error)) from error
         readiness = ensure_model_server(
             stage=stage,
             profile_id=profile_id,
@@ -233,18 +251,7 @@ def _ensure_learning_stage_model_ready(
             raise LearningStageWorkerError(
                 f"model service not ready for {stage}: {status or 'unknown'}"
             )
-        if task_kind != "panel_learning_hybrid_qwen_binding":
-            return None
-        from app.core.model_server import acquire_qwen_model_lease
-
-        request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
-        if not request_id:
-            raise LearningStageWorkerError("Qwen model request identity is unavailable")
-        return acquire_qwen_model_lease(
-            profile=profile,
-            request_id=request_id,
-            readiness=readiness,
-        )
+        return None
 
     if (
         task_kind == "panel_learning_hybrid_qwen_binding"

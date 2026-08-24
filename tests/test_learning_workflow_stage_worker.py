@@ -1410,6 +1410,84 @@ def test_managed_qwen_pending_cancel_reconciles_after_worker_exit(
     assert calls == 2
 
 
+def test_managed_qwen_pending_cancel_real_finalizer_then_owner_retry_closes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+
+    lease_root = tmp_path / "leases"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", lease_root)
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+    }
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path / "workers",
+        process_factory=_fake_process_factory,
+        model_request_cancel=model_server.cancel_model_request,
+    )
+    started = registry.start(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-real-reconcile",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={"run_id": "run-qwen", "omni_inventory": {"immutable": True}},
+    )
+    readiness = {
+        "started": True,
+        "after": {
+            "status": "running",
+            "base_url": "http://127.0.0.1:13240/v1",
+            "model_id": "qwen",
+            "server_process_identity": {"pid": 9101, "create_time_ns": 111},
+        },
+    }
+    owned = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id=str(started["model_request_id"]),
+        readiness=readiness,
+    )
+    retained = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="other-active-owner",
+        readiness={**readiness, "started": False},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: pytest.fail("shared Qwen process was terminated"),
+    )
+
+    first = registry.cancel_by_operation(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-real-reconcile",
+    )
+    assert first["status"] == "cancellation_pending"
+
+    finalized = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=owned,
+        compute_completed=True,
+        reason="worker_http_completed_after_cancel",
+    )
+    assert finalized["status"] == "released"
+    assert model_server.qwen_model_lease_is_active(retained) is True
+    record = registry._records[str(started["worker_id"])]
+    record["process"].alive = False
+    record["process"].exitcode = 1
+
+    retry = registry.cancel_by_operation(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-real-reconcile",
+    )
+    assert retry["status"] == "cancelled"
+    assert retry["model_service_compute_termination"] == "request_not_active"
+    assert retry["model_request_cancellation"]["provider_results"][0]["owner_receipt"]["status"] == "finalized"
+
+
 def test_hybrid_omni_registry_cancel_requires_valid_cooperative_cleanup_handshake(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

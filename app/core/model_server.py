@@ -25,6 +25,9 @@ MODEL_SERVER_LEASE_DIR = ROOT_DIR / "logs" / "model_server_leases"
 _QWEN_HTTP_RESPONSE_MAX_BYTES = 1024 * 1024
 _ACTIVE_SERVER_STATUSES = {"running", "loading", "busy"}
 _QWEN_LOCAL_LEASE_LOCK = threading.Lock()
+_QWEN_LOCAL_ACQUISITION_LOCK = threading.Lock()
+_QWEN_PROCESS_TERMINATE_SECONDS = 3.0
+_QWEN_PROCESS_KILL_SECONDS = 2.0
 _QWEN_LEASE_FIELDS = {
     "contract_version",
     "lease_id",
@@ -139,8 +142,32 @@ def cancel_model_request(
     if not normalized_request_id:
         raise ValueError("request_id is required")
     if str(task_kind or "").strip() == "panel_learning_hybrid_qwen_binding":
-        owner = _find_qwen_lease_by_owner(normalized_request_id)
-        owner_profile = owner[0].get("profile") if owner is not None else None
+        owner_record = _find_qwen_owner_record(normalized_request_id)
+        if owner_record is None or owner_record["kind"] == "tombstone":
+            receipt = (
+                deepcopy(owner_record["receipt"])
+                if owner_record is not None
+                else {
+                    "contract_version": "qwen_model_request_owner_receipt_v1",
+                    "status": "not_found",
+                    "owner_request_id": normalized_request_id,
+                }
+            )
+            return {
+                "contract_version": "model_request_cancellation_v1",
+                "status": "request_not_active",
+                "request_id": normalized_request_id,
+                "model_service_compute_termination": "request_not_active",
+                "provider_results": [{
+                    "profile_id": receipt.get("profile_id", "qwen"),
+                    "status": "request_not_active",
+                    "model_service_compute_termination": "request_not_active",
+                    "server_termination": receipt.get("server_termination", "not_required"),
+                    "owner_receipt": receipt,
+                }],
+            }
+        owner = (owner_record["state"], owner_record["lease"])
+        owner_profile = owner[0].get("profile")
         matching_profiles = [deepcopy(owner_profile)] if isinstance(owner_profile, dict) else []
     else:
         matching_profiles = _request_cancel_profiles(task_kind=task_kind, payload=payload)
@@ -373,6 +400,39 @@ def run_qwen_binding_model(
     return parsed
 
 
+def ensure_and_acquire_qwen_model_lease(
+    *,
+    stage: str,
+    profile_id: str | None,
+    profile: dict[str, Any],
+    request_id: str,
+    wait_seconds: float,
+) -> dict[str, Any]:
+    """跨进程串行化 Qwen 首启与租约发布，避免无主启动副作用。"""
+    with _qwen_acquisition_lock():
+        readiness = ensure_model_server(
+            stage=stage,
+            profile_id=profile_id,
+            wait_until_ready=True,
+            wait_seconds=wait_seconds,
+        )
+        after = readiness.get("after")
+        before = readiness.get("before")
+        status = str(
+            (after.get("status") if isinstance(after, dict) else "")
+            or (before.get("status") if isinstance(before, dict) else "")
+        ).strip()
+        if status != "running":
+            raise RuntimeError(
+                f"Qwen model service is not ready for lease publication: {status or 'unknown'}"
+            )
+        return acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+
+
 def acquire_qwen_model_lease(
     *,
     profile: dict[str, Any],
@@ -397,9 +457,17 @@ def acquire_qwen_model_lease(
     }
     with _qwen_lease_lock():
         for existing in _load_all_qwen_lease_states():
-            if existing["profile_id"] != profile_id or not existing["leases"]:
+            if not existing["leases"]:
                 continue
-            if existing["incarnation"] != incarnation:
+            existing_incarnation = existing["incarnation"]
+            same_listener_process = (
+                existing_incarnation.get("server_base_url") == incarnation["server_base_url"]
+                and existing_incarnation.get("server_process_identity")
+                == incarnation["server_process_identity"]
+            )
+            if (
+                existing["profile_id"] == profile_id or same_listener_process
+            ) and existing_incarnation != incarnation:
                 raise ValueError("Qwen server incarnation mismatch for existing profile lease")
         state = _load_qwen_lease_state(incarnation["incarnation_id"])
         if state is None:
@@ -478,28 +546,52 @@ def _release_exact_qwen_lease(
         state = _load_qwen_lease_state(incarnation_id)
         exact = _find_exact_lease(state, model_lease)
         if exact is None:
+            receipt = _load_qwen_owner_tombstone(
+                str(model_lease.get("owner_request_id") or "")
+            )
+            if (
+                isinstance(receipt, dict)
+                and receipt.get("lease_id") == model_lease.get("lease_id")
+                and isinstance(receipt.get("release_result"), dict)
+            ):
+                return deepcopy(receipt["release_result"])
             raise ValueError("exact Qwen model lease is not active")
+        finalization = state.get("finalization")
+        if isinstance(finalization, dict):
+            return {
+                "status": "cancellation_acknowledged_pending",
+                "model_service_compute_termination": "cancellation_acknowledged_pending",
+                "lease": deepcopy(model_lease),
+                "shared_server_retained": True,
+                "server_termination": "finalization_pending",
+                "finalization": deepcopy(finalization),
+                "reason": reason,
+            }
         remaining = [item for item in state["leases"] if item is not exact]
         if remaining:
             state["leases"] = remaining
             state["revision"] += 1
-            _write_qwen_lease_state(state)
-            return {
+            result = {
                 "status": "released",
                 "lease": deepcopy(model_lease),
                 "shared_server_retained": True,
                 "server_termination": "not_required_shared",
                 "reason": reason,
             }
+            _write_qwen_owner_tombstone(model_lease, result=result)
+            _write_qwen_lease_state(state)
+            return result
         if not state.get("server_started_by_runtime"):
-            _delete_qwen_lease_state(incarnation_id)
-            return {
+            result = {
                 "status": "released",
                 "lease": deepcopy(model_lease),
                 "shared_server_retained": True,
                 "server_termination": "not_owned",
                 "reason": reason,
             }
+            _write_qwen_owner_tombstone(model_lease, result=result)
+            _delete_qwen_lease_state(incarnation_id)
+            return result
         token = uuid4().hex
         state["revision"] += 1
         revision = state["revision"]
@@ -523,20 +615,33 @@ def _stop_and_finalize_qwen_incarnation(
 ) -> dict[str, Any]:
     incarnation = state["incarnation"]
     expected_process = incarnation["server_process_identity"]
-    current = _current_process_identity(expected_process["pid"])
-    if current != expected_process:
+    before = _probe_exact_qwen_process(expected_process)
+    if before["status"] == "unobservable":
+        _record_qwen_finalization_failure(state, token, revision, "process_identity_unobservable")
+        raise RuntimeError("Qwen exact server process identity is unobservable before stop")
+    if before["status"] == "proven_absent" and before.get("identity") is not None:
         _record_qwen_finalization_failure(state, token, revision, "ownership_changed")
         raise RuntimeError("Qwen server incarnation ownership changed before stop")
-    profile = state["profile"]
-    try:
-        release = stop_model_server(profile)
-    except Exception as error:
-        _record_qwen_finalization_failure(state, token, revision, "stop_failed")
-        raise RuntimeError("Qwen exact server stop failed") from error
-    current_after = _current_process_identity(expected_process["pid"])
-    if current_after == expected_process:
-        _record_qwen_finalization_failure(state, token, revision, "process_still_running")
+    if before["status"] == "proven_absent":
+        release = before
+    else:
+        try:
+            release = _terminate_exact_qwen_server_process(expected_process)
+        except RuntimeError as error:
+            failure_reason = str(getattr(error, "qwen_failure_reason", "stop_failed"))
+            _record_qwen_finalization_failure(state, token, revision, failure_reason)
+            raise
+    if release.get("status") != "proven_absent":
+        failure_reason = (
+            "process_exit_unobservable"
+            if release.get("status") == "unobservable"
+            else "process_still_running"
+        )
+        _record_qwen_finalization_failure(state, token, revision, failure_reason)
+        if failure_reason == "process_exit_unobservable":
+            raise RuntimeError("Qwen exact server process exit is unobservable")
         raise RuntimeError("Qwen exact server process is still running after release")
+    profile = state["profile"]
     health = check_model_server(profile)
     incarnation_id = incarnation["incarnation_id"]
     with _qwen_lease_lock():
@@ -548,16 +653,18 @@ def _stop_and_finalize_qwen_incarnation(
             or finalization.get("revision") != revision
         ):
             raise RuntimeError("Qwen finalization token changed")
+        result = {
+            "status": "released",
+            "lease": deepcopy(state["leases"][0]),
+            "shared_server_retained": False,
+            "server_termination": "verified_exact_process_exited",
+            "release": release,
+            "after": health,
+            "process_identity": expected_process,
+        }
+        _write_qwen_owner_tombstone(state["leases"][0], result=result)
         _delete_qwen_lease_state(incarnation_id)
-    return {
-        "status": "released",
-        "lease": deepcopy(state["leases"][0]),
-        "shared_server_retained": False,
-        "server_termination": "verified_exact_process_exited",
-        "release": release,
-        "after": health,
-        "process_identity": expected_process,
-    }
+    return result
 
 
 def _record_qwen_finalization_failure(
@@ -588,6 +695,8 @@ def _mark_qwen_lease_pending(model_lease: object, *, reason: str) -> dict[str, A
             return {"status": "request_not_active", "model_service_compute_termination": "request_not_active"}
         exact["lifecycle_state"] = "owned_pending"
         exact["pending_reason"] = str(reason)
+        exact["capability_blocker"] = str(reason)
+        exact["reconciliation_trigger"] = "worker_http_completion_or_explicit_retry"
         state["revision"] += 1
         _write_qwen_lease_state(state)
     return {
@@ -596,6 +705,9 @@ def _mark_qwen_lease_pending(model_lease: object, *, reason: str) -> dict[str, A
         "lease": deepcopy(model_lease),
         "shared_server_retained": True,
         "server_termination": "owned_pending",
+        "pending_reason": str(reason),
+        "capability_blocker": str(reason),
+        "reconciliation_trigger": "worker_http_completion_or_explicit_retry",
     }
 
 
@@ -610,6 +722,8 @@ def _mark_qwen_model_compute_complete(model_lease: object) -> None:
             raise ValueError("exact Qwen model lease is not active")
         exact["lifecycle_state"] = "compute_complete"
         exact.pop("pending_reason", None)
+        exact.pop("capability_blocker", None)
+        exact.pop("reconciliation_trigger", None)
         state["revision"] += 1
         _write_qwen_lease_state(state)
 
@@ -642,6 +756,8 @@ def _release_qwen_request_lease(
     if not request_cancelled and not state.get("server_started_by_runtime"):
         return _mark_qwen_lease_pending(lease, reason="external_server_request_unproven")
     result = _release_exact_qwen_lease(lease, reason="cancelled")
+    if result.get("status") == "cancellation_acknowledged_pending":
+        return result
     return {
         **result,
         "status": "terminated",
@@ -744,6 +860,72 @@ def _current_process_identity(pid: object) -> dict[str, int] | None:
         return None
 
 
+def _probe_exact_qwen_process(expected: dict[str, int]) -> dict[str, Any]:
+    """区分精确存活、已证实不存在与当前不可观测三种状态。"""
+    try:
+        process = psutil.Process(int(expected["pid"]))
+        if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+            return {"status": "proven_absent", "identity": None, "reason": "not_running"}
+        identity = {
+            "pid": int(process.pid),
+            "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+        }
+    except psutil.NoSuchProcess:
+        return {"status": "proven_absent", "identity": None, "reason": "no_such_process"}
+    except (psutil.AccessDenied, OSError) as error:
+        return {
+            "status": "unobservable",
+            "identity": None,
+            "reason": type(error).__name__,
+        }
+    except (ValueError, TypeError) as error:
+        return {
+            "status": "unobservable",
+            "identity": None,
+            "reason": type(error).__name__,
+        }
+    if identity != expected:
+        return {"status": "proven_absent", "identity": identity, "reason": "pid_reused"}
+    return {"status": "exact_live", "identity": identity}
+
+
+def _terminate_exact_qwen_server_process(
+    expected: dict[str, int],
+) -> dict[str, Any]:
+    """仅终止已验证 PID+创建时间的进程，不按端口或 PID 文件扩大。"""
+    before = _probe_exact_qwen_process(expected)
+    if before["status"] != "exact_live":
+        return before
+    try:
+        process = psutil.Process(int(expected["pid"]))
+        identity = {
+            "pid": int(process.pid),
+            "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+        }
+        if identity != expected or not process.is_running():
+            return _probe_exact_qwen_process(expected)
+        process.terminate()
+        try:
+            process.wait(timeout=_QWEN_PROCESS_TERMINATE_SECONDS)
+        except psutil.TimeoutExpired:
+            before_kill = _probe_exact_qwen_process(expected)
+            if before_kill["status"] != "exact_live":
+                return before_kill
+            process.kill()
+            process.wait(timeout=_QWEN_PROCESS_KILL_SECONDS)
+    except psutil.NoSuchProcess:
+        return {"status": "proven_absent", "identity": None, "reason": "no_such_process"}
+    except (psutil.AccessDenied, OSError) as error:
+        return {
+            "status": "unobservable",
+            "identity": None,
+            "reason": type(error).__name__,
+        }
+    except psutil.TimeoutExpired:
+        return _probe_exact_qwen_process(expected)
+    return _probe_exact_qwen_process(expected)
+
+
 def _valid_process_identity(value: object) -> bool:
     return (
         isinstance(value, dict)
@@ -758,15 +940,19 @@ def _qwen_lease_state_path(incarnation_id: str) -> Path:
     return MODEL_SERVER_LEASE_DIR / f"{incarnation_id}.json"
 
 
+def _qwen_owner_tombstone_path(request_id: str) -> Path:
+    digest = sha256(request_id.encode("utf-8")).hexdigest()
+    return MODEL_SERVER_LEASE_DIR / "finalized_owners" / f"{digest}.json"
+
+
 @contextmanager
-def _qwen_lease_lock():
+def _exclusive_qwen_file_lock(local_lock: threading.Lock, lock_name: str):
     MODEL_SERVER_LEASE_DIR.mkdir(parents=True, exist_ok=True)
-    lock_path = MODEL_SERVER_LEASE_DIR / ".lease-state.lock"
-    with _QWEN_LOCAL_LEASE_LOCK:
+    lock_path = MODEL_SERVER_LEASE_DIR / lock_name
+    with local_lock:
         handle = lock_path.open("a+b")
         try:
-            handle.seek(0)
-            if handle.tell() == 0 and lock_path.stat().st_size == 0:
+            if lock_path.stat().st_size == 0:
                 handle.write(b"0")
                 handle.flush()
             handle.seek(0)
@@ -788,6 +974,21 @@ def _qwen_lease_lock():
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         finally:
             handle.close()
+
+
+@contextmanager
+def _qwen_acquisition_lock():
+    with _exclusive_qwen_file_lock(
+        _QWEN_LOCAL_ACQUISITION_LOCK,
+        ".acquisition-transaction.lock",
+    ):
+        yield
+
+
+@contextmanager
+def _qwen_lease_lock():
+    with _exclusive_qwen_file_lock(_QWEN_LOCAL_LEASE_LOCK, ".lease-state.lock"):
+        yield
 
 
 def _load_qwen_lease_state(incarnation_id: str) -> dict[str, Any] | None:
@@ -841,6 +1042,62 @@ def _delete_qwen_lease_state(incarnation_id: str) -> None:
     _qwen_lease_state_path(incarnation_id).unlink(missing_ok=True)
 
 
+def _write_qwen_owner_tombstone(
+    model_lease: dict[str, Any],
+    *,
+    result: dict[str, Any],
+) -> None:
+    request_id = str(model_lease.get("owner_request_id") or "")
+    if not request_id:
+        raise ValueError("Qwen owner request identity is required")
+    path = _qwen_owner_tombstone_path(request_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    receipt = {
+        "contract_version": "qwen_model_request_owner_receipt_v1",
+        "status": "finalized",
+        "owner_request_id": request_id,
+        "profile_id": model_lease.get("profile_id"),
+        "lease_id": model_lease.get("lease_id"),
+        "incarnation_id": model_lease.get("incarnation_id"),
+        "server_termination": result.get("server_termination"),
+        "release_result": deepcopy(result),
+    }
+    temporary = path.with_suffix(f".{uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(
+            seal_immutable(receipt),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _load_qwen_owner_tombstone(request_id: str) -> dict[str, Any] | None:
+    if not request_id:
+        return None
+    path = _qwen_owner_tombstone_path(request_id)
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("Qwen owner receipt is unreadable") from error
+    if not isinstance(value, dict) or value.get("content_sha256") != content_sha256(value):
+        raise RuntimeError("Qwen owner receipt seal mismatch")
+    receipt = deepcopy(value)
+    receipt.pop("content_sha256")
+    if (
+        receipt.get("contract_version") != "qwen_model_request_owner_receipt_v1"
+        or receipt.get("owner_request_id") != request_id
+        or receipt.get("status") != "finalized"
+    ):
+        raise RuntimeError("Qwen owner receipt identity mismatch")
+    return receipt
+
+
 def _find_exact_lease(
     state: dict[str, Any] | None,
     model_lease: dict[str, Any],
@@ -868,6 +1125,23 @@ def _find_qwen_lease_by_owner(
         if len(matches) > 1:
             raise RuntimeError("Qwen request ownership is ambiguous")
         return matches[0] if matches else None
+
+
+def _find_qwen_owner_record(request_id: str) -> dict[str, Any] | None:
+    with _qwen_lease_lock():
+        matches = []
+        for state in _load_all_qwen_lease_states():
+            for lease in state["leases"]:
+                if isinstance(lease, dict) and lease.get("owner_request_id") == request_id:
+                    matches.append((state, deepcopy(lease)))
+        if len(matches) > 1:
+            raise RuntimeError("Qwen request ownership is ambiguous")
+        if matches:
+            return {"kind": "active", "state": matches[0][0], "lease": matches[0][1]}
+        receipt = _load_qwen_owner_tombstone(request_id)
+        if receipt is not None:
+            return {"kind": "tombstone", "receipt": receipt}
+        return None
 
 
 def _profile_for_qwen_model_lease(model_lease: object) -> dict[str, Any]:
