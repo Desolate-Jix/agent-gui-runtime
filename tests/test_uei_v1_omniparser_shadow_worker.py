@@ -63,6 +63,8 @@ def test_worker_projects_boxes_into_the_exact_capture_coordinate_space(tmp_path:
             "source_item_id": "omniparser/1",
             "kind": "icon",
             "safe_text": "Search",
+            "safe_role": "icon",
+            "safe_states": [],
             "source_bbox": [2, 2, 10, 8],
             "source_coordinate_space": "capture_pixel_xyxy",
             "provider_confidence": None,
@@ -83,6 +85,24 @@ def test_worker_applies_review_candidate_quality_filter_before_uei_output(tmp_pa
 
     assert len(result["items"]) == 1
     assert result["items"][0]["safe_text"].strip().casefold() == "search"
+
+
+def test_worker_preserves_only_explicit_provider_role_and_interactivity_belief(tmp_path: Path, monkeypatch):
+    from scripts import run_uei_omniparser_shadow_worker as worker
+
+    items = [
+        {"bbox": [0.1, 0.2, 0.5, 0.4], "type": "icon", "content": "Unknown icon", "interactivity": True},
+        {"bbox": [0.1, 0.5, 0.5, 0.7], "type": "text", "content": "Heading", "interactivity": False},
+    ]
+    _patch_runner(monkeypatch, outputs=[(items, 4.0)])
+    monkeypatch.setattr(worker, "_peak_resource_units", lambda: 0)
+
+    result = worker._run(tmp_path / "capture.png", {"width": 1000, "height": 800})
+
+    assert [(item["safe_role"], item["safe_states"]) for item in result["items"]] == [
+        ("icon", ["interactable"]),
+        ("text", []),
+    ]
 
 
 def test_benchmark_worker_records_observed_invalid_counts_for_cold_and_three_warm_runs(tmp_path: Path, monkeypatch):

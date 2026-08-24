@@ -63,9 +63,12 @@ def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = Fals
             raise ValueError("worker_output_invalid")
         pixel_bbox = [round(float(bbox[0]) * image_size["width"]), round(float(bbox[1]) * image_size["height"]),
                       round(float(bbox[2]) * image_size["width"]), round(float(bbox[3]) * image_size["height"])]
+        kind = str(item.get("type") or "element").strip().casefold()
         normalized.append({
-            "source_item_id": f"omniparser/{index + 1}", "kind": str(item.get("type") or "element"),
+            "source_item_id": f"omniparser/{index + 1}", "kind": kind,
             "safe_text": str(item.get("content") or ""), "source_bbox": pixel_bbox,
+            "safe_role": kind if kind in {"element", "text", "icon", "structure"} else None,
+            "safe_states": ["interactable"] if item.get("interactivity") is True else [],
             # 输入图片就是受限 capture 本体；按原尺寸反投影后的像素框属于 capture 坐标系。
             "source_coordinate_space": "capture_pixel_xyxy", "provider_confidence": None,
         })

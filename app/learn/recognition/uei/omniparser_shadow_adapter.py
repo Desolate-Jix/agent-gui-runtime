@@ -517,15 +517,22 @@ def _benchmark_metrics(raw: bytes) -> dict[str, object]:
 def _normalize_item(
     *, item: object, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
 ) -> NormalizedProviderItem:
-    allowed = {"source_item_id", "kind", "safe_text", "source_bbox", "source_coordinate_space", "provider_confidence"}
-    if not isinstance(item, dict) or set(item) != allowed:
+    required = {"source_item_id", "kind", "safe_text", "source_bbox", "source_coordinate_space", "provider_confidence"}
+    optional = {"safe_role", "safe_states"}
+    if not isinstance(item, dict) or not required.issubset(item) or not set(item).issubset(required | optional):
         raise OmniParserShadowAdapterError("runtime_worker_invalid")
     source_item_id, kind, safe_text = item.get("source_item_id"), item.get("kind"), item.get("safe_text")
     coordinate_space, bbox, confidence = item.get("source_coordinate_space"), item.get("source_bbox"), item.get("provider_confidence")
+    safe_role = item.get("safe_role")
+    safe_states = item.get("safe_states", [])
     if (not isinstance(source_item_id, str) or not source_item_id or len(source_item_id) > 512
             or kind not in {"element", "text", "role", "state", "icon", "structure"}
             or not isinstance(safe_text, str) or len(safe_text) > budget.max_string_length
-            or _contains_secret(safe_text)):
+            or _contains_secret(safe_text)
+            or safe_role is not None and (not isinstance(safe_role, str) or len(safe_role) > budget.max_string_length or _contains_secret(safe_role))
+            or not isinstance(safe_states, list)
+            or any(state != "interactable" for state in safe_states)
+            or len(safe_states) != len(set(safe_states))):
         raise OmniParserShadowAdapterError("runtime_worker_invalid")
     if (coordinate_space != "capture_pixel_xyxy" or not isinstance(bbox, list) or len(bbox) != 4
             or not all(isinstance(edge, int) and not isinstance(edge, bool) for edge in bbox)
@@ -537,6 +544,7 @@ def _normalize_item(
     return NormalizedProviderItem(
         source_item_id=source_item_id, kind=kind, safe_text=safe_text, source_bbox=tuple(bbox),
         source_coordinate_space=coordinate_space, provider_confidence=None if confidence is None else float(confidence),
+        safe_role=safe_role, safe_states=tuple(safe_states),
     )
 
 
