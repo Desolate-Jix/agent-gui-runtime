@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, UnidentifiedImageError
 
 from app.learn.correction_memory import record_human_review_correction
 from app.learn.recognition.uei.learning_shadow import (
+    load_hybrid_large_review_projection,
     load_uei_shadow_provider_review,
     strip_uei_shadow_review_cache,
 )
@@ -88,6 +89,7 @@ def load_learning_draft_review(
 
     draft, attempt_index = _select_draft(payload)
     selected_draft = draft
+    hybrid_projection_source = deepcopy(draft.get("hybrid_review_projection"))
     source_ref = {
         "source_path": _relative_path(resolved, root),
         "source_trial_path": _relative_path(resolved, root) if _is_trial(payload) else None,
@@ -140,6 +142,34 @@ def load_learning_draft_review(
                 displayed_source_image=displayed_source_image,
                 root=root,
             )
+    hybrid_review = load_hybrid_large_review_projection(
+        hybrid_projection_source,
+        current_capture_lineage_ref=current_capture_lineage_ref,
+        displayed_source_sha256=(
+            str(displayed_source_image.get("sha256") or "")
+            if isinstance(displayed_source_image, dict)
+            else None
+        ),
+        displayed_source_size=(
+            deepcopy(displayed_source_image.get("image_size"))
+            if isinstance(displayed_source_image, dict)
+            and isinstance(displayed_source_image.get("image_size"), dict)
+            else None
+        ),
+        existing_region_ids={
+            str(region.get("region_id"))
+            for region in normalized_draft.get("regions", [])
+            if isinstance(region, dict) and str(region.get("region_id") or "").strip()
+        },
+    )
+    if isinstance(hybrid_review, dict) and isinstance(hybrid_review.get("regions"), list):
+        normalized_draft["regions"].extend(deepcopy(hybrid_review["regions"]))
+        if hybrid_review["regions"]:
+            _bind_projected_review_source_copy(
+                normalized_draft,
+                displayed_source_image=displayed_source_image,
+                root=root,
+            )
     strip_uei_shadow_review_cache(normalized_draft)
     result = {
         "contract_version": REVIEW_CONTRACT,
@@ -163,6 +193,8 @@ def load_learning_draft_review(
         result["uei_shadow_provider_summary"] = shadow_summary
     if isinstance(shadow_review, dict) and isinstance(shadow_review.get("projection"), dict):
         result["uei_shadow_review_projection"] = deepcopy(shadow_review["projection"])
+    if isinstance(hybrid_review, dict) and isinstance(hybrid_review.get("projection"), dict):
+        result["hybrid_review_projection"] = deepcopy(hybrid_review["projection"])
     if workflow_node_identity:
         result["workflow_node_identity"] = workflow_node_identity
     if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT:

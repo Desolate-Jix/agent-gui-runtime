@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from app.learn.hybrid.review_projection import validate_hybrid_review_projection
 from app.learn.recognition.bbox_alignment import bbox_overlap, cross_evidence_overlap_is_acceptable
 from app.learn.recognition.uei.canonical import canonical_json_bytes
 from app.learn.recognition.uei.contracts import UEIValidationError
@@ -14,6 +16,59 @@ from app.learn.recognition.uei.store import UEIObjectStore
 
 _STORE_RELATIVE_PATH = Path("artifacts") / "uei-shadow-store"
 _REF_KEYS = frozenset({"id", "content_sha256"})
+
+
+def load_hybrid_large_review_projection(
+    projection: object,
+    *,
+    current_capture_lineage_ref: dict[str, str] | None,
+    displayed_source_sha256: str | None,
+    displayed_source_size: dict[str, int] | None,
+    existing_region_ids: set[str],
+) -> dict[str, object] | None:
+    """Revalidate and adapt a sealed Hybrid projection to Large Review regions."""
+    if projection is None:
+        return None
+    if (
+        not isinstance(projection, dict)
+        or not _is_ref(current_capture_lineage_ref)
+        or not isinstance(displayed_source_sha256, str)
+        or not isinstance(displayed_source_size, dict)
+    ):
+        return _invalid_hybrid_review("hybrid_projection_context_invalid")
+    try:
+        validated = validate_hybrid_review_projection(
+            projection,
+            current_capture_lineage_ref=current_capture_lineage_ref,
+            displayed_image_sha256=displayed_source_sha256,
+            displayed_image_size=displayed_source_size,
+        )
+        regions = deepcopy(validated["candidates"])
+        generated = [str(region.get("region_id") or "") for region in regions]
+        if len(generated) != len(set(generated)) or set(generated) & existing_region_ids:
+            return _invalid_hybrid_review("hybrid_region_id_collision")
+        return {"projection": validated, "regions": regions}
+    except (TypeError, ValueError):
+        return _invalid_hybrid_review("hybrid_projection_invalid")
+
+
+def _invalid_hybrid_review(reason: str) -> dict[str, object]:
+    return {
+        "projection": {
+            "contract_version": "hybrid_large_review_projection_status_v1",
+            "status": "rejected",
+            "reason": reason,
+            "display_only": True,
+            "review_only": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "final_submit_forbidden": True,
+            "real_action_requires_gate": True,
+            "authorization_scope": "display_and_review_only",
+            "action_candidates": [],
+        },
+        "regions": [],
+    }
 
 
 def load_uei_shadow_provider_summary(
