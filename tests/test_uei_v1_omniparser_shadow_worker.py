@@ -70,6 +70,21 @@ def test_worker_projects_boxes_into_the_exact_capture_coordinate_space(tmp_path:
     ]
 
 
+def test_worker_applies_review_candidate_quality_filter_before_uei_output(tmp_path: Path, monkeypatch):
+    from scripts import run_uei_omniparser_shadow_worker as worker
+
+    tiny = {"bbox": [0.0, 0.0, 0.009, 0.5], "type": "icon", "content": "tiny", "source": "yolo"}
+    first = {"bbox": [0.1, 0.2, 0.5, 0.4], "type": "icon", "content": "Search", "source": "yolo"}
+    duplicate = {"bbox": [0.101, 0.2, 0.501, 0.4], "type": "icon", "content": " search ", "source": "yolo"}
+    _patch_runner(monkeypatch, outputs=[([tiny, first, duplicate], 4.0)])
+    monkeypatch.setattr(worker, "_peak_resource_units", lambda: 0)
+
+    result = worker._run(tmp_path / "capture.png", {"width": 1000, "height": 800})
+
+    assert len(result["items"]) == 1
+    assert result["items"][0]["safe_text"].strip().casefold() == "search"
+
+
 def test_benchmark_worker_records_observed_invalid_counts_for_cold_and_three_warm_runs(tmp_path: Path, monkeypatch):
     from scripts import run_uei_omniparser_shadow_worker as worker
 

@@ -37,6 +37,7 @@ def _input(path: Path) -> tuple[Path, dict[str, int]]:
 
 
 def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = False) -> dict[str, object]:
+    from app.learn.recognition.omniparser_quality import filter_omniparser_candidates
     from scripts import run_omniparser_learn_smoke as runner
 
     profile = runner._load_profile()
@@ -49,6 +50,10 @@ def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = Fals
         input_path=input_path, detector=detector, caption=caption,
         check_ocr_box=check_ocr_box, get_som_labeled_img=get_som_labeled_img,
     )
+    try:
+        items, _quality_summary = filter_omniparser_candidates(items, image_size=image_size)
+    except ValueError as error:
+        raise ValueError("worker_output_invalid") from error
     normalized: list[dict[str, object]] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
