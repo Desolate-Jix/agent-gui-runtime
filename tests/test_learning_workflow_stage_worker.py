@@ -1115,6 +1115,52 @@ def test_worker_dispatches_managed_hybrid_omni_with_internal_cancellation_event(
     }
 
 
+def test_worker_dispatches_managed_hybrid_fusion_without_model_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from threading import Event
+    from app.learn import workflow_worker
+
+    seen: dict[str, object] = {}
+
+    def fake_run(payload, *, cancellation_event=None):
+        seen["payload"] = payload
+        seen["cancellation_event"] = cancellation_event
+        return {"contract_version": "hybrid_fusion_result_v1", "candidates": []}
+
+    monkeypatch.setattr(workflow_worker, "run_hybrid_fusion_task", fake_run)
+    cancellation_event = Event()
+    response = execute_learning_stage_worker_task(
+        "panel_learning_hybrid_fusion",
+        {"run_id": "run-fusion"},
+        cancellation_event=cancellation_event,
+    )
+
+    assert response == {"contract_version": "hybrid_fusion_result_v1", "candidates": []}
+    assert seen == {
+        "payload": {"run_id": "run-fusion"},
+        "cancellation_event": cancellation_event,
+    }
+    assert "panel_learning_hybrid_fusion" not in workflow_worker._MODEL_STAGE_BY_TASK_KIND
+
+
+def test_panel_request_contract_accepts_managed_hybrid_fusion() -> None:
+    from app.api.panel import PanelStartLearningStageWorkerRequest
+
+    request = PanelStartLearningStageWorkerRequest.model_validate(
+        {
+            "run_id": "run-fusion",
+            "expected_revision": 1,
+            "stage": "fusion",
+            "operation_id": "operation-fusion",
+            "task_kind": "panel_learning_hybrid_fusion",
+            "payload": {},
+        }
+    )
+
+    assert request.task_kind == "panel_learning_hybrid_fusion"
+
+
 def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
