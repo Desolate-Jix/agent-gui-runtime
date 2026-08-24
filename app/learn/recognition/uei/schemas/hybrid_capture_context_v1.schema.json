@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hybrid_capture_context_v1",
+  "type": "object",
+  "required": [
+    "contract_version", "context_id", "run_id", "workflow_revision",
+    "capture_lineage_ref", "window_binding", "sources", "derived_views",
+    "artifact_is_authorization", "execute_binding_enabled", "final_submit_forbidden",
+    "real_action_requires_gate", "authorization_scope", "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {"const": "hybrid_capture_context_v1"},
+    "context_id": {"type": "string", "minLength": 1, "maxLength": 512},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "workflow_revision": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "capture_lineage_ref": {"$ref": "#/$defs/immutable_ref"},
+    "window_binding": {"$ref": "#/$defs/window_binding"},
+    "sources": {
+      "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "derived_views": {
+      "type": "array", "maxItems": 16, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/derived_view"}
+    },
+    "artifact_is_authorization": {"const": false},
+    "execute_binding_enabled": {"const": false},
+    "final_submit_forbidden": {"const": true},
+    "real_action_requires_gate": {"const": true},
+    "authorization_scope": {"const": "display_and_review_only"},
+    "content_sha256": {"$ref": "#/$defs/sha"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "immutable_ref": {
+      "type": "object",
+      "required": ["id", "content_sha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "size": {
+      "type": "object", "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "height": {"type": "integer", "minimum": 1, "maximum": 100000}
+      },
+      "additionalProperties": false
+    },
+    "point": {
+      "type": "object", "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number", "minimum": -1000000000, "maximum": 1000000000},
+        "y": {"type": "number", "minimum": -1000000000, "maximum": 1000000000}
+      },
+      "additionalProperties": false
+    },
+    "rect": {
+      "type": "object", "required": ["left", "top", "right", "bottom"],
+      "properties": {
+        "left": {"type": "integer", "minimum": -100000, "maximum": 100000},
+        "top": {"type": "integer", "minimum": -100000, "maximum": 100000},
+        "right": {"type": "integer", "minimum": -100000, "maximum": 100000},
+        "bottom": {"type": "integer", "minimum": -100000, "maximum": 100000}
+      },
+      "additionalProperties": false
+    },
+    "window_binding": {
+      "type": "object",
+      "required": ["window_binding_id", "process_id", "process_name", "rect"],
+      "properties": {
+        "window_binding_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "process_id": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+        "process_name": {"type": "string", "minLength": 1, "maxLength": 512},
+        "rect": {"$ref": "#/$defs/rect"}
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "source_kind", "capture_lineage_ref", "run_id", "workflow_revision",
+        "window_binding", "evidence_contract_version", "evidence_ref"
+      ],
+      "properties": {
+        "source_kind": {"type": "string", "enum": ["ocr", "uia"]},
+        "capture_lineage_ref": {"$ref": "#/$defs/immutable_ref"},
+        "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "workflow_revision": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+        "window_binding": {"$ref": "#/$defs/window_binding"},
+        "evidence_contract_version": {"const": "provider_safe_result_v1"},
+        "evidence_ref": {"$ref": "#/$defs/immutable_ref"}
+      },
+      "additionalProperties": false
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "contract_version", "artifact_id", "artifact_sha256", "media_type",
+        "byte_length", "restricted", "content_sha256"
+      ],
+      "properties": {
+        "contract_version": {"const": "artifact_ref_v1"},
+        "artifact_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "artifact_sha256": {"$ref": "#/$defs/sha"},
+        "media_type": {"type": "string", "enum": ["image/png", "image/jpeg"]},
+        "byte_length": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "restricted": {"const": true},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "lineage": {
+      "type": "object",
+      "required": [
+        "contract_version", "capture_id", "artifact_ref", "artifact_sha256",
+        "image_size", "capture_coordinate_space", "captured_at", "content_sha256"
+      ],
+      "properties": {
+        "contract_version": {"const": "capture_lineage_v1"},
+        "capture_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "artifact_ref": {"$ref": "#/$defs/immutable_ref"},
+        "artifact_sha256": {"$ref": "#/$defs/sha"},
+        "image_size": {"$ref": "#/$defs/size"},
+        "capture_coordinate_space": {"const": "capture_pixel_xyxy"},
+        "captured_at": {"type": "string", "minLength": 20, "maxLength": 64, "pattern": "Z$"},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "transform": {
+      "type": "object",
+      "required": [
+        "contract_version", "source_space", "target_space", "source_size", "target_size",
+        "scale", "offset", "rounding", "clipping", "source_capture_artifact_sha256",
+        "target_capture_artifact_sha256", "content_sha256"
+      ],
+      "properties": {
+        "contract_version": {"const": "affine_coordinate_transform_v1"},
+        "source_space": {"const": "capture_pixel_xyxy"},
+        "target_space": {"type": "string", "enum": ["capture_pixel_xyxy", "image_pixel_xyxy"]},
+        "source_size": {"$ref": "#/$defs/size"},
+        "target_size": {"$ref": "#/$defs/size"},
+        "scale": {"$ref": "#/$defs/point"},
+        "offset": {"$ref": "#/$defs/point"},
+        "rounding": {"type": "string", "enum": ["outward", "nearest", "none"]},
+        "clipping": {"const": "reject_if_outside"},
+        "source_capture_artifact_sha256": {"$ref": "#/$defs/sha"},
+        "target_capture_artifact_sha256": {"$ref": "#/$defs/sha"},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "derived_view": {
+      "type": "object",
+      "required": [
+        "target_capture_lineage_ref", "target_capture_lineage", "target_artifact_ref",
+        "target_artifact", "coordinate_transform_ref", "coordinate_transform"
+      ],
+      "properties": {
+        "target_capture_lineage_ref": {"$ref": "#/$defs/immutable_ref"},
+        "target_capture_lineage": {"$ref": "#/$defs/lineage"},
+        "target_artifact_ref": {"$ref": "#/$defs/immutable_ref"},
+        "target_artifact": {"$ref": "#/$defs/artifact"},
+        "coordinate_transform_ref": {"$ref": "#/$defs/immutable_ref"},
+        "coordinate_transform": {"$ref": "#/$defs/transform"}
+      },
+      "additionalProperties": false
+    },
+    "opaque_scalar": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "null"}]},
+    "opaque_value": {"oneOf": [{"$ref": "#/$defs/opaque_scalar"}, {"type": "array", "items": {"$ref": "#/$defs/opaque_value"}, "maxItems": 256}, {"type": "object", "maxProperties": 64, "additionalProperties": {"$ref": "#/$defs/opaque_value"}}]}
+  }
+}

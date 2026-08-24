@@ -111,8 +111,9 @@ def interpret_learning_stage_worker_result(
 
 def _screen_observe_decision(result: dict[str, Any]) -> dict[str, Any]:
     raw_bundle_ref = result.get("hybrid_capture_bundle_ref")
-    bundle_ref = _screen_observe_bundle_ref(raw_bundle_ref)
-    if raw_bundle_ref is not None and bundle_ref is None:
+    bundle_verified = result.get("_hybrid_capture_bundle_verified") is True
+    bundle_ref = _screen_observe_bundle_ref(raw_bundle_ref) if bundle_verified else None
+    if bundle_verified and bundle_ref is None:
         return _decision(
             stage="screen_understanding",
             task_kind="vision_observe_screen",

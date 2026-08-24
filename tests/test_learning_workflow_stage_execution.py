@@ -1546,6 +1546,169 @@ def test_continuation_starts_recognition_trial_after_observe(
     assert len(registry.started_payloads) == 2
 
 
+def test_continuation_forwards_only_a_persisted_verified_hybrid_capture_ref(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    from tests.test_learn_hybrid_capture import _bundle
+
+    store, bind_state = _store_at_completed_bind_capture()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    running_revision = 0
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started_payloads = []
+
+        def read_adopted_result(self, **kwargs):
+            bundle = _bundle(
+                tmp_path,
+                run_id="run-stage-operation",
+                revision=running_revision,
+            )
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-observe-hybrid",
+                    "task_kind": "vision_observe_screen",
+                    "result_sha256": "d" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {"result": {
+                        "image_path": "artifacts/screenshots/capture.png",
+                        "hybrid_capture_bundle_ref": bundle["bundle_ref"],
+                        "screen_size": {"width": 8, "height": 6},
+                    }},
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started_payloads.append(kwargs)
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-trial-hybrid",
+                "run_id": kwargs["run_id"],
+                "stage": kwargs["stage"],
+                "operation_id": kwargs["operation_id"],
+                "task_kind": kwargs["task_kind"],
+                "status": "running",
+                "backend_compute_owner": "backend_process_worker",
+            }
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "observe hybrid",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    running_revision = started["workflow_state"]["revision"]
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": running_revision,
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-observe-hybrid",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    evidence = registry.started_payloads[0]["payload"]["observation_evidence"]
+    assert evidence["hybrid_capture_bundle_ref"]["id"].startswith("hybrid-capture/")
+    assert "current_image_path" not in evidence
+    assert "_hybrid_capture_bundle_verified" not in continued["data"]["response"]["data"]["result"]
+
+
+@pytest.mark.parametrize("ref_kind", ["missing", "cross_run", "stale_revision"])
+def test_continuation_rejects_unverified_hybrid_ref_before_starting_next_worker(
+    monkeypatch,
+    tmp_path: Path,
+    ref_kind: str,
+) -> None:
+    from tests.test_learn_hybrid_capture import _bundle
+
+    store, bind_state = _store_at_completed_bind_capture()
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    running_revision = 0
+
+    class _WorkerRegistry:
+        started = False
+
+        def read_adopted_result(self, **kwargs):
+            if ref_kind == "missing":
+                bundle_ref = {
+                    "id": "hybrid-capture/fabricated",
+                    "content_sha256": "a" * 64,
+                }
+            else:
+                bundle = _bundle(
+                    tmp_path,
+                    run_id=("run-other" if ref_kind == "cross_run" else "run-stage-operation"),
+                    revision=(running_revision - 1 if ref_kind == "stale_revision" else running_revision),
+                )
+                bundle_ref = bundle["bundle_ref"]
+            return {
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-observe-forged",
+                    "task_kind": "vision_observe_screen",
+                    "result_sha256": "e" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {"result": {
+                        "image_path": "artifacts/screenshots/legacy.png",
+                        "hybrid_capture_bundle_ref": bundle_ref,
+                    }},
+                },
+            }
+
+        def start(self, **kwargs):
+            self.started = True
+            raise AssertionError("unverified hybrid ref reached next worker")
+
+    registry = _WorkerRegistry()
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", registry)
+    client = TestClient(app)
+    started = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "observe forged",
+            "lease_seconds": 600,
+        },
+    ).json()["data"]
+    running_revision = started["workflow_state"]["revision"]
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": started["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": started["operation_id"],
+            "worker_id": "worker-observe-forged",
+        },
+    ).json()
+
+    assert continued["success"] is False
+    assert continued["error"]["code"] == "learning_stage_worker_result_continuation_invalid"
+    assert "hybrid capture handoff verification failed" in continued["error"]["details"]
+    assert registry.started is False
+
+
 def test_continuation_finishes_screen_understanding_from_trial(
     monkeypatch,
     tmp_path: Path,

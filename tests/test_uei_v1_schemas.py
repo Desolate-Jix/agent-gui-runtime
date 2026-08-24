@@ -7,6 +7,11 @@ from tests.uei_v1_helpers import SHA, minimal_provider_safe_result
 
 def minimal_contract_values() -> dict[str, dict[str, object]]:
     ref = {"id": "ref/1", "content_sha256": SHA}
+    window = {"window_binding_id": "window:1", "process_id": 1, "process_name": "fixture.exe",
+              "rect": {"left": 0, "top": 0, "right": 1, "bottom": 1}}
+    source = {"source_kind": "ocr", "capture_lineage_ref": ref, "run_id": "run/1",
+              "workflow_revision": 1, "window_binding": window,
+              "evidence_contract_version": "provider_safe_result_v1", "evidence_ref": ref}
     profile = {"profile_id": "profile/1", "operation": "screen_parse", "input_contract": "screen_parse_request_v1", "output_contract": "provider_safe_result_v1", "declared_output_kinds": ["text"], "supported_coordinate_spaces": ["capture_pixel_xyxy"], "supports_capture_artifact": True, "privacy_capabilities": ["minimal"], "mode_allowlist": ["Shadow"]}
     common = {"content_sha256": SHA}
     return {
@@ -18,6 +23,16 @@ def minimal_contract_values() -> dict[str, dict[str, object]]:
         "screen_parse_request_v1": {"contract_version": "screen_parse_request_v1", "request_id": "request/1", "capture_lineage_ref": ref, "requested_profiles": [{"provider_id": "provider/1", "profile_id": "profile/1", "mode": "Shadow"}], "privacy_policy": "minimal", "requester_id": "requester/1", **common},
         "provider_safe_result_v1": minimal_provider_safe_result(),
         "provider_error_v1": {"contract_version": "provider_error_v1", "error_id": "error/1", "request_ref": ref, "requested_provider_id": "provider/1", "requested_profile_id": "profile/1", "registration_resolution": "not_found", "manifest_resolution": "not_reached", "provider_id": "provider/1", "profile_id": "profile/1", "stage": "registration", "code": "provider_unregistered", "retryable": False, "message": "synthetic", "safe_details": {"reason_class": "policy"}, "capture_lineage_ref": ref, **common},
+        "hybrid_capture_context_v1": {"contract_version": "hybrid_capture_context_v1", "context_id": "context/1",
+            "run_id": "run/1", "workflow_revision": 1, "capture_lineage_ref": ref, "window_binding": window,
+            "sources": [source, {**source, "source_kind": "uia"}], "derived_views": [],
+            "artifact_is_authorization": False, "execute_binding_enabled": False, "final_submit_forbidden": True,
+            "real_action_requires_gate": True, "authorization_scope": "display_and_review_only", **common},
+        "hybrid_capture_bundle_v1": {"contract_version": "hybrid_capture_bundle_v1", "bundle_id": "bundle/1",
+            "run_id": "run/1", "workflow_revision": 1, "capture_lineage_ref": ref, "artifact_ref": ref,
+            "context_ref": ref, "artifact_is_authorization": False, "execute_binding_enabled": False,
+            "final_submit_forbidden": True, "real_action_requires_gate": True,
+            "authorization_scope": "display_and_review_only", **common},
     }
 
 
@@ -41,6 +56,7 @@ def test_all_contract_legal_minima_validate(contract, value):
     "trusted_provider_registration_v1", "artifact_ref_v1", "capture_lineage_v1",
     "affine_coordinate_transform_v1", "provider_manifest_v1", "screen_parse_request_v1",
     "provider_safe_result_v1", "provider_error_v1",
+    "hybrid_capture_context_v1", "hybrid_capture_bundle_v1",
 ])
 def test_schema_has_closed_top_level_and_version(contract):
     from app.learn.recognition.uei.contracts import load_contract_schema

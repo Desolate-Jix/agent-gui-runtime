@@ -7,28 +7,14 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
+from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.store import UEIObjectStore
 
 
-def _image(path: Path, *, color: tuple[int, int, int] = (10, 20, 30)) -> Path:
+def _image(path: Path, *, size: tuple[int, int] = (8, 6), color=(10, 20, 30)) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (8, 6), color=color).save(path)
+    Image.new("RGB", size, color=color).save(path)
     return path
-
-
-def _context(*, derived_views: list[dict[str, object]] | None = None) -> dict[str, object]:
-    return {
-        "ocr": {
-            "provenance": {"engine": "windows-ocr", "revision": "ocr-1"},
-            "items": [{"text": "Search", "bbox": [1, 1, 5, 3]}],
-        },
-        "uia": {
-            "provenance": {"adapter": "windows-uia", "revision": "uia-1"},
-            "nodes": [{"automation_id": "search", "role": "edit"}],
-        },
-        "derived_views": derived_views or [],
-    }
 
 
 def _window() -> dict[str, object]:
@@ -40,148 +26,306 @@ def _window() -> dict[str, object]:
     }
 
 
-def _seal(root: Path, *, revision: str = "7", color: tuple[int, int, int] = (10, 20, 30)):
-    from app.learn.hybrid.capture import seal_hybrid_capture_bundle
+def _identity(root: Path, *, run_id: str = "run-a", revision: int = 7, name="capture.png", size=(8, 6)):
+    from app.learn.hybrid.capture import seal_hybrid_capture_identity
 
-    return seal_hybrid_capture_bundle(
+    image_path = _image(root / "artifacts" / "screenshots" / name, size=size)
+    return image_path, seal_hybrid_capture_identity(
         project_root=root,
-        image_path=_image(root / "artifacts" / "screenshots" / f"capture-{revision}.png", color=color),
+        image_path=image_path,
+        run_id=run_id,
         workflow_revision=revision,
         window_binding=_window(),
-        ocr_uia_context=_context(),
+        captured_at="2026-08-25T00:00:00Z",
     )
 
 
-def _store_forged_bundle(root: Path, value: dict[str, object]) -> dict[str, str]:
-    sealed = seal_immutable(value)
-    bundle_id = str(sealed["bundle_id"])
-    digest = str(sealed["content_sha256"])
-    path = root / "artifacts" / "hybrid-capture-store" / "objects" / f"{digest}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(canonical_json_bytes(sealed))
-    return {"id": bundle_id, "content_sha256": digest}
+def _put(store: UEIObjectStore, value: dict[str, object]) -> dict[str, str]:
+    return store.put(seal_immutable(value))
 
 
-def test_seal_reads_once_and_persists_exact_capture_and_context(monkeypatch, tmp_path: Path) -> None:
+def _provider_evidence(
+    root: Path,
+    *,
+    capture_lineage_ref: dict[str, str],
+    source_kind: str,
+    suffix: str,
+) -> dict[str, str]:
+    store = UEIObjectStore(root=root / "artifacts" / "uei-shadow-store")
+    provider_id = f"local.test/{source_kind}"
+    profile_id = f"local.test/{source_kind}/v1"
+    request_ref = _put(store, {
+        "contract_version": "screen_parse_request_v1",
+        "request_id": f"request/{suffix}",
+        "capture_lineage_ref": capture_lineage_ref,
+        "requested_profiles": [{
+            "provider_id": provider_id,
+            "profile_id": profile_id,
+            "mode": "Advisory",
+        }],
+        "privacy_policy": "minimal",
+        "requester_id": "server",
+    })
+    registration_ref = _put(store, {
+        "contract_version": "trusted_provider_registration_v1",
+        "registration_id": f"registration/{suffix}",
+        "provider_id": provider_id,
+        "profile_ids": [profile_id],
+        "enabled": True,
+        "allowed_modes": ["Advisory"],
+        "allowed_privacy_policies": ["minimal"],
+        "egress_policy": "local_only",
+        "wire_payload_policy": "restricted_store_only",
+        "safe_payload_limits": {
+            "max_json_bytes": 4096,
+            "max_depth": 6,
+            "max_array_items": 16,
+            "max_object_properties": 16,
+            "max_string_chars": 256,
+            "allowed_json_types": ["object", "array", "string", "number", "boolean", "null"],
+        },
+        "required_conformance_suite": "uei-v1-static-projection",
+    })
+    manifest_ref = _put(store, {
+        "contract_version": "provider_manifest_v1",
+        "manifest_id": f"manifest/{suffix}",
+        "provider_id": provider_id,
+        "provider_version": "test-1",
+        "profiles": [{
+            "profile_id": profile_id,
+            "operation": "screen_parse",
+            "input_contract": "screen_parse_request_v1",
+            "output_contract": "provider_safe_result_v1",
+            "declared_output_kinds": ["text" if source_kind == "ocr" else "element"],
+            "supported_coordinate_spaces": ["capture_pixel_xyxy"],
+            "supports_capture_artifact": True,
+            "privacy_capabilities": ["minimal"],
+            "mode_allowlist": ["Advisory"],
+        }],
+    })
+    return _put(store, {
+        "contract_version": "provider_safe_result_v1",
+        "result_id": f"result/{suffix}",
+        "request_ref": request_ref,
+        "requested_provider_id": provider_id,
+        "requested_profile_id": profile_id,
+        "registration_resolution": "resolved",
+        "manifest_resolution": "resolved",
+        "registration_ref": registration_ref,
+        "manifest_ref": manifest_ref,
+        "provider_id": provider_id,
+        "profile_id": profile_id,
+        "provider_version": "test-1",
+        "capture_lineage_ref": capture_lineage_ref,
+        "status": "success",
+        "review_only": True,
+        "items": [],
+        "redaction_summary": {
+            "redacted_item_count": 0,
+            "redacted_field_count": 0,
+            "secret_detected": False,
+            "sensitive_categories": [],
+        },
+    })
+
+
+def _source(
+    *, kind: str, evidence_ref: dict[str, str], lineage_ref: dict[str, str], run_id="run-a", revision=7
+) -> dict[str, object]:
+    return {
+        "source_kind": kind,
+        "capture_lineage_ref": lineage_ref,
+        "run_id": run_id,
+        "workflow_revision": revision,
+        "window_binding": _window(),
+        "evidence_contract_version": "provider_safe_result_v1",
+        "evidence_ref": evidence_ref,
+    }
+
+
+def _context(root: Path, identity: dict[str, object], *, run_id="run-a", revision=7):
+    lineage_ref = identity["capture_lineage_ref"]
+    ocr = _provider_evidence(
+        root, capture_lineage_ref=lineage_ref, source_kind="ocr", suffix=f"{run_id}-ocr-{revision}"
+    )
+    uia = _provider_evidence(
+        root, capture_lineage_ref=lineage_ref, source_kind="uia", suffix=f"{run_id}-uia-{revision}"
+    )
+    return {
+        "capture_lineage_ref": lineage_ref,
+        "sources": [
+            _source(kind="ocr", evidence_ref=ocr, lineage_ref=lineage_ref, run_id=run_id, revision=revision),
+            _source(kind="uia", evidence_ref=uia, lineage_ref=lineage_ref, run_id=run_id, revision=revision),
+        ],
+        "derived_views": [],
+    }
+
+
+def _bundle(root: Path, *, run_id="run-a", revision=7):
+    from app.learn.hybrid.capture import seal_hybrid_capture_bundle
+
+    image_path, identity = _identity(root, run_id=run_id, revision=revision)
+    return seal_hybrid_capture_bundle(
+        project_root=root,
+        image_path=image_path,
+        run_id=run_id,
+        workflow_revision=revision,
+        window_binding=_window(),
+        ocr_uia_context=_context(root, identity, run_id=run_id, revision=revision),
+    )
+
+
+def test_valid_same_capture_ocr_uia_context_is_uei_native_and_loadable(tmp_path: Path) -> None:
+    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
+
+    bundle = _bundle(tmp_path)
+    loaded = load_and_verify_hybrid_capture_bundle(
+        project_root=tmp_path,
+        bundle_ref=bundle["bundle_ref"],
+        expected_run_id="run-a",
+        expected_workflow_revision=7,
+    )
+
+    assert loaded["run_id"] == "run-a"
+    assert loaded["workflow_revision"] == 7
+    assert [source["source_kind"] for source in loaded["context"]["sources"]] == ["ocr", "uia"]
+    assert all(source["capture_lineage_ref"] == loaded["capture_identity"]["capture_lineage_ref"]
+               for source in loaded["context"]["sources"])
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    assert store.get(bundle["context_ref"], contract_version="hybrid_capture_context_v1") == loaded["context"]
+    stored_bundle = store.get(bundle["bundle_ref"], contract_version="hybrid_capture_bundle_v1")
+    assert {field: loaded[field] for field in stored_bundle} == stored_bundle
+
+
+def test_bundle_reads_canonical_screenshot_once_and_derives_exact_facts(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     import app.learn.hybrid.capture as capture_module
 
-    image_path = _image(tmp_path / "artifacts" / "screenshots" / "capture.png")
-    image_bytes = image_path.read_bytes()
-    calls = 0
-    original = capture_module._read_server_owned_image
+    image_path, identity = _identity(tmp_path)
+    context = _context(tmp_path, identity)
+    image_open_count = 0
+    original_open = capture_module.os.open
 
-    def counted(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original(*args, **kwargs)
+    def counted_open(path, *args, **kwargs):
+        nonlocal image_open_count
+        if Path(path).resolve() == image_path.resolve():
+            image_open_count += 1
+        return original_open(path, *args, **kwargs)
 
-    monkeypatch.setattr(capture_module, "_read_server_owned_image", counted)
+    monkeypatch.setattr(capture_module.os, "open", counted_open)
     bundle = capture_module.seal_hybrid_capture_bundle(
         project_root=tmp_path,
         image_path=image_path,
-        workflow_revision="7",
+        run_id="run-a",
+        workflow_revision=7,
         window_binding=_window(),
-        ocr_uia_context=_context(),
-    )
-    loaded = capture_module.load_and_verify_hybrid_capture_bundle(
-        project_root=tmp_path, bundle_ref=bundle["bundle_ref"]
+        ocr_uia_context=context,
     )
 
-    expected_sha = sha256(image_bytes).hexdigest()
-    identity = loaded["capture_identity"]
-    assert calls == 1
-    assert identity["artifact_sha256"] == expected_sha
-    assert identity["screenshot_sha256"] == expected_sha
-    assert identity["image_size"] == {"width": 8, "height": 6}
-    assert identity["workflow_revision"] == "7"
-    assert identity["artifact"]["artifact_sha256"] == expected_sha
-    assert identity["capture_lineage"]["artifact_sha256"] == expected_sha
-    assert identity["artifact_ref"]["content_sha256"] != expected_sha
-    assert identity["capture_lineage_ref"]["content_sha256"] != expected_sha
-    assert loaded["capture_lineage_ref"] == identity["capture_lineage_ref"]
-    assert loaded["context_ref"]["content_sha256"] == loaded["context"]["content_sha256"]
-    assert loaded["context"]["capture_lineage_ref"] == identity["capture_lineage_ref"]
-    assert loaded["context"]["workflow_revision"] == "7"
-    assert loaded["context"]["window_binding"] == _window()
-    assert loaded["context"]["ocr_uia_context"]["ocr"]["provenance"]["engine"] == "windows-ocr"
-    assert loaded["context"]["ocr_uia_context"]["uia"]["provenance"]["adapter"] == "windows-uia"
-
-    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
-    assert store.get(identity["artifact_ref"], contract_version="artifact_ref_v1") == identity["artifact"]
-    assert store.get(identity["capture_lineage_ref"], contract_version="capture_lineage_v1") == identity["capture_lineage"]
+    expected_sha = sha256(image_path.read_bytes()).hexdigest()
+    assert image_open_count == 1
+    assert bundle["capture_identity"]["artifact_sha256"] == expected_sha
+    assert bundle["capture_identity"]["screenshot_sha256"] == expected_sha
+    assert bundle["capture_identity"]["image_size"] == {"width": 8, "height": 6}
 
 
-def test_loader_rejects_client_forged_path_or_ref(tmp_path: Path) -> None:
-    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
-
-    bundle = _seal(tmp_path)
-    for forged in (
-        {**bundle["bundle_ref"], "image_path": "Z:/forged.png"},
-        {"id": bundle["bundle_ref"]["id"], "content_sha256": "0" * 64},
-    ):
-        with pytest.raises(ValueError):
-            load_and_verify_hybrid_capture_bundle(project_root=tmp_path, bundle_ref=forged)
-
-
-def test_stale_workflow_revision_fails_closed(tmp_path: Path) -> None:
-    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
-
-    stale = _seal(tmp_path, revision="7")
-    _seal(tmp_path, revision="8", color=(30, 20, 10))
-    with pytest.raises(ValueError, match="stale workflow revision"):
-        load_and_verify_hybrid_capture_bundle(project_root=tmp_path, bundle_ref=stale["bundle_ref"])
-
-
-def test_conflicting_valid_lineage_refs_fail_closed(tmp_path: Path) -> None:
-    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
-
-    first = _seal(tmp_path / "one", revision="7")
-    second = _seal(tmp_path / "two", revision="7", color=(30, 20, 10))
-    loaded = load_and_verify_hybrid_capture_bundle(
-        project_root=tmp_path / "one", bundle_ref=first["bundle_ref"]
-    )
-    forged = deepcopy(loaded)
-    forged.pop("content_sha256")
-    forged["capture_lineage_ref"] = second["capture_lineage_ref"]
-    forged_ref = _store_forged_bundle(tmp_path / "one", forged)
-    with pytest.raises(ValueError, match="capture lineage conflict"):
-        load_and_verify_hybrid_capture_bundle(project_root=tmp_path / "one", bundle_ref=forged_ref)
-
-
-def test_cross_capture_provider_result_fails_closed(tmp_path: Path) -> None:
+def test_raw_ocr_uia_snapshot_fields_are_not_a_context_contract(tmp_path: Path) -> None:
     from app.learn.hybrid.capture import seal_hybrid_capture_bundle
-    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
 
-    other_image = _image(tmp_path / "artifacts" / "screenshots" / "other.png", color=(1, 2, 3))
-    other_ref = seal_builtin_ocr_evidence(
-        project_root=tmp_path,
-        image_path=other_image,
-        capture_id="capture/other",
-        captured_at="2026-08-25T00:00:00Z",
-        ocr_result={
-            "matches": [{
-                "text": "Other",
-                "score": 0.9,
-                "bbox": {"x": 1, "y": 1, "width": 3, "height": 2},
-            }],
-            "metadata": {"engine": "fixture"},
-        },
-    )
-    with pytest.raises(ValueError, match="cross-capture evidence"):
+    image_path, identity = _identity(tmp_path)
+    with pytest.raises(ValueError, match="closed object"):
         seal_hybrid_capture_bundle(
             project_root=tmp_path,
-            image_path=_image(tmp_path / "artifacts" / "screenshots" / "current.png"),
-            workflow_revision="7",
+            image_path=image_path,
+            run_id="run-a",
+            workflow_revision=7,
             window_binding=_window(),
-            ocr_uia_context={**_context(), "ocr_result_ref": other_ref},
+            ocr_uia_context={
+                "capture_lineage_ref": identity["capture_lineage_ref"],
+                "sources": [],
+                "derived_views": [],
+                "qwen_payload": {"raw": True},
+            },
         )
 
 
-def test_derived_view_transform_must_bind_source_and_target_sha(tmp_path: Path) -> None:
+def test_builtin_ocr_hybrid_path_reuses_exact_sealed_lineage(tmp_path: Path) -> None:
+    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
+
+    image_path, identity = _identity(tmp_path)
+    result_ref = seal_builtin_ocr_evidence(
+        project_root=tmp_path,
+        image_path=image_path,
+        capture_id=identity["capture_id"],
+        captured_at=identity["captured_at"],
+        capture_lineage_ref=identity["capture_lineage_ref"],
+        expected_image_sha256=identity["artifact_sha256"],
+        expected_image_size=identity["image_size"],
+        ocr_result={
+            "matches": [{
+                "text": "Search",
+                "score": 0.9,
+                "bbox": {"x": 1, "y": 1, "width": 4, "height": 2},
+            }],
+            "metadata": {"engine": "builtin"},
+        },
+    )
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    result = store.get(result_ref, contract_version="provider_safe_result_v1")
+    assert result["capture_lineage_ref"] == identity["capture_lineage_ref"]
+    assert store.object_count(contract_version="capture_lineage_v1") == 1
+
+
+def test_cross_capture_source_and_nested_authority_fail_closed(tmp_path: Path) -> None:
     from app.learn.hybrid.capture import seal_hybrid_capture_bundle
 
-    image_path = _image(tmp_path / "artifacts" / "screenshots" / "capture.png")
-    target_sha = "b" * 64
+    image_path, identity = _identity(tmp_path, run_id="run-a")
+    _, other = _identity(tmp_path, run_id="run-b", name="other.png")
+    context = _context(tmp_path, identity)
+    cross = _provider_evidence(
+        tmp_path,
+        capture_lineage_ref=other["capture_lineage_ref"],
+        source_kind="ocr",
+        suffix="cross-ocr",
+    )
+    context["sources"][0]["evidence_ref"] = cross
+    with pytest.raises(ValueError, match="cross-capture evidence"):
+        seal_hybrid_capture_bundle(
+            project_root=tmp_path, image_path=image_path, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), ocr_uia_context=context,
+        )
+
+    context = _context(tmp_path, identity)
+    context["sources"][0]["window_binding"]["approved_to_click"] = True
+    with pytest.raises(ValueError, match="window binding|closed|authority"):
+        seal_hybrid_capture_bundle(
+            project_root=tmp_path, image_path=image_path, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), ocr_uia_context=context,
+        )
+
+
+def test_capture_path_must_be_under_screenshot_service_root(tmp_path: Path) -> None:
+    from app.learn.hybrid.capture import seal_hybrid_capture_identity
+
+    outside = _image(tmp_path / "arbitrary.png")
+    with pytest.raises(ValueError, match="screenshot service root"):
+        seal_hybrid_capture_identity(
+            project_root=tmp_path, image_path=outside, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), captured_at="2026-08-25T00:00:00Z",
+        )
+
+
+def test_derived_target_artifact_and_affine_are_resolved_semantically(tmp_path: Path) -> None:
+    from app.learn.hybrid.capture import (
+        load_and_verify_hybrid_capture_bundle,
+        seal_hybrid_capture_bundle,
+    )
+
+    source_path, source = _identity(tmp_path, name="source.png", size=(8, 6))
+    _, target = _identity(tmp_path, name="target.png", size=(4, 3))
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
     transform = seal_immutable({
         "contract_version": "affine_coordinate_transform_v1",
         "source_space": "capture_pixel_xyxy",
@@ -192,107 +336,110 @@ def test_derived_view_transform_must_bind_source_and_target_sha(tmp_path: Path) 
         "offset": {"x": 0, "y": 0},
         "rounding": "outward",
         "clipping": "reject_if_outside",
-        "source_capture_artifact_sha256": "a" * 64,
-        "target_capture_artifact_sha256": target_sha,
+        "source_capture_artifact_sha256": source["artifact_sha256"],
+        "target_capture_artifact_sha256": target["artifact_sha256"],
     })
-    context = _context(derived_views=[{
-        "target_artifact_sha256": target_sha,
-        "coordinate_transform": transform,
-    }])
-    with pytest.raises(ValueError, match="transform source artifact SHA mismatch"):
+    transform_ref = store.put(transform)
+    context = _context(tmp_path, source)
+    context["derived_views"] = [{
+        "target_capture_lineage_ref": target["capture_lineage_ref"],
+        "target_artifact_ref": target["artifact_ref"],
+        "coordinate_transform_ref": transform_ref,
+    }]
+    bundle = seal_hybrid_capture_bundle(
+        project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
+        window_binding=_window(), ocr_uia_context=context,
+    )
+    assert bundle["context"]["derived_views"][0]["target_artifact"]["artifact_sha256"] == target["artifact_sha256"]
+    assert load_and_verify_hybrid_capture_bundle(
+        project_root=tmp_path,
+        bundle_ref=bundle["bundle_ref"],
+        expected_run_id="run-a",
+        expected_workflow_revision=7,
+    )["context"]["derived_views"][0]["coordinate_transform"] == transform
+
+    bad = deepcopy(transform)
+    bad.pop("content_sha256")
+    bad["scale"] = {"x": 0.25, "y": 0.5}
+    context["derived_views"][0]["coordinate_transform_ref"] = store.put(seal_immutable(bad))
+    with pytest.raises(ValueError, match="affine scale mismatch"):
         seal_hybrid_capture_bundle(
-            project_root=tmp_path,
-            image_path=image_path,
-            workflow_revision="7",
-            window_binding=_window(),
-            ocr_uia_context=context,
+            project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), ocr_uia_context=context,
+        )
+
+    wrong_size = deepcopy(transform)
+    wrong_size.pop("content_sha256")
+    wrong_size["target_size"] = {"width": 5, "height": 3}
+    context["derived_views"][0]["coordinate_transform_ref"] = store.put(
+        seal_immutable(wrong_size)
+    )
+    with pytest.raises(ValueError, match="derived affine binding mismatch"):
+        seal_hybrid_capture_bundle(
+            project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), ocr_uia_context=context,
+        )
+
+    context["derived_views"][0]["target_artifact_ref"] = {
+        "id": "artifact/missing", "content_sha256": "f" * 64
+    }
+    with pytest.raises(ValueError):
+        seal_hybrid_capture_bundle(
+            project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), ocr_uia_context=context,
         )
 
 
-def test_raw_provider_payload_and_path_escape_are_rejected(tmp_path: Path) -> None:
-    from app.learn.hybrid.capture import seal_hybrid_capture_bundle
+def test_run_scoped_freshness_supports_concurrent_runs(tmp_path: Path) -> None:
+    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
 
-    outside = _image(tmp_path.parent / "outside-hybrid-capture.png")
-    with pytest.raises(ValueError, match="server-owned image"):
-        seal_hybrid_capture_bundle(
-            project_root=tmp_path,
-            image_path=outside,
-            workflow_revision="7",
-            window_binding=_window(),
-            ocr_uia_context=_context(),
-        )
-    with pytest.raises(ValueError, match="raw provider payload"):
-        seal_hybrid_capture_bundle(
-            project_root=tmp_path,
-            image_path=_image(tmp_path / "artifacts" / "screenshots" / "capture.png"),
-            workflow_revision="7",
-            window_binding=_window(),
-            ocr_uia_context={**_context(), "qwen_payload": {"raw": "not allowed"}},
+    first = _bundle(tmp_path / "shared", run_id="run-a", revision=7)
+    second = _bundle(tmp_path / "shared", run_id="run-b", revision=7)
+    assert load_and_verify_hybrid_capture_bundle(
+        project_root=tmp_path / "shared", bundle_ref=first["bundle_ref"],
+        expected_run_id="run-a", expected_workflow_revision=7,
+    )["run_id"] == "run-a"
+    assert load_and_verify_hybrid_capture_bundle(
+        project_root=tmp_path / "shared", bundle_ref=second["bundle_ref"],
+        expected_run_id="run-b", expected_workflow_revision=7,
+    )["run_id"] == "run-b"
+    with pytest.raises(ValueError, match="cross-run bundle"):
+        load_and_verify_hybrid_capture_bundle(
+            project_root=tmp_path / "shared", bundle_ref=first["bundle_ref"],
+            expected_run_id="run-b", expected_workflow_revision=7,
         )
 
 
-def test_symlink_and_capture_read_race_fail_closed(monkeypatch, tmp_path: Path) -> None:
-    import app.learn.hybrid.capture as capture_module
+def test_unverified_screen_observe_ref_never_suppresses_legacy_path() -> None:
+    from app.learn.workflow_continuation import interpret_learning_stage_worker_result
+
+    ref = {"id": "hybrid-capture/fabricated", "content_sha256": "a" * 64}
+    decision = interpret_learning_stage_worker_result(
+        stage="screen_understanding",
+        task_kind="vision_observe_screen",
+        response={"success": True, "data": {"result": {
+            "image_path": "artifacts/screenshots/current.png",
+            "hybrid_capture_bundle_ref": ref,
+            "screen_size": {"width": 8, "height": 6},
+        }}},
+    )
+    evidence = decision["next_worker"]["payload"]["observation_evidence"]
+    assert evidence["current_image_path"] == "artifacts/screenshots/current.png"
+    assert "hybrid_capture_bundle_ref" not in evidence
+
+
+def test_windows_reparse_capture_is_rejected_or_explicitly_skipped(tmp_path: Path) -> None:
+    from app.learn.hybrid.capture import seal_hybrid_capture_identity
 
     screenshots = tmp_path / "artifacts" / "screenshots"
     real = _image(screenshots / "real.png")
     link = screenshots / "linked.png"
     try:
         link.symlink_to(real)
-    except OSError:
-        link = None
-    if link is not None:
-        with pytest.raises(ValueError, match="reparse point"):
-            capture_module.seal_hybrid_capture_bundle(
-                project_root=tmp_path,
-                image_path=link,
-                workflow_revision="7",
-                window_binding=_window(),
-                ocr_uia_context=_context(),
-            )
-
-    comparisons = 0
-    original = capture_module._same_file_state
-
-    def changed_during_read(left, right):
-        nonlocal comparisons
-        comparisons += 1
-        return False if comparisons == 2 else original(left, right)
-
-    monkeypatch.setattr(capture_module, "_same_file_state", changed_during_read)
-    with pytest.raises(ValueError, match="changed during read"):
-        capture_module.seal_hybrid_capture_bundle(
-            project_root=tmp_path,
-            image_path=real,
-            workflow_revision="7",
-            window_binding=_window(),
-            ocr_uia_context=_context(),
+    except OSError as error:
+        pytest.skip(f"Windows symlink creation unavailable: {error}")
+    with pytest.raises(ValueError, match="reparse point"):
+        seal_hybrid_capture_identity(
+            project_root=tmp_path, image_path=link, run_id="run-a", workflow_revision=7,
+            window_binding=_window(), captured_at="2026-08-25T00:00:00Z",
         )
-
-
-def test_screen_observe_prefers_sealed_bundle_ref_without_changing_legacy_default() -> None:
-    from app.learn.workflow_continuation import interpret_learning_stage_worker_result
-
-    ref = {"id": "hybrid-capture/example", "content_sha256": "a" * 64}
-    decision = interpret_learning_stage_worker_result(
-        stage="screen_understanding",
-        task_kind="vision_observe_screen",
-        response={
-            "success": True,
-            "data": {"result": {
-                "image_path": "artifacts/screenshots/current.png",
-                "hybrid_capture_bundle_ref": ref,
-                "screen_size": {"width": 8, "height": 6},
-            }},
-        },
-    )
-    evidence = decision["next_worker"]["payload"]["observation_evidence"]
-    assert evidence["hybrid_capture_bundle_ref"] == ref
-    assert "current_image_path" not in evidence
-
-    legacy = interpret_learning_stage_worker_result(
-        stage="screen_understanding",
-        task_kind="vision_observe_screen",
-        response={"success": True, "data": {"result": {"image_path": "legacy.png"}}},
-    )
-    assert legacy["next_worker"]["payload"]["observation_evidence"]["current_image_path"] == "legacy.png"

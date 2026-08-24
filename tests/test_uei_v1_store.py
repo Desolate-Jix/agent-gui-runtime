@@ -34,6 +34,23 @@ def test_store_returns_verified_ref_and_records_instance_write_order(tmp_path: P
     assert UEIObjectStore(root=tmp_path / "other").write_order == ()
 
 
+def test_store_uses_stable_ids_for_hybrid_context_and_bundle(tmp_path: Path):
+    from app.learn.recognition.uei.store import UEIObjectStore
+    from tests.test_uei_v1_schemas import minimal_contract_values
+
+    store = UEIObjectStore(root=tmp_path / "objects")
+    values = minimal_contract_values()
+    context = seal_immutable(values["hybrid_capture_context_v1"])
+    context_ref = store.put(context)
+    bundle = seal_immutable(values["hybrid_capture_bundle_v1"])
+    bundle_ref = store.put(bundle)
+
+    assert context_ref["id"] == "context/1"
+    assert bundle_ref["id"] == "bundle/1"
+    assert store.get(context_ref, contract_version="hybrid_capture_context_v1") == context
+    assert store.get(bundle_ref, contract_version="hybrid_capture_bundle_v1") == bundle
+
+
 @pytest.mark.parametrize("mutation", [
     lambda value: value.__setitem__("byte_length", 2),
     lambda value: value.__setitem__("content_sha256", "b" * 64),

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hybrid_capture_bundle_v1",
+  "type": "object",
+  "required": [
+    "contract_version", "bundle_id", "run_id", "workflow_revision",
+    "capture_lineage_ref", "artifact_ref", "context_ref",
+    "artifact_is_authorization", "execute_binding_enabled", "final_submit_forbidden",
+    "real_action_requires_gate", "authorization_scope", "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {"const": "hybrid_capture_bundle_v1"},
+    "bundle_id": {"type": "string", "minLength": 1, "maxLength": 512},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "workflow_revision": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "capture_lineage_ref": {"$ref": "#/$defs/immutable_ref"},
+    "artifact_ref": {"$ref": "#/$defs/immutable_ref"},
+    "context_ref": {"$ref": "#/$defs/immutable_ref"},
+    "artifact_is_authorization": {"const": false},
+    "execute_binding_enabled": {"const": false},
+    "final_submit_forbidden": {"const": true},
+    "real_action_requires_gate": {"const": true},
+    "authorization_scope": {"const": "display_and_review_only"},
+    "content_sha256": {"$ref": "#/$defs/sha"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "immutable_ref": {
+      "type": "object",
+      "required": ["id", "content_sha256"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "content_sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "opaque_scalar": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "null"}]},
+    "opaque_value": {"oneOf": [{"$ref": "#/$defs/opaque_scalar"}, {"type": "array", "items": {"$ref": "#/$defs/opaque_value"}, "maxItems": 256}, {"type": "object", "maxProperties": 64, "additionalProperties": {"$ref": "#/$defs/opaque_value"}}]}
+  }
+}

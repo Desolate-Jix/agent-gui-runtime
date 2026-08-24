@@ -20,6 +20,7 @@ from app.learn.workflow_continuation import (
 )
 from app.learn.workflow_evidence import verify_learning_workflow_completion_evidence
 from app.learn.workflow_store import LearningWorkflowRunStore
+from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
 
 
 LEARNING_WORKFLOW_STAGE_OPERATION_CONTRACT_VERSION = (
@@ -557,13 +558,22 @@ def continue_learning_stage_worker_result(
             "adopted worker result identity is incomplete"
         )
 
+    response_for_return = deepcopy(response)
+    current = store.get(run_id)
+    if task_kind == "vision_observe_screen" and response.get("success") is True:
+        response = _verify_hybrid_observe_handoff(
+            response=response,
+            project_root=project_root,
+            run_id=run_id,
+            expected_revision=expected_revision,
+            current=current,
+        )
     decision = interpret_learning_stage_worker_result(
         stage=stage,
         task_kind=task_kind,
         response=response,
     )
     artifact_request = decision.pop("artifact_request", None)
-    current = store.get(run_id)
     replay = _matching_worker_continuation_replay(
         workflow_state=current,
         stage=stage,
@@ -596,7 +606,7 @@ def continue_learning_stage_worker_result(
             "stage_finished": True,
             "continuation_status": "terminal_result",
             "outcome": replay["outcome"],
-            "response": deepcopy(response),
+            "response": response_for_return,
             "workflow_state": current,
             "idempotent_replay": True,
             "next_stage_operation": deepcopy(next_stage_operation),
@@ -638,7 +648,7 @@ def continue_learning_stage_worker_result(
             }
         return {
             **decision,
-            "response": deepcopy(response),
+            "response": response_for_return,
             "workflow_state": current,
             "idempotent_replay": False,
             "next_worker": deepcopy(next_worker),
@@ -729,12 +739,49 @@ def continue_learning_stage_worker_result(
     )
     return {
         **decision,
-        "response": deepcopy(response),
+        "response": response_for_return,
         "workflow_state": workflow_state,
         "idempotent_replay": False,
         "next_stage_operation": deepcopy(next_stage_operation),
         "next_stage_worker": deepcopy(next_stage_worker),
     }
+
+
+def _verify_hybrid_observe_handoff(
+    *, response: dict[str, Any], project_root: str | Path, run_id: str,
+    expected_revision: int, current: dict[str, Any],
+) -> dict[str, Any]:
+    verified_response = deepcopy(response)
+    data = verified_response.get("data")
+    if isinstance(data, dict) and isinstance(data.get("result"), dict):
+        result = data["result"]
+    elif isinstance(verified_response.get("result"), dict):
+        result = verified_response["result"]
+    else:
+        result = verified_response
+    result.pop("_hybrid_capture_bundle_verified", None)
+    bundle_ref = result.get("hybrid_capture_bundle_ref")
+    if bundle_ref is None:
+        return verified_response
+    _require_revision(current, expected_revision)
+    current_revision = current.get("revision")
+    if isinstance(current_revision, bool) or not isinstance(current_revision, int):
+        raise LearningWorkflowStageOperationError(
+            "authoritative workflow revision is invalid"
+        )
+    try:
+        load_and_verify_hybrid_capture_bundle(
+            project_root=Path(project_root),
+            bundle_ref=bundle_ref,
+            expected_run_id=run_id,
+            expected_workflow_revision=current_revision,
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"hybrid capture handoff verification failed: {error}"
+        ) from error
+    result["_hybrid_capture_bundle_verified"] = True
+    return verified_response
 
 
 def _ensure_next_managed_stage_operation(

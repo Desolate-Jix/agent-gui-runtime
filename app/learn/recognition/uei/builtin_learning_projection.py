@@ -6,7 +6,9 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from app.learn.hybrid.capture import _seal_server_owned_capture
+from PIL import Image
+
+from app.learn.hybrid.capture import resolve_server_owned_capture
 from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.projections import project_ocr_result
 from app.learn.recognition.uei.store import UEIObjectStore
@@ -33,6 +35,7 @@ def seal_builtin_ocr_evidence(
     ocr_result: dict[str, object],
     expected_image_sha256: str | None = None,
     expected_image_size: dict[str, int] | None = None,
+    capture_lineage_ref: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """把服务端截图与内置 OCR 结果封装成仅供审阅的 UEI 引用。"""
     if not isinstance(capture_id, str) or not capture_id.strip():
@@ -42,17 +45,31 @@ def seal_builtin_ocr_evidence(
     if not isinstance(ocr_result, dict):
         raise ValueError("built-in OCR result must be an object")
 
-    capture = _seal_server_owned_capture(
-        project_root=project_root,
-        image_path=image_path,
-        capture_id=capture_id,
-        captured_at=captured_at,
-        expected_image_sha256=expected_image_sha256,
-        expected_image_size=expected_image_size,
+    capture = (
+        resolve_server_owned_capture(
+            project_root=project_root,
+            image_path=image_path,
+            capture_lineage_ref=capture_lineage_ref,
+        )
+        if capture_lineage_ref is not None
+        else _seal_legacy_capture(
+            project_root=project_root,
+            image_path=image_path,
+            capture_id=capture_id,
+            captured_at=captured_at,
+        )
     )
     root = capture["project_root"]
     artifact_sha256 = capture["artifact_sha256"]
     image_size = capture["image_size"]
+    if capture_lineage_ref is not None and (
+        capture["capture_id"] != capture_id or capture["captured_at"] != captured_at
+    ):
+        raise ValueError("built-in OCR capture identity mismatch")
+    if expected_image_sha256 is not None and expected_image_sha256 != artifact_sha256:
+        raise ValueError("server-owned image SHA-256 mismatch")
+    if expected_image_size is not None and expected_image_size != image_size:
+        raise ValueError("server-owned image dimensions mismatch")
     store = capture["store"]
     capture_token = sha256((capture_id + artifact_sha256).encode("utf-8")).hexdigest()[:24]
     capture_ref = capture["capture_lineage_ref"]
@@ -120,3 +137,49 @@ def seal_builtin_ocr_evidence(
 
 def _put(store: UEIObjectStore, value: dict[str, Any]) -> dict[str, str]:
     return store.put(seal_immutable(value))
+
+
+def _seal_legacy_capture(
+    *, project_root: Path, image_path: Path, capture_id: str, captured_at: str
+) -> dict[str, Any]:
+    root = project_root.resolve()
+    image = image_path.resolve()
+    try:
+        image.relative_to(root)
+    except ValueError as error:
+        raise ValueError("server-owned image must be inside project root") from error
+    if not image.is_file() or image.is_symlink():
+        raise ValueError("server-owned image must be a regular project file")
+    image_bytes = image.read_bytes()
+    artifact_sha256 = sha256(image_bytes).hexdigest()
+    with Image.open(image) as opened:
+        image_size = {"width": int(opened.width), "height": int(opened.height)}
+        media_type = "image/jpeg" if str(opened.format).upper() == "JPEG" else "image/png"
+    store = UEIObjectStore(root=root / "artifacts" / "uei-shadow-store")
+    artifact_ref = _put(store, {
+        "contract_version": "artifact_ref_v1",
+        "artifact_id": f"artifact/server-owned/{artifact_sha256}",
+        "artifact_sha256": artifact_sha256,
+        "media_type": media_type,
+        "byte_length": len(image_bytes),
+        "restricted": True,
+    })
+    capture_ref = _put(store, {
+        "contract_version": "capture_lineage_v1",
+        "capture_id": capture_id,
+        "artifact_ref": artifact_ref,
+        "artifact_sha256": artifact_sha256,
+        "image_size": image_size,
+        "capture_coordinate_space": "capture_pixel_xyxy",
+        "captured_at": captured_at,
+    })
+    return {
+        "project_root": root,
+        "image_relative_path": image.relative_to(root).as_posix(),
+        "artifact_sha256": artifact_sha256,
+        "image_size": image_size,
+        "store": store,
+        "capture_id": capture_id,
+        "captured_at": captured_at,
+        "capture_lineage_ref": capture_ref,
+    }

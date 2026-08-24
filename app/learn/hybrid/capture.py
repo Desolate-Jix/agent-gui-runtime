@@ -1,254 +1,103 @@
-"""服务端拥有的 Hybrid 截图、血缘与 OCR/UIA 上下文封装。"""
+"""服务端截图与 Hybrid OCR/UIA 证据的不可变 UEI 封装。"""
 
 from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from io import BytesIO
 from hashlib import sha256
-import json
+from io import BytesIO
+import math
 import os
 from pathlib import Path
-import re
 import stat
 from typing import Any, TypeAlias
-from uuid import uuid4
 
 from PIL import Image
 
 from app.learn.hybrid.contracts import validate_capture_identity
-from app.learn.recognition.uei.canonical import (
-    canonical_json_bytes,
-    content_sha256,
-    seal_immutable,
-)
-from app.learn.recognition.uei.contracts import validate_contract
+from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
 from app.learn.recognition.uei.store import UEIObjectStore
 
 
 HybridCaptureBundle: TypeAlias = dict[str, Any]
 
-_UEI_STORE_RELATIVE_PATH = Path("artifacts") / "uei-shadow-store"
-_BUNDLE_STORE_RELATIVE_PATH = Path("artifacts") / "hybrid-capture-store"
-_HASH = re.compile(r"^[0-9a-f]{64}$")
+_STORE_RELATIVE_PATH = Path("artifacts") / "uei-shadow-store"
+_SCREENSHOT_RELATIVE_PATH = Path("artifacts") / "screenshots"
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-_PROVIDER_REF_FIELDS = frozenset(
-    {"provider_result_ref", "ocr_result_ref", "uia_result_ref"}
-)
-_FORBIDDEN_CONTEXT_PATH_FIELDS = frozenset(
-    {"image_path", "screenshot_path", "source_image_path", "artifact_path"}
-)
-_BUNDLE_FIELDS = frozenset(
+_NON_AUTHORIZING = {
+    "artifact_is_authorization": False,
+    "execute_binding_enabled": False,
+    "final_submit_forbidden": True,
+    "real_action_requires_gate": True,
+    "authorization_scope": "display_and_review_only",
+}
+_AUTHORITY_ALIASES = frozenset(
     {
-        "contract_version",
-        "bundle_id",
-        "capture_identity",
-        "capture_lineage_ref",
-        "artifact_ref",
-        "context_ref",
-        "context",
-        "transform_refs",
-        "artifact_is_authorization",
-        "execute_binding_enabled",
-        "final_submit_forbidden",
-        "real_action_requires_gate",
-        "authorization_scope",
-        "content_sha256",
+        "action_authorized",
+        "approved_to_click",
+        "approved_to_execute",
+        "click_authorized",
+        "execute",
+        "final_submit",
+        "submit_authorized",
     }
 )
-_CONTEXT_FIELDS = frozenset(
+_WINDOW_FIELDS = frozenset({"window_binding_id", "process_id", "process_name", "rect"})
+_RECT_FIELDS = frozenset({"left", "top", "right", "bottom"})
+_SOURCE_FIELDS = frozenset(
     {
-        "contract_version",
-        "context_id",
+        "source_kind",
         "capture_lineage_ref",
+        "run_id",
         "workflow_revision",
         "window_binding",
-        "ocr_uia_context",
-        "transform_refs",
-        "content_sha256",
+        "evidence_contract_version",
+        "evidence_ref",
+    }
+)
+_DERIVED_INPUT_FIELDS = frozenset(
+    {"target_capture_lineage_ref", "target_artifact_ref", "coordinate_transform_ref"}
+)
+_DERIVED_STORED_FIELDS = frozenset(
+    {
+        "target_capture_lineage_ref",
+        "target_capture_lineage",
+        "target_artifact_ref",
+        "target_artifact",
+        "coordinate_transform_ref",
+        "coordinate_transform",
     }
 )
 
 
-def seal_hybrid_capture_bundle(
+def seal_hybrid_capture_identity(
     *,
     project_root: Path,
     image_path: Path,
-    workflow_revision: object,
+    run_id: str,
+    workflow_revision: int,
     window_binding: dict[str, object],
-    ocr_uia_context: dict[str, object],
-) -> HybridCaptureBundle:
-    """读取一次服务端截图并封装不可变血缘和同源上下文。"""
+    captured_at: str | None = None,
+) -> dict[str, Any]:
+    """为 ScreenshotService 已生成的文件建立唯一 UEI capture lineage。"""
+    root = _project_root(project_root)
+    normalized_run_id = _run_id(run_id)
     revision = _workflow_revision(workflow_revision)
-    binding = _canonical_object(window_binding, name="window_binding", require_nonempty=True)
-    context_input = _canonical_object(
-        ocr_uia_context, name="ocr_uia_context", require_nonempty=True
-    )
-    _reject_untrusted_context_fields(context_input)
-
-    capture = _seal_server_owned_capture(
-        project_root=project_root,
-        image_path=image_path,
-    )
-    root = capture["project_root"]
-    store = capture["store"]
-    identity = {
-        "contract_version": "hybrid_capture_identity_v1",
-        "capture_id": capture["capture_id"],
-        "capture_lineage_ref": capture["capture_lineage_ref"],
-        "capture_lineage": capture["capture_lineage"],
-        "artifact_ref": capture["artifact_ref"],
-        "artifact": capture["artifact"],
-        "artifact_sha256": capture["artifact_sha256"],
-        "screenshot_sha256": capture["artifact_sha256"],
-        "image_size": capture["image_size"],
-        "capture_coordinate_space": "capture_pixel_xyxy",
-        "captured_at": capture["captured_at"],
-        "workflow_revision": revision,
-    }
-    identity = validate_capture_identity(identity)
-
-    normalized_context, transform_refs = _seal_context_bindings(
-        store=store,
-        context=context_input,
-        capture_lineage_ref=identity["capture_lineage_ref"],
-        artifact_sha256=identity["artifact_sha256"],
-        image_size=identity["image_size"],
-    )
-    context_base: dict[str, object] = {
-        "contract_version": "hybrid_ocr_uia_context_v1",
-        "context_id": "",
-        "capture_lineage_ref": identity["capture_lineage_ref"],
+    binding = _window_binding(window_binding)
+    _, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
+    artifact_sha, image_size, media_type = _image_facts(image_bytes)
+    timestamp = captured_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    identity_material = {
+        "run_id": normalized_run_id,
         "workflow_revision": revision,
         "window_binding": binding,
-        "ocr_uia_context": normalized_context,
-        "transform_refs": transform_refs,
+        "artifact_sha256": artifact_sha,
+        "captured_at": timestamp,
     }
-    context_token = sha256(canonical_json_bytes(context_base)).hexdigest()
-    context_base["context_id"] = f"hybrid-context/{context_token}"
-    context = seal_immutable(context_base)
-    context_ref = _persist_sealed_object(
-        root=root,
-        directory="contexts",
-        value=context,
-        id_field="context_id",
-    )
-
-    bundle_base: dict[str, object] = {
-        "contract_version": "hybrid_capture_bundle_v1",
-        "bundle_id": "",
-        "capture_identity": identity,
-        "capture_lineage_ref": identity["capture_lineage_ref"],
-        "artifact_ref": identity["artifact_ref"],
-        "context_ref": context_ref,
-        "context": context,
-        "transform_refs": transform_refs,
-        "artifact_is_authorization": False,
-        "execute_binding_enabled": False,
-        "final_submit_forbidden": True,
-        "real_action_requires_gate": True,
-        "authorization_scope": "display_and_review_only",
-    }
-    bundle_token = sha256(canonical_json_bytes(bundle_base)).hexdigest()
-    bundle_base["bundle_id"] = f"hybrid-capture/{bundle_token}"
-    bundle = seal_immutable(bundle_base)
-    bundle_ref = _persist_sealed_object(
-        root=root,
-        directory="objects",
-        value=bundle,
-        id_field="bundle_id",
-    )
-    _write_current_revision(
-        root=root,
-        revision=revision,
-        capture_lineage_ref=identity["capture_lineage_ref"],
-    )
-    return {"bundle_ref": bundle_ref, **deepcopy(bundle)}
-
-
-def load_and_verify_hybrid_capture_bundle(
-    *, project_root: Path, bundle_ref: dict[str, str]
-) -> dict[str, Any]:
-    """加载并重新验证一个精确的不可变 Hybrid capture bundle。"""
-    root = _project_root(project_root)
-    reference = _immutable_ref(bundle_ref, name="bundle_ref")
-    bundle = _load_sealed_object(
-        root=root,
-        directory="objects",
-        reference=reference,
-        id_field="bundle_id",
-    )
-    _closed_fields(bundle, _BUNDLE_FIELDS, name="hybrid capture bundle")
-    if bundle.get("contract_version") != "hybrid_capture_bundle_v1":
-        raise ValueError("hybrid capture bundle contract mismatch")
-    _non_authorizing(bundle)
-
-    identity = validate_capture_identity(_required_dict(bundle, "capture_identity"))
-    lineage_ref = _immutable_ref(
-        bundle.get("capture_lineage_ref"), name="capture_lineage_ref"
-    )
-    if lineage_ref != identity["capture_lineage_ref"]:
-        raise ValueError("capture lineage conflict")
-    artifact_ref = _immutable_ref(bundle.get("artifact_ref"), name="artifact_ref")
-    if artifact_ref != identity["artifact_ref"]:
-        raise ValueError("artifact ref conflict")
-
-    store = UEIObjectStore(root=root / _UEI_STORE_RELATIVE_PATH)
-    stored_artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
-    stored_lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
-    if canonical_json_bytes(stored_artifact) != canonical_json_bytes(identity["artifact"]):
-        raise ValueError("artifact ref conflict")
-    if canonical_json_bytes(stored_lineage) != canonical_json_bytes(identity["capture_lineage"]):
-        raise ValueError("capture lineage conflict")
-
-    context_ref = _immutable_ref(bundle.get("context_ref"), name="context_ref")
-    context = _load_sealed_object(
-        root=root,
-        directory="contexts",
-        reference=context_ref,
-        id_field="context_id",
-    )
-    if canonical_json_bytes(context) != canonical_json_bytes(bundle.get("context")):
-        raise ValueError("context ref conflict")
-    _verify_context_envelope(
-        store=store,
-        context=context,
-        capture_identity=identity,
-        expected_transform_refs=bundle.get("transform_refs"),
-    )
-    current = _read_current_revision(root=root)
-    if current["workflow_revision"] != identity["workflow_revision"]:
-        raise ValueError("stale workflow revision")
-    if current["capture_lineage_ref"] != identity["capture_lineage_ref"]:
-        raise ValueError("stale capture lineage")
-    return deepcopy(bundle)
-
-
-def _seal_server_owned_capture(
-    *,
-    project_root: Path,
-    image_path: Path,
-    capture_id: str | None = None,
-    captured_at: str | None = None,
-    expected_image_sha256: str | None = None,
-    expected_image_size: dict[str, int] | None = None,
-) -> dict[str, Any]:
-    root = _project_root(project_root)
-    image, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
-    artifact_sha = sha256(image_bytes).hexdigest()
-    image_size, media_type = _image_metadata(image_bytes)
-    if expected_image_sha256 is not None and expected_image_sha256 != artifact_sha:
-        raise ValueError("server-owned image SHA-256 mismatch")
-    if expected_image_size is not None and expected_image_size != image_size:
-        raise ValueError("server-owned image dimensions mismatch")
-    timestamp = captured_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    identifier = capture_id or f"capture/server-owned/{sha256((artifact_sha + timestamp).encode('utf-8')).hexdigest()}"
-    if not isinstance(identifier, str) or not identifier.strip():
-        raise ValueError("capture_id is required")
-    if not isinstance(timestamp, str) or not timestamp.strip():
-        raise ValueError("captured_at is required")
-
-    store = UEIObjectStore(root=root / _UEI_STORE_RELATIVE_PATH)
+    capture_id = "capture/server-owned/" + sha256(
+        canonical_json_bytes(identity_material)
+    ).hexdigest()
+    store = _store(root)
     artifact_ref = store.put(seal_immutable({
         "contract_version": "artifact_ref_v1",
         "artifact_id": f"artifact/server-owned/{artifact_sha}",
@@ -260,7 +109,7 @@ def _seal_server_owned_capture(
     artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
     lineage_ref = store.put(seal_immutable({
         "contract_version": "capture_lineage_v1",
-        "capture_id": identifier,
+        "capture_id": capture_id,
         "artifact_ref": artifact_ref,
         "artifact_sha256": artifact_sha,
         "image_size": image_size,
@@ -268,6 +117,194 @@ def _seal_server_owned_capture(
         "captured_at": timestamp,
     }))
     lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
+    return _capture_identity(
+        lineage=lineage,
+        lineage_ref=lineage_ref,
+        artifact=artifact,
+        artifact_ref=artifact_ref,
+        workflow_revision=revision,
+    )
+
+
+def seal_hybrid_capture_bundle(
+    *,
+    project_root: Path,
+    image_path: Path,
+    run_id: str,
+    workflow_revision: int,
+    window_binding: dict[str, object],
+    ocr_uia_context: dict[str, object],
+) -> HybridCaptureBundle:
+    """验证同源 OCR/UIA 证据并通过 UEIObjectStore 持久化上下文与 bundle。"""
+    root = _project_root(project_root)
+    normalized_run_id = _run_id(run_id)
+    revision = _workflow_revision(workflow_revision)
+    binding = _window_binding(window_binding)
+    _reject_authority_aliases(ocr_uia_context)
+    context_input = _exact_object(
+        ocr_uia_context,
+        fields={"capture_lineage_ref", "sources", "derived_views"},
+        name="OCR/UIA context",
+    )
+    lineage_ref = _immutable_ref(
+        context_input["capture_lineage_ref"], name="capture_lineage_ref"
+    )
+    store = _store(root)
+    lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
+    artifact_ref = _immutable_ref(lineage["artifact_ref"], name="artifact_ref")
+    artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
+    _, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
+    artifact_sha, image_size, media_type = _image_facts(image_bytes)
+    if (
+        artifact["artifact_sha256"] != artifact_sha
+        or lineage["artifact_sha256"] != artifact_sha
+        or lineage["image_size"] != image_size
+        or artifact["byte_length"] != len(image_bytes)
+        or artifact["media_type"] != media_type
+    ):
+        raise ValueError("server capture does not match sealed capture lineage")
+    identity = _capture_identity(
+        lineage=lineage,
+        lineage_ref=lineage_ref,
+        artifact=artifact,
+        artifact_ref=artifact_ref,
+        workflow_revision=revision,
+    )
+
+    sources = _verified_sources(
+        store=store,
+        value=context_input["sources"],
+        capture_lineage_ref=lineage_ref,
+        run_id=normalized_run_id,
+        workflow_revision=revision,
+        window_binding=binding,
+    )
+    derived_views = _verified_derived_views(
+        store=store,
+        value=context_input["derived_views"],
+        source_lineage=lineage,
+        source_artifact=artifact,
+    )
+    context_base: dict[str, object] = {
+        "contract_version": "hybrid_capture_context_v1",
+        "context_id": "",
+        "run_id": normalized_run_id,
+        "workflow_revision": revision,
+        "capture_lineage_ref": lineage_ref,
+        "window_binding": binding,
+        "sources": sources,
+        "derived_views": derived_views,
+        **_NON_AUTHORIZING,
+    }
+    context_base["context_id"] = "hybrid-context/" + sha256(
+        canonical_json_bytes(context_base)
+    ).hexdigest()
+    context = seal_immutable(context_base)
+    context_ref = store.put(context)
+
+    bundle_base: dict[str, object] = {
+        "contract_version": "hybrid_capture_bundle_v1",
+        "bundle_id": "",
+        "run_id": normalized_run_id,
+        "workflow_revision": revision,
+        "capture_lineage_ref": lineage_ref,
+        "artifact_ref": artifact_ref,
+        "context_ref": context_ref,
+        **_NON_AUTHORIZING,
+    }
+    bundle_base["bundle_id"] = "hybrid-capture/" + sha256(
+        canonical_json_bytes(bundle_base)
+    ).hexdigest()
+    bundle = seal_immutable(bundle_base)
+    bundle_ref = store.put(bundle)
+    return {
+        **deepcopy(bundle),
+        "bundle_ref": bundle_ref,
+        "capture_identity": identity,
+        "context": context,
+    }
+
+
+def load_and_verify_hybrid_capture_bundle(
+    *,
+    project_root: Path,
+    bundle_ref: dict[str, str],
+    expected_run_id: str,
+    expected_workflow_revision: int,
+) -> dict[str, Any]:
+    """按权威 run/revision 重新解析 UEI bundle 及全部父证据。"""
+    root = _project_root(project_root)
+    run_id = _run_id(expected_run_id)
+    revision = _workflow_revision(expected_workflow_revision)
+    store = _store(root)
+    reference = _immutable_ref(bundle_ref, name="bundle_ref")
+    bundle = store.get(reference, contract_version="hybrid_capture_bundle_v1")
+    _require_non_authorizing(bundle, name="hybrid capture bundle")
+    if bundle["run_id"] != run_id:
+        raise ValueError("cross-run bundle")
+    if bundle["workflow_revision"] != revision:
+        raise ValueError("stale workflow revision")
+
+    lineage_ref = _immutable_ref(bundle["capture_lineage_ref"], name="capture_lineage_ref")
+    artifact_ref = _immutable_ref(bundle["artifact_ref"], name="artifact_ref")
+    lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
+    artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
+    if lineage["artifact_ref"] != artifact_ref:
+        raise ValueError("capture lineage artifact conflict")
+    context_ref = _immutable_ref(bundle["context_ref"], name="context_ref")
+    context = store.get(context_ref, contract_version="hybrid_capture_context_v1")
+    _require_non_authorizing(context, name="hybrid capture context")
+    if (
+        context["run_id"] != run_id
+        or context["workflow_revision"] != revision
+        or context["capture_lineage_ref"] != lineage_ref
+    ):
+        raise ValueError("capture context freshness mismatch")
+    binding = _window_binding(context["window_binding"])
+    _verified_sources(
+        store=store,
+        value=context["sources"],
+        capture_lineage_ref=lineage_ref,
+        run_id=run_id,
+        workflow_revision=revision,
+        window_binding=binding,
+    )
+    _verified_derived_views(
+        store=store,
+        value=context["derived_views"],
+        source_lineage=lineage,
+        source_artifact=artifact,
+    )
+    identity = _capture_identity(
+        lineage=lineage,
+        lineage_ref=lineage_ref,
+        artifact=artifact,
+        artifact_ref=artifact_ref,
+        workflow_revision=revision,
+    )
+    return {**deepcopy(bundle), "capture_identity": identity, "context": context}
+
+
+def resolve_server_owned_capture(
+    *, project_root: Path, image_path: Path, capture_lineage_ref: dict[str, str]
+) -> dict[str, Any]:
+    """为内置 provider 解析已封装 capture，禁止创建第二条 lineage。"""
+    root = _project_root(project_root)
+    store = _store(root)
+    lineage_ref = _immutable_ref(capture_lineage_ref, name="capture_lineage_ref")
+    lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
+    artifact_ref = _immutable_ref(lineage["artifact_ref"], name="artifact_ref")
+    artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
+    image, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
+    artifact_sha, image_size, media_type = _image_facts(image_bytes)
+    if (
+        artifact_sha != artifact["artifact_sha256"]
+        or artifact_sha != lineage["artifact_sha256"]
+        or image_size != lineage["image_size"]
+        or len(image_bytes) != artifact["byte_length"]
+        or media_type != artifact["media_type"]
+    ):
+        raise ValueError("server capture does not match sealed capture lineage")
     return {
         "project_root": root,
         "image_path": image,
@@ -275,10 +312,9 @@ def _seal_server_owned_capture(
         "image_bytes": image_bytes,
         "artifact_sha256": artifact_sha,
         "image_size": image_size,
-        "media_type": media_type,
-        "capture_id": identifier,
-        "captured_at": timestamp,
         "store": store,
+        "capture_id": lineage["capture_id"],
+        "captured_at": lineage["captured_at"],
         "artifact_ref": artifact_ref,
         "artifact": artifact,
         "capture_lineage_ref": lineage_ref,
@@ -286,24 +322,199 @@ def _seal_server_owned_capture(
     }
 
 
+def _capture_identity(
+    *, lineage: dict[str, Any], lineage_ref: dict[str, str], artifact: dict[str, Any],
+    artifact_ref: dict[str, str], workflow_revision: int,
+) -> dict[str, Any]:
+    identity = {
+        "contract_version": "hybrid_capture_identity_v1",
+        "capture_id": lineage["capture_id"],
+        "capture_lineage_ref": lineage_ref,
+        "capture_lineage": lineage,
+        "artifact_ref": artifact_ref,
+        "artifact": artifact,
+        "artifact_sha256": artifact["artifact_sha256"],
+        "screenshot_sha256": artifact["artifact_sha256"],
+        "image_size": lineage["image_size"],
+        "capture_coordinate_space": "capture_pixel_xyxy",
+        "captured_at": lineage["captured_at"],
+        "workflow_revision": str(workflow_revision),
+    }
+    return validate_capture_identity(identity)
+
+
+def _verified_sources(
+    *, store: UEIObjectStore, value: object, capture_lineage_ref: dict[str, str],
+    run_id: str, workflow_revision: int, window_binding: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError("OCR/UIA context must contain exactly two sources")
+    normalized: list[dict[str, Any]] = []
+    kinds: list[str] = []
+    for raw in value:
+        source = _exact_object(raw, fields=_SOURCE_FIELDS, name="OCR/UIA source")
+        _reject_authority_aliases(source)
+        kind = source["source_kind"]
+        if kind not in {"ocr", "uia"}:
+            raise ValueError("OCR/UIA source kind is invalid")
+        if (
+            _immutable_ref(source["capture_lineage_ref"], name="source capture_lineage_ref")
+            != capture_lineage_ref
+            or source["run_id"] != run_id
+            or source["workflow_revision"] != workflow_revision
+            or _window_binding(source["window_binding"]) != window_binding
+        ):
+            raise ValueError("cross-capture evidence provenance")
+        if source["evidence_contract_version"] != "provider_safe_result_v1":
+            raise ValueError("unverified OCR/UIA evidence contract")
+        evidence_ref = _immutable_ref(source["evidence_ref"], name="evidence_ref")
+        evidence = store.get(evidence_ref, contract_version="provider_safe_result_v1")
+        if (
+            evidence["capture_lineage_ref"] != capture_lineage_ref
+            or evidence["status"] != "success"
+            or evidence["review_only"] is not True
+        ):
+            raise ValueError("cross-capture evidence")
+        request = store.get(evidence["request_ref"], contract_version="screen_parse_request_v1")
+        if request["capture_lineage_ref"] != capture_lineage_ref:
+            raise ValueError("cross-capture evidence request")
+        registration = store.get(
+            evidence["registration_ref"], contract_version="trusted_provider_registration_v1"
+        )
+        manifest = store.get(evidence["manifest_ref"], contract_version="provider_manifest_v1")
+        requested_profiles = request.get("requested_profiles")
+        manifest_profiles = manifest.get("profiles")
+        selected_manifest = next(
+            (
+                profile
+                for profile in manifest_profiles
+                if isinstance(profile, dict) and profile.get("profile_id") == evidence["profile_id"]
+            ),
+            None,
+        ) if isinstance(manifest_profiles, list) else None
+        expected_output_kind = "text" if kind == "ocr" else "element"
+        if (
+            registration["provider_id"] != evidence["provider_id"]
+            or registration["enabled"] is not True
+            or evidence["profile_id"] not in registration["profile_ids"]
+            or manifest["provider_id"] != evidence["provider_id"]
+            or evidence["requested_provider_id"] != evidence["provider_id"]
+            or evidence["requested_profile_id"] != evidence["profile_id"]
+            or not isinstance(requested_profiles, list)
+            or not any(
+                isinstance(profile, dict)
+                and profile.get("provider_id") == evidence["provider_id"]
+                and profile.get("profile_id") == evidence["profile_id"]
+                for profile in requested_profiles
+            )
+            or not isinstance(selected_manifest, dict)
+            or expected_output_kind not in selected_manifest.get("declared_output_kinds", [])
+        ):
+            raise ValueError("OCR/UIA provider provenance mismatch")
+        normalized.append(deepcopy(source))
+        kinds.append(kind)
+    if set(kinds) != {"ocr", "uia"} or len(set(kinds)) != 2:
+        raise ValueError("OCR/UIA context requires one OCR and one UIA source")
+    return sorted(normalized, key=lambda source: str(source["source_kind"]))
+
+
+def _verified_derived_views(
+    *, store: UEIObjectStore, value: object, source_lineage: dict[str, Any],
+    source_artifact: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or len(value) > 16:
+        raise ValueError("derived_views must be a bounded list")
+    normalized: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            raise ValueError("derived view must be a closed object")
+        stored_form = set(raw) == set(_DERIVED_STORED_FIELDS)
+        view = _exact_object(
+            raw,
+            fields=_DERIVED_STORED_FIELDS if stored_form else _DERIVED_INPUT_FIELDS,
+            name="derived view",
+        )
+        _reject_authority_aliases(view)
+        target_lineage_ref = _immutable_ref(
+            view["target_capture_lineage_ref"], name="target_capture_lineage_ref"
+        )
+        target_lineage = store.get(target_lineage_ref, contract_version="capture_lineage_v1")
+        target_artifact_ref = _immutable_ref(view["target_artifact_ref"], name="target_artifact_ref")
+        target_artifact = store.get(target_artifact_ref, contract_version="artifact_ref_v1")
+        if (
+            target_lineage["artifact_ref"] != target_artifact_ref
+            or target_lineage["artifact_sha256"] != target_artifact["artifact_sha256"]
+        ):
+            raise ValueError("derived target artifact conflict")
+        transform_ref = _immutable_ref(
+            view["coordinate_transform_ref"], name="coordinate_transform_ref"
+        )
+        transform = store.get(transform_ref, contract_version="affine_coordinate_transform_v1")
+        if stored_form and (
+            canonical_json_bytes(view["target_capture_lineage"])
+            != canonical_json_bytes(target_lineage)
+            or canonical_json_bytes(view["target_artifact"])
+            != canonical_json_bytes(target_artifact)
+            or canonical_json_bytes(view["coordinate_transform"])
+            != canonical_json_bytes(transform)
+        ):
+            raise ValueError("derived view embedded object conflict")
+        expected_scale = {
+            "x": target_lineage["image_size"]["width"] / source_lineage["image_size"]["width"],
+            "y": target_lineage["image_size"]["height"] / source_lineage["image_size"]["height"],
+        }
+        if (
+            transform["source_space"] != "capture_pixel_xyxy"
+            or transform["target_space"] not in {"capture_pixel_xyxy", "image_pixel_xyxy"}
+            or transform["source_size"] != source_lineage["image_size"]
+            or transform["target_size"] != target_lineage["image_size"]
+            or transform["source_capture_artifact_sha256"] != source_artifact["artifact_sha256"]
+            or transform["target_capture_artifact_sha256"] != target_artifact["artifact_sha256"]
+            or transform["offset"] != {"x": 0, "y": 0}
+            or transform["clipping"] != "reject_if_outside"
+        ):
+            raise ValueError("derived affine binding mismatch")
+        if not all(
+            math.isclose(float(transform["scale"][axis]), expected_scale[axis], rel_tol=0, abs_tol=1e-12)
+            for axis in ("x", "y")
+        ):
+            raise ValueError("affine scale mismatch")
+        normalized.append({
+            "target_capture_lineage_ref": target_lineage_ref,
+            "target_capture_lineage": target_lineage,
+            "target_artifact_ref": target_artifact_ref,
+            "target_artifact": target_artifact,
+            "coordinate_transform_ref": transform_ref,
+            "coordinate_transform": transform,
+        })
+    return normalized
+
+
 def _read_server_owned_image(*, root: Path, image_path: Path) -> tuple[Path, bytes]:
     if not isinstance(image_path, Path):
         raise ValueError("image_path must be a server-owned Path")
+    screenshot_root = root / _SCREENSHOT_RELATIVE_PATH
     candidate = image_path if image_path.is_absolute() else root / image_path
-    _reject_reparse_ancestors(candidate.absolute())
+    _reject_reparse_ancestors(candidate.absolute(), stop=screenshot_root.parent)
     try:
+        resolved_root = screenshot_root.resolve(strict=True)
         resolved = candidate.resolve(strict=True)
-        resolved.relative_to(root)
+        resolved.relative_to(resolved_root)
     except (OSError, ValueError) as error:
-        raise ValueError("server-owned image must be inside project root") from error
-    _reject_reparse_ancestors(resolved)
+        raise ValueError("server-owned image must be inside screenshot service root") from error
+    _reject_reparse_ancestors(resolved, stop=resolved_root.parent)
     before = os.stat(resolved, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
-        raise ValueError("server-owned image must be a regular project file")
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    descriptor = os.open(str(resolved), flags)
+        raise ValueError("server-owned image must be a regular screenshot")
+    descriptor = os.open(str(resolved), os.O_RDONLY | getattr(os, "O_BINARY", 0))
     try:
         opened = os.fstat(descriptor)
+        final_path = _final_handle_path(descriptor, fallback=resolved)
+        try:
+            final_path.relative_to(resolved_root)
+        except ValueError as error:
+            raise ValueError("opened screenshot handle escaped screenshot service root") from error
+        _reject_reparse_ancestors(final_path, stop=resolved_root.parent)
         if not _same_file_state(before, opened):
             raise ValueError("server-owned image changed before read")
         chunks: list[bytes] = []
@@ -316,317 +527,168 @@ def _read_server_owned_image(*, root: Path, image_path: Path) -> tuple[Path, byt
         after_fd = os.fstat(descriptor)
     finally:
         os.close(descriptor)
-    after_path = os.stat(resolved, follow_symlinks=False)
+    after_path = os.stat(final_path, follow_symlinks=False)
     if not _same_file_state(opened, after_fd) or not _same_file_state(after_fd, after_path):
         raise ValueError("server-owned image changed during read")
-    if len(image_bytes) != after_fd.st_size or not image_bytes:
+    if not image_bytes or len(image_bytes) != after_fd.st_size:
         raise ValueError("server-owned image read was incomplete")
-    return resolved, image_bytes
+    return final_path, image_bytes
 
 
-def _same_file_state(left: os.stat_result, right: os.stat_result) -> bool:
-    return (
-        left.st_dev,
-        left.st_ino,
-        left.st_size,
-        left.st_mtime_ns,
-    ) == (
-        right.st_dev,
-        right.st_ino,
-        right.st_size,
-        right.st_mtime_ns,
-    )
+def _final_handle_path(descriptor: int, *, fallback: Path) -> Path:
+    if os.name == "nt":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            handle = msvcrt.get_osfhandle(descriptor)
+            buffer = ctypes.create_unicode_buffer(32768)
+            get_final_path = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+            get_final_path.argtypes = [
+                wintypes.HANDLE,
+                wintypes.LPWSTR,
+                wintypes.DWORD,
+                wintypes.DWORD,
+            ]
+            get_final_path.restype = wintypes.DWORD
+            length = get_final_path(
+                handle, buffer, len(buffer), 0
+            )
+            if not length or length >= len(buffer):
+                raise OSError("GetFinalPathNameByHandleW failed")
+            value = buffer.value
+            if value.startswith("\\\\?\\UNC\\"):
+                value = "\\\\" + value[8:]
+            elif value.startswith("\\\\?\\"):
+                value = value[4:]
+            return Path(value).resolve(strict=True)
+        except (ImportError, OSError, ValueError) as error:
+            raise ValueError("unable to verify final screenshot handle path") from error
+    proc_path = Path(f"/proc/self/fd/{descriptor}")
+    return proc_path.resolve(strict=True) if proc_path.exists() else fallback.resolve(strict=True)
 
 
-def _image_metadata(image_bytes: bytes) -> tuple[dict[str, int], str]:
+def _image_facts(image_bytes: bytes) -> tuple[str, dict[str, int], str]:
     try:
         with Image.open(BytesIO(image_bytes)) as opened:
             opened.verify()
         with Image.open(BytesIO(image_bytes)) as opened:
-            width, height = int(opened.width), int(opened.height)
+            size = {"width": int(opened.width), "height": int(opened.height)}
             image_format = str(opened.format or "").upper()
     except Exception as error:
-        raise ValueError("server-owned image is not a valid supported image") from error
-    media_types = {"PNG": "image/png", "JPEG": "image/jpeg"}
-    if image_format not in media_types:
-        raise ValueError("server-owned image format is not supported")
-    return {"width": width, "height": height}, media_types[image_format]
+        raise ValueError("server-owned screenshot is invalid") from error
+    media_type = {"PNG": "image/png", "JPEG": "image/jpeg"}.get(image_format)
+    if media_type is None:
+        raise ValueError("server-owned screenshot format is unsupported")
+    return sha256(image_bytes).hexdigest(), size, media_type
 
 
-def _seal_context_bindings(
-    *,
-    store: UEIObjectStore,
-    context: dict[str, Any],
-    capture_lineage_ref: dict[str, str],
-    artifact_sha256: str,
-    image_size: dict[str, int],
-) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    normalized = deepcopy(context)
-    _verify_nested_capture_and_provider_refs(
-        store=store, value=normalized, capture_lineage_ref=capture_lineage_ref
-    )
-    raw_views = normalized.get("derived_views", [])
-    if not isinstance(raw_views, list):
-        raise ValueError("ocr_uia_context.derived_views must be a list")
-    transform_refs: list[dict[str, str]] = []
-    for index, raw_view in enumerate(raw_views):
-        if not isinstance(raw_view, dict):
-            raise ValueError(f"derived view {index} must be an object")
-        transform = raw_view.get("coordinate_transform", raw_view.get("transform"))
-        if not isinstance(transform, dict):
-            raise ValueError(f"derived view {index} requires affine coordinate transform")
-        validate_contract(transform, "affine_coordinate_transform_v1")
-        if transform.get("content_sha256") != content_sha256(transform):
-            raise ValueError("derived view transform content SHA mismatch")
-        if transform.get("source_capture_artifact_sha256") != artifact_sha256:
-            raise ValueError("transform source artifact SHA mismatch")
-        target_sha = raw_view.get("target_artifact_sha256")
-        if not isinstance(target_sha, str) or _HASH.fullmatch(target_sha) is None:
-            raise ValueError("derived view target artifact SHA is required")
-        if transform.get("target_capture_artifact_sha256") != target_sha:
-            raise ValueError("transform target artifact SHA mismatch")
-        if transform.get("source_size") != image_size:
-            raise ValueError("transform source image dimensions mismatch")
-        transform_ref = store.put(deepcopy(transform))
-        declared_ref = raw_view.get("coordinate_transform_ref")
-        if declared_ref is not None and _immutable_ref(
-            declared_ref, name="coordinate_transform_ref"
-        ) != transform_ref:
-            raise ValueError("transform ref conflict")
-        raw_view["coordinate_transform_ref"] = transform_ref
-        transform_refs.append(transform_ref)
-    return normalized, transform_refs
+def _window_binding(value: object) -> dict[str, Any]:
+    binding = _exact_object(value, fields=_WINDOW_FIELDS, name="window binding")
+    rect = _exact_object(binding["rect"], fields=_RECT_FIELDS, name="window binding rect")
+    if (
+        not isinstance(binding["window_binding_id"], str)
+        or not binding["window_binding_id"]
+        or len(binding["window_binding_id"]) > 256
+        or isinstance(binding["process_id"], bool)
+        or not isinstance(binding["process_id"], int)
+        or binding["process_id"] < 1
+        or not isinstance(binding["process_name"], str)
+        or not binding["process_name"]
+        or len(binding["process_name"]) > 512
+        or not all(isinstance(rect[field], int) and not isinstance(rect[field], bool) for field in _RECT_FIELDS)
+        or rect["left"] >= rect["right"]
+        or rect["top"] >= rect["bottom"]
+    ):
+        raise ValueError("window binding is invalid")
+    _reject_authority_aliases(binding)
+    return binding
 
 
-def _verify_nested_capture_and_provider_refs(
-    *, store: UEIObjectStore, value: Any, capture_lineage_ref: dict[str, str]
-) -> None:
+def _exact_object(value: object, *, fields: set[str] | frozenset[str], name: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != set(fields):
+        raise ValueError(f"{name} must be a closed object")
+    candidate = deepcopy(value)
+    canonical = canonical_json_bytes(candidate)
+    if len(canonical) > 1024 * 1024:
+        raise ValueError(f"{name} exceeds size limit")
+    return candidate
+
+
+def _reject_authority_aliases(value: object, *, depth: int = 0) -> None:
+    if depth > 12:
+        raise ValueError("context exceeds depth limit")
     if isinstance(value, dict):
-        for key, child in value.items():
-            if str(key).lower().endswith("capture_lineage_ref"):
-                if _immutable_ref(child, name=key) != capture_lineage_ref:
-                    raise ValueError("cross-capture evidence")
-            elif key in _PROVIDER_REF_FIELDS:
-                result_ref = _immutable_ref(child, name=key)
-                result = store.get(result_ref, contract_version="provider_safe_result_v1")
-                if result.get("capture_lineage_ref") != capture_lineage_ref:
-                    raise ValueError("cross-capture evidence")
-            _verify_nested_capture_and_provider_refs(
-                store=store, value=child, capture_lineage_ref=capture_lineage_ref
-            )
+        forbidden = set(value) & _AUTHORITY_ALIASES
+        if forbidden:
+            raise ValueError(f"context contains authority alias: {sorted(forbidden)[0]}")
+        if len(value) > 64:
+            raise ValueError("context object exceeds property limit")
+        for child in value.values():
+            _reject_authority_aliases(child, depth=depth + 1)
     elif isinstance(value, list):
+        if len(value) > 256:
+            raise ValueError("context array exceeds item limit")
         for child in value:
-            _verify_nested_capture_and_provider_refs(
-                store=store, value=child, capture_lineage_ref=capture_lineage_ref
-            )
+            _reject_authority_aliases(child, depth=depth + 1)
+    elif isinstance(value, str) and len(value) > 4096:
+        raise ValueError("context string exceeds length limit")
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("context number must be finite")
 
 
-def _verify_context_envelope(
-    *,
-    store: UEIObjectStore,
-    context: dict[str, Any],
-    capture_identity: dict[str, Any],
-    expected_transform_refs: object,
-) -> None:
-    _closed_fields(context, _CONTEXT_FIELDS, name="hybrid OCR/UIA context")
-    if context.get("contract_version") != "hybrid_ocr_uia_context_v1":
-        raise ValueError("hybrid OCR/UIA context contract mismatch")
-    if context.get("workflow_revision") != capture_identity["workflow_revision"]:
-        raise ValueError("stale workflow revision")
-    if context.get("capture_lineage_ref") != capture_identity["capture_lineage_ref"]:
-        raise ValueError("capture lineage conflict")
-    _canonical_object(context.get("window_binding"), name="window_binding", require_nonempty=True)
-    nested = _canonical_object(
-        context.get("ocr_uia_context"), name="ocr_uia_context", require_nonempty=True
-    )
-    _reject_untrusted_context_fields(nested)
-    _verify_nested_capture_and_provider_refs(
-        store=store,
-        value=nested,
-        capture_lineage_ref=capture_identity["capture_lineage_ref"],
-    )
-    refs = _transform_refs(context.get("transform_refs"))
-    if refs != _transform_refs(expected_transform_refs):
-        raise ValueError("transform ref conflict")
-    raw_views = nested.get("derived_views", [])
-    if not isinstance(raw_views, list) or len(raw_views) != len(refs):
-        raise ValueError("derived view transform ref conflict")
-    for index, (view, reference) in enumerate(zip(raw_views, refs, strict=True)):
-        if not isinstance(view, dict) or view.get("coordinate_transform_ref") != reference:
-            raise ValueError("derived view transform ref conflict")
-        transform = store.get(reference, contract_version="affine_coordinate_transform_v1")
-        embedded = view.get("coordinate_transform", view.get("transform"))
-        if canonical_json_bytes(transform) != canonical_json_bytes(embedded):
-            raise ValueError("derived view transform ref conflict")
-        target_sha = view.get("target_artifact_sha256")
-        if transform.get("source_capture_artifact_sha256") != capture_identity["artifact_sha256"]:
-            raise ValueError("transform source artifact SHA mismatch")
-        if transform.get("target_capture_artifact_sha256") != target_sha:
-            raise ValueError("transform target artifact SHA mismatch")
-        if transform.get("source_size") != capture_identity["image_size"]:
-            raise ValueError("transform source image dimensions mismatch")
+def _immutable_ref(value: object, *, name: str) -> dict[str, str]:
+    reference = _exact_object(value, fields={"id", "content_sha256"}, name=name)
+    identifier, digest = reference["id"], reference["content_sha256"]
+    if (
+        not isinstance(identifier, str)
+        or not identifier
+        or len(identifier) > 512
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError(f"{name} is invalid")
+    return {"id": identifier, "content_sha256": digest}
 
 
-def _reject_untrusted_context_fields(value: Any) -> None:
-    if isinstance(value, dict):
-        for key, child in value.items():
-            normalized = str(key).lower()
-            if normalized in _FORBIDDEN_CONTEXT_PATH_FIELDS:
-                raise ValueError("raw client path is not accepted in OCR/UIA context")
-            if normalized.endswith("_payload") and any(
-                provider in normalized for provider in ("provider", "omni", "qwen")
-            ):
-                raise ValueError("raw provider payload is not accepted")
-            if normalized in {"provider_result", "omni_result", "qwen_result"}:
-                raise ValueError("raw provider payload is not accepted")
-            _reject_untrusted_context_fields(child)
-    elif isinstance(value, list):
-        for child in value:
-            _reject_untrusted_context_fields(child)
+def _require_non_authorizing(value: dict[str, Any], *, name: str) -> None:
+    if any(value.get(field) != expected for field, expected in _NON_AUTHORIZING.items()):
+        raise ValueError(f"{name} violates non-authorizing invariant")
+    _reject_authority_aliases(value)
 
 
-def _persist_sealed_object(
-    *, root: Path, directory: str, value: dict[str, object], id_field: str
-) -> dict[str, str]:
-    declared = value.get("content_sha256")
-    identifier = value.get(id_field)
-    if not isinstance(declared, str) or declared != content_sha256(value):
-        raise ValueError("sealed object content SHA mismatch")
-    if not isinstance(identifier, str) or not identifier:
-        raise ValueError("sealed object ID is required")
-    store_root = _bundle_store_root(root)
-    target_dir = store_root / directory
-    _ensure_private_directory(target_dir)
-    target = target_dir / f"{declared}.json"
-    if target.parent != target_dir or _is_reparse(target):
-        raise ValueError("hybrid capture store path escape")
-    canonical = canonical_json_bytes(value)
-    if target.exists():
-        if target.read_bytes() != canonical:
-            raise ValueError("hybrid capture digest conflict")
-    else:
-        temporary = target_dir / f".{declared}.{uuid4().hex}.tmp"
-        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(canonical)
-                handle.flush()
-                os.fsync(handle.fileno())
-            try:
-                os.link(str(temporary), str(target))
-            except FileExistsError:
-                if target.read_bytes() != canonical:
-                    raise ValueError("hybrid capture digest conflict")
-        finally:
-            temporary.unlink(missing_ok=True)
-    return {"id": identifier, "content_sha256": declared}
+def _run_id(value: object) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 256:
+        raise ValueError("run_id is required")
+    return value.strip()
 
 
-def _load_sealed_object(
-    *, root: Path, directory: str, reference: dict[str, str], id_field: str
-) -> dict[str, Any]:
-    target_dir = _bundle_store_root(root) / directory
-    _ensure_private_directory(target_dir)
-    target = target_dir / f"{reference['content_sha256']}.json"
-    if target.parent != target_dir or _is_reparse(target):
-        raise ValueError("hybrid capture store path escape")
-    try:
-        raw = target.read_bytes()
-        value = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError("hybrid capture object is unreadable") from error
-    if not isinstance(value, dict) or canonical_json_bytes(value) != raw:
-        raise ValueError("hybrid capture object is not canonical")
-    if value.get("content_sha256") != reference["content_sha256"]:
-        raise ValueError("hybrid capture object content SHA mismatch")
-    if content_sha256(value) != reference["content_sha256"]:
-        raise ValueError("hybrid capture object content SHA mismatch")
-    if value.get(id_field) != reference["id"]:
-        raise ValueError("hybrid capture object ID mismatch")
+def _workflow_revision(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("workflow_revision must be a non-negative integer")
     return value
 
 
-def _write_current_revision(
-    *, root: Path, revision: str, capture_lineage_ref: dict[str, str]
-) -> None:
-    store_root = _bundle_store_root(root)
-    _ensure_private_directory(store_root)
-    target = store_root / "current-revision.json"
-    if _is_reparse(target):
-        raise ValueError("hybrid capture revision path is a reparse point")
-    payload = canonical_json_bytes({
-        "contract_version": "hybrid_capture_current_revision_v1",
-        "workflow_revision": revision,
-        "capture_lineage_ref": capture_lineage_ref,
-    })
-    temporary = store_root / f".current-revision.{uuid4().hex}.tmp"
-    descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _read_current_revision(*, root: Path) -> dict[str, object]:
-    target = _bundle_store_root(root) / "current-revision.json"
-    if _is_reparse(target):
-        raise ValueError("hybrid capture revision path is a reparse point")
-    try:
-        raw = target.read_bytes()
-        parsed = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError("hybrid capture current revision is unavailable") from error
-    if canonical_json_bytes(parsed) != raw or not isinstance(parsed, dict):
-        raise ValueError("hybrid capture current revision is not canonical")
-    if set(parsed) != {
-        "contract_version",
-        "workflow_revision",
-        "capture_lineage_ref",
-    }:
-        raise ValueError("hybrid capture current revision is not closed")
-    if parsed.get("contract_version") != "hybrid_capture_current_revision_v1":
-        raise ValueError("hybrid capture current revision contract mismatch")
-    return {
-        "workflow_revision": _workflow_revision(parsed.get("workflow_revision")),
-        "capture_lineage_ref": _immutable_ref(
-            parsed.get("capture_lineage_ref"), name="current capture_lineage_ref"
-        ),
-    }
-
-
-def _bundle_store_root(root: Path) -> Path:
-    path = root / _BUNDLE_STORE_RELATIVE_PATH
-    _reject_reparse_ancestors(path)
-    return path
-
-
-def _ensure_private_directory(path: Path) -> None:
-    _reject_reparse_ancestors(path)
-    path.mkdir(parents=True, exist_ok=True)
-    _reject_reparse_ancestors(path)
-    if not path.is_dir():
-        raise ValueError("hybrid capture store is not a directory")
+def _store(root: Path) -> UEIObjectStore:
+    return UEIObjectStore(root=root / _STORE_RELATIVE_PATH)
 
 
 def _project_root(project_root: Path) -> Path:
     if not isinstance(project_root, Path):
         raise ValueError("project_root must be a Path")
-    _reject_reparse_ancestors(project_root.absolute())
     try:
         root = project_root.resolve(strict=True)
     except OSError as error:
         raise ValueError("project_root is unavailable") from error
-    _reject_reparse_ancestors(root)
     if not root.is_dir():
         raise ValueError("project_root must be a directory")
+    _reject_reparse_ancestors(root)
     return root
 
 
-def _reject_reparse_ancestors(path: Path) -> None:
+def _reject_reparse_ancestors(path: Path, *, stop: Path | None = None) -> None:
     current = path
     while True:
         try:
@@ -640,82 +702,14 @@ def _reject_reparse_ancestors(path: Path) -> None:
             getattr(status, "st_file_attributes", 0) & _REPARSE_POINT
         ):
             raise ValueError("server-owned path contains a reparse point")
-        if current == current.parent:
+        if current == current.parent or current == stop:
             return
         current = current.parent
 
 
-def _is_reparse(path: Path) -> bool:
-    try:
-        status = os.lstat(path)
-    except FileNotFoundError:
-        return False
-    except OSError as error:
-        raise ValueError("server-owned path is unavailable") from error
-    return stat.S_ISLNK(status.st_mode) or bool(
-        getattr(status, "st_file_attributes", 0) & _REPARSE_POINT
+def _same_file_state(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev, left.st_ino, left.st_size, left.st_mtime_ns
+    ) == (
+        right.st_dev, right.st_ino, right.st_size, right.st_mtime_ns
     )
-
-
-def _workflow_revision(value: object) -> str:
-    if isinstance(value, bool) or not isinstance(value, (str, int)):
-        raise ValueError("workflow_revision must be a string or integer")
-    revision = str(value).strip()
-    if not revision:
-        raise ValueError("workflow_revision is required")
-    return revision
-
-
-def _immutable_ref(value: object, *, name: str) -> dict[str, str]:
-    if not isinstance(value, dict) or set(value) != {"id", "content_sha256"}:
-        raise ValueError(f"{name} must be an exact immutable ref")
-    identifier = value.get("id")
-    digest = value.get("content_sha256")
-    if not isinstance(identifier, str) or not identifier:
-        raise ValueError(f"{name}.id is required")
-    if not isinstance(digest, str) or _HASH.fullmatch(digest) is None:
-        raise ValueError(f"{name}.content_sha256 is invalid")
-    return {"id": identifier, "content_sha256": digest}
-
-
-def _canonical_object(
-    value: object, *, name: str, require_nonempty: bool = False
-) -> dict[str, Any]:
-    if not isinstance(value, dict) or (require_nonempty and not value):
-        raise ValueError(f"{name} must be a non-empty object")
-    candidate = deepcopy(value)
-    try:
-        canonical_json_bytes(candidate)
-    except ValueError as error:
-        raise ValueError(f"{name} must be canonical JSON") from error
-    return candidate
-
-
-def _required_dict(value: dict[str, Any], field: str) -> dict[str, Any]:
-    child = value.get(field)
-    if not isinstance(child, dict):
-        raise ValueError(f"{field} must be an object")
-    return deepcopy(child)
-
-
-def _closed_fields(value: dict[str, Any], fields: frozenset[str], *, name: str) -> None:
-    if set(value) != set(fields):
-        raise ValueError(f"{name} is not closed")
-
-
-def _transform_refs(value: object) -> list[dict[str, str]]:
-    if not isinstance(value, list):
-        raise ValueError("transform_refs must be a list")
-    return [_immutable_ref(child, name="transform_ref") for child in value]
-
-
-def _non_authorizing(value: dict[str, Any]) -> None:
-    required = {
-        "artifact_is_authorization": False,
-        "execute_binding_enabled": False,
-        "final_submit_forbidden": True,
-        "real_action_requires_gate": True,
-        "authorization_scope": "display_and_review_only",
-    }
-    if any(value.get(key) != expected for key, expected in required.items()):
-        raise ValueError("hybrid capture bundle violates non-authorizing invariant")

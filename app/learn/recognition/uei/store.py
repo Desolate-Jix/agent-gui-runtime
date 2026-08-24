@@ -25,6 +25,8 @@ _ID_FIELDS = {
     "provider_safe_result_v1": "result_id",
     "provider_error_v1": "error_id",
     "provider_runtime_receipt_v1": "receipt_id",
+    "hybrid_capture_context_v1": "context_id",
+    "hybrid_capture_bundle_v1": "bundle_id",
 }
 _REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
 

@@ -14,8 +14,10 @@ UEI_CONTRACTS = (
     "trusted_provider_registration_v1", "artifact_ref_v1", "capture_lineage_v1",
     "affine_coordinate_transform_v1", "provider_manifest_v1", "screen_parse_request_v1",
     "provider_safe_result_v1", "provider_error_v1", "provider_runtime_receipt_v1",
+    "hybrid_capture_context_v1", "hybrid_capture_bundle_v1",
 )
 _SCHEMA_DIR = Path(__file__).resolve().parents[4] / "schemas" / "uei" / "v1"
+_LOCAL_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 _NAMESPACED_PROVIDER_PROFILE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)+$")
 
 
@@ -39,7 +41,8 @@ class UEIProjectionFailure(UEIValidationError):
 def load_contract_schema(contract_version: str) -> dict[str, Any]:
     if contract_version not in UEI_CONTRACTS:
         raise UEIValidationError(f"unknown contract_version: {contract_version}")
-    path = _SCHEMA_DIR / f"{contract_version}.schema.json"
+    local_path = _LOCAL_SCHEMA_DIR / f"{contract_version}.schema.json"
+    path = local_path if local_path.is_file() else _SCHEMA_DIR / f"{contract_version}.schema.json"
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
