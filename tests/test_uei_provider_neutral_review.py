@@ -462,7 +462,7 @@ def _real_recorded_omni_result(
             "input_contract": "screen_parse_request_v1",
             "output_contract": "provider_safe_result_v1",
             "declared_output_kinds": ["text"],
-            "supported_coordinate_spaces": ["image_pixel_xyxy"],
+            "supported_coordinate_spaces": ["capture_pixel_xyxy"],
             "supports_capture_artifact": True,
             "privacy_capabilities": ["restricted"],
             "mode_allowlist": ["Shadow"],
@@ -837,7 +837,7 @@ def test_builtin_projection_and_real_recorded_omni_adapter_share_safe_semantic_c
     assert first["provider_confidence"] == 0.88
     assert second["provider_confidence"] == 0.9
     assert first["capture_bbox"] == [1, 1, 5, 3]
-    assert second["capture_bbox"] is None
+    assert second["capture_bbox"] == [1, 1, 5, 3]
     assert omni_result["review_only"] is True
 
 

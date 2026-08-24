@@ -86,7 +86,7 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     from app.learn.recognition.uei.omniparser_shadow_adapter import OmniParserShadowAdapter
 
     process = FakeProcess(payload={"items": [{"source_item_id": "item/1", "kind": "text", "safe_text": "Search",
-                                                "source_bbox": [1, 2, 10, 20], "source_coordinate_space": "image_pixel_xyxy",
+                                                "source_bbox": [1, 2, 10, 20], "source_coordinate_space": "capture_pixel_xyxy",
                                                 "provider_confidence": 0.8}], "duration_ms": 2, "resource_units": 1})
     calls: list[dict[str, object]] = []
     monkeypatch.setattr("app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen", _fake_popen(process, calls))
@@ -95,6 +95,7 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     )
 
     assert output.items[0].safe_text == "Search" and output.items[0].source_bbox == (1, 2, 10, 20)
+    assert output.items[0].source_coordinate_space == "capture_pixel_xyxy"
     assert calls[0]["env"]["HF_HUB_OFFLINE"] == "1"
     assert "capture.png" not in repr(output)
     assert not calls[0]["output_path"].exists()

@@ -5,7 +5,7 @@
       "kind": "text",
       "safe_text": "Quick Apply",
       "source_bbox": [1, 1, 5, 3],
-      "source_coordinate_space": "image_pixel_xyxy",
+      "source_coordinate_space": "capture_pixel_xyxy",
       "provider_confidence": 0.9
     }
   ],

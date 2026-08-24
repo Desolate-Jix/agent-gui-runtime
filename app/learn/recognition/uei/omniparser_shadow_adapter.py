@@ -527,7 +527,7 @@ def _normalize_item(
             or not isinstance(safe_text, str) or len(safe_text) > budget.max_string_length
             or _contains_secret(safe_text)):
         raise OmniParserShadowAdapterError("runtime_worker_invalid")
-    if (coordinate_space != "image_pixel_xyxy" or not isinstance(bbox, list) or len(bbox) != 4
+    if (coordinate_space != "capture_pixel_xyxy" or not isinstance(bbox, list) or len(bbox) != 4
             or not all(isinstance(edge, int) and not isinstance(edge, bool) for edge in bbox)
             or not (0 <= bbox[0] < bbox[2] <= capture.image_size["width"]
                     and 0 <= bbox[1] < bbox[3] <= capture.image_size["height"])):

@@ -61,7 +61,8 @@ def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = Fals
         normalized.append({
             "source_item_id": f"omniparser/{index + 1}", "kind": str(item.get("type") or "element"),
             "safe_text": str(item.get("content") or ""), "source_bbox": pixel_bbox,
-            "source_coordinate_space": "image_pixel_xyxy", "provider_confidence": None,
+            # 输入图片就是受限 capture 本体；按原尺寸反投影后的像素框属于 capture 坐标系。
+            "source_coordinate_space": "capture_pixel_xyxy", "provider_confidence": None,
         })
     result = {"items": normalized, "duration_ms": int(round(duration_ms)), "resource_units": _peak_resource_units()}
     if benchmark:

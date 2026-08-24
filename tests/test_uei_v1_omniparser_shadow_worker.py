@@ -45,6 +45,31 @@ def test_worker_uses_profile_huggingface_cache_for_preflight_and_model_load(tmp_
     assert result["resource_units"] == 7
 
 
+def test_worker_projects_boxes_into_the_exact_capture_coordinate_space(tmp_path: Path, monkeypatch):
+    from scripts import run_uei_omniparser_shadow_worker as worker
+
+    item = {
+        "bbox": [0.1, 0.2, 0.5, 0.8],
+        "type": "icon",
+        "content": "Search",
+    }
+    _patch_runner(monkeypatch, outputs=[([item], 4.0)])
+    monkeypatch.setattr(worker, "_peak_resource_units", lambda: 0)
+
+    result = worker._run(tmp_path / "capture.png", {"width": 20, "height": 10})
+
+    assert result["items"] == [
+        {
+            "source_item_id": "omniparser/1",
+            "kind": "icon",
+            "safe_text": "Search",
+            "source_bbox": [2, 2, 10, 8],
+            "source_coordinate_space": "capture_pixel_xyxy",
+            "provider_confidence": None,
+        }
+    ]
+
+
 def test_benchmark_worker_records_observed_invalid_counts_for_cold_and_three_warm_runs(tmp_path: Path, monkeypatch):
     from scripts import run_uei_omniparser_shadow_worker as worker
 
