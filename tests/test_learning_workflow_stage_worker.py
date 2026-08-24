@@ -1104,6 +1104,99 @@ def test_worker_dispatches_managed_hybrid_omni_with_internal_cancellation_event(
     }
 
 
+def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    events: list[object] = []
+
+    monkeypatch.setattr(
+        "app.core.model_server.profile_for_stage",
+        lambda stage, profile_id: events.append(("profile", stage, profile_id))
+        or {"profile_id": "qwen3_vl_8b_q4_k_m", "provider_mode": "local_understanding"},
+    )
+    monkeypatch.setattr(
+        "app.core.gpu_resources.build_model_resource_preflight",
+        lambda profile: events.append(("preflight", profile["profile_id"]))
+        or {"resource_mode": "normal", "model_launch_allowed": True},
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.ensure_model_server",
+        lambda **kwargs: events.append(("ensure", kwargs))
+        or {"before": {"status": "running"}, "started": False},
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_hybrid_qwen_task",
+        lambda payload, cancellation_event=None: events.append(
+            ("task", payload, cancellation_event)
+        )
+        or {"contract_version": "hybrid_qwen_bindings_v1"},
+    )
+
+    response = execute_learning_stage_worker_task(
+        "panel_learning_hybrid_qwen_binding",
+        {"run_id": "run-qwen"},
+    )
+
+    assert response == {"contract_version": "hybrid_qwen_bindings_v1"}
+    assert events == [
+        ("profile", "understanding", None),
+        ("preflight", "qwen3_vl_8b_q4_k_m"),
+        (
+            "ensure",
+            {
+                "stage": "understanding",
+                "profile_id": None,
+                "wait_until_ready": True,
+                "wait_seconds": 180.0,
+            },
+        ),
+        ("task", {"run_id": "run-qwen"}, None),
+    ]
+
+
+def test_managed_hybrid_qwen_cancel_uses_existing_model_cancellation(
+    tmp_path: Path,
+) -> None:
+    cancellation_calls: list[dict[str, object]] = []
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=lambda **kwargs: cancellation_calls.append(kwargs)
+        or {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "terminated",
+            "model_service_compute_termination": "terminated",
+        },
+    )
+    payload = {"run_id": "run-qwen", "omni_inventory": {"immutable": True}}
+    started = registry.start(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload=payload,
+    )
+
+    cancelled = registry.cancel_by_operation(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen",
+    )
+
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["model_service_compute_termination"] == "terminated"
+    assert cancellation_calls == [
+        {
+            "request_id": started["model_request_id"],
+            "task_kind": "panel_learning_hybrid_qwen_binding",
+            "payload": payload,
+        }
+    ]
+
+
 def test_hybrid_omni_registry_cancel_requires_valid_cooperative_cleanup_handshake(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

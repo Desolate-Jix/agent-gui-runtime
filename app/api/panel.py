@@ -413,7 +413,8 @@ class PanelStartLearningStageWorkerRequest(BaseModel):
             "panel_learning_two_stage_understanding|"
             "panel_learning_model_review_repair|vision_observe_screen|"
             "panel_learning_calibration_sequence|"
-            "panel_learning_hybrid_omni_discovery|vision_locate_target)$"
+            "panel_learning_hybrid_omni_discovery|"
+            "panel_learning_hybrid_qwen_binding|vision_locate_target)$"
         )
     )
     payload: dict[str, Any] = Field(default_factory=dict)

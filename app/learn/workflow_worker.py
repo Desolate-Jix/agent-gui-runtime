@@ -25,6 +25,7 @@ from app.learn.workflow_task_result_adapter import (
 )
 from app.learn.workflow_tasks.model_review import run_model_review_task
 from app.learn.workflow_tasks.hybrid_omni import run_hybrid_omni_task
+from app.learn.workflow_tasks.hybrid_qwen import run_hybrid_qwen_task
 from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
 from app.learn.workflow_tasks.two_stage import run_two_stage_understanding_task
@@ -44,6 +45,7 @@ SUPPORTED_LEARNING_STAGE_TASK_KINDS = frozenset(
         "panel_learning_model_review_repair",
         "panel_learning_calibration_sequence",
         "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
         "vision_observe_screen",
         "vision_locate_target",
     }
@@ -53,6 +55,7 @@ _MODEL_STAGE_BY_TASK_KIND = {
     "panel_learning_two_stage_understanding": "observe",
     "panel_learning_model_review_repair": "observe",
     "panel_learning_calibration_sequence": "locate",
+    "panel_learning_hybrid_qwen_binding": "understanding",
 }
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
@@ -105,7 +108,12 @@ def execute_learning_stage_worker_task(
 
     _ensure_learning_stage_model_ready(normalized_kind, payload)
 
-    if normalized_kind == "panel_learning_hybrid_omni_discovery":
+    if normalized_kind == "panel_learning_hybrid_qwen_binding":
+        response = run_hybrid_qwen_task(
+            payload,
+            cancellation_event=cancellation_event,
+        )
+    elif normalized_kind == "panel_learning_hybrid_omni_discovery":
         response = run_hybrid_omni_task(
             payload,
             cancellation_event=cancellation_event,

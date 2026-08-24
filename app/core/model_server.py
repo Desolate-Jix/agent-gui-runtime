@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
 import psutil
 import subprocess
 import time
@@ -8,6 +10,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+from app.learn.recognition.uei.canonical import content_sha256
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
@@ -115,15 +119,17 @@ def cancel_model_request(
             "provider_results": [],
         }
 
-    provider_results = [
-        _cancel_profile_request(
-            profile=profile,
-            request_id=normalized_request_id,
-            timeout=timeout,
-            verify_seconds=verify_seconds,
-        )
-        for profile in matching_profiles
-    ]
+    provider_results = []
+    for profile in matching_profiles:
+        if str(task_kind or "").strip() == "panel_learning_hybrid_qwen_binding":
+            provider_results.append(_cancel_qwen_profile(profile))
+        else:
+            provider_results.append(_cancel_profile_request(
+                profile=profile,
+                request_id=normalized_request_id,
+                timeout=timeout,
+                verify_seconds=verify_seconds,
+            ))
     terminations = {
         str(item.get("model_service_compute_termination") or "")
         for item in provider_results
@@ -151,6 +157,14 @@ def _request_cancel_profiles(
     payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
     normalized_task_kind = str(task_kind or "").strip()
+    if normalized_task_kind == "panel_learning_hybrid_qwen_binding":
+        try:
+            profile = profile_for_stage("understanding")
+        except ValueError:
+            return []
+        if str(profile.get("provider_mode") or "").strip().casefold() != "local_understanding":
+            return []
+        return [profile]
     effective_payload = payload
     if normalized_task_kind == "panel_learning_calibration_sequence":
         nested_payload = payload.get("locate_payload")
@@ -174,6 +188,117 @@ def _request_cancel_profiles(
         if roles.intersection({"locate", "grounding"}):
             profiles.append(profile)
     return profiles
+
+
+def _cancel_qwen_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    profile_id = str(profile.get("profile_id") or "unknown")
+    try:
+        release = stop_model_server(profile)
+    except Exception as error:
+        return {
+            "profile_id": profile_id,
+            "status": "cancel_failed",
+            "model_service_compute_termination": "cancel_failed",
+            "error": str(error),
+        }
+    terminated = release.get("stopped") is True
+    return {
+        "profile_id": profile_id,
+        "status": "terminated" if terminated else "cancel_failed",
+        "model_service_compute_termination": (
+            "terminated" if terminated else "cancel_failed"
+        ),
+        "release": release,
+    }
+
+
+def run_qwen_binding_model(
+    *,
+    request: dict[str, Any],
+    image_path: Path,
+    cancellation_event: Any | None = None,
+    timeout_seconds: float = 120.0,
+) -> dict[str, Any]:
+    """使用既有 understanding profile 发出一次封闭的 Qwen JSON 请求。"""
+    if cancellation_event is not None and cancellation_event.is_set():
+        raise RuntimeError("Qwen binding request cancelled")
+    profile = profile_for_stage("understanding")
+    endpoint = str(profile.get("endpoint") or "").strip()
+    if not endpoint:
+        endpoint = model_base_url(profile) + "/chat/completions"
+    path = Path(image_path).resolve()
+    media_type = "image/png" if path.suffix.casefold() == ".png" else "image/jpeg"
+    image_url = "data:" + media_type + ";base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    prompt = (
+        "Bind semantics only to the supplied candidate_id values. Return exactly one JSON object with "
+        "bindings and orphan_semantics. Never output geometry, action authority, new candidate IDs, or prose. "
+        "Every supplied candidate_id must appear exactly once. Important visible semantics without a candidate "
+        "must use reason ORPHAN_SEMANTIC. Canonical request: "
+        + json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+    body_payload: dict[str, Any] = {
+        "model": str(profile.get("model_name") or profile.get("model_id") or "qwen"),
+        "temperature": 0.0,
+        "max_tokens": 4096,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": "Return one closed JSON object only."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ],
+    }
+    request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if request_id:
+        body_payload["request_id"] = request_id
+        headers["X-Agent-GUI-Request-ID"] = request_id
+    http_request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body_payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=float(timeout_seconds)) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except TimeoutError:
+        raise
+    except Exception as error:
+        raise RuntimeError(f"Qwen binding request failed: {error}") from error
+    if cancellation_event is not None and cancellation_event.is_set():
+        raise RuntimeError("Qwen binding request cancelled")
+    choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+    message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise ValueError("Qwen binding response has no JSON message content")
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise ValueError("Qwen binding response is not a closed JSON object") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("Qwen binding response is not an object")
+    return parsed
+
+
+def release_qwen_model_server(*, sealed_artifact: dict[str, Any]) -> dict[str, Any]:
+    """仅在 Qwen binding artifact 已密封后释放既有 understanding 服务。"""
+    if (
+        not isinstance(sealed_artifact, dict)
+        or sealed_artifact.get("contract_version") != "hybrid_qwen_bindings_v1"
+        or sealed_artifact.get("content_sha256") != content_sha256(sealed_artifact)
+    ):
+        raise ValueError("sealed Qwen binding artifact is required before release")
+    profile = profile_for_stage("understanding")
+    result = stop_model_server(profile)
+    if result.get("stopped") is not True:
+        raise RuntimeError("Qwen model server release failed")
+    return result
 
 
 def _cancel_profile_request(

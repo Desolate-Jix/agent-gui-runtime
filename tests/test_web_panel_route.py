@@ -6474,3 +6474,20 @@ def test_panel_start_worker_request_accepts_hybrid_omni_task_kind() -> None:
     )
 
     assert request.task_kind == "panel_learning_hybrid_omni_discovery"
+
+
+def test_panel_start_worker_request_accepts_hybrid_qwen_task_kind() -> None:
+    from app.api.panel import PanelStartLearningStageWorkerRequest
+
+    request = PanelStartLearningStageWorkerRequest.model_validate(
+        {
+            "run_id": "run-hybrid",
+            "expected_revision": 7,
+            "stage": "screen_understanding",
+            "operation_id": "operation-qwen",
+            "task_kind": "panel_learning_hybrid_qwen_binding",
+            "payload": {},
+        }
+    )
+
+    assert request.task_kind == "panel_learning_hybrid_qwen_binding"
