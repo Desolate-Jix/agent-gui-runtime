@@ -1,0 +1,44 @@
+{
+  "contract_version": "learn_hybrid_config_v1_1",
+  "config_id": "learn_hybrid_v1_1",
+  "model_order": [
+    "capture",
+    "omniparser",
+    "qwen",
+    "deterministic_fusion",
+    "vista",
+    "human_review"
+  ],
+  "rollout_mode": "opt_in",
+  "providers": {
+    "omni": "omniparser_v2",
+    "qwen": "qwen3_vl",
+    "vista": "vista_local"
+  },
+  "coordinate_space": "capture_pixel_xyxy",
+  "fusion": {
+    "rules_version": "hybrid_fusion_rules_v1",
+    "semantic_confidence_threshold": 0.7,
+    "tie_delta": 0.05,
+    "overlap_iou_threshold": 0.5,
+    "vista_eligible_states": [
+      "BOUND"
+    ],
+    "states": [
+      "BOUND",
+      "AMBIGUOUS",
+      "CONFLICT",
+      "ORPHAN",
+      "ORPHAN_SEMANTIC",
+      "LOW_CONFIDENCE",
+      "UNBOUND",
+      "CAPTURE_MISMATCH",
+      "REVIEW_REQUIRED"
+    ]
+  },
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "authorization_scope": "display_and_review_only"
+}
