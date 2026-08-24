@@ -306,6 +306,9 @@ def _run_once(*, input_path: Path, detector: Any, caption: Any, check_ocr_box: A
         str(input_path), display_img=False, output_bb_format="xyxy", goal_filtering=None,
         easyocr_args={"paragraph": False, "text_threshold": 0.9}, use_paddleocr=False,
     )
+    # 稀疏界面可能没有 OCR 命中；官方解析器仍要求可迭代的证据集合。
+    texts = texts if texts is not None else []
+    ocr_boxes = ocr_boxes if ocr_boxes is not None else []
     _, _, parsed_content_list = get_som_labeled_img(
         str(input_path), detector, BOX_TRESHOLD=0.01, output_coord_in_ratio=True,
         ocr_bbox=ocr_boxes, caption_model_processor=caption, ocr_text=texts,

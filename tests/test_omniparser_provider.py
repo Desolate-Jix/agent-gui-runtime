@@ -139,6 +139,29 @@ def test_benchmark_mode_requires_three_warm_repetitions() -> None:
     assert runner._validate_warm_repetitions(3) == 3
 
 
+def test_run_once_treats_missing_ocr_result_as_an_empty_evidence_set(tmp_path) -> None:
+    observed: dict[str, object] = {}
+
+    def check_ocr_box(*args, **kwargs):
+        return (None, None), None
+
+    def get_som_labeled_img(*args, **kwargs):
+        observed["ocr_bbox"] = kwargs["ocr_bbox"]
+        observed["ocr_text"] = kwargs["ocr_text"]
+        return None, None, []
+
+    items, _ = runner._run_once(
+        input_path=tmp_path / "sparse-screen.png",
+        detector=object(),
+        caption=object(),
+        check_ocr_box=check_ocr_box,
+        get_som_labeled_img=get_som_labeled_img,
+    )
+
+    assert items == []
+    assert observed == {"ocr_bbox": [], "ocr_text": []}
+
+
 def test_per_run_metrics_include_element_interactivity_and_invalid_bbox_counts() -> None:
     metrics = runner._element_metrics(
         [
