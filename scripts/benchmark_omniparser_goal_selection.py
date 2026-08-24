@@ -17,9 +17,15 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.benchmark_vista_scaling import evaluate_point
+from app.learn.recognition.bbox_alignment import bbox_overlap, cross_evidence_overlap_is_acceptable
 
 
 APP_IDS = ("calculator", "notepad", "paint", "character_map", "control_panel")
+_SUPPORT_ROLES = {"button", "link", "input", "checkbox", "menu_item", "tab"}
+_UIA_CONTRACT_VERSION = "five_interface_uia_gold_source_v1"
+_QWEN_PROFILE_ID = "learn_mode_qwen3_vl_8b"
+_QWEN_MODEL_NAME = "Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+_QWEN_INVENTORY_GOAL = "inventory the visible interface and identify interactive controls with labels and bounding boxes"
 
 
 class BenchmarkInputError(RuntimeError):
@@ -65,18 +71,229 @@ def _general_text_similarity(goal: str, content: Any) -> float:
     return round(max(token_f1, SequenceMatcher(None, target, candidate).ratio()), 6)
 
 
+def _selection_texts(candidate: dict[str, Any]) -> list[str]:
+    texts = [str(candidate.get("content") or "")]
+    support_texts = candidate.get("support_texts")
+    if isinstance(support_texts, list):
+        texts.extend(str(value or "") for value in support_texts)
+    return [text for text in texts if _canonical_text(text)]
+
+
 def forced_similarity(goal: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not candidates:
         return None
-    scored = [(_general_text_similarity(goal, item.get("content")), index) for index, item in enumerate(candidates)]
+    scored = [
+        (max((_general_text_similarity(goal, text) for text in _selection_texts(item)), default=0.0), index)
+        for index, item in enumerate(candidates)
+    ]
     _, selected_index = max(scored, key=lambda item: (item[0], -item[1]))
     return candidates[selected_index]
 
 
 def exact_unique_fail_closed(goal: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
     target = _goal_target(goal)
-    matches = [item for item in candidates if target and _canonical_text(item.get("content")) == target]
+    matches = [
+        item
+        for item in candidates
+        if target and any(_canonical_text(text) == target for text in _selection_texts(item))
+    ]
     return matches[0] if len(matches) == 1 else None
+
+
+def _enrich_candidates_with_support(
+    candidates: list[dict[str, Any]], support_items: list[dict[str, Any]], source: str
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    enriched: list[dict[str, Any]] = []
+    coverage = {"unique_count": 0, "ambiguous_count": 0, "unmatched_count": 0}
+    for candidate in candidates:
+        copy = dict(candidate)
+        matches = [
+            item
+            for item in support_items
+            if isinstance(item, dict)
+            and isinstance(item.get("bbox"), dict)
+            and _canonical_support_role(item.get("role")) in _SUPPORT_ROLES
+            and cross_evidence_overlap_is_acceptable(bbox_overlap(candidate["pixel_bbox"], item["bbox"]))
+        ]
+        if len(matches) == 1:
+            texts = matches[0].get("texts")
+            if not isinstance(texts, list):
+                texts = [matches[0].get("text")]
+            current_texts = copy.get("support_texts")
+            copy["support_texts"] = [
+                *(current_texts if isinstance(current_texts, list) else []),
+                *(str(text or "").strip() for text in texts if str(text or "").strip()),
+            ]
+            if not copy["support_texts"]:
+                copy.pop("support_texts")
+            copy["support_evidence"] = [
+                *copy.get("support_evidence", []),
+                {"source": source, "support_id": str(matches[0].get("support_id") or "")},
+            ]
+            coverage["unique_count"] += 1
+        elif len(matches) > 1:
+            coverage["ambiguous_count"] += 1
+        else:
+            coverage["unmatched_count"] += 1
+        enriched.append(copy)
+    return enriched, coverage
+
+
+def _canonical_support_role(value: Any) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
+    aliases = {
+        "menuitem": "menu_item",
+        "menu_item": "menu_item",
+        "edit": "input",
+        "textbox": "input",
+        "text_box": "input",
+        "hyperlink": "link",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _pixel_bbox(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    try:
+        bbox = {axis: int(value[axis]) for axis in ("x", "y", "w", "h")}
+    except (KeyError, TypeError, ValueError):
+        return None
+    return bbox if bbox["w"] > 0 and bbox["h"] > 0 else None
+
+
+def _support_text_values(*values: Any) -> list[str]:
+    texts: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in texts:
+            texts.append(text)
+    return texts
+
+
+def _uia_support_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    snapshot = payload.get("uia_snapshot")
+    controls = snapshot.get("controls") if isinstance(snapshot, dict) else None
+    if not isinstance(controls, list):
+        raise BenchmarkInputError("UIA artifact must contain uia_snapshot.controls")
+    items: list[dict[str, Any]] = []
+    for control in controls:
+        if not isinstance(control, dict):
+            continue
+        role = _canonical_support_role(control.get("control_type"))
+        bbox = _pixel_bbox(control.get("bbox"))
+        texts = _support_text_values(control.get("name"), control.get("automation_id"), role)
+        support_id = str(control.get("control_id") or "").strip()
+        if (
+            control.get("enabled") is True
+            and control.get("visible") is True
+            and role in _SUPPORT_ROLES
+            and bbox is not None
+            and support_id
+            and texts
+        ):
+            items.append({"support_id": support_id, "bbox": bbox, "role": role, "texts": texts})
+    return items
+
+
+def _qwen_support_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    bundle = payload.get("observe_bundle")
+    sources = bundle.get("sources") if isinstance(bundle, dict) else None
+    vision = sources.get("vision") if isinstance(sources, dict) else None
+    regions = vision.get("regions") if isinstance(vision, dict) else None
+    if not isinstance(regions, list):
+        raise BenchmarkInputError("Qwen artifact must contain observe_bundle.sources.vision.regions")
+    items: list[dict[str, Any]] = []
+    for region in regions:
+        if not isinstance(region, dict):
+            continue
+        role = _canonical_support_role(region.get("role"))
+        bbox = _pixel_bbox(region.get("bbox"))
+        texts = _support_text_values(region.get("label"), region.get("ocr_text"), region.get("description"), role)
+        support_id = str(region.get("region_id") or "").strip()
+        if role in _SUPPORT_ROLES and bbox is not None and support_id and texts:
+            items.append({"support_id": support_id, "bbox": bbox, "role": role, "texts": texts})
+    return items
+
+
+def _validate_support_lineage(
+    app_id: str, source: str, payload: dict[str, Any], expected_sha: str, expected_size: tuple[int, int]
+) -> None:
+    label = "UIA" if source == "uia" else "Qwen"
+    if source == "uia":
+        sha_values = [payload.get("image_sha256")]
+        size_values = [payload.get("image_size")]
+    elif source == "qwen":
+        bundle = payload.get("observe_bundle")
+        if not isinstance(bundle, dict):
+            raise BenchmarkInputError(f"Qwen observe bundle missing: {app_id}")
+        sha_values = [payload.get("screenshot_sha256"), bundle.get("screenshot_sha256")]
+        size_values = [bundle.get("image_size")]
+    else:
+        raise BenchmarkInputError(f"unknown support source: {source}")
+    if any(value != expected_sha for value in sha_values):
+        raise BenchmarkInputError(f"{label} screenshot SHA lineage mismatch: {app_id}")
+    sizes = []
+    for value in size_values:
+        if not isinstance(value, dict):
+            raise BenchmarkInputError(f"{label} screenshot size lineage mismatch: {app_id}")
+        try:
+            sizes.append((int(value.get("width") or 0), int(value.get("height") or 0)))
+        except (TypeError, ValueError):
+            raise BenchmarkInputError(f"{label} screenshot size lineage mismatch: {app_id}") from None
+    if any(size != expected_size for size in sizes):
+        raise BenchmarkInputError(f"{label} screenshot size lineage mismatch: {app_id}")
+
+
+def _validate_support_attribution(app_id: str, source: str, payload: dict[str, Any]) -> None:
+    if source == "uia":
+        snapshot = payload.get("uia_snapshot")
+        valid = (
+            payload.get("contract_version") == _UIA_CONTRACT_VERSION
+            and payload.get("app_id") == app_id
+            and isinstance(snapshot, dict)
+            and snapshot.get("provider") == "windows_uia"
+            and snapshot.get("provider_version") == "windows_uia_provider_v1"
+            and snapshot.get("status") == "ok"
+        )
+        if not valid:
+            raise BenchmarkInputError(f"UIA support attribution invalid: {app_id}")
+        return
+    if source != "qwen":
+        raise BenchmarkInputError(f"unknown support source: {source}")
+    profile = payload.get("model_profile")
+    config = payload.get("model_config")
+    config_profile = config.get("model_profile") if isinstance(config, dict) else None
+    bundle = payload.get("observe_bundle")
+    sources = bundle.get("sources") if isinstance(bundle, dict) else None
+    vision = sources.get("vision") if isinstance(sources, dict) else None
+    expected_profile = lambda value: (
+        isinstance(value, dict)
+        and value.get("profile_id") == _QWEN_PROFILE_ID
+        and value.get("model_name") == _QWEN_MODEL_NAME
+        and value.get("model_family") == "Qwen3-VL"
+        and value.get("provider_mode") == "local_understanding"
+        and value.get("mode_scope") == "learn_only"
+        and value.get("artifact_is_authorization") is False
+        and value.get("execute_binding_enabled") is False
+    )
+    valid = (
+        payload.get("contract_version") == "actual_parser_output_v1"
+        and payload.get("source_type") == "actual_parser_call"
+        and payload.get("actual_model_call_in_this_run") is True
+        and isinstance(config, dict)
+        and config.get("model_profile_id") == _QWEN_PROFILE_ID
+        and config.get("model_name") == _QWEN_MODEL_NAME
+        and config.get("app_name") == app_id
+        and config.get("goal") == _QWEN_INVENTORY_GOAL
+        and expected_profile(profile)
+        and expected_profile(config_profile)
+        and isinstance(vision, dict)
+        and vision.get("contract_version") == "vision_regions_v1"
+        and vision.get("provider") == _QWEN_MODEL_NAME
+    )
+    if not valid:
+        raise BenchmarkInputError(f"Qwen support attribution invalid: {app_id}")
 
 
 def _sha256(path: Path) -> str:
@@ -218,6 +435,8 @@ def _evaluate_mode(
     cases: list[dict[str, Any]],
     candidates_by_app: dict[str, list[dict[str, Any]]],
     selector: Callable[[str, list[dict[str, Any]]], dict[str, Any] | None],
+    *,
+    selection_input_contract: list[str] | None = None,
 ) -> dict[str, Any]:
     details: list[dict[str, Any]] = []
     per_screen = {
@@ -246,6 +465,7 @@ def _evaluate_mode(
                 "selected": selected is not None,
                 "selected_element_id": selected.get("element_id") if selected else None,
                 "selected_content": selected.get("content") if selected else None,
+                "selected_support_evidence": selected.get("support_evidence") if selected else None,
                 **evaluation,
             }
         )
@@ -253,7 +473,8 @@ def _evaluate_mode(
     inside_count = sum(item["inside_expected_bbox"] for item in details)
     statuses = Counter(str(item["status"]) for item in details)
     return {
-        "selection_input_contract": ["goal", "current_omni_candidates"],
+        "case_count": len(details),
+        "selection_input_contract": selection_input_contract or ["goal", "current_omni_candidates"],
         "selected_count": selected_count,
         "abstained_count": len(details) - selected_count,
         "inside_count": inside_count,
@@ -325,6 +546,15 @@ def _vista_reference(benchmark_dir: Path, cases: list[dict[str, Any]]) -> dict[s
     }
 
 
+def _empty_support_coverage() -> dict[str, int]:
+    return {"unique_count": 0, "ambiguous_count": 0, "unmatched_count": 0}
+
+
+def _attach_support_coverage(report: dict[str, Any], coverage: dict[str, dict[str, int]]) -> dict[str, Any]:
+    report["support_coverage"] = coverage
+    return report
+
+
 def run_benchmark(benchmark_dir: Path) -> dict[str, Any]:
     benchmark_dir = Path(benchmark_dir).resolve()
     cases_payload = _load_json(benchmark_dir / "vista_cases.json")
@@ -336,13 +566,50 @@ def run_benchmark(benchmark_dir: Path) -> dict[str, Any]:
         _validate_omni_artifact_attribution(app_id, payload)
     lineage = _validate_lineage(benchmark_dir, cases, omni_payloads)
     candidates_by_app = {app_id: _interactive_candidates(payload) for app_id, payload in omni_payloads.items()}
+    uia_payloads = {app_id: _load_json(benchmark_dir / f"{app_id}_uia.json") for app_id in APP_IDS}
+    qwen_payloads = {
+        app_id: _load_json(benchmark_dir / f"qwen_{app_id}.json" / "actual_parser_output_v1.json")
+        for app_id in APP_IDS
+    }
+    uia_candidates_by_app: dict[str, list[dict[str, Any]]] = {}
+    uia_qwen_candidates_by_app: dict[str, list[dict[str, Any]]] = {}
+    uia_coverage = _empty_support_coverage()
+    qwen_coverage = _empty_support_coverage()
+    for app_id in APP_IDS:
+        omni_payload = omni_payloads[app_id]
+        image_size = omni_payload["image_size"]
+        expected_size = (int(image_size["width"]), int(image_size["height"]))
+        expected_sha = str(omni_payload["screenshot_sha256"])
+        _validate_support_attribution(app_id, "uia", uia_payloads[app_id])
+        _validate_support_attribution(app_id, "qwen", qwen_payloads[app_id])
+        _validate_support_lineage(app_id, "uia", uia_payloads[app_id], expected_sha, expected_size)
+        _validate_support_lineage(app_id, "qwen", qwen_payloads[app_id], expected_sha, expected_size)
+        uia_candidates, coverage = _enrich_candidates_with_support(
+            candidates_by_app[app_id], _uia_support_items(uia_payloads[app_id]), "uia"
+        )
+        uia_candidates_by_app[app_id] = uia_candidates
+        qwen_candidates, coverage_qwen = _enrich_candidates_with_support(
+            uia_candidates, _qwen_support_items(qwen_payloads[app_id]), "qwen"
+        )
+        uia_qwen_candidates_by_app[app_id] = qwen_candidates
+        for key in uia_coverage:
+            uia_coverage[key] += coverage[key]
+            qwen_coverage[key] += coverage_qwen[key]
     forced_report = _evaluate_mode(cases, candidates_by_app, forced_similarity)
     forced_report["interpretation"] = (
         f"{forced_report['inside_count']}/{len(cases)} is end-to-end goal-selector safe-center accuracy; "
         "not detection recall, bbox IoU, execute safety, or authorization."
     )
+    uia_contract = ["goal", "current_omni_candidates", "same_screenshot_uia_semantic_support"]
+    uia_qwen_contract = [
+        "goal",
+        "current_omni_candidates",
+        "same_screenshot_uia_semantic_support",
+        "same_screenshot_qwen_semantic_support",
+    ]
+    support_coverage = {"uia": uia_coverage, "qwen": qwen_coverage}
     return {
-        "contract_version": "omniparser_vista_goal_selection_benchmark_v2",
+        "contract_version": "omniparser_vista_goal_selection_benchmark_v3",
         "scope": "frozen artifact review benchmark only; no model, GUI, click, or authorization",
         "review_only": True,
         "artifact_is_authorization": False,
@@ -360,11 +627,52 @@ def run_benchmark(benchmark_dir: Path) -> dict[str, Any]:
                 "Evaluation-only upper bound where any current Omni candidate bbox center point lies within the target; "
                 "not IoU/bbox recall and never used for selection."
             ),
+            "semantic_support": (
+                "Same-screenshot UIA and Qwen text/role evidence may enrich Omni candidate selection text only after a unique "
+                "accepted overlap; it is non-authorizing and never supplies geometry or a click target."
+            ),
         },
         "modes": {
             "forced_similarity": forced_report,
             "exact_unique_fail_closed": _evaluate_mode(cases, candidates_by_app, exact_unique_fail_closed),
+            "omni_uia_forced_similarity": _attach_support_coverage(
+                _evaluate_mode(
+                    cases,
+                    uia_candidates_by_app,
+                    forced_similarity,
+                    selection_input_contract=uia_contract,
+                ),
+                {"uia": uia_coverage},
+            ),
+            "omni_uia_exact_unique_fail_closed": _attach_support_coverage(
+                _evaluate_mode(
+                    cases,
+                    uia_candidates_by_app,
+                    exact_unique_fail_closed,
+                    selection_input_contract=uia_contract,
+                ),
+                {"uia": uia_coverage},
+            ),
+            "omni_uia_qwen_forced_similarity": _attach_support_coverage(
+                _evaluate_mode(
+                    cases,
+                    uia_qwen_candidates_by_app,
+                    forced_similarity,
+                    selection_input_contract=uia_qwen_contract,
+                ),
+                support_coverage,
+            ),
+            "omni_uia_qwen_exact_unique_fail_closed": _attach_support_coverage(
+                _evaluate_mode(
+                    cases,
+                    uia_qwen_candidates_by_app,
+                    exact_unique_fail_closed,
+                    selection_input_contract=uia_qwen_contract,
+                ),
+                support_coverage,
+            ),
         },
+        "support_coverage": support_coverage,
         "posthoc_safe_center_point_ceiling": _posthoc_safe_center_point_ceiling(cases, candidates_by_app),
         "vista_frozen_reference": _vista_reference(benchmark_dir, cases),
     }
