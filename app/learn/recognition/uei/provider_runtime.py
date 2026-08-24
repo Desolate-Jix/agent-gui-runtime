@@ -72,23 +72,23 @@ class ShadowProviderRuntime:
         binding = self._trusted_profiles.get((provider_id, profile_id))
         adapter = self._registry.resolve(provider_id=provider_id, profile_id=profile_id)
         if mode != "Shadow" or binding is None or adapter is None:
-            return self._persist_rejection(
+            return self._preclaim_rejection(self._persist_rejection(
                 context=context, provider_id=provider_id, profile_id=profile_id, invocation_id=invocation_id,
-            )
+            ))
         profile = resolve_requested_profile(
             context=context, registration_ref=binding[0], manifest_ref=binding[1],
             provider_id=provider_id, profile_id=profile_id,
         )
         if profile.get("resolved") is not True:
-            return self._persist_rejection(
+            return self._preclaim_rejection(self._persist_rejection(
                 context=context, provider_id=provider_id, profile_id=profile_id, invocation_id=invocation_id,
-            )
+            ))
         if (getattr(adapter, "provider_id", None) != provider_id
                 or getattr(adapter, "profile_id", None) != profile_id
                 or getattr(adapter, "provider_version", None) != profile.get("manifest", {}).get("provider_version")):
-            return self._persist_rejection(
+            return self._preclaim_rejection(self._persist_rejection(
                 context=context, provider_id=provider_id, profile_id=profile_id, invocation_id=invocation_id,
-            )
+            ))
         invocation_id = self._invocation_id(
             request_ref, capture_lease.capture_lineage_ref, provider_id, profile_id,
             registration_ref=profile.get("registration_ref"), manifest_ref=profile.get("manifest_ref"),
@@ -135,10 +135,14 @@ class ShadowProviderRuntime:
                 invocation_id=invocation_id, reason_class="runtime_provider_failed", retryable=False,
                 duration_ms=0, resource_units=0, output_item_count=0, cleanup_status="failed",
             )
+        completed_reply = {**reply, "claim_status": "complete"}
+        self._complete_claim(invocation_id, completed_reply)
         with self._lock:
-            self._states[invocation_id] = {"state": "complete", "reply": deepcopy(reply)}
-        self._complete_claim(invocation_id, reply)
-        return reply
+            self._states[invocation_id] = {
+                "state": "complete",
+                "reply": deepcopy(completed_reply),
+            }
+        return completed_reply
 
     def _select_requested_profile(self, context: dict[str, object]) -> tuple[str, str, str]:
         request = context.get("request")
@@ -217,17 +221,8 @@ class ShadowProviderRuntime:
         try:
             descriptor = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
-            try:
-                existing = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                raise _outer("invocation") from None
-            if not isinstance(existing, dict) or existing.get("invocation_id") != invocation_id:
-                raise _outer("invocation")
-            if existing.get("state") != "complete" or not isinstance(existing.get("reply"), dict):
-                raise _outer("invocation")
-            reply = deepcopy(existing["reply"])
-            self._verify_completed(reply)
-            return reply
+            reply = self._load_complete_claim(path, invocation_id)
+            return {**reply, "claim_status": "complete"}
         except OSError:
             raise _outer("invocation") from None
         try:
@@ -256,6 +251,29 @@ class ShadowProviderRuntime:
                 temporary.unlink(missing_ok=True)
             except OSError:
                 pass
+        if self._load_complete_claim(path, invocation_id) != reply:
+            raise _outer("invocation")
+
+    def _load_complete_claim(
+        self,
+        path: Path,
+        invocation_id: str,
+    ) -> dict[str, object]:
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise _outer("invocation") from None
+        if not isinstance(existing, dict) or existing.get("invocation_id") != invocation_id:
+            raise _outer("invocation")
+        if existing.get("state") != "complete" or not isinstance(existing.get("reply"), dict):
+            raise _outer("invocation")
+        reply = deepcopy(existing["reply"])
+        self._verify_completed(reply)
+        return reply
+
+    @staticmethod
+    def _preclaim_rejection(reply: dict[str, object]) -> dict[str, object]:
+        return {**reply, "claim_status": "not_created"}
 
     def _claim_path(self, invocation_id: str):
         digest = invocation_id.rsplit("/", 1)[-1]

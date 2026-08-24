@@ -98,6 +98,9 @@ def run_hybrid_omni_discovery(
     )
     receipt_ref = _ref(reply.get("receipt_ref"), name="provider receipt ref")
     receipt = store.get(receipt_ref, contract_version="provider_runtime_receipt_v1")
+    claim_status = reply.get("claim_status")
+    if claim_status not in {"not_created", "complete"}:
+        raise ValueError("provider claim status is invalid")
     metrics = receipt.get("metrics")
     duration_ms = metrics.get("duration_ms") if isinstance(metrics, dict) else 0
     result_ref_value = reply.get("result_ref")
@@ -125,7 +128,7 @@ def run_hybrid_omni_discovery(
             "provider_error_ref": error_ref,
             "provider_receipt_ref": receipt_ref,
             "provider_invocation_id": reply["invocation_id"],
-            "provider_claim_status": "complete",
+            "provider_claim_status": claim_status,
             "provider_status": receipt["status"],
             "provider_reason_class": receipt["reason_class"],
             "failure_reason": adapter.failure_code,
@@ -149,7 +152,7 @@ def run_hybrid_omni_discovery(
         "provider_error_ref": None,
         "provider_receipt_ref": receipt_ref,
         "provider_invocation_id": reply["invocation_id"],
-        "provider_claim_status": "complete",
+        "provider_claim_status": claim_status,
         "provider_status": receipt["status"],
         "provider_reason_class": receipt["reason_class"],
         "inventory": inventory,

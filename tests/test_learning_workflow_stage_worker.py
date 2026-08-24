@@ -1161,6 +1161,52 @@ def test_hybrid_omni_registry_cancel_requires_valid_cooperative_cleanup_handshak
     assert cancellation_calls == []
     assert process.terminated is False
 
+
+def test_hybrid_omni_missing_handshake_times_out_without_relinquishing_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    monkeypatch.setattr(workflow_worker, "_HYBRID_OMNI_CLEANUP_WAIT_SECONDS", 0.01)
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id="run-timeout",
+        stage="screen_understanding",
+        operation_id="operation-timeout",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        payload={"run_id": "run-timeout"},
+    )
+    record = registry._records[started["worker_id"]]
+    process = record["process"]
+    operation_key = ("run-timeout", "screen_understanding", "operation-timeout")
+
+    with pytest.raises(LearningStageWorkerError, match="handshake timed out"):
+        registry.cancel_by_operation(
+            run_id="run-timeout",
+            stage="screen_understanding",
+            operation_id="operation-timeout",
+        )
+
+    assert record["status"] == "running"
+    assert record["process"] is process
+    assert process.is_alive()
+    assert process.terminated is False
+    assert process.killed is False
+    assert registry._active_by_operation[operation_key] == started["worker_id"]
+
+    recovered = _finish_fake_worker(
+        registry,
+        started,
+        response={"outcome": "completed-after-timeout"},
+    )
+    assert recovered["status"] == "completed"
+    assert recovered["result_available"] is True
+    assert operation_key not in registry._active_by_operation
+
 def test_real_managed_omni_cancel_waits_for_nested_cleanup_and_completed_claim(
     tmp_path: Path,
 ) -> None:

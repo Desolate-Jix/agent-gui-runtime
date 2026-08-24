@@ -248,6 +248,62 @@ def test_discovery_recovers_completed_provider_claim_without_rerun(
     assert adapter.calls == 1
 
 
+def test_non_shadow_rejection_reports_claim_not_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import omni_discovery
+
+    facts = _facts(tmp_path)
+    store = facts["store"]
+    payload = deepcopy(facts["payload"])
+    request = store.get(
+        payload["request_ref"],
+        contract_version="screen_parse_request_v1",
+    )
+    request.pop("content_sha256")
+    request["requested_profiles"][0]["mode"] = "Primary"
+    payload["request_ref"] = _put(store, request)
+    adapter = _RecordedAdapter()
+    monkeypatch.setattr(omni_discovery, "OmniParserShadowAdapter", lambda: adapter)
+
+    result = omni_discovery.run_hybrid_omni_discovery(payload)
+
+    assert result["outcome"] == "failed"
+    assert result["provider_claim_status"] == "not_created"
+    assert adapter.calls == 0
+    claim_root = store.root / ".shadow-runtime-claims"
+    assert not claim_root.exists() or list(claim_root.glob("*.json")) == []
+
+
+def test_adapter_manifest_mismatch_reports_claim_not_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import omni_discovery
+
+    facts = _facts(tmp_path)
+    store = facts["store"]
+    payload = deepcopy(facts["payload"])
+    manifest = store.get(
+        payload["manifest_ref"],
+        contract_version="provider_manifest_v1",
+    )
+    manifest.pop("content_sha256")
+    manifest["provider_version"] = "v9.9.9"
+    payload["manifest_ref"] = _put(store, manifest)
+    adapter = _RecordedAdapter()
+    monkeypatch.setattr(omni_discovery, "OmniParserShadowAdapter", lambda: adapter)
+
+    result = omni_discovery.run_hybrid_omni_discovery(payload)
+
+    assert result["outcome"] == "failed"
+    assert result["provider_claim_status"] == "not_created"
+    assert adapter.calls == 0
+    claim_root = store.root / ".shadow-runtime-claims"
+    assert not claim_root.exists() or list(claim_root.glob("*.json")) == []
+
+
 def test_adapter_bootstrap_failure_is_persisted_as_provider_safe_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

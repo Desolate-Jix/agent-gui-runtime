@@ -152,6 +152,7 @@ def test_only_server_trusted_shadow_local_profile_can_invoke(tmp_path: Path):
     reply = _runtime(store, registration_ref, manifest_ref, adapter).invoke(request_ref=request_ref, capture_lease=lease)
     receipt = store.get(reply["receipt_ref"], contract_version="provider_runtime_receipt_v1")
     assert receipt["status"] == "rejected" and receipt["reason_class"] == "policy_rejected"
+    assert reply["claim_status"] == "not_created"
     assert adapter.calls == 0
 
 
@@ -198,6 +199,12 @@ def test_success_persists_review_only_result_and_is_idempotent(tmp_path: Path):
 
     result = store.get(first["result_ref"], contract_version="provider_safe_result_v1")
     assert first == second and adapter.calls == 1
+    assert first["claim_status"] == "complete"
+    claims = list((store.root / ".shadow-runtime-claims").glob("*.json"))
+    assert len(claims) == 1
+    durable_claim = json.loads(claims[0].read_text(encoding="utf-8"))
+    assert durable_claim["state"] == "complete"
+    assert durable_claim["reply"]["claim_status"] == "complete"
     assert result["status"] == "success" and result["review_only"] is True
     assert set(result["items"][0]) == {"source_item_id", "source_id_origin", "kind", "safe_text", "safe_role",
                                           "safe_states", "source_bbox", "capture_bbox", "source_coordinate_space",
@@ -215,6 +222,7 @@ def test_second_runtime_recovers_completed_claim_without_adapter_dispatch(tmp_pa
     )
 
     assert recovered == first
+    assert recovered["claim_status"] == "complete"
     assert first_adapter.calls == 1 and second_adapter.calls == 0
 
 
@@ -268,6 +276,7 @@ def test_manifest_provider_version_mismatch_rejects_before_adapter_dispatch(tmp_
 
     receipt = store.get(reply["receipt_ref"], contract_version="provider_runtime_receipt_v1")
     assert receipt["status"] == "rejected" and receipt["reason_class"] == "policy_rejected"
+    assert reply["claim_status"] == "not_created"
     assert adapter.calls == 0
 
 
@@ -305,6 +314,7 @@ def test_post_precondition_failure_persists_error_result_then_receipt(tmp_path: 
 
     assert store.write_order[-3:] == ("provider_error_v1", "provider_safe_result_v1", "provider_runtime_receipt_v1")
     assert reply["error_ref"] is not None
+    assert reply["claim_status"] == "complete"
     result = store.get(reply["result_ref"], contract_version="provider_safe_result_v1")
     assert result["status"] == "failed" and result["review_only"] is True and result["items"] == []
 
@@ -336,6 +346,7 @@ def test_runtime_centrally_redacts_generic_credential_text_and_typed_rejects(tmp
     )
     receipt = store.get(reply["receipt_ref"], contract_version="provider_runtime_receipt_v1")
     assert reply["result_ref"] is None and receipt["reason_class"] == "resource_rejected" and receipt["retryable"] is True
+    assert reply["claim_status"] == "complete"
 
 
 @pytest.mark.parametrize("secret", [
