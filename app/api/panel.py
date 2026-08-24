@@ -96,6 +96,7 @@ from app.learn.workflow_worker import (
 from app.learn.workflow_state import (
     LEARNING_WORKFLOW_STAGES,
     LearningWorkflowTransitionError,
+    validate_learning_workflow_state,
 )
 from app.learn.workflow_contracts import (
     ModelReviewTaskInput,
@@ -208,6 +209,7 @@ class PanelLoadModelArtifactRequest(BaseModel):
 class PanelLoadLearningDraftReviewRequest(BaseModel):
     source_path: str = Field(min_length=1)
     discover_related_sidecars: bool = True
+    workflow_run_id: Optional[str] = None
 
 
 class PanelLoadLiveSafeFillPreflightRequest(BaseModel):
@@ -233,6 +235,7 @@ class PanelLoadInterfaceWorkflowReviewRequest(BaseModel):
     application_identity: dict[str, Any] = Field(default_factory=dict)
     draft_source_paths: list[str] = Field(default_factory=list, max_length=100)
     discover_related_sidecars: bool = True
+    workflow_run_ids_by_source: dict[str, str] = Field(default_factory=dict)
 
 
 class PanelSaveInterfaceWorkflowReviewRequest(BaseModel):
@@ -1324,15 +1327,81 @@ def load_model_artifact(request: PanelLoadModelArtifactRequest) -> APIResponse:
         )
 
 
+def _authoritative_hybrid_workflow_expectations(
+    workflow_run_id: str | None,
+    *,
+    source_path: str,
+) -> tuple[str | None, int | None]:
+    """仅从服务端工作流存储恢复 Hybrid 新鲜度与来源绑定。"""
+
+    normalized_run_id = str(workflow_run_id or "").strip()
+    if not normalized_run_id:
+        return None, None
+    try:
+        state = validate_learning_workflow_state(
+            learning_workflow_run_store.get(normalized_run_id)
+        )
+    except (LearningWorkflowTransitionError, TypeError, ValueError):
+        return None, None
+    revision = state.get("revision")
+    if (
+        state.get("run_id") != normalized_run_id
+        or isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 0
+    ):
+        return None, None
+    try:
+        resolved_source = _resolve_panel_artifact_file(source_path)
+    except (OSError, TypeError, ValueError):
+        return None, None
+    source_keys = {
+        "trial_path",
+        "source_path",
+        "original_draft_path",
+        "review_path",
+        "scaffold_path",
+    }
+    source_bound = False
+    for event in state.get("events", []):
+        refs = event.get("evidence_refs") if isinstance(event, dict) else None
+        if not isinstance(refs, dict):
+            continue
+        for key in source_keys:
+            evidence_path = refs.get(key)
+            if not isinstance(evidence_path, str) or not evidence_path.strip():
+                continue
+            try:
+                source_bound = _resolve_panel_artifact_file(evidence_path) == resolved_source
+            except (OSError, TypeError, ValueError):
+                continue
+            if source_bound:
+                break
+        if source_bound:
+            break
+    if not source_bound:
+        return None, None
+    return str(state["run_id"]), revision
+
+
 @router.post("/panel/load_learning_draft_review", response_model=APIResponse)
 def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewRequest) -> APIResponse:
     """Load a model learning draft for display-only human review."""
     try:
-        result = load_learning_draft_review(
-            request.source_path,
-            project_root=ROOT_DIR,
-            discover_related_sidecars=request.discover_related_sidecars,
+        expected_run_id, expected_revision = _authoritative_hybrid_workflow_expectations(
+            request.workflow_run_id,
+            source_path=request.source_path,
         )
+        load_options: dict[str, Any] = {
+            "project_root": ROOT_DIR,
+            "discover_related_sidecars": request.discover_related_sidecars,
+        }
+        if expected_run_id is not None and expected_revision is not None:
+            load_options.update(
+                expected_hybrid_run_id=expected_run_id,
+                expected_hybrid_workflow_revision=expected_revision,
+            )
+        result = load_learning_draft_review(request.source_path, **load_options)
         trace_path = write_trace(
             category="panel",
             operation="load-learning-draft-review",
@@ -1456,12 +1525,21 @@ def load_interface_workflow_review_endpoint(
             )
             continue
         try:
-            loaded_reviews.append(
-                load_learning_draft_review(
-                    normalized_path,
-                    project_root=ROOT_DIR,
-                    discover_related_sidecars=request.discover_related_sidecars,
+            expected_run_id, expected_revision = _authoritative_hybrid_workflow_expectations(
+                request.workflow_run_ids_by_source.get(normalized_path),
+                source_path=normalized_path,
+            )
+            load_options: dict[str, Any] = {
+                "project_root": ROOT_DIR,
+                "discover_related_sidecars": request.discover_related_sidecars,
+            }
+            if expected_run_id is not None and expected_revision is not None:
+                load_options.update(
+                    expected_hybrid_run_id=expected_run_id,
+                    expected_hybrid_workflow_revision=expected_revision,
                 )
+            loaded_reviews.append(
+                load_learning_draft_review(normalized_path, **load_options)
             )
         except Exception as exc:
             invalid_sources.append(

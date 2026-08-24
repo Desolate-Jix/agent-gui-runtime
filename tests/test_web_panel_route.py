@@ -16,7 +16,109 @@ from PIL import Image, ImageDraw
 from app.api import memory as memory_api
 from app.api import panel as panel_api
 from app.learn.workflow_contracts import LearningTaskResult
+from app.learn.workflow_state import transition_learning_workflow_state
 from app.main import app
+
+
+class _StaticLearningWorkflowStore:
+    def __init__(self, state: dict) -> None:
+        self._state = state
+
+    def get(self, run_id: str) -> dict:
+        if run_id != self._state["run_id"]:
+            raise ValueError("learning workflow run not found")
+        return json.loads(json.dumps(self._state))
+
+
+def _hybrid_review_workflow_state(
+    run_id: str,
+    *,
+    revision: int = 7,
+    trial_path: str = "artifacts/learning-runs/panel/trial.json",
+) -> dict:
+    state = None
+    transitions = [
+        ("bind_capture", "running", {}),
+        ("bind_capture", "completed", {"image_path": "artifacts/screenshots/recorded.png"}),
+        ("screen_understanding", "running", {}),
+        ("screen_understanding", "completed", {"trial_path": trial_path}),
+        ("numbered_map", "running", {}),
+        (
+            "numbered_map",
+            "completed",
+            {"report_path": "artifacts/report.json", "overlay_path": "artifacts/overlay.png"},
+        ),
+        ("precise_calibration", "running", {}),
+    ]
+    if revision == 8:
+        transitions.append(
+            (
+                "precise_calibration",
+                "completed",
+                {"result_path": "artifacts/result.json", "overlay_path": "artifacts/precise.png"},
+            )
+        )
+    for stage, outcome, evidence_refs in transitions:
+        state = transition_learning_workflow_state(
+            previous_state=state,
+            run_id=run_id,
+            stage=stage,
+            outcome=outcome,
+            evidence_refs=evidence_refs,
+        )
+    assert state["revision"] == revision
+    return state
+
+
+def test_panel_hybrid_review_uses_authoritative_workflow_state(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from tests.test_learning_hybrid_vertical_slice import _vertical, _write_draft
+
+    facts = _vertical(tmp_path)
+    source = _write_draft(
+        tmp_path,
+        facts,
+        projection_ref=facts["projected"]["projection_ref"],
+        case="panel",
+    )
+    relative_source = source.relative_to(tmp_path).as_posix()
+    client = TestClient(app)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(panel_api, "write_trace", lambda **_kwargs: "trace.json")
+
+    for run_id, revision, state_source, expected_regions in (
+        ("run-recorded", 7, relative_source, 2),
+        ("run-recorded", 8, relative_source, 0),
+        ("run-other", 7, relative_source, 0),
+        ("run-recorded", 7, "artifacts/learning-runs/other/trial.json", 0),
+    ):
+        monkeypatch.setattr(
+            panel_api,
+            "learning_workflow_run_store",
+            _StaticLearningWorkflowStore(
+                _hybrid_review_workflow_state(
+                    run_id,
+                    revision=revision,
+                    trial_path=state_source,
+                )
+            ),
+        )
+        response = client.post(
+            "/panel/load_learning_draft_review",
+            json={"source_path": relative_source, "workflow_run_id": run_id},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["success"] is True
+        regions = payload["data"]["draft"]["regions"]
+        assert len(regions) == expected_regions
+        if expected_regions:
+            assert [region["candidate_id"] for region in regions] == [
+                candidate["candidate_id"] for candidate in facts["projected"]["candidates"]
+            ]
+        else:
+            assert payload["data"]["hybrid_review_projection_status"]["status"] == "rejected"
 
 
 def test_web_panel_serves_browser_control_surface() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -8,7 +9,8 @@ import pytest
 from PIL import Image
 
 from app.learn.draft_review import load_learning_draft_review
-from app.learn.recognition.uei.canonical import seal_immutable
+from app.learn.hybrid.review_projection import validate_hybrid_review_projection
+from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
 from app.learn.recognition.uei.store import UEIObjectStore
 from tests.test_learn_hybrid_capture import _context, _identity, _window
 
@@ -129,6 +131,18 @@ def _load(root: Path, path: Path, *, expectations: bool = True) -> dict:
     return load_learning_draft_review(path, project_root=root, **kwargs)
 
 
+def _reidentify_and_reseal_projection(value: dict) -> dict:
+    forged = deepcopy(value)
+    forged.pop("content_sha256", None)
+    forged["projection_id"] = ""
+    forged["projection_id"] = "hybrid-review-projection/" + sha256(
+        canonical_json_bytes(forged)
+    ).hexdigest()
+    forged = seal_immutable(forged)
+    assert validate_hybrid_review_projection(forged) == forged
+    return forged
+
+
 def test_persisted_omni_projection_loads_all_candidates_without_authority(tmp_path: Path) -> None:
     facts = _vertical(tmp_path)
     projected, ledger = facts["projected"], facts["ledger"]
@@ -208,7 +222,7 @@ def test_resealed_projection_mutations_fail_closed(tmp_path: Path, mutation: str
         )
         provider["items"][0]["opaque_attributes"]["recording"] = "resealed-mutation"
         stored["provider_result_ref"] = store.put(seal_immutable(provider))
-    forged_ref = store.put(seal_immutable(stored))
+    forged_ref = store.put(_reidentify_and_reseal_projection(stored))
     path = _write_draft(tmp_path, facts, projection_ref=forged_ref, case=mutation)
     loaded = _load(tmp_path, path)
     assert loaded["draft"]["regions"] == []
@@ -251,7 +265,7 @@ def test_same_run_cross_capture_bundle_fails_closed(tmp_path: Path) -> None:
         facts["projected"]["projection_ref"], contract_version="hybrid_review_projection_v1"
     )
     stored["hybrid_capture_bundle_ref"] = cross_bundle["bundle_ref"]
-    forged_ref = store.put(seal_immutable(stored))
+    forged_ref = store.put(_reidentify_and_reseal_projection(stored))
     path = _write_draft(tmp_path, facts, projection_ref=forged_ref, case="cross-capture")
     loaded = _load(tmp_path, path)
     assert loaded["draft"]["regions"] == []
