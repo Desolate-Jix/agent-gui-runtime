@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -23,6 +22,17 @@ def _window() -> dict[str, object]:
         "process_id": 202,
         "process_name": "fixture.exe",
         "rect": {"left": 10, "top": 20, "right": 810, "bottom": 620},
+    }
+
+
+def _ocr_result() -> dict[str, object]:
+    return {
+        "matches": [{
+            "text": "Search",
+            "score": 0.9,
+            "bbox": {"x": 1, "y": 1, "width": 4, "height": 2},
+        }],
+        "metadata": {"engine": "builtin"},
     }
 
 
@@ -172,6 +182,7 @@ def _bundle(root: Path, *, run_id="run-a", revision=7):
         workflow_revision=revision,
         window_binding=_window(),
         ocr_uia_context=_context(root, identity, run_id=run_id, revision=revision),
+        capture_envelope=identity.capture_envelope,
     )
 
 
@@ -203,8 +214,7 @@ def test_bundle_reads_canonical_screenshot_once_and_derives_exact_facts(
 ) -> None:
     import app.learn.hybrid.capture as capture_module
 
-    image_path, identity = _identity(tmp_path)
-    context = _context(tmp_path, identity)
+    image_path = _image(tmp_path / "artifacts" / "screenshots" / "capture.png")
     image_open_count = 0
     original_open = capture_module.os.open
 
@@ -215,6 +225,47 @@ def test_bundle_reads_canonical_screenshot_once_and_derives_exact_facts(
         return original_open(path, *args, **kwargs)
 
     monkeypatch.setattr(capture_module.os, "open", counted_open)
+    identity = capture_module.seal_hybrid_capture_identity(
+        project_root=tmp_path,
+        image_path=image_path,
+        run_id="run-a",
+        workflow_revision=7,
+        window_binding=_window(),
+        captured_at="2026-08-25T00:00:00Z",
+    )
+    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
+
+    ocr_ref = seal_builtin_ocr_evidence(
+        project_root=tmp_path,
+        image_path=image_path,
+        capture_id=identity["capture_id"],
+        captured_at=identity["captured_at"],
+        capture_lineage_ref=identity["capture_lineage_ref"],
+        capture_envelope=identity.capture_envelope,
+        ocr_result=_ocr_result(),
+    )
+    uia_ref = _provider_evidence(
+        tmp_path,
+        capture_lineage_ref=identity["capture_lineage_ref"],
+        source_kind="uia",
+        suffix="run-a-uia-one-read",
+    )
+    context = {
+        "capture_lineage_ref": identity["capture_lineage_ref"],
+        "sources": [
+            _source(
+                kind="ocr",
+                evidence_ref=ocr_ref,
+                lineage_ref=identity["capture_lineage_ref"],
+            ),
+            _source(
+                kind="uia",
+                evidence_ref=uia_ref,
+                lineage_ref=identity["capture_lineage_ref"],
+            ),
+        ],
+        "derived_views": [],
+    }
     bundle = capture_module.seal_hybrid_capture_bundle(
         project_root=tmp_path,
         image_path=image_path,
@@ -222,12 +273,12 @@ def test_bundle_reads_canonical_screenshot_once_and_derives_exact_facts(
         workflow_revision=7,
         window_binding=_window(),
         ocr_uia_context=context,
+        capture_envelope=identity.capture_envelope,
     )
 
-    expected_sha = sha256(image_path.read_bytes()).hexdigest()
     assert image_open_count == 1
-    assert bundle["capture_identity"]["artifact_sha256"] == expected_sha
-    assert bundle["capture_identity"]["screenshot_sha256"] == expected_sha
+    assert bundle["capture_identity"]["artifact_sha256"] == identity["artifact_sha256"]
+    assert bundle["capture_identity"]["screenshot_sha256"] == identity["artifact_sha256"]
     assert bundle["capture_identity"]["image_size"] == {"width": 8, "height": 6}
 
 
@@ -242,6 +293,7 @@ def test_raw_ocr_uia_snapshot_fields_are_not_a_context_contract(tmp_path: Path) 
             run_id="run-a",
             workflow_revision=7,
             window_binding=_window(),
+            capture_envelope=identity.capture_envelope,
             ocr_uia_context={
                 "capture_lineage_ref": identity["capture_lineage_ref"],
                 "sources": [],
@@ -261,6 +313,7 @@ def test_builtin_ocr_hybrid_path_reuses_exact_sealed_lineage(tmp_path: Path) -> 
         capture_id=identity["capture_id"],
         captured_at=identity["captured_at"],
         capture_lineage_ref=identity["capture_lineage_ref"],
+        capture_envelope=identity.capture_envelope,
         expected_image_sha256=identity["artifact_sha256"],
         expected_image_size=identity["image_size"],
         ocr_result={
@@ -276,6 +329,104 @@ def test_builtin_ocr_hybrid_path_reuses_exact_sealed_lineage(tmp_path: Path) -> 
     result = store.get(result_ref, contract_version="provider_safe_result_v1")
     assert result["capture_lineage_ref"] == identity["capture_lineage_ref"]
     assert store.object_count(contract_version="capture_lineage_v1") == 1
+
+
+def test_builtin_ocr_hybrid_path_requires_in_process_envelope(tmp_path: Path) -> None:
+    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
+
+    image_path, identity = _identity(tmp_path)
+    with pytest.raises(ValueError, match="capture envelope is required"):
+        seal_builtin_ocr_evidence(
+            project_root=tmp_path,
+            image_path=image_path,
+            capture_id=identity["capture_id"],
+            captured_at=identity["captured_at"],
+            capture_lineage_ref=identity["capture_lineage_ref"],
+            ocr_result=_ocr_result(),
+        )
+
+
+def test_lineage_cannot_be_rebound_to_another_run_revision(tmp_path: Path) -> None:
+    from app.learn.hybrid.capture import seal_hybrid_capture_bundle
+
+    image_path, identity = _identity(tmp_path, run_id="run-a", revision=7)
+    context = _context(tmp_path, identity, run_id="run-b", revision=8)
+
+    with pytest.raises(ValueError, match="capture identity mismatch"):
+        seal_hybrid_capture_bundle(
+            project_root=tmp_path,
+            image_path=image_path,
+            run_id="run-b",
+            workflow_revision=8,
+            window_binding=_window(),
+            ocr_uia_context=context,
+            capture_envelope=identity.capture_envelope,
+        )
+
+
+def test_legacy_builtin_ocr_uses_one_verified_descriptor_and_png_media_type(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.learn.hybrid.capture as capture_module
+    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
+
+    image_path = _image(tmp_path / "legacy.png")
+    image_open_count = 0
+    original_open = capture_module.os.open
+
+    def counted_open(path, *args, **kwargs):
+        nonlocal image_open_count
+        if Path(path).resolve() == image_path.resolve():
+            image_open_count += 1
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(capture_module.os, "open", counted_open)
+    result_ref = seal_builtin_ocr_evidence(
+        project_root=tmp_path,
+        image_path=image_path,
+        capture_id="capture/legacy",
+        captured_at="2026-08-25T00:00:00Z",
+        ocr_result=_ocr_result(),
+    )
+
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    result = store.get(result_ref, contract_version="provider_safe_result_v1")
+    lineage = store.get(result["capture_lineage_ref"], contract_version="capture_lineage_v1")
+    artifact = store.get(lineage["artifact_ref"], contract_version="artifact_ref_v1")
+    assert image_open_count == 1
+    assert artifact["media_type"] == "image/png"
+
+
+def test_legacy_builtin_ocr_rejects_mutation_and_unsupported_media(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.learn.hybrid.capture as capture_module
+    from app.learn.recognition.uei.builtin_learning_projection import seal_builtin_ocr_evidence
+
+    image_path = _image(tmp_path / "legacy.png")
+    monkeypatch.setattr(capture_module, "_same_file_state", lambda left, right: False)
+    with pytest.raises(ValueError, match="changed before read"):
+        seal_builtin_ocr_evidence(
+            project_root=tmp_path,
+            image_path=image_path,
+            capture_id="capture/mutable",
+            captured_at="2026-08-25T00:00:00Z",
+            ocr_result=_ocr_result(),
+        )
+
+    monkeypatch.undo()
+    gif_path = tmp_path / "legacy.gif"
+    Image.new("RGB", (8, 6), color=(1, 2, 3)).save(gif_path, format="GIF")
+    with pytest.raises(ValueError, match="format is unsupported"):
+        seal_builtin_ocr_evidence(
+            project_root=tmp_path,
+            image_path=gif_path,
+            capture_id="capture/gif",
+            captured_at="2026-08-25T00:00:00Z",
+            ocr_result=_ocr_result(),
+        )
 
 
 def test_cross_capture_source_and_nested_authority_fail_closed(tmp_path: Path) -> None:
@@ -295,6 +446,7 @@ def test_cross_capture_source_and_nested_authority_fail_closed(tmp_path: Path) -
         seal_hybrid_capture_bundle(
             project_root=tmp_path, image_path=image_path, run_id="run-a", workflow_revision=7,
             window_binding=_window(), ocr_uia_context=context,
+            capture_envelope=identity.capture_envelope,
         )
 
     context = _context(tmp_path, identity)
@@ -303,6 +455,7 @@ def test_cross_capture_source_and_nested_authority_fail_closed(tmp_path: Path) -
         seal_hybrid_capture_bundle(
             project_root=tmp_path, image_path=image_path, run_id="run-a", workflow_revision=7,
             window_binding=_window(), ocr_uia_context=context,
+            capture_envelope=identity.capture_envelope,
         )
 
 
@@ -349,6 +502,7 @@ def test_derived_target_artifact_and_affine_are_resolved_semantically(tmp_path: 
     bundle = seal_hybrid_capture_bundle(
         project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
         window_binding=_window(), ocr_uia_context=context,
+        capture_envelope=source.capture_envelope,
     )
     assert bundle["context"]["derived_views"][0]["target_artifact"]["artifact_sha256"] == target["artifact_sha256"]
     assert load_and_verify_hybrid_capture_bundle(
@@ -366,6 +520,7 @@ def test_derived_target_artifact_and_affine_are_resolved_semantically(tmp_path: 
         seal_hybrid_capture_bundle(
             project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
             window_binding=_window(), ocr_uia_context=context,
+            capture_envelope=source.capture_envelope,
         )
 
     wrong_size = deepcopy(transform)
@@ -378,6 +533,7 @@ def test_derived_target_artifact_and_affine_are_resolved_semantically(tmp_path: 
         seal_hybrid_capture_bundle(
             project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
             window_binding=_window(), ocr_uia_context=context,
+            capture_envelope=source.capture_envelope,
         )
 
     context["derived_views"][0]["target_artifact_ref"] = {
@@ -387,6 +543,7 @@ def test_derived_target_artifact_and_affine_are_resolved_semantically(tmp_path: 
         seal_hybrid_capture_bundle(
             project_root=tmp_path, image_path=source_path, run_id="run-a", workflow_revision=7,
             window_binding=_window(), ocr_uia_context=context,
+            capture_envelope=source.capture_envelope,
         )
 
 

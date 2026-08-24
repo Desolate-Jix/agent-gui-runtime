@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from io import BytesIO
@@ -70,6 +71,43 @@ _DERIVED_STORED_FIELDS = frozenset(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _ServerCaptureEnvelope:
+    """进程内传递的不可变截图事实；不能来自面板 JSON。"""
+
+    project_root: Path
+    image_path: Path
+    image_relative_path: str
+    image_bytes: bytes
+    artifact_sha256: str
+    image_width: int
+    image_height: int
+    media_type: str
+    capture_id: str
+    captured_at: str
+    run_id: str
+    workflow_revision: int
+    window_binding_sha256: str
+    artifact_ref_id: str
+    artifact_ref_sha256: str
+    lineage_ref_id: str
+    lineage_ref_sha256: str
+
+
+class HybridCaptureIdentity(dict[str, Any]):
+    """兼容既有字典契约，同时私有保存一次读取所得的服务端封套。"""
+
+    __slots__ = ("_capture_envelope",)
+
+    def __init__(self, value: dict[str, Any], envelope: _ServerCaptureEnvelope) -> None:
+        super().__init__(value)
+        self._capture_envelope = envelope
+
+    @property
+    def capture_envelope(self) -> object:
+        return self._capture_envelope
+
+
 def seal_hybrid_capture_identity(
     *,
     project_root: Path,
@@ -78,25 +116,22 @@ def seal_hybrid_capture_identity(
     workflow_revision: int,
     window_binding: dict[str, object],
     captured_at: str | None = None,
-) -> dict[str, Any]:
+) -> HybridCaptureIdentity:
     """为 ScreenshotService 已生成的文件建立唯一 UEI capture lineage。"""
     root = _project_root(project_root)
     normalized_run_id = _run_id(run_id)
     revision = _workflow_revision(workflow_revision)
     binding = _window_binding(window_binding)
-    _, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
+    image, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
     artifact_sha, image_size, media_type = _image_facts(image_bytes)
     timestamp = captured_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    identity_material = {
-        "run_id": normalized_run_id,
-        "workflow_revision": revision,
-        "window_binding": binding,
-        "artifact_sha256": artifact_sha,
-        "captured_at": timestamp,
-    }
-    capture_id = "capture/server-owned/" + sha256(
-        canonical_json_bytes(identity_material)
-    ).hexdigest()
+    capture_id = _expected_capture_id(
+        run_id=normalized_run_id,
+        workflow_revision=revision,
+        window_binding=binding,
+        artifact_sha256=artifact_sha,
+        captured_at=timestamp,
+    )
     store = _store(root)
     artifact_ref = store.put(seal_immutable({
         "contract_version": "artifact_ref_v1",
@@ -117,13 +152,33 @@ def seal_hybrid_capture_identity(
         "captured_at": timestamp,
     }))
     lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
-    return _capture_identity(
+    identity = _capture_identity(
         lineage=lineage,
         lineage_ref=lineage_ref,
         artifact=artifact,
         artifact_ref=artifact_ref,
         workflow_revision=revision,
     )
+    envelope = _ServerCaptureEnvelope(
+        project_root=root,
+        image_path=image,
+        image_relative_path=image.relative_to(root).as_posix(),
+        image_bytes=image_bytes,
+        artifact_sha256=artifact_sha,
+        image_width=image_size["width"],
+        image_height=image_size["height"],
+        media_type=media_type,
+        capture_id=capture_id,
+        captured_at=timestamp,
+        run_id=normalized_run_id,
+        workflow_revision=revision,
+        window_binding_sha256=sha256(canonical_json_bytes(binding)).hexdigest(),
+        artifact_ref_id=artifact_ref["id"],
+        artifact_ref_sha256=artifact_ref["content_sha256"],
+        lineage_ref_id=lineage_ref["id"],
+        lineage_ref_sha256=lineage_ref["content_sha256"],
+    )
+    return HybridCaptureIdentity(identity, envelope)
 
 
 def seal_hybrid_capture_bundle(
@@ -134,6 +189,7 @@ def seal_hybrid_capture_bundle(
     workflow_revision: int,
     window_binding: dict[str, object],
     ocr_uia_context: dict[str, object],
+    capture_envelope: object,
 ) -> HybridCaptureBundle:
     """验证同源 OCR/UIA 证据并通过 UEIObjectStore 持久化上下文与 bundle。"""
     root = _project_root(project_root)
@@ -150,19 +206,30 @@ def seal_hybrid_capture_bundle(
         context_input["capture_lineage_ref"], name="capture_lineage_ref"
     )
     store = _store(root)
-    lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
-    artifact_ref = _immutable_ref(lineage["artifact_ref"], name="artifact_ref")
-    artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
-    _, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
-    artifact_sha, image_size, media_type = _image_facts(image_bytes)
+    capture = _resolve_capture_envelope(
+        root=root,
+        image_path=image_path,
+        capture_lineage_ref=lineage_ref,
+        capture_envelope=capture_envelope,
+    )
+    lineage = capture["capture_lineage"]
+    artifact_ref = capture["artifact_ref"]
+    artifact = capture["artifact"]
+    envelope = capture["_capture_envelope"]
     if (
-        artifact["artifact_sha256"] != artifact_sha
-        or lineage["artifact_sha256"] != artifact_sha
-        or lineage["image_size"] != image_size
-        or artifact["byte_length"] != len(image_bytes)
-        or artifact["media_type"] != media_type
+        envelope.run_id != normalized_run_id
+        or envelope.workflow_revision != revision
+        or envelope.window_binding_sha256
+        != sha256(canonical_json_bytes(binding)).hexdigest()
     ):
-        raise ValueError("server capture does not match sealed capture lineage")
+        raise ValueError("capture identity mismatch")
+    _require_capture_identity_binding(
+        lineage=lineage,
+        artifact=artifact,
+        run_id=normalized_run_id,
+        workflow_revision=revision,
+        window_binding=binding,
+    )
     identity = _capture_identity(
         lineage=lineage,
         lineage_ref=lineage_ref,
@@ -261,6 +328,13 @@ def load_and_verify_hybrid_capture_bundle(
     ):
         raise ValueError("capture context freshness mismatch")
     binding = _window_binding(context["window_binding"])
+    _require_capture_identity_binding(
+        lineage=lineage,
+        artifact=artifact,
+        run_id=run_id,
+        workflow_revision=revision,
+        window_binding=binding,
+    )
     _verified_sources(
         store=store,
         value=context["sources"],
@@ -286,30 +360,83 @@ def load_and_verify_hybrid_capture_bundle(
 
 
 def resolve_server_owned_capture(
-    *, project_root: Path, image_path: Path, capture_lineage_ref: dict[str, str]
+    *, project_root: Path, image_path: Path, capture_lineage_ref: dict[str, str],
+    capture_envelope: object,
 ) -> dict[str, Any]:
     """为内置 provider 解析已封装 capture，禁止创建第二条 lineage。"""
     root = _project_root(project_root)
-    store = _store(root)
-    lineage_ref = _immutable_ref(capture_lineage_ref, name="capture_lineage_ref")
-    lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
-    artifact_ref = _immutable_ref(lineage["artifact_ref"], name="artifact_ref")
-    artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
-    image, image_bytes = _read_server_owned_image(root=root, image_path=image_path)
+    return _resolve_capture_envelope(
+        root=root,
+        image_path=image_path,
+        capture_lineage_ref=capture_lineage_ref,
+        capture_envelope=capture_envelope,
+    )
+
+
+def read_project_owned_image(*, project_root: Path, image_path: Path) -> dict[str, Any]:
+    """兼容旧 OCR：以单一描述符验证项目内服务端文件。"""
+    root = _project_root(project_root)
+    image, image_bytes = _read_verified_image(
+        root=root,
+        image_path=image_path,
+        allowed_root=root,
+        boundary_name="project root",
+    )
     artifact_sha, image_size, media_type = _image_facts(image_bytes)
-    if (
-        artifact_sha != artifact["artifact_sha256"]
-        or artifact_sha != lineage["artifact_sha256"]
-        or image_size != lineage["image_size"]
-        or len(image_bytes) != artifact["byte_length"]
-        or media_type != artifact["media_type"]
-    ):
-        raise ValueError("server capture does not match sealed capture lineage")
     return {
         "project_root": root,
         "image_path": image,
         "image_relative_path": image.relative_to(root).as_posix(),
         "image_bytes": image_bytes,
+        "artifact_sha256": artifact_sha,
+        "image_size": image_size,
+        "media_type": media_type,
+    }
+
+
+def _resolve_capture_envelope(
+    *, root: Path, image_path: Path, capture_lineage_ref: dict[str, str],
+    capture_envelope: object,
+) -> dict[str, Any]:
+    if type(capture_envelope) is not _ServerCaptureEnvelope:
+        raise ValueError("capture envelope must be server-owned")
+    envelope = capture_envelope
+    if envelope.project_root != root or _lexical_path(root, image_path) != envelope.image_path:
+        raise ValueError("capture envelope path mismatch")
+    lineage_ref = _immutable_ref(capture_lineage_ref, name="capture_lineage_ref")
+    if lineage_ref != {
+        "id": envelope.lineage_ref_id,
+        "content_sha256": envelope.lineage_ref_sha256,
+    }:
+        raise ValueError("capture envelope lineage mismatch")
+    store = _store(root)
+    lineage = store.get(lineage_ref, contract_version="capture_lineage_v1")
+    artifact_ref = _immutable_ref(lineage["artifact_ref"], name="artifact_ref")
+    if artifact_ref != {
+        "id": envelope.artifact_ref_id,
+        "content_sha256": envelope.artifact_ref_sha256,
+    }:
+        raise ValueError("capture envelope artifact mismatch")
+    artifact = store.get(artifact_ref, contract_version="artifact_ref_v1")
+    artifact_sha, image_size, media_type = _image_facts(envelope.image_bytes)
+    if (
+        artifact_sha != envelope.artifact_sha256
+        or image_size != {"width": envelope.image_width, "height": envelope.image_height}
+        or media_type != envelope.media_type
+        or lineage["capture_id"] != envelope.capture_id
+        or lineage["captured_at"] != envelope.captured_at
+        or lineage["artifact_sha256"] != artifact_sha
+        or lineage["image_size"] != image_size
+        or artifact["artifact_sha256"] != artifact_sha
+        or artifact["byte_length"] != len(envelope.image_bytes)
+        or artifact["media_type"] != media_type
+    ):
+        raise ValueError("server capture does not match sealed capture envelope")
+    return {
+        "project_root": root,
+        "image_path": envelope.image_path,
+        "image_relative_path": envelope.image_relative_path,
+        "image_bytes": envelope.image_bytes,
         "artifact_sha256": artifact_sha,
         "image_size": image_size,
         "store": store,
@@ -319,7 +446,45 @@ def resolve_server_owned_capture(
         "artifact": artifact,
         "capture_lineage_ref": lineage_ref,
         "capture_lineage": lineage,
+        "_capture_envelope": envelope,
     }
+
+
+def _expected_capture_id(
+    *, run_id: str, workflow_revision: int, window_binding: dict[str, Any],
+    artifact_sha256: str, captured_at: str,
+) -> str:
+    material = {
+        "run_id": run_id,
+        "workflow_revision": workflow_revision,
+        "window_binding": window_binding,
+        "artifact_sha256": artifact_sha256,
+        "captured_at": captured_at,
+    }
+    return "capture/server-owned/" + sha256(canonical_json_bytes(material)).hexdigest()
+
+
+def _require_capture_identity_binding(
+    *, lineage: dict[str, Any], artifact: dict[str, Any], run_id: str,
+    workflow_revision: int, window_binding: dict[str, Any],
+) -> None:
+    expected = _expected_capture_id(
+        run_id=run_id,
+        workflow_revision=workflow_revision,
+        window_binding=window_binding,
+        artifact_sha256=artifact["artifact_sha256"],
+        captured_at=lineage["captured_at"],
+    )
+    if lineage["artifact_sha256"] != artifact["artifact_sha256"] or lineage["capture_id"] != expected:
+        raise ValueError("capture identity mismatch")
+
+
+def _lexical_path(root: Path, image_path: Path) -> Path:
+    if not isinstance(image_path, Path):
+        raise ValueError("image_path must be a server-owned Path")
+    candidate = image_path if image_path.is_absolute() else root / image_path
+    normalized = os.path.normcase(os.path.abspath(os.fspath(candidate)))
+    return Path(normalized)
 
 
 def _capture_identity(
@@ -491,17 +656,27 @@ def _verified_derived_views(
 
 
 def _read_server_owned_image(*, root: Path, image_path: Path) -> tuple[Path, bytes]:
+    return _read_verified_image(
+        root=root,
+        image_path=image_path,
+        allowed_root=root / _SCREENSHOT_RELATIVE_PATH,
+        boundary_name="screenshot service root",
+    )
+
+
+def _read_verified_image(
+    *, root: Path, image_path: Path, allowed_root: Path, boundary_name: str,
+) -> tuple[Path, bytes]:
     if not isinstance(image_path, Path):
         raise ValueError("image_path must be a server-owned Path")
-    screenshot_root = root / _SCREENSHOT_RELATIVE_PATH
     candidate = image_path if image_path.is_absolute() else root / image_path
-    _reject_reparse_ancestors(candidate.absolute(), stop=screenshot_root.parent)
+    _reject_reparse_ancestors(candidate.absolute(), stop=allowed_root.parent)
     try:
-        resolved_root = screenshot_root.resolve(strict=True)
+        resolved_root = allowed_root.resolve(strict=True)
         resolved = candidate.resolve(strict=True)
         resolved.relative_to(resolved_root)
     except (OSError, ValueError) as error:
-        raise ValueError("server-owned image must be inside screenshot service root") from error
+        raise ValueError(f"server-owned image must be inside {boundary_name}") from error
     _reject_reparse_ancestors(resolved, stop=resolved_root.parent)
     before = os.stat(resolved, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
@@ -513,7 +688,7 @@ def _read_server_owned_image(*, root: Path, image_path: Path) -> tuple[Path, byt
         try:
             final_path.relative_to(resolved_root)
         except ValueError as error:
-            raise ValueError("opened screenshot handle escaped screenshot service root") from error
+            raise ValueError(f"opened image handle escaped {boundary_name}") from error
         _reject_reparse_ancestors(final_path, stop=resolved_root.parent)
         if not _same_file_state(before, opened):
             raise ValueError("server-owned image changed before read")

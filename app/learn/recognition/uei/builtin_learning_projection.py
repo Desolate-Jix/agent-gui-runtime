@@ -6,9 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from PIL import Image
-
-from app.learn.hybrid.capture import resolve_server_owned_capture
+from app.learn.hybrid.capture import read_project_owned_image, resolve_server_owned_capture
 from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.projections import project_ocr_result
 from app.learn.recognition.uei.store import UEIObjectStore
@@ -36,6 +34,7 @@ def seal_builtin_ocr_evidence(
     expected_image_sha256: str | None = None,
     expected_image_size: dict[str, int] | None = None,
     capture_lineage_ref: dict[str, str] | None = None,
+    capture_envelope: object | None = None,
 ) -> dict[str, str]:
     """把服务端截图与内置 OCR 结果封装成仅供审阅的 UEI 引用。"""
     if not isinstance(capture_id, str) or not capture_id.strip():
@@ -44,12 +43,17 @@ def seal_builtin_ocr_evidence(
         raise ValueError("captured_at is required")
     if not isinstance(ocr_result, dict):
         raise ValueError("built-in OCR result must be an object")
+    if capture_envelope is not None and capture_lineage_ref is None:
+        raise ValueError("capture envelope requires a sealed capture lineage")
+    if capture_lineage_ref is not None and capture_envelope is None:
+        raise ValueError("capture envelope is required for sealed capture lineage")
 
     capture = (
         resolve_server_owned_capture(
             project_root=project_root,
             image_path=image_path,
             capture_lineage_ref=capture_lineage_ref,
+            capture_envelope=capture_envelope,
         )
         if capture_lineage_ref is not None
         else _seal_legacy_capture(
@@ -142,19 +146,12 @@ def _put(store: UEIObjectStore, value: dict[str, Any]) -> dict[str, str]:
 def _seal_legacy_capture(
     *, project_root: Path, image_path: Path, capture_id: str, captured_at: str
 ) -> dict[str, Any]:
-    root = project_root.resolve()
-    image = image_path.resolve()
-    try:
-        image.relative_to(root)
-    except ValueError as error:
-        raise ValueError("server-owned image must be inside project root") from error
-    if not image.is_file() or image.is_symlink():
-        raise ValueError("server-owned image must be a regular project file")
-    image_bytes = image.read_bytes()
-    artifact_sha256 = sha256(image_bytes).hexdigest()
-    with Image.open(image) as opened:
-        image_size = {"width": int(opened.width), "height": int(opened.height)}
-        media_type = "image/jpeg" if str(opened.format).upper() == "JPEG" else "image/png"
+    verified = read_project_owned_image(project_root=project_root, image_path=image_path)
+    root = verified["project_root"]
+    artifact_sha256 = verified["artifact_sha256"]
+    image_size = verified["image_size"]
+    media_type = verified["media_type"]
+    image_bytes = verified["image_bytes"]
     store = UEIObjectStore(root=root / "artifacts" / "uei-shadow-store")
     artifact_ref = _put(store, {
         "contract_version": "artifact_ref_v1",
@@ -175,7 +172,7 @@ def _seal_legacy_capture(
     })
     return {
         "project_root": root,
-        "image_relative_path": image.relative_to(root).as_posix(),
+        "image_relative_path": verified["image_relative_path"],
         "artifact_sha256": artifact_sha256,
         "image_size": image_size,
         "store": store,
