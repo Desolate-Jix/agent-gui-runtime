@@ -244,3 +244,123 @@ DONE_WITH_CONCERNS. Closed C1 and I1–I6 within the Task 4 allowlist without a 
 ## Commit
 
 `fix(learn): close qwen binding lifecycle boundaries` (exact hash returned after commit creation).
+
+---
+
+# Task 4 independent-review repair — round 2
+
+## Status
+
+DONE_WITH_CONCERNS. Closed the remaining C1/I4 and the round-2 lifecycle findings with an internal `qwen_model_server_lease_v2` protocol. No model, GPU, GUI, browser, or action path was invoked. The only concern remains the previously documented unrelated full-panel fixture/mojibake baseline.
+
+## Exact server-incarnation lifecycle
+
+- Lease state is now keyed by an immutable `incarnation_id`, not mutable `profile_id`.
+- The incarnation seals the exact endpoint, canonical base URL, model identity, acquired profile digest, listener/service PID, and nanosecond process creation identity.
+- An active same-profile state rejects any incompatible endpoint, model, profile digest, PID, or process creation identity.
+- Model dispatch rechecks the exact PID/creation identity before sending HTTP, so a replacement process cannot receive an old lease's request.
+- Cancellation scans every sealed lease state by `owner_request_id` first and then loads the acquired profile snapshot. Current stage/profile configuration is never used to select the cancellation target.
+- Final stop uses a two-phase token/revision protocol: mark `stop_pending` under the state lock, release the lock, prove the exact process identity, invoke stop, prove that exact PID/creation incarnation exited, use health only as secondary evidence, then conditionally delete the matching state.
+- If ownership changes, stop fails, the exact process remains, or the finalization token changes, the sealed lease remains `owned_pending`; an external replacement is never reported released or stopped.
+
+## Interprocess coordination
+
+- Replaced mtime lock-file stealing with an OS-backed file lock (`msvcrt.locking` on Windows, `fcntl.flock` elsewhere) plus a process-local thread lock.
+- A live lock remains authoritative even when its mtime is moved past the former 30-second expiry.
+- No lease-state lock is held across the stop script; a regression reacquires the state lock from inside the controlled stop seam.
+- The managed Qwen ensure/start/readiness/lease-publication transition now executes inside `_ManagedCancellationEvent.run_if_not_cancelled`.
+  - Cancellation that wins first prevents acquisition/start.
+  - Acquisition that wins holds the shared transition lock until the exact lease is durably published; cancellation then observes and owns cleanup.
+
+## Deployed no-endpoint cancellation and reconciliation
+
+- The regression loads the actual checked-in `qwen3_vl_8b_q4_k_m` profile and proves it has no `request_cancel_endpoint`.
+- With a shared server and no request endpoint, cancellation records `cancellation_acknowledged_pending` / `owned_pending`, retains both leases, keeps the worker attached, and does not terminate/kill the wrapper or shared model server.
+- The registry retries request-owned reconciliation after worker exit; only verified `terminated`/`request_not_active` converts the internal pending operation to cancelled cleanup.
+- A sole runtime-owned request may stop only its exact proven incarnation; a sole external lease remains pending unless request completion is proven.
+
+## Failure finalization and typed cancellation
+
+- `run_hybrid_qwen_task` now owns a failure finalizer for timeout, invalid JSON, parser rejection, cancellation, and release failure.
+- A model completion notifier distinguishes model-returned parser failures from uncertain transport timeouts.
+- The HTTP adapter durably marks compute complete immediately after bounded response bytes are read, before JSON decode, so invalid outer JSON can reconcile a shared lease without stranding it.
+- Completed parser/JSON/release failures remove only the exact request lease; a final runtime-owned lease stops only after exact-process proof.
+- Uncertain shared/external timeouts persist `owned_pending`; a sole exact runtime-owned timeout can stop the exact incarnation and prove completion.
+- Release/finalization failures preserve the exact lease and pending token instead of reporting released.
+- Added `QwenModelRequestCancelled`; pre-request, post-request, and event-set transport errors map through `QwenBindingCancelled` rather than generic runtime failure.
+
+## TDD evidence
+
+### RED
+
+- Incarnation/control-plane selection:
+  - `uv run pytest -q tests/test_model_request_cancellation.py -k 'incarnation or current_profile_id or no_endpoint_shared or replacement_process or outside_os_state_lock or os_lock'`
+  - exit 1; `8 failed, 13 deselected` for incompatible same-ID acquisitions, mutable-profile cancellation selection, deployed no-endpoint terminal misreporting, absent exact PID proof, and the old lock API.
+- Atomic managed transition:
+  - `uv run pytest -q tests/test_learning_workflow_stage_worker.py -k 'ensure_to_lease'`
+  - exit 1 because cancellation and ensure→publication were not one protected transition.
+- Pending shared cancellation:
+  - `uv run pytest -q tests/test_learning_workflow_stage_worker.py -k 'shared_no_endpoint'`
+  - exit 1 because the registry marked cancelled and killed the wrapper.
+- Pending recovery after exit:
+  - `uv run pytest -q tests/test_learning_workflow_stage_worker.py -k 'pending_cancel_reconciles'`
+  - exit 1 because failed/non-running workers bypassed model reconciliation.
+- Cancellation typing:
+  - HTTP adapter test failed because `QwenModelRequestCancelled` did not exist; binding test exposed generic `RuntimeError`.
+- Failure finalization:
+  - workflow timeout/invalid JSON/parser/release matrix: `4 failed, 25 deselected` because no failure reconciler existed;
+  - sole exact timeout finalizer failed with `owned_pending` instead of verified exact-process termination;
+  - invalid outer HTTP JSON failed by leaving the shared request lease pending;
+  - partial/forged lease token was initially accepted by the exact release helper.
+
+### GREEN
+
+- Required focused Task 4 suite:
+  - `uv run pytest -q tests/test_learn_hybrid_qwen_binding.py tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py tests/test_web_panel_route.py -k "qwen or hybrid or cancellation"`
+  - exit 0; `69 passed, 190 deselected in 6.57s`.
+- Full worker and cancellation suites:
+  - `uv run pytest -q tests/test_learning_workflow_stage_worker.py tests/test_model_request_cancellation.py`
+  - exit 0; `58 passed in 9.06s`.
+- Relevant panel suite:
+  - `uv run pytest -q tests/test_web_panel_route.py -k "qwen or hybrid or cancellation or task_kind"`
+  - exit 0; `4 passed, 167 deselected in 1.78s`.
+- Relevant Hybrid regressions:
+  - `uv run pytest -q tests/test_learn_hybrid_contracts.py tests/test_learning_hybrid_vertical_slice.py tests/test_learn_hybrid_omni_discovery.py`
+  - exit 0; `68 passed in 5.99s`.
+- Full Qwen binding suite:
+  - `uv run pytest -q tests/test_learn_hybrid_qwen_binding.py`
+  - exit 0; `30 passed in 4.14s`.
+- `uv run python -m py_compile` over every Task 4 production/test path: exit 0.
+- `git diff --check`: exit 0; only Git's expected `core.autocrlf=true` normalization warning for `model_server.py` was emitted.
+
+## Self-review
+
+- Lease state and lease token field sets are closed and sealed; a partial `lease_id`/`incarnation_id` object cannot release or select a server.
+- All state-file scans validate the self-hash and incarnation/path binding; corruption or ambiguous owner matches fail closed.
+- The current configured profile ID/endpoint cannot redirect an acquired request's cancellation or HTTP dispatch.
+- A server replacement before request or stop fails exact PID/creation comparison and receives neither request nor stop.
+- Health `unreachable` alone never proves termination; exact process-incarnation exit is required.
+- Shared no-endpoint cancellation retains compute ownership and worker attachment; no wrapper kill or terminal cancellation occurs while compute is unproven.
+- Timeout/parser/invalid JSON/release failures have explicit final-state regressions covering exact release, exact stop, and durable pending ownership.
+- I1/I2/I3/I5/I6 tests remain green; Task 3 Omni cleanup/claim behavior and public UEI/Runtime/action authority remain unchanged.
+- No config was fabricated or modified. The denylisted untracked `tests/test_agent_runtime_actual_adapter_portfolio_v1.py` was not read, edited, staged, deleted, or committed.
+
+## Files changed in repair
+
+- `app/core/model_server.py`
+- `app/learn/hybrid/qwen_binding.py`
+- `app/learn/workflow_tasks/hybrid_qwen.py`
+- `app/learn/workflow_worker.py`
+- `tests/test_learn_hybrid_qwen_binding.py`
+- `tests/test_learning_workflow_stage_worker.py`
+- `tests/test_model_request_cancellation.py`
+- this report
+
+## Concerns
+
+- The nine previously documented unrelated full-panel fixture/mojibake failures remain outside the Task 4 allowlist. Relevant Task 4 panel checks are green.
+- No real Qwen/GPU run was performed, as explicitly forbidden; exact HTTP/cancellation/process/lease seams are exercised with controlled readiness, PID identities, responses, and stop probes.
+
+## Commit
+
+`fix(learn): bind qwen leases to exact server incarnation` (exact hash returned after commit creation).

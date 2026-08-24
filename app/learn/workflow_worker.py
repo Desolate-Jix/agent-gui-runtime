@@ -111,7 +111,11 @@ def execute_learning_stage_worker_task(
 
     if normalized_kind == "panel_learning_hybrid_qwen_binding":
         validate_hybrid_qwen_task_payload(payload)
-    model_lease = _ensure_learning_stage_model_ready(normalized_kind, payload)
+    model_lease = _ensure_learning_stage_model_ready(
+        normalized_kind,
+        payload,
+        cancellation_event=cancellation_event,
+    )
 
     if normalized_kind == "panel_learning_hybrid_qwen_binding":
         response = run_hybrid_qwen_task(
@@ -174,6 +178,8 @@ def execute_learning_stage_worker_task(
 def _ensure_learning_stage_model_ready(
     task_kind: str,
     payload: dict[str, Any],
+    *,
+    cancellation_event: Any | None = None,
 ) -> dict[str, Any] | None:
     """后端 worker 自行完成模型资源检查和服务准备。"""
 
@@ -210,23 +216,25 @@ def _ensure_learning_stage_model_ready(
             f"model resource preflight blocked {stage}: {reasons}"
         )
 
-    readiness = ensure_model_server(
-        stage=stage,
-        profile_id=profile_id,
-        wait_until_ready=True,
-        wait_seconds=_MODEL_READY_WAIT_SECONDS,
-    )
-    after = readiness.get("after")
-    before = readiness.get("before")
-    status = str(
-        (after.get("status") if isinstance(after, dict) else "")
-        or (before.get("status") if isinstance(before, dict) else "")
-    ).strip()
-    if status != "running":
-        raise LearningStageWorkerError(
-            f"model service not ready for {stage}: {status or 'unknown'}"
+    def ensure_and_publish() -> dict[str, Any] | None:
+        readiness = ensure_model_server(
+            stage=stage,
+            profile_id=profile_id,
+            wait_until_ready=True,
+            wait_seconds=_MODEL_READY_WAIT_SECONDS,
         )
-    if task_kind == "panel_learning_hybrid_qwen_binding":
+        after = readiness.get("after")
+        before = readiness.get("before")
+        status = str(
+            (after.get("status") if isinstance(after, dict) else "")
+            or (before.get("status") if isinstance(before, dict) else "")
+        ).strip()
+        if status != "running":
+            raise LearningStageWorkerError(
+                f"model service not ready for {stage}: {status or 'unknown'}"
+            )
+        if task_kind != "panel_learning_hybrid_qwen_binding":
+            return None
         from app.core.model_server import acquire_qwen_model_lease
 
         request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
@@ -237,7 +245,20 @@ def _ensure_learning_stage_model_ready(
             request_id=request_id,
             readiness=readiness,
         )
-    return None
+
+    if (
+        task_kind == "panel_learning_hybrid_qwen_binding"
+        and cancellation_event is not None
+        and hasattr(cancellation_event, "run_if_not_cancelled")
+    ):
+        allowed, result = cancellation_event.run_if_not_cancelled(
+            "qwen_ensure_and_lease",
+            ensure_and_publish,
+        )
+        if not allowed:
+            raise LearningStageWorkerError("Qwen cancelled before model acquisition")
+        return result
+    return ensure_and_publish()
 
 
 def _run_learning_stage_worker_entry(
@@ -698,6 +719,37 @@ class LearningStageWorkerRegistry:
                 }
             self._refresh_record(record)
             if record["status"] not in {"running", "detached_running"}:
+                if (
+                    record["task_kind"] == "panel_learning_hybrid_qwen_binding"
+                    and isinstance(record.get("cancellation_pending"), dict)
+                ):
+                    retry = self._model_request_cancel(
+                        request_id=record["model_request_id"],
+                        task_kind=record["task_kind"],
+                        payload=deepcopy(record["payload"]),
+                    )
+                    termination = retry.get("model_service_compute_termination")
+                    if termination in {"terminated", "request_not_active"}:
+                        record["status"] = "cancelled"
+                        record["finished_at"] = record.get("finished_at") or _utc_now_iso()
+                        record.pop("cancellation_pending", None)
+                        self._active_by_operation.pop(operation_key, None)
+                        self._persist_record_journal(record)
+                        return {
+                            **self._public_record(record),
+                            "backend_compute_termination": "terminated",
+                            "model_service_compute_termination": termination,
+                            "model_request_cancellation": deepcopy(retry),
+                        }
+                    record["cancellation_pending"] = deepcopy(retry)
+                    self._persist_record_journal(record)
+                    return {
+                        **self._public_record(record),
+                        "status": "cancellation_pending",
+                        "backend_compute_termination": "terminated",
+                        "model_service_compute_termination": termination,
+                        "model_request_cancellation": deepcopy(retry),
+                    }
                 return {
                     **self._public_record(record),
                     "backend_compute_termination": "not_running",
@@ -787,6 +839,23 @@ class LearningStageWorkerRegistry:
                         "request_id": record["model_request_id"],
                         "model_service_compute_termination": "cancel_failed",
                         "error": str(exc),
+                    }
+                if (
+                    record["task_kind"] == "panel_learning_hybrid_qwen_binding"
+                    and model_cancellation.get("model_service_compute_termination")
+                    not in {"terminated", "request_not_active"}
+                ):
+                    record["cancellation_pending"] = deepcopy(model_cancellation)
+                    self._persist_record_journal(record)
+                    return {
+                        **self._public_record(record),
+                        "status": "cancellation_pending",
+                        "backend_compute_termination": "pending",
+                        "model_service_compute_termination": model_cancellation.get(
+                            "model_service_compute_termination",
+                            "cancellation_acknowledged_pending",
+                        ),
+                        "model_request_cancellation": deepcopy(model_cancellation),
                     }
             if process.is_alive():
                 process.terminate()

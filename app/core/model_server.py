@@ -8,6 +8,7 @@ import json
 import os
 import psutil
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -16,17 +17,33 @@ from typing import Any
 from uuid import uuid4
 
 from app.learn.hybrid.contracts import validate_omni_inventory
-from app.learn.recognition.uei.canonical import content_sha256
+from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
 MODEL_SERVER_LEASE_DIR = ROOT_DIR / "logs" / "model_server_leases"
 _QWEN_HTTP_RESPONSE_MAX_BYTES = 1024 * 1024
 _ACTIVE_SERVER_STATUSES = {"running", "loading", "busy"}
+_QWEN_LOCAL_LEASE_LOCK = threading.Lock()
+_QWEN_LEASE_FIELDS = {
+    "contract_version",
+    "lease_id",
+    "owner_request_id",
+    "profile_id",
+    "incarnation_id",
+    "server_base_url",
+    "server_model_id",
+    "profile_sha256",
+    "server_process_identity",
+}
 
 
 class QwenModelRequestTimeout(TimeoutError):
     """Qwen HTTP 请求在适配器边界统一归类为超时。"""
+
+
+class QwenModelRequestCancelled(RuntimeError):
+    """Qwen HTTP 请求由精确受管请求取消。"""
 
 STAGE_PROFILE_IDS = {
     "observe": "qwen3_vl_8b_q4_k_m",
@@ -121,7 +138,12 @@ def cancel_model_request(
     normalized_request_id = str(request_id or "").strip()
     if not normalized_request_id:
         raise ValueError("request_id is required")
-    matching_profiles = _request_cancel_profiles(task_kind=task_kind, payload=payload)
+    if str(task_kind or "").strip() == "panel_learning_hybrid_qwen_binding":
+        owner = _find_qwen_lease_by_owner(normalized_request_id)
+        owner_profile = owner[0].get("profile") if owner is not None else None
+        matching_profiles = [deepcopy(owner_profile)] if isinstance(owner_profile, dict) else []
+    else:
+        matching_profiles = _request_cancel_profiles(task_kind=task_kind, payload=payload)
     if not matching_profiles:
         return {
             "contract_version": "model_request_cancellation_v1",
@@ -175,13 +197,7 @@ def _request_cancel_profiles(
 ) -> list[dict[str, Any]]:
     normalized_task_kind = str(task_kind or "").strip()
     if normalized_task_kind == "panel_learning_hybrid_qwen_binding":
-        try:
-            profile = profile_for_stage("understanding")
-        except ValueError:
-            return []
-        if str(profile.get("provider_mode") or "").strip().casefold() != "local_understanding":
-            return []
-        return [profile]
+        return []
     effective_payload = payload
     if normalized_task_kind == "panel_learning_calibration_sequence":
         nested_payload = payload.get("locate_payload")
@@ -215,9 +231,6 @@ def _cancel_qwen_profile(
     verify_seconds: float,
 ) -> dict[str, Any]:
     profile_id = str(profile.get("profile_id") or "unknown")
-    acquired_profile = _qwen_acquired_profile_for_request(profile_id, request_id)
-    if acquired_profile is not None:
-        profile = acquired_profile
     endpoint = str(profile.get("request_cancel_endpoint") or "").strip()
     if profile.get("request_cancel_supported") is True and endpoint:
         request_result = _cancel_profile_request(
@@ -232,7 +245,6 @@ def _cancel_qwen_profile(
         }:
             return request_result
         lease_release = _release_qwen_request_lease(
-            profile_id=profile_id,
             request_id=request_id,
             request_cancelled=True,
         )
@@ -240,7 +252,6 @@ def _cancel_qwen_profile(
 
     try:
         lease_release = _release_qwen_request_lease(
-            profile_id=profile_id,
             request_id=request_id,
             request_cancelled=False,
         )
@@ -269,7 +280,7 @@ def run_qwen_binding_model(
 ) -> dict[str, Any]:
     """使用既有 understanding profile 发出一次封闭的 Qwen JSON 请求。"""
     if cancellation_event is not None and cancellation_event.is_set():
-        raise RuntimeError("Qwen binding request cancelled")
+        raise QwenModelRequestCancelled("Qwen binding request cancelled")
     profile = (
         _profile_for_qwen_model_lease(model_lease)
         if model_lease is not None
@@ -329,19 +340,25 @@ def run_qwen_binding_model(
             response_bytes = response.read(_QWEN_HTTP_RESPONSE_MAX_BYTES + 1)
             if len(response_bytes) > _QWEN_HTTP_RESPONSE_MAX_BYTES:
                 raise ValueError("Qwen HTTP response byte limit exceeded")
+            if model_lease is not None:
+                _mark_qwen_model_compute_complete(model_lease)
             response_payload = json.loads(response_bytes.decode("utf-8"))
     except (TimeoutError, QwenModelRequestTimeout) as error:
         raise QwenModelRequestTimeout("Qwen binding request timed out") from error
     except urllib.error.URLError as error:
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise QwenModelRequestCancelled("Qwen binding request cancelled") from error
         if isinstance(error.reason, TimeoutError):
             raise QwenModelRequestTimeout("Qwen binding request timed out") from error
         raise RuntimeError(f"Qwen binding request failed: {error}") from error
     except (ValueError, UnicodeError):
         raise
     except Exception as error:
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise QwenModelRequestCancelled("Qwen binding request cancelled") from error
         raise RuntimeError(f"Qwen binding request failed: {error}") from error
     if cancellation_event is not None and cancellation_event.is_set():
-        raise RuntimeError("Qwen binding request cancelled")
+        raise QwenModelRequestCancelled("Qwen binding request cancelled")
     choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
     message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
     content = message.get("content") if isinstance(message, dict) else None
@@ -362,50 +379,63 @@ def acquire_qwen_model_lease(
     request_id: str,
     readiness: dict[str, Any],
 ) -> dict[str, Any]:
-    """为一个受管请求记录精确的 profile/server 所有权租约。"""
     profile_id = str(profile.get("profile_id") or "").strip()
     owner_request_id = str(request_id or "").strip()
     if not profile_id or not owner_request_id:
         raise ValueError("Qwen model lease identity is incomplete")
-    observed = readiness.get("after") if isinstance(readiness.get("after"), dict) else readiness.get("before")
-    observed = observed if isinstance(observed, dict) else {}
+    incarnation = _qwen_server_incarnation(profile, readiness)
     lease = {
-        "contract_version": "qwen_model_server_lease_v1",
+        "contract_version": "qwen_model_server_lease_v2",
         "lease_id": uuid4().hex,
         "owner_request_id": owner_request_id,
         "profile_id": profile_id,
-        "server_base_url": str(observed.get("base_url") or model_base_url(profile)),
-        "server_model_id": str(observed.get("model_id") or profile.get("model_name") or "") or None,
+        "incarnation_id": incarnation["incarnation_id"],
+        "server_base_url": incarnation["server_base_url"],
+        "server_model_id": incarnation["server_model_id"],
+        "profile_sha256": incarnation["profile_sha256"],
+        "server_process_identity": deepcopy(incarnation["server_process_identity"]),
     }
-    with _qwen_lease_lock(profile_id):
-        state = _load_qwen_lease_state(profile_id)
+    with _qwen_lease_lock():
+        for existing in _load_all_qwen_lease_states():
+            if existing["profile_id"] != profile_id or not existing["leases"]:
+                continue
+            if existing["incarnation"] != incarnation:
+                raise ValueError("Qwen server incarnation mismatch for existing profile lease")
+        state = _load_qwen_lease_state(incarnation["incarnation_id"])
         if state is None:
             state = {
-                "contract_version": "qwen_model_server_lease_state_v1",
+                "contract_version": "qwen_model_server_lease_state_v2",
                 "profile_id": profile_id,
                 "profile": deepcopy(profile),
+                "incarnation": incarnation,
                 "server_started_by_runtime": bool(readiness.get("started")),
+                "revision": 0,
+                "finalization": None,
                 "leases": [],
             }
+        elif state["incarnation"] != incarnation:
+            raise ValueError("Qwen server incarnation mismatch")
+        if state.get("finalization") is not None:
+            raise RuntimeError("Qwen server incarnation finalization is pending")
+        if any(item.get("owner_request_id") == owner_request_id for item in state["leases"]):
+            raise ValueError("Qwen request already owns a server lease")
         state["server_started_by_runtime"] = bool(
             state.get("server_started_by_runtime") or readiness.get("started")
         )
-        leases = state.get("leases")
-        if not isinstance(leases, list):
-            raise RuntimeError("Qwen model lease state is invalid")
-        leases.append(deepcopy(lease))
-        _write_qwen_lease_state(profile_id, state)
+        state["revision"] = int(state.get("revision") or 0) + 1
+        state["leases"].append(deepcopy(lease))
+        _write_qwen_lease_state(state)
     return lease
 
 
 def qwen_model_lease_is_active(model_lease: object) -> bool:
     if not isinstance(model_lease, dict):
         return False
-    profile_id = str(model_lease.get("profile_id") or "")
-    if not profile_id:
+    incarnation_id = str(model_lease.get("incarnation_id") or "")
+    if not incarnation_id:
         return False
-    with _qwen_lease_lock(profile_id):
-        state = _load_qwen_lease_state(profile_id)
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(incarnation_id)
         return _find_exact_lease(state, model_lease) is not None
 
 
@@ -415,116 +445,208 @@ def release_qwen_model_server(
     omni_inventory: dict[str, Any],
     model_lease: dict[str, Any],
 ) -> dict[str, Any]:
-    """验证完整绑定与精确租约后，仅释放本请求持有的服务引用。"""
     _validate_sealed_qwen_release_artifact(sealed_artifact, omni_inventory)
+    return _release_exact_qwen_lease(model_lease, reason="completed")
+
+
+def reconcile_qwen_model_lease_failure(
+    *,
+    model_lease: dict[str, Any],
+    compute_completed: bool,
+    reason: str,
+) -> dict[str, Any]:
+    if compute_completed or _qwen_model_compute_is_complete(model_lease):
+        return _release_exact_qwen_lease(model_lease, reason=reason)
+    request_id = str(model_lease.get("owner_request_id") or "")
+    return _release_qwen_request_lease(
+        request_id=request_id,
+        request_cancelled=False,
+    )
+
+
+def _release_exact_qwen_lease(
+    model_lease: object,
+    *,
+    reason: str,
+) -> dict[str, Any]:
     if not isinstance(model_lease, dict):
         raise ValueError("exact Qwen model lease is required before release")
-    profile_id = str(model_lease.get("profile_id") or "")
-    with _qwen_lease_lock(profile_id):
-        state = _load_qwen_lease_state(profile_id)
+    if set(model_lease) != _QWEN_LEASE_FIELDS:
+        raise ValueError("exact Qwen model lease is required before release")
+    incarnation_id = str(model_lease.get("incarnation_id") or "")
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(incarnation_id)
         exact = _find_exact_lease(state, model_lease)
         if exact is None:
             raise ValueError("exact Qwen model lease is not active")
-        leases = state["leases"]
-        remaining = [item for item in leases if item is not exact]
+        remaining = [item for item in state["leases"] if item is not exact]
         if remaining:
             state["leases"] = remaining
-            _write_qwen_lease_state(profile_id, state)
+            state["revision"] += 1
+            _write_qwen_lease_state(state)
             return {
                 "status": "released",
                 "lease": deepcopy(model_lease),
                 "shared_server_retained": True,
                 "server_termination": "not_required_shared",
+                "reason": reason,
             }
         if not state.get("server_started_by_runtime"):
-            _delete_qwen_lease_state(profile_id)
+            _delete_qwen_lease_state(incarnation_id)
             return {
                 "status": "released",
                 "lease": deepcopy(model_lease),
                 "shared_server_retained": True,
                 "server_termination": "not_owned",
+                "reason": reason,
             }
-        profile = state.get("profile")
-        if not isinstance(profile, dict):
-            raise RuntimeError("Qwen model lease profile is unavailable")
-        stop_result = stop_model_server(profile)
-        after = check_model_server(profile)
-        if after.get("status") in _ACTIVE_SERVER_STATUSES:
-            raise RuntimeError("Qwen model server is still running after release")
-        _delete_qwen_lease_state(profile_id)
-        return {
-            "status": "released",
-            "lease": deepcopy(model_lease),
-            "shared_server_retained": False,
-            "server_termination": "verified_stopped",
-            "release": stop_result,
-            "after": after,
+        token = uuid4().hex
+        state["revision"] += 1
+        revision = state["revision"]
+        state["finalization"] = {
+            "token": token,
+            "revision": revision,
+            "lease_id": model_lease["lease_id"],
+            "phase": "stop_pending",
+            "reason": reason,
         }
+        _write_qwen_lease_state(state)
+        stop_state = deepcopy(state)
+    return _stop_and_finalize_qwen_incarnation(stop_state, token=token, revision=revision)
+
+
+def _stop_and_finalize_qwen_incarnation(
+    state: dict[str, Any],
+    *,
+    token: str,
+    revision: int,
+) -> dict[str, Any]:
+    incarnation = state["incarnation"]
+    expected_process = incarnation["server_process_identity"]
+    current = _current_process_identity(expected_process["pid"])
+    if current != expected_process:
+        _record_qwen_finalization_failure(state, token, revision, "ownership_changed")
+        raise RuntimeError("Qwen server incarnation ownership changed before stop")
+    profile = state["profile"]
+    try:
+        release = stop_model_server(profile)
+    except Exception as error:
+        _record_qwen_finalization_failure(state, token, revision, "stop_failed")
+        raise RuntimeError("Qwen exact server stop failed") from error
+    current_after = _current_process_identity(expected_process["pid"])
+    if current_after == expected_process:
+        _record_qwen_finalization_failure(state, token, revision, "process_still_running")
+        raise RuntimeError("Qwen exact server process is still running after release")
+    health = check_model_server(profile)
+    incarnation_id = incarnation["incarnation_id"]
+    with _qwen_lease_lock():
+        current_state = _load_qwen_lease_state(incarnation_id)
+        finalization = current_state.get("finalization") if isinstance(current_state, dict) else None
+        if (
+            not isinstance(finalization, dict)
+            or finalization.get("token") != token
+            or finalization.get("revision") != revision
+        ):
+            raise RuntimeError("Qwen finalization token changed")
+        _delete_qwen_lease_state(incarnation_id)
+    return {
+        "status": "released",
+        "lease": deepcopy(state["leases"][0]),
+        "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": release,
+        "after": health,
+        "process_identity": expected_process,
+    }
+
+
+def _record_qwen_finalization_failure(
+    state: dict[str, Any],
+    token: str,
+    revision: int,
+    reason: str,
+) -> None:
+    incarnation_id = state["incarnation"]["incarnation_id"]
+    with _qwen_lease_lock():
+        current = _load_qwen_lease_state(incarnation_id)
+        finalization = current.get("finalization") if isinstance(current, dict) else None
+        if isinstance(finalization, dict) and finalization.get("token") == token:
+            finalization["phase"] = "owned_pending"
+            finalization["failure_reason"] = reason
+            current["revision"] = max(int(current.get("revision") or 0), revision)
+            _write_qwen_lease_state(current)
+
+
+def _mark_qwen_lease_pending(model_lease: object, *, reason: str) -> dict[str, Any]:
+    if not isinstance(model_lease, dict):
+        raise ValueError("exact Qwen model lease is required")
+    incarnation_id = str(model_lease.get("incarnation_id") or "")
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(incarnation_id)
+        exact = _find_exact_lease(state, model_lease)
+        if exact is None:
+            return {"status": "request_not_active", "model_service_compute_termination": "request_not_active"}
+        exact["lifecycle_state"] = "owned_pending"
+        exact["pending_reason"] = str(reason)
+        state["revision"] += 1
+        _write_qwen_lease_state(state)
+    return {
+        "status": "cancellation_acknowledged_pending",
+        "model_service_compute_termination": "cancellation_acknowledged_pending",
+        "lease": deepcopy(model_lease),
+        "shared_server_retained": True,
+        "server_termination": "owned_pending",
+    }
+
+
+def _mark_qwen_model_compute_complete(model_lease: object) -> None:
+    if not isinstance(model_lease, dict):
+        return
+    incarnation_id = str(model_lease.get("incarnation_id") or "")
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(incarnation_id)
+        exact = _find_exact_lease(state, model_lease)
+        if exact is None:
+            raise ValueError("exact Qwen model lease is not active")
+        exact["lifecycle_state"] = "compute_complete"
+        exact.pop("pending_reason", None)
+        state["revision"] += 1
+        _write_qwen_lease_state(state)
+
+
+def _qwen_model_compute_is_complete(model_lease: object) -> bool:
+    if not isinstance(model_lease, dict):
+        return False
+    incarnation_id = str(model_lease.get("incarnation_id") or "")
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(incarnation_id)
+        exact = _find_exact_lease(state, model_lease)
+        return bool(exact is not None and exact.get("lifecycle_state") == "compute_complete")
 
 
 def _release_qwen_request_lease(
     *,
-    profile_id: str,
     request_id: str,
     request_cancelled: bool,
 ) -> dict[str, Any]:
-    with _qwen_lease_lock(profile_id):
-        state = _load_qwen_lease_state(profile_id)
-        leases = state.get("leases") if isinstance(state, dict) else None
-        if not isinstance(leases, list):
-            return {
-                "status": "request_not_active",
-                "model_service_compute_termination": "request_not_active",
-                "shared_server_retained": True,
-            }
-        owned = [item for item in leases if item.get("owner_request_id") == request_id]
-        if not owned:
-            return {
-                "status": "request_not_active",
-                "model_service_compute_termination": "request_not_active",
-                "shared_server_retained": True,
-            }
-        remaining = [item for item in leases if item not in owned]
-        if remaining:
-            if not request_cancelled:
-                raise RuntimeError("request-specific cancellation is unavailable while Qwen server is shared")
-            state["leases"] = remaining
-            _write_qwen_lease_state(profile_id, state)
-            return {
-                "status": "terminated",
-                "model_service_compute_termination": "terminated",
-                "lease": deepcopy(owned[0]),
-                "shared_server_retained": True,
-                "server_termination": "not_required_shared",
-            }
-        if not state.get("server_started_by_runtime"):
-            if not request_cancelled:
-                raise RuntimeError("request-specific cancellation is unavailable for an externally owned Qwen server")
-            _delete_qwen_lease_state(profile_id)
-            return {
-                "status": "terminated",
-                "model_service_compute_termination": "terminated",
-                "lease": deepcopy(owned[0]),
-                "shared_server_retained": True,
-                "server_termination": "not_owned_request_cancelled",
-            }
-        profile = state.get("profile")
-        if not isinstance(profile, dict):
-            raise RuntimeError("Qwen model lease profile is unavailable")
-        release = stop_model_server(profile)
-        after = check_model_server(profile)
-        if after.get("status") in _ACTIVE_SERVER_STATUSES:
-            raise RuntimeError("Qwen model server is still running after cancellation")
-        _delete_qwen_lease_state(profile_id)
+    match = _find_qwen_lease_by_owner(request_id)
+    if match is None:
         return {
-            "status": "terminated",
-            "model_service_compute_termination": "terminated",
-            "lease": deepcopy(owned[0]),
-            "shared_server_retained": False,
-            "server_termination": "verified_stopped",
-            "release": release,
-            "after": after,
+            "status": "request_not_active",
+            "model_service_compute_termination": "request_not_active",
+            "shared_server_retained": True,
         }
+    state, lease = match
+    if not request_cancelled and len(state["leases"]) > 1:
+        return _mark_qwen_lease_pending(lease, reason="request_cancel_endpoint_unavailable")
+    if not request_cancelled and not state.get("server_started_by_runtime"):
+        return _mark_qwen_lease_pending(lease, reason="external_server_request_unproven")
+    result = _release_exact_qwen_lease(lease, reason="cancelled")
+    return {
+        **result,
+        "status": "terminated",
+        "model_service_compute_termination": "terminated",
+    }
 
 
 def _validate_sealed_qwen_release_artifact(
@@ -537,7 +659,7 @@ def _validate_sealed_qwen_release_artifact(
     inventory_digest = sealed_inventory.pop("content_sha256", None)
     if inventory_digest != content_sha256(omni_inventory):
         raise ValueError("sealed Omni inventory is required before release")
-    inventory = validate_omni_inventory(sealed_inventory)
+    validate_omni_inventory(sealed_inventory)
     if not isinstance(sealed_artifact, dict):
         raise ValueError("sealed Qwen binding artifact is required before release")
     artifact = deepcopy(sealed_artifact)
@@ -546,7 +668,6 @@ def _validate_sealed_qwen_release_artifact(
         raise ValueError("sealed Qwen binding artifact is required before release")
     try:
         from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
-
         parsed = parse_qwen_candidate_bindings(
             {
                 "bindings": deepcopy(artifact.get("bindings")),
@@ -560,108 +681,218 @@ def _validate_sealed_qwen_release_artifact(
         raise ValueError(f"sealed Qwen binding artifact is invalid: {error}") from error
 
 
-def _qwen_lease_state_path(profile_id: str) -> Path:
-    digest = sha256(profile_id.encode("utf-8")).hexdigest()
-    return MODEL_SERVER_LEASE_DIR / f"{digest}.json"
+def _qwen_server_incarnation(
+    profile: dict[str, Any],
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    observed = readiness.get("after") if isinstance(readiness.get("after"), dict) else readiness.get("before")
+    observed = observed if isinstance(observed, dict) else {}
+    process_identity = observed.get("server_process_identity")
+    if not _valid_process_identity(process_identity):
+        process_identity = _observe_qwen_server_process(profile, readiness)
+    if not _valid_process_identity(process_identity):
+        raise RuntimeError("Qwen listener process identity is unavailable")
+    body = {
+        "profile_id": str(profile.get("profile_id") or ""),
+        "profile_sha256": content_sha256(_public_profile(profile)),
+        "server_endpoint": str(profile.get("endpoint") or ""),
+        "server_base_url": str(observed.get("base_url") or model_base_url(profile)),
+        "server_model_id": str(observed.get("model_id") or profile.get("model_name") or "") or None,
+        "server_process_identity": {
+            "pid": int(process_identity["pid"]),
+            "create_time_ns": int(process_identity["create_time_ns"]),
+        },
+    }
+    return {**body, "incarnation_id": content_sha256(body)}
+
+
+def _observe_qwen_server_process(
+    profile: dict[str, Any],
+    readiness: dict[str, Any],
+) -> dict[str, int] | None:
+    port = profile.get("port")
+    try:
+        port_number = int(port)
+    except (TypeError, ValueError):
+        port_number = 0
+    if port_number:
+        try:
+            for connection in psutil.net_connections(kind="tcp"):
+                address = connection.laddr
+                if connection.status == psutil.CONN_LISTEN and address and int(address.port) == port_number and connection.pid:
+                    return _current_process_identity(connection.pid)
+        except (psutil.AccessDenied, OSError):
+            return None
+    start = readiness.get("start")
+    if isinstance(start, dict):
+        pid = start.get("service_pid") or start.get("pid")
+        if pid:
+            return _current_process_identity(pid)
+    return None
+
+
+def _current_process_identity(pid: object) -> dict[str, int] | None:
+    try:
+        process = psutil.Process(int(pid))
+        if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+            return None
+        return {
+            "pid": int(process.pid),
+            "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+        }
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError, TypeError, OSError):
+        return None
+
+
+def _valid_process_identity(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("pid"), int)
+        and value["pid"] > 0
+        and isinstance(value.get("create_time_ns"), int)
+        and value["create_time_ns"] > 0
+    )
+
+
+def _qwen_lease_state_path(incarnation_id: str) -> Path:
+    return MODEL_SERVER_LEASE_DIR / f"{incarnation_id}.json"
 
 
 @contextmanager
-def _qwen_lease_lock(profile_id: str):
-    if not profile_id:
-        raise ValueError("Qwen model lease profile_id is required")
+def _qwen_lease_lock():
     MODEL_SERVER_LEASE_DIR.mkdir(parents=True, exist_ok=True)
-    lock_path = _qwen_lease_state_path(profile_id).with_suffix(".lock")
-    deadline = time.monotonic() + 5.0
-    descriptor: int | None = None
-    while descriptor is None:
+    lock_path = MODEL_SERVER_LEASE_DIR / ".lease-state.lock"
+    with _QWEN_LOCAL_LEASE_LOCK:
+        handle = lock_path.open("a+b")
         try:
-            descriptor = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(descriptor, f"{os.getpid()} {time.time()}".encode("ascii"))
-        except FileExistsError:
+            handle.seek(0)
+            if handle.tell() == 0 and lock_path.stat().st_size == 0:
+                handle.write(b"0")
+                handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
-                if time.time() - lock_path.stat().st_mtime > 30.0:
-                    lock_path.unlink(missing_ok=True)
-                    continue
-            except FileNotFoundError:
-                continue
-            if time.monotonic() >= deadline:
-                raise RuntimeError("Qwen model lease lock timed out")
-            time.sleep(0.01)
-    try:
-        yield
-    finally:
-        os.close(descriptor)
-        lock_path.unlink(missing_ok=True)
+                yield
+            finally:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
-def _load_qwen_lease_state(profile_id: str) -> dict[str, Any] | None:
-    path = _qwen_lease_state_path(profile_id)
+def _load_qwen_lease_state(incarnation_id: str) -> dict[str, Any] | None:
+    if not incarnation_id:
+        return None
+    path = _qwen_lease_state_path(incarnation_id)
     if not path.exists():
         return None
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise RuntimeError("Qwen model lease state is unreadable") from error
-    if not isinstance(value, dict) or value.get("profile_id") != profile_id:
+    if not isinstance(value, dict) or value.get("content_sha256") != content_sha256(value):
+        raise RuntimeError("Qwen model lease state seal mismatch")
+    value = deepcopy(value)
+    value.pop("content_sha256")
+    if (
+        value.get("contract_version") != "qwen_model_server_lease_state_v2"
+        or value.get("incarnation", {}).get("incarnation_id") != incarnation_id
+        or not isinstance(value.get("leases"), list)
+        or not isinstance(value.get("revision"), int)
+    ):
         raise RuntimeError("Qwen model lease state identity mismatch")
     return value
 
 
-def _write_qwen_lease_state(profile_id: str, state: dict[str, Any]) -> None:
-    path = _qwen_lease_state_path(profile_id)
+def _load_all_qwen_lease_states() -> list[dict[str, Any]]:
+    states = []
+    if not MODEL_SERVER_LEASE_DIR.exists():
+        return states
+    for path in MODEL_SERVER_LEASE_DIR.glob("*.json"):
+        state = _load_qwen_lease_state(path.stem)
+        if state is not None:
+            states.append(state)
+    return states
+
+
+def _write_qwen_lease_state(state: dict[str, Any]) -> None:
+    incarnation_id = state["incarnation"]["incarnation_id"]
+    path = _qwen_lease_state_path(incarnation_id)
     temporary = path.with_suffix(f".{uuid4().hex}.tmp")
+    sealed = seal_immutable(state)
     temporary.write_text(
-        json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        json.dumps(sealed, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         encoding="utf-8",
     )
     os.replace(temporary, path)
 
 
-def _delete_qwen_lease_state(profile_id: str) -> None:
-    _qwen_lease_state_path(profile_id).unlink(missing_ok=True)
+def _delete_qwen_lease_state(incarnation_id: str) -> None:
+    _qwen_lease_state_path(incarnation_id).unlink(missing_ok=True)
 
 
 def _find_exact_lease(
     state: dict[str, Any] | None,
     model_lease: dict[str, Any],
 ) -> dict[str, Any] | None:
+    if set(model_lease) != _QWEN_LEASE_FIELDS:
+        return None
     leases = state.get("leases") if isinstance(state, dict) else None
     if not isinstance(leases, list):
         return None
     for lease in leases:
-        if isinstance(lease, dict) and lease == model_lease:
+        if isinstance(lease, dict) and all(lease.get(key) == value for key, value in model_lease.items()):
             return lease
     return None
 
 
-def _qwen_acquired_profile_for_request(
-    profile_id: str,
+def _find_qwen_lease_by_owner(
     request_id: str,
-) -> dict[str, Any] | None:
-    with _qwen_lease_lock(profile_id):
-        state = _load_qwen_lease_state(profile_id)
-        leases = state.get("leases") if isinstance(state, dict) else None
-        if not isinstance(leases, list) or not any(
-            isinstance(item, dict) and item.get("owner_request_id") == request_id
-            for item in leases
-        ):
-            return None
-        profile = state.get("profile")
-        return deepcopy(profile) if isinstance(profile, dict) else None
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    with _qwen_lease_lock():
+        matches = []
+        for state in _load_all_qwen_lease_states():
+            for lease in state["leases"]:
+                if isinstance(lease, dict) and lease.get("owner_request_id") == request_id:
+                    matches.append((state, deepcopy(lease)))
+        if len(matches) > 1:
+            raise RuntimeError("Qwen request ownership is ambiguous")
+        return matches[0] if matches else None
 
 
 def _profile_for_qwen_model_lease(model_lease: object) -> dict[str, Any]:
     if not isinstance(model_lease, dict):
         raise ValueError("exact Qwen model lease is required")
-    profile_id = str(model_lease.get("profile_id") or "")
-    with _qwen_lease_lock(profile_id):
-        state = _load_qwen_lease_state(profile_id)
+    incarnation_id = str(model_lease.get("incarnation_id") or "")
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(incarnation_id)
         if _find_exact_lease(state, model_lease) is None:
             raise ValueError("exact Qwen model lease is not active")
         profile = state.get("profile") if isinstance(state, dict) else None
+        expected_process = (
+            deepcopy(state.get("incarnation", {}).get("server_process_identity"))
+            if isinstance(state, dict)
+            else None
+        )
         if not isinstance(profile, dict):
             raise RuntimeError("Qwen model lease profile is unavailable")
-        return deepcopy(profile)
+        acquired_profile = deepcopy(profile)
+    if (
+        not _valid_process_identity(expected_process)
+        or _current_process_identity(expected_process["pid"]) != expected_process
+    ):
+        raise RuntimeError("Qwen server incarnation ownership changed before request")
+    return acquired_profile
 
 
 def _cancel_profile_request(

@@ -197,6 +197,7 @@ def run_qwen_candidate_binding(
     model_runner: Callable[..., object],
     cancellation_event: Any | None = None,
     model_lease: dict[str, Any] | None = None,
+    model_completion_notifier: Callable[[], object] | None = None,
 ) -> dict[str, Any]:
     """重新验证 Task 2/3 artifact，调用 Qwen，并在返回前密封绑定。"""
     request_payload = _validated_payload(payload)
@@ -228,6 +229,12 @@ def run_qwen_candidate_binding(
         )
     except TimeoutError as error:
         raise QwenBindingTimeout("Qwen model timeout") from error
+    except RuntimeError as error:
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise QwenBindingCancelled("Qwen candidate binding cancelled") from error
+        raise
+    if model_completion_notifier is not None:
+        model_completion_notifier()
     if cancellation_event is not None and cancellation_event.is_set():
         raise QwenBindingCancelled("Qwen candidate binding cancelled")
     if isinstance(raw, str):

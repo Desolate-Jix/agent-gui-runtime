@@ -500,6 +500,29 @@ def test_model_timeout_and_cancel_leave_prior_omni_inventory_unchanged(
     assert facts["inventory"] == before
 
 
+def test_cancellation_induced_runner_error_maps_to_binding_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.qwen_binding import QwenBindingCancelled, run_qwen_candidate_binding
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    cancellation = Event()
+
+    def runner(**kwargs):
+        del kwargs
+        cancellation.set()
+        raise RuntimeError("transport closed by cancellation")
+
+    with pytest.raises(QwenBindingCancelled, match="cancelled"):
+        run_qwen_candidate_binding(
+            deepcopy(facts["qwen_payload"]),
+            model_runner=runner,
+            cancellation_event=cancellation,
+        )
+
+
+
 def test_workflow_task_releases_qwen_only_after_sealed_binding(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -535,3 +558,102 @@ def test_workflow_task_releases_qwen_only_after_sealed_binding(
 
     assert result["content_sha256"] == content_sha256(result)
     assert events == ["model", "release"]
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_compute_completed"),
+    [
+        ("timeout", False),
+        ("invalid_json", True),
+        ("parser_rejection", True),
+        ("release_failure", True),
+    ],
+)
+def test_workflow_failure_finalizer_reconciles_exact_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_compute_completed: bool,
+) -> None:
+    from app.learn.workflow_tasks import hybrid_qwen
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    payload = deepcopy(facts["qwen_payload"])
+    payload.pop("project_root")
+    monkeypatch.setattr(hybrid_qwen, "_PROJECT_ROOT", tmp_path)
+    lease = {"lease_id": "failure-lease", "owner_request_id": "failure-request"}
+    reconciliations: list[dict[str, object]] = []
+
+    def runner(**kwargs):
+        del kwargs
+        if failure_kind == "timeout":
+            raise TimeoutError("controlled timeout")
+        if failure_kind == "invalid_json":
+            return "not-json"
+        if failure_kind == "parser_rejection":
+            raw = _raw_for(facts["inventory"])
+            raw["bindings"][0]["candidate_id"] = "candidate/unknown"
+            return raw
+        return _raw_for(facts["inventory"])
+
+    def release(**kwargs):
+        del kwargs
+        if failure_kind == "release_failure":
+            raise RuntimeError("controlled release failure")
+        return {"status": "released"}
+
+    with pytest.raises((ValueError, RuntimeError)):
+        hybrid_qwen.run_hybrid_qwen_task(
+            payload,
+            model_runner=runner,
+            model_releaser=release,
+            model_lease=lease,
+            model_failure_reconciler=lambda **kwargs: reconciliations.append(kwargs)
+            or {"status": "reconciled"},
+        )
+
+    assert len(reconciliations) == 1
+    assert reconciliations[0]["model_lease"] == lease
+    assert reconciliations[0]["compute_completed"] is expected_compute_completed
+    assert reconciliations[0]["reason"] == failure_kind
+
+
+def test_workflow_release_failure_uses_production_reconciler_and_removes_completed_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn.workflow_tasks import hybrid_qwen
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    payload = deepcopy(facts["qwen_payload"])
+    payload.pop("project_root")
+    monkeypatch.setattr(hybrid_qwen, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    readiness = {
+        "started": False,
+        "before": {
+            "status": "running",
+            "base_url": "http://127.0.0.1:13240/v1",
+            "model_id": "qwen",
+            "server_process_identity": {"pid": 9101, "create_time_ns": 111},
+        },
+    }
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="release-failure-request",
+        readiness=readiness,
+    )
+
+    with pytest.raises(RuntimeError, match="release failure"):
+        hybrid_qwen.run_hybrid_qwen_task(
+            payload,
+            model_runner=lambda **kwargs: _raw_for(facts["inventory"]),
+            model_releaser=lambda **kwargs: (_ for _ in ()).throw(
+                RuntimeError("controlled release failure")
+            ),
+            model_lease=lease,
+        )
+
+    assert model_server.qwen_model_lease_is_active(lease) is False

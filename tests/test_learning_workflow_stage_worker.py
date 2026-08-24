@@ -5,7 +5,7 @@ import multiprocessing
 import os
 import subprocess
 import sys
-from threading import Thread
+from threading import Event, Lock, Thread
 import time
 from pathlib import Path
 
@@ -1201,6 +1201,74 @@ def test_managed_qwen_rejects_unsealed_inventory_before_model_acquisition(
         )
 
 
+def test_qwen_ensure_to_lease_publication_is_atomic_with_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    entered_ensure = Event()
+    release_ensure = Event()
+    published = Event()
+    cancelled = Event()
+    managed_event = workflow_worker._ManagedCancellationEvent(
+        event=Event(),
+        lock=Lock(),
+    )
+    profile = {"profile_id": "qwen", "provider_mode": "local_understanding"}
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "request-atomic")
+    monkeypatch.setattr("app.core.model_server.profile_for_stage", lambda *args: profile)
+    monkeypatch.setattr(
+        "app.core.gpu_resources.build_model_resource_preflight",
+        lambda selected: {"resource_mode": "normal", "model_launch_allowed": True},
+    )
+
+    def ensure(**kwargs):
+        del kwargs
+        entered_ensure.set()
+        release_ensure.wait(timeout=2.0)
+        return {"started": True, "after": {"status": "running"}}
+
+    monkeypatch.setattr("app.core.model_server.ensure_model_server", ensure)
+    monkeypatch.setattr(
+        "app.core.model_server.acquire_qwen_model_lease",
+        lambda **kwargs: published.set() or {"lease_id": "published"},
+    )
+    outcome: dict[str, object] = {}
+
+    worker = Thread(
+        target=lambda: outcome.update(
+            lease=workflow_worker._ensure_learning_stage_model_ready(
+                "panel_learning_hybrid_qwen_binding",
+                {},
+                cancellation_event=managed_event,
+            )
+        )
+    )
+    cancel = Thread(target=lambda: (managed_event.set(), cancelled.set()))
+    worker.start()
+    assert entered_ensure.wait(timeout=1.0) is True
+    cancel.start()
+    time.sleep(0.05)
+    assert cancelled.is_set() is False
+    release_ensure.set()
+    worker.join(timeout=1.0)
+    cancel.join(timeout=1.0)
+
+    assert published.is_set() is True
+    assert cancelled.is_set() is True
+    assert managed_event.is_set() is True
+    assert outcome["lease"] == {"lease_id": "published"}
+
+    pre_cancelled = workflow_worker._ManagedCancellationEvent(event=Event(), lock=Lock())
+    pre_cancelled.set()
+    with pytest.raises(LearningStageWorkerError, match="cancelled before model acquisition"):
+        workflow_worker._ensure_learning_stage_model_ready(
+            "panel_learning_hybrid_qwen_binding",
+            {},
+            cancellation_event=pre_cancelled,
+        )
+
+
 def test_managed_hybrid_qwen_cancel_uses_existing_model_cancellation(
     tmp_path: Path,
 ) -> None:
@@ -1248,6 +1316,98 @@ def test_managed_hybrid_qwen_cancel_uses_existing_model_cancellation(
             "payload": payload,
         }
     ]
+
+
+def test_managed_qwen_shared_no_endpoint_cancel_remains_attached_pending(
+    tmp_path: Path,
+) -> None:
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=lambda **kwargs: {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "cancellation_acknowledged_pending",
+            "model_service_compute_termination": "cancellation_acknowledged_pending",
+            "provider_results": [{"server_termination": "owned_pending"}],
+        },
+    )
+    started = registry.start(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-pending",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={"run_id": "run-qwen", "omni_inventory": {"immutable": True}},
+    )
+    record = registry._records[str(started["worker_id"])]
+    process = record["process"]
+
+    pending = registry.cancel_by_operation(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-pending",
+    )
+
+    assert pending["status"] == "cancellation_pending"
+    assert pending["backend_compute_termination"] == "pending"
+    assert pending["model_service_compute_termination"] == "cancellation_acknowledged_pending"
+    assert process.is_alive() is True
+    assert process.terminated is False
+    assert process.killed is False
+    assert record["cancellation_event"].is_set() is True
+    assert registry._active_by_operation[("run-qwen", "screen_understanding", "operation-qwen-pending")] == started["worker_id"]
+
+
+def test_managed_qwen_pending_cancel_reconciles_after_worker_exit(
+    tmp_path: Path,
+) -> None:
+    calls = 0
+
+    def cancel_request(**kwargs):
+        nonlocal calls
+        del kwargs
+        calls += 1
+        if calls == 1:
+            return {
+                "contract_version": "model_request_cancellation_v1",
+                "status": "cancellation_acknowledged_pending",
+                "model_service_compute_termination": "cancellation_acknowledged_pending",
+            }
+        return {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "terminated",
+            "model_service_compute_termination": "terminated",
+        }
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=cancel_request,
+    )
+    started = registry.start(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-reconcile",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={"run_id": "run-qwen", "omni_inventory": {"immutable": True}},
+    )
+    first = registry.cancel_by_operation(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-reconcile",
+    )
+    assert first["status"] == "cancellation_pending"
+    record = registry._records[str(started["worker_id"])]
+    record["process"].alive = False
+    record["process"].exitcode = 1
+
+    reconciled = registry.cancel_by_operation(
+        run_id="run-qwen",
+        stage="screen_understanding",
+        operation_id="operation-qwen-reconcile",
+    )
+    assert reconciled["status"] == "cancelled"
+    assert reconciled["model_service_compute_termination"] == "terminated"
+    assert calls == 2
 
 
 def test_hybrid_omni_registry_cancel_requires_valid_cooperative_cleanup_handshake(

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import base64
+import os
 import socket
 import urllib.error
 from copy import deepcopy
+from threading import Event, Thread
+import time
 
 import pytest
 
@@ -25,6 +28,26 @@ class _FakeResponse:
     def read(self, size: int = -1) -> bytes:
         raw = json.dumps(self._payload).encode("utf-8")
         return raw if size < 0 else raw[:size]
+
+
+def _server_readiness(
+    *,
+    started: bool,
+    pid: int = 9101,
+    created_ns: int = 123456789,
+    model_id: str = "qwen",
+    base_url: str = "http://127.0.0.1:13240/v1",
+) -> dict:
+    observation = {
+        "status": "running",
+        "base_url": base_url,
+        "model_id": model_id,
+        "server_process_identity": {
+            "pid": pid,
+            "create_time_ns": created_ns,
+        },
+    }
+    return {"started": started, "after" if started else "before": observation}
 
 
 def _valid_binding_artifacts() -> tuple[dict, dict]:
@@ -159,12 +182,12 @@ def test_qwen_cancellation_uses_exact_request_endpoint_and_retains_other_operati
     lease_a = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="learn-qwen-a",
-        readiness={"started": True, "after": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=True),
     )
     lease_b = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="learn-qwen-b",
-        readiness={"started": False, "before": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=False),
     )
     changed_profile = {**profile, "request_cancel_endpoint": "http://127.0.0.1:13240/v1/should-not-use"}
     monkeypatch.setattr(model_server, "profile_for_stage", lambda stage, profile_id=None: changed_profile)
@@ -205,6 +228,229 @@ def test_qwen_cancellation_uses_exact_request_endpoint_and_retains_other_operati
     assert model_server.qwen_model_lease_is_active(lease_a) is False
 
 
+@pytest.mark.parametrize(
+    "second_profile,second_readiness",
+    [
+        (
+            {"profile_id": "qwen", "endpoint": "http://127.0.0.1:14000/v1/chat/completions"},
+            _server_readiness(started=False, base_url="http://127.0.0.1:14000/v1"),
+        ),
+        (
+            {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions", "model_name": "other"},
+            _server_readiness(started=False, model_id="other"),
+        ),
+        (
+            {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"},
+            _server_readiness(started=False, pid=9202, created_ns=987654321),
+        ),
+    ],
+)
+def test_same_profile_id_rejects_incompatible_server_incarnation(
+    tmp_path,
+    monkeypatch,
+    second_profile,
+    second_readiness,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-a",
+        readiness=_server_readiness(started=True),
+    )
+
+    with pytest.raises(ValueError, match="server incarnation mismatch"):
+        model_server.acquire_qwen_model_lease(
+            profile=second_profile,
+            request_id="request-b",
+            readiness=second_readiness,
+        )
+
+
+def test_qwen_cancellation_finds_lease_by_owner_when_current_profile_id_changes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    acquired = {
+        "profile_id": "qwen-acquired",
+        "role": ["understanding"],
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "request_cancel_supported": True,
+        "request_cancel_endpoint": "http://127.0.0.1:13240/v1/cancel",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=acquired,
+        request_id="owner-request",
+        readiness=_server_readiness(started=False),
+    )
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda *args, **kwargs: {
+        **acquired,
+        "profile_id": "qwen-current-other",
+        "request_cancel_endpoint": "http://127.0.0.1:13240/v1/wrong",
+    })
+    requested: list[str] = []
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda request, timeout: requested.append(request.full_url) or _FakeResponse({
+        "status": "request_not_active",
+        "request_id": "owner-request",
+    }))
+
+    result = model_server.cancel_model_request(
+        request_id="owner-request",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={},
+    )
+
+    assert requested == [acquired["request_cancel_endpoint"]]
+    assert result["provider_results"][0]["profile_id"] == "qwen-acquired"
+    assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_no_endpoint_shared_cancel_stays_owned_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = deepcopy(model_server.profile_for_stage("understanding"))
+    assert profile["profile_id"] == "qwen3_vl_8b_q4_k_m"
+    assert not profile.get("request_cancel_endpoint")
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease_a = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-a",
+        readiness=_server_readiness(started=True),
+    )
+    lease_b = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-b",
+        readiness=_server_readiness(started=False),
+    )
+    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: pytest.fail("shared server stopped"))
+
+    result = model_server.cancel_model_request(
+        request_id="request-a",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload={},
+    )
+
+    assert result["status"] == "cancellation_acknowledged_pending"
+    assert result["model_service_compute_termination"] == "cancellation_acknowledged_pending"
+    assert model_server.qwen_model_lease_is_active(lease_a) is True
+    assert model_server.qwen_model_lease_is_active(lease_b) is True
+
+
+def test_qwen_failure_reconciliation_persists_timeout_pending_and_removes_completed_parser_lease(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    timeout_lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="timeout-request",
+        readiness=_server_readiness(started=True),
+    )
+    parser_lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="parser-request",
+        readiness=_server_readiness(started=False),
+    )
+
+    pending = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=timeout_lease,
+        compute_completed=False,
+        reason="timeout",
+    )
+    assert pending["status"] == "cancellation_acknowledged_pending"
+    assert model_server.qwen_model_lease_is_active(timeout_lease) is True
+
+    completed = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=parser_lease,
+        compute_completed=True,
+        reason="parser_rejection",
+    )
+    assert completed["status"] == "released"
+    assert completed["shared_server_retained"] is True
+    assert model_server.qwen_model_lease_is_active(parser_lease) is False
+    assert model_server.qwen_model_lease_is_active(timeout_lease) is True
+
+
+def test_qwen_timeout_finalizer_stops_only_sole_exact_owned_incarnation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="timeout-request",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    identities = iter([{"pid": 9101, "create_time_ns": 111}, None])
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
+    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: {"stopped": True})
+    monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "unreachable"})
+
+    reconciled = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=lease,
+        compute_completed=False,
+        reason="timeout",
+    )
+    assert reconciled["server_termination"] == "verified_exact_process_exited"
+    assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_invalid_http_json_marks_compute_complete_before_failure_reconciliation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    failed = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="invalid-json-request",
+        readiness=_server_readiness(started=True),
+    )
+    active = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="active-request",
+        readiness=_server_readiness(started=False),
+    )
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: {
+        "pid": 9101,
+        "create_time_ns": 123456789,
+    })
+
+    class InvalidResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self, size=-1):
+            return b"not-json"
+
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda *args, **kwargs: InvalidResponse())
+    with pytest.raises(ValueError):
+        model_server.run_qwen_binding_model(
+            request={},
+            screenshot_bytes=b"same-bytes",
+            screenshot_media_type="image/png",
+            screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
+            model_lease=failed,
+        )
+
+    reconciled = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=failed,
+        compute_completed=False,
+        reason="invalid_json",
+    )
+    assert reconciled["status"] == "released"
+    assert model_server.qwen_model_lease_is_active(failed) is False
+    assert model_server.qwen_model_lease_is_active(active) is True
+
+
 def test_qwen_release_refcounts_and_stops_only_after_last_runtime_owned_lease(
     tmp_path,
     monkeypatch,
@@ -216,18 +462,23 @@ def test_qwen_release_refcounts_and_stops_only_after_last_runtime_owned_lease(
     lease_a = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="request-a",
-        readiness={"started": True, "after": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=True),
     )
     lease_b = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="request-b",
-        readiness={"started": False, "before": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=False),
     )
     monkeypatch.setattr(
         model_server,
         "stop_model_server",
         lambda selected: stopped.append(selected) or {"stopped": True, "after": {"status": "unreachable"}},
     )
+    identities = iter([
+        {"pid": 9101, "create_time_ns": 123456789},
+        None,
+    ])
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "unreachable"})
 
     first = model_server.release_qwen_model_server(
@@ -246,7 +497,7 @@ def test_qwen_release_refcounts_and_stops_only_after_last_runtime_owned_lease(
         model_lease=lease_b,
     )
     assert second["status"] == "released"
-    assert second["server_termination"] == "verified_stopped"
+    assert second["server_termination"] == "verified_exact_process_exited"
     assert stopped == [profile]
 
 
@@ -268,7 +519,7 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
     first = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="owned-request",
-        readiness={"started": True, "after": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=True),
     )
     stopped: list[dict] = []
     monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda request, timeout: _FakeResponse({
@@ -276,6 +527,11 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
         "request_id": "owned-request",
     }))
     monkeypatch.setattr(model_server, "stop_model_server", lambda selected: stopped.append(selected) or {"stopped": True})
+    identities = iter([
+        {"pid": 9101, "create_time_ns": 123456789},
+        None,
+    ])
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {
         "status": "unreachable",
         "health": {"active_request": None},
@@ -287,14 +543,14 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
         payload={},
     )
     assert cancelled["status"] == "terminated"
-    assert cancelled["provider_results"][0]["server_termination"] == "verified_stopped"
+    assert cancelled["provider_results"][0]["server_termination"] == "verified_exact_process_exited"
     assert stopped == [profile]
     assert model_server.qwen_model_lease_is_active(first) is False
 
     external = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="external-request",
-        readiness={"started": False, "before": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=False),
     )
     stopped.clear()
     released = model_server.release_qwen_model_server(
@@ -316,7 +572,7 @@ def test_qwen_release_rejects_forged_or_wrong_capture_artifact(
     lease = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="request-a",
-        readiness={"started": False, "before": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=False),
     )
 
     with pytest.raises(ValueError, match="sealed Qwen binding"):
@@ -324,6 +580,16 @@ def test_qwen_release_rejects_forged_or_wrong_capture_artifact(
             sealed_artifact=seal_immutable({"contract_version": "hybrid_qwen_bindings_v1"}),
             omni_inventory=inventory,
             model_lease=lease,
+        )
+
+    with pytest.raises(ValueError, match="exact Qwen model lease"):
+        model_server.release_qwen_model_server(
+            sealed_artifact=artifact,
+            omni_inventory=inventory,
+            model_lease={
+                "lease_id": lease["lease_id"],
+                "incarnation_id": lease["incarnation_id"],
+            },
         )
 
     omitted = seal_immutable({
@@ -359,9 +625,13 @@ def test_qwen_stop_script_success_but_server_running_is_not_released(
     lease = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="request-a",
-        readiness={"started": True, "after": {"status": "running", "model_id": "qwen"}},
+        readiness=_server_readiness(started=True),
     )
     monkeypatch.setattr(model_server, "stop_model_server", lambda selected: {"stopped": True})
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: {
+        "pid": 9101,
+        "create_time_ns": 123456789,
+    })
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "running", "model_id": "qwen"})
 
     with pytest.raises(RuntimeError, match="still running"):
@@ -371,6 +641,103 @@ def test_qwen_stop_script_success_but_server_running_is_not_released(
             model_lease=lease,
         )
     assert model_server.qwen_model_lease_is_active(lease) is True
+
+
+def test_qwen_release_never_stops_replacement_process(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    inventory, artifact = _valid_binding_artifacts()
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-a",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_current_process_identity",
+        lambda pid: {"pid": 9101, "create_time_ns": 222},
+    )
+    monkeypatch.setattr(model_server, "stop_model_server", lambda selected: pytest.fail("replacement stopped"))
+
+    with pytest.raises(RuntimeError, match="server incarnation ownership changed"):
+        model_server.release_qwen_model_server(
+            sealed_artifact=artifact,
+            omni_inventory=inventory,
+            model_lease=lease,
+        )
+    assert model_server.qwen_model_lease_is_active(lease) is True
+
+
+def test_qwen_final_stop_runs_outside_os_state_lock_and_proves_exact_pid_exit(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    inventory, artifact = _valid_binding_artifacts()
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-a",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    identities = iter([
+        {"pid": 9101, "create_time_ns": 111},
+        None,
+    ])
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: next(identities))
+    stop_observed_lock = Event()
+
+    def stop(selected):
+        del selected
+        with model_server._qwen_lease_lock():
+            stop_observed_lock.set()
+        return {"stopped": True}
+
+    monkeypatch.setattr(model_server, "stop_model_server", stop)
+    monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {"status": "unreachable"})
+
+    released = model_server.release_qwen_model_server(
+        sealed_artifact=artifact,
+        omni_inventory=inventory,
+        model_lease=lease,
+    )
+    assert stop_observed_lock.is_set() is True
+    assert released["server_termination"] == "verified_exact_process_exited"
+
+
+def test_qwen_os_lock_is_not_stolen_from_live_owner(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    owner_entered = Event()
+    release_owner = Event()
+    waiter_entered = Event()
+
+    def owner():
+        with model_server._qwen_lease_lock():
+            lock_path = tmp_path / ".lease-state.lock"
+            old = time.time() - 31.0
+            os.utime(lock_path, (old, old))
+            owner_entered.set()
+            release_owner.wait(timeout=2.0)
+
+    def waiter():
+        owner_entered.wait(timeout=2.0)
+        with model_server._qwen_lease_lock():
+            waiter_entered.set()
+
+    first = Thread(target=owner)
+    second = Thread(target=waiter)
+    first.start()
+    second.start()
+    assert owner_entered.wait(timeout=1.0) is True
+    time.sleep(0.05)
+    assert waiter_entered.is_set() is False
+    release_owner.set()
+    first.join(timeout=1.0)
+    second.join(timeout=1.0)
+    assert waiter_entered.is_set() is True
 
 
 def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
@@ -387,10 +754,14 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
     lease = model_server.acquire_qwen_model_lease(
         profile=profile,
         request_id="learn-qwen-request",
-        readiness={"started": False, "before": {"status": "running", "model_id": profile["model_name"]}},
+        readiness=_server_readiness(started=False, model_id=profile["model_name"]),
     )
     changed_profile = {**profile, "endpoint": "http://127.0.0.1:13240/v1/should-not-use"}
     monkeypatch.setattr(model_server, "profile_for_stage", lambda stage: changed_profile)
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: {
+        "pid": 9101,
+        "create_time_ns": 123456789,
+    })
     monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "learn-qwen-request")
     screenshot_bytes = b"controlled-task2-image-bytes"
 
@@ -480,4 +851,63 @@ def test_qwen_binding_runner_rejects_oversized_http_body(monkeypatch) -> None:
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
+        )
+
+
+def test_qwen_http_event_set_and_cancelled_transport_use_typed_cancellation(monkeypatch) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda stage: profile)
+    cancellation = Event()
+    cancellation.set()
+    with pytest.raises(model_server.QwenModelRequestCancelled):
+        model_server.run_qwen_binding_model(
+            request={},
+            screenshot_bytes=b"same-bytes",
+            screenshot_media_type="image/png",
+            screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
+            cancellation_event=cancellation,
+        )
+
+    cancellation.clear()
+
+    def cancelled_transport(*args, **kwargs):
+        del args, kwargs
+        cancellation.set()
+        raise urllib.error.URLError("cancelled transport")
+
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", cancelled_transport)
+    with pytest.raises(model_server.QwenModelRequestCancelled):
+        model_server.run_qwen_binding_model(
+            request={},
+            screenshot_bytes=b"same-bytes",
+            screenshot_media_type="image/png",
+            screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
+            cancellation_event=cancellation,
+        )
+
+
+def test_qwen_runner_rejects_replaced_server_incarnation_before_http(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-a",
+        readiness=_server_readiness(started=False, pid=9101, created_ns=111),
+    )
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: {
+        "pid": 9101,
+        "create_time_ns": 222,
+    })
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda *args, **kwargs: pytest.fail("replacement received request"))
+
+    with pytest.raises(RuntimeError, match="server incarnation ownership changed"):
+        model_server.run_qwen_binding_model(
+            request={},
+            screenshot_bytes=b"same-bytes",
+            screenshot_media_type="image/png",
+            screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
+            model_lease=lease,
         )
