@@ -41,6 +41,24 @@ def clear_learning_draft_sidecar_cache() -> None:
     _SIDECAR_CANDIDATE_PATH_CACHE.clear()
 
 
+def _uei_review_uia_support_items(draft: dict[str, Any]) -> list[dict[str, object]]:
+    """仅转交当前草稿内显式标注为 UIA 的审阅辅助证据。"""
+
+    page_details = draft.get("page_details")
+    if not isinstance(page_details, dict):
+        return []
+    candidates = page_details.get("grounding_candidates")
+    if not isinstance(candidates, list):
+        return []
+    return [
+        deepcopy(candidate)
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and isinstance(candidate.get("source_evidence"), list)
+        and "uia" in {str(source).casefold() for source in candidate["source_evidence"]}
+    ]
+
+
 def load_learning_draft_review(
     source_path: str | Path,
     *,
@@ -106,6 +124,7 @@ def load_learning_draft_review(
             for region in normalized_draft.get("regions", [])
             if isinstance(region, dict) and str(region.get("region_id") or "").strip()
         },
+        uia_support_items=_uei_review_uia_support_items(normalized_draft),
     )
     shadow_summary = shadow_review.get("summary") if isinstance(shadow_review, dict) else None
     if shadow_summary is not None:

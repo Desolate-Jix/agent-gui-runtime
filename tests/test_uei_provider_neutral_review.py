@@ -193,6 +193,7 @@ _AUTO_SOURCE_IMAGE = object()
 def _load_review(
     *, root: Path, case: str, result_ref: dict[str, str], capture_ref: dict[str, str],
     regions: list[dict[str, object]] | None = None,
+    uia_support_items: list[dict[str, object]] | None = None,
     source_image_path: Path | None | object = _AUTO_SOURCE_IMAGE,
     declared_source_sha256: str | None = None,
     wrapper: bool = False,
@@ -232,6 +233,7 @@ def _load_review(
             },
             "page_details": {
                 "screen": screen,
+                "grounding_candidates": list(uia_support_items or []),
                 "provider_summary": {
                     "contract_version": "learning_recognition_provider_summary_v1",
                     "provider": "omniparser",
@@ -253,6 +255,98 @@ def _load_review(
         payload["capture_lineage_ref"] = top_level_capture_ref
     source_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return load_learning_draft_review(source_path, project_root=root)
+
+
+def test_omni_review_enriches_role_from_one_current_uia_support_without_authority(tmp_path: Path) -> None:
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    reply = _invoke_recorded_shadow(
+        root=tmp_path,
+        store=store,
+        suffix="uia-role-enrichment",
+        fail=False,
+        items=(
+            NormalizedProviderItem(
+                source_item_id="omni/search",
+                kind="icon",
+                safe_text="Search",
+                safe_role="icon",
+                safe_states=("interactable",),
+                source_bbox=(0, 0, 1, 1),
+                source_coordinate_space="capture_pixel_xyxy",
+            ),
+        ),
+    )
+    result = store.get(reply["result_ref"], contract_version="provider_safe_result_v1")
+    review = _load_review(
+        root=tmp_path,
+        case="uia-role-enrichment",
+        result_ref=reply["result_ref"],
+        capture_ref=result["capture_lineage_ref"],
+        uia_support_items=[
+            {
+                "item_id": "uia/search",
+                "label": "Search",
+                "item_type": "actionable",
+                "role": "button",
+                "bbox": {"x": 0, "y": 0, "w": 1, "h": 1},
+                "source_evidence": ["uia"],
+            }
+        ],
+    )
+
+    region = review["draft"]["regions"][0]
+    assert region["role"] == "review_only"
+    assert region["provider_evidence"]["safe_role"] == "icon"
+    assert region["provider_evidence"]["canonical_role"] == "button"
+    assert region["provider_evidence"]["cross_evidence"]["status"] == "uia_supported"
+    assert region["provider_evidence"]["cross_evidence"]["support_item_id"] == "uia/search"
+    assert region["grounding_eligible"] is False
+    assert region["artifact_is_authorization"] is False
+    assert region["execute_binding_enabled"] is False
+    assert region["action_candidates"] == []
+
+
+def test_omni_review_does_not_promote_ambiguous_uia_roles(tmp_path: Path) -> None:
+    store = UEIObjectStore(root=tmp_path / "artifacts" / "uei-shadow-store")
+    reply = _invoke_recorded_shadow(
+        root=tmp_path,
+        store=store,
+        suffix="uia-role-ambiguous",
+        fail=False,
+        items=(
+            NormalizedProviderItem(
+                source_item_id="omni/search",
+                kind="icon",
+                safe_text="Search",
+                safe_role="icon",
+                source_bbox=(0, 0, 1, 1),
+                source_coordinate_space="capture_pixel_xyxy",
+            ),
+        ),
+    )
+    result = store.get(reply["result_ref"], contract_version="provider_safe_result_v1")
+    review = _load_review(
+        root=tmp_path,
+        case="uia-role-ambiguous",
+        result_ref=reply["result_ref"],
+        capture_ref=result["capture_lineage_ref"],
+        uia_support_items=[
+            {
+                "item_id": f"uia/{role}",
+                "label": "Search",
+                "item_type": "actionable",
+                "role": role,
+                "bbox": {"x": 0, "y": 0, "w": 1, "h": 1},
+                "source_evidence": ["uia"],
+            }
+            for role in ("button", "link")
+        ],
+    )
+
+    evidence = review["draft"]["regions"][0]["provider_evidence"]
+    assert evidence["cross_evidence"] == {"status": "ambiguous"}
+    assert "canonical_role" not in evidence
+    assert review["draft"]["regions"][0]["role"] == "review_only"
 
 
 def _recorded_item(

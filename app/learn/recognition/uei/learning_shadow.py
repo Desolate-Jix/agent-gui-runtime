@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
+from app.learn.recognition.bbox_alignment import bbox_overlap, cross_evidence_overlap_is_acceptable
 from app.learn.recognition.uei.canonical import canonical_json_bytes
 from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.store import UEIObjectStore
@@ -35,6 +36,7 @@ def load_uei_shadow_provider_review(
     current_capture_lineage_ref: dict[str, str] | None = None,
     current_capture_lineage_error: str | None = None,
     existing_region_ids: set[str] | None = None,
+    uia_support_items: list[dict[str, object]] | None = None,
     displayed_source_sha256: str | None = None,
     displayed_source_size: dict[str, int] | None = None,
 ) -> dict[str, object] | None:
@@ -63,6 +65,7 @@ def load_uei_shadow_provider_review(
             current_capture_lineage_ref=current_capture_lineage_ref,
             current_capture_lineage_error=current_capture_lineage_error,
             existing_region_ids=existing_region_ids or set(),
+            uia_support_items=uia_support_items or [],
             displayed_source_sha256=displayed_source_sha256,
             displayed_source_size=displayed_source_size,
         )
@@ -173,6 +176,7 @@ def _project_review_regions(
     current_capture_lineage_ref: dict[str, str] | None,
     current_capture_lineage_error: str | None,
     existing_region_ids: set[str],
+    uia_support_items: list[dict[str, object]],
     displayed_source_sha256: str | None,
     displayed_source_size: dict[str, int] | None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
@@ -288,20 +292,29 @@ def _project_review_regions(
         label = text.strip() if isinstance(text, str) and text.strip() else (
             role.strip() if isinstance(role, str) and role.strip() else kind
         )
+        provider_evidence = {
+            "provider_id": result.get("provider_id"),
+            "profile_id": result.get("profile_id"),
+            "provider_version": result.get("provider_version"),
+            "confidence": confidence,
+            "safe_role": role,
+            "safe_states": list(states),
+        }
+        cross_evidence = _uia_cross_evidence(
+            bbox={"x": left, "y": top, "w": right - left, "h": bottom - top},
+            support_items=uia_support_items,
+        )
+        if cross_evidence is not None:
+            provider_evidence["cross_evidence"] = cross_evidence
+            if cross_evidence.get("status") == "uia_supported":
+                provider_evidence["canonical_role"] = cross_evidence["support_role"]
         regions.append({
             "region_id": region_id,
             "label": label,
             "role": "review_only",
             "kind": kind,
             "bbox": {"x": left, "y": top, "w": right - left, "h": bottom - top},
-            "provider_evidence": {
-                "provider_id": result.get("provider_id"),
-                "profile_id": result.get("profile_id"),
-                "provider_version": result.get("provider_version"),
-                "confidence": confidence,
-                "safe_role": role,
-                "safe_states": list(states),
-            },
+            "provider_evidence": provider_evidence,
             "source": "uei_provider_safe_result_v1",
             "candidate_only": True,
             "requires_human_review": True,
@@ -324,6 +337,44 @@ def _project_review_regions(
             if skipped_item_count
             else {}
         ),
+    }
+
+
+def _uia_cross_evidence(
+    *, bbox: dict[str, int], support_items: list[dict[str, object]],
+) -> dict[str, object] | None:
+    matches: list[tuple[dict[str, object], dict[str, float]]] = []
+    for item in support_items:
+        if not isinstance(item, dict):
+            continue
+        sources = item.get("source_evidence")
+        if not isinstance(sources, list) or "uia" not in {str(source).casefold() for source in sources}:
+            continue
+        support_bbox = item.get("bbox")
+        role = str(item.get("role") or "").strip().casefold()
+        item_id = str(item.get("item_id") or item.get("id") or "").strip()
+        if (
+            not isinstance(support_bbox, dict)
+            or role not in {"button", "link", "input", "checkbox", "menu_item", "tab"}
+            or not item_id
+        ):
+            continue
+        overlap = bbox_overlap(bbox, support_bbox)
+        if cross_evidence_overlap_is_acceptable(overlap):
+            matches.append((item, overlap))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        return {"status": "ambiguous"}
+    support, overlap = matches[0]
+    return {
+        "status": "uia_supported",
+        "support_item_id": str(support.get("item_id") or support.get("id")),
+        "support_sources": ["uia"],
+        "support_role": str(support.get("role") or "").strip().casefold(),
+        "iou": overlap["iou"],
+        "candidate_coverage": overlap["vision_coverage"],
+        "support_coverage": overlap["support_coverage"],
     }
 
 
