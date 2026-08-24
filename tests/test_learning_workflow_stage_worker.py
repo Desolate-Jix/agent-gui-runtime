@@ -20,6 +20,7 @@ from app.learn.workflow_worker import (
 
 @pytest.fixture(autouse=True)
 def _deny_real_model_server_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
     monkeypatch.setattr(
         "app.core.model_server.start_model_server",
         lambda profile: pytest.fail(
@@ -1248,9 +1249,11 @@ def test_existing_managed_qwen_consumer_uses_shared_lease_lifecycle(
 @pytest.mark.parametrize(
     "task_kind",
     [
+        "panel_learning_recognition_trial",
         "panel_learning_two_stage_understanding",
         "panel_learning_model_review_repair",
         "panel_learning_hybrid_qwen_binding",
+        "vision_observe_screen",
     ],
 )
 def test_every_managed_qwen_consumer_acquires_the_common_owner_domain(
@@ -1316,8 +1319,19 @@ def test_managed_qwen_rejects_unsealed_inventory_before_model_acquisition(
         )
 
 
+@pytest.mark.parametrize(
+    "task_kind",
+    [
+        "panel_learning_recognition_trial",
+        "panel_learning_two_stage_understanding",
+        "panel_learning_model_review_repair",
+        "panel_learning_hybrid_qwen_binding",
+        "vision_observe_screen",
+    ],
+)
 def test_qwen_ensure_to_lease_publication_is_atomic_with_cancellation(
     monkeypatch: pytest.MonkeyPatch,
+    task_kind: str,
 ) -> None:
     from app.learn import workflow_worker
 
@@ -1349,12 +1363,16 @@ def test_qwen_ensure_to_lease_publication_is_atomic_with_cancellation(
         "app.core.model_server.ensure_and_acquire_qwen_model_lease",
         ensure,
     )
+    monkeypatch.setattr(
+        "app.core.model_server._mark_qwen_model_request_in_flight",
+        lambda lease: None,
+    )
     outcome: dict[str, object] = {}
 
     worker = Thread(
         target=lambda: outcome.update(
             lease=workflow_worker._ensure_learning_stage_model_ready(
-                "panel_learning_hybrid_qwen_binding",
+                task_kind,
                 {},
                 cancellation_event=managed_event,
             )
@@ -1379,7 +1397,7 @@ def test_qwen_ensure_to_lease_publication_is_atomic_with_cancellation(
     pre_cancelled.set()
     with pytest.raises(LearningStageWorkerError, match="cancelled before model acquisition"):
         workflow_worker._ensure_learning_stage_model_ready(
-            "panel_learning_hybrid_qwen_binding",
+            task_kind,
             {},
             cancellation_event=pre_cancelled,
         )
@@ -1514,8 +1532,19 @@ def test_reloaded_hybrid_qwen_terminal_owner_result_does_not_claim_wrapper_exit(
     assert cancelled["runtime_attached"] is False
 
 
+@pytest.mark.parametrize(
+    "task_kind",
+    [
+        "panel_learning_recognition_trial",
+        "panel_learning_two_stage_understanding",
+        "panel_learning_model_review_repair",
+        "panel_learning_hybrid_qwen_binding",
+        "vision_observe_screen",
+    ],
+)
 def test_managed_qwen_shared_no_endpoint_cancel_remains_attached_pending(
     tmp_path: Path,
+    task_kind: str,
 ) -> None:
     registry = LearningStageWorkerRegistry(
         result_root=tmp_path,
@@ -1531,7 +1560,7 @@ def test_managed_qwen_shared_no_endpoint_cancel_remains_attached_pending(
         run_id="run-qwen",
         stage="screen_understanding",
         operation_id="operation-qwen-pending",
-        task_kind="panel_learning_hybrid_qwen_binding",
+        task_kind=task_kind,
         payload={"run_id": "run-qwen", "omni_inventory": {"immutable": True}},
     )
     record = registry._records[str(started["worker_id"])]

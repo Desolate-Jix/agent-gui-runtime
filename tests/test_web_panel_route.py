@@ -12,12 +12,18 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
+import pytest
 
 from app.api import memory as memory_api
 from app.api import panel as panel_api
 from app.learn.workflow_contracts import LearningTaskResult
 from app.learn.workflow_state import transition_learning_workflow_state
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _inherit_real_model_wrapper_deny(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
 
 
 class _StaticLearningWorkflowStore:

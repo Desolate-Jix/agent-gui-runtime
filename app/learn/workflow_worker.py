@@ -59,6 +59,7 @@ _MODEL_STAGE_BY_TASK_KIND = {
     "panel_learning_model_review_repair": "observe",
     "panel_learning_calibration_sequence": "locate",
     "panel_learning_hybrid_qwen_binding": "understanding",
+    "vision_observe_screen": "observe",
 }
 _MANAGED_QWEN_TASK_KINDS = frozenset(
     {
@@ -66,6 +67,7 @@ _MANAGED_QWEN_TASK_KINDS = frozenset(
         "panel_learning_two_stage_understanding",
         "panel_learning_model_review_repair",
         "panel_learning_hybrid_qwen_binding",
+        "vision_observe_screen",
     }
 )
 _MODEL_READY_WAIT_SECONDS = 180.0
@@ -212,6 +214,14 @@ def _ensure_learning_stage_model_ready(
     stage = _MODEL_STAGE_BY_TASK_KIND.get(task_kind)
     if not stage:
         return None
+    if task_kind == "vision_observe_screen":
+        if payload.get("capture_live") is False and not str(
+            payload.get("image_path") or ""
+        ).strip():
+            return None
+        requested_provider = str(payload.get("provider_mode") or "").strip().casefold()
+        if requested_provider not in {"", "local", "local_grounding", "local_understanding"}:
+            return None
     if task_kind == "panel_learning_model_review_repair":
         profile_id = str(payload.get("model_profile_id") or "").strip() or None
     elif task_kind == "panel_learning_calibration_sequence":
@@ -254,13 +264,16 @@ def _ensure_learning_stage_model_ready(
             if not request_id:
                 raise LearningStageWorkerError("Qwen model request identity is unavailable")
             try:
-                return ensure_and_acquire_qwen_model_lease(
+                lease = ensure_and_acquire_qwen_model_lease(
                     stage=stage,
                     profile_id=profile_id,
                     request_id=request_id,
                     wait_seconds=_MODEL_READY_WAIT_SECONDS,
                     profile_validator=validate_profile,
                 )
+                if task_kind != "panel_learning_hybrid_qwen_binding":
+                    _mark_qwen_model_request_in_flight(lease)
+                return lease
             except RuntimeError as error:
                 raise LearningStageWorkerError(str(error)) from error
         profile = profile_for_stage(stage, profile_id)
@@ -287,7 +300,7 @@ def _ensure_learning_stage_model_ready(
         return None
 
     if (
-        task_kind == "panel_learning_hybrid_qwen_binding"
+        task_kind in _MANAGED_QWEN_TASK_KINDS
         and cancellation_event is not None
         and hasattr(cancellation_event, "run_if_not_cancelled")
     ):
@@ -298,14 +311,7 @@ def _ensure_learning_stage_model_ready(
         if not allowed:
             raise LearningStageWorkerError("Qwen cancelled before model acquisition")
         return result
-    result = ensure_and_publish()
-    if (
-        result is not None
-        and task_kind in _MANAGED_QWEN_TASK_KINDS
-        and task_kind != "panel_learning_hybrid_qwen_binding"
-    ):
-        _mark_qwen_model_request_in_flight(result)
-    return result
+    return ensure_and_publish()
 
 
 def _run_learning_stage_worker_entry(
@@ -516,10 +522,8 @@ class LearningStageWorkerRegistry:
                     event=self._process_context.Event(),
                     lock=self._process_context.Lock(),
                 )
-                if normalized_task_kind in {
-                    "panel_learning_hybrid_omni_discovery",
-                    "panel_learning_hybrid_qwen_binding",
-                }
+                if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                or normalized_task_kind in _MANAGED_QWEN_TASK_KINDS
                 else None
             )
             completion_event = (
@@ -767,7 +771,7 @@ class LearningStageWorkerRegistry:
             self._refresh_record(record)
             if record["status"] not in {"running", "detached_running"}:
                 if (
-                    record["task_kind"] == "panel_learning_hybrid_qwen_binding"
+                    record["task_kind"] in _MANAGED_QWEN_TASK_KINDS
                     and isinstance(record.get("cancellation_pending"), dict)
                 ):
                     retry = self._model_request_cancel(
@@ -811,7 +815,7 @@ class LearningStageWorkerRegistry:
 
             process = record.get("process")
             if process is None:
-                if record["task_kind"] == "panel_learning_hybrid_qwen_binding":
+                if record["task_kind"] in _MANAGED_QWEN_TASK_KINDS:
                     try:
                         model_cancellation = self._model_request_cancel(
                             request_id=record["model_request_id"],
@@ -902,7 +906,7 @@ class LearningStageWorkerRegistry:
                     "cooperative_cleanup": cooperative_cleanup,
                 }
             else:
-                if record["task_kind"] == "panel_learning_hybrid_qwen_binding":
+                if record["task_kind"] in _MANAGED_QWEN_TASK_KINDS:
                     cancellation_event = record.get("cancellation_event")
                     if cancellation_event is not None:
                         cancellation_event.set()
@@ -921,7 +925,7 @@ class LearningStageWorkerRegistry:
                         "error": str(exc),
                     }
                 if (
-                    record["task_kind"] == "panel_learning_hybrid_qwen_binding"
+                    record["task_kind"] in _MANAGED_QWEN_TASK_KINDS
                     and model_cancellation.get("model_service_compute_termination")
                     not in {"terminated", "request_not_active"}
                 ):

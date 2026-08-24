@@ -11,6 +11,11 @@ import pytest
 from app.learn.recognition.uei.canonical import content_sha256
 
 
+@pytest.fixture(autouse=True)
+def _inherit_real_model_wrapper_deny(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
+
+
 def _sealed_inventory(value: dict[str, object]) -> dict[str, object]:
     from app.learn.recognition.uei.canonical import seal_immutable
 

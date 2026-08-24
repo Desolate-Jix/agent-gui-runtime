@@ -4,6 +4,8 @@ import json
 import base64
 import os
 import socket
+import subprocess
+import sys
 import urllib.error
 from urllib.parse import urlsplit
 from copy import deepcopy
@@ -16,9 +18,12 @@ import psutil
 from app.core import model_server
 from app.learn.recognition.uei.canonical import seal_immutable
 
+_PRODUCTION_QWEN_SOCKET_ATTESTER = model_server._attest_exact_qwen_socket_owner
+
 
 @pytest.fixture(autouse=True)
 def _use_controlled_qwen_socket_attestation(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
     production_observer = model_server._observe_qwen_server_binding
 
     def observe(profile, readiness):
@@ -43,6 +48,15 @@ def _use_controlled_qwen_socket_attestation(monkeypatch) -> None:
         return production_observer(profile, readiness)
 
     monkeypatch.setattr(model_server, "_observe_qwen_server_binding", observe)
+    monkeypatch.setattr(
+        model_server,
+        "_attest_exact_qwen_socket_owner",
+        lambda server_socket, process_identity: (
+            model_server._current_process_identity(process_identity["pid"])
+            == process_identity
+        ),
+        raising=False,
+    )
 
 
 class _FakeResponse:
@@ -170,13 +184,45 @@ def test_cancel_model_request_reports_unsupported_without_guessing(monkeypatch) 
 
     result = model_server.cancel_model_request(
         request_id="learn-worker-456",
-        task_kind="panel_learning_model_review_repair",
+        task_kind="unknown_model_task",
         payload={},
     )
 
     assert result["status"] == "not_supported"
     assert result["model_service_compute_termination"] == "not_supported"
     assert result["provider_results"] == []
+
+
+@pytest.mark.parametrize(
+    "task_kind",
+    [
+        "panel_learning_recognition_trial",
+        "panel_learning_two_stage_understanding",
+        "panel_learning_model_review_repair",
+        "panel_learning_hybrid_qwen_binding",
+        "vision_observe_screen",
+    ],
+)
+def test_managed_qwen_cancel_before_lease_publication_is_request_not_active(
+    tmp_path,
+    monkeypatch,
+    task_kind,
+) -> None:
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    monkeypatch.setattr(
+        model_server,
+        "_request_cancel_profiles",
+        lambda **kwargs: pytest.fail("managed Qwen cancellation guessed a profile before ownership publication"),
+    )
+
+    result = model_server.cancel_model_request(
+        request_id=f"pre-publish-{task_kind}",
+        task_kind=task_kind,
+        payload={},
+    )
+
+    assert result["status"] == "request_not_active"
+    assert result["model_service_compute_termination"] == "request_not_active"
 
 
 def test_calibration_sequence_cancellation_uses_nested_locate_payload(
@@ -662,6 +708,11 @@ def test_existing_qwen_finalization_token_is_immutable_and_never_stops_twice(
         model_server,
         "_terminate_exact_qwen_server_process",
         lambda expected: pytest.fail("second finalizer attempted exact termination"),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "exact_live", "identity": expected},
     )
 
     pending = model_server._release_exact_qwen_lease(lease, reason="cancelled")
@@ -1688,3 +1739,282 @@ def test_qwen_runner_rejects_replaced_server_incarnation_before_http(
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
             model_lease=lease,
         )
+
+
+def test_qwen_runner_rejects_replaced_endpoint_socket_owner_before_http(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="request-socket-drift",
+        readiness=_server_readiness(started=False, pid=9101, created_ns=111),
+    )
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: {
+        "pid": 9101,
+        "create_time_ns": 111,
+    })
+    observed = []
+
+    def reject_socket(server_socket, process_identity):
+        observed.append((deepcopy(server_socket), deepcopy(process_identity)))
+        return False
+
+    monkeypatch.setattr(
+        model_server,
+        "_attest_exact_qwen_socket_owner",
+        reject_socket,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        model_server.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: pytest.fail("replacement socket owner received request"),
+    )
+
+    with pytest.raises(RuntimeError, match="endpoint socket ownership changed"):
+        model_server.run_qwen_binding_model(
+            request={},
+            screenshot_bytes=b"same-bytes",
+            screenshot_media_type="image/png",
+            screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
+            model_lease=lease,
+        )
+
+    assert observed == [
+        (
+            {"host": "127.0.0.1", "port": 13240},
+            {"pid": 9101, "create_time_ns": 111},
+        )
+    ]
+
+
+def test_exact_qwen_socket_attester_requires_one_sealed_pid_and_create_time(
+    monkeypatch,
+) -> None:
+    class Address:
+        ip = "127.0.0.1"
+        port = 13240
+
+    class Connection:
+        status = psutil.CONN_LISTEN
+        laddr = Address()
+
+        def __init__(self, pid):
+            self.pid = pid
+
+    identity = {"pid": 9101, "create_time_ns": 111}
+    monkeypatch.setattr(model_server, "_current_process_identity", lambda pid: deepcopy(identity))
+    monkeypatch.setattr(model_server.psutil, "net_connections", lambda kind: [Connection(9101)])
+
+    assert _PRODUCTION_QWEN_SOCKET_ATTESTER(
+        {"host": "127.0.0.1", "port": 13240}, identity
+    ) is True
+
+    monkeypatch.setattr(
+        model_server.psutil,
+        "net_connections",
+        lambda kind: [Connection(9101), Connection(9202)],
+    )
+    assert _PRODUCTION_QWEN_SOCKET_ATTESTER(
+        {"host": "127.0.0.1", "port": 13240}, identity
+    ) is False
+
+    monkeypatch.setattr(
+        model_server,
+        "_current_process_identity",
+        lambda pid: {"pid": 9101, "create_time_ns": 222},
+    )
+    assert _PRODUCTION_QWEN_SOCKET_ATTESTER(
+        {"host": "127.0.0.1", "port": 13240}, identity
+    ) is False
+
+
+def test_legacy_v2_missing_lifecycle_is_unknown_in_flight_and_fails_closed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="legacy-owner",
+        readiness=_server_readiness(started=False, pid=9101, created_ns=111),
+    )
+    retained = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="retained-owner",
+        readiness=_server_readiness(started=False, pid=9101, created_ns=111),
+    )
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        state["contract_version"] = "qwen_model_server_lease_state_v2"
+        for stored in state["leases"]:
+            stored.pop("lifecycle_state", None)
+        model_server._write_qwen_lease_state(state)
+
+    result = model_server.cancel_model_request(
+        request_id="legacy-owner",
+        task_kind="panel_learning_recognition_trial",
+        payload={},
+    )
+
+    assert result["status"] == "cancellation_acknowledged_pending"
+    assert model_server.qwen_model_lease_is_active(lease) is True
+    assert model_server.qwen_model_lease_is_active(retained) is True
+    with model_server._qwen_lease_lock():
+        migrated = model_server._load_qwen_lease_state(lease["incarnation_id"])
+    assert migrated["leases"][0]["lifecycle_state"] == "unknown_in_flight"
+
+
+def test_qwen_v3_state_rejects_open_lifecycle_values(tmp_path, monkeypatch) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="invalid-lifecycle",
+        readiness=_server_readiness(started=False, pid=9101, created_ns=111),
+    )
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        state["leases"][0]["lifecycle_state"] = "assume_safe"
+        model_server._write_qwen_lease_state(state)
+
+    with pytest.raises(RuntimeError, match="lease lifecycle is invalid"):
+        model_server._load_qwen_lease_state(lease["incarnation_id"])
+
+
+def test_legacy_finalization_without_finalizer_pid_recovers_from_exact_absence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="legacy-finalizer",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        state["contract_version"] = "qwen_model_server_lease_state_v2"
+        state["revision"] += 1
+        state["finalization"] = {
+            "token": "legacy-token",
+            "revision": state["revision"],
+            "lease_id": lease["lease_id"],
+            "phase": "stop_pending",
+            "reason": "legacy-retry",
+        }
+        model_server._write_qwen_lease_state(state)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda expected: {"status": "proven_absent", "identity": None, "reason": "no_such_process"},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_terminate_exact_qwen_server_process",
+        lambda expected: pytest.fail("legacy recovery must not terminate again"),
+    )
+    monkeypatch.setattr(model_server, "check_model_server", lambda profile: {"status": "unreachable"})
+
+    result = model_server._release_exact_qwen_lease(lease, reason="legacy-retry")
+
+    assert result["status"] == "released"
+    assert result["server_termination"] == "verified_exact_process_proven_absent_on_retry"
+    assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_qwen_terminal_proof_is_phase_cas_and_tombstone_recovery_is_idempotent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    profile = {"profile_id": "qwen", "endpoint": "http://127.0.0.1:13240/v1/chat/completions"}
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path)
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="proof-race",
+        readiness=_server_readiness(started=True, pid=9101, created_ns=111),
+    )
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        state["revision"] += 1
+        revision = state["revision"]
+        state["finalization"] = {
+            "token": "proof-token",
+            "revision": revision,
+            "lease_id": lease["lease_id"],
+            "phase": "stop_pending",
+            "reason": "race",
+            "finalizer_pid": os.getpid(),
+        }
+        model_server._write_qwen_lease_state(state)
+    first_result = {"status": "released", "server_termination": "proof-a", "lease": lease}
+    second_result = {"status": "released", "server_termination": "proof-b", "lease": lease}
+    outputs = []
+    gate = Event()
+
+    def persist(candidate):
+        gate.wait(timeout=1.0)
+        outputs.append(
+            model_server._persist_qwen_termination_proof(
+                state,
+                token="proof-token",
+                revision=revision,
+                result=candidate,
+            )
+        )
+
+    threads = [Thread(target=persist, args=(candidate,)) for candidate in (first_result, second_result)]
+    for thread in threads:
+        thread.start()
+    gate.set()
+    for thread in threads:
+        thread.join(timeout=1.0)
+
+    assert len(outputs) == 2
+    assert outputs[0] == outputs[1]
+    assert outputs[0]["server_termination"] in {"proof-a", "proof-b"}
+    cleaned = model_server._finish_qwen_finalization_cleanup(
+        lease["incarnation_id"],
+        token="proof-token",
+        revision=revision,
+        model_lease=lease,
+    )
+    recovered = model_server._finish_qwen_finalization_cleanup(
+        lease["incarnation_id"],
+        token="proof-token",
+        revision=revision,
+        model_lease=lease,
+    )
+    assert recovered == cleaned == outputs[0]
+
+
+def test_spawned_python_inherits_hard_deny_before_real_wrapper_boundary() -> None:
+    code = """
+import sys
+from app.core import model_server
+model_server.subprocess.Popen = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError('REAL_WRAPPER_REACHED'))
+try:
+    model_server.start_model_server({'profile_id': 'deny-test', 'start_script': 'scripts/model_servers/start_llama_vision_server.ps1'})
+except RuntimeError as error:
+    text = str(error)
+    print(text)
+    raise SystemExit(0 if 'disabled by inherited test safety sentinel' in text else 7)
+raise SystemExit(8)
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=model_server.ROOT_DIR,
+        env=os.environ.copy(),
+        text=True,
+        capture_output=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "disabled by inherited test safety sentinel" in completed.stdout
+    assert "REAL_WRAPPER_REACHED" not in completed.stdout + completed.stderr

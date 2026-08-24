@@ -30,6 +30,22 @@ _QWEN_LOCAL_LEASE_LOCK = threading.Lock()
 _QWEN_LOCAL_ACQUISITION_LOCK = threading.Lock()
 _QWEN_PROCESS_TERMINATE_SECONDS = 3.0
 _QWEN_PROCESS_KILL_SECONDS = 2.0
+_QWEN_LEASE_STATE_CONTRACT = "qwen_model_server_lease_state_v3"
+_QWEN_LEGACY_LEASE_STATE_CONTRACT = "qwen_model_server_lease_state_v2"
+_QWEN_LIFECYCLE_STATES = {
+    "not_started",
+    "request_in_flight",
+    "compute_complete",
+    "unknown_in_flight",
+}
+_QWEN_UNPROVEN_FINALIZATION_PHASES = {"stop_pending", "owned_pending"}
+_MANAGED_QWEN_TASK_KINDS = {
+    "panel_learning_recognition_trial",
+    "panel_learning_two_stage_understanding",
+    "panel_learning_model_review_repair",
+    "panel_learning_hybrid_qwen_binding",
+    "vision_observe_screen",
+}
 _QWEN_LEASE_FIELDS = {
     "contract_version",
     "lease_id",
@@ -144,7 +160,7 @@ def cancel_model_request(
     if not normalized_request_id:
         raise ValueError("request_id is required")
     owner_record = _find_qwen_owner_record(normalized_request_id)
-    if owner_record is not None or str(task_kind or "").strip() == "panel_learning_hybrid_qwen_binding":
+    if owner_record is not None or str(task_kind or "").strip() in _MANAGED_QWEN_TASK_KINDS:
         if owner_record is None or owner_record["kind"] == "tombstone":
             receipt = (
                 deepcopy(owner_record["receipt"])
@@ -474,7 +490,7 @@ def acquire_qwen_model_lease(
         state = _load_qwen_lease_state(incarnation["incarnation_id"])
         if state is None:
             state = {
-                "contract_version": "qwen_model_server_lease_state_v2",
+                "contract_version": _QWEN_LEASE_STATE_CONTRACT,
                 "profile_id": profile_id,
                 "profile": deepcopy(profile),
                 "incarnation": incarnation,
@@ -692,6 +708,7 @@ def _stop_and_finalize_qwen_incarnation(
         state["incarnation"]["incarnation_id"],
         token=token,
         revision=revision,
+        model_lease=_qwen_public_lease(state["leases"][0]),
     )
 
 
@@ -701,10 +718,13 @@ def _persist_qwen_termination_proof(
     token: str,
     revision: int,
     result: dict[str, Any],
-) -> None:
+) -> dict[str, Any]:
     incarnation_id = state["incarnation"]["incarnation_id"]
+    model_lease = _qwen_public_lease(state["leases"][0])
     with _qwen_lease_lock():
         current_state = _load_qwen_lease_state(incarnation_id)
+        if current_state is None:
+            return _recover_qwen_finalization_tombstone(model_lease, token=token)
         finalization = current_state.get("finalization") if isinstance(current_state, dict) else None
         if (
             not isinstance(finalization, dict)
@@ -712,10 +732,18 @@ def _persist_qwen_termination_proof(
             or finalization.get("revision") != revision
         ):
             raise RuntimeError("Qwen finalization token changed")
+        if finalization.get("phase") == "termination_proven":
+            existing_result = finalization.get("termination_result")
+            if not isinstance(existing_result, dict):
+                raise RuntimeError("Qwen terminal finalization evidence is unavailable")
+            return deepcopy(existing_result)
+        if finalization.get("phase") not in _QWEN_UNPROVEN_FINALIZATION_PHASES:
+            raise RuntimeError("Qwen finalization phase cannot accept terminal proof")
         finalization["phase"] = "termination_proven"
         finalization["termination_result"] = deepcopy(result)
         current_state["revision"] = max(int(current_state.get("revision") or 0), revision)
         _write_qwen_lease_state(current_state)
+        return deepcopy(result)
 
 
 def _finish_qwen_finalization_cleanup(
@@ -723,9 +751,12 @@ def _finish_qwen_finalization_cleanup(
     *,
     token: str,
     revision: int,
+    model_lease: dict[str, Any],
 ) -> dict[str, Any]:
     with _qwen_lease_lock():
         current_state = _load_qwen_lease_state(incarnation_id)
+        if current_state is None:
+            return _recover_qwen_finalization_tombstone(model_lease, token=token)
         finalization = current_state.get("finalization") if isinstance(current_state, dict) else None
         if (
             not isinstance(finalization, dict)
@@ -736,7 +767,9 @@ def _finish_qwen_finalization_cleanup(
         ):
             raise RuntimeError("Qwen terminal finalization evidence is unavailable")
         result = deepcopy(finalization["termination_result"])
-        lease = {key: deepcopy(current_state["leases"][0].get(key)) for key in _QWEN_LEASE_FIELDS}
+        lease = _qwen_public_lease(current_state["leases"][0])
+        if lease != model_lease:
+            raise RuntimeError("Qwen finalization lease changed before cleanup")
         _write_qwen_owner_tombstone(
             lease,
             result=result,
@@ -759,8 +792,9 @@ def _resume_qwen_finalization(
             state["incarnation"]["incarnation_id"],
             token=token,
             revision=revision,
+            model_lease=_qwen_public_lease(state["leases"][0]),
         )
-    if not isinstance(finalization, dict) or not isinstance(finalization.get("finalizer_pid"), int):
+    if not isinstance(finalization, dict):
         return _qwen_finalization_pending_result(state, reason=reason)
     proof = _probe_exact_qwen_process(state["incarnation"]["server_process_identity"])
     if proof.get("status") != "proven_absent":
@@ -786,6 +820,7 @@ def _resume_qwen_finalization(
         state["incarnation"]["incarnation_id"],
         token=token,
         revision=revision,
+        model_lease=_qwen_public_lease(state["leases"][0]),
     )
 
 
@@ -816,7 +851,11 @@ def _record_qwen_finalization_failure(
     with _qwen_lease_lock():
         current = _load_qwen_lease_state(incarnation_id)
         finalization = current.get("finalization") if isinstance(current, dict) else None
-        if isinstance(finalization, dict) and finalization.get("token") == token:
+        if (
+            isinstance(finalization, dict)
+            and finalization.get("token") == token
+            and finalization.get("phase") in _QWEN_UNPROVEN_FINALIZATION_PHASES
+        ):
             finalization["phase"] = "owned_pending"
             finalization["failure_reason"] = reason
             current["revision"] = max(int(current.get("revision") or 0), revision)
@@ -832,7 +871,7 @@ def _mark_qwen_lease_pending(model_lease: object, *, reason: str) -> dict[str, A
         exact = _find_exact_lease(state, model_lease)
         if exact is None:
             return {"status": "request_not_active", "model_service_compute_termination": "request_not_active"}
-        lifecycle_state = str(exact.get("lifecycle_state") or "not_started")
+        lifecycle_state = str(exact.get("lifecycle_state") or "unknown_in_flight")
         if lifecycle_state == "compute_complete":
             raise RuntimeError("completed Qwen lease cannot be overwritten as pending")
         exact["pending_reason"] = str(reason)
@@ -862,7 +901,7 @@ def _mark_qwen_model_request_in_flight(model_lease: object) -> None:
         exact = _find_exact_lease(state, model_lease)
         if exact is None:
             raise ValueError("exact Qwen model lease is not active")
-        lifecycle_state = str(exact.get("lifecycle_state") or "not_started")
+        lifecycle_state = str(exact.get("lifecycle_state") or "unknown_in_flight")
         if lifecycle_state == "compute_complete":
             return
         if lifecycle_state not in {"not_started", "request_in_flight"}:
@@ -915,7 +954,7 @@ def _release_qwen_request_lease(
     exact = _find_exact_lease(state, lease)
     if exact is None:
         raise RuntimeError("Qwen request lease changed during cancellation")
-    lifecycle_state = str(exact.get("lifecycle_state") or "not_started")
+    lifecycle_state = str(exact.get("lifecycle_state") or "unknown_in_flight")
     if not request_cancelled and lifecycle_state in {"not_started", "compute_complete"}:
         result = _release_exact_qwen_lease(
             {key: deepcopy(lease.get(key)) for key in _QWEN_LEASE_FIELDS},
@@ -1122,6 +1161,35 @@ def _valid_qwen_server_socket(value: object) -> bool:
     )
 
 
+def _attest_exact_qwen_socket_owner(
+    server_socket: object,
+    process_identity: object,
+) -> bool:
+    if (
+        not _valid_qwen_server_socket(server_socket)
+        or not _valid_process_identity(process_identity)
+        or _current_process_identity(process_identity["pid"]) != process_identity
+    ):
+        return False
+    expected_socket = (
+        str(server_socket["host"]),
+        int(server_socket["port"]),
+    )
+    try:
+        connections = list(psutil.net_connections(kind="tcp"))
+    except (psutil.AccessDenied, OSError):
+        return False
+    owners = {
+        int(connection.pid)
+        for connection in connections
+        if connection.status == psutil.CONN_LISTEN
+        and connection.laddr
+        and connection.pid
+        and (str(connection.laddr.ip), int(connection.laddr.port)) == expected_socket
+    }
+    return owners == {int(process_identity["pid"])}
+
+
 def _canonical_qwen_base_url(
     profile: dict[str, Any],
     observed: dict[str, Any],
@@ -1312,13 +1380,53 @@ def _load_qwen_lease_state(incarnation_id: str) -> dict[str, Any] | None:
         raise RuntimeError("Qwen model lease state seal mismatch")
     value = deepcopy(value)
     value.pop("content_sha256")
+    contract_version = value.get("contract_version")
     if (
-        value.get("contract_version") != "qwen_model_server_lease_state_v2"
+        contract_version not in {
+            _QWEN_LEASE_STATE_CONTRACT,
+            _QWEN_LEGACY_LEASE_STATE_CONTRACT,
+        }
         or value.get("incarnation", {}).get("incarnation_id") != incarnation_id
         or not isinstance(value.get("leases"), list)
         or not isinstance(value.get("revision"), int)
     ):
         raise RuntimeError("Qwen model lease state identity mismatch")
+    for lease in value["leases"]:
+        if not isinstance(lease, dict):
+            raise RuntimeError("Qwen model lease lifecycle is invalid")
+        lifecycle_state = lease.get("lifecycle_state")
+        if (
+            contract_version == _QWEN_LEGACY_LEASE_STATE_CONTRACT
+            and lifecycle_state is None
+        ):
+            lifecycle_state = "unknown_in_flight"
+            lease["lifecycle_state"] = lifecycle_state
+        if lifecycle_state not in _QWEN_LIFECYCLE_STATES:
+            raise RuntimeError("Qwen model lease lifecycle is invalid")
+    finalization = value.get("finalization")
+    if isinstance(finalization, dict):
+        if (
+            contract_version == _QWEN_LEGACY_LEASE_STATE_CONTRACT
+            and finalization.get("phase") is None
+        ):
+            finalization["phase"] = "owned_pending"
+        phase = finalization.get("phase")
+        if phase not in {*_QWEN_UNPROVEN_FINALIZATION_PHASES, "termination_proven"}:
+            raise RuntimeError("Qwen model finalization phase is invalid")
+        if (
+            not isinstance(finalization.get("token"), str)
+            or not finalization["token"]
+            or not isinstance(finalization.get("revision"), int)
+            or not isinstance(finalization.get("lease_id"), str)
+        ):
+            raise RuntimeError("Qwen model finalization identity is invalid")
+        if phase == "termination_proven" and not isinstance(
+            finalization.get("termination_result"), dict
+        ):
+            raise RuntimeError("Qwen terminal finalization evidence is unavailable")
+    elif finalization is not None:
+        raise RuntimeError("Qwen model finalization state is invalid")
+    value["contract_version"] = _QWEN_LEASE_STATE_CONTRACT
     return value
 
 
@@ -1417,6 +1525,25 @@ def _load_qwen_owner_tombstone(request_id: str) -> dict[str, Any] | None:
     return receipt
 
 
+def _recover_qwen_finalization_tombstone(
+    model_lease: dict[str, Any],
+    *,
+    token: str,
+) -> dict[str, Any]:
+    receipt = _load_qwen_owner_tombstone(
+        str(model_lease.get("owner_request_id") or "")
+    )
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("lease_id") != model_lease.get("lease_id")
+        or receipt.get("incarnation_id") != model_lease.get("incarnation_id")
+        or receipt.get("finalization_token") != token
+        or not isinstance(receipt.get("release_result"), dict)
+    ):
+        raise RuntimeError("Qwen terminal finalization evidence is unavailable")
+    return deepcopy(receipt["release_result"])
+
+
 def _find_exact_lease(
     state: dict[str, Any] | None,
     model_lease: dict[str, Any],
@@ -1481,6 +1608,11 @@ def _profile_for_qwen_model_lease(model_lease: object) -> dict[str, Any]:
             if isinstance(state, dict)
             else None
         )
+        expected_socket = (
+            deepcopy(state.get("incarnation", {}).get("server_socket"))
+            if isinstance(state, dict)
+            else None
+        )
         if not isinstance(profile, dict):
             raise RuntimeError("Qwen model lease profile is unavailable")
         acquired_profile = deepcopy(profile)
@@ -1489,6 +1621,8 @@ def _profile_for_qwen_model_lease(model_lease: object) -> dict[str, Any]:
         or _current_process_identity(expected_process["pid"]) != expected_process
     ):
         raise RuntimeError("Qwen server incarnation ownership changed before request")
+    if not _attest_exact_qwen_socket_owner(expected_socket, expected_process):
+        raise RuntimeError("Qwen endpoint socket ownership changed before request")
     return acquired_profile
 
 
@@ -1655,6 +1789,10 @@ def _stop_exclusive_resource_conflicts(profile: dict[str, Any]) -> dict[str, Any
 
 
 def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
+    if os.environ.get("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER") == "1":
+        raise RuntimeError(
+            "model server wrapper disabled by inherited test safety sentinel"
+        )
     if profile.get("launchable") is False:
         profile_id = str(profile.get("profile_id") or "unknown")
         raise ValueError(f"Model profile is not launchable: {profile_id}")
