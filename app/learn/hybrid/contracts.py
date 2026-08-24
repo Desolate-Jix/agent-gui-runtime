@@ -31,6 +31,17 @@ _NON_AUTHORIZING = {
     "authorization_scope": "display_and_review_only",
 }
 _NON_AUTHORIZING_FIELDS = frozenset(_NON_AUTHORIZING)
+_AUTHORITY_SHAPED_FIELDS = frozenset(
+    {
+        "action_authorized",
+        "approved_to_click",
+        "approved_to_execute",
+        "click_authorized",
+        "execute",
+        "final_submit",
+        "submit_authorized",
+    }
+)
 _GEOMETRY_FIELDS = frozenset(
     {
         "bbox",
@@ -47,19 +58,18 @@ _GEOMETRY_FIELDS = frozenset(
         "xyxy",
     }
 )
-_FUSION_STATES = frozenset(
-    {
-        "BOUND",
-        "AMBIGUOUS",
-        "CONFLICT",
-        "ORPHAN",
-        "ORPHAN_SEMANTIC",
-        "LOW_CONFIDENCE",
-        "UNBOUND",
-        "CAPTURE_MISMATCH",
-        "REVIEW_REQUIRED",
-    }
+_FUSION_STATE_ORDER = (
+    "BOUND",
+    "AMBIGUOUS",
+    "CONFLICT",
+    "ORPHAN",
+    "ORPHAN_SEMANTIC",
+    "LOW_CONFIDENCE",
+    "UNBOUND",
+    "CAPTURE_MISMATCH",
+    "REVIEW_REQUIRED",
 )
+_FUSION_STATES = frozenset(_FUSION_STATE_ORDER)
 
 
 def _object(value: Any, *, name: str, fields: set[str] | frozenset[str]) -> dict[str, Any]:
@@ -152,6 +162,39 @@ def _non_authorizing(value: Mapping[str, Any], *, name: str) -> None:
 def _same_capture(left: Mapping[str, Any], right: Mapping[str, Any]) -> None:
     if canonical_json_bytes(left) != canonical_json_bytes(right):
         raise ValueError("conflicting capture identity")
+
+
+def _canonical_return(value: dict[str, Any], *, name: str) -> dict[str, Any]:
+    try:
+        canonical_json_bytes(value)
+    except ValueError as error:
+        raise ValueError(f"{name} is not canonical JSON: {error}") from error
+    return value
+
+
+def _sealed_content(value: Mapping[str, Any], *, name: str) -> str:
+    declared = _sha256(value.get("content_sha256"), name=f"{name}.content_sha256")
+    try:
+        actual = content_sha256(dict(value))
+    except ValueError as error:
+        raise ValueError(f"{name} is not canonical JSON: {error}") from error
+    if declared != actual:
+        raise ValueError(f"{name} content_sha256 mismatch")
+    return declared
+
+
+def _reject_authority_shaped(value: Any, *, name: str) -> None:
+    if isinstance(value, Mapping):
+        forbidden = set(value) & _AUTHORITY_SHAPED_FIELDS
+        if forbidden:
+            raise ValueError(
+                f"{name} contains authority-shaped field: {sorted(forbidden)[0]}"
+            )
+        for child in value.values():
+            _reject_authority_shaped(child, name=name)
+    elif isinstance(value, list):
+        for child in value:
+            _reject_authority_shaped(child, name=name)
 
 
 def stable_candidate_id(
@@ -266,7 +309,7 @@ def validate_capture_identity(value: Mapping[str, Any]) -> dict[str, Any]:
     for field in ("capture_id", "captured_at"):
         if lineage[field] != result[field]:
             raise ValueError(f"lineage {field} mismatch")
-    return result
+    return _canonical_return(result, name="capture identity")
 
 
 def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -274,6 +317,7 @@ def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
         "contract_version",
         "capture_identity",
         "provider_result_ref",
+        "provider_result",
         "provider_id",
         "provider_revision",
         "candidates",
@@ -281,11 +325,47 @@ def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
     result = _object(value, name="Omni inventory", fields=fields)
     if result["contract_version"] != OMNI_CONTRACT:
         raise ValueError(f"Omni inventory contract_version must be {OMNI_CONTRACT}")
+    _non_authorizing(result, name="Omni inventory")
     result["capture_identity"] = validate_capture_identity(result["capture_identity"])
     provider_ref = _ref(result["provider_result_ref"], name="provider_result_ref")
-    _string(result["provider_id"], name="provider_id")
-    _string(result["provider_revision"], name="provider_revision")
-    _non_authorizing(result, name="Omni inventory")
+    provider_id = _string(result["provider_id"], name="provider_id")
+    provider_revision = _string(result["provider_revision"], name="provider_revision")
+    if not isinstance(result["provider_result"], Mapping):
+        raise ValueError("provider_result must be an immutable object")
+    provider_result = deepcopy(dict(result["provider_result"]))
+    validate_contract(provider_result, "provider_safe_result_v1")
+    _reject_authority_shaped(provider_result, name="provider result")
+    provider_hash = _sealed_content(provider_result, name="provider result")
+    if provider_ref != {
+        "id": provider_result.get("result_id"),
+        "content_sha256": provider_hash,
+    }:
+        raise ValueError("provider_result_ref does not resolve to provider result")
+    if (
+        provider_result.get("capture_lineage_ref")
+        != result["capture_identity"]["capture_lineage_ref"]
+    ):
+        raise ValueError("provider result capture identity mismatch")
+    if (
+        provider_result.get("provider_id") != provider_id
+        or provider_result.get("requested_provider_id") != provider_id
+        or provider_result.get("provider_version") != provider_revision
+        or provider_result.get("status") != "success"
+        or provider_result.get("review_only") is not True
+    ):
+        raise ValueError("provider result identity or review boundary mismatch")
+    result["provider_result"] = provider_result
+    provider_items = provider_result.get("items")
+    if not isinstance(provider_items, list):
+        raise ValueError("provider result items must be a list")
+    provider_items_by_id: dict[str, dict[str, Any]] = {}
+    for item in provider_items:
+        if not isinstance(item, dict):
+            raise ValueError("provider result item must be an object")
+        source_id = _string(item.get("source_item_id"), name="provider source_item_id")
+        if source_id in provider_items_by_id:
+            raise ValueError("duplicate provider source_item_id")
+        provider_items_by_id[source_id] = item
     if not isinstance(result["candidates"], list):
         raise ValueError("Omni inventory.candidates must be a list")
     candidate_fields = {
@@ -297,7 +377,7 @@ def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
         "confidence",
         "active",
         "inactive_reason",
-        "raw_provenance",
+        "provenance",
     }
     seen_ids: set[str] = set()
     seen_sources: set[str] = set()
@@ -323,21 +403,47 @@ def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
         ):
             raise ValueError("candidate_id does not match stable identity")
         bbox = _xyxy(candidate["bbox_original"], name=f"candidate[{index}].bbox_original")
+        provider_item = provider_items_by_id.get(source_item_id)
+        if provider_item is None:
+            raise ValueError("candidate source_item_id is absent from provider result")
+        if provider_item.get("capture_bbox") != bbox:
+            raise ValueError("candidate bbox_original does not match immutable provider result")
         image_size = result["capture_identity"]["image_size"]
         if bbox[0] < 0 or bbox[1] < 0 or bbox[2] > image_size["width"] or bbox[3] > image_size["height"]:
             raise ValueError(f"candidate[{index}].bbox_original must be inside capture bounds")
         _coordinate_space(candidate["coordinate_space"], name=f"candidate[{index}].coordinate_space")
-        _confidence(candidate["confidence"], name=f"candidate[{index}].confidence")
+        confidence = _confidence(candidate["confidence"], name=f"candidate[{index}].confidence")
+        if provider_item.get("provider_confidence") != confidence:
+            raise ValueError("candidate confidence does not match immutable provider result")
         if not isinstance(candidate["active"], bool):
             raise ValueError(f"candidate[{index}].active must be a boolean")
         if candidate["active"] and candidate["inactive_reason"] is not None:
             raise ValueError("active candidate cannot have inactive_reason")
         if not candidate["active"]:
             _string(candidate["inactive_reason"], name=f"candidate[{index}].inactive_reason")
-        if not isinstance(candidate["raw_provenance"], Mapping):
-            raise ValueError(f"candidate[{index}].raw_provenance must be an object")
+        provenance = _object(
+            candidate["provenance"],
+            name="candidate provenance",
+            fields={
+                "contract_version",
+                "provider_result_ref",
+                "source_item_id",
+                "content_sha256",
+            },
+        )
+        if provenance["contract_version"] != "hybrid_candidate_provenance_v1":
+            raise ValueError("candidate provenance contract_version is invalid")
+        _sealed_content(provenance, name="candidate provenance")
+        if (
+            provenance["provider_result_ref"] != provider_ref
+            or provenance["source_item_id"] != source_item_id
+        ):
+            raise ValueError("candidate provenance identity mismatch")
+        candidate["provenance"] = provenance
         result["candidates"][index] = candidate
-    return result
+    if seen_sources != set(provider_items_by_id):
+        raise ValueError("Omni candidates must cover every provider result item")
+    return _canonical_return(result, name="Omni inventory")
 
 
 def validate_qwen_bindings(
@@ -406,20 +512,16 @@ def validate_qwen_bindings(
             _string(orphan[field], name=f"orphan_semantic[{index}].{field}")
         _string(orphan["description"], name=f"orphan_semantic[{index}].description", allow_empty=True)
         result["orphan_semantics"][index] = orphan
-    return result
+    return _canonical_return(result, name="Qwen bindings")
 
 
 def validate_fusion_result(
     value: Mapping[str, Any],
-    omni_inventory: Mapping[str, Any] | None = None,
-    qwen_bindings: Mapping[str, Any] | None = None,
+    omni_inventory: Mapping[str, Any],
+    qwen_bindings: Mapping[str, Any],
 ) -> dict[str, Any]:
-    inventory = validate_omni_inventory(omni_inventory) if omni_inventory is not None else None
-    bindings = (
-        validate_qwen_bindings(qwen_bindings, inventory)
-        if qwen_bindings is not None and inventory is not None
-        else None
-    )
+    inventory = validate_omni_inventory(omni_inventory)
+    bindings = validate_qwen_bindings(qwen_bindings, inventory)
     fields = {
         "contract_version",
         "capture_identity",
@@ -430,21 +532,19 @@ def validate_fusion_result(
     if result["contract_version"] != FUSION_CONTRACT:
         raise ValueError(f"fusion result contract_version must be {FUSION_CONTRACT}")
     result["capture_identity"] = validate_capture_identity(result["capture_identity"])
-    if inventory is not None:
-        _same_capture(result["capture_identity"], inventory["capture_identity"])
-    if bindings is not None:
-        _same_capture(result["capture_identity"], bindings["capture_identity"])
+    _same_capture(result["capture_identity"], inventory["capture_identity"])
+    _same_capture(result["capture_identity"], bindings["capture_identity"])
     _sha256(result["config_sha256"], name="fusion result.config_sha256")
     _non_authorizing(result, name="fusion result")
     if not isinstance(result["candidates"], list):
         raise ValueError("fusion result.candidates must be a list")
-    known_ids = (
-        {candidate["candidate_id"] for candidate in inventory["candidates"]}
-        if inventory is not None
-        else None
-    )
+    omni_by_id = {candidate["candidate_id"]: candidate for candidate in inventory["candidates"]}
+    known_ids = set(omni_by_id)
+    qwen_by_id = {binding["candidate_id"]: binding for binding in bindings["bindings"]}
     candidate_fields = {
         "candidate_id",
+        "bbox_original",
+        "coordinate_space",
         "state",
         "vista_eligible",
         "review_required",
@@ -459,8 +559,17 @@ def validate_fusion_result(
         if candidate_id in seen_ids:
             raise ValueError("duplicate candidate_id in fusion result")
         seen_ids.add(candidate_id)
-        if known_ids is not None and candidate_id not in known_ids:
+        if candidate_id not in known_ids:
             raise ValueError(f"unknown candidate_id: {candidate_id}")
+        omni_candidate = omni_by_id[candidate_id]
+        bbox = _xyxy(
+            candidate["bbox_original"], name=f"fusion candidate[{index}].bbox_original"
+        )
+        if bbox != omni_candidate["bbox_original"]:
+            raise ValueError("fusion candidate geometry must match immutable Omni bbox_original")
+        _coordinate_space(
+            candidate["coordinate_space"], name=f"fusion candidate[{index}].coordinate_space"
+        )
         state = candidate["state"]
         if state not in _FUSION_STATES:
             raise ValueError(f"unknown fusion state: {state}")
@@ -470,26 +579,31 @@ def validate_fusion_result(
             raise ValueError("non-BOUND candidate cannot be VISTA eligible")
         if state == "BOUND" and not candidate["vista_eligible"]:
             raise ValueError("BOUND candidate must be VISTA eligible")
+        if state == "BOUND" and (
+            omni_candidate["active"] is not True or candidate_id not in qwen_by_id
+        ):
+            raise ValueError("BOUND requires one valid Qwen binding on an active Omni candidate")
         if not isinstance(candidate["review_required"], bool):
             raise ValueError("review_required must be a boolean")
         if state != "BOUND" and not candidate["review_required"]:
             raise ValueError("non-BOUND candidate must require review")
         _string(candidate["reason"], name=f"fusion candidate[{index}].reason")
         result["candidates"][index] = candidate
-    return result
-
-
-def _geometry_ref(value: Any, *, name: str) -> dict[str, Any]:
-    result = _object(value, name=name, fields={"coordinate_space", "xyxy"})
-    _coordinate_space(result["coordinate_space"], name=f"{name}.coordinate_space")
-    result["xyxy"] = _xyxy(result["xyxy"], name=f"{name}.xyxy")
-    return result
+    if seen_ids != known_ids:
+        raise ValueError("fusion result must preserve exact Omni candidate coverage")
+    return _canonical_return(result, name="fusion result")
 
 
 def validate_vista_proposals(
-    value: Mapping[str, Any], fusion_result: Mapping[str, Any]
+    value: Mapping[str, Any],
+    fusion_result: Mapping[str, Any],
+    omni_inventory: Mapping[str, Any],
+    qwen_bindings: Mapping[str, Any],
+    permitted_roi_refs: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
-    fusion = validate_fusion_result(fusion_result)
+    inventory = validate_omni_inventory(omni_inventory)
+    bindings = validate_qwen_bindings(qwen_bindings, inventory)
+    fusion = validate_fusion_result(fusion_result, inventory, bindings)
     fields = {
         "contract_version",
         "capture_identity",
@@ -500,10 +614,22 @@ def validate_vista_proposals(
         raise ValueError(f"VISTA proposals contract_version must be {VISTA_CONTRACT}")
     result["capture_identity"] = validate_capture_identity(result["capture_identity"])
     _same_capture(result["capture_identity"], fusion["capture_identity"])
+    _same_capture(result["capture_identity"], inventory["capture_identity"])
     _non_authorizing(result, name="VISTA proposals")
     if not isinstance(result["proposals"], list):
         raise ValueError("VISTA proposals.proposals must be a list")
     fusion_by_id = {candidate["candidate_id"]: candidate for candidate in fusion["candidates"]}
+    omni_by_id = {candidate["candidate_id"]: candidate for candidate in inventory["candidates"]}
+    if not isinstance(permitted_roi_refs, Mapping):
+        raise ValueError("permitted ROI context must be an object")
+    permitted_rois = deepcopy(dict(permitted_roi_refs))
+    bound_ids = {
+        candidate_id
+        for candidate_id, candidate in fusion_by_id.items()
+        if candidate["state"] == "BOUND"
+    }
+    if set(permitted_rois) != bound_ids:
+        raise ValueError("permitted ROI context must cover exact BOUND candidates")
     proposal_fields = {
         "candidate_id",
         "fusion_state",
@@ -529,10 +655,60 @@ def validate_vista_proposals(
             raise ValueError(f"unknown candidate_id: {candidate_id}")
         if fused["state"] != "BOUND" or proposal["fusion_state"] != "BOUND":
             raise ValueError("VISTA requires BOUND fusion state")
-        candidate_bbox = _geometry_ref(
-            proposal["candidate_bbox_ref"], name=f"VISTA proposal[{index}].candidate_bbox_ref"
-        )["xyxy"]
-        roi = _geometry_ref(proposal["roi_ref"], name=f"VISTA proposal[{index}].roi_ref")["xyxy"]
+        omni_candidate = omni_by_id[candidate_id]
+        bbox_ref = _object(
+            proposal["candidate_bbox_ref"],
+            name="candidate bbox ref",
+            fields={
+                "contract_version",
+                "candidate_id",
+                "provider_result_ref",
+                "coordinate_space",
+                "xyxy",
+                "content_sha256",
+            },
+        )
+        if bbox_ref["contract_version"] != "hybrid_candidate_bbox_ref_v1":
+            raise ValueError("candidate bbox ref contract_version is invalid")
+        _sealed_content(bbox_ref, name="candidate bbox ref")
+        _coordinate_space(bbox_ref["coordinate_space"], name="candidate bbox ref.coordinate_space")
+        candidate_bbox = _xyxy(bbox_ref["xyxy"], name="candidate bbox ref.xyxy")
+        if (
+            bbox_ref["candidate_id"] != candidate_id
+            or bbox_ref["provider_result_ref"] != omni_candidate["provider_result_ref"]
+            or candidate_bbox != omni_candidate["bbox_original"]
+            or candidate_bbox != fused["bbox_original"]
+        ):
+            raise ValueError("candidate bbox substitution is forbidden")
+        roi_ref = _object(
+            proposal["roi_ref"],
+            name="ROI",
+            fields={
+                "contract_version",
+                "roi_id",
+                "candidate_id",
+                "capture_lineage_ref",
+                "coordinate_space",
+                "xyxy",
+                "permitted_for_refinement",
+                "content_sha256",
+            },
+        )
+        if roi_ref["contract_version"] != "hybrid_permitted_roi_v1":
+            raise ValueError("ROI contract_version is invalid")
+        _sealed_content(roi_ref, name="ROI")
+        _string(roi_ref["roi_id"], name="ROI.roi_id")
+        _coordinate_space(roi_ref["coordinate_space"], name="ROI.coordinate_space")
+        roi = _xyxy(roi_ref["xyxy"], name="ROI.xyxy")
+        if (
+            roi_ref["candidate_id"] != candidate_id
+            or roi_ref["capture_lineage_ref"]
+            != result["capture_identity"]["capture_lineage_ref"]
+            or roi_ref["permitted_for_refinement"] is not True
+        ):
+            raise ValueError("ROI is not sealed and permitted for this candidate/capture")
+        if canonical_json_bytes(roi_ref) != canonical_json_bytes(permitted_rois[candidate_id]):
+            raise ValueError("proposal ROI does not match permitted ROI context")
         point_value = _object(
             proposal["point"],
             name=f"VISTA proposal[{index}].point",
@@ -574,7 +750,7 @@ def validate_vista_proposals(
         if proposal["review_required"] is not True:
             raise ValueError("VISTA proposal must remain review_required")
         result["proposals"][index] = proposal
-    return result
+    return _canonical_return(result, name="VISTA proposals")
 
 
 def load_hybrid_config(project_root: Path) -> dict[str, Any]:
@@ -637,8 +813,8 @@ def load_hybrid_config(project_root: Path) -> dict[str, Any]:
         _confidence(fusion[field], name=f"Hybrid config.fusion.{field}")
     if fusion["vista_eligible_states"] != ["BOUND"]:
         raise ValueError("Hybrid config only permits BOUND VISTA eligibility")
-    if not isinstance(fusion["states"], list) or set(fusion["states"]) != _FUSION_STATES:
-        raise ValueError("Hybrid config fusion states are not the closed state set")
+    if fusion["states"] != list(_FUSION_STATE_ORDER):
+        raise ValueError("Hybrid config fusion states must use the exact canonical order")
     _non_authorizing(result, name="Hybrid config")
     result["config_sha256"] = hashlib.sha256(canonical_json_bytes(result)).hexdigest()
-    return result
+    return _canonical_return(result, name="Hybrid config")
