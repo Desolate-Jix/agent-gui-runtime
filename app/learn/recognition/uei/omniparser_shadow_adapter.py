@@ -47,11 +47,14 @@ class OmniParserShadowAdapterError(AdapterFailure):
             "runtime_worker_failed": ("failed", "runtime_worker_failed", True, "clean"),
             "runtime_cleanup_failed": ("failed", "runtime_cleanup_failed", False, "failed"),
             "runtime_capture_hash_mismatch": ("rejected", "policy_rejected", False, "not_required"),
-            "runtime_cancelled": ("failed", "runtime_cancelled", True, "clean"),
+            "runtime_cancelled": ("failed", "runtime_provider_failed", True, "clean"),
+            "runtime_configuration_unavailable": ("failed", "runtime_provider_failed", True, "not_required"),
         }
         disposition, reason, retryable, cleanup = outcomes.get(code, ("failed", "runtime_provider_failed", False, "failed"))
         super().__init__(disposition=disposition, reason_class=reason, retryable=retryable, cleanup_status=cleanup)
         self.code = code
+        if code == "runtime_cancelled":
+            self.args = (code,)
 
 
 class ResourceLease(Protocol):
@@ -196,7 +199,13 @@ class OmniParserShadowAdapter:
             raise OmniParserShadowAdapterError("runtime_cancelled")
         if self._gpu_free_gib() < self._configuration.minimum_free_gpu_gib:
             raise OmniParserShadowAdapterError("runtime_resource_rejected")
-        resource_lease = self._lease_manager(budget.resource_group)
+        lease_allowed, resource_lease = _cancellable_transition(
+            cancellation_event,
+            "before_lease",
+            lambda: self._lease_manager(budget.resource_group),
+        )
+        if not lease_allowed:
+            raise OmniParserShadowAdapterError("runtime_cancelled")
         if resource_lease is None:
             raise OmniParserShadowAdapterError("runtime_resource_rejected")
         try:
@@ -243,12 +252,19 @@ class OmniParserShadowAdapter:
                 }
                 if os.name != "nt":
                     spawn_options["start_new_session"] = True
-                process = subprocess.Popen(
-                    [str(self._configuration.interpreter), str(self._configuration.worker_script),
-                     "--input-json", str(input_path), "--output-json", str(output_path)]
-                    + (["--benchmark"] if self._benchmark_mode else []),
-                    **spawn_options,
+                spawn_allowed, spawned_process = _cancellable_transition(
+                    cancellation_event,
+                    "before_popen",
+                    lambda: subprocess.Popen(
+                        [str(self._configuration.interpreter), str(self._configuration.worker_script),
+                         "--input-json", str(input_path), "--output-json", str(output_path)]
+                        + (["--benchmark"] if self._benchmark_mode else []),
+                        **spawn_options,
+                    ),
                 )
+                if not spawn_allowed:
+                    raise OmniParserShadowAdapterError("runtime_cancelled")
+                process = spawned_process
                 deadline = time.monotonic() + budget.timeout_ms / 1000
                 while process.poll() is None:
                     if cancellation_event is not None and cancellation_event.is_set():
@@ -338,6 +354,20 @@ def _offline_environment(cache_path: Path) -> dict[str, str]:
         if value:
             environment[name] = value
     return environment
+
+
+def _cancellable_transition(
+    cancellation_event: Event | None,
+    stage: str,
+    action: Callable[[], object],
+) -> tuple[bool, object | None]:
+    transition = getattr(cancellation_event, "run_if_not_cancelled", None)
+    if callable(transition):
+        allowed, result = transition(stage, action)
+        return bool(allowed), result
+    if cancellation_event is not None and cancellation_event.is_set():
+        return False, None
+    return True, action()
 
 
 def _windows_descendant_pids(root_pid: int) -> set[int]:

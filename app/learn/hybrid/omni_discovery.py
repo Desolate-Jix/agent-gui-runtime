@@ -17,8 +17,11 @@ from app.learn.recognition.uei.omniparser_shadow_adapter import (
     OmniParserShadowAdapter,
     PROFILE_ID,
     PROVIDER_ID,
+    PROVIDER_VERSION,
 )
 from app.learn.recognition.uei.provider_adapters import (
+    AdapterFailure,
+    NormalizedScreenParseOutput,
     ProviderRunBudget,
     RestrictedCaptureLease,
     TrustedProviderAdapterRegistry,
@@ -58,7 +61,11 @@ def run_hybrid_omni_discovery(
     bundle_ref = deepcopy(request["hybrid_capture_bundle_ref"])
     identity = bundle["capture_identity"]
     store = UEIObjectStore(root=root / _STORE_RELATIVE_PATH)
-    adapter = OmniParserShadowAdapter()
+    try:
+        provider_adapter = OmniParserShadowAdapter()
+    except AdapterFailure as failure:
+        provider_adapter = _BootstrapFailureAdapter(failure)
+    adapter = _FailureCapturingAdapter(provider_adapter)
     runtime = ShadowProviderRuntime(
         store=store,
         registry=TrustedProviderAdapterRegistry([adapter]),
@@ -95,12 +102,33 @@ def run_hybrid_omni_discovery(
     duration_ms = metrics.get("duration_ms") if isinstance(metrics, dict) else 0
     result_ref_value = reply.get("result_ref")
     if result_ref_value is None or receipt.get("status") != "succeeded":
+        result_ref = (
+            _ref(result_ref_value, name="provider result ref")
+            if result_ref_value is not None
+            else None
+        )
+        if result_ref is not None:
+            store.get(result_ref, contract_version="provider_safe_result_v1")
+        error_ref_value = reply.get("error_ref")
+        error_ref = (
+            _ref(error_ref_value, name="provider error ref")
+            if error_ref_value is not None
+            else None
+        )
+        if error_ref is not None:
+            store.get(error_ref, contract_version="provider_error_v1")
         return {
             "contract_version": "hybrid_omni_discovery_result_v1",
             "outcome": "failed",
             "hybrid_capture_bundle_ref": bundle_ref,
-            "provider_result_ref": deepcopy(result_ref_value),
+            "provider_result_ref": result_ref,
+            "provider_error_ref": error_ref,
             "provider_receipt_ref": receipt_ref,
+            "provider_invocation_id": reply["invocation_id"],
+            "provider_claim_status": "complete",
+            "provider_status": receipt["status"],
+            "provider_reason_class": receipt["reason_class"],
+            "failure_reason": adapter.failure_code,
             "inventory": None,
             "omni_candidate_ledger": None,
             "duration_ms": duration_ms,
@@ -118,7 +146,12 @@ def run_hybrid_omni_discovery(
         "outcome": "completed",
         "hybrid_capture_bundle_ref": bundle_ref,
         "provider_result_ref": result_ref,
+        "provider_error_ref": None,
         "provider_receipt_ref": receipt_ref,
+        "provider_invocation_id": reply["invocation_id"],
+        "provider_claim_status": "complete",
+        "provider_status": receipt["status"],
+        "provider_reason_class": receipt["reason_class"],
         "inventory": inventory,
         "omni_candidate_ledger": ledger,
         "duration_ms": duration_ms,
@@ -170,3 +203,42 @@ def _ref(value: object, *, name: str) -> dict[str, str]:
     ):
         raise ValueError(f"{name} is invalid")
     return {"id": identifier, "content_sha256": digest}
+
+
+class _BootstrapFailureAdapter:
+    provider_id = PROVIDER_ID
+    profile_id = PROFILE_ID
+    provider_version = PROVIDER_VERSION
+
+    def __init__(self, failure: AdapterFailure) -> None:
+        self._failure = failure
+
+    def invoke(
+        self,
+        *,
+        capture: RestrictedCaptureLease,
+        budget: ProviderRunBudget,
+        invocation_id: str,
+        cancellation_event: Event | None = None,
+    ) -> NormalizedScreenParseOutput:
+        del capture, budget, invocation_id, cancellation_event
+        raise self._failure
+
+
+class _FailureCapturingAdapter:
+    """保留适配器安全故障码，避免扩展公开 UEI 枚举。"""
+
+    def __init__(self, adapter: object) -> None:
+        self._adapter = adapter
+        self.provider_id = getattr(adapter, "provider_id")
+        self.profile_id = getattr(adapter, "profile_id")
+        self.provider_version = getattr(adapter, "provider_version")
+        self.failure_code: str | None = None
+
+    def invoke(self, **kwargs: Any) -> NormalizedScreenParseOutput:
+        try:
+            return self._adapter.invoke(**kwargs)
+        except AdapterFailure as failure:
+            code = getattr(failure, "code", None)
+            self.failure_code = code if isinstance(code, str) else failure.reason_class
+            raise

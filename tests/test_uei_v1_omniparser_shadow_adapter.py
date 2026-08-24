@@ -83,6 +83,33 @@ def _fake_popen(process: FakeProcess, calls: list[dict[str, object]]):
     return spawn
 
 
+
+class _BarrierCancellation:
+    def __init__(self, stage: str) -> None:
+        from threading import Lock
+
+        self._cancelled = Event()
+        self._lock = Lock()
+        self._stage = stage
+        self.entered = Event()
+        self.release = Event()
+
+    def is_set(self) -> bool:
+        return self._cancelled.is_set()
+
+    def set(self) -> None:
+        with self._lock:
+            self._cancelled.set()
+
+    def run_if_not_cancelled(self, stage: str, action):
+        if stage == self._stage:
+            self.entered.set()
+            assert self.release.wait(timeout=3)
+        with self._lock:
+            if self._cancelled.is_set():
+                return False, None
+            return True, action()
+
 def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_path: Path, monkeypatch):
     from app.learn.recognition.uei.omniparser_shadow_adapter import OmniParserShadowAdapter
 
@@ -423,3 +450,94 @@ def _windows_pid_is_active(pid: int) -> bool:
         return exit_code.value == 259
     finally:
         ctypes.windll.kernel32.CloseHandle(process)
+
+
+def test_cancellation_winning_before_lease_prevents_lease_and_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        OmniParserShadowAdapter,
+        OmniParserShadowAdapterError,
+    )
+
+    cancellation = _BarrierCancellation("before_lease")
+    lease_calls: list[str] = []
+    spawn_calls: list[object] = []
+    monkeypatch.setattr(
+        "app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen",
+        lambda *args, **kwargs: spawn_calls.append((args, kwargs)),
+    )
+    errors: list[BaseException] = []
+    adapter = OmniParserShadowAdapter(
+        configuration=_config(tmp_path),
+        resource_lease_manager=lambda group: lease_calls.append(group),
+        gpu_free_gib=lambda: 16.0,
+    )
+    thread = Thread(
+        target=lambda: _capture_adapter_error(
+            errors,
+            adapter,
+            capture=_capture(tmp_path),
+            budget=_budget(),
+            invocation_id="invocation/cancel-before-lease",
+            cancellation_event=cancellation,
+        )
+    )
+    thread.start()
+    assert cancellation.entered.wait(timeout=3)
+    cancellation.set()
+    cancellation.release.set()
+    thread.join(timeout=3)
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], OmniParserShadowAdapterError)
+    assert errors[0].cleanup_status == "clean"
+    assert lease_calls == []
+    assert spawn_calls == []
+
+
+def test_cancellation_winning_before_popen_releases_lease_without_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        OmniParserShadowAdapter,
+        OmniParserShadowAdapterError,
+        ProcessResourceLeaseManager,
+    )
+
+    cancellation = _BarrierCancellation("before_popen")
+    lease_root = tmp_path / "barrier-leases"
+    spawn_calls: list[object] = []
+    monkeypatch.setattr(
+        "app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen",
+        lambda *args, **kwargs: spawn_calls.append((args, kwargs)),
+    )
+    errors: list[BaseException] = []
+    adapter = OmniParserShadowAdapter(
+        configuration=_config(tmp_path),
+        resource_lease_manager=ProcessResourceLeaseManager(root=lease_root),
+        gpu_free_gib=lambda: 16.0,
+    )
+    thread = Thread(
+        target=lambda: _capture_adapter_error(
+            errors,
+            adapter,
+            capture=_capture(tmp_path),
+            budget=_budget(),
+            invocation_id="invocation/cancel-before-popen",
+            cancellation_event=cancellation,
+        )
+    )
+    thread.start()
+    assert cancellation.entered.wait(timeout=3)
+    cancellation.set()
+    cancellation.release.set()
+    thread.join(timeout=3)
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], OmniParserShadowAdapterError)
+    assert errors[0].cleanup_status == "clean"
+    assert spawn_calls == []
+    assert list(lease_root.glob("*.lock")) == []

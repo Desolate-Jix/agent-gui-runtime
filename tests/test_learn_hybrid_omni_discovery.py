@@ -246,3 +246,42 @@ def test_discovery_recovers_completed_provider_claim_without_rerun(
 
     assert second == first
     assert adapter.calls == 1
+
+
+def test_adapter_bootstrap_failure_is_persisted_as_provider_safe_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import omni_discovery
+    from app.learn import workflow_worker
+    from app.learn.workflow_tasks import hybrid_omni
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        OmniParserShadowAdapterError,
+    )
+
+    facts = _facts(tmp_path)
+
+    def unavailable_adapter():
+        raise OmniParserShadowAdapterError("runtime_configuration_unavailable")
+
+    monkeypatch.setattr(omni_discovery, "OmniParserShadowAdapter", unavailable_adapter)
+    monkeypatch.setattr(hybrid_omni, "_PROJECT_ROOT", tmp_path)
+    payload = deepcopy(facts["payload"])
+    payload.pop("project_root")
+    result = workflow_worker.execute_learning_stage_worker_task(
+        "panel_learning_hybrid_omni_discovery",
+        payload,
+    )
+
+    assert result["outcome"] == "failed"
+    assert result["provider_result_ref"] is not None
+    assert result["provider_error_ref"] is not None
+    assert result["provider_reason_class"] == "runtime_provider_failed"
+    assert result["failure_reason"] == "runtime_configuration_unavailable"
+    assert result["cleanup_status"] == "not_required"
+    assert result["provider_claim_status"] == "complete"
+    stored = facts["store"].get(
+        result["provider_result_ref"],
+        contract_version="provider_safe_result_v1",
+    )
+    assert stored["status"] == "failed"

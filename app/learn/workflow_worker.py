@@ -55,11 +55,38 @@ _MODEL_STAGE_BY_TASK_KIND = {
     "panel_learning_calibration_sequence": "locate",
 }
 _MODEL_READY_WAIT_SECONDS = 180.0
+_HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class LearningStageWorkerError(ValueError):
     """学习阶段 worker 请求无效或不属于当前 operation。"""
+
+
+class _ManagedCancellationEvent:
+    """用同一进程锁原子化 cancel 与受保护的 lease/spawn transition。"""
+
+    def __init__(self, *, event: Any, lock: Any) -> None:
+        self._event = event
+        self._lock = lock
+
+    def is_set(self) -> bool:
+        return bool(self._event.is_set())
+
+    def set(self) -> None:
+        with self._lock:
+            self._event.set()
+
+    def run_if_not_cancelled(
+        self,
+        stage: str,
+        action: Callable[[], Any],
+    ) -> tuple[bool, Any | None]:
+        del stage
+        with self._lock:
+            if self._event.is_set():
+                return False, None
+            return True, action()
 
 
 def execute_learning_stage_worker_task(
@@ -194,6 +221,7 @@ def _run_learning_stage_worker_entry(
     model_request_id: str,
     identity: dict[str, Any],
     cancellation_event: Any,
+    completion_event: Any,
 ) -> None:
     result_file = Path(result_path)
     previous_request_id = os.environ.get("AGENT_GUI_MODEL_REQUEST_ID")
@@ -228,6 +256,8 @@ def _run_learning_stage_worker_entry(
         else:
             os.environ["AGENT_GUI_MODEL_REQUEST_ID"] = previous_request_id
     _write_worker_result(result_file, envelope)
+    if completion_event is not None:
+        completion_event.set()
 
 
 def _write_worker_result(path: Path, payload: dict[str, Any]) -> None:
@@ -388,6 +418,14 @@ class LearningStageWorkerRegistry:
                 "payload_sha256": payload_sha256,
             }
             cancellation_event = (
+                _ManagedCancellationEvent(
+                    event=self._process_context.Event(),
+                    lock=self._process_context.Lock(),
+                )
+                if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                else None
+            )
+            completion_event = (
                 self._process_context.Event()
                 if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
                 else None
@@ -401,6 +439,7 @@ class LearningStageWorkerRegistry:
                     model_request_id,
                     deepcopy(identity),
                     cancellation_event,
+                    completion_event,
                 ),
                 name=f"learning-stage-{normalized_stage}-{worker_id[:8]}",
             )
@@ -415,6 +454,7 @@ class LearningStageWorkerRegistry:
                 "process": process,
                 "payload": deepcopy(payload),
                 "cancellation_event": cancellation_event,
+                "completion_event": completion_event,
                 "recovered_from_journal": False,
             }
             self._persist_record_journal(record)
@@ -666,7 +706,40 @@ class LearningStageWorkerRegistry:
                     "model_service_compute_termination": "not_covered",
                     "reason": "Hybrid Omni uses its internal cooperative cancellation event",
                 }
-                process.join(timeout=3.0)
+                completion_event = record.get("completion_event")
+                handshake_complete = bool(
+                    completion_event is not None
+                    and completion_event.wait(
+                        timeout=_HYBRID_OMNI_CLEANUP_WAIT_SECONDS
+                    )
+                )
+                if not handshake_complete:
+                    raise LearningStageWorkerError(
+                        "Hybrid Omni cooperative cleanup handshake timed out; "
+                        "worker remains attached"
+                    )
+                process.join(timeout=2.0)
+                self._refresh_record(record)
+                if record.get("status") != "completed":
+                    raise LearningStageWorkerError(
+                        "Hybrid Omni cooperative cleanup result is invalid"
+                    )
+                cooperative_cleanup = _hybrid_omni_cleanup_evidence(record)
+                if cooperative_cleanup is None:
+                    raise LearningStageWorkerError(
+                        "Hybrid Omni completed while cancellation was pending"
+                    )
+                if process.is_alive():
+                    raise LearningStageWorkerError(
+                        "Hybrid Omni cleanup completed but worker exit is still pending"
+                    )
+                return {
+                    **self._public_record(record),
+                    "backend_compute_termination": "terminated",
+                    "model_service_compute_termination": "not_covered",
+                    "model_request_cancellation": deepcopy(model_cancellation),
+                    "cooperative_cleanup": cooperative_cleanup,
+                }
             else:
                 try:
                     model_cancellation = self._model_request_cancel(
@@ -868,6 +941,7 @@ class LearningStageWorkerRegistry:
                 "worker_result",
                 "result_adoption",
                 "cancellation_event",
+                "completion_event",
             }
         }
         process = record.get("process")
@@ -1047,6 +1121,7 @@ def _load_worker_journal(
         "process": None,
         "payload": None,
         "cancellation_event": None,
+        "completion_event": None,
         "result_adoption": result_adoption,
         "recovered_from_journal": True,
     }
@@ -1134,6 +1209,55 @@ def _load_worker_result(
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _hybrid_omni_cleanup_evidence(
+    record: dict[str, Any],
+) -> dict[str, Any] | None:
+    result = record.get("worker_result")
+    response = result.get("response") if isinstance(result, dict) else None
+    if not isinstance(response, dict) or response.get("outcome") != "failed":
+        return None
+    receipt_ref = response.get("provider_receipt_ref")
+    error_ref = response.get("provider_error_ref")
+    if (
+        response.get("contract_version") != "hybrid_omni_discovery_result_v1"
+        or response.get("failure_reason") != "runtime_cancelled"
+        or response.get("provider_reason_class") != "runtime_provider_failed"
+        or response.get("provider_status") != "failed"
+        or response.get("provider_claim_status") != "complete"
+        or response.get("cleanup_status") != "clean"
+        or not _is_immutable_ref(receipt_ref)
+        or not _is_immutable_ref(error_ref)
+        or not isinstance(response.get("provider_invocation_id"), str)
+        or not response["provider_invocation_id"].startswith("invocation/")
+    ):
+        raise LearningStageWorkerError(
+            "Hybrid Omni cooperative cleanup evidence is invalid"
+        )
+    return {
+        "contract_version": "hybrid_omni_cooperative_cleanup_v1",
+        "provider_invocation_id": response["provider_invocation_id"],
+        "provider_claim_status": "complete",
+        "provider_result_ref": deepcopy(response.get("provider_result_ref")),
+        "provider_error_ref": deepcopy(error_ref),
+        "provider_receipt_ref": deepcopy(receipt_ref),
+        "provider_reason_class": "runtime_provider_failed",
+        "failure_reason": "runtime_cancelled",
+        "cleanup_status": "clean",
+    }
+
+
+def _is_immutable_ref(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"id", "content_sha256"}
+        and isinstance(value.get("id"), str)
+        and bool(value["id"])
+        and isinstance(value.get("content_sha256"), str)
+        and len(value["content_sha256"]) == 64
+        and all(character in "0123456789abcdef" for character in value["content_sha256"])
+    )
 
 
 learning_stage_worker_registry = LearningStageWorkerRegistry(

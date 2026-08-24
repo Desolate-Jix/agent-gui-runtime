@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
+import subprocess
+import sys
+from threading import Thread
 import time
 from pathlib import Path
 
@@ -13,6 +17,63 @@ from app.learn.workflow_worker import (
     execute_learning_stage_worker_task,
 )
 
+
+
+def _spawned_managed_omni_test_entry(target, args, control: dict[str, str]) -> None:
+    from app.learn.hybrid import omni_discovery
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        OmniParserShadowAdapter,
+        ProcessResourceLeaseManager,
+        TrustedOmniParserConfiguration,
+    )
+    from app.learn.workflow_tasks import hybrid_omni
+
+    configuration = TrustedOmniParserConfiguration(
+        interpreter=Path(control["interpreter"]),
+        worker_script=Path(control["worker_script"]),
+        code_path=Path(control["code_path"]),
+        weights_path=Path(control["weights_path"]),
+        cache_path=Path(control["cache_path"]),
+        minimum_free_gpu_gib=0,
+    )
+    original_terminate_tree = OmniParserShadowAdapter._terminate_tree
+
+    def blocked_terminate_tree(process) -> None:
+        original_terminate_tree(process)
+        Path(control["cleanup_entered"]).write_text("entered", encoding="utf-8")
+        deadline = time.monotonic() + 15
+        release = Path(control["cleanup_release"])
+        while not release.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if not release.exists():
+            raise RuntimeError("controlled cleanup release timed out")
+
+    OmniParserShadowAdapter._terminate_tree = staticmethod(blocked_terminate_tree)
+    omni_discovery.OmniParserShadowAdapter = lambda: OmniParserShadowAdapter(
+        configuration=configuration,
+        resource_lease_manager=ProcessResourceLeaseManager(
+            root=Path(control["lease_root"])
+        ),
+        gpu_free_gib=lambda: 99.0,
+    )
+    hybrid_omni._PROJECT_ROOT = Path(control["project_root"])
+    target(*args)
+
+
+def _pid_is_active(pid: int) -> bool:
+    if os.name == "nt":
+        from app.learn.recognition.uei.omniparser_shadow_adapter import (
+            _windows_pid_is_active,
+        )
+
+        return _windows_pid_is_active(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 class _FakeProcess:
     def __init__(self, *, target: object, args: tuple[object, ...], name: str) -> None:
@@ -47,8 +108,32 @@ class _FakeProcess:
         del timeout
 
 
+class _CooperativeFakeProcess(_FakeProcess):
+    def start(self) -> None:
+        super().start()
+
+        def run_after_cancellation() -> None:
+            while not self.args[5].is_set():
+                time.sleep(0.001)
+            self.target(*self.args)
+            self.alive = False
+            self.exitcode = 0
+
+        self._thread = Thread(target=run_after_cancellation, daemon=True)
+        self._thread.start()
+
+    def join(self, timeout: float | None = None) -> None:
+        self._thread.join(timeout=timeout)
+
+
 def _fake_process_factory(*, target: object, args: tuple[object, ...], name: str) -> _FakeProcess:
     return _FakeProcess(target=target, args=args, name=name)
+
+
+def _cooperative_fake_process_factory(
+    *, target: object, args: tuple[object, ...], name: str
+) -> _CooperativeFakeProcess:
+    return _CooperativeFakeProcess(target=target, args=args, name=name)
 
 
 def _sleeping_process_entry() -> None:
@@ -1019,13 +1104,36 @@ def test_worker_dispatches_managed_hybrid_omni_with_internal_cancellation_event(
     }
 
 
-def test_hybrid_omni_registry_cancel_signals_worker_before_forced_termination(
+def test_hybrid_omni_registry_cancel_requires_valid_cooperative_cleanup_handshake(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.learn import workflow_worker
+
     cancellation_calls: list[dict[str, object]] = []
+    ref = {"id": "fixture/ref", "content_sha256": "12" * 32}
+
+    def fake_run(payload, *, cancellation_event=None):
+        del payload
+        assert cancellation_event.is_set()
+        return {
+            "contract_version": "hybrid_omni_discovery_result_v1",
+            "outcome": "failed",
+            "provider_invocation_id": "invocation/" + "34" * 32,
+            "provider_claim_status": "complete",
+            "provider_status": "failed",
+            "provider_reason_class": "runtime_provider_failed",
+            "failure_reason": "runtime_cancelled",
+            "provider_result_ref": ref,
+            "provider_error_ref": ref,
+            "provider_receipt_ref": ref,
+            "cleanup_status": "clean",
+        }
+
+    monkeypatch.setattr(workflow_worker, "run_hybrid_omni_task", fake_run)
     registry = LearningStageWorkerRegistry(
         result_root=tmp_path,
-        process_factory=_fake_process_factory,
+        process_factory=_cooperative_fake_process_factory,
         model_request_cancel=lambda **kwargs: cancellation_calls.append(kwargs),
     )
     started = registry.start(
@@ -1045,8 +1153,161 @@ def test_hybrid_omni_registry_cancel_signals_worker_before_forced_termination(
     )
 
     assert cancellation_event.is_set()
-    assert cancelled["status"] == "cancelled"
+    assert cancelled["status"] == "completed"
     assert cancelled["backend_compute_termination"] == "terminated"
     assert cancelled["model_service_compute_termination"] == "not_covered"
+    assert cancelled["cooperative_cleanup"]["provider_claim_status"] == "complete"
+    assert cancelled["cooperative_cleanup"]["cleanup_status"] == "clean"
     assert cancellation_calls == []
-    assert process.terminated is True
+    assert process.terminated is False
+
+def test_real_managed_omni_cancel_waits_for_nested_cleanup_and_completed_claim(
+    tmp_path: Path,
+) -> None:
+    from tests.test_learn_hybrid_omni_discovery import _facts
+
+    facts = _facts(tmp_path)
+    payload = dict(facts["payload"])
+    payload.pop("project_root")
+    worker_script = tmp_path / "controlled_omni_worker.py"
+    worker_script.write_text(
+        """from __future__ import annotations
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--input-json", required=True)
+parser.add_argument("--output-json", required=True)
+args = parser.parse_args()
+request = json.loads(Path(args.input_json).read_text(encoding="utf-8"))
+capture_path = Path(request["input_path"])
+exchange = Path(args.input_json).parent
+(capture_path.parent / "managed-exchange.txt").write_text(str(exchange), encoding="utf-8")
+(capture_path.parent / "managed-worker.pid").write_text(str(__import__("os").getpid()), encoding="utf-8")
+grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+(capture_path.parent / "managed-grandchild.pid").write_text(str(grandchild.pid), encoding="utf-8")
+while True:
+    time.sleep(1)
+""",
+        encoding="utf-8",
+    )
+    code_path = tmp_path / "controlled-code"
+    weights_path = tmp_path / "controlled-weights"
+    cache_path = tmp_path / "controlled-cache"
+    for path in (code_path, weights_path, cache_path):
+        path.mkdir()
+    cleanup_entered = tmp_path / "cleanup-entered"
+    cleanup_release = tmp_path / "cleanup-release"
+    lease_root = tmp_path / "managed-leases"
+    control = {
+        "interpreter": sys.executable,
+        "worker_script": str(worker_script),
+        "code_path": str(code_path),
+        "weights_path": str(weights_path),
+        "cache_path": str(cache_path),
+        "cleanup_entered": str(cleanup_entered),
+        "cleanup_release": str(cleanup_release),
+        "lease_root": str(lease_root),
+        "project_root": str(tmp_path),
+    }
+    context = multiprocessing.get_context("spawn")
+
+    def process_factory(*, target, args, name):
+        return context.Process(
+            target=_spawned_managed_omni_test_entry,
+            args=(target, args, control),
+            name=name,
+        )
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path / "worker-results",
+        process_factory=process_factory,
+    )
+    started = registry.start(
+        run_id="run-omni",
+        stage="screen_understanding",
+        operation_id="operation-omni",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        payload=payload,
+    )
+    capture_dir = Path(facts["image"]).parent
+    worker_pid_path = capture_dir / "managed-worker.pid"
+    grandchild_pid_path = capture_dir / "managed-grandchild.pid"
+    deadline = time.monotonic() + 15
+    while (
+        (not worker_pid_path.exists() or not grandchild_pid_path.exists())
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.02)
+    assert worker_pid_path.is_file() and grandchild_pid_path.is_file()
+    worker_pid = int(worker_pid_path.read_text(encoding="utf-8"))
+    grandchild_pid = int(grandchild_pid_path.read_text(encoding="utf-8"))
+
+    cancellation: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def cancel() -> None:
+        try:
+            cancellation.update(
+                registry.cancel_by_operation(
+                    run_id="run-omni",
+                    stage="screen_understanding",
+                    operation_id="operation-omni",
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    cancel_thread = Thread(target=cancel)
+    cancel_thread.start()
+    deadline = time.monotonic() + 15
+    while not cleanup_entered.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert cleanup_entered.is_file()
+    exchange_path = Path(
+        (capture_dir / "managed-exchange.txt").read_text(encoding="utf-8")
+    )
+    try:
+        time.sleep(3.3)
+        assert cancel_thread.is_alive()
+        assert registry._records[started["worker_id"]]["process"].is_alive()
+        assert list(lease_root.glob("*.lock"))
+        assert exchange_path.is_dir()
+        claims = list(
+            (tmp_path / "artifacts" / "uei-shadow-store" / ".shadow-runtime-claims").glob("*.json")
+        )
+        assert claims
+        assert json.loads(claims[0].read_text(encoding="utf-8"))["state"] == "in_progress"
+    finally:
+        cleanup_release.write_text("release", encoding="utf-8")
+        cancel_thread.join(timeout=20)
+
+    assert not errors
+    assert not cancel_thread.is_alive()
+    assert cancellation["backend_compute_termination"] == "terminated"
+    assert cancellation["cooperative_cleanup"]["cleanup_status"] == "clean"
+    assert cancellation["cooperative_cleanup"]["provider_receipt_ref"]["id"].startswith("receipt/")
+    assert cancellation["cooperative_cleanup"]["provider_error_ref"]["id"].startswith("error/")
+    assert cancellation["cooperative_cleanup"]["provider_claim_status"] == "complete"
+    assert not exchange_path.exists()
+    assert list(lease_root.glob("*.lock")) == []
+    deadline = time.monotonic() + 10
+    while (
+        (_pid_is_active(worker_pid) or _pid_is_active(grandchild_pid))
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.05)
+    assert not _pid_is_active(worker_pid)
+    assert not _pid_is_active(grandchild_pid)
+    claims = list(
+        (tmp_path / "artifacts" / "uei-shadow-store" / ".shadow-runtime-claims").glob("*.json")
+    )
+    assert claims
+    assert all(
+        json.loads(path.read_text(encoding="utf-8"))["state"] == "complete"
+        for path in claims
+    )
