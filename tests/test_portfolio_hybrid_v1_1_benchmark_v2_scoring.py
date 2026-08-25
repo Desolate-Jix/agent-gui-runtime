@@ -1,216 +1,129 @@
 from __future__ import annotations
-
+import ast, base64, hashlib, json, os, subprocess, sys
 from copy import deepcopy
-import ast
-import hashlib
-import json
 from pathlib import Path
-import subprocess
-import sys
-
 import pytest
+from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, canonical_bytes, seal_automatic_prediction, seal_target_binding, seal_vista_request, sealed_artifact_envelope
+from app.learn.hybrid.benchmark_scorer_v2 import config_ref, run_private_scorer
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "score_portfolio_hybrid_v1_1_benchmark_v2_private.py"
-GATE = ROOT / "configs" / "benchmarks" / "portfolio_hybrid_v1_1_gate.v2.json"
-SAFETY = {"artifact_is_authorization": False, "execute_binding_enabled": False, "display_only": True}
+ROOT=Path(__file__).resolve().parents[1]; SCRIPT=ROOT/"scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py"; GATE=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json"; ESTIMAND=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"; RELEASE="portfolio_hybrid_v1_1_benchmark_v2_release_1"
+def ref(name:str)->dict[str,str]: return {"id":name,"content_sha256":hashlib.sha256(name.encode()).hexdigest()}
+def write(path:Path,value:object)->None: path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(canonical_bytes(value)+b"\n")
+def artifact(contract:str,aid:str,**fields:object)->dict[str,object]: return {"contract_version":contract,"artifact_id":aid,**fields,"safety":deepcopy(SAFETY)}
 
+def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout:bool=False)->tuple[dict[str,object],dict[str,object],dict[str,object]]:
+    parent=ref("parent/seal"); cases=[{"case_id":"opaque/1","target_id":"target/right/1","important":True,"acceptable_regions":[[2,2,4,4]]},{"case_id":"opaque/2","target_id":"target/right/2","important":True,"acceptable_regions":[[0,0,2,2]]}]
+    envelopes=[]; rows=[]
+    automatic_ref_placeholder=ref("automatic/pending")
+    for case in cases:
+        cid,target=case["case_id"],case["target_id"]
+        right=seal_target_binding(artifact_id=f"binding-right/{cid}",case_id=cid,target_id=target,candidate_id=f"candidate-right/{cid}",fusion_ref=ref(f"fusion/{cid}"),capture_ref=ref(f"capture/{cid}"),bbox_ref=ref(f"bbox/{cid}"),bbox=[0,0,2,2],source_parent_ref=parent)
+        wrong=seal_target_binding(artifact_id=f"binding-wrong/{cid}",case_id=cid,target_id="target/wrong",candidate_id=f"candidate-wrong/{cid}",fusion_ref=ref(f"fusion-w/{cid}"),capture_ref=ref(f"capture-w/{cid}"),bbox_ref=ref(f"bbox-w/{cid}"),bbox=[0,0,2,2],source_parent_ref=parent)
+        envelopes += [sealed_artifact_envelope(right),sealed_artifact_envelope(wrong)]
+        request=seal_vista_request(artifact_id=f"request/{cid}",case_id=cid,target_id=target,target_binding_ref=artifact_ref(right),candidate_id=right["candidate_id"],fusion_ref=right["fusion_ref"],capture_ref=right["capture_ref"],bbox_ref=right["bbox_ref"],source_parent_ref=parent)
+        envelopes.append(sealed_artifact_envelope(request))
+        for arm in ("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista"):
+            if arm=="qwen_only" and (all_missing_qwen or (missing_qwen and cid=="opaque/1")):
+                rows.append({"case_id":cid,"arm_id":arm,"selection_status":"missing","failure_reason":"no_selection"}); continue
+            binding=wrong if arm=="qwen_only" and cid=="opaque/1" else right
+            row={"case_id":cid,"arm_id":arm,"selection_status":"selected","target_binding_ref":artifact_ref(binding)}
+            if arm in {"omni_to_qwen","omni_to_qwen_vista"}: row["vista_request_ref"]=artifact_ref(request)
+            if arm=="omni_to_qwen_vista": row["vista_result"]={"status":"validated","request_ref":artifact_ref(request),"target_binding_ref":artifact_ref(right),"canonical_capture_pixel_point":[3,3] if cid=="opaque/1" else [1,1]}
+            rows.append(row)
+    pre={"contract_version":"automatic_prediction_v2","artifact_id":"automatic/1","prediction_id":"prediction/1","source_parent_ref":parent,"partition":"holdout","release_id":RELEASE,"rows":rows,"safety":deepcopy(SAFETY)}
+    sealed=seal_automatic_prediction(request_ref=ref("run/request"),pre_review=pre,execution_refs=[ref("execution/1")],lifecycle_ref=ref("lifecycle/bootstrap")); pre_env=sealed["pre_review_artifact"]; auto_ref=pre_env["ref"]; envelopes.append(pre_env)
+    def life(aid:str,attempt:str,partition:str,complete:bool)->dict[str,object]: return artifact("lifecycle_receipt_v2",aid,attempt_id=attempt,release_id=RELEASE,partition=partition,source_parent_ref=parent,automatic_prediction_ref=auto_ref,complete=complete,lifecycle_verified=complete,cleanup_stable_zero=complete)
+    hold1=life("lifecycle/hold-1","hold-1","holdout",True); hold2=life("lifecycle/hold-2","hold-2","holdout",True)
+    hold_entries=[{"sequence":0,"attempt_id":"hold-1","lifecycle_ref":artifact_ref(hold1),"disposition":"complete"}]
+    if later_holdout: hold_entries.append({"sequence":1,"attempt_id":"hold-2","lifecycle_ref":artifact_ref(hold2),"disposition":"complete"})
+    hold_ledger=artifact("regression_attempt_ledger_v2","ledger/holdout",release_id=RELEASE,partition="holdout",source_parent_ref=parent,automatic_prediction_ref=auto_ref,entries=hold_entries)
+    reg0=life("lifecycle/reg-0","reg-0","regression",False); reg1=life("lifecycle/reg-1","reg-1","regression",True)
+    reg_ledger=artifact("regression_attempt_ledger_v2","ledger/regression",release_id=RELEASE,partition="regression",source_parent_ref=parent,automatic_prediction_ref=auto_ref,entries=[{"sequence":0,"attempt_id":"reg-0","lifecycle_ref":artifact_ref(reg0),"disposition":"infrastructure_failure"},{"sequence":1,"attempt_id":"reg-1","lifecycle_ref":artifact_ref(reg1),"disposition":"complete"}])
+    reg_receipt=artifact("regression_precondition_receipt_v2","regression/precondition",release_id=RELEASE,partition="regression",source_parent_ref=parent,regression_attempt_ledger_ref=artifact_ref(reg_ledger),selected_attempt_id="reg-1",selected_lifecycle_ref=artifact_ref(reg1),status="PASS")
+    life_env=[sealed_artifact_envelope(x) for x in (hold1,hold2,hold_ledger,reg0,reg1,reg_ledger,reg_receipt)]
+    run={"contract_version":"benchmark_v2_prediction_run_v2","release_id":RELEASE,"partition":"holdout","source_parent_ref":parent,"automatic_prediction_ref":auto_ref,"attempt_ledger_ref":artifact_ref(hold_ledger),"regression_precondition_ref":artifact_ref(reg_receipt),"lifecycle_ref":artifact_ref(hold1),"sealed_artifacts":envelopes,"safety":deepcopy(SAFETY)}
+    bundle={"contract_version":"benchmark_v2_lifecycle_bundle_v2","sealed_artifacts":life_env,"safety":deepcopy(SAFETY)}
+    private={"contract_version":"portfolio_hybrid_v1_1_private_manifest_v2_synthetic","source_parent_ref":parent,"partition":"holdout","release_id":RELEASE,"cases":cases,"expected_automatic_prediction_ref":auto_ref,"expected_attempt_ledger_ref":artifact_ref(hold_ledger),"expected_regression_precondition_ref":artifact_ref(reg_receipt),"estimand_ref":config_ref(ESTIMAND),"gate_ref":config_ref(GATE)}
+    return private,run,bundle
 
-def canonical(value: object) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+def files(tmp:Path,private:dict,run:dict,bundle:dict)->dict[str,Path]:
+    paths={k:tmp/f"{k}.json" for k in ("private","run","lifecycle","output","public")}
+    for k,v in (("private",private),("run",run),("lifecycle",bundle)): write(paths[k],v)
+    return paths
 
+def execute(tmp:Path,private:dict,run:dict,bundle:dict)->tuple[dict[str,str],dict[str,object],dict[str,object]]:
+    p=files(tmp,private,run,bundle); result=run_private_scorer(private_manifest_path=p["private"],prediction_run_path=p["run"],lifecycle_path=p["lifecycle"],private_output_path=p["output"],public_ref_path=p["public"]); return result,json.loads(p["output"].read_text()),json.loads(p["public"].read_text())
 
-def ref(name: str, value: object | None = None) -> dict[str, str]:
-    return {"id": name, "content_sha256": hashlib.sha256(canonical(value if value is not None else name)).hexdigest()}
+def decode(env:dict[str,object])->dict[str,object]: return json.loads(base64.b64decode(env["canonical_bytes_b64"]))
+def reseal(env:dict[str,object],value:dict[str,object])->None: env.update(sealed_artifact_envelope(value))
 
+def test_sealed_evidence_scores_exact_pair_and_stdout_ref(tmp_path:Path)->None:
+    private,run,bundle=evidence(); result,score,public=execute(tmp_path,private,run,bundle)
+    assert set(result)=={"status","score_ref","content_sha256"}; assert result["status"]=="PASS"; assert public["safety"]==SAFETY
+    assert score["point_metric"]=={"gain_numerator":1,"submitted_count":2,"gain":"1/2"}; assert "opaque/" not in json.dumps(public)
 
-def write_json(path: Path, value: object) -> None:
-    path.write_bytes(canonical(value) + b"\n")
+def test_pre_review_requires_external_anchor_and_noop_is_stable()->None:
+    private,run,bundle=evidence(); env=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); raw=base64.b64decode(env["canonical_bytes_b64"])
+    sealed=seal_automatic_prediction(request_ref=ref("r"),pre_review=decode(env),execution_refs=[ref("e")],lifecycle_ref=ref("l")); record=sealed["record"]
+    decision={"decision_id":"d1","predecessor_ref":record["revision_ref"],"target_binding_ref":next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected"),"disposition":"corrected","replacement_candidate_id":"reviewed"}
+    revised=append_review_decisions(record,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"])
+    assert canonical_bytes(append_review_decisions(revised,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"]))==canonical_bytes(revised)
+    reminted=deepcopy(raw); changed=json.loads(reminted); changed["rows"][0]["failure_reason"]="rewrite" if "failure_reason" in changed["rows"][0] else None
+    with pytest.raises(ValueError): append_review_decisions(record,[],pre_review_artifact_bytes=canonical_bytes(changed),expected_pre_review_ref=env["ref"])
 
-
-def automatic_row(case: str, arm: str, target: str, *, status: str = "validated") -> dict[str, object]:
-    shared = {
-        "case_id": case,
-        "arm_id": arm,
-        "selected_target_id": target,
-        "candidate_id": f"candidate/{case}",
-        "target_binding_ref": f"binding/{case}",
-        "eligibility": "ELIGIBLE",
-        "fusion_ref": f"fusion/{case}",
-        "capture_ref": f"capture/{case}",
-        "bbox_ref": f"bbox/{case}",
-        "bbox": [0, 0, 2, 2],
-        "vista_request_ref": f"request/{case}",
-        "submission_status": "SUBMITTED",
-    }
-    if arm == "omni_to_qwen_vista":
-        shared["vista_result"] = {
-            "status": status,
-            "proposal_lineage": {key: shared[key] for key in (
-                "case_id", "selected_target_id", "vista_request_ref", "candidate_id",
-                "fusion_ref", "capture_ref", "target_binding_ref", "bbox_ref",
-            )},
-            "canonical_capture_pixel_point": [3, 3] if case == "opaque/1" else [1, 1],
-        }
-    return shared
-
-
-def private_fixture() -> dict[str, object]:
-    parent = ref("parent/seal")
-    return {
-        "contract_version": "portfolio_hybrid_v1_1_private_manifest_v2_synthetic",
-        "source_parent_ref": parent,
-        "partition": "holdout",
-        "cases": [
-            {"case_id": "opaque/1", "target_id": "target/right/1", "important": True, "acceptable_regions": [[2, 2, 4, 4]]},
-            {"case_id": "opaque/2", "target_id": "target/right/2", "important": True, "acceptable_regions": [[0, 0, 2, 2]]},
-        ],
-    }
-
-
-def prediction_run() -> tuple[dict[str, object], dict[str, object]]:
-    private = private_fixture()
-    rows = []
-    for case, target in (("opaque/1", "target/right/1"), ("opaque/2", "target/right/2")):
-        for arm in ("qwen_only", "omni_only_discovery", "omni_to_qwen", "omni_to_qwen_vista"):
-            selected = target
-            if arm == "qwen_only" and case == "opaque/1":
-                selected = "target/wrong"
-            rows.append(automatic_row(case, arm, selected))
-    lifecycle = {
-        "contract_version": "benchmark_v2_lifecycle_receipt_v1",
-        "id": "lifecycle/1",
-        "content_sha256": "a" * 64,
-        "complete": True,
-        "lifecycle_verified": True,
-        "artifact_is_authorization": False,
-        "execute_binding_enabled": False,
-    }
-    run = {
-        "contract_version": "benchmark_v2_prediction_run_v1",
-        "source_parent_ref": deepcopy(private["source_parent_ref"]),
-        "partition": "holdout",
-        "attempt_ref": ref("attempt/1"),
-        "lifecycle_ref": {"id": lifecycle["id"], "content_sha256": lifecycle["content_sha256"]},
-        "regression_precondition_ref": {"id": "regression/1", "content_sha256": "b" * 64, "status": "PASS"},
-        "pre_review_rows": rows,
-        "vista_proposals": [row["vista_result"] for row in rows if row["arm_id"] == "omni_to_qwen_vista"],
-        "safety": deepcopy(SAFETY),
-    }
-    return run, lifecycle
-
-
-def run_scorer(tmp_path: Path, private: dict[str, object], run: dict[str, object], lifecycle: dict[str, object]) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    private_path, run_path, life_path = (tmp_path / name for name in ("private.json", "run.json", "life.json"))
-    output_path, public_path = tmp_path / "private-output.json", tmp_path / "public-ref.json"
-    for path, value in ((private_path, private), (run_path, run), (life_path, lifecycle)):
-        write_json(path, value)
-    process = subprocess.run(
-        [sys.executable, str(SCRIPT), "--private-manifest", str(private_path), "--prediction-run", str(run_path), "--lifecycle", str(life_path), "--private-output", str(output_path), "--public-ref", str(public_path)],
-        cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", close_fds=True, check=False,
-    )
-    return process, output_path, public_path
-
-
-def test_prediction_record_pre_review_is_immutable_and_review_chain_is_append_only() -> None:
-    from app.learn.hybrid.benchmark_v2_predictions import append_review_decisions, seal_automatic_prediction
-    pre = {"contract_version": "benchmark_v2_pre_review_v1", "prediction_id": "prediction/1", "rows": [automatic_row("opaque/1", "omni_to_qwen_vista", "target/1")], "safety": deepcopy(SAFETY)}
-    record = seal_automatic_prediction(request_ref=ref("request/run"), pre_review=pre, execution_refs=[ref("execution/1")], lifecycle_ref=ref("lifecycle/1"))
-    original_ref = deepcopy(record["pre_review_ref"])
-    decision = {"decision_id": "decision/1", "predecessor_ref": record["revision_ref"], "target_binding_ref": "binding/opaque/1", "disposition": "corrected", "replacement_candidate_id": "candidate/reviewed"}
-    revised = append_review_decisions(record, [decision])
-    assert revised["pre_review_ref"] == original_ref
-    assert revised["post_review"]["rows"][0]["candidate_id"] == "candidate/reviewed"
-    assert revised["decisions"][0]["predecessor_ref"] == record["revision_ref"]
-    assert canonical(append_review_decisions(revised, [decision])) == canonical(revised)
-    tampered = deepcopy(revised); tampered["pre_review_ref"]["content_sha256"] = "0" * 64
-    with pytest.raises(ValueError): append_review_decisions(tampered, [])
-
-
-def test_prediction_requires_exact_binding_candidate_eligibility_and_vista_reason() -> None:
-    from app.learn.hybrid.benchmark_v2_predictions import seal_automatic_prediction
-    pre = {"contract_version": "benchmark_v2_pre_review_v1", "prediction_id": "prediction/1", "rows": [automatic_row("opaque/1", "omni_to_qwen_vista", "target/1")], "safety": deepcopy(SAFETY)}
-    for mutate in ("missing_binding", "unsent", "ineligible_request", "missing_reason"):
-        changed = deepcopy(pre); row = changed["rows"][0]
-        if mutate == "missing_binding": row.pop("target_binding_ref")
-        elif mutate == "unsent": row["submission_status"] = "NOT_SUBMITTED"
-        elif mutate == "ineligible_request": row["eligibility"] = "INELIGIBLE"
-        else:
-            row["eligibility"] = "INELIGIBLE"; row.pop("vista_request_ref"); row.pop("submission_status")
-        with pytest.raises(ValueError): seal_automatic_prediction(request_ref=ref("request/run"), pre_review=changed, execution_refs=[ref("execution/1")], lifecycle_ref=ref("lifecycle/1"))
-
-
-def test_private_scorer_uses_automatic_rows_and_emits_only_public_ref(tmp_path: Path) -> None:
-    private = private_fixture(); run, lifecycle = prediction_run()
-    process, output, public = run_scorer(tmp_path, private, run, lifecycle)
-    assert process.returncode == 0, process.stderr
-    assert process.stdout.count("\n") == 1
-    stdout_ref = json.loads(process.stdout)
-    assert stdout_ref == json.loads(public.read_text(encoding="utf-8"))
-    assert set(stdout_ref) == {"status", "score_ref", "content_sha256", "artifact_is_authorization", "execute_binding_enabled"}
-    assert "opaque/" not in public.read_text(encoding="utf-8")
-    score = json.loads(output.read_text(encoding="utf-8"))
-    assert score["automatic"]["wrong_target_count"] == 0
-    assert score["point_metric"] == {"gain_numerator": 1, "submitted_count": 2, "gain": "1/2"}
-    assert score["gate"]["status"] == "PASS"
-    assert score["safety"] == SAFETY
-
-
-def test_human_review_cannot_hide_automatic_error(tmp_path: Path) -> None:
-    private = private_fixture(); run, lifecycle = prediction_run()
-    bad = next(row for row in run["pre_review_rows"] if row["case_id"] == "opaque/1" and row["arm_id"] == "omni_to_qwen_vista")
-    bad["selected_target_id"] = "target/wrong"
-    bad["vista_result"]["proposal_lineage"]["selected_target_id"] = "target/wrong"
-    run["post_review_rows"] = deepcopy(run["pre_review_rows"])
-    next(row for row in run["post_review_rows"] if row["case_id"] == "opaque/1" and row["arm_id"] == "omni_to_qwen_vista")["selected_target_id"] = "target/right/1"
-    process, output, _ = run_scorer(tmp_path, private, run, lifecycle)
-    assert process.returncode == 0
-    assert json.loads(output.read_text(encoding="utf-8"))["gate"]["status"] == "FAIL"
-
-
-@pytest.mark.parametrize("mutation", ["duplicate", "missing", "same_sha_wrong_lineage", "unsent", "cross_target", "extra_better", "zero_submitted"])
-def test_private_scorer_fails_closed_on_invalid_run(tmp_path: Path, mutation: str) -> None:
-    private = private_fixture(); run, lifecycle = prediction_run()
-    if mutation == "duplicate": run["pre_review_rows"].append(deepcopy(run["pre_review_rows"][0]))
-    elif mutation == "missing": run["pre_review_rows"].pop()
-    elif mutation == "same_sha_wrong_lineage": run["source_parent_ref"]["id"] = "parent/wrong"
-    elif mutation == "unsent": next(row for row in run["pre_review_rows"] if row["arm_id"] == "omni_to_qwen_vista")["submission_status"] = "NOT_SUBMITTED"
-    elif mutation == "cross_target": next(row for row in run["pre_review_rows"] if row["arm_id"] == "omni_to_qwen_vista")["target_binding_ref"] = "binding/other"
-    elif mutation == "extra_better": run["vista_proposals"].append({**deepcopy(run["vista_proposals"][0]), "canonical_capture_pixel_point": [2, 2]})
+@pytest.mark.parametrize("mutation",["handcrafted","missing_parent","binding_wrong_id","cross_target_request","sync_row_proposal","later_cherry_pick","lifecycle_hash","regression_self_pass","gate_ref"])
+def test_sealed_lineage_mutations_fail(tmp_path:Path,mutation:str)->None:
+    private,run,bundle=evidence(later_holdout=True)
+    if mutation=="handcrafted": run["pre_review_rows"]=[]
+    elif mutation=="gate_ref": private["gate_ref"]["file_sha256"]="0"*64
+    elif mutation=="later_cherry_pick": run["lifecycle_ref"]=decode(bundle["sealed_artifacts"][1]) and bundle["sealed_artifacts"][1]["ref"]
+    elif mutation=="lifecycle_hash": bundle["sealed_artifacts"][0]["ref"]["content_sha256"]="0"*64
+    elif mutation=="regression_self_pass":
+        env=next(x for x in bundle["sealed_artifacts"] if x["ref"]==run["regression_precondition_ref"]); value=decode(env); value["selected_attempt_id"]="reg-0"; value["selected_lifecycle_ref"]=next(x["ref"] for x in bundle["sealed_artifacts"] if x["ref"]["id"]=="lifecycle/reg-0"); reseal(env,value); run["regression_precondition_ref"]=env["ref"]
     else:
-        for row in run["pre_review_rows"]:
-            if row["arm_id"] in {"omni_to_qwen", "omni_to_qwen_vista"}:
-                row["eligibility"] = "INELIGIBLE"; row.pop("vista_request_ref"); row.pop("submission_status"); row["ineligible_reason"] = "no_candidate"; row.pop("vista_result", None)
-        run["vista_proposals"] = []
-    process, _, _ = run_scorer(tmp_path, private, run, lifecycle)
-    assert process.returncode != 0
-    sensitive = json.dumps(private, sort_keys=True)
-    assert all(token not in process.stderr for token in ("opaque/1", "target/right/1", str(tmp_path), sensitive))
+        auto=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); value=decode(auto); row=next(r for r in value["rows"] if r["arm_id"]=="omni_to_qwen_vista")
+        if mutation=="missing_parent":
+            binding=next(x for x in run["sealed_artifacts"] if x["ref"]==row["target_binding_ref"]); b=decode(binding); b.pop("fusion_ref"); reseal(binding,b); row["target_binding_ref"]=binding["ref"]
+        elif mutation=="binding_wrong_id": row["target_binding_ref"]={"id":"wrong/id","content_sha256":row["target_binding_ref"]["content_sha256"]}
+        elif mutation=="cross_target_request":
+            req=next(x for x in run["sealed_artifacts"] if x["ref"]==row["vista_request_ref"]); q=decode(req); q["target_id"]="target/other"; reseal(req,q); row["vista_request_ref"]=req["ref"]; row["vista_result"]["request_ref"]=req["ref"]
+        else:
+            binding=next(x for x in run["sealed_artifacts"] if x["ref"]==row["target_binding_ref"]); b=decode(binding); b["target_id"]="target/wrong"; reseal(binding,b); row["target_binding_ref"]=binding["ref"]; row["vista_result"]["target_binding_ref"]=binding["ref"]
+        reseal(auto,value); run["automatic_prediction_ref"]=auto["ref"]
+    with pytest.raises(ValueError,match="failed closed|invalid|mismatch|differs|missing|wrong|cherry|lineage|artifact|closed"):
+        execute(tmp_path,private,run,bundle)
 
+def test_selection_status_estimands_and_zero_selected_fail(tmp_path:Path)->None:
+    private,run,bundle=evidence(missing_qwen=True); _,score,_=execute(tmp_path,private,run,bundle)
+    qwen=score["automatic"]["arm_metrics"]["qwen_only"]; assert qwen["coverage"]=="1/2"; assert qwen["semantic_precision"]=="1/1"
+    private,run,bundle=evidence(all_missing_qwen=True)
+    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path/"all",private,run,bundle)
 
-def test_failed_vista_remains_in_denominator_and_regression_is_precondition(tmp_path: Path) -> None:
-    private = private_fixture(); run, lifecycle = prediction_run()
-    vista = next(row for row in run["pre_review_rows"] if row["case_id"] == "opaque/2" and row["arm_id"] == "omni_to_qwen_vista")
-    vista["vista_result"] = {"status": "timeout", "proposal_lineage": vista["vista_result"]["proposal_lineage"]}
-    run["vista_proposals"] = [row["vista_result"] for row in run["pre_review_rows"] if row["arm_id"] == "omni_to_qwen_vista"]
-    process, output, _ = run_scorer(tmp_path, private, run, lifecycle)
-    assert process.returncode == 0
-    assert json.loads(output.read_text(encoding="utf-8"))["point_metric"]["submitted_count"] == 2
-    run["regression_precondition_ref"]["status"] = "FAIL"
-    process, _, _ = run_scorer(tmp_path / "again", private, run, lifecycle)
-    assert process.returncode != 0
+def test_first_verified_regression_and_automatic_human_boundary(tmp_path:Path)->None:
+    private,run,bundle=evidence(); auto=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); value=decode(auto); row=next(r for r in value["rows"] if r["case_id"]=="opaque/1" and r["arm_id"]=="omni_to_qwen_vista"); wrong=next(x for x in run["sealed_artifacts"] if x["ref"]["id"]=="binding-wrong/opaque/1"); row["target_binding_ref"]=wrong["ref"]; row["vista_result"]["target_binding_ref"]=wrong["ref"]; reseal(auto,value); run["automatic_prediction_ref"]=auto["ref"]
+    # private independently pins original automatic ref, so reminting all run-side automatic bytes cannot hide the error
+    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path,private,run,bundle)
 
+def test_cli_closed_stdin_redacts_and_stdout_is_exact_three_fields(tmp_path:Path)->None:
+    private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); envelope={"private_manifest_path":str(p["private"]),"prediction_run_path":str(p["run"]),"lifecycle_path":str(p["lifecycle"]),"private_output_path":str(p["output"]),"public_ref_path":str(p["public"])}
+    child_env={"SYSTEMROOT":os.environ["SYSTEMROOT"],"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1","BENCHMARK_V2_SCORER_CHILD_CAPABILITY":"test-child-capability"}
+    proc=subprocess.run([sys.executable,str(SCRIPT),"--closed-stdin"],cwd=tmp_path,env=child_env,input=json.dumps(envelope,separators=(",",":")),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
+    assert proc.returncode==0; assert set(json.loads(proc.stdout))=={"status","score_ref","content_sha256"}; assert str(p["private"]) not in " ".join(proc.args)
+    envelope["private_manifest_path"]=str(tmp_path/"secret-private-name.json")
+    bad=subprocess.run([sys.executable,str(SCRIPT),"--closed-stdin"],cwd=tmp_path,env=child_env,input=json.dumps(envelope),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
+    assert bad.returncode!=0 and str(tmp_path) not in bad.stderr and "opaque" not in bad.stderr
 
-def test_gate_and_import_boundary_are_closed_non_authorizing() -> None:
-    gate = json.loads(GATE.read_text(encoding="utf-8"))
-    assert gate["automatic_split"] == "pre_review"
-    assert gate["holdout_role"] == "automatic_gate"
-    assert gate["regression_role"] == "precondition_only"
-    assert gate["safety"] == SAFETY
-    prediction_tree = ast.parse((ROOT / "app/learn/hybrid/benchmark_v2_predictions.py").read_text(encoding="utf-8"))
-    imports = {node.module for node in ast.walk(prediction_tree) if isinstance(node, ast.ImportFrom)}
-    assert "app.learn.hybrid.benchmark_scorer_v2" not in imports
-    raw = GATE.read_text(encoding="utf-8").casefold()
-    assert "click_point" not in raw and "runtime" not in raw
+def test_gate_release_and_import_graph_are_closed()->None:
+    gate=json.loads(GATE.read_text()); assert gate["contract_version"]=="portfolio_hybrid_v1_1_automatic_gate_v2" and gate["benchmark_release_id"]==RELEASE and gate["safety"]==SAFETY
+    tree=ast.parse((ROOT/"app/learn/hybrid/benchmark_v2_predictions.py").read_text()); imports={n.module for n in ast.walk(tree) if isinstance(n,ast.ImportFrom)}; assert "app.learn.hybrid.benchmark_scorer_v2" not in imports
+    assert "click_point" not in GATE.read_text().casefold()
+
+def test_same_threshold_alternate_gate_ref_is_rejected(tmp_path:Path)->None:
+    private,run,bundle=evidence(); alternate=json.loads(GATE.read_text()); alternate["benchmark_release_id"]="alternate-release"; alternate_path=tmp_path/"alternate-gate.json"; alternate_path.write_text(json.dumps(alternate),encoding="utf-8")
+    raw=alternate_path.read_bytes(); private["gate_ref"]={"relative_path":"alternate-gate.json","file_sha256":hashlib.sha256(raw).hexdigest(),"content_sha256":hashlib.sha256(canonical_bytes(alternate)).hexdigest(),"contract_version":alternate["contract_version"],"release_id":alternate["benchmark_release_id"]}
+    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path/"run",private,run,bundle)
+
+def test_private_loader_direct_call_is_child_only(tmp_path:Path)->None:
+    from app.learn.hybrid.benchmark_scorer_v2 import _score_private_child
+    with pytest.raises(PermissionError,match="child-only"):
+        _score_private_child(child_capability="wrong",private_manifest_path=tmp_path/"private",prediction_run_path=tmp_path/"run",lifecycle_path=tmp_path/"life",private_output_path=tmp_path/"out",public_ref_path=tmp_path/"public")
