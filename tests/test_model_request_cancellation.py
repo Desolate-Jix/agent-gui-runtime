@@ -1492,6 +1492,8 @@ def test_managed_local_provider_timeout_preserves_request_in_flight(
         state = model_server._load_qwen_lease_state(lease["incarnation_id"])
         exact = model_server._find_exact_lease(state, lease)
     assert exact["lifecycle_state"] == "request_in_flight"
+    assert exact["request_attempt"] >= 2
+    assert "completed_request_attempt" not in exact
     pending = model_server.reconcile_qwen_model_lease_failure(
         model_lease=lease,
         compute_completed=False,
@@ -1576,6 +1578,230 @@ def test_managed_local_provider_release_race_waits_for_exact_response_body(
     )
     assert finalized["status"] == "released"
     assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_managed_local_provider_parse_retry_then_timeout_reopens_request_lifecycle(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from app.vision import local_provider
+    from app.vision.schemas import VisionAnalyzeRequest
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-parse-retry-timeout",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    dispatch_count = 0
+
+    def controlled_urlopen(request, timeout):
+        nonlocal dispatch_count
+        del request, timeout
+        dispatch_count += 1
+        if dispatch_count == 1:
+            return _FakeResponse(
+                {"choices": [{"message": {"content": "not-json"}}]}
+            )
+        raise TimeoutError("controlled retry timeout")
+
+    monkeypatch.setattr(local_provider, "urlopen", controlled_urlopen)
+    provider = local_provider.LocalVisionProvider(
+        endpoint="http://127.0.0.1:1/v1/chat/completions",
+        model_name="mutable-wrong-model",
+        timeout_seconds=0.01,
+        managed_model_lease=lease,
+    )
+
+    with pytest.raises(RuntimeError, match="controlled retry timeout"):
+        provider.analyze(VisionAnalyzeRequest(image_path=str(image_path)))
+
+    assert dispatch_count >= 2
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        exact = model_server._find_exact_lease(state, lease)
+    assert exact["lifecycle_state"] == "request_in_flight"
+    assert exact["request_attempt"] >= 2
+    assert "completed_request_attempt" not in exact
+    pending = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=lease,
+        compute_completed=False,
+        reason="parse_retry_timeout",
+    )
+    assert pending["status"] == "cancellation_acknowledged_pending"
+
+
+def test_managed_factory_stub_endpoint_uses_lease_and_blocks_release_until_body(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from app.vision import local_provider
+    from app.vision.factory import VisionProviderFactory
+    from app.vision.schemas import VisionAnalyzeRequest
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-factory-stub-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    read_entered = Event()
+    release_read = Event()
+    requested_urls: list[str] = []
+
+    class BlockingResponse(_FakeResponse):
+        def read(self, size: int = -1) -> bytes:
+            read_entered.set()
+            assert release_read.wait(timeout=2.0)
+            return super().read(size)
+
+    def controlled_urlopen(request, timeout):
+        del timeout
+        requested_urls.append(request.full_url)
+        return BlockingResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "screen_summary": "leased response",
+                                    "state_guess": "leased",
+                                    "regions": [],
+                                    "targets": [],
+                                    "observers": [],
+                                    "notes": [],
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+
+    monkeypatch.setattr(local_provider, "urlopen", controlled_urlopen)
+    provider = VisionProviderFactory.create(config=deepcopy(VisionProviderFactory.load_config(tmp_path / "missing.json")))
+    assert provider.endpoint is None
+    provider.bind_managed_model_lease(lease)
+    result: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def invoke() -> None:
+        try:
+            result["response"] = provider.analyze(
+                VisionAnalyzeRequest(image_path=str(image_path))
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=invoke)
+    worker.start()
+    assert read_entered.wait(timeout=1.0) is True
+    pending = model_server.release_managed_qwen_model_lease(
+        lease,
+        "concurrent_release",
+    )
+    assert pending["status"] == "cancellation_acknowledged_pending"
+    release_read.set()
+    worker.join(timeout=2.0)
+
+    assert worker.is_alive() is False
+    assert errors == []
+    assert requested_urls == [profile["endpoint"]]
+    response = result["response"]
+    assert response.screen_summary == "leased response"
+    assert response.raw_response["endpoint_response"]
+    finalized = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=lease,
+        compute_completed=False,
+        reason="response_body_completed",
+    )
+    assert finalized["status"] == "released"
+    assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_model_review_http_attempt_reopens_completed_lease_before_later_timeout(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from scripts import run_learning_overlay_model_review_probe as review_probe
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-model-review-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "managed-model-review-owner")
+    image_path = tmp_path / "review.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    dispatch_count = 0
+
+    def controlled_urlopen(request, timeout):
+        nonlocal dispatch_count
+        del request, timeout
+        dispatch_count += 1
+        if dispatch_count == 1:
+            return _FakeResponse({"choices": [{"message": {"content": "{}"}}]})
+        raise TimeoutError("controlled model-review timeout")
+
+    monkeypatch.setattr(review_probe, "urlopen", controlled_urlopen)
+    first = review_probe._call_model(
+        endpoint=profile["endpoint"],
+        model_name=profile["model_name"],
+        image_path=image_path,
+        prompt="first",
+        timeout_seconds=0.01,
+    )
+    assert first["choices"]
+    with model_server._qwen_lease_lock():
+        completed_state = model_server._load_qwen_lease_state(
+            lease["incarnation_id"]
+        )
+        completed_exact = model_server._find_exact_lease(completed_state, lease)
+    assert completed_exact["lifecycle_state"] == "compute_complete"
+    assert completed_exact["completed_request_attempt"] == 1
+
+    with pytest.raises(TimeoutError, match="controlled model-review timeout"):
+        review_probe._call_model(
+            endpoint=profile["endpoint"],
+            model_name=profile["model_name"],
+            image_path=image_path,
+            prompt="retry",
+            timeout_seconds=0.01,
+        )
+
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        exact = model_server._find_exact_lease(state, lease)
+    assert exact["lifecycle_state"] == "request_in_flight"
+    assert exact["request_attempt"] == 2
+    assert "completed_request_attempt" not in exact
 
 
 def test_qwen_finalizer_crash_after_stop_recovers_from_proven_absence_without_second_stop(

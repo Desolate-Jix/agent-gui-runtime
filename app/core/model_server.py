@@ -380,15 +380,19 @@ def run_qwen_binding_model(
         headers=headers,
         method="POST",
     )
+    request_attempt = None
     if model_lease is not None:
-        _mark_qwen_model_request_in_flight(model_lease)
+        request_attempt = _mark_qwen_model_request_in_flight(model_lease)
     try:
         with urllib.request.urlopen(http_request, timeout=float(timeout_seconds)) as response:
             response_bytes = response.read(_QWEN_HTTP_RESPONSE_MAX_BYTES + 1)
             if len(response_bytes) > _QWEN_HTTP_RESPONSE_MAX_BYTES:
                 raise ValueError("Qwen HTTP response byte limit exceeded")
             if model_lease is not None:
-                _mark_qwen_model_compute_complete(model_lease)
+                _mark_qwen_model_compute_complete(
+                    model_lease,
+                    request_attempt=request_attempt,
+                )
             response_payload = json.loads(response_bytes.decode("utf-8"))
     except (TimeoutError, QwenModelRequestTimeout) as error:
         raise QwenModelRequestTimeout("Qwen binding request timed out") from error
@@ -564,6 +568,7 @@ def mark_qwen_model_response_body_complete(
     *,
     model_lease: dict[str, Any] | None = None,
     request_id: str | None = None,
+    request_attempt: int | None = None,
 ) -> bool:
     """仅在提供者响应体完整读取后推进精确 Qwen 租约。"""
     selected_lease = deepcopy(model_lease) if isinstance(model_lease, dict) else None
@@ -575,8 +580,29 @@ def mark_qwen_model_response_body_complete(
         if match is None:
             return False
         selected_lease = match[1]
-    _mark_qwen_model_compute_complete(selected_lease)
+    _mark_qwen_model_compute_complete(
+        selected_lease,
+        request_attempt=request_attempt,
+    )
     return True
+
+
+def mark_qwen_model_request_in_flight(
+    *,
+    model_lease: dict[str, Any] | None = None,
+    request_id: str | None = None,
+) -> int | None:
+    """在每次真实 HTTP 派发前重新打开精确 Qwen 请求生命周期。"""
+    selected_lease = deepcopy(model_lease) if isinstance(model_lease, dict) else None
+    if selected_lease is None:
+        owner_request_id = str(request_id or "").strip()
+        if not owner_request_id:
+            return None
+        match = _find_qwen_lease_by_owner(owner_request_id)
+        if match is None:
+            return None
+        selected_lease = match[1]
+    return _mark_qwen_model_request_in_flight(selected_lease)
 
 
 def reconcile_qwen_model_lease_failure(
@@ -914,7 +940,7 @@ def _mark_qwen_lease_pending(model_lease: object, *, reason: str) -> dict[str, A
     }
 
 
-def _mark_qwen_model_request_in_flight(model_lease: object) -> None:
+def _mark_qwen_model_request_in_flight(model_lease: object) -> int:
     if not isinstance(model_lease, dict):
         raise ValueError("exact Qwen model lease is required")
     incarnation_id = str(model_lease.get("incarnation_id") or "")
@@ -923,17 +949,32 @@ def _mark_qwen_model_request_in_flight(model_lease: object) -> None:
         exact = _find_exact_lease(state, model_lease)
         if exact is None:
             raise ValueError("exact Qwen model lease is not active")
+        if isinstance(state.get("finalization"), dict):
+            raise RuntimeError("Qwen server finalization already started before request")
         lifecycle_state = str(exact.get("lifecycle_state") or "unknown_in_flight")
-        if lifecycle_state == "compute_complete":
-            return
-        if lifecycle_state not in {"not_started", "request_in_flight"}:
+        if lifecycle_state not in {
+            "not_started",
+            "request_in_flight",
+            "compute_complete",
+        }:
             raise RuntimeError("Qwen request lifecycle state is invalid")
+        request_attempt = int(exact.get("request_attempt") or 0) + 1
         exact["lifecycle_state"] = "request_in_flight"
+        exact["request_attempt"] = request_attempt
+        exact.pop("completed_request_attempt", None)
+        exact.pop("pending_reason", None)
+        exact.pop("capability_blocker", None)
+        exact.pop("reconciliation_trigger", None)
         state["revision"] += 1
         _write_qwen_lease_state(state)
+        return request_attempt
 
 
-def _mark_qwen_model_compute_complete(model_lease: object) -> None:
+def _mark_qwen_model_compute_complete(
+    model_lease: object,
+    *,
+    request_attempt: int | None = None,
+) -> None:
     if not isinstance(model_lease, dict):
         return
     incarnation_id = str(model_lease.get("incarnation_id") or "")
@@ -942,7 +983,11 @@ def _mark_qwen_model_compute_complete(model_lease: object) -> None:
         exact = _find_exact_lease(state, model_lease)
         if exact is None:
             raise ValueError("exact Qwen model lease is not active")
+        active_attempt = int(exact.get("request_attempt") or 0)
+        if request_attempt is not None and active_attempt != request_attempt:
+            raise RuntimeError("Qwen response body completion attempt is stale")
         exact["lifecycle_state"] = "compute_complete"
+        exact["completed_request_attempt"] = active_attempt
         exact.pop("pending_reason", None)
         exact.pop("capability_blocker", None)
         exact.pop("reconciliation_trigger", None)

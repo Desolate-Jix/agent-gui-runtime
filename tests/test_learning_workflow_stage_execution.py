@@ -2889,3 +2889,190 @@ def test_duplicate_hybrid_continue_recovers_same_next_worker_without_inference(
     assert first["next_worker"] == duplicate["next_worker"]
     assert first["next_worker"]["worker_id"] == "worker-hybrid-qwen"
     assert registry.inference_starts == 1
+
+
+@pytest.mark.parametrize(
+    ("task_kind", "handler_target"),
+    [
+        (
+            "panel_learning_hybrid_omni_discovery",
+            "app.learn.workflow_worker.run_hybrid_omni_task",
+        ),
+        (
+            "panel_learning_hybrid_qwen_binding",
+            "app.learn.workflow_worker.run_hybrid_qwen_task",
+        ),
+        (
+            "panel_learning_hybrid_fusion",
+            "app.learn.workflow_worker.run_hybrid_fusion_task",
+        ),
+        (
+            "panel_learning_calibration_sequence",
+            "app.learn.calibration_sequence.run_learning_calibration_sequence",
+        ),
+    ],
+)
+def test_raised_hybrid_handler_failure_is_adoptable_and_idempotently_safe_stops(
+    tmp_path: Path,
+    monkeypatch,
+    task_kind: str,
+    handler_target: str,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.workflow_worker import LearningStageWorkerRegistry
+    from app.core import model_server
+
+    handler_calls = 0
+    lifecycle_calls: list[dict[str, object]] = []
+    managed_lease = (
+        {
+            "lease_id": "lease-controlled",
+            "incarnation_id": "incarnation-controlled",
+            "owner_request_id": "owner-controlled",
+            "profile_id": "qwen-controlled",
+            "server_process_identity": {"pid": 1, "create_time_ns": 1},
+            "server_socket": {"host": "127.0.0.1", "port": 13240},
+        }
+        if task_kind == "panel_learning_hybrid_qwen_binding"
+        else None
+    )
+
+    def raise_controlled(*_args, **_kwargs):
+        nonlocal handler_calls
+        handler_calls += 1
+        raise RuntimeError(f"controlled {task_kind} failure")
+
+    monkeypatch.setattr(handler_target, raise_controlled)
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *_args, **_kwargs: managed_lease,
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "validate_hybrid_qwen_task_payload",
+        lambda _payload: None,
+    )
+
+    def reconcile_failure(**kwargs):
+        lifecycle_calls.append(kwargs)
+        return {
+            "status": "cancellation_acknowledged_pending",
+            "lifecycle_state": "request_in_flight",
+        }
+
+    monkeypatch.setattr(
+        model_server,
+        "reconcile_qwen_model_lease_failure",
+        reconcile_failure,
+    )
+
+    class _InlineProcess:
+        def __init__(self, *, target, args, name) -> None:
+            self.target = target
+            self.args = args
+            self.name = name
+            self.pid = None
+            self.exitcode = None
+            self.started = False
+
+        def start(self) -> None:
+            self.started = True
+            self.target(*self.args)
+            self.exitcode = 0
+
+        def is_alive(self) -> bool:
+            return False
+
+        def join(self, timeout=None) -> None:
+            del timeout
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path / task_kind,
+        process_factory=lambda **kwargs: _InlineProcess(**kwargs),
+    )
+    store, bind_state = _store_at_completed_bind_capture()
+    operation = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=bind_state["revision"],
+        stage="screen_understanding",
+        operation_id=f"operation-{task_kind}",
+        learning_pipeline_mode="hybrid_v1_1",
+    )
+    payload = {
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "_hybrid_orchestration": {},
+    }
+    started = registry.start(
+        run_id="run-stage-operation",
+        stage="screen_understanding",
+        operation_id=operation["operation_id"],
+        task_kind=task_kind,
+        payload=payload,
+        reuse_active_identical=True,
+    )
+    status = registry.status(
+        worker_id=started["worker_id"],
+        run_id="run-stage-operation",
+        operation_id=operation["operation_id"],
+    )
+    assert status["status"] == "completed"
+
+    first_adoption = registry.adopt_result(
+        worker_id=started["worker_id"],
+        run_id="run-stage-operation",
+        stage="screen_understanding",
+        operation_id=operation["operation_id"],
+    )
+    duplicate_adoption = registry.adopt_result(
+        worker_id=started["worker_id"],
+        run_id="run-stage-operation",
+        stage="screen_understanding",
+        operation_id=operation["operation_id"],
+    )
+    assert duplicate_adoption["receipt"] == first_adoption["receipt"]
+    adopted = registry.read_adopted_result(
+        worker_id=started["worker_id"],
+        run_id="run-stage-operation",
+        stage="screen_understanding",
+        operation_id=operation["operation_id"],
+    )
+    failure_result = adopted["response"]["result"]
+    assert failure_result["error_type"] == "RuntimeError"
+    if managed_lease is not None:
+        assert failure_result["model_lifecycle"] == {
+            "status": "cancellation_acknowledged_pending",
+            "lifecycle_state": "request_in_flight",
+        }
+        assert lifecycle_calls == [
+            {
+                "model_lease": managed_lease,
+                "compute_completed": False,
+                "reason": "managed_hybrid_handler_failed",
+            }
+        ]
+
+    continuation_request = {
+        "store": store,
+        "worker_registry": registry,
+        "project_root": tmp_path,
+        "run_id": "run-stage-operation",
+        "expected_revision": operation["workflow_state"]["revision"],
+        "stage": "screen_understanding",
+        "operation_id": operation["operation_id"],
+        "worker_id": started["worker_id"],
+    }
+    continued = workflow_service.continue_learning_stage_worker_result(
+        **continuation_request
+    )
+    duplicate = workflow_service.continue_learning_stage_worker_result(
+        **continuation_request
+    )
+
+    assert continued["outcome"] == "safe_stopped"
+    assert continued["reason"].startswith("SAFE_STOP")
+    assert duplicate["idempotent_replay"] is True
+    assert duplicate["workflow_state"]["revision"] == continued["workflow_state"]["revision"]
+    assert handler_calls == 1

@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -775,14 +776,30 @@ def _call_model(
             },
         ],
     }
+    request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if request_id:
+        payload["request_id"] = request_id
+        headers["X-Agent-GUI-Request-ID"] = request_id
     request = Request(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=headers,
         method="POST",
     )
+    from app.core.model_server import (
+        mark_qwen_model_request_in_flight,
+        mark_qwen_model_response_body_complete,
+    )
+
+    request_attempt = mark_qwen_model_request_in_flight(request_id=request_id)
     with urlopen(request, timeout=float(timeout_seconds)) as response:
-        decoded = json.loads(response.read().decode("utf-8"))
+        response_bytes = response.read()
+        mark_qwen_model_response_body_complete(
+            request_id=request_id,
+            request_attempt=request_attempt,
+        )
+        decoded = json.loads(response_bytes.decode("utf-8"))
     if not isinstance(decoded, dict):
         raise ValueError("model endpoint response must be a JSON object")
     return decoded

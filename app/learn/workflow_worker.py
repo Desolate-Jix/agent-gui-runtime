@@ -75,6 +75,14 @@ _MANAGED_QWEN_TASK_KINDS = frozenset(
         "vision_observe_screen",
     }
 )
+_HYBRID_MANAGED_TASK_KINDS = frozenset(
+    {
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+        "panel_learning_calibration_sequence",
+    }
+)
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -131,15 +139,15 @@ def execute_learning_stage_worker_task(
     orchestration = execution_payload.pop("_hybrid_orchestration", None)
     execution_payload.pop("learning_pipeline_mode", None)
 
-    if normalized_kind == "panel_learning_hybrid_qwen_binding":
-        validate_hybrid_qwen_task_payload(execution_payload)
-    model_lease = _ensure_learning_stage_model_ready(
-        normalized_kind,
-        execution_payload,
-        cancellation_event=cancellation_event,
-    )
-
+    model_lease: dict[str, Any] | None = None
     try:
+        if normalized_kind == "panel_learning_hybrid_qwen_binding":
+            validate_hybrid_qwen_task_payload(execution_payload)
+        model_lease = _ensure_learning_stage_model_ready(
+            normalized_kind,
+            execution_payload,
+            cancellation_event=cancellation_event,
+        )
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
             response = run_hybrid_qwen_task(
                 execution_payload,
@@ -199,7 +207,21 @@ def execute_learning_stage_worker_task(
             response = locate_target(
                 VisionLocateTargetRequestModel.model_validate(execution_payload)
             )
-    except BaseException:
+    except BaseException as error:
+        if (
+            learning_pipeline_mode == "hybrid_v1_1"
+            and normalized_kind in _HYBRID_MANAGED_TASK_KINDS
+        ):
+            lifecycle_evidence = _reconcile_hybrid_handler_failure(
+                model_lease=model_lease,
+                error=error,
+            )
+            return _hybrid_managed_failure_result(
+                task_kind=normalized_kind,
+                error=error,
+                orchestration=orchestration,
+                lifecycle_evidence=lifecycle_evidence,
+            )
         if model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
             from app.core.model_server import reconcile_qwen_model_lease_failure
 
@@ -228,18 +250,18 @@ def execute_learning_stage_worker_task(
         )
     if (
         learning_pipeline_mode == "hybrid_v1_1"
-        and normalized_kind
-        in {
-            "panel_learning_hybrid_omni_discovery",
-            "panel_learning_hybrid_qwen_binding",
-            "panel_learning_hybrid_fusion",
-        }
+        and normalized_kind in _HYBRID_MANAGED_TASK_KINDS
     ):
         if not isinstance(orchestration, dict):
             raise LearningStageWorkerError(
                 "Hybrid managed worker payload is missing orchestration context"
             )
-        outcome = str(normalized_response.get("outcome") or "completed").strip()
+        declared_outcome = str(normalized_response.get("outcome") or "").strip()
+        outcome = (
+            declared_outcome
+            if declared_outcome
+            else "failed" if normalized_response.get("success") is False else "completed"
+        )
         return {
             "contract_version": "learning_hybrid_managed_stage_result_v1",
             "learning_pipeline_mode": "hybrid_v1_1",
@@ -249,6 +271,65 @@ def execute_learning_stage_worker_task(
             "orchestration": deepcopy(orchestration),
         }
     return normalized_response
+
+
+def _reconcile_hybrid_handler_failure(
+    *,
+    model_lease: dict[str, Any] | None,
+    error: BaseException,
+) -> dict[str, Any]:
+    if model_lease is None:
+        return {"status": "model_lease_not_acquired"}
+    from app.core.model_server import reconcile_qwen_model_lease_failure
+
+    try:
+        return deepcopy(
+            reconcile_qwen_model_lease_failure(
+                model_lease=model_lease,
+                compute_completed=False,
+                reason="managed_hybrid_handler_failed",
+            )
+        )
+    except BaseException as cleanup_error:
+        error.add_note(
+            "Hybrid model lifecycle reconciliation failed: "
+            f"{type(cleanup_error).__name__}: {cleanup_error}"
+        )
+        return {
+            "status": "reconciliation_failed",
+            "error_type": type(cleanup_error).__name__,
+            "details": str(cleanup_error),
+        }
+
+
+def _hybrid_managed_failure_result(
+    *,
+    task_kind: str,
+    error: BaseException,
+    orchestration: object,
+    lifecycle_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    error_notes = [str(note) for note in getattr(error, "__notes__", [])]
+    diagnostics = getattr(error, "diagnostics", None)
+    failure = {
+        "contract_version": "learning_hybrid_stage_failure_v1",
+        "failure_reason": str(error) or type(error).__name__,
+        "error_type": type(error).__name__,
+        "error_notes": error_notes,
+        "model_lifecycle": deepcopy(lifecycle_evidence),
+    }
+    if isinstance(diagnostics, dict):
+        failure["diagnostics"] = deepcopy(diagnostics)
+    return {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": task_kind,
+        "outcome": "failed",
+        "result": failure,
+        "orchestration": (
+            deepcopy(orchestration) if isinstance(orchestration, dict) else {}
+        ),
+    }
 
 
 def _ensure_learning_stage_model_ready(

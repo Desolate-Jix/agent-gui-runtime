@@ -60,7 +60,7 @@ class LocalVisionProvider:
         with Image.open(image_path) as image:
             original_image_size = ImageSize(width=image.width, height=image.height)
         notes: list[str] = []
-        if not self.endpoint:
+        if not self.endpoint and self._managed_model_lease is None:
             notes.append("Local provider is currently running in stub mode.")
             return VisionAnalyzeResponse(
                 provider="local",
@@ -235,21 +235,28 @@ class LocalVisionProvider:
                 headers=headers,
                 method="POST",
             )
+            request_attempt = self._mark_request_in_flight(request_id)
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
                     response_bytes = response.read()
-                    self._mark_response_body_complete(request_id)
+                    self._mark_response_body_complete(
+                        request_id,
+                        request_attempt=request_attempt,
+                    )
                     return json.loads(response_bytes.decode("utf-8"))
             except HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")
+                self._mark_response_body_complete(
+                    request_id,
+                    request_attempt=request_attempt,
+                )
                 if self._model_is_loading(exc.code, details) and time.monotonic() < loading_deadline:
                     self._model_loading_retries += 1
                     time.sleep(min(1.0, max(0.0, loading_deadline - time.monotonic())))
                     continue
-                self._mark_response_body_complete(request_id)
                 raise RuntimeError(f"local vision endpoint returned HTTP {exc.code}: {details}") from exc
             except URLError as exc:
-                raise RuntimeError(f"failed to reach local vision endpoint {self.endpoint}: {exc.reason}") from exc
+                raise RuntimeError(f"failed to reach local vision endpoint {endpoint}: {exc.reason}") from exc
 
     def _attest_managed_request_profile(self) -> dict[str, Any] | None:
         if self._managed_model_lease is None:
@@ -258,12 +265,26 @@ class LocalVisionProvider:
 
         return _profile_for_qwen_model_lease(self._managed_model_lease)
 
-    def _mark_response_body_complete(self, request_id: str) -> None:
+    def _mark_request_in_flight(self, request_id: str) -> int | None:
+        from app.core.model_server import mark_qwen_model_request_in_flight
+
+        return mark_qwen_model_request_in_flight(
+            model_lease=self._managed_model_lease,
+            request_id=request_id,
+        )
+
+    def _mark_response_body_complete(
+        self,
+        request_id: str,
+        *,
+        request_attempt: int | None,
+    ) -> None:
         from app.core.model_server import mark_qwen_model_response_body_complete
 
         mark_qwen_model_response_body_complete(
             model_lease=self._managed_model_lease,
             request_id=request_id,
+            request_attempt=request_attempt,
         )
 
     def _model_is_loading(self, status_code: int, details: str) -> bool:

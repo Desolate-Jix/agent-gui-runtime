@@ -134,6 +134,7 @@ def _hybrid_managed_stage_decision(
         "panel_learning_hybrid_omni_discovery",
         "panel_learning_hybrid_qwen_binding",
         "panel_learning_hybrid_fusion",
+        "panel_learning_calibration_sequence",
     }
     if stage != "screen_understanding" or task_kind not in supported:
         raise LearningStageWorkerContinuationError(
