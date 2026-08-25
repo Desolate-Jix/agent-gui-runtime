@@ -347,12 +347,32 @@ const PAGE_REGISTRY = {
   },
 };
 
+let backendHybridRolloutStatus = {
+  ready: false,
+  rollout: "unavailable",
+  reason: "hybrid_rollout_status_not_loaded",
+  incumbent_default: true,
+};
+
+async function refreshHybridRolloutStatus() {
+  try {
+    const response = await fetch(`${baseUrl()}/panel/hybrid_rollout_status`);
+    const payload = await response.json();
+    backendHybridRolloutStatus = payload?.success === true && payload?.data
+      ? payload.data
+      : { ready: false, rollout: "unavailable", reason: "hybrid_rollout_status_invalid", incumbent_default: true };
+  } catch (_error) {
+    backendHybridRolloutStatus = { ready: false, rollout: "unavailable", reason: "hybrid_rollout_status_unavailable", incumbent_default: true };
+  }
+  return backendHybridRolloutStatus;
+}
+
 function learningPipelineModeStatus(mode = LEARNING_PIPELINE_MODE) {
   if (mode === "hybrid_v1_1") {
     return {
       learning_pipeline_mode: "hybrid_v1_1",
-      rollout: "experimental",
-      reason: "hybrid_rollout_experimental",
+      rollout: backendHybridRolloutStatus.ready === true ? "experimental" : "unavailable",
+      reason: backendHybridRolloutStatus.reason,
     };
   }
   return { learning_pipeline_mode: "incumbent", rollout: "active" };
@@ -24028,6 +24048,7 @@ function callConfirmedPoint(dryRun) {
 
 async function boot() {
   bindEvents();
+  await refreshHybridRolloutStatus();
   const initialStage = initialStageFromQuery();
   if (initialStage) {
     document.querySelectorAll(".stage").forEach((button) => {

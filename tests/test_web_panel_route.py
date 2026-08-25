@@ -6537,10 +6537,54 @@ def test_hybrid_learning_pipeline_start_is_experimental_and_incumbent_remains_de
     execution = response["data"]["workflow_state"]["stages"]["screen_understanding"]["evidence_refs"]["stage_execution"]
     assert execution["learning_pipeline_mode"] == "hybrid_v1_1"
 
+    rollout = TestClient(app).get("/panel/hybrid_rollout_status").json()
+    assert rollout["success"] is True
+    assert rollout["data"]["ready"] is True
+    assert rollout["data"]["rollout"] == "experimental"
+    assert rollout["data"]["incumbent_default"] is True
+    assert all(rollout["data"]["components"].values())
+
     panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
-    assert 'rollout: "experimental"' in panel_js
-    assert 'reason: "hybrid_rollout_experimental"' in panel_js
+    assert "/panel/hybrid_rollout_status" in panel_js
+    assert 'backendHybridRolloutStatus.ready === true ? "experimental" : "unavailable"' in panel_js
     assert 'return { learning_pipeline_mode: "incumbent", rollout: "active" }' in panel_js
+
+
+@pytest.mark.parametrize(
+    "component",
+    [
+        "start_guard",
+        "omni_cleanup_observer",
+        "qwen_cleanup_observer",
+        "vista_cleanup_observer",
+        "supervisor_reconciliation",
+        "review_guard",
+        "handlers",
+    ],
+)
+def test_hybrid_rollout_status_fails_closed_for_each_missing_backend_component(
+    monkeypatch,
+    component: str,
+) -> None:
+    from app.learn import workflow_worker
+
+    if component == "handlers":
+        monkeypatch.delitem(
+            workflow_worker.HYBRID_STAGE_HANDLER_REGISTRY,
+            "panel_learning_hybrid_review_projection",
+        )
+    else:
+        monkeypatch.delitem(
+            workflow_worker.HYBRID_LIFECYCLE_COMPONENT_REGISTRY,
+            component,
+        )
+
+    rollout = TestClient(app).get("/panel/hybrid_rollout_status").json()["data"]
+
+    assert rollout["ready"] is False
+    assert rollout["rollout"] == "unavailable"
+    assert rollout["components"][component] is False
+    assert rollout["incumbent_default"] is True
 
 
 def test_public_worker_route_accepts_only_registered_experimental_hybrid_handler(monkeypatch) -> None:
@@ -6598,3 +6642,27 @@ def test_public_worker_route_accepts_only_registered_experimental_hybrid_handler
     assert response["success"] is True
     assert response["data"]["task_kind"] == "panel_learning_hybrid_omni_discovery"
     assert started[0]["payload"]["learning_pipeline_mode"] == "hybrid_v1_1"
+
+    replay = TestClient(app).post(
+        "/panel/start_learning_stage_worker",
+        json={
+            "run_id": "run-hybrid-worker-disabled",
+            "expected_revision": operation["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": "operation-hybrid-disabled",
+            "task_kind": "panel_learning_hybrid_qwen_binding",
+            "payload": {
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "_hybrid_orchestration": {
+                    "omni_cleanup_receipt": {
+                        "contract_version": "hybrid_provider_cleanup_receipt_v2",
+                        "content_sha256": "f" * 64,
+                    }
+                },
+            },
+        },
+    ).json()
+
+    assert replay["success"] is False
+    assert replay["error"]["code"] == "hybrid_backend_continuation_required"
+    assert len(started) == 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -26,6 +27,89 @@ from app.main import app
 
 
 NOW = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
+
+
+def _hybrid_supervised_lineage(
+    *,
+    run_id: str,
+    workflow_revision: int,
+    operation_id: str,
+    stage: str = "screen_understanding",
+) -> dict:
+    return {
+        "run_id": run_id,
+        "workflow_revision": workflow_revision,
+        "operation_id": operation_id,
+        "stage": stage,
+        "stage_execution_id": hashlib.sha256(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "workflow_revision": workflow_revision,
+                    "operation_id": operation_id,
+                    "stage": stage,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _observed_hybrid_cleanup_receipt(
+    provider: str,
+    *,
+    lineage: dict,
+    predecessor: dict,
+    provider_result: dict,
+) -> dict:
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    process_identity = {
+        "pid": 5100 + len(provider),
+        "create_time_ns": 100_000_000_000,
+    }
+    if provider == "omni":
+        provider_identity = {
+            "provider_invocation_id": "invocation/controlled-omni",
+            "provider_receipt_ref": {
+                "id": "receipt/controlled-omni",
+                "content_sha256": "a" * 64,
+            },
+            "process_identity": process_identity,
+        }
+    elif provider == "qwen":
+        provider_identity = {
+            "lease_id": "controlled-qwen-lease",
+            "incarnation_id": "qwen-controlled",
+            "profile_id": "qwen-profile",
+            "server_process_identity": process_identity,
+        }
+    else:
+        provider_identity = {
+            "incarnation_id": "vista-controlled",
+            "profile_id": "vista-profile",
+            "process_identities": [process_identity],
+        }
+    inventory = {
+        "contract_version": "hybrid_provider_process_inventory_v2",
+        "provider": provider,
+        "observer_contract": f"hybrid_{provider}_cleanup_observer_v1",
+        "release_status": "verified",
+        "termination_reason": "completed",
+        "lineage": lineage,
+        "provider_lease_identity": provider_identity,
+        "predecessor_sha256": content_sha256(predecessor),
+        "provider_result_sha256": content_sha256(provider_result),
+        "provider_processes_after": [],
+        "helper_processes_after": [],
+        "orphan_descendant_pids": [],
+        "active_listeners_after": [],
+        "lease_files_after": [],
+        "source_cleanup_evidence": {"status": "verified"},
+    }
+    return release_hybrid_provider(provider, process_inventory=lambda _: inventory)
 
 
 def _completion_evidence(stage: str) -> dict[str, str]:
@@ -2658,11 +2742,13 @@ def test_panel_production_flow_follows_backend_started_stage_workers() -> None:
 
 def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     from app.learn.workflow_continuation import interpret_learning_stage_worker_result
     from app.learn.workflow_service import build_learning_pipeline_initial_worker_request
     from app.learn import workflow_worker
     from tests.test_learn_hybrid_vista_refinement import _cleanup_receipt
+    from app.learn.recognition.uei.canonical import seal_immutable
 
     bundle_ref = {"id": "hybrid-capture/test", "content_sha256": "1" * 64}
     capture_bundle = {
@@ -2671,15 +2757,13 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
         "content_sha256": bundle_ref["content_sha256"],
     }
     config = {"contract_version": "hybrid_config_v1", "config_sha256": "2" * 64}
-    omni_inventory = {
+    omni_inventory = seal_immutable({
         "contract_version": "hybrid_omni_inventory_v1",
-        "content_sha256": "3" * 64,
         "candidates": [{"candidate_id": "candidate/one"}],
-    }
-    qwen_bindings = {
+    })
+    qwen_bindings = seal_immutable({
         "contract_version": "hybrid_qwen_bindings_v1",
-        "content_sha256": "4" * 64,
-    }
+    })
     fusion_result = {
         "contract_version": "hybrid_fusion_result_v1",
         "config_sha256": config["config_sha256"],
@@ -2707,6 +2791,61 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
         "qwen_cleanup_receipt": _cleanup_receipt(),
     })
     monkeypatch.setattr(workflow_worker, "run_hybrid_fusion_task", lambda payload, **kwargs: fusion_result)
+    lineage = _hybrid_supervised_lineage(
+        run_id="run-hybrid",
+        workflow_revision=7,
+        operation_id="operation-hybrid-chain",
+    )
+
+    def observed_inventory(provider: str, **kwargs) -> dict:
+        process_identity = {
+            "pid": 5200 + len(provider),
+            "create_time_ns": 100_000_000_000,
+        }
+        provider_identity = (
+            {
+                "provider_invocation_id": "invocation/controlled-omni-chain",
+                "provider_receipt_ref": {
+                    "id": "receipt/controlled-omni-chain",
+                    "content_sha256": "b" * 64,
+                },
+                "process_identity": process_identity,
+            }
+            if provider == "omni"
+            else {
+                "lease_id": "controlled-qwen-chain-lease",
+                "incarnation_id": "qwen-controlled-chain",
+                "profile_id": "qwen-profile",
+                "server_process_identity": process_identity,
+            }
+        )
+        return {
+            "contract_version": "hybrid_provider_process_inventory_v2",
+            "provider": provider,
+            "observer_contract": f"hybrid_{provider}_cleanup_observer_v1",
+            "release_status": "verified",
+            "termination_reason": "completed",
+            "lineage": kwargs["lineage"],
+            "provider_lease_identity": provider_identity,
+            "predecessor_sha256": kwargs["predecessor_sha256"],
+            "provider_result_sha256": kwargs["provider_result_sha256"],
+            "provider_processes_after": [],
+            "helper_processes_after": [],
+            "orphan_descendant_pids": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "source_cleanup_evidence": {"status": "verified"},
+        }
+
+    monkeypatch.setattr(
+        workflow_worker,
+        "_observe_hybrid_omni_cleanup",
+        lambda result, **kwargs: observed_inventory("omni", **kwargs),
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.observe_hybrid_qwen_cleanup",
+        lambda receipt, **kwargs: observed_inventory("qwen", **kwargs),
+    )
 
     current = build_learning_pipeline_initial_worker_request(
         learning_pipeline_mode="hybrid_v1_1",
@@ -2726,6 +2865,12 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
     payload_hashes: list[str] = []
     for _ in range(3):
         task_kinds.append(current["task_kind"])
+        current["payload"]["_hybrid_supervisor"] = {
+            "contract_version": "hybrid_worker_supervisor_context_v1",
+            "worker_id": "worker-hybrid-chain",
+            "provider_lease_path": str(tmp_path / "vista-lease.json"),
+            "lineage": lineage,
+        }
         response = workflow_worker.execute_learning_stage_worker_task(
             current["task_kind"], current["payload"]
         )
@@ -2789,27 +2934,16 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     )
     from app.learn.hybrid.vista_refinement import build_vista_requests, validate_vista_proposal
     from tests.test_learn_hybrid_vista_refinement import _authoritative_inputs
-    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
 
     fusion, bundle, inventory, bindings, receipt = _authoritative_inputs()
     request = build_vista_requests(fusion, bundle, omni_inventory=inventory,
         qwen_bindings=bindings, qwen_cleanup_receipt=receipt,
         expected_workflow_revision=bundle["workflow_revision"])[0]
 
-    vista_cleanup_receipt = release_hybrid_provider(
-        "vista",
-        process_inventory={
-            "contract_version": "hybrid_provider_process_inventory_v1",
-            "provider": "vista",
-            "release_status": "verified",
-            "termination_reason": "completed",
-            "provider_processes_after": [],
-            "helper_processes_after": [],
-            "orphan_descendant_pids": [],
-            "active_listeners_after": [],
-            "lease_files_after": [],
-            "source_cleanup_evidence": {"status": "verified"},
-        },
+    lineage = _hybrid_supervised_lineage(
+        run_id="run-hybrid-review",
+        workflow_revision=11,
+        operation_id="operation-hybrid-review",
     )
     orchestration = {
         "run_id": "run-hybrid-review",
@@ -2826,7 +2960,6 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
             "contract_version": "hybrid_capture_bundle_v1",
             "content_sha256": "3" * 64,
         },
-        "vista_cleanup_receipt": vista_cleanup_receipt,
     }
     bbox = request["candidate_bbox_ref"]["xyxy"]
     raw = {"status":"PROPOSED", "candidate_id":request["candidate_id"], "capture_id":request["capture_id"],
@@ -2836,6 +2969,22 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     proposal = validate_vista_proposal(request=request, raw_result=raw)
     vista_result = {"candidate_id": request["candidate_id"], "hybrid_vista_request": deepcopy(request),
         "hybrid_vista_proposal": proposal}
+    calibration_sequence = {
+        "contract_version": "learning_calibration_sequence_result_v1",
+        "status": "completed",
+        "remaining_count": 0,
+        "completed_count": 1,
+        "hybrid_vista_requests": [request],
+        "hybrid_vista_results": [vista_result],
+        "qwen_cleanup_receipt": receipt,
+    }
+    vista_cleanup_receipt = _observed_hybrid_cleanup_receipt(
+        "vista",
+        lineage=lineage,
+        predecessor=orchestration["fusion_result"],
+        provider_result=calibration_sequence,
+    )
+    orchestration["vista_cleanup_receipt"] = vista_cleanup_receipt
     response = {
         "contract_version": "learning_hybrid_managed_stage_result_v1",
         "learning_pipeline_mode": "hybrid_v1_1",
@@ -2845,19 +2994,12 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
             "success": True,
             "data": {
                 "result": {
-                    "calibration_sequence": {
-                        "contract_version": "learning_calibration_sequence_result_v1",
-                        "status": "completed",
-                        "remaining_count": 0,
-                        "completed_count": 1,
-                        "hybrid_vista_requests": [request],
-                        "hybrid_vista_results": [vista_result],
-                        "qwen_cleanup_receipt": receipt,
-                    }
+                    "calibration_sequence": calibration_sequence
                 }
             },
         },
         "orchestration": orchestration,
+        "supervisor_lineage": lineage,
     }
 
     decision = _interpret_hybrid_post_calibration_worker_result(
@@ -2873,9 +3015,15 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     assert decision["next_worker"]["payload"]["qwen_cleanup_receipt"] == receipt
     assert decision["next_worker"]["payload"]["vista_cleanup_receipt"] == vista_cleanup_receipt
 
+    review_payload = decision["next_worker"]["payload"]
+    review_payload["_hybrid_supervisor"] = {
+        "contract_version": "hybrid_worker_supervisor_context_v1",
+        "worker_id": "worker-hybrid-review",
+        "provider_lease_path": "unused-review-lease.json",
+        "lineage": lineage,
+    }
     review_response = workflow_worker.execute_learning_stage_worker_task(
-        decision["next_worker"]["task_kind"],
-        decision["next_worker"]["payload"],
+        decision["next_worker"]["task_kind"], review_payload
     )
     review_decision = _interpret_hybrid_post_calibration_worker_result(
         stage="screen_understanding",
@@ -3120,13 +3268,34 @@ def test_raised_hybrid_handler_failure_is_adoptable_and_idempotently_safe_stops(
         operation_id=f"operation-{task_kind}",
         learning_pipeline_mode="hybrid_v1_1",
     )
-    orchestration: dict[str, object] = {}
+    workflow_revision = bind_state["revision"]
+    lineage = _hybrid_supervised_lineage(
+        run_id="run-stage-operation",
+        workflow_revision=workflow_revision,
+        operation_id=operation["operation_id"],
+    )
+    omni_inventory = {
+        "contract_version": "hybrid_omni_inventory_v1",
+        "items": [],
+    }
+    qwen_bindings = {
+        "contract_version": "hybrid_qwen_bindings_v1",
+        "items": [],
+    }
+    fusion_result = {
+        "contract_version": "hybrid_fusion_result_v1",
+        "items": [],
+    }
+    orchestration: dict[str, object] = {
+        "workflow_revision": workflow_revision,
+        "omni_inventory": omni_inventory,
+        "qwen_bindings": qwen_bindings,
+        "fusion_result": fusion_result,
+    }
     if task_kind in {
         "panel_learning_hybrid_qwen_binding",
         "panel_learning_calibration_sequence",
     }:
-        from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
-
         previous_provider = (
             "omni"
             if task_kind == "panel_learning_hybrid_qwen_binding"
@@ -3137,23 +3306,23 @@ def test_raised_hybrid_handler_failure_is_adoptable_and_idempotently_safe_stops(
             if previous_provider == "omni"
             else "qwen_gpu_cleanup_receipt"
         )
-        orchestration[receipt_name] = release_hybrid_provider(
+        predecessor = (
+            {"contract_version": "hybrid_capture_bundle_v1", "items": []}
+            if previous_provider == "omni"
+            else omni_inventory
+        )
+        provider_result = (
+            omni_inventory if previous_provider == "omni" else qwen_bindings
+        )
+        orchestration[receipt_name] = _observed_hybrid_cleanup_receipt(
             previous_provider,
-            process_inventory={
-                "contract_version": "hybrid_provider_process_inventory_v1",
-                "provider": previous_provider,
-                "release_status": "verified",
-                "termination_reason": "completed",
-                "provider_processes_after": [],
-                "helper_processes_after": [],
-                "orphan_descendant_pids": [],
-                "active_listeners_after": [],
-                "lease_files_after": [],
-                "source_cleanup_evidence": {"status": "verified"},
-            },
+            lineage=lineage,
+            predecessor=predecessor,
+            provider_result=provider_result,
         )
     payload = {
         "learning_pipeline_mode": "hybrid_v1_1",
+        "workflow_revision": workflow_revision,
         "_hybrid_orchestration": orchestration,
     }
     started = registry.start(

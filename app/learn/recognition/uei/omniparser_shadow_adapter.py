@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import psutil
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ from app.learn.recognition.uei.provider_adapters import (
     ProviderRunBudget,
     RestrictedCaptureLease,
 )
+from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -31,6 +34,7 @@ PROVIDER_ID = "local.runtime/omniparser"
 PROFILE_ID = "local.runtime/omniparser/shadow-v2"
 PROVIDER_VERSION = "v2.0.1"
 _SECRET_MARKERS = ("authorization:", "bearer ", "api_key", "password=", "secret=", "sk-")
+OMNI_CLEANUP_OBSERVATION_ROOT = ROOT / "logs" / "hybrid-omni-cleanup"
 
 
 class OmniParserShadowAdapterError(AdapterFailure):
@@ -189,6 +193,7 @@ class OmniParserShadowAdapter:
             f"{PROVIDER_VERSION}+benchmark-cold1-warm3" if self._benchmark_mode else PROVIDER_VERSION
         )
         self.last_benchmark: dict[str, object] | None = None
+        self._cleanup_observation: dict[str, object] | None = None
 
     def invoke(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
@@ -208,6 +213,12 @@ class OmniParserShadowAdapter:
             raise OmniParserShadowAdapterError("runtime_cancelled")
         if resource_lease is None:
             raise OmniParserShadowAdapterError("runtime_resource_rejected")
+        self._cleanup_observation = {
+            "process_identity": None,
+            "descendant_identities": [],
+            "inventory_observable": True,
+        }
+        lease_path = getattr(resource_lease, "_path", None)
         try:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise OmniParserShadowAdapterError("runtime_cancelled")
@@ -217,7 +228,18 @@ class OmniParserShadowAdapter:
                 cancellation_event=cancellation_event,
             )
         finally:
-            resource_lease.release()
+            cleanup_status = "verified"
+            try:
+                resource_lease.release()
+            except BaseException:
+                cleanup_status = "failed"
+                raise
+            finally:
+                self._persist_cleanup_observation(
+                    invocation_id,
+                    lease_path=lease_path if isinstance(lease_path, Path) else None,
+                    cleanup_status=cleanup_status,
+                )
 
     def _validate_preflight(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget, invocation_id: str,
@@ -265,6 +287,7 @@ class OmniParserShadowAdapter:
                 if not spawn_allowed:
                     raise OmniParserShadowAdapterError("runtime_cancelled")
                 process = spawned_process
+                self._capture_cleanup_process_tree(process)
                 deadline = time.monotonic() + budget.timeout_ms / 1000
                 while process.poll() is None:
                     if cancellation_event is not None and cancellation_event.is_set():
@@ -287,7 +310,103 @@ class OmniParserShadowAdapter:
                 return output
             finally:
                 if process is not None and process.returncode is None:
+                    self._capture_cleanup_process_tree(process)
                     self._terminate_tree(process)
+                if process is not None:
+                    self._capture_cleanup_process_tree(process)
+
+    def _capture_cleanup_process_tree(self, process: subprocess.Popen[bytes]) -> None:
+        observation = self._cleanup_observation
+        if not isinstance(observation, dict):
+            return
+        try:
+            parent = psutil.Process(int(process.pid))
+            identity = {
+                "pid": int(parent.pid),
+                "create_time_ns": int(round(parent.create_time() * 1_000_000_000)),
+            }
+            observation["process_identity"] = identity
+            descendants = observation.get("descendant_identities")
+            if not isinstance(descendants, list):
+                descendants = []
+            for child in parent.children(recursive=True):
+                child_identity = {
+                    "pid": int(child.pid),
+                    "create_time_ns": int(round(child.create_time() * 1_000_000_000)),
+                }
+                if child_identity not in descendants:
+                    descendants.append(child_identity)
+            observation["descendant_identities"] = descendants
+        except psutil.NoSuchProcess:
+            return
+        except (psutil.AccessDenied, OSError, ValueError, TypeError):
+            observation["inventory_observable"] = False
+
+    def _persist_cleanup_observation(
+        self,
+        invocation_id: str,
+        *,
+        lease_path: Path | None,
+        cleanup_status: str,
+    ) -> None:
+        observation = deepcopy(self._cleanup_observation) if isinstance(self._cleanup_observation, dict) else {}
+        process_identity = observation.get("process_identity")
+        descendant_identities = observation.get("descendant_identities")
+        provider_after, descendants_after = [], []
+        observable = observation.get("inventory_observable") is True
+        for identity, target in (
+            (process_identity, provider_after),
+            *((item, descendants_after) for item in descendant_identities or []),
+        ):
+            if not isinstance(identity, dict):
+                observable = False
+                continue
+            status = _probe_process_identity(identity)
+            if status == "exact_live":
+                target.append(identity)
+            elif status == "unobservable":
+                observable = False
+        listener_identities = [
+            identity
+            for identity in [process_identity, *(descendant_identities or [])]
+            if isinstance(identity, dict)
+        ]
+        active_listeners, listeners_observable = _active_listener_endpoints(
+            listener_identities
+        )
+        observable = observable and listeners_observable
+        lease_files = [str(lease_path)] if lease_path is not None and lease_path.exists() else []
+        verified = (
+            cleanup_status == "verified"
+            and isinstance(process_identity, dict)
+            and observable
+            and not provider_after
+            and not descendants_after
+            and not active_listeners
+            and not lease_files
+        )
+        document = seal_immutable({
+            "contract_version": "omniparser_invocation_cleanup_observation_v1",
+            "provider_invocation_id": invocation_id,
+            "process_identity": process_identity,
+            "descendant_identities": descendant_identities or [],
+            "provider_processes_after": provider_after,
+            "orphan_descendant_identities": descendants_after,
+            "active_listeners_after": active_listeners,
+            "pid_file_paths": [],
+            "lease_path": str(lease_path) if lease_path is not None else None,
+            "lease_files_after": lease_files,
+            "inventory_observable": observable,
+            "cleanup_status": "verified" if verified else "indeterminate",
+        })
+        OMNI_CLEANUP_OBSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
+        target = _cleanup_observation_path(invocation_id)
+        temporary = target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+        temporary.write_text(
+            json.dumps(document, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, target)
 
     @staticmethod
     def _terminate_tree(process: subprocess.Popen[bytes]) -> None:
@@ -342,6 +461,103 @@ class OmniParserShadowAdapter:
                 tree_failed = True
         if tree_failed:
             raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+
+
+def load_omniparser_invocation_cleanup_observation(
+    invocation_id: str,
+) -> dict[str, object]:
+    path = _cleanup_observation_path(invocation_id)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed") from error
+    expected_fields = {
+        "contract_version", "provider_invocation_id", "process_identity",
+        "descendant_identities", "provider_processes_after",
+        "orphan_descendant_identities", "active_listeners_after", "pid_file_paths",
+        "lease_path", "lease_files_after", "inventory_observable", "cleanup_status",
+        "content_sha256",
+    }
+    if (
+        not isinstance(document, dict)
+        or set(document) != expected_fields
+        or document.get("content_sha256") != content_sha256(document)
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    if (
+        document.get("contract_version")
+        != "omniparser_invocation_cleanup_observation_v1"
+        or document.get("provider_invocation_id") != invocation_id
+        or document.get("cleanup_status") not in {"verified", "indeterminate"}
+        or not isinstance(document.get("inventory_observable"), bool)
+        or any(
+            not isinstance(document.get(field), list)
+            for field in (
+                "descendant_identities", "provider_processes_after",
+                "orphan_descendant_identities", "active_listeners_after",
+                "pid_file_paths", "lease_files_after",
+            )
+        )
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    return deepcopy(document)
+
+
+def _cleanup_observation_path(invocation_id: str) -> Path:
+    if not isinstance(invocation_id, str) or not invocation_id.startswith("invocation/"):
+        raise OmniParserShadowAdapterError("runtime_invalid_input")
+    safe_name = sha256(invocation_id.encode("utf-8")).hexdigest()
+    return OMNI_CLEANUP_OBSERVATION_ROOT / f"{safe_name}.json"
+
+
+def _probe_process_identity(identity: dict[str, object]) -> str:
+    try:
+        process = psutil.Process(int(identity["pid"]))
+        if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+            return "proven_absent"
+        current = {
+            "pid": int(process.pid),
+            "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+        }
+    except psutil.NoSuchProcess:
+        return "proven_absent"
+    except (psutil.AccessDenied, OSError, ValueError, TypeError, KeyError):
+        return "unobservable"
+    return "exact_live" if current == identity else "pid_reused"
+
+
+def _active_listener_endpoints(
+    identities: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], bool]:
+    expected_by_pid = {
+        int(identity["pid"]): identity
+        for identity in identities
+        if isinstance(identity.get("pid"), int)
+    }
+    if not expected_by_pid:
+        return [], True
+    try:
+        connections = psutil.net_connections(kind="tcp")
+    except (psutil.AccessDenied, OSError):
+        return [], False
+    listeners: list[dict[str, object]] = []
+    for connection in connections:
+        pid = getattr(connection, "pid", None)
+        if pid not in expected_by_pid or connection.status != psutil.CONN_LISTEN:
+            continue
+        if _probe_process_identity(expected_by_pid[int(pid)]) != "exact_live":
+            continue
+        address = getattr(connection, "laddr", None)
+        if not address:
+            continue
+        listeners.append(
+            {
+                "pid": int(pid),
+                "host": str(getattr(address, "ip", address[0])),
+                "port": int(getattr(address, "port", address[1])),
+            }
+        )
+    return listeners, True
 
 
 def _offline_environment(cache_path: Path) -> dict[str, str]:

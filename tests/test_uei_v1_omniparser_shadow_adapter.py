@@ -132,6 +132,59 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     assert not calls[0]["output_path"].exists()
 
 
+def test_adapter_persists_exact_invocation_cleanup_observation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+
+    process = FakeProcess(
+        payload={"items": [], "duration_ms": 2, "resource_units": 1}
+    )
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "cleanup")
+    monkeypatch.setattr(adapter_module.subprocess, "Popen", _fake_popen(process, calls))
+
+    def capture_exact_identity(self, spawned) -> None:
+        self._cleanup_observation["process_identity"] = {
+            "pid": spawned.pid,
+            "create_time_ns": 123_000_000_000,
+        }
+        self._cleanup_observation["descendant_identities"] = [
+            {"pid": 124, "create_time_ns": 124_000_000_000}
+        ]
+
+    monkeypatch.setattr(
+        adapter_module.OmniParserShadowAdapter,
+        "_capture_cleanup_process_tree",
+        capture_exact_identity,
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_probe_process_identity",
+        lambda identity: "proven_absent",
+    )
+    monkeypatch.setattr(adapter_module.psutil, "net_connections", lambda kind: [])
+
+    adapter_module.OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke(
+        capture=_capture(tmp_path),
+        budget=_budget(),
+        invocation_id="invocation/cleanup-observed",
+    )
+    observation = adapter_module.load_omniparser_invocation_cleanup_observation(
+        "invocation/cleanup-observed"
+    )
+
+    assert observation["cleanup_status"] == "verified"
+    assert observation["process_identity"]["pid"] == 123
+    assert observation["descendant_identities"][0]["pid"] == 124
+    assert observation["provider_processes_after"] == []
+    assert observation["orphan_descendant_identities"] == []
+    assert observation["active_listeners_after"] == []
+    assert observation["pid_file_paths"] == []
+    assert observation["lease_files_after"] == []
+
+
 @pytest.mark.parametrize("payload", [
     {"items": [], "duration_ms": 1, "resource_units": 0, "capture_id": "forged"},
     {"items": [{"source_item_id": "item/1", "kind": "text", "safe_text": "Authorization: Bearer token",

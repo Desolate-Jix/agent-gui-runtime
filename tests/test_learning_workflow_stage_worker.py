@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from copy import deepcopy
 import multiprocessing
 import os
 import subprocess
@@ -16,6 +18,116 @@ from app.learn.workflow_worker import (
     LearningStageWorkerRegistry,
     execute_learning_stage_worker_task,
 )
+
+
+def _hybrid_lineage(
+    *,
+    run_id: str,
+    task_kind: str,
+    operation_id: str | None = None,
+    stage: str = "screen_understanding",
+) -> dict:
+    operation = operation_id or f"operation-{run_id}"
+    execution_id = hashlib.sha256(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "workflow_revision": 7,
+                "operation_id": operation,
+                "stage": stage,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "run_id": run_id,
+        "workflow_revision": 7,
+        "operation_id": operation,
+        "stage": stage,
+        "stage_execution_id": execution_id,
+    }
+
+
+def _hybrid_supervisor(*, run_id: str, task_kind: str, lease_path: Path) -> dict:
+    return {
+        "contract_version": "hybrid_worker_supervisor_context_v1",
+        "worker_id": f"worker-{run_id}",
+        "provider_lease_path": str(lease_path),
+        "lineage": _hybrid_lineage(run_id=run_id, task_kind=task_kind),
+    }
+
+
+def _hybrid_cleanup_inventory(
+    provider: str,
+    *,
+    lineage: dict,
+    predecessor_sha256: str,
+    provider_result_sha256: str,
+    termination_reason: str = "completed",
+) -> dict:
+    process_identity = {
+        "pid": 4100 + len(provider),
+        "create_time_ns": 100_000_000_000,
+    }
+    if provider == "omni":
+        provider_identity = {
+            "provider_invocation_id": "invocation/controlled-omni",
+            "provider_receipt_ref": {
+                "id": "receipt/controlled-omni",
+                "content_sha256": "a" * 64,
+            },
+            "process_identity": process_identity,
+        }
+    elif provider == "qwen":
+        provider_identity = {
+            "lease_id": "controlled-qwen-lease",
+            "incarnation_id": "qwen-incarnation",
+            "profile_id": "qwen-profile",
+            "server_process_identity": process_identity,
+        }
+    else:
+        provider_identity = {
+            "incarnation_id": "vista-incarnation",
+            "profile_id": "vista-profile",
+            "process_identities": [process_identity],
+        }
+    return {
+        "contract_version": "hybrid_provider_process_inventory_v2",
+        "provider": provider,
+        "observer_contract": f"hybrid_{provider}_cleanup_observer_v1",
+        "release_status": "verified",
+        "termination_reason": termination_reason,
+        "lineage": lineage,
+        "provider_lease_identity": provider_identity,
+        "predecessor_sha256": predecessor_sha256,
+        "provider_result_sha256": provider_result_sha256,
+        "provider_processes_after": [],
+        "helper_processes_after": [],
+        "orphan_descendant_pids": [],
+        "active_listeners_after": [],
+        "lease_files_after": [],
+        "source_cleanup_evidence": {"status": "verified"},
+    }
+
+
+def _hybrid_cleanup_receipt(
+    provider: str,
+    *,
+    lineage: dict,
+    predecessor: dict,
+    provider_result: dict,
+) -> dict:
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    inventory = _hybrid_cleanup_inventory(
+        provider,
+        lineage=lineage,
+        predecessor_sha256=content_sha256(predecessor),
+        provider_result_sha256=content_sha256(provider_result),
+    )
+    return release_hybrid_provider(provider, process_inventory=lambda _: inventory)
 
 
 @pytest.fixture(autouse=True)
@@ -2238,6 +2350,7 @@ def test_hybrid_registered_handler_chain_resolves_actual_callables() -> None:
 )
 def test_hybrid_next_provider_guard_runs_before_handler_or_model_acquisition(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     task_kind: str,
     required_receipt: str,
 ) -> None:
@@ -2261,11 +2374,17 @@ def test_hybrid_next_provider_guard_runs_before_handler_or_model_acquisition(
         lambda *args, **kwargs: calls.append("handler") or {},
         raising=False,
     )
+    run_id = "run-guard"
     response = workflow_worker.execute_learning_stage_worker_task(
         task_kind,
         {
             "learning_pipeline_mode": "hybrid_v1_1",
-            "_hybrid_orchestration": {"run_id": "run-guard"},
+            "_hybrid_orchestration": {"run_id": run_id},
+            "_hybrid_supervisor": _hybrid_supervisor(
+                run_id=run_id,
+                task_kind=task_kind,
+                lease_path=tmp_path / "vista-lease.json",
+            ),
         },
     )
     assert response["outcome"] == "failed"
@@ -2274,11 +2393,70 @@ def test_hybrid_next_provider_guard_runs_before_handler_or_model_acquisition(
     assert "handler" not in calls
 
 
-def test_hybrid_omni_completion_publishes_verified_cleanup_receipt(
+def test_hybrid_cross_run_cleanup_receipt_replay_rejects_before_acquisition(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn import workflow_worker
 
+    task_kind = "panel_learning_hybrid_qwen_binding"
+    active_run = "run-active-lineage"
+    replayed_lineage = _hybrid_lineage(
+        run_id="run-replayed-lineage",
+        task_kind=task_kind,
+    )
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    capture_bundle = {"contract_version": "hybrid_capture_bundle_v1", "items": []}
+    replayed_receipt = _hybrid_cleanup_receipt(
+        "omni",
+        lineage=replayed_lineage,
+        predecessor=capture_bundle,
+        provider_result=omni_inventory,
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *args, **kwargs: calls.append("model"),
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_hybrid_qwen_task",
+        lambda *args, **kwargs: calls.append("handler") or {},
+    )
+
+    response = workflow_worker.execute_learning_stage_worker_task(
+        task_kind,
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": {
+                "omni_inventory": omni_inventory,
+                "omni_cleanup_receipt": replayed_receipt,
+            },
+            "_hybrid_supervisor": _hybrid_supervisor(
+                run_id=active_run,
+                task_kind=task_kind,
+                lease_path=tmp_path / "unused-vista-lease.json",
+            ),
+        },
+    )
+
+    assert response["outcome"] == "failed"
+    assert "lineage mismatch" in response["result"]["failure_reason"]
+    assert calls == []
+
+
+def test_hybrid_omni_completion_publishes_verified_cleanup_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    run_id = "run-omni-clean"
+    task_kind = "panel_learning_hybrid_omni_discovery"
+    capture_ref = {"id": "capture/omni-clean", "content_sha256": "2" * 64}
+    inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
     monkeypatch.setattr(workflow_worker, "_ensure_learning_stage_model_ready", lambda *a, **k: None)
     monkeypatch.setattr(
         workflow_worker,
@@ -2286,17 +2464,34 @@ def test_hybrid_omni_completion_publishes_verified_cleanup_receipt(
         lambda *a, **k: {
             "contract_version": "hybrid_omni_discovery_result_v1",
             "outcome": "completed",
+            "inventory": inventory,
             "provider_claim_status": "complete",
             "provider_status": "completed",
             "provider_receipt_ref": {"id": "receipt/omni", "content_sha256": "1" * 64},
             "cleanup_status": "clean",
         },
     )
+    monkeypatch.setattr(
+        workflow_worker,
+        "_observe_hybrid_omni_cleanup",
+        lambda result, **kwargs: _hybrid_cleanup_inventory(
+            "omni",
+            lineage=kwargs["lineage"],
+            predecessor_sha256=kwargs["predecessor_sha256"],
+            provider_result_sha256=content_sha256(inventory),
+        ),
+    )
     response = workflow_worker.execute_learning_stage_worker_task(
-        "panel_learning_hybrid_omni_discovery",
+        task_kind,
         {
             "learning_pipeline_mode": "hybrid_v1_1",
-            "_hybrid_orchestration": {"run_id": "run-omni-clean"},
+            "hybrid_capture_bundle_ref": capture_ref,
+            "_hybrid_orchestration": {"run_id": run_id},
+            "_hybrid_supervisor": _hybrid_supervisor(
+                run_id=run_id,
+                task_kind=task_kind,
+                lease_path=tmp_path / "vista-lease.json",
+            ),
         },
     )
     receipt = response["orchestration"]["omni_cleanup_receipt"]
@@ -2306,31 +2501,30 @@ def test_hybrid_omni_completion_publishes_verified_cleanup_receipt(
 
 def test_hybrid_vista_completion_releases_before_review_receipt(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from app.core import model_server
     from app.learn import workflow_worker
-    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+    from app.learn.recognition.uei.canonical import content_sha256
 
-    qwen_receipt = release_hybrid_provider(
+    run_id = "run-vista-clean"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(run_id=run_id, task_kind=task_kind)
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    qwen_receipt = _hybrid_cleanup_receipt(
         "qwen",
-        process_inventory={
-            "contract_version": "hybrid_provider_process_inventory_v1",
-            "provider": "qwen",
-            "release_status": "verified",
-            "termination_reason": "completed",
-            "provider_processes_after": [],
-            "helper_processes_after": [],
-            "orphan_descendant_pids": [],
-            "active_listeners_after": [],
-            "lease_files_after": [],
-            "source_cleanup_evidence": {"status": "verified"},
-        },
+        lineage=lineage,
+        predecessor=omni_inventory,
+        provider_result=qwen_bindings,
     )
     vista_lease = {
-        "contract_version": "hybrid_vista_model_lease_v1",
+        "contract_version": "hybrid_vista_model_lease_v2",
         "provider": "vista",
+        "incarnation_id": "vista-incarnation",
         "profile": {"profile_id": "vista"},
-        "expected_pids": [],
+        "process_identities": [{"pid": 4200, "create_time_ns": 100_000_000_000}],
     }
     monkeypatch.setattr(
         workflow_worker,
@@ -2338,34 +2532,44 @@ def test_hybrid_vista_completion_releases_before_review_receipt(
         lambda *a, **k: vista_lease,
     )
     monkeypatch.setattr(
+        workflow_worker, "_mark_supervised_vista_released", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
         workflow_worker,
         "run_learning_calibration_sequence",
-        lambda *a, **k: {"contract_version": "learning_calibration_sequence_result_v1"},
+        lambda *a, **k: {
+            "contract_version": "learning_calibration_sequence_result_v1",
+            "calibration_sequence": {
+                "contract_version": "learning_calibration_sequence_v1",
+                "requests": [],
+            },
+        },
     )
     monkeypatch.setattr(
         model_server,
         "release_hybrid_vista_model_lease",
-        lambda lease: {
-            "contract_version": "hybrid_provider_process_inventory_v1",
-            "provider": "vista",
-            "release_status": "verified",
-            "termination_reason": "completed",
-            "provider_processes_after": [],
-            "helper_processes_after": [],
-            "orphan_descendant_pids": [],
-            "active_listeners_after": [],
-            "lease_files_after": [],
-            "source_cleanup_evidence": {"status": "verified"},
-        },
+        lambda lease, **kwargs: _hybrid_cleanup_inventory(
+            "vista",
+            lineage=kwargs["lineage"],
+            predecessor_sha256=kwargs["predecessor_sha256"],
+            provider_result_sha256=kwargs["provider_result_sha256"],
+        ),
     )
     response = workflow_worker.execute_learning_stage_worker_task(
         "panel_learning_calibration_sequence",
         {
             "learning_pipeline_mode": "hybrid_v1_1",
             "_hybrid_orchestration": {
-                "run_id": "run-vista-clean",
+                "run_id": run_id,
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
                 "qwen_gpu_cleanup_receipt": qwen_receipt,
             },
+            "_hybrid_supervisor": _hybrid_supervisor(
+                run_id=run_id,
+                task_kind=task_kind,
+                lease_path=tmp_path / "vista-lease.json",
+            ),
         },
     )
     receipt = response["orchestration"]["vista_cleanup_receipt"]
@@ -2376,35 +2580,47 @@ def test_hybrid_vista_completion_releases_before_review_receipt(
 
 def test_hybrid_vista_handler_failure_still_releases_exact_lease(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from app.core import model_server
     from app.learn import workflow_worker
-    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+    from app.learn.recognition.uei.canonical import content_sha256
 
-    qwen_receipt = release_hybrid_provider(
+    run_id = "run-vista-failure"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(run_id=run_id, task_kind=task_kind)
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    qwen_receipt = _hybrid_cleanup_receipt(
         "qwen",
-        process_inventory={
-            "contract_version": "hybrid_provider_process_inventory_v1",
-            "provider": "qwen",
-            "release_status": "verified",
-            "termination_reason": "completed",
-            "provider_processes_after": [],
-            "helper_processes_after": [],
-            "orphan_descendant_pids": [],
-            "active_listeners_after": [],
-            "lease_files_after": [],
-            "source_cleanup_evidence": {"status": "verified"},
-        },
+        lineage=lineage,
+        predecessor=omni_inventory,
+        provider_result=qwen_bindings,
     )
+    supervisor = _hybrid_supervisor(
+        run_id=run_id,
+        task_kind=task_kind,
+        lease_path=tmp_path / "vista-lease.json",
+    )
+    vista_lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": "vista-failure-incarnation",
+        "profile": {"profile_id": "vista"},
+        "process_identities": [{"pid": 4201, "create_time_ns": 100_000_000_000}],
+    }
     monkeypatch.setattr(
         workflow_worker,
         "_ensure_learning_stage_model_ready",
-        lambda *a, **k: {
-            "contract_version": "hybrid_vista_model_lease_v1",
-            "provider": "vista",
-            "profile": {"profile_id": "vista"},
-            "expected_pids": [],
-        },
+        lambda *a, **k: (
+            workflow_worker._publish_supervised_vista_lease(
+                supervisor,
+                vista_lease,
+                predecessor_sha256=content_sha256(fusion_result),
+            )
+            or vista_lease
+        ),
     )
     monkeypatch.setattr(
         workflow_worker,
@@ -2414,27 +2630,25 @@ def test_hybrid_vista_handler_failure_still_releases_exact_lease(
     monkeypatch.setattr(
         model_server,
         "release_hybrid_vista_model_lease",
-        lambda lease: {
-            "contract_version": "hybrid_provider_process_inventory_v1",
-            "provider": "vista",
-            "release_status": "verified",
-            "termination_reason": "failure_recovery",
-            "provider_processes_after": [],
-            "helper_processes_after": [],
-            "orphan_descendant_pids": [],
-            "active_listeners_after": [],
-            "lease_files_after": [],
-            "source_cleanup_evidence": {"status": "verified"},
-        },
+        lambda lease, **kwargs: _hybrid_cleanup_inventory(
+            "vista",
+            lineage=kwargs["lineage"],
+            predecessor_sha256=kwargs["predecessor_sha256"],
+            provider_result_sha256=kwargs["provider_result_sha256"],
+            termination_reason="failure_recovery",
+        ),
     )
     response = workflow_worker.execute_learning_stage_worker_task(
         "panel_learning_calibration_sequence",
         {
             "learning_pipeline_mode": "hybrid_v1_1",
             "_hybrid_orchestration": {
-                "run_id": "run-vista-failure",
+                "run_id": run_id,
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
                 "qwen_gpu_cleanup_receipt": qwen_receipt,
             },
+            "_hybrid_supervisor": supervisor,
         },
     )
     assert response["outcome"] == "failed"
@@ -2447,22 +2661,23 @@ def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_term
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn import workflow_worker
-    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
 
-    qwen_receipt = release_hybrid_provider(
+    run_id = "run-vista-cancel"
+    operation_id = "operation-vista-cancel"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind=task_kind,
+        operation_id=operation_id,
+    )
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    qwen_receipt = _hybrid_cleanup_receipt(
         "qwen",
-        process_inventory={
-            "contract_version": "hybrid_provider_process_inventory_v1",
-            "provider": "qwen",
-            "release_status": "verified",
-            "termination_reason": "completed",
-            "provider_processes_after": [],
-            "helper_processes_after": [],
-            "orphan_descendant_pids": [],
-            "active_listeners_after": [],
-            "lease_files_after": [],
-            "source_cleanup_evidence": {"status": "verified"},
-        },
+        lineage=lineage,
+        predecessor=omni_inventory,
+        provider_result=qwen_bindings,
     )
     monkeypatch.setattr(
         workflow_worker,
@@ -2490,13 +2705,16 @@ def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_term
         },
     )
     started = registry.start(
-        run_id="run-vista-cancel",
+        run_id=run_id,
         stage="screen_understanding",
-        operation_id="operation-vista-cancel",
-        task_kind="panel_learning_calibration_sequence",
+        operation_id=operation_id,
+        task_kind=task_kind,
         payload={
             "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
             "_hybrid_orchestration": {
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
                 "qwen_gpu_cleanup_receipt": qwen_receipt,
             },
         },
@@ -2504,15 +2722,227 @@ def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_term
     process = registry._records[started["worker_id"]]["process"]
 
     cancelled = registry.cancel_by_operation(
-        run_id="run-vista-cancel",
+        run_id=run_id,
         stage="screen_understanding",
-        operation_id="operation-vista-cancel",
+        operation_id=operation_id,
     )
 
     assert cancelled["backend_compute_termination"] == "terminated"
     assert cancelled["cooperative_cleanup"]["cleanup_status"] == "not_acquired"
     assert process.terminated is False
     assert process.killed is False
+
+
+def test_hybrid_vista_outer_worker_death_remains_nonterminal_until_exact_lease_is_clean(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker
+
+    run_id = "run-vista-outer-death"
+    operation_id = "operation-vista-outer-death"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind=task_kind,
+        operation_id=operation_id,
+    )
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    qwen_receipt = _hybrid_cleanup_receipt(
+        "qwen",
+        lineage=lineage,
+        predecessor=omni_inventory,
+        provider_result=qwen_bindings,
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id=run_id,
+        stage="screen_understanding",
+        operation_id=operation_id,
+        task_kind=task_kind,
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "_hybrid_orchestration": {
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
+                "qwen_gpu_cleanup_receipt": qwen_receipt,
+            },
+        },
+    )
+    record = registry._records[started["worker_id"]]
+    supervisor = record["process"].args[2]["_hybrid_supervisor"]
+    model_lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": "vista-outer-death-incarnation",
+        "profile": {"profile_id": "vista"},
+        "process_identities": [
+            {"pid": 6123, "create_time_ns": 612_300_000_000}
+        ],
+    }
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    workflow_worker._publish_supervised_vista_lease(
+        supervisor,
+        model_lease,
+        predecessor_sha256=content_sha256(fusion_result),
+    )
+    record["process"].alive = False
+    record["process"].exitcode = -9
+    observations = [
+        _hybrid_cleanup_inventory(
+            "vista",
+            lineage=lineage,
+            predecessor_sha256=content_sha256(fusion_result),
+            provider_result_sha256="f" * 64,
+        ),
+        _hybrid_cleanup_inventory(
+            "vista",
+            lineage=lineage,
+            predecessor_sha256=content_sha256(fusion_result),
+            provider_result_sha256="f" * 64,
+        ),
+    ]
+    observations[0]["release_status"] = "failed"
+    observations[0]["provider_processes_after"] = [
+        deepcopy(model_lease["process_identities"][0])
+    ]
+    observations[0]["source_cleanup_evidence"] = {"status": "failed"}
+
+    def release_observed(lease, **kwargs):
+        observation = observations.pop(0)
+        observation["provider_result_sha256"] = kwargs["provider_result_sha256"]
+        return observation
+
+    monkeypatch.setattr(
+        model_server,
+        "release_hybrid_vista_model_lease",
+        release_observed,
+    )
+
+    pending = registry.status(
+        worker_id=started["worker_id"],
+        run_id=run_id,
+        operation_id=operation_id,
+    )
+    assert pending["status"] == "reconciliation_pending"
+    assert registry._records[started["worker_id"]].get("worker_result") is None
+
+    recovered_registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    terminal = recovered_registry.status(
+        worker_id=started["worker_id"],
+        run_id=run_id,
+        operation_id=operation_id,
+    )
+    assert terminal["status"] == "failed"
+    lease_document = json.loads(
+        Path(record["provider_lease_path"]).read_text(encoding="utf-8")
+    )
+    assert lease_document["state"] == "released"
+    assert lease_document["cleanup_receipt"]["cleanup_status"] == "verified"
+
+
+def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    run_id = "run-vista-cancel-acquired"
+    operation_id = "operation-vista-cancel-acquired"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind=task_kind,
+        operation_id=operation_id,
+    )
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        model_request_cancel=lambda **kwargs: {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "request_not_active",
+            "model_service_compute_termination": "request_not_active",
+        },
+    )
+    started = registry.start(
+        run_id=run_id,
+        stage="screen_understanding",
+        operation_id=operation_id,
+        task_kind=task_kind,
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "_hybrid_orchestration": {
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
+                "qwen_gpu_cleanup_receipt": _hybrid_cleanup_receipt(
+                    "qwen",
+                    lineage=lineage,
+                    predecessor=omni_inventory,
+                    provider_result=qwen_bindings,
+                ),
+            },
+        },
+    )
+    record = registry._records[started["worker_id"]]
+    supervisor = record["process"].args[2]["_hybrid_supervisor"]
+    model_lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": "vista-cancel-incarnation",
+        "profile": {"profile_id": "vista"},
+        "process_identities": [
+            {"pid": 7123, "create_time_ns": 712_300_000_000}
+        ],
+    }
+    workflow_worker._publish_supervised_vista_lease(
+        supervisor,
+        model_lease,
+        predecessor_sha256=content_sha256(fusion_result),
+    )
+    monkeypatch.setattr(workflow_worker, "_HYBRID_VISTA_CLEANUP_WAIT_SECONDS", 0.0)
+    monkeypatch.setattr(
+        model_server,
+        "release_hybrid_vista_model_lease",
+        lambda lease, **kwargs: _hybrid_cleanup_inventory(
+            "vista",
+            lineage=kwargs["lineage"],
+            predecessor_sha256=kwargs["predecessor_sha256"],
+            provider_result_sha256=kwargs["provider_result_sha256"],
+            termination_reason="cancellation_recovery",
+        ),
+    )
+
+    cancelled = registry.cancel_by_operation(
+        run_id=run_id,
+        stage="screen_understanding",
+        operation_id=operation_id,
+    )
+
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["backend_compute_termination"] == "terminated"
+    assert cancelled["model_service_compute_termination"] == "terminated"
+    assert record["process"].terminated is True
+    lease_document = json.loads(
+        Path(record["provider_lease_path"]).read_text(encoding="utf-8")
+    )
+    assert lease_document["state"] == "released"
 
 
 def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(

@@ -16,6 +16,7 @@ from app.learn.calibration_sequence import (
     LEARNING_CALIBRATION_SEQUENCE_REQUEST_CONTRACT_VERSION,
 )
 from app.learn.hybrid.gpu_lifecycle import assert_next_provider_safe_to_start
+from app.learn.recognition.uei.canonical import content_sha256
 from app.learn.workflow_continuation import (
     LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION,
     interpret_learning_stage_worker_result,
@@ -1407,7 +1408,12 @@ def _interpret_hybrid_post_calibration_worker_result(
             "Hybrid calibration lost VISTA cleanup receipt"
         )
     try:
-        assert_next_provider_safe_to_start(vista_cleanup_receipt, "review")
+        assert_next_provider_safe_to_start(
+            vista_cleanup_receipt,
+            "review",
+            expected_lineage=response.get("supervisor_lineage"),
+            expected_provider_result_sha256=content_sha256(sequence),
+        )
     except RuntimeError as error:
         raise LearningWorkflowStageOperationError(str(error)) from error
     payload = {

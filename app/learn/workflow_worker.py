@@ -34,10 +34,12 @@ from app.learn.workflow_tasks.hybrid_qwen import (
 from app.learn.workflow_tasks.hybrid_review import (
     run_hybrid_review_projection_task,
 )
-from app.learn.recognition.uei.canonical import seal_immutable
+from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 from app.learn.hybrid.gpu_lifecycle import (
     assert_next_provider_safe_to_start,
     release_hybrid_provider,
+    validate_hybrid_cleanup_receipt,
+    validate_hybrid_lineage,
 )
 from app.learn.workflow_tasks.model_review import run_model_review_task
 from app.learn.workflow_tasks.observe import run_observe_task
@@ -120,6 +122,14 @@ HYBRID_STAGE_HANDLER_REGISTRY = {
         "previous_cleanup_receipt": "vista_cleanup_receipt",
     },
 }
+HYBRID_LIFECYCLE_COMPONENT_REGISTRY = {
+    "start_guard": ("worker", "_assert_hybrid_provider_start_guard"),
+    "omni_cleanup_observer": ("worker", "_observe_hybrid_omni_cleanup"),
+    "qwen_cleanup_observer": ("model_server", "observe_hybrid_qwen_cleanup"),
+    "vista_cleanup_observer": ("model_server", "release_hybrid_vista_model_lease"),
+    "supervisor_reconciliation": ("worker", "_reconcile_supervised_vista_record"),
+    "review_guard": ("worker", "_assert_hybrid_provider_start_guard"),
+}
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
 _HYBRID_VISTA_CLEANUP_WAIT_SECONDS = 35.0
@@ -156,6 +166,10 @@ def resolve_hybrid_stage_handler(task_kind: str) -> Callable[..., Any]:
 
 
 def hybrid_registered_handler_chain_ready() -> bool:
+    return bool(hybrid_registered_lifecycle_status()["ready"])
+
+
+def hybrid_registered_lifecycle_status() -> dict[str, Any]:
     expected_lifecycle = {
         "panel_learning_hybrid_omni_discovery": ("omni", None),
         "panel_learning_hybrid_qwen_binding": ("qwen", "omni_cleanup_receipt"),
@@ -163,8 +177,26 @@ def hybrid_registered_handler_chain_ready() -> bool:
         "panel_learning_calibration_sequence": ("vista", "qwen_gpu_cleanup_receipt"),
         "panel_learning_hybrid_review_projection": ("review", "vista_cleanup_receipt"),
     }
+    expected_components = {
+        "start_guard": ("worker", "_assert_hybrid_provider_start_guard"),
+        "omni_cleanup_observer": ("worker", "_observe_hybrid_omni_cleanup"),
+        "qwen_cleanup_observer": ("model_server", "observe_hybrid_qwen_cleanup"),
+        "vista_cleanup_observer": ("model_server", "release_hybrid_vista_model_lease"),
+        "supervisor_reconciliation": ("worker", "_reconcile_supervised_vista_record"),
+        "review_guard": ("worker", "_assert_hybrid_provider_start_guard"),
+    }
+    components: dict[str, bool] = {}
+    for component, (owner, function_name) in expected_components.items():
+        configured = HYBRID_LIFECYCLE_COMPONENT_REGISTRY.get(component)
+        if owner == "worker":
+            resolved = globals().get(function_name)
+        else:
+            from app.core import model_server
+
+            resolved = getattr(model_server, function_name, None)
+        components[component] = configured == (owner, function_name) and callable(resolved)
     try:
-        return set(HYBRID_STAGE_HANDLER_REGISTRY) == set(expected_lifecycle) and all(
+        handlers_ready = set(HYBRID_STAGE_HANDLER_REGISTRY) == set(expected_lifecycle) and all(
             callable(resolve_hybrid_stage_handler(task_kind))
             and (
                 HYBRID_STAGE_HANDLER_REGISTRY[task_kind].get("provider"),
@@ -176,12 +208,21 @@ def hybrid_registered_handler_chain_ready() -> bool:
             for task_kind, lifecycle in expected_lifecycle.items()
         )
     except LearningStageWorkerError:
-        return False
+        handlers_ready = False
+    components["handlers"] = handlers_ready
+    return {
+        "contract_version": "hybrid_registered_lifecycle_status_v1",
+        "ready": all(components.values()),
+        "components": components,
+    }
 
 
 def _assert_hybrid_provider_start_guard(
     task_kind: str,
     orchestration: object,
+    *,
+    supervisor_lineage: object,
+    execution_payload: dict[str, Any],
 ) -> None:
     spec = HYBRID_STAGE_HANDLER_REGISTRY.get(task_kind)
     if not isinstance(spec, dict):
@@ -196,70 +237,187 @@ def _assert_hybrid_provider_start_guard(
             f"{receipt_name} is required before Hybrid provider start"
         )
     try:
+        expected_result_sha256 = _hybrid_previous_provider_result_sha256(
+            task_kind,
+            orchestration=orchestration,
+            execution_payload=execution_payload,
+        )
         assert_next_provider_safe_to_start(
             orchestration[str(receipt_name)],
             str(spec.get("provider") or ""),
+            expected_lineage=validate_hybrid_lineage(supervisor_lineage),
+            expected_provider_result_sha256=expected_result_sha256,
         )
     except (TypeError, ValueError, RuntimeError) as error:
         raise LearningStageWorkerError(str(error)) from error
 
 
-def _verified_hybrid_process_inventory(
-    provider: str,
-    source_cleanup_evidence: dict[str, Any],
+def _hybrid_previous_provider_result_sha256(
+    task_kind: str,
+    *,
+    orchestration: object,
+    execution_payload: dict[str, Any],
+) -> str:
+    context = orchestration if isinstance(orchestration, dict) else {}
+    if task_kind == "panel_learning_hybrid_qwen_binding":
+        value = context.get("omni_inventory")
+    elif task_kind == "panel_learning_calibration_sequence":
+        value = context.get("qwen_bindings")
+    elif task_kind == "panel_learning_hybrid_review_projection":
+        value = execution_payload.get("calibration_sequence")
+    else:
+        raise LearningStageWorkerError(
+            f"Hybrid provider predecessor is undefined for {task_kind}"
+        )
+    if not isinstance(value, dict):
+        raise LearningStageWorkerError(
+            "Hybrid previous provider result is unavailable"
+        )
+    return _artifact_digest(value)
+
+
+def _omni_cleanup_receipt(
+    result: object,
+    *,
+    lineage: dict[str, Any],
+    predecessor_sha256: str,
 ) -> dict[str, Any]:
+    if not isinstance(result, dict) or not isinstance(result.get("inventory"), dict):
+        raise LearningStageWorkerError("Hybrid Omni cleanup result is invalid")
+    inventory = _observe_hybrid_omni_cleanup(
+        result,
+        lineage=lineage,
+        predecessor_sha256=predecessor_sha256,
+        provider_result_sha256=_artifact_digest(result["inventory"]),
+    )
+    return release_hybrid_provider(
+        "omni",
+        process_inventory=lambda provider: deepcopy(inventory),
+    )
+
+
+def _observe_hybrid_omni_cleanup(
+    result: dict[str, Any],
+    *,
+    lineage: dict[str, Any],
+    predecessor_sha256: str,
+    provider_result_sha256: str,
+) -> dict[str, Any]:
+    from app.learn.recognition.uei.store import UEIObjectStore
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        load_omniparser_invocation_cleanup_observation,
+    )
+
+    receipt_ref = result.get("provider_receipt_ref")
+    result_ref = result.get("provider_result_ref")
+    if not isinstance(receipt_ref, dict) or not isinstance(result_ref, dict):
+        raise LearningStageWorkerError("Hybrid Omni provider refs are unavailable")
+    store = UEIObjectStore(root=_PROJECT_ROOT / "artifacts" / "uei-shadow-store")
+    receipt = store.get(receipt_ref, contract_version="provider_runtime_receipt_v1")
+    persisted_result = store.get(result_ref, contract_version="provider_safe_result_v1")
+    invocation_id = str(result.get("provider_invocation_id") or "").strip()
+    expected_suffix = invocation_id.rsplit("/", 1)[-1]
+    omni_inventory = result.get("inventory")
+    refs_match = (
+        receipt.get("receipt_id") == f"receipt/{expected_suffix}"
+        and persisted_result.get("result_id") == f"result/{expected_suffix}"
+        and receipt.get("result_ref") == result_ref
+        and receipt.get("provider_id") == "local.runtime/omniparser"
+        and receipt.get("profile_id") == "local.runtime/omniparser/shadow-v2"
+        and receipt.get("cleanup_status") == "clean"
+        and receipt.get("status") == "succeeded"
+        and persisted_result.get("status") == "succeeded"
+        and persisted_result.get("provider_id") == receipt.get("provider_id")
+        and persisted_result.get("profile_id") == receipt.get("profile_id")
+        and persisted_result.get("capture_lineage_ref")
+        == receipt.get("capture_lineage_ref")
+        and isinstance(omni_inventory, dict)
+        and omni_inventory.get("provider_result_ref") == result_ref
+    )
+    cleanup_observation = load_omniparser_invocation_cleanup_observation(invocation_id)
+    provider_processes = deepcopy(cleanup_observation["provider_processes_after"])
+    orphan_identities = deepcopy(cleanup_observation["orphan_descendant_identities"])
+    lease_files = deepcopy(cleanup_observation["lease_files_after"])
+    active_listeners = deepcopy(cleanup_observation["active_listeners_after"])
+    inventory_observable = cleanup_observation.get("inventory_observable") is True
+    verified = (
+        refs_match
+        and cleanup_observation.get("cleanup_status") == "verified"
+        and inventory_observable
+        and not provider_processes
+        and not orphan_identities
+        and not active_listeners
+        and not lease_files
+    )
     return {
-        "contract_version": "hybrid_provider_process_inventory_v1",
-        "provider": provider,
-        "release_status": "verified",
-        "termination_reason": "completed",
-        "provider_processes_after": [],
-        "helper_processes_after": [],
-        "orphan_descendant_pids": [],
-        "active_listeners_after": [],
-        "lease_files_after": [],
-        "source_cleanup_evidence": deepcopy(source_cleanup_evidence),
+        "contract_version": "hybrid_provider_process_inventory_v2",
+        "provider": "omni",
+        "observer_contract": "hybrid_omni_cleanup_observer_v1",
+        "release_status": "verified" if verified else "failed",
+        "termination_reason": "completed" if verified else "cleanup_failed",
+        "lineage": validate_hybrid_lineage(lineage),
+        "provider_lease_identity": {
+            "provider_invocation_id": invocation_id,
+            "provider_receipt_ref": deepcopy(receipt_ref),
+            "process_identity": deepcopy(cleanup_observation["process_identity"]),
+        },
+        "predecessor_sha256": predecessor_sha256,
+        "provider_result_sha256": provider_result_sha256,
+        "provider_processes_after": provider_processes,
+        "helper_processes_after": orphan_identities,
+        "orphan_descendant_pids": [identity["pid"] for identity in orphan_identities],
+        "active_listeners_after": active_listeners,
+        "lease_files_after": lease_files,
+        "source_cleanup_evidence": {
+            "contract_version": "hybrid_omni_cleanup_evidence_v2",
+            "status": "verified" if verified else "failed",
+            "provider_receipt": deepcopy(receipt),
+            "provider_result_ref": deepcopy(result_ref),
+            "inventory_observable": inventory_observable,
+            "adapter_cleanup_observation": cleanup_observation,
+        },
     }
 
 
-def _omni_cleanup_receipt(result: object) -> dict[str, Any]:
-    if not isinstance(result, dict) or any(
-        (
-            result.get("cleanup_status") != "clean",
-            result.get("provider_claim_status") != "complete",
-            not isinstance(result.get("provider_receipt_ref"), dict),
-        )
-    ):
-        raise LearningStageWorkerError("Hybrid Omni cleanup is not verified")
-    inventory = _verified_hybrid_process_inventory(
-        "omni",
-        {
-            "contract_version": "hybrid_omni_cleanup_evidence_v1",
-            "status": "verified",
-            "provider_receipt_ref": deepcopy(result["provider_receipt_ref"]),
-        },
-    )
-    return release_hybrid_provider("omni", process_inventory=inventory)
-
-
-def _qwen_gpu_cleanup_receipt(result: object) -> dict[str, Any]:
+def _qwen_gpu_cleanup_receipt(
+    result: object,
+    *,
+    lineage: dict[str, Any],
+    predecessor_sha256: str,
+    provider_result_sha256: str,
+) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise LearningStageWorkerError("Hybrid Qwen cleanup receipt is required")
-    from app.core.model_server import validate_qwen_cleanup_receipt
+    from app.core.model_server import observe_hybrid_qwen_cleanup
 
     try:
-        exact_receipt = validate_qwen_cleanup_receipt(result)
+        inventory = observe_hybrid_qwen_cleanup(
+            result,
+            lineage=lineage,
+            predecessor_sha256=predecessor_sha256,
+            provider_result_sha256=provider_result_sha256,
+        )
     except ValueError as error:
         raise LearningStageWorkerError(str(error)) from error
-    inventory = _verified_hybrid_process_inventory(
+    return release_hybrid_provider(
         "qwen",
-        {
-            "contract_version": "hybrid_qwen_cleanup_evidence_v1",
-            "status": "verified",
-            "qwen_cleanup_receipt": exact_receipt,
-        },
+        process_inventory=lambda provider: deepcopy(inventory),
     )
-    return release_hybrid_provider("qwen", process_inventory=inventory)
+
+
+def _artifact_digest(value: object) -> str:
+    if not isinstance(value, dict):
+        raise LearningStageWorkerError("Hybrid predecessor artifact is unavailable")
+    declared = value.get("content_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        if _is_immutable_ref(value):
+            return declared
+        if declared != content_sha256(value):
+            raise LearningStageWorkerError(
+                "Hybrid predecessor artifact seal mismatch"
+            )
+        return declared
+    return content_sha256(value)
 
 
 class _ManagedCancellationEvent:
@@ -307,6 +465,7 @@ def execute_learning_stage_worker_task(
     )
     execution_payload = deepcopy(payload)
     orchestration = execution_payload.pop("_hybrid_orchestration", None)
+    supervisor_context = execution_payload.pop("_hybrid_supervisor", None)
     execution_payload.pop("learning_pipeline_mode", None)
     if (
         learning_pipeline_mode == "hybrid_v1_1"
@@ -342,13 +501,28 @@ def execute_learning_stage_worker_task(
             else None
         )
         if learning_pipeline_mode == "hybrid_v1_1":
-            _assert_hybrid_provider_start_guard(normalized_kind, orchestration)
+            if not isinstance(supervisor_context, dict):
+                raise LearningStageWorkerError(
+                    "Hybrid supervisor-owned lineage is required"
+                )
+            supervisor_lineage = validate_hybrid_lineage(
+                supervisor_context.get("lineage")
+            )
+            _assert_hybrid_provider_start_guard(
+                normalized_kind,
+                orchestration,
+                supervisor_lineage=supervisor_lineage,
+                execution_payload=execution_payload,
+            )
+        else:
+            supervisor_lineage = None
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
             validate_hybrid_qwen_task_payload(execution_payload)
         model_lease = _ensure_learning_stage_model_ready(
             normalized_kind,
             execution_payload,
             cancellation_event=cancellation_event,
+            supervisor_context=supervisor_context,
         )
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
             assert hybrid_handler is not None
@@ -368,8 +542,14 @@ def execute_learning_stage_worker_task(
                 response["qwen_cleanup_receipt"]
             )
             if learning_pipeline_mode == "hybrid_v1_1":
+                qwen_bindings = response.get("qwen_bindings")
                 qwen_gpu_receipt = _qwen_gpu_cleanup_receipt(
-                    response["qwen_cleanup_receipt"]
+                    response["qwen_cleanup_receipt"],
+                    lineage=supervisor_lineage,
+                    predecessor_sha256=_artifact_digest(
+                        orchestration.get("omni_inventory")
+                    ),
+                    provider_result_sha256=_artifact_digest(qwen_bindings),
                 )
                 lifecycle_evidence["qwen_gpu_cleanup_receipt"] = deepcopy(
                     qwen_gpu_receipt
@@ -395,7 +575,14 @@ def execute_learning_stage_worker_task(
                 cancellation_event=cancellation_event,
             )
             if learning_pipeline_mode == "hybrid_v1_1":
-                omni_receipt = _omni_cleanup_receipt(response)
+                predecessor = execution_payload.get("hybrid_capture_bundle_ref")
+                if not isinstance(predecessor, dict) and isinstance(orchestration, dict):
+                    predecessor = orchestration.get("hybrid_capture_bundle_ref")
+                omni_receipt = _omni_cleanup_receipt(
+                    response,
+                    lineage=supervisor_lineage,
+                    predecessor_sha256=_artifact_digest(predecessor),
+                )
                 lifecycle_evidence["omni_cleanup_receipt"] = deepcopy(omni_receipt)
                 assert isinstance(orchestration, dict)
                 orchestration["omni_cleanup_receipt"] = deepcopy(omni_receipt)
@@ -475,6 +662,7 @@ def execute_learning_stage_worker_task(
                 model_lease=model_lease,
                 error=error,
                 task_kind=normalized_kind,
+                supervisor_context=supervisor_context,
             )
             return _hybrid_managed_failure_result(
                 task_kind=normalized_kind,
@@ -497,7 +685,16 @@ def execute_learning_stage_worker_task(
         and model_lease is not None
     ):
         try:
-            vista_receipt = _release_hybrid_vista_lease(model_lease)
+            vista_receipt = _release_hybrid_vista_lease(
+                model_lease,
+                lineage=supervisor_lineage,
+                predecessor_sha256=_artifact_digest(
+                    orchestration.get("fusion_result")
+                ),
+                provider_result_sha256=_artifact_digest(
+                    _hybrid_calibration_result(response)
+                ),
+            )
         except BaseException as error:
             lifecycle_evidence = {
                 "status": "reconciliation_failed",
@@ -511,6 +708,7 @@ def execute_learning_stage_worker_task(
                 lifecycle_evidence=lifecycle_evidence,
             )
         lifecycle_evidence["vista_cleanup_receipt"] = deepcopy(vista_receipt)
+        _mark_supervised_vista_released(supervisor_context, vista_receipt)
         assert isinstance(orchestration, dict)
         orchestration["vista_cleanup_receipt"] = deepcopy(vista_receipt)
     elif model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
@@ -552,6 +750,7 @@ def execute_learning_stage_worker_task(
             "result": normalized_response,
             "orchestration": deepcopy(orchestration),
             "lifecycle_evidence": deepcopy(lifecycle_evidence),
+            "supervisor_lineage": deepcopy(supervisor_lineage),
         }
     return normalized_response
 
@@ -561,12 +760,26 @@ def _reconcile_hybrid_handler_failure(
     model_lease: dict[str, Any] | None,
     error: BaseException,
     task_kind: str,
+    supervisor_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if model_lease is None:
         return {"status": "model_lease_not_acquired"}
     if task_kind == "panel_learning_calibration_sequence":
         try:
-            return {"vista_cleanup_receipt": _release_hybrid_vista_lease(model_lease)}
+            if not isinstance(supervisor_context, dict):
+                raise LearningStageWorkerError("Hybrid VISTA supervisor context is unavailable")
+            lease_document = _load_supervised_vista_lease(supervisor_context)
+            receipt = _release_hybrid_vista_lease(
+                model_lease,
+                lineage=lease_document["lineage"],
+                predecessor_sha256=lease_document["predecessor_sha256"],
+                provider_result_sha256=content_sha256({
+                    "failure_type": type(error).__name__,
+                    "failure_reason": str(error),
+                }),
+            )
+            _mark_supervised_vista_released(supervisor_context, receipt)
+            return {"vista_cleanup_receipt": receipt}
         except BaseException as cleanup_error:
             error.add_note(
                 "Hybrid VISTA lifecycle reconciliation failed: "
@@ -600,14 +813,147 @@ def _reconcile_hybrid_handler_failure(
         }
 
 
-def _release_hybrid_vista_lease(model_lease: dict[str, Any]) -> dict[str, Any]:
+def _release_hybrid_vista_lease(
+    model_lease: dict[str, Any],
+    *,
+    lineage: dict[str, Any],
+    predecessor_sha256: str,
+    provider_result_sha256: str,
+) -> dict[str, Any]:
     from app.core.model_server import release_hybrid_vista_model_lease
 
-    inventory = release_hybrid_vista_model_lease(model_lease)
+    inventory = release_hybrid_vista_model_lease(
+        model_lease,
+        lineage=lineage,
+        predecessor_sha256=predecessor_sha256,
+        provider_result_sha256=provider_result_sha256,
+    )
     try:
-        return release_hybrid_provider("vista", process_inventory=inventory)
+        return release_hybrid_provider(
+            "vista", process_inventory=lambda provider: deepcopy(inventory)
+        )
     except (TypeError, ValueError, RuntimeError) as error:
         raise LearningStageWorkerError(str(error)) from error
+
+
+def _hybrid_calibration_result(response: object) -> dict[str, Any]:
+    if not isinstance(response, dict):
+        raise LearningStageWorkerError("Hybrid VISTA result is unavailable")
+    data = response.get("data")
+    nested = data.get("result") if isinstance(data, dict) else None
+    sequence = (
+        nested.get("calibration_sequence") if isinstance(nested, dict) else None
+    )
+    if not isinstance(sequence, dict):
+        sequence = response.get("calibration_sequence")
+    if not isinstance(sequence, dict):
+        raise LearningStageWorkerError("Hybrid VISTA calibration result is unavailable")
+    return deepcopy(sequence)
+
+
+def _publish_supervised_vista_lease(
+    supervisor_context: object,
+    model_lease: dict[str, Any],
+    *,
+    predecessor_sha256: str,
+) -> None:
+    if (
+        not isinstance(supervisor_context, dict)
+        or supervisor_context.get("contract_version")
+        != "hybrid_worker_supervisor_context_v1"
+        or not isinstance(supervisor_context.get("provider_lease_path"), str)
+        or not isinstance(supervisor_context.get("worker_id"), str)
+    ):
+        raise LearningStageWorkerError("Hybrid VISTA supervisor context is invalid")
+    document = seal_immutable({
+        "contract_version": "hybrid_supervised_provider_lease_v1",
+        "state": "acquired",
+        "worker_id": supervisor_context["worker_id"],
+        "lineage": validate_hybrid_lineage(supervisor_context.get("lineage")),
+        "predecessor_sha256": predecessor_sha256,
+        "model_lease": deepcopy(model_lease),
+        "cleanup_receipt": None,
+    })
+    _write_json_atomic(Path(supervisor_context["provider_lease_path"]), document)
+
+
+def _load_supervised_vista_lease(
+    supervisor_context: dict[str, Any],
+) -> dict[str, Any]:
+    path = Path(str(supervisor_context.get("provider_lease_path") or ""))
+    document = _read_json_object(path, label="Hybrid VISTA supervisor lease")
+    digest = document.pop("content_sha256", None)
+    if digest != content_sha256(document):
+        raise LearningStageWorkerError("Hybrid VISTA supervisor lease seal is invalid")
+    if (
+        document.get("contract_version") != "hybrid_supervised_provider_lease_v1"
+        or document.get("worker_id") != supervisor_context.get("worker_id")
+        or document.get("state") not in {"acquired", "released"}
+        or not isinstance(document.get("model_lease"), dict)
+    ):
+        raise LearningStageWorkerError("Hybrid VISTA supervisor lease is invalid")
+    document["lineage"] = validate_hybrid_lineage(document.get("lineage"))
+    document["content_sha256"] = digest
+    return document
+
+
+def _mark_supervised_vista_released(
+    supervisor_context: object,
+    cleanup_receipt: dict[str, Any],
+) -> None:
+    if not isinstance(supervisor_context, dict):
+        raise LearningStageWorkerError("Hybrid VISTA supervisor context is invalid")
+    document = _load_supervised_vista_lease(supervisor_context)
+    document.pop("content_sha256", None)
+    document["state"] = "released"
+    document["cleanup_receipt"] = deepcopy(cleanup_receipt)
+    _write_json_atomic(
+        Path(supervisor_context["provider_lease_path"]),
+        seal_immutable(document),
+    )
+
+
+def _reconcile_supervised_vista_record(record: dict[str, Any]) -> dict[str, Any]:
+    """父进程只按持久化精确 lease 回收，不按端口猜测 provider 身份。"""
+    context = {
+        "provider_lease_path": str(record.get("provider_lease_path") or ""),
+        "worker_id": str(record.get("worker_id") or ""),
+    }
+    try:
+        document = _load_supervised_vista_lease(context)
+        if document.get("state") == "released":
+            receipt = document.get("cleanup_receipt")
+            if not isinstance(receipt, dict):
+                raise LearningStageWorkerError(
+                    "released Hybrid VISTA lease lost cleanup receipt"
+                )
+            return {
+                "contract_version": "hybrid_supervisor_reconciliation_v1",
+                "status": "verified",
+                "cleanup_receipt": deepcopy(receipt),
+            }
+        receipt = _release_hybrid_vista_lease(
+            document["model_lease"],
+            lineage=document["lineage"],
+            predecessor_sha256=document["predecessor_sha256"],
+            provider_result_sha256=content_sha256({
+                "worker_id": context["worker_id"],
+                "outcome": "outer_worker_terminated",
+            }),
+        )
+        _mark_supervised_vista_released(context, receipt)
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v1",
+            "status": "verified",
+            "cleanup_receipt": receipt,
+        }
+    except BaseException as error:
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v1",
+            "status": "indeterminate",
+            "error_type": type(error).__name__,
+            "details": str(error),
+        }
 
 
 def _hybrid_managed_failure_result(
@@ -645,6 +991,7 @@ def _ensure_learning_stage_model_ready(
     payload: dict[str, Any],
     *,
     cancellation_event: Any | None = None,
+    supervisor_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """后端 worker 自行完成模型资源检查和服务准备。"""
 
@@ -739,8 +1086,19 @@ def _ensure_learning_stage_model_ready(
             and payload.get("learning_pipeline_mode") == "hybrid_v1_1"
         ):
             from app.core.model_server import build_hybrid_vista_model_lease
+            try:
+                lease = build_hybrid_vista_model_lease(profile, readiness)
+            except ValueError as error:
+                from app.core.model_server import stop_model_server
 
-            return build_hybrid_vista_model_lease(profile, readiness)
+                stop_model_server(profile)
+                raise LearningStageWorkerError(str(error)) from error
+            _publish_supervised_vista_lease(
+                supervisor_context,
+                lease,
+                predecessor_sha256=_artifact_digest(payload.get("hybrid_fusion_result")),
+            )
+            return lease
         return None
 
     managed_vista_acquisition = (
@@ -902,8 +1260,13 @@ class LearningStageWorkerRegistry:
         }
         if payload["status"] == "detached_running":
             payload["status"] = "running"
+        if payload["status"] == "reconciliation_pending":
+            payload["status"] = "running"
         payload["contract_version"] = LEARNING_STAGE_WORKER_JOURNAL_CONTRACT_VERSION
         payload["result_file"] = Path(record["result_path"]).name
+        provider_lease_path = record.get("provider_lease_path")
+        if isinstance(provider_lease_path, str):
+            payload["provider_lease_file"] = Path(provider_lease_path).name
         if isinstance(record.get("result_adoption"), dict):
             payload["result_adoption"] = deepcopy(record["result_adoption"])
         _write_json_atomic(journal_path, payload)
@@ -968,6 +1331,7 @@ class LearningStageWorkerRegistry:
             model_request_id = f"learn-worker-{worker_id}"
             result_path = self._result_root / f"{worker_id}.result.json"
             journal_path = self._result_root / f"{worker_id}.worker.json"
+            provider_lease_path = self._result_root / f"{worker_id}.provider-lease.json"
             identity = {
                 "worker_id": worker_id,
                 "run_id": normalized_run_id,
@@ -981,6 +1345,44 @@ class LearningStageWorkerRegistry:
                 normalized_task_kind == "panel_learning_calibration_sequence"
                 and payload.get("learning_pipeline_mode") == "hybrid_v1_1"
             )
+            child_payload = deepcopy(payload)
+            if payload.get("learning_pipeline_mode") == "hybrid_v1_1":
+                orchestration = payload.get("_hybrid_orchestration")
+                revision_value = payload.get("workflow_revision")
+                if revision_value is None and isinstance(orchestration, dict):
+                    revision_value = orchestration.get("workflow_revision")
+                if (
+                    isinstance(revision_value, bool)
+                    or not isinstance(revision_value, int)
+                    or revision_value < 0
+                ):
+                    raise LearningStageWorkerError(
+                        "Hybrid supervisor workflow revision is required"
+                    )
+                lineage = {
+                    "run_id": normalized_run_id,
+                    "workflow_revision": revision_value,
+                    "operation_id": normalized_operation_id,
+                    "stage": normalized_stage,
+                    "stage_execution_id": hashlib.sha256(
+                        json.dumps(
+                            {
+                                "run_id": normalized_run_id,
+                                "workflow_revision": revision_value,
+                                "operation_id": normalized_operation_id,
+                                "stage": normalized_stage,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest(),
+                }
+                child_payload["_hybrid_supervisor"] = {
+                    "contract_version": "hybrid_worker_supervisor_context_v1",
+                    "lineage": lineage,
+                    "provider_lease_path": str(provider_lease_path),
+                    "worker_id": worker_id,
+                }
             cancellation_event = (
                 _ManagedCancellationEvent(
                     event=self._process_context.Event(),
@@ -1002,7 +1404,7 @@ class LearningStageWorkerRegistry:
                 args=(
                     str(result_path),
                     normalized_task_kind,
-                    deepcopy(payload),
+                    child_payload,
                     model_request_id,
                     deepcopy(identity),
                     cancellation_event,
@@ -1018,6 +1420,7 @@ class LearningStageWorkerRegistry:
                 "finished_at": None,
                 "result_path": str(result_path),
                 "journal_path": str(journal_path),
+                "provider_lease_path": str(provider_lease_path),
                 "process": process,
                 "payload": deepcopy(payload),
                 "cancellation_event": cancellation_event,
@@ -1235,7 +1638,11 @@ class LearningStageWorkerRegistry:
                     },
                 }
             self._refresh_record(record)
-            if record["status"] not in {"running", "detached_running"}:
+            if record["status"] not in {
+                "running",
+                "detached_running",
+                "reconciliation_pending",
+            }:
                 if (
                     record["task_kind"] in _MANAGED_QWEN_TASK_KINDS
                     and isinstance(record.get("cancellation_pending"), dict)
@@ -1281,6 +1688,40 @@ class LearningStageWorkerRegistry:
 
             process = record.get("process")
             if process is None:
+                if (
+                    record["task_kind"] == "panel_learning_calibration_sequence"
+                    and isinstance(record.get("provider_lease_path"), str)
+                    and Path(record["provider_lease_path"]).is_file()
+                ):
+                    reconciliation = _reconcile_supervised_vista_record(record)
+                    record["supervisor_reconciliation"] = reconciliation
+                    record["status"] = (
+                        "cancelled"
+                        if reconciliation.get("status") == "verified"
+                        else "reconciliation_pending"
+                    )
+                    self._persist_record_journal(record)
+                    return {
+                        **self._public_record(record),
+                        "backend_compute_termination": "not_covered",
+                        "model_service_compute_termination": (
+                            "terminated"
+                            if reconciliation.get("status") == "verified"
+                            else "indeterminate"
+                        ),
+                        "model_request_cancellation": {
+                            "contract_version": "model_request_cancellation_v1",
+                            "status": "supervisor_reconciled"
+                            if reconciliation.get("status") == "verified"
+                            else "reconciliation_pending",
+                            "model_service_compute_termination": (
+                                "terminated"
+                                if reconciliation.get("status") == "verified"
+                                else "indeterminate"
+                            ),
+                        },
+                        "supervisor_reconciliation": reconciliation,
+                    }
                 if record["task_kind"] in _MANAGED_QWEN_TASK_KINDS:
                     try:
                         model_cancellation = self._model_request_cancel(
@@ -1401,10 +1842,35 @@ class LearningStageWorkerRegistry:
                     )
                 )
                 if not handshake_complete:
-                    raise LearningStageWorkerError(
-                        "Hybrid VISTA cooperative cleanup handshake timed out; "
-                        "worker remains attached"
-                    )
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(timeout=3.0)
+                    reconciliation = _reconcile_supervised_vista_record(record)
+                    record["supervisor_reconciliation"] = reconciliation
+                    if reconciliation.get("status") != "verified":
+                        record["status"] = "reconciliation_pending"
+                        self._persist_record_journal(record)
+                        return {
+                            **self._public_record(record),
+                            "status": "reconciliation_pending",
+                            "backend_compute_termination": "terminated"
+                            if not process.is_alive()
+                            else "termination_failed",
+                            "model_service_compute_termination": "indeterminate",
+                            "model_request_cancellation": deepcopy(model_cancellation),
+                            "supervisor_reconciliation": reconciliation,
+                        }
+                    record["status"] = "cancelled"
+                    record["finished_at"] = _utc_now_iso()
+                    self._active_by_operation.pop(operation_key, None)
+                    self._persist_record_journal(record)
+                    return {
+                        **self._public_record(record),
+                        "backend_compute_termination": "terminated",
+                        "model_service_compute_termination": "terminated",
+                        "model_request_cancellation": deepcopy(model_cancellation),
+                        "supervisor_reconciliation": reconciliation,
+                    }
                 process.join(timeout=2.0)
                 self._refresh_record(record)
                 if record.get("status") != "completed":
@@ -1519,7 +1985,9 @@ class LearningStageWorkerRegistry:
         if attached:
             return attached[-1]
         detached = [
-            item for item in records if item.get("status") == "detached_running"
+            item
+            for item in records
+            if item.get("status") in {"detached_running", "reconciliation_pending"}
         ]
         return detached[-1] if detached else None
 
@@ -1593,6 +2061,31 @@ class LearningStageWorkerRegistry:
 
         process = record.get("process")
         if process is None:
+            if (
+                record.get("task_kind") == "panel_learning_calibration_sequence"
+                and Path(str(record.get("provider_lease_path") or "")).is_file()
+            ):
+                reconciliation = _reconcile_supervised_vista_record(record)
+                record["supervisor_reconciliation"] = reconciliation
+                if reconciliation.get("status") != "verified":
+                    record["status"] = "reconciliation_pending"
+                    self._persist_record_journal(record)
+                    return
+                record["status"] = "failed"
+                record["worker_result"] = {
+                    "contract_version": LEARNING_STAGE_WORKER_RESULT_CONTRACT_VERSION,
+                    "status": "failed",
+                    "error": {
+                        "type": "WorkerResultMissing",
+                        "details": (
+                            "recovered Hybrid VISTA worker has no result envelope "
+                            "after verified supervisor cleanup"
+                        ),
+                    },
+                }
+                record["finished_at"] = record.get("finished_at") or _utc_now_iso()
+                self._persist_record_journal(record)
+                return
             if record["status"] in {"running", "detached_running"}:
                 record["status"] = "detached_running"
                 return
@@ -1615,6 +2108,16 @@ class LearningStageWorkerRegistry:
             return
 
         process.join(timeout=0)
+        if (
+            record.get("task_kind") == "panel_learning_calibration_sequence"
+            and Path(str(record.get("provider_lease_path") or "")).is_file()
+        ):
+            reconciliation = _reconcile_supervised_vista_record(record)
+            record["supervisor_reconciliation"] = reconciliation
+            if reconciliation.get("status") != "verified":
+                record["status"] = "reconciliation_pending"
+                self._persist_record_journal(record)
+                return
         record["status"] = "failed"
         record["worker_result"] = {
             "contract_version": LEARNING_STAGE_WORKER_RESULT_CONTRACT_VERSION,
@@ -1816,6 +2319,25 @@ def _load_worker_journal(
         raise LearningStageWorkerError(
             "worker journal result_file escapes the result root"
         )
+    provider_lease_file = payload.get("provider_lease_file")
+    provider_lease_path = None
+    if provider_lease_file is not None:
+        provider_lease_file = _required_text(
+            provider_lease_file, "provider_lease_file"
+        )
+        if (
+            provider_lease_file != f"{worker_id}.provider-lease.json"
+            or Path(provider_lease_file).name != provider_lease_file
+        ):
+            raise LearningStageWorkerError(
+                "worker journal provider_lease_file does not match worker_id"
+            )
+        candidate = (result_root / provider_lease_file).resolve()
+        if candidate.parent != result_root.resolve():
+            raise LearningStageWorkerError(
+                "worker journal provider_lease_file escapes the result root"
+            )
+        provider_lease_path = str(candidate)
     return {
         "contract_version": LEARNING_STAGE_WORKER_CONTRACT_VERSION,
         **identity,
@@ -1825,6 +2347,7 @@ def _load_worker_journal(
         "finished_at": payload.get("finished_at"),
         "result_path": str(result_path),
         "journal_path": str(journal_path.resolve()),
+        "provider_lease_path": provider_lease_path,
         "process": None,
         "payload": None,
         "cancellation_event": None,
@@ -1987,8 +2510,8 @@ def _hybrid_vista_cleanup_evidence(record: dict[str, Any]) -> dict[str, Any]:
         receipt = model_lifecycle.get("vista_cleanup_receipt")
     if isinstance(receipt, dict):
         try:
-            assert_next_provider_safe_to_start(receipt, "review")
-        except RuntimeError as error:
+            validate_hybrid_cleanup_receipt(receipt)
+        except (TypeError, ValueError) as error:
             raise LearningStageWorkerError(str(error)) from error
         return {
             "contract_version": "hybrid_vista_cooperative_cleanup_v1",

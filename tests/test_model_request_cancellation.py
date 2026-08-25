@@ -15,6 +15,17 @@ import time
 import pytest
 
 
+_HYBRID_LINEAGE = {
+    "run_id": "run-hybrid-release",
+    "workflow_revision": 7,
+    "operation_id": "operation-hybrid-release",
+    "stage": "panel_learning_calibration_sequence",
+    "stage_execution_id": "stage-execution-hybrid-release",
+}
+_PREDECESSOR_SHA256 = "a" * 64
+_PROVIDER_RESULT_SHA256 = "b" * 64
+
+
 def _cleanup_lease() -> dict:
     process = {"pid": 4123, "create_time": 100.5, "executable": "qwen-server.exe"}
     return {"contract_version":"qwen_model_server_lease_v1", "lease_id":"lease-cleanup",
@@ -62,11 +73,16 @@ def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
         "port": 13240,
         "pid_file": str(tmp_path / "vista.pid"),
     }
+    identities = [
+        {"pid": 4123, "create_time_ns": 100_000_000_000},
+        {"pid": 4124, "create_time_ns": 200_000_000_000},
+    ]
     lease = {
-        "contract_version": "hybrid_vista_model_lease_v1",
+        "contract_version": "hybrid_vista_model_lease_v2",
         "provider": "vista",
+        "incarnation_id": "vista-incarnation",
         "profile": profile,
-        "expected_pids": [4123, 4124],
+        "process_identities": identities,
     }
     monkeypatch.setattr(
         model_server,
@@ -76,10 +92,22 @@ def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
             "after": {"status": "unreachable"},
         },
     )
-    monkeypatch.setattr(model_server, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: {"status": "proven_absent", "identity": identity},
+    )
+    monkeypatch.setattr(
+        model_server, "_descendant_identities_for_parents", lambda parents: ([], True)
+    )
     monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [])
 
-    inventory = model_server.release_hybrid_vista_model_lease(lease)
+    inventory = model_server.release_hybrid_vista_model_lease(
+        lease,
+        lineage=_HYBRID_LINEAGE,
+        predecessor_sha256=_PREDECESSOR_SHA256,
+        provider_result_sha256=_PROVIDER_RESULT_SHA256,
+    )
 
     assert inventory["release_status"] == "verified"
     assert inventory["provider_processes_after"] == []
@@ -95,9 +123,11 @@ def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
 
     pid_path = tmp_path / "vista.pid"
     pid_path.write_text("4123", encoding="utf-8")
+    identity = {"pid": 4123, "create_time_ns": 100_000_000_000}
     lease = {
-        "contract_version": "hybrid_vista_model_lease_v1",
+        "contract_version": "hybrid_vista_model_lease_v2",
         "provider": "vista",
+        "incarnation_id": "vista-incarnation",
         "profile": {
             "profile_id": "vista-test",
             "role": ["locate"],
@@ -105,23 +135,201 @@ def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
             "port": 13240,
             "pid_file": str(pid_path),
         },
-        "expected_pids": [4123],
+        "process_identities": [identity],
     }
     monkeypatch.setattr(
         model_server,
         "stop_model_server",
         lambda selected: {"stopped": False, "after": {"status": "running"}},
     )
-    monkeypatch.setattr(model_server, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda observed: {"status": "exact_live", "identity": observed},
+    )
+    monkeypatch.setattr(
+        model_server, "_descendant_identities_for_parents", lambda parents: ([], True)
+    )
     monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [4123])
 
-    inventory = model_server.release_hybrid_vista_model_lease(lease)
+    inventory = model_server.release_hybrid_vista_model_lease(
+        lease,
+        lineage=_HYBRID_LINEAGE,
+        predecessor_sha256=_PREDECESSOR_SHA256,
+        provider_result_sha256=_PROVIDER_RESULT_SHA256,
+    )
 
     assert inventory["release_status"] == "failed"
-    assert inventory["provider_processes_after"] == [{"pid": 4123}]
+    assert inventory["provider_processes_after"] == [identity]
     assert inventory["active_listeners_after"] == [{"port": 13240, "pid": 4123}]
     with pytest.raises(RuntimeError, match="cleanup is not verified"):
-        release_hybrid_provider("vista", process_inventory=inventory)
+        release_hybrid_provider("vista", process_inventory=lambda provider: inventory)
+
+
+def test_hybrid_vista_lease_rejects_missing_or_ambiguous_process_identity() -> None:
+    from app.core.model_server import build_hybrid_vista_model_lease
+
+    profile = {"profile_id": "vista-test", "provider_mode": "local_grounding"}
+
+    with pytest.raises(ValueError, match="no exact process identity"):
+        build_hybrid_vista_model_lease(
+            profile,
+            {"before": {"status": "unreachable"}, "after": {"status": "ready"}},
+        )
+
+
+def test_hybrid_vista_release_detects_descendant_appearing_after_stop(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+
+    parent = {"pid": 4123, "create_time_ns": 100_000_000_000}
+    raced_child = {"pid": 4999, "create_time_ns": 200_000_000_000}
+    lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": "vista-race-incarnation",
+        "profile": {
+            "profile_id": "vista-test",
+            "provider_mode": "local_grounding",
+            "port": 13240,
+            "pid_file": str(tmp_path / "vista.pid"),
+        },
+        "process_identities": [parent],
+    }
+    observations = iter([([], True), ([raced_child], True), ([raced_child], True)])
+    monkeypatch.setattr(
+        model_server,
+        "_descendant_identities_for_parents",
+        lambda parents: next(observations),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "stop_model_server",
+        lambda profile: {"stopped": True, "after": {"status": "unreachable"}},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: {
+            "status": "exact_live" if identity == raced_child else "proven_absent",
+            "identity": identity,
+        },
+    )
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [])
+
+    inventory = model_server.release_hybrid_vista_model_lease(
+        lease,
+        lineage=_HYBRID_LINEAGE,
+        predecessor_sha256=_PREDECESSOR_SHA256,
+        provider_result_sha256=_PROVIDER_RESULT_SHA256,
+    )
+
+    assert inventory["release_status"] == "failed"
+    assert inventory["orphan_descendant_pids"] == [raced_child["pid"]]
+    assert inventory["helper_processes_after"] == [raced_child]
+
+
+def test_hybrid_qwen_observer_rejects_synthetic_receipt_without_lifecycle_tombstone(
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+
+    lease = _cleanup_lease()
+    release_result = {
+        "status": "released",
+        "lease": lease,
+        "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": {"status": "proven_absent", "identity": lease["server_process_identity"]},
+        "process_identity": lease["server_process_identity"],
+    }
+    receipt = model_server.build_qwen_cleanup_receipt(
+        release_result=release_result,
+        model_lease=lease,
+    )
+    monkeypatch.setattr(model_server, "_load_qwen_owner_tombstone", lambda owner: None)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: {"status": "proven_absent", "identity": identity},
+    )
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [])
+    monkeypatch.setattr(model_server, "qwen_model_lease_is_active", lambda value: False)
+
+    inventory = model_server.observe_hybrid_qwen_cleanup(
+        receipt,
+        lineage=_HYBRID_LINEAGE,
+        predecessor_sha256=_PREDECESSOR_SHA256,
+        provider_result_sha256=_PROVIDER_RESULT_SHA256,
+    )
+
+    assert inventory["release_status"] == "failed"
+    assert inventory["source_cleanup_evidence"]["lifecycle_verified"] is False
+
+
+def test_hybrid_qwen_observer_requires_exact_server_owned_lifecycle_tombstone(
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+
+    lease = _cleanup_lease()
+    release_result = {
+        "status": "released",
+        "lease": lease,
+        "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": {"status": "proven_absent", "identity": lease["server_process_identity"]},
+        "process_identity": lease["server_process_identity"],
+        "hybrid_descendant_cleanup": {
+            "status": "verified",
+            "descendant_identities": [
+                {"pid": 8124, "create_time_ns": 812_400_000_000}
+            ],
+            "probes": [
+                {
+                    "status": "proven_absent",
+                    "identity": {"pid": 8124, "create_time_ns": 812_400_000_000},
+                }
+            ],
+        },
+    }
+    receipt = model_server.build_qwen_cleanup_receipt(
+        release_result=release_result,
+        model_lease=lease,
+    )
+    tombstone = {
+        "contract_version": "qwen_model_request_owner_receipt_v1",
+        "status": "finalized",
+        "owner_request_id": lease["owner_request_id"],
+        "profile_id": lease["profile_id"],
+        "lease_id": lease["lease_id"],
+        "incarnation_id": lease["incarnation_id"],
+        "server_termination": release_result["server_termination"],
+        "release_result": release_result,
+        "finalization_token": None,
+    }
+    monkeypatch.setattr(
+        model_server, "_load_qwen_owner_tombstone", lambda owner: tombstone
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: {"status": "proven_absent", "identity": identity},
+    )
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [])
+    monkeypatch.setattr(model_server, "qwen_model_lease_is_active", lambda value: False)
+
+    inventory = model_server.observe_hybrid_qwen_cleanup(
+        receipt,
+        lineage=_HYBRID_LINEAGE,
+        predecessor_sha256=_PREDECESSOR_SHA256,
+        provider_result_sha256=_PROVIDER_RESULT_SHA256,
+    )
+
+    assert inventory["release_status"] == "verified"
+    assert inventory["source_cleanup_evidence"]["lifecycle_verified"] is True
 
 
 def test_stop_model_server_honors_real_wrapper_test_sentinel(monkeypatch) -> None:
@@ -1284,6 +1492,10 @@ def test_qwen_post_stop_access_denied_remains_owned_pending(
 
         def create_time(self):
             return 111 / 1_000_000_000
+
+        def children(self, recursive=True):
+            del recursive
+            return []
 
         def terminate(self):
             return None

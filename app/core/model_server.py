@@ -616,6 +616,131 @@ def validate_qwen_cleanup_receipt(receipt: object) -> dict[str, Any]:
     return deepcopy(receipt)
 
 
+def observe_hybrid_qwen_cleanup(
+    receipt: object,
+    *,
+    lineage: dict[str, Any],
+    predecessor_sha256: str,
+    provider_result_sha256: str,
+) -> dict[str, Any]:
+    """从既有精确 Qwen 回执和当前 OS/lease 事实构造 Hybrid observer inventory。"""
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+
+    exact_receipt = validate_qwen_cleanup_receipt(receipt)
+    lease = exact_receipt["lease"]
+    process_identity = exact_receipt["process_identity"]
+    owner_receipt = _load_qwen_owner_tombstone(
+        str(lease.get("owner_request_id") or "")
+    )
+    lifecycle_verified = False
+    descendant_cleanup: dict[str, Any] = {
+        "status": "indeterminate",
+        "descendant_identities": [],
+        "probes": [],
+    }
+    if (
+        isinstance(owner_receipt, dict)
+        and owner_receipt.get("lease_id") == lease.get("lease_id")
+        and owner_receipt.get("incarnation_id") == lease.get("incarnation_id")
+        and owner_receipt.get("profile_id") == lease.get("profile_id")
+        and isinstance(owner_receipt.get("release_result"), dict)
+    ):
+        try:
+            _validate_exact_qwen_cleanup_evidence(
+                owner_receipt["release_result"], lease
+            )
+        except ValueError:
+            lifecycle_verified = False
+        else:
+            observed_descendants = owner_receipt["release_result"].get(
+                "hybrid_descendant_cleanup"
+            )
+            if isinstance(observed_descendants, dict):
+                descendant_cleanup = deepcopy(observed_descendants)
+            identities = descendant_cleanup.get("descendant_identities")
+            probes = descendant_cleanup.get("probes")
+            lifecycle_verified = (
+                descendant_cleanup.get("status") == "verified"
+                and isinstance(identities, list)
+                and isinstance(probes, list)
+                and len(identities) == len(probes)
+                and all(
+                    _valid_process_identity(identity)
+                    and isinstance(probe, dict)
+                    and probe.get("status") == "proven_absent"
+                    for identity, probe in zip(identities, probes)
+                )
+            )
+    process_probe = _probe_exact_qwen_process(process_identity)
+    parsed = urlsplit(str(lease.get("server_base_url") or ""))
+    port = int(parsed.port or 0)
+    listener_pids = _listening_pids_for_port(port) if port > 0 else []
+    lease_active = qwen_model_lease_is_active(lease)
+    observable = process_probe.get("status") != "unobservable"
+    provider_processes = (
+        [deepcopy(process_identity)]
+        if process_probe.get("status") == "exact_live"
+        else []
+    )
+    listeners = [{"port": port, "pid": pid} for pid in listener_pids]
+    lease_files = [f"active-qwen-lease:{lease['lease_id']}"] if lease_active else []
+    verified = (
+        lifecycle_verified
+        and observable
+        and not provider_processes
+        and not listeners
+        and not lease_files
+    )
+    return {
+        "contract_version": "hybrid_provider_process_inventory_v2",
+        "provider": "qwen",
+        "observer_contract": "hybrid_qwen_cleanup_observer_v1",
+        "release_status": "verified" if verified else "failed",
+        "termination_reason": "completed" if verified else "cleanup_failed",
+        "lineage": validate_hybrid_lineage(lineage),
+        "provider_lease_identity": {
+            "lease_id": lease["lease_id"],
+            "incarnation_id": lease["incarnation_id"],
+            "profile_id": lease["profile_id"],
+            "server_process_identity": deepcopy(process_identity),
+        },
+        "predecessor_sha256": predecessor_sha256,
+        "provider_result_sha256": provider_result_sha256,
+        "provider_processes_after": provider_processes,
+        "helper_processes_after": [
+            deepcopy(identity)
+            for identity, probe in zip(
+                descendant_cleanup.get("descendant_identities", []),
+                descendant_cleanup.get("probes", []),
+            )
+            if isinstance(probe, dict) and probe.get("status") == "exact_live"
+        ],
+        "orphan_descendant_pids": [
+            int(identity["pid"])
+            for identity, probe in zip(
+                descendant_cleanup.get("descendant_identities", []),
+                descendant_cleanup.get("probes", []),
+            )
+            if isinstance(identity, dict)
+            and isinstance(identity.get("pid"), int)
+            and isinstance(probe, dict)
+            and probe.get("status") == "exact_live"
+        ],
+        "active_listeners_after": listeners,
+        "lease_files_after": lease_files,
+        "source_cleanup_evidence": {
+            "contract_version": "hybrid_qwen_cleanup_evidence_v2",
+            "status": "verified" if verified else "failed",
+            "qwen_cleanup_receipt": exact_receipt,
+            "owner_lifecycle_receipt": deepcopy(owner_receipt),
+            "lifecycle_verified": lifecycle_verified,
+            "descendant_cleanup": descendant_cleanup,
+            "process_probe": process_probe,
+            "lease_active": lease_active,
+        },
+    }
+
+
 def _validate_exact_qwen_cleanup_evidence(
     release_result: object,
     model_lease: object,
@@ -779,6 +904,14 @@ def _release_exact_qwen_lease(
                 "reason": reason,
                 "finalizer_pid": os.getpid(),
             }
+            descendants, descendants_observable = _descendant_identities_for_parents(
+                [state["incarnation"]["server_process_identity"]]
+            )
+            if not descendants_observable:
+                raise RuntimeError(
+                    "Qwen descendant process inventory is unobservable before stop"
+                )
+            state["finalization"]["descendant_identities"] = descendants
             _write_qwen_lease_state(state)
             stop_state = deepcopy(state)
     if resume_state is not None:
@@ -799,6 +932,13 @@ def _stop_and_finalize_qwen_incarnation(
 ) -> dict[str, Any]:
     incarnation = state["incarnation"]
     expected_process = incarnation["server_process_identity"]
+    finalization = state.get("finalization")
+    known_descendants = (
+        deepcopy(finalization.get("descendant_identities"))
+        if isinstance(finalization, dict)
+        and isinstance(finalization.get("descendant_identities"), list)
+        else []
+    )
     before = _probe_exact_qwen_process(expected_process)
     if before["status"] == "unobservable":
         _record_qwen_finalization_failure(state, token, revision, "process_identity_unobservable")
@@ -825,6 +965,12 @@ def _stop_and_finalize_qwen_incarnation(
         if failure_reason == "process_exit_unobservable":
             raise RuntimeError("Qwen exact server process exit is unobservable")
         raise RuntimeError("Qwen exact server process is still running after release")
+    descendant_cleanup = _observe_known_qwen_descendant_cleanup(known_descendants)
+    if descendant_cleanup["status"] != "verified":
+        _record_qwen_finalization_failure(
+            state, token, revision, "descendant_cleanup_unverified"
+        )
+        raise RuntimeError("Qwen descendant cleanup is unverified")
     health = check_model_server(state["profile"])
     result = {
         "status": "released",
@@ -834,6 +980,7 @@ def _stop_and_finalize_qwen_incarnation(
         "release": release,
         "after": health,
         "process_identity": expected_process,
+        "hybrid_descendant_cleanup": descendant_cleanup,
     }
     _persist_qwen_termination_proof(
         state,
@@ -936,6 +1083,12 @@ def _resume_qwen_finalization(
     proof = _probe_exact_qwen_process(state["incarnation"]["server_process_identity"])
     if proof.get("status") != "proven_absent":
         return _qwen_finalization_pending_result(state, reason=reason)
+    known_descendants = finalization.get("descendant_identities")
+    descendant_cleanup = _observe_known_qwen_descendant_cleanup(
+        known_descendants if isinstance(known_descendants, list) else []
+    )
+    if descendant_cleanup["status"] != "verified":
+        return _qwen_finalization_pending_result(state, reason=reason)
     result = {
         "status": "released",
         "lease": {
@@ -946,6 +1099,7 @@ def _resume_qwen_finalization(
         "release": proof,
         "after": check_model_server(state["profile"]),
         "process_identity": deepcopy(state["incarnation"]["server_process_identity"]),
+        "hybrid_descendant_cleanup": descendant_cleanup,
     }
     _persist_qwen_termination_proof(
         state,
@@ -2078,53 +2232,99 @@ def build_hybrid_vista_model_lease(
         raise ValueError("Hybrid VISTA profile is required")
     if not isinstance(readiness, dict):
         raise ValueError("Hybrid VISTA readiness is required")
-    expected_pids: set[int] = set()
+    identities: dict[tuple[int, int], dict[str, int]] = {}
+
+    def collect_identity(value: object) -> None:
+        if _valid_process_identity(value):
+            identity = deepcopy(value)
+        else:
+            identity = _current_process_identity(value)
+        if _valid_process_identity(identity):
+            identities[(identity["pid"], identity["create_time_ns"])] = identity
+
     start = readiness.get("start")
     if isinstance(start, dict):
         for field in ("pid", "service_pid"):
-            _append_positive_pid(expected_pids, start.get(field))
+            collect_identity(start.get(field))
     for section in ("before", "after"):
         observed = readiness.get(section)
         if not isinstance(observed, dict):
             continue
-        _append_positive_pid(expected_pids, observed.get("expected_pid"))
+        collect_identity(observed.get("expected_pid"))
+        collect_identity(observed.get("server_process_identity"))
         health = observed.get("health")
         if isinstance(health, dict):
-            _append_positive_pid(expected_pids, health.get("pid"))
+            collect_identity(health.get("pid"))
+            collect_identity(health.get("server_process_identity"))
+    process_identities = sorted(identities.values(), key=lambda item: (item["pid"], item["create_time_ns"]))
+    if not process_identities:
+        raise ValueError("Hybrid VISTA readiness has no exact process identity")
+    incarnation_id = content_sha256({
+        "profile_id": profile["profile_id"],
+        "process_identities": process_identities,
+    })
     return {
-        "contract_version": "hybrid_vista_model_lease_v1",
+        "contract_version": "hybrid_vista_model_lease_v2",
         "provider": "vista",
+        "incarnation_id": incarnation_id,
         "profile": _public_profile(deepcopy(profile)),
-        "expected_pids": sorted(expected_pids),
+        "process_identities": process_identities,
     }
 
 
 def release_hybrid_vista_model_lease(
     model_lease: dict[str, Any],
+    *,
+    lineage: dict[str, Any],
+    predecessor_sha256: str,
+    provider_result_sha256: str,
 ) -> dict[str, Any]:
     """停止同一 VISTA profile，并把进程、监听和 pid 文件事实返回给协调器。"""
     if (
         not isinstance(model_lease, dict)
-        or model_lease.get("contract_version") != "hybrid_vista_model_lease_v1"
+        or model_lease.get("contract_version") != "hybrid_vista_model_lease_v2"
         or model_lease.get("provider") != "vista"
+        or not isinstance(model_lease.get("incarnation_id"), str)
         or not isinstance(model_lease.get("profile"), dict)
-        or not isinstance(model_lease.get("expected_pids"), list)
+        or not isinstance(model_lease.get("process_identities"), list)
+        or not model_lease.get("process_identities")
     ):
         raise ValueError("exact Hybrid VISTA model lease is required")
-    profile = deepcopy(model_lease["profile"])
-    expected_pids: list[int] = []
-    for value in model_lease["expected_pids"]:
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError("Hybrid VISTA model lease PID is invalid")
-        if value not in expected_pids:
-            expected_pids.append(value)
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
 
-    descendants_before, descendants_observable = _descendant_pids_for_parents(
-        expected_pids
-    )
+    profile = deepcopy(model_lease["profile"])
+    expected_identities = deepcopy(model_lease["process_identities"])
+    if any(not _valid_process_identity(identity) for identity in expected_identities):
+        raise ValueError("Hybrid VISTA model lease identity is invalid")
+    known_descendants, descendants_observable = _descendant_identities_for_parents(expected_identities)
     stop_result = stop_model_server(profile)
+    stable_rounds = 0
+    previous_descendants: list[dict[str, int]] | None = None
+    for _ in range(5):
+        observed, observable = _descendant_identities_for_parents(expected_identities)
+        descendants_observable = descendants_observable and observable
+        for identity in observed:
+            if identity not in known_descendants:
+                known_descendants.append(identity)
+        normalized = sorted(known_descendants, key=lambda item: (item["pid"], item["create_time_ns"]))
+        if normalized == previous_descendants:
+            stable_rounds += 1
+        else:
+            stable_rounds = 0
+        previous_descendants = normalized
+        if stable_rounds >= 1:
+            break
+        time.sleep(0.01)
+    tree_stable = stable_rounds >= 1
+    provider_probes = [_probe_exact_qwen_process(identity) for identity in expected_identities]
+    descendant_probes = [_probe_exact_qwen_process(identity) for identity in known_descendants]
+    inventory_observable = descendants_observable and all(
+        probe.get("status") != "unobservable" for probe in (*provider_probes, *descendant_probes)
+    )
     active_provider = [
-        {"pid": pid} for pid in expected_pids if _process_is_alive(pid)
+        deepcopy(identity)
+        for identity, probe in zip(expected_identities, provider_probes)
+        if probe.get("status") == "exact_live"
     ]
     port = profile.get("port")
     try:
@@ -2141,9 +2341,12 @@ def release_hybrid_vista_model_lease(
     )
     pid_path = model_profile_pid_path(profile)
     lease_files = [str(pid_path)] if pid_path.exists() else []
-    orphan_descendants = [
-        pid for pid in descendants_before if _process_is_alive(pid)
+    orphan_descendant_identities = [
+        deepcopy(identity)
+        for identity, probe in zip(known_descendants, descendant_probes)
+        if probe.get("status") == "exact_live"
     ]
+    orphan_descendants = [identity["pid"] for identity in orphan_descendant_identities]
     after = stop_result.get("after")
     after_status = str(
         after.get("status") if isinstance(after, dict) else ""
@@ -2152,40 +2355,42 @@ def release_hybrid_vista_model_lease(
         stop_result.get("stopped") is True
         and after_status == "unreachable"
         and not active_provider
-        and descendants_observable
+        and inventory_observable
+        and tree_stable
         and not orphan_descendants
         and not listeners
         and not lease_files
     )
     return {
-        "contract_version": "hybrid_provider_process_inventory_v1",
+        "contract_version": "hybrid_provider_process_inventory_v2",
         "provider": "vista",
+        "observer_contract": "hybrid_vista_cleanup_observer_v1",
         "release_status": "verified" if verified else "failed",
         "termination_reason": "completed" if verified else "cleanup_failed",
+        "lineage": validate_hybrid_lineage(lineage),
+        "provider_lease_identity": {
+            "incarnation_id": model_lease["incarnation_id"],
+            "profile_id": profile["profile_id"],
+            "process_identities": expected_identities,
+        },
+        "predecessor_sha256": predecessor_sha256,
+        "provider_result_sha256": provider_result_sha256,
         "provider_processes_after": active_provider,
-        "helper_processes_after": [
-            {"pid": pid} for pid in orphan_descendants
-        ],
+        "helper_processes_after": orphan_descendant_identities,
         "orphan_descendant_pids": orphan_descendants,
         "active_listeners_after": listeners,
         "lease_files_after": lease_files,
         "source_cleanup_evidence": {
-            "contract_version": "hybrid_vista_cleanup_evidence_v1",
+            "contract_version": "hybrid_vista_cleanup_evidence_v2",
             "status": "verified" if verified else "failed",
             "model_lease": deepcopy(model_lease),
             "stop_result": deepcopy(stop_result),
-            "descendant_inventory_observable": descendants_observable,
+            "inventory_observable": inventory_observable,
+            "tree_stable": tree_stable,
+            "provider_probes": provider_probes,
+            "descendant_probes": descendant_probes,
         },
     }
-
-
-def _append_positive_pid(target: set[int], value: Any) -> None:
-    try:
-        pid = int(value)
-    except (TypeError, ValueError):
-        return
-    if pid > 0:
-        target.add(pid)
 
 
 def _listening_pids_for_port(port: int) -> list[int]:
@@ -2208,20 +2413,49 @@ def _listening_pids_for_port(port: int) -> list[int]:
     return sorted(pids)
 
 
-def _descendant_pids_for_parents(parent_pids: list[int]) -> tuple[list[int], bool]:
-    descendants: set[int] = set()
+def _descendant_identities_for_parents(
+    parent_identities: list[dict[str, int]],
+) -> tuple[list[dict[str, int]], bool]:
+    descendants: dict[tuple[int, int], dict[str, int]] = {}
     observable = True
-    for parent_pid in parent_pids:
+    for parent_identity in parent_identities:
         try:
-            process = psutil.Process(parent_pid)
-            descendants.update(
-                int(child.pid) for child in process.children(recursive=True)
-            )
+            process = psutil.Process(parent_identity["pid"])
+            current = {
+                "pid": int(process.pid),
+                "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+            }
+            if current != parent_identity:
+                continue
+            for child in process.children(recursive=True):
+                identity = {
+                    "pid": int(child.pid),
+                    "create_time_ns": int(round(child.create_time() * 1_000_000_000)),
+                }
+                descendants[(identity["pid"], identity["create_time_ns"])] = identity
         except psutil.NoSuchProcess:
             continue
         except (psutil.AccessDenied, OSError):
             observable = False
-    return sorted(descendants), observable
+    return sorted(descendants.values(), key=lambda item: (item["pid"], item["create_time_ns"])), observable
+
+
+def _observe_known_qwen_descendant_cleanup(
+    identities: list[dict[str, int]],
+) -> dict[str, Any]:
+    if any(not _valid_process_identity(identity) for identity in identities):
+        return {
+            "status": "indeterminate",
+            "descendant_identities": deepcopy(identities),
+            "probes": [],
+        }
+    probes = [_probe_exact_qwen_process(identity) for identity in identities]
+    verified = all(probe.get("status") == "proven_absent" for probe in probes)
+    return {
+        "status": "verified" if verified else "indeterminate",
+        "descendant_identities": deepcopy(identities),
+        "probes": probes,
+    }
 
 
 def wait_for_model_server(

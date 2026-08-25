@@ -93,6 +93,7 @@ from app.learn.workflow_worker import (
     HYBRID_STAGE_HANDLER_REGISTRY,
     LearningStageWorkerError,
     hybrid_registered_handler_chain_ready,
+    hybrid_registered_lifecycle_status,
     learning_stage_worker_registry,
 )
 from app.learn.workflow_state import (
@@ -169,6 +170,31 @@ def _hybrid_experimental_rollout_ready() -> bool:
         config.get("rollout_mode") == "opt_in"
         and hybrid_registered_handler_chain_ready()
     )
+
+
+def _hybrid_rollout_status() -> dict[str, Any]:
+    from app.learn.hybrid.contracts import load_hybrid_config
+
+    lifecycle = hybrid_registered_lifecycle_status()
+    try:
+        config_ready = load_hybrid_config(ROOT_DIR).get("rollout_mode") == "opt_in"
+    except (OSError, TypeError, ValueError):
+        config_ready = False
+    components = {"config": config_ready, **deepcopy(lifecycle["components"])}
+    ready = all(components.values())
+    return {
+        "contract_version": "hybrid_rollout_status_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "ready": ready,
+        "rollout": "experimental" if ready else "unavailable",
+        "reason": (
+            "hybrid_rollout_experimental"
+            if ready
+            else "hybrid_experimental_rollout_unavailable"
+        ),
+        "components": components,
+        "incumbent_default": True,
+    }
 
 
 _INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD = Lock()
@@ -793,6 +819,17 @@ def transition_learning_workflow_state_endpoint(
         )
 
 
+@router.get("/panel/hybrid_rollout_status", response_model=APIResponse)
+def hybrid_rollout_status_endpoint() -> APIResponse:
+    """返回唯一后端派生的 Hybrid experimental readiness。"""
+    return APIResponse(
+        success=True,
+        message="Hybrid rollout status",
+        data=_hybrid_rollout_status(),
+        error=None,
+    )
+
+
 @router.post(
     "/panel/start_learning_workflow_stage_operation",
     response_model=APIResponse,
@@ -914,6 +951,22 @@ def start_learning_stage_worker_endpoint(
                 details="hybrid_v1_1 registered lifecycle chain is incomplete",
             ),
         )
+    if (
+        hybrid_requested
+        and request.task_kind != "panel_learning_hybrid_omni_discovery"
+    ):
+        return APIResponse(
+            success=False,
+            message="Hybrid continuation is supervisor-owned",
+            data=None,
+            error=ErrorModel(
+                code="hybrid_backend_continuation_required",
+                details=(
+                    "cleanup receipts and predecessor lineage are derived by the "
+                    "active backend continuation"
+                ),
+            ),
+        )
 
     try:
         require_active_learning_workflow_stage_operation(
@@ -923,12 +976,16 @@ def start_learning_stage_worker_endpoint(
             stage=request.stage,
             operation_id=request.operation_id,
         )
+        worker_payload = deepcopy(request.payload)
+        worker_payload.pop("_hybrid_supervisor", None)
+        if hybrid_requested:
+            worker_payload.setdefault("workflow_revision", request.expected_revision)
         result = learning_stage_worker_registry.start(
             run_id=request.run_id,
             stage=request.stage,
             operation_id=request.operation_id,
             task_kind=request.task_kind,
-            payload=request.payload,
+            payload=worker_payload,
         )
         try:
             require_active_learning_workflow_stage_operation(
