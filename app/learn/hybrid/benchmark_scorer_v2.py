@@ -13,6 +13,10 @@ SCRIPT=ROOT/"scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py"
 FAILURES={"failed","timeout","out_of_bounds","missing"}
 RELEASE="portfolio_hybrid_v1_1_benchmark_v2_release_1"
 
+def _scorer_python_executable()->Path:
+    path=Path(getattr(sys,"_base_executable",sys.executable)).resolve(strict=True)
+    if not path.is_file(): raise ValueError("private scorer base interpreter invalid")
+    return path
 
 def _load(path:Path)->Any:
     raw=Path(path).read_bytes(); value=json.loads(raw.decode("utf-8"))
@@ -219,7 +223,8 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lif
     with tempfile.TemporaryDirectory(prefix="benchmark-v2-score-") as operation_root:
         root=Path(operation_root).resolve()
         if root==Path(private_output_path).resolve().parent or root==Path(private_manifest_path).resolve().parent or any(root.iterdir()): raise ValueError("private scorer operation root invalid")
-        process=subprocess.Popen([sys.executable,str(SCRIPT),"--closed-stdin"],cwd=root,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
+        python_executable=_scorer_python_executable()
+        process=subprocess.Popen([str(python_executable),str(SCRIPT),"--closed-stdin"],executable=str(python_executable),cwd=root,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
         try:
             identity=_process_identity(process.pid); envelope.update({"nonce":nonce,"expected_process_id":process.pid,"expected_process_identity":identity})
             stdout,stderr=process.communicate(json.dumps(envelope,sort_keys=True,separators=(",",":")),timeout=30)

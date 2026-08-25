@@ -171,10 +171,12 @@ def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monk
     private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); observed={}; original=scorer.subprocess.Popen
     def capture(*args:object,**kwargs:object):
         observed.update({"args":deepcopy(args),"env":deepcopy(kwargs["env"]),"cwd":Path(kwargs["cwd"]),"initial":list(Path(kwargs["cwd"]).iterdir())})
-        return original(*args,**kwargs)
+        process=original(*args,**kwargs); observed["launcher_pid"]=process.pid; return process
     monkeypatch.setattr(scorer.subprocess,"Popen",capture)
     result=run_private_scorer(private_manifest_path=p["private"],prediction_run_path=p["run"],lifecycle_path=p["lifecycle"],private_output_path=p["output"],public_ref_path=p["public"])
     projection=json.dumps({"args":observed["args"],"env":observed["env"],"cwd":str(observed["cwd"])},default=str)
     assert set(result)=={"status","score_ref","content_sha256"} and observed["initial"]==[]
     assert str(tmp_path) not in projection and "opaque/" not in projection and "BENCHMARK_V2_SCORER_CHILD_CAPABILITY" not in observed["env"]
-    public=json.loads(p["public"].read_text()); assert public["execution_receipt"]["process_id"]>0 and len(public["execution_receipt"]["nonce"])==64
+    public=json.loads(p["public"].read_text()); assert public["execution_receipt"]["process_id"]==observed["launcher_pid"] and len(public["execution_receipt"]["nonce"])==64
+    expected_python=Path(getattr(sys,"_base_executable",sys.executable)).resolve()
+    assert Path(observed["args"][0][0]).resolve()==expected_python
