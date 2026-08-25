@@ -13,6 +13,7 @@ from app.learn.agent_evidence import (
     build_workflow_agent_evidence,
 )
 from app.learn.application_identity import normalize_application_identity
+from app.learn.draft_review import validate_reviewed_template_candidate_source
 
 
 INTERFACE_WORKFLOW_REVIEW_CONTRACT = "single_application_workflow_review_v1"
@@ -603,10 +604,28 @@ def _materialize_editable_node_review_sources(
             for value in (node.get("source_paths") if isinstance(node.get("source_paths"), list) else [])
             if str(value or "").strip() and str(value or "").strip() != source_ref
         ]
-        has_authoritative_reviewed_source = any(
-            _is_reviewed_candidate_source(value, project_root=project_root)
-            for value in existing_paths
+        evidence = (
+            node.get("evidence")
+            if isinstance(node.get("evidence"), dict)
+            else {}
         )
+        evidence.pop("authoritative_source_ref", None)
+        verified_refs = [
+            reference
+            for value in existing_paths
+            if (
+                reference := _reviewed_candidate_source_ref(
+                    value,
+                    project_root=project_root,
+                )
+            )
+        ]
+        has_authoritative_reviewed_source = (
+            len(existing_paths) == 1 and len(verified_refs) == 1
+        )
+        if has_authoritative_reviewed_source:
+            evidence["authoritative_source_ref"] = verified_refs[0]
+        node["evidence"] = evidence
         node["source_paths"] = (
             existing_paths
             if has_authoritative_reviewed_source
@@ -614,24 +633,24 @@ def _materialize_editable_node_review_sources(
         )
 
 
-def _is_reviewed_candidate_source(value: str, *, project_root: Path) -> bool:
-    """仅把现存的 Task 8 reviewed candidate 识别为权威父来源。"""
+def _reviewed_candidate_source_ref(
+    value: str,
+    *,
+    project_root: Path,
+) -> dict[str, str] | None:
+    """仅返回经 Task 8 严格校验且绑定原始字节的父证据引用。"""
 
-    candidate = Path(value)
-    resolved = (
-        candidate.resolve()
-        if candidate.is_absolute()
-        else (project_root / candidate).resolve()
-    )
     try:
-        resolved.relative_to(project_root.resolve())
-        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
-        return False
-    return (
-        isinstance(payload, dict)
-        and payload.get("contract_version") == "reviewed_template_candidate_v1"
-    )
+        reference = validate_reviewed_template_candidate_source(
+            value,
+            project_root=project_root,
+        )
+    except (KeyError, OSError, TypeError, UnicodeError, ValueError):
+        return None
+    return {
+        "id": str(reference["id"]),
+        "content_sha256": str(reference["content_sha256"]),
+    }
 
 
 def _editable_action_templates(node: dict[str, Any]) -> list[dict[str, Any]]:
@@ -761,6 +780,17 @@ def _node_evidence_provenance(
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
+
+    authoritative_source_ref = evidence.get("authoritative_source_ref")
+    if (
+        isinstance(authoritative_source_ref, dict)
+        and set(authoritative_source_ref) == {"id", "content_sha256"}
+        and str(authoritative_source_ref.get("id") or "").strip()
+        and str(authoritative_source_ref.get("content_sha256") or "").strip()
+    ):
+        provenance["authoritative_source_ref"] = str(
+            authoritative_source_ref["content_sha256"]
+        )
 
     for key, value in sorted(evidence.items()):
         if not str(key).endswith("_path"):

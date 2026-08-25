@@ -564,7 +564,7 @@ def test_saved_workflow_materializes_editable_evidence_for_each_interface(
     assert loaded["execute_binding_enabled"] is False
 
 
-def test_saved_workflow_keeps_reviewed_candidate_as_exact_authoritative_source(
+def test_minimal_reviewed_candidate_label_is_not_authoritative(
     tmp_path: Path,
 ) -> None:
     reviewed_path = (
@@ -596,9 +596,239 @@ def test_saved_workflow_keeps_reviewed_candidate_as_exact_authoritative_source(
     result = save_interface_workflow_review_candidate(review, project_root=tmp_path)
 
     node = json.loads(Path(result["path"]).read_text(encoding="utf-8"))["nodes"][0]
-    assert node["source_paths"] == [reviewed_path.relative_to(tmp_path).as_posix()]
+    assert node["source_paths"][-1] == reviewed_path.relative_to(tmp_path).as_posix()
+    assert "/node-review-sources/" in node["source_paths"][0]
     assert "/node-review-sources/" in node["editable_review_source_path"]
     assert (tmp_path / node["editable_review_source_path"]).is_file()
+
+
+def test_verified_reviewed_candidate_binds_raw_sha_and_stales_on_replacement(
+    tmp_path: Path,
+) -> None:
+    from app.learn.draft_review import validate_reviewed_template_candidate_source
+    from app.learn.hybrid.review_projection import project_hybrid_review
+    from tests.test_learn_hybrid_review import _persistent_full_parent_fixture
+
+    bundle, inventory, bindings, fusion, vista, image = (
+        _persistent_full_parent_fixture(tmp_path)
+    )
+    projection = project_hybrid_review(
+        capture_bundle=bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        fusion_result=fusion,
+        vista_proposals=vista,
+    )
+    original_path = tmp_path / "artifacts" / "learning-runs" / "strict" / "trial.json"
+    original_path.parent.mkdir(parents=True)
+    original_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "learning_template_draft_v1",
+                "capture_lineage_ref": bundle["capture_lineage_ref"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path = (
+        tmp_path / "artifacts" / "learning-draft-review" / "strict" / "reviewed.json"
+    )
+    reviewed_path.parent.mkdir(parents=True)
+    original_relative = original_path.relative_to(tmp_path).as_posix()
+    candidate = {
+        "contract_version": "reviewed_template_candidate_v1",
+        "source": {
+            "source_path": original_relative,
+            "source_trial_path": original_relative,
+            "original_draft_path": original_relative,
+            "sha256": hashlib.sha256(original_path.read_bytes()).hexdigest(),
+            "attempt_index": None,
+            "readonly": True,
+        },
+        "source_after_review": "mixed",
+        "counts_as_pure_model_generated": False,
+        "artifact_is_authorization": False,
+        "draft_only": False,
+        "reviewed_by_human": False,
+        "review_status": "needs_human_review",
+        "final_submit_forbidden": True,
+        "real_action_requires_gate": True,
+        "execute_binding_enabled": False,
+        "authorization_scope": "display_and_review_only",
+        "draft": {
+            "contract_version": "learning_template_draft_v1",
+            "states": [],
+            "regions": [
+                {"candidate_id": item["candidate_id"]}
+                for item in projection["candidates"]
+            ],
+            "action_templates": [],
+            "page_details": {
+                "screen": {
+                    "source_image_path": image.relative_to(tmp_path).as_posix(),
+                    "source_image_sha256": bundle["capture_identity"][
+                        "artifact_sha256"
+                    ],
+                }
+            },
+            "capture_lineage_ref": bundle["capture_lineage_ref"],
+            "hybrid_review_projection": projection,
+        },
+        "safety": {
+            "artifact_is_authorization": False,
+            "final_submit_allowed": False,
+            "final_submit_forbidden": True,
+            "real_action_requires_gate": True,
+            "execute_binding_enabled": False,
+            "authorization_scope": "display_and_review_only",
+        },
+        "audit": {
+            "source_trial_path": original_relative,
+            "original_draft_path": original_relative,
+            "reviewed_at": "2026-08-26T00:00:00Z",
+            "review_status": "needs_human_review",
+            "authorization_scope": "display_and_review_only",
+        },
+    }
+    incomplete_draft = deepcopy(candidate)
+    incomplete_draft["draft"].pop("action_templates")
+    authorizing_candidate = deepcopy(candidate)
+    authorizing_candidate["safety"]["final_submit_allowed"] = True
+    invalid_source_mode = deepcopy(candidate)
+    invalid_source_mode["source_after_review"] = "model_generated"
+    stale_capture = deepcopy(candidate)
+    stale_capture["draft"]["capture_lineage_ref"]["content_sha256"] = "0" * 64
+    broken_review_projection = deepcopy(candidate)
+    broken_review_projection["draft"]["hybrid_review_projection"]["candidates"][
+        0
+    ]["semantics"] = {"name": "tampered"}
+    disconnected_pathgraph = deepcopy(candidate)
+    disconnected_pathgraph["draft"]["regions"] = [
+        {"region_id": "region/a", "parent_region_id": "region/b"},
+        {"region_id": "region/b", "parent_region_id": "region/a"},
+    ]
+    for invalid_candidate in (
+        incomplete_draft,
+        authorizing_candidate,
+        invalid_source_mode,
+        stale_capture,
+        broken_review_projection,
+        disconnected_pathgraph,
+    ):
+        reviewed_path.write_text(json.dumps(invalid_candidate), encoding="utf-8")
+        with pytest.raises(ValueError):
+            validate_reviewed_template_candidate_source(
+                reviewed_path,
+                project_root=tmp_path,
+            )
+    reviewed_path.write_text(json.dumps(candidate), encoding="utf-8")
+    reviewed_relative = reviewed_path.relative_to(tmp_path).as_posix()
+    review = build_interface_workflow_review(
+        goal="Bind exact reviewed bytes",
+        application_identity={"name": "ExampleApp"},
+        draft_sources=[
+            _review(
+                source_path=reviewed_relative,
+                signature="strict-reviewed-source",
+                summary="Reviewed source",
+                screenshot_path=image.relative_to(tmp_path).as_posix(),
+            )
+        ],
+    )
+    first = save_interface_workflow_review_candidate(review, project_root=tmp_path)
+    first_review = json.loads(Path(first["path"]).read_text(encoding="utf-8"))
+    first_node = first_review["nodes"][0]
+    first_ref = first_node["evidence"]["authoritative_source_ref"]
+    assert first_node["source_paths"] == [reviewed_relative]
+    assert first_ref == {
+        "id": reviewed_relative,
+        "content_sha256": hashlib.sha256(reviewed_path.read_bytes()).hexdigest(),
+    }
+    _confirm_current_node_revision(first_review, first_node)
+    approved = save_interface_workflow_review_candidate(
+        first_review,
+        project_root=tmp_path,
+    )
+    first_review = json.loads(Path(approved["path"]).read_text(encoding="utf-8"))
+    first_node = first_review["nodes"][0]
+    first_ref = first_node["evidence"]["authoritative_source_ref"]
+    assert first_node["review_status"] == "human_approved"
+    registry = json.loads(
+        (
+            tmp_path
+            / "artifacts"
+            / "interface-workflow-reviews"
+            / "registry.json"
+        ).read_text(encoding="utf-8")
+    )
+    registry_record = registry["workflows"][first_review["workflow"]["workflow_id"]]
+    assert registry_record["reviewed_node_evidence_sha256"][first_node["node_id"]][
+        "authoritative_source_ref"
+    ] == first_ref["content_sha256"]
+
+    valid_candidate_bytes = reviewed_path.read_bytes()
+    invalid_candidate = deepcopy(candidate)
+    invalid_candidate["source"]["sha256"] = "0" * 64
+    reviewed_path.write_text(json.dumps(invalid_candidate), encoding="utf-8")
+    invalid_source = save_interface_workflow_review_candidate(
+        first_review,
+        project_root=tmp_path,
+    )
+    invalid_node = json.loads(
+        Path(invalid_source["path"]).read_text(encoding="utf-8")
+    )["nodes"][0]
+    assert "/node-review-sources/" in invalid_node["source_paths"][0]
+    assert "authoritative_source_ref" not in invalid_node["evidence"]
+    reviewed_path.write_bytes(valid_candidate_bytes)
+
+    candidate["audit"]["reviewed_at"] = "2026-08-26T00:00:01Z"
+    reviewed_path.write_text(json.dumps(candidate), encoding="utf-8")
+    replaced = save_interface_workflow_review_candidate(
+        first_review,
+        project_root=tmp_path,
+    )
+    replaced_review = json.loads(Path(replaced["path"]).read_text(encoding="utf-8"))
+    replaced_node = replaced_review["nodes"][0]
+    assert replaced_node["review_status"] == "needs_human_review"
+    assert replaced_node["reviewed_by_human"] is False
+    assert replaced_node["evidence"]["authoritative_source_ref"][
+        "content_sha256"
+    ] != first_ref["content_sha256"]
+
+    reviewed_bytes = reviewed_path.read_bytes()
+    reviewed_path.unlink()
+    missing = save_interface_workflow_review_candidate(
+        first_review,
+        project_root=tmp_path,
+    )
+    missing_node = json.loads(Path(missing["path"]).read_text(encoding="utf-8"))[
+        "nodes"
+    ][0]
+    assert "/node-review-sources/" in missing_node["source_paths"][0]
+    assert "authoritative_source_ref" not in missing_node["evidence"]
+    reviewed_path.write_bytes(b"{corrupt")
+    corrupt = save_interface_workflow_review_candidate(
+        first_review,
+        project_root=tmp_path,
+    )
+    corrupt_node = json.loads(Path(corrupt["path"]).read_text(encoding="utf-8"))[
+        "nodes"
+    ][0]
+    assert "/node-review-sources/" in corrupt_node["source_paths"][0]
+    assert "authoritative_source_ref" not in corrupt_node["evidence"]
+    reviewed_path.write_bytes(reviewed_bytes)
+    recovered = save_interface_workflow_review_candidate(
+        first_review,
+        project_root=tmp_path,
+    )
+    recovered_node = json.loads(
+        Path(recovered["path"]).read_text(encoding="utf-8")
+    )["nodes"][0]
+    assert recovered_node["source_paths"] == [reviewed_relative]
+    assert recovered_node["evidence"]["authoritative_source_ref"][
+        "content_sha256"
+    ] == hashlib.sha256(reviewed_bytes).hexdigest()
+    assert recovered_node["review_status"] == "needs_human_review"
 
 
 def test_saved_workflow_owns_durable_node_evidence_after_source_cleanup(

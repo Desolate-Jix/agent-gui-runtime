@@ -47,6 +47,159 @@ def clear_learning_draft_sidecar_cache() -> None:
     _SIDECAR_CANDIDATE_PATH_CACHE.clear()
 
 
+def validate_reviewed_template_candidate_source(
+    source_path: str | Path,
+    *,
+    project_root: str | Path,
+) -> dict[str, Any]:
+    """严格验证可作为界面流程父证据的 Task 8 reviewed candidate。"""
+
+    root = Path(project_root).resolve()
+    resolved = _resolve_source_path(source_path, root)
+    raw = resolved.read_bytes()
+    payload = json.loads(raw.decode("utf-8-sig"))
+    required_fields = {
+        "contract_version",
+        "source",
+        "source_after_review",
+        "counts_as_pure_model_generated",
+        "artifact_is_authorization",
+        "draft_only",
+        "reviewed_by_human",
+        "review_status",
+        "final_submit_forbidden",
+        "real_action_requires_gate",
+        "execute_binding_enabled",
+        "authorization_scope",
+        "draft",
+        "safety",
+        "audit",
+    }
+    if not isinstance(payload, dict) or not required_fields.issubset(payload):
+        raise ValueError("reviewed template candidate schema is incomplete")
+    if (
+        payload.get("contract_version") != REVIEWED_TEMPLATE_CONTRACT
+        or payload.get("source_after_review") not in {"mixed", "assisted_generation"}
+        or payload.get("counts_as_pure_model_generated") is not False
+        or payload.get("artifact_is_authorization") is not False
+        or payload.get("draft_only") is not False
+        or not isinstance(payload.get("reviewed_by_human"), bool)
+        or payload.get("review_status")
+        not in {"needs_human_review", "approved_as_assisted_template"}
+        or payload.get("final_submit_forbidden") is not True
+        or payload.get("real_action_requires_gate") is not True
+        or payload.get("execute_binding_enabled") is not False
+        or payload.get("authorization_scope") != "display_and_review_only"
+    ):
+        raise ValueError("reviewed template candidate is authorizing or invalid")
+    safety = payload.get("safety")
+    if (
+        not isinstance(safety, dict)
+        or safety.get("artifact_is_authorization") is not False
+        or safety.get("final_submit_allowed") is not False
+        or safety.get("final_submit_forbidden") is not True
+        or safety.get("real_action_requires_gate") is not True
+        or safety.get("execute_binding_enabled") is not False
+        or safety.get("authorization_scope") != "display_and_review_only"
+    ):
+        raise ValueError("reviewed template candidate safety is invalid")
+    source = payload.get("source")
+    if not isinstance(source, dict):
+        raise ValueError("reviewed template candidate source lineage is missing")
+    original_path = str(source.get("original_draft_path") or "").strip()
+    source_path_value = str(source.get("source_path") or "").strip()
+    source_sha256 = str(source.get("sha256") or "").strip()
+    if (
+        not original_path
+        or source_path_value != original_path
+        or len(source_sha256) != 64
+        or source.get("readonly") is not True
+    ):
+        raise ValueError("reviewed template candidate source lineage is invalid")
+    original = _resolve_source_path(original_path, root)
+    if hashlib.sha256(original.read_bytes()).hexdigest() != source_sha256:
+        raise ValueError("reviewed template candidate original source SHA mismatch")
+    audit = payload.get("audit")
+    if (
+        not isinstance(audit, dict)
+        or audit.get("original_draft_path") != original_path
+        or audit.get("source_trial_path")
+        not in {source_path_value, source.get("source_trial_path")}
+        or audit.get("review_status") != payload.get("review_status")
+        or audit.get("authorization_scope") != "display_and_review_only"
+    ):
+        raise ValueError("reviewed template candidate audit lineage is invalid")
+    draft = payload.get("draft")
+    if (
+        not isinstance(draft, dict)
+        or draft.get("contract_version") != "learning_template_draft_v1"
+        or not isinstance(draft.get("states"), list)
+        or not isinstance(draft.get("regions"), list)
+        or not isinstance(draft.get("action_templates"), list)
+        or not isinstance(draft.get("page_details"), dict)
+    ):
+        raise ValueError("reviewed template candidate draft is invalid")
+    capture_lineage_ref = draft.get("capture_lineage_ref")
+    if (
+        not isinstance(capture_lineage_ref, dict)
+        or set(capture_lineage_ref) != {"id", "content_sha256"}
+        or not all(
+            isinstance(capture_lineage_ref.get(key), str)
+            and capture_lineage_ref[key]
+            for key in ("id", "content_sha256")
+        )
+    ):
+        raise ValueError("reviewed template candidate capture lineage is invalid")
+    projection = validate_hybrid_review_projection(
+        draft.get("hybrid_review_projection")
+    )
+    if (
+        projection.get("contract_version") != "hybrid_review_projection_v2"
+        or projection.get("screen_facts", {}).get("capture_lineage_ref")
+        != capture_lineage_ref
+        or projection.get("artifact_is_authorization") is not False
+        or projection.get("execute_binding_enabled") is not False
+        or projection.get("final_submit_forbidden") is not True
+        or projection.get("real_action_requires_gate") is not True
+    ):
+        raise ValueError("reviewed template candidate Hybrid lineage is invalid")
+    if not projection.get("candidates"):
+        raise ValueError("reviewed template candidate review projection is incomplete")
+    regions = draft["regions"]
+    if any(not isinstance(item, dict) for item in regions):
+        raise ValueError("reviewed template candidate PathGraph regions are invalid")
+    regions_by_id: dict[str, dict[str, Any]] = {}
+    for region in regions:
+        region_id = str(region.get("region_id") or "").strip()
+        if not region_id:
+            continue
+        if region_id in regions_by_id:
+            raise ValueError(
+                f"reviewed template candidate duplicate PathGraph region: {region_id}"
+            )
+        regions_by_id[region_id] = region
+    _validate_region_parent_graph(regions_by_id)
+    screen = draft["page_details"].get("screen")
+    displayed_image = projection.get("screen_facts", {}).get("displayed_image")
+    if not isinstance(screen, dict) or not isinstance(displayed_image, dict):
+        raise ValueError("reviewed template candidate screen lineage is missing")
+    screen_path = str(screen.get("source_image_path") or "").strip()
+    screen_sha256 = str(screen.get("source_image_sha256") or "").strip()
+    if (
+        not screen_path
+        or len(screen_sha256) != 64
+        or displayed_image.get("sha256") != screen_sha256
+    ):
+        raise ValueError("reviewed template candidate screen lineage is invalid")
+    screen_source = _resolve_source_path(screen_path, root)
+    if hashlib.sha256(screen_source.read_bytes()).hexdigest() != screen_sha256:
+        raise ValueError("reviewed template candidate screen source SHA mismatch")
+    return {
+        "id": resolved.relative_to(root).as_posix(),
+        "content_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
 def _uei_review_uia_support_items(draft: dict[str, Any]) -> list[dict[str, object]]:
     """仅转交当前草稿内显式标注为 UIA 的审阅辅助证据。"""
 
