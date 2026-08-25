@@ -4,15 +4,63 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 
 FORBIDDEN_RUNTIME_POINT_FIELDS = {
     "actual_point",
     "click_point",
+    "clickpoint",
     "confirmed_point",
     "expected_point",
     "screen_point",
     "target_point",
 }
+
+
+def _canonical_sha256(value: object) -> str:
+    from app.learn.recognition.uei.canonical import canonical_json_bytes
+
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+@pytest.mark.parametrize("field", sorted(FORBIDDEN_RUNTIME_POINT_FIELDS))
+def test_runtime_point_scanner_rejects_every_forbidden_spelling(field: str) -> None:
+    """捕获拼写变体绕过发布资产历史坐标扫描。"""
+
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _runtime_point_fields,
+    )
+
+    assert _runtime_point_fields({"safety": {field: [12, 34]}}) == [field]
+
+
+def test_runtime_point_scanner_allows_only_exact_fresh_grounding_policy() -> None:
+    """捕获策略形状在错误位置或坐标值下被误放行。"""
+
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _runtime_point_fields,
+    )
+
+    valid = {
+        "transitions": [
+            {
+                "preconditions": {
+                    "grounding": {"click_point": {"required": True}}
+                }
+            }
+        ]
+    }
+    assert _runtime_point_fields(valid) == []
+
+    coordinate_value = json.loads(json.dumps(valid))
+    coordinate_value["transitions"][0]["preconditions"]["grounding"][
+        "click_point"
+    ] = [12, 34]
+    assert _runtime_point_fields(coordinate_value) == ["click_point"]
+    assert _runtime_point_fields(
+        {"safety": {"grounding": {"click_point": {"required": True}}}}
+    ) == ["click_point"]
 
 
 def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
@@ -23,8 +71,13 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     from scripts.prove_portfolio_hybrid_v1_1_persistence import (
         run_managed_two_process_persistence_proof,
     )
+    import scripts.prove_portfolio_hybrid_v1_1_persistence as proof_module
 
     proof = run_managed_two_process_persistence_proof(tmp_path)
+
+    assert not hasattr(proof_module, "_StaticWorkflowStore")
+    assert not hasattr(proof_module, "_hybrid_projection")
+    assert not hasattr(proof_module, "_workflow_state")
 
     assert proof["contract_version"] == "portfolio_hybrid_v1_1_persistence_proof_v1"
     assert proof["proof_mode"] == "managed_e2e_fake_provider_boundaries"
@@ -39,7 +92,30 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
         "publish_b_once",
         "verify_registry_cas",
     ]
-    assert proof["provider_boundary_trace"] == ["omni", "qwen", "fusion", "vista"]
+    assert proof["provider_boundary_trace"] == [
+        "omni",
+        "qwen",
+        "fusion",
+        "vista",
+        "review",
+    ]
+    assert proof["managed_lifecycle_task_trace"] == [
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+        "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection",
+    ]
+    receipts = proof["managed_lifecycle_receipts"]
+    assert [receipt["task_kind"] for receipt in receipts] == proof[
+        "managed_lifecycle_task_trace"
+    ]
+    assert all(receipt["worker_status"] == "completed" for receipt in receipts)
+    assert all(receipt["adoption_status"] == "adopted" for receipt in receipts)
+    assert all(receipt["operation_id"] == receipts[0]["operation_id"] for receipt in receipts)
+    assert proof["managed_review_projection_receipt"]["worker_id"] == receipts[-1][
+        "worker_id"
+    ]
     assert proof["large_review_save"]["status"] == "saved"
     assert proof["large_review_save"]["reviewed_candidate_contains_vista_proposal"] is True
     assert proof["large_review_save"]["reviewed_candidate_contains_human_proposal"] is True
@@ -50,11 +126,51 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     assert proof["managed_reviewed_source_sha256"] == proof["large_review_save"][
         "reviewed_candidate_sha256"
     ]
+    reviewed_path = Path(proof["managed_reviewed_source_path"])
+    reviewed_bytes = reviewed_path.read_bytes()
+    reviewed_candidate = json.loads(reviewed_bytes.decode("utf-8-sig"))
+    assert hashlib.sha256(reviewed_bytes).hexdigest() == proof[
+        "managed_reviewed_source_sha256"
+    ]
+    projection = reviewed_candidate["draft"]["hybrid_review_projection"]
+    lineage = reviewed_candidate["draft"]["capture_lineage_ref"]
+    assert proof["managed_capture_lineage_ref"] == lineage
+    assert proof["managed_capture_lineage_digest"] == lineage["content_sha256"]
+    assert proof["managed_projection_ledger_digest"] == projection["content_sha256"]
+    assert proof["managed_decision_ledger_digest"] == _canonical_sha256(
+        projection["review_decisions"]
+    )
     assert proof["compiler_source_path"] == proof["saved_source_path"]
     assert proof["compiler_source_references_managed_reviewed_source"] is True
+    compiler_review = json.loads(
+        Path(proof["compiler_source_path"]).read_text(encoding="utf-8-sig")
+    )
+    source_node = next(
+        node
+        for node in compiler_review["nodes"]
+        if node["node_id"] == proof["compiler_reviewed_source_node_id"]
+    )
+    assert proof["compiler_reviewed_source_field"] == "nodes[*].source_paths"
+    assert proof["compiler_reviewed_source_relative_path"] in source_node["source_paths"]
+    assert source_node["source_paths"].count(
+        proof["compiler_reviewed_source_relative_path"]
+    ) == 1
+    assert proof["compiler_reviewed_source_sha256"] == hashlib.sha256(
+        reviewed_bytes
+    ).hexdigest()
     assert proof["review_source_vista_proposal_present"] is True
     assert proof["review_source_human_proposal_present"] is True
     assert proof["public_reload_b_exact_managed_bytes"] is True
+    reload_identity = proof["public_reload_b_identity"]
+    assert reload_identity["source_path"] == proof[
+        "compiler_reviewed_source_relative_path"
+    ]
+    assert reload_identity["source_sha256"] == hashlib.sha256(reviewed_bytes).hexdigest()
+    assert reload_identity["capture_lineage_ref"] == lineage
+    assert reload_identity["projection_ledger_digest"] == projection["content_sha256"]
+    assert reload_identity["decision_ledger_digest"] == _canonical_sha256(
+        projection["review_decisions"]
+    )
     assert proof["server_pid_a"] != proof["server_pid_b"]
     assert proof["server_a_exit_code"] == 0
     assert proof["server_b_exit_code"] == 0
@@ -68,12 +184,20 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     assert proof["compile_a_status"] == proof["compile_b_status"] == "compiled"
     assert proof["compile_a_registry_revision_before"] == 0
     assert proof["compile_a_registry_revision_after"] == 0
+    assert proof["compile_a_read_only_snapshot_before"] == proof[
+        "compile_a_read_only_snapshot_after"
+    ]
+    assert proof["compile_a_read_only_snapshot_before"]["cas_object_sha256_by_name"] == {}
     assert proof["publish_count"] == 1
     assert proof["publish_status"] == "published"
     assert proof["duplicate_publish_status"] == "already_published"
     assert proof["registry_revision_before"] == 0
     assert proof["registry_revision_after"] == 1
     assert proof["registry_publish_event_count"] == 1
+    publish_event = proof["single_publish_event"]
+    assert publish_event["asset_id"] == proof["published_asset_id"]
+    assert publish_event["content_sha256"] == proof["compiled_asset_sha_b"]
+    assert publish_event["registry_revision"] == proof["registry_revision_after"]
     assert proof["event_count_delta"] == 1
     assert proof["registry_cas_verified"] is True
     assert proof["active_content_sha256"] == proof["compiled_asset_sha_b"]
@@ -91,6 +215,13 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     assert proof_path.is_file()
     persisted = json.loads(proof_path.read_text(encoding="utf-8"))
     assert persisted["proof_sha256"] == proof["proof_sha256"]
+    canonical_scope = dict(persisted)
+    canonical_scope.pop("proof_sha256")
+    canonical_scope.pop("proof_file_sha256", None)
+    assert _canonical_sha256(canonical_scope) == proof["proof_sha256"]
+    assert hashlib.sha256(proof_path.read_bytes()).hexdigest() == proof[
+        "proof_file_sha256"
+    ]
     assert FORBIDDEN_RUNTIME_POINT_FIELDS.isdisjoint(
         persisted["published_runtime_point_fields"]
     )

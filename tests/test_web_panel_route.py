@@ -272,6 +272,72 @@ def test_panel_public_full_parent_hybrid_load_save_reload_survives(
     )
 
 
+def test_panel_managed_hybrid_trial_binds_operation_revision_after_finish(
+    tmp_path: Path,
+) -> None:
+    """公共 Task 8 仅信任服务端绑定的 managed 操作版本与捕获血缘。"""
+
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _managed_panel_http_boundary,
+        build_managed_hybrid_review_source,
+        fake_bounded_vista_runner,
+        fake_omni_runner,
+        fake_qwen_runner,
+    )
+
+    managed = build_managed_hybrid_review_source(tmp_path)
+    reviewed_path = Path(managed["large_review_save"]["reviewed_candidate_path"])
+    reviewed_relative = reviewed_path.relative_to(tmp_path).as_posix()
+    run_id = managed["large_review_save"]["workflow_run_id"]
+    trial_path = Path(managed["large_review_save"]["managed_review_trial_path"])
+    original_trial = trial_path.read_bytes()
+
+    def load_status(client: TestClient) -> dict:
+        response = client.post(
+            "/panel/load_learning_draft_review",
+            json={
+                "source_path": reviewed_relative,
+                "workflow_run_id": run_id,
+                "discover_related_sidecars": False,
+            },
+        ).json()
+        assert response["success"] is True, response
+        return response["data"]["hybrid_review_projection_status"]
+
+    with _managed_panel_http_boundary(
+        tmp_path,
+        workflow_store_path=Path(managed["workflow_store_path"]),
+        omni_runner=fake_omni_runner,
+        qwen_runner=fake_qwen_runner,
+        vista_runner=fake_bounded_vista_runner,
+    ) as (client, _store, _registry):
+        assert load_status(client)["status"] == "projected"
+        original = json.loads(original_trial.decode("utf-8"))
+        mutations = []
+        wrong_run = deepcopy(original)
+        wrong_run["managed_hybrid_lineage"]["run_id"] = "run-stale"
+        mutations.append(wrong_run)
+        wrong_revision = deepcopy(original)
+        wrong_revision["managed_hybrid_lineage"]["workflow_revision"] += 1
+        mutations.append(wrong_revision)
+        wrong_lineage = deepcopy(original)
+        wrong_lineage["managed_hybrid_lineage"]["capture_lineage_ref"] = {
+            "id": "capture/stale",
+            "content_sha256": "f" * 64,
+        }
+        mutations.append(wrong_lineage)
+        for mutation in mutations:
+            trial_path.write_text(
+                json.dumps(mutation, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            status = load_status(client)
+            assert status["status"] == "rejected"
+            assert status["reason"] == "hybrid_expectations_missing"
+        trial_path.write_bytes(original_trial)
+        assert load_status(client)["status"] == "projected"
+
+
 def test_web_panel_serves_browser_control_surface() -> None:
     client = TestClient(app)
 

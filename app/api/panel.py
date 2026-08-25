@@ -1510,7 +1510,97 @@ def _authoritative_hybrid_workflow_expectations(
     )
     if lineage_ref is None:
         return None, None, None
+    managed_present, managed_revision, managed_lineage_ref = (
+        _authoritative_managed_hybrid_trial_expectations(
+            state=state,
+            trial_path=bound_source_path,
+            capture_lineage_ref=lineage_ref,
+        )
+    )
+    if managed_present:
+        if managed_revision is None or managed_lineage_ref is None:
+            return None, None, None
+        return str(state["run_id"]), managed_revision, managed_lineage_ref
     return str(state["run_id"]), revision, lineage_ref
+
+
+def _authoritative_managed_hybrid_trial_expectations(
+    *,
+    state: dict[str, Any],
+    trial_path: Path,
+    capture_lineage_ref: dict[str, str],
+) -> tuple[bool, int | None, dict[str, str] | None]:
+    """从服务端绑定的 managed trial 恢复生成投影时的操作版本。"""
+
+    try:
+        payload = json.loads(trial_path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False, None, None
+    if not isinstance(payload, dict) or "managed_hybrid_lineage" not in payload:
+        return False, None, None
+    managed = payload.get("managed_hybrid_lineage")
+    if not isinstance(managed, dict):
+        return True, None, None
+    run_id = managed.get("run_id")
+    operation_revision = managed.get("workflow_revision")
+    operation_id = managed.get("operation_id")
+    worker_id = managed.get("worker_id")
+    result_sha256 = managed.get("result_sha256")
+    if (
+        run_id != state.get("run_id")
+        or isinstance(operation_revision, bool)
+        or not isinstance(operation_revision, int)
+        or operation_revision < 0
+        or not all(
+            isinstance(value, str) and value
+            for value in (operation_id, worker_id, result_sha256)
+        )
+        or len(result_sha256) != 64
+        or managed.get("capture_lineage_ref") != capture_lineage_ref
+    ):
+        return True, None, None
+    operation_bound = False
+    completion_bound = False
+    resolved_trial = trial_path.resolve()
+    for event in state.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        refs = event.get("evidence_refs")
+        if not isinstance(refs, dict):
+            continue
+        execution = refs.get("stage_execution")
+        if (
+            event.get("revision") == operation_revision
+            and isinstance(execution, dict)
+            and execution.get("operation_id") == operation_id
+            and execution.get("stage") == "screen_understanding"
+        ):
+            operation_bound = True
+        continuation = refs.get("worker_continuation")
+        event_trial = refs.get("trial_path")
+        try:
+            event_trial_path = (
+                _resolve_panel_artifact_file(event_trial)
+                if isinstance(event_trial, str) and event_trial.strip()
+                else None
+            )
+        except (OSError, TypeError, ValueError):
+            event_trial_path = None
+        if (
+            event_trial_path == resolved_trial
+            and isinstance(continuation, dict)
+            and continuation.get("operation_id") == operation_id
+            and continuation.get("worker_id") == worker_id
+            and continuation.get("result_sha256") == result_sha256
+            and continuation.get("task_kind")
+            == "panel_learning_hybrid_review_projection"
+            and isinstance(event.get("revision"), int)
+            and event["revision"] > operation_revision
+        ):
+            completion_bound = True
+    if not operation_bound or not completion_bound:
+        return True, None, None
+    return True, operation_revision, deepcopy(capture_lineage_ref)
 
 
 def _authoritative_hybrid_source_binding_paths(source_path: str) -> set[Path]:

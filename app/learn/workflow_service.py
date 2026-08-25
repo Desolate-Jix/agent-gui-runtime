@@ -16,7 +16,8 @@ from app.learn.calibration_sequence import (
     LEARNING_CALIBRATION_SEQUENCE_REQUEST_CONTRACT_VERSION,
 )
 from app.learn.hybrid.gpu_lifecycle import assert_next_provider_safe_to_start
-from app.learn.recognition.uei.canonical import content_sha256
+from app.learn.hybrid.review_projection import project_hybrid_review
+from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 from app.learn.workflow_continuation import (
     LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION,
     interpret_learning_stage_worker_result,
@@ -600,6 +601,318 @@ def finish_learning_workflow_stage_operation(
     }
 
 
+def _managed_hybrid_large_review_projection(
+    *,
+    orchestration: dict[str, Any],
+    managed_projection: dict[str, Any],
+) -> dict[str, Any]:
+    """从已验证 managed 父证据构建 Task 8 只读投影。"""
+
+    bundle = orchestration.get("capture_bundle")
+    inventory = orchestration.get("omni_inventory")
+    bindings = orchestration.get("qwen_bindings")
+    fusion = orchestration.get("fusion_result")
+    if not all(isinstance(item, dict) for item in (bundle, inventory, bindings, fusion)):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review parent evidence is incomplete"
+        )
+    normalized_parents: list[dict[str, Any]] = []
+    for label, parent in (
+        ("Omni inventory", inventory),
+        ("Qwen bindings", bindings),
+        ("fusion result", fusion),
+    ):
+        declared = parent.get("content_sha256")
+        if declared != content_sha256(parent):
+            raise LearningWorkflowStageOperationError(
+                f"managed Hybrid review {label} hash mismatch"
+            )
+        normalized = deepcopy(parent)
+        normalized.pop("content_sha256", None)
+        normalized_parents.append(normalized)
+    inventory, bindings, fusion = normalized_parents
+    inventory_by_id = {
+        item.get("candidate_id"): item
+        for item in inventory.get("candidates", [])
+        if isinstance(item, dict)
+    }
+    vista_proposals: list[dict[str, Any]] = []
+    for proposal in managed_projection.get("proposals", []):
+        if not isinstance(proposal, dict):
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review proposal is invalid"
+            )
+        candidate_id = proposal.get("candidate_id")
+        candidate = inventory_by_id.get(candidate_id)
+        roi_source = proposal.get("roi_ref")
+        point = proposal.get("canonical_point")
+        if (
+            not isinstance(candidate, dict)
+            or not isinstance(roi_source, dict)
+            or not isinstance(point, dict)
+        ):
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review proposal lost parent evidence"
+            )
+        bbox_ref = seal_immutable(
+            {
+                "contract_version": "hybrid_candidate_bbox_ref_v1",
+                "candidate_id": candidate_id,
+                "provider_result_ref": deepcopy(candidate["provider_result_ref"]),
+                "coordinate_space": candidate["coordinate_space"],
+                "xyxy": deepcopy(candidate["bbox_original"]),
+            }
+        )
+        roi_ref = seal_immutable(
+            {
+                "contract_version": "hybrid_permitted_roi_v1",
+                "roi_id": roi_source["roi_id"],
+                "candidate_id": candidate_id,
+                "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"]),
+                "coordinate_space": roi_source["coordinate_space"],
+                "xyxy": deepcopy(roi_source["xyxy"]),
+                "permitted_for_refinement": True,
+            }
+        )
+        vista_proposals.append(
+            {
+                "candidate_id": candidate_id,
+                "fusion_state": "BOUND",
+                "candidate_bbox_ref": bbox_ref,
+                "roi_ref": roi_ref,
+                "point": deepcopy(point),
+                "confidence": 0.0,
+                "evidence": [
+                    "managed_hybrid_review_projection/"
+                    + str(managed_projection.get("content_sha256") or "")
+                ],
+                "status": proposal.get("status"),
+                "review_required": True,
+            }
+        )
+    try:
+        return project_hybrid_review(
+            capture_bundle=bundle,
+            omni_inventory=inventory,
+            qwen_bindings=bindings,
+            fusion_result=fusion,
+            vista_proposals={
+                "contract_version": "hybrid_vista_proposals_v1",
+                "capture_identity": deepcopy(bundle["capture_identity"]),
+                "proposals": vista_proposals,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "final_submit_forbidden": True,
+                "real_action_requires_gate": True,
+                "authorization_scope": "display_and_review_only",
+            },
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LearningWorkflowStageOperationError(
+            f"managed Hybrid review could not build Task 8 projection · {exc}"
+        ) from exc
+
+
+def _persist_managed_hybrid_review_trial(
+    *,
+    project_root: str | Path,
+    run_id: str,
+    workflow_revision: int,
+    operation_id: str,
+    worker_id: str,
+    result_sha256: str,
+    response: dict[str, Any],
+    current: dict[str, Any],
+) -> str:
+    """将服务端接纳的 Hybrid review 结果固化为既有 trial 格式。"""
+
+    if (
+        response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+        or response.get("task_kind")
+        != "panel_learning_hybrid_review_projection"
+        or response.get("outcome") != "completed"
+    ):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review worker response is invalid"
+        )
+    stage_execution = _managed_stage_execution(current, "screen_understanding")
+    lineage = response.get("supervisor_lineage")
+    if (
+        not isinstance(lineage, dict)
+        or lineage.get("run_id") != run_id
+        or lineage.get("workflow_revision") != workflow_revision
+        or lineage.get("operation_id") != operation_id
+        or lineage.get("stage") != "screen_understanding"
+        or stage_execution.get("operation_id") != operation_id
+    ):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review supervisor lineage is stale"
+        )
+    orchestration = response.get("orchestration")
+    projection = response.get("result")
+    if not isinstance(orchestration, dict) or not isinstance(projection, dict):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review lost projection lineage"
+        )
+    if (
+        orchestration.get("run_id") != run_id
+        or orchestration.get("workflow_revision") != workflow_revision
+    ):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review orchestration is stale"
+        )
+    bundle_ref = orchestration.get("hybrid_capture_bundle_ref")
+    if not isinstance(bundle_ref, dict):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review capture bundle ref is missing"
+        )
+    root = Path(project_root).resolve()
+    try:
+        bundle = load_and_verify_hybrid_capture_bundle(
+            project_root=root,
+            bundle_ref=deepcopy(bundle_ref),
+            expected_run_id=run_id,
+            expected_workflow_revision=workflow_revision,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise LearningWorkflowStageOperationError(
+            f"managed Hybrid review capture bundle is invalid · {exc}"
+        ) from exc
+    orchestration_bundle = orchestration.get("capture_bundle")
+    if (
+        not isinstance(orchestration_bundle, dict)
+        or orchestration_bundle.get("bundle_ref") != bundle_ref
+        or orchestration_bundle.get("capture_lineage_ref")
+        != bundle.get("capture_lineage_ref")
+    ):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review capture bundle lineage mismatch"
+        )
+    if projection.get("hybrid_capture_bundle_ref") != bundle_ref:
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review projection bundle lineage mismatch"
+        )
+    proposals = projection.get("proposals")
+    if not isinstance(proposals, list):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review projection proposals are invalid"
+        )
+    capture_lineage_ref = bundle.get("capture_lineage_ref")
+    for proposal in proposals:
+        roi_ref = proposal.get("roi_ref") if isinstance(proposal, dict) else None
+        if (
+            not isinstance(roi_ref, dict)
+            or roi_ref.get("capture_lineage_ref") != capture_lineage_ref
+        ):
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review projection capture lineage mismatch"
+            )
+    if (
+        projection.get("contract_version") != "hybrid_review_projection_v1"
+        or projection.get("outcome") != "completed"
+        or projection.get("review_status") != "REVIEW_REQUIRED"
+        or projection.get("automatic_acceptance") is not False
+        or projection.get("execute_binding_enabled") is not False
+        or projection.get("no_live_click_authorization") is not True
+    ):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review projection is authorizing"
+        )
+    capture_image_path = str(orchestration.get("capture_image_path") or "").strip()
+    if not capture_image_path:
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review capture image path is missing"
+        )
+    image_path = (root / capture_image_path).resolve()
+    try:
+        image_path.relative_to(root)
+    except ValueError as exc:
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review capture image path escaped project root"
+        ) from exc
+    if (
+        not image_path.is_file()
+        or hashlib.sha256(image_path.read_bytes()).hexdigest()
+        != bundle["capture_identity"]["artifact_sha256"]
+    ):
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review capture image identity mismatch"
+        )
+    exact_worker_id = str(worker_id or "").strip()
+    exact_result_sha256 = str(result_sha256 or "").strip()
+    if not exact_worker_id or len(exact_result_sha256) != 64:
+        raise LearningWorkflowStageOperationError(
+            "managed Hybrid review adopted result identity is incomplete"
+        )
+    managed_lineage = {
+        "run_id": run_id,
+        "workflow_revision": workflow_revision,
+        "operation_id": operation_id,
+        "worker_id": exact_worker_id,
+        "result_sha256": exact_result_sha256,
+        "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"]),
+        "hybrid_capture_bundle_ref": deepcopy(bundle_ref),
+    }
+    large_review_projection = _managed_hybrid_large_review_projection(
+        orchestration=orchestration,
+        managed_projection=projection,
+    )
+    trial = {
+        "contract_version": "learning_template_draft_v1",
+        "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"]),
+        "states": [],
+        "regions": [],
+        "action_templates": [],
+        "page_details": {
+            "screen": {
+                "source_image_path": image_path.relative_to(root).as_posix(),
+                "source_image_sha256": bundle["capture_identity"][
+                    "artifact_sha256"
+                ],
+            }
+        },
+        "hybrid_review_projection": large_review_projection,
+        "managed_hybrid_review_projection": deepcopy(projection),
+        "managed_hybrid_lineage": managed_lineage,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "final_submit_forbidden": True,
+        "real_action_requires_gate": True,
+    }
+    encoded = (
+        json.dumps(trial, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    identity_bytes = json.dumps(
+        managed_lineage,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    trial_id = hashlib.sha256(identity_bytes).hexdigest()
+    trial_path = (
+        root
+        / "artifacts"
+        / "learning-runs"
+        / "hybrid-managed-review"
+        / f"trial_{trial_id}.json"
+    )
+    trial_path.parent.mkdir(parents=True, exist_ok=True)
+    if trial_path.exists():
+        if trial_path.read_bytes() != encoded:
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review trial identity collision"
+            )
+    else:
+        temporary = trial_path.with_name(
+            f".{trial_path.name}.{uuid4().hex}.tmp"
+        )
+        temporary.write_bytes(encoded)
+        temporary.replace(trial_path)
+    return trial_path.relative_to(root).as_posix()
+
+
 def continue_learning_stage_worker_result(
     *,
     store: LearningWorkflowRunStore,
@@ -697,6 +1010,29 @@ def continue_learning_stage_worker_result(
             "idempotent_replay": True,
             "next_stage_operation": deepcopy(next_stage_operation),
             "next_stage_worker": deepcopy(next_stage_worker),
+        }
+
+    if (
+        learning_pipeline_mode == "hybrid_v1_1"
+        and stage == "screen_understanding"
+        and task_kind == "panel_learning_hybrid_review_projection"
+        and decision.get("stage_finished") is True
+        and decision.get("outcome") == "completed"
+    ):
+        trial_path = _persist_managed_hybrid_review_trial(
+            project_root=project_root,
+            run_id=run_id,
+            workflow_revision=expected_revision,
+            operation_id=str(operation_id or "").strip(),
+            worker_id=normalized_worker_id,
+            result_sha256=result_sha256,
+            response=response,
+            current=current,
+        )
+        decision = deepcopy(decision)
+        decision["evidence_refs"] = {
+            **deepcopy(decision.get("evidence_refs") or {}),
+            "trial_path": trial_path,
         }
 
     if decision["stage_finished"] is not True:

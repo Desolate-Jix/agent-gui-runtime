@@ -3066,7 +3066,13 @@ def test_hybrid_persistence_driver_uses_all_managed_fake_provider_boundaries(
 
     result = build_managed_hybrid_review_source(tmp_path)
 
-    assert result["provider_boundary_trace"] == ["omni", "qwen", "fusion", "vista"]
+    assert result["provider_boundary_trace"] == [
+        "omni",
+        "qwen",
+        "fusion",
+        "vista",
+        "review",
+    ]
     assert result["large_review_save"]["status"] == "saved"
     saved_candidate = json.loads(
         Path(result["large_review_save"]["reviewed_candidate_path"]).read_text(
@@ -3079,6 +3085,145 @@ def test_hybrid_persistence_driver_uses_all_managed_fake_provider_boundaries(
     assert '"human_point_proposal"' in serialized
     assert saved_candidate["artifact_is_authorization"] is False
     assert saved_candidate["execute_binding_enabled"] is False
+
+
+def test_public_hybrid_review_continuation_persists_authoritative_trial(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """捕获公共 Hybrid 终态缺少服务端 trial_path 而无法完成阶段。"""
+
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _build_capture,
+        _create_capture_image,
+    )
+
+    store, bind_state = _store_at_completed_bind_capture()
+    config_path = tmp_path / "configs" / "learn_hybrid_v1_1.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_bytes(Path("configs/learn_hybrid_v1_1.json").read_bytes())
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    client = TestClient(app)
+    operation = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "public managed Hybrid review",
+            "lease_seconds": 600,
+            "learning_pipeline_mode": "hybrid_v1_1",
+        },
+    ).json()["data"]
+    workflow_revision = operation["workflow_state"]["revision"]
+    image_path = _create_capture_image(tmp_path)
+    bundle = _build_capture(
+        tmp_path,
+        image_path=image_path,
+        run_id="run-stage-operation",
+        revision=workflow_revision,
+    )
+    lineage = _hybrid_supervised_lineage(
+        run_id="run-stage-operation",
+        workflow_revision=workflow_revision,
+        operation_id=operation["operation_id"],
+    )
+    projection = {
+        "contract_version": "hybrid_review_projection_v1",
+        "outcome": "completed",
+        "review_status": "REVIEW_REQUIRED",
+        "automatic_acceptance": False,
+        "completed_count": 1,
+        "requested_candidate_ids": ["candidate/one"],
+        "completed_candidate_ids": ["candidate/one"],
+        "hybrid_capture_bundle_ref": deepcopy(bundle["bundle_ref"]),
+        "proposals": [
+            {
+                "candidate_id": "candidate/one",
+                "roi_ref": {
+                    "capture_lineage_ref": deepcopy(
+                        bundle["capture_lineage_ref"]
+                    )
+                },
+            }
+        ],
+        "execute_binding_enabled": False,
+        "no_live_click_authorization": True,
+    }
+    task8_projection = {
+        "contract_version": "hybrid_review_projection_v2",
+        "content_sha256": "e" * 64,
+        "screen_facts": {
+            "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"])
+        },
+    }
+    monkeypatch.setattr(
+        workflow_service,
+        "_managed_hybrid_large_review_projection",
+        lambda **_kwargs: deepcopy(task8_projection),
+    )
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_review_projection",
+        "outcome": "completed",
+        "result": deepcopy(projection),
+        "orchestration": {
+            "run_id": "run-stage-operation",
+            "workflow_revision": workflow_revision,
+            "hybrid_capture_bundle_ref": deepcopy(bundle["bundle_ref"]),
+            "capture_bundle": deepcopy(bundle),
+            "capture_image_path": image_path.relative_to(tmp_path).as_posix(),
+        },
+        "supervisor_lineage": lineage,
+        "lifecycle_evidence": {},
+    }
+
+    class _AdoptedRegistry:
+        def read_adopted_result(self, **_kwargs):
+            return {
+                "receipt": {
+                    "task_kind": "panel_learning_hybrid_review_projection",
+                    "result_sha256": "d" * 64,
+                },
+                "response": deepcopy(response),
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _AdoptedRegistry())
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": workflow_revision,
+            "stage": "screen_understanding",
+            "operation_id": operation["operation_id"],
+            "worker_id": "worker-public-hybrid-review",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    evidence = continued["data"]["workflow_state"]["stages"][
+        "screen_understanding"
+    ]["evidence_refs"]
+    trial_path = tmp_path / evidence["trial_path"]
+    assert trial_path.is_file()
+    trial = json.loads(trial_path.read_text(encoding="utf-8"))
+    assert trial["hybrid_review_projection"] == task8_projection
+    assert trial["managed_hybrid_review_projection"] == projection
+    assert trial["capture_lineage_ref"] == bundle["capture_lineage_ref"]
+    assert trial["managed_hybrid_lineage"] == {
+        "run_id": "run-stage-operation",
+        "workflow_revision": workflow_revision,
+        "operation_id": operation["operation_id"],
+        "worker_id": "worker-public-hybrid-review",
+        "result_sha256": "d" * 64,
+        "capture_lineage_ref": bundle["capture_lineage_ref"],
+        "hybrid_capture_bundle_ref": bundle["bundle_ref"],
+    }
+    assert evidence["evidence_integrity"]["artifacts"]["trial_path"][
+        "sha256"
+    ] == hashlib.sha256(trial_path.read_bytes()).hexdigest()
 
 
 def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:
