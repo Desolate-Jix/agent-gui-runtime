@@ -37,11 +37,22 @@ class _InferenceAttempt:
 
 
 class LocalVisionProvider:
-    def __init__(self, endpoint: str | None = None, model_name: str | None = None, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        model_name: str | None = None,
+        timeout_seconds: float = 30.0,
+        managed_model_lease: dict[str, Any] | None = None,
+    ) -> None:
         self.endpoint = endpoint
         self.model_name = model_name or "local_stub"
         self.timeout_seconds = float(timeout_seconds)
+        self._managed_model_lease = copy.deepcopy(managed_model_lease)
         self._model_loading_retries = 0
+
+    def bind_managed_model_lease(self, model_lease: dict[str, Any]) -> None:
+        """绑定本次观察实际使用的不可变 Qwen 服务实例。"""
+        self._managed_model_lease = copy.deepcopy(model_lease)
 
     def analyze(self, req: VisionAnalyzeRequest) -> VisionAnalyzeResponse:
         self._model_loading_retries = 0
@@ -207,30 +218,59 @@ class LocalVisionProvider:
         body = json.dumps(payload).encode("utf-8")
         loading_deadline = time.monotonic() + self.timeout_seconds
         while True:
+            managed_profile = self._attest_managed_request_profile()
+            if managed_profile is not None:
+                payload["model"] = str(
+                    managed_profile.get("model_name")
+                    or managed_profile.get("model_id")
+                    or self.model_name
+                )
+                body = json.dumps(payload).encode("utf-8")
+                endpoint = str(managed_profile.get("endpoint") or "").strip()
+            else:
+                endpoint = self.endpoint
             request = Request(
-                self._chat_completions_url(),
+                self._chat_completions_url(endpoint),
                 data=body,
                 headers=headers,
                 method="POST",
             )
             try:
                 with urlopen(request, timeout=self.timeout_seconds) as response:
-                    return json.loads(response.read().decode("utf-8"))
+                    response_bytes = response.read()
+                    self._mark_response_body_complete(request_id)
+                    return json.loads(response_bytes.decode("utf-8"))
             except HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")
                 if self._model_is_loading(exc.code, details) and time.monotonic() < loading_deadline:
                     self._model_loading_retries += 1
                     time.sleep(min(1.0, max(0.0, loading_deadline - time.monotonic())))
                     continue
+                self._mark_response_body_complete(request_id)
                 raise RuntimeError(f"local vision endpoint returned HTTP {exc.code}: {details}") from exc
             except URLError as exc:
                 raise RuntimeError(f"failed to reach local vision endpoint {self.endpoint}: {exc.reason}") from exc
 
+    def _attest_managed_request_profile(self) -> dict[str, Any] | None:
+        if self._managed_model_lease is None:
+            return None
+        from app.core.model_server import _profile_for_qwen_model_lease
+
+        return _profile_for_qwen_model_lease(self._managed_model_lease)
+
+    def _mark_response_body_complete(self, request_id: str) -> None:
+        from app.core.model_server import mark_qwen_model_response_body_complete
+
+        mark_qwen_model_response_body_complete(
+            model_lease=self._managed_model_lease,
+            request_id=request_id,
+        )
+
     def _model_is_loading(self, status_code: int, details: str) -> bool:
         return status_code == 503 and "loading model" in details.casefold()
 
-    def _chat_completions_url(self) -> str:
-        endpoint = str(self.endpoint or "").rstrip("/")
+    def _chat_completions_url(self, endpoint_override: str | None = None) -> str:
+        endpoint = str(endpoint_override or self.endpoint or "").rstrip("/")
         if endpoint.endswith("/chat/completions"):
             return endpoint
         if endpoint.endswith("/v1"):

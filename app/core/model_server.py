@@ -553,8 +553,30 @@ def release_managed_qwen_model_lease(
     reason: str,
 ) -> dict[str, Any]:
     """释放已完成的受管 Qwen 消费者租约，不绕过共享引用计数。"""
-    _mark_qwen_model_compute_complete(model_lease)
-    return _release_exact_qwen_lease(model_lease, reason=reason)
+    return reconcile_qwen_model_lease_failure(
+        model_lease=model_lease,
+        compute_completed=False,
+        reason=reason,
+    )
+
+
+def mark_qwen_model_response_body_complete(
+    *,
+    model_lease: dict[str, Any] | None = None,
+    request_id: str | None = None,
+) -> bool:
+    """仅在提供者响应体完整读取后推进精确 Qwen 租约。"""
+    selected_lease = deepcopy(model_lease) if isinstance(model_lease, dict) else None
+    if selected_lease is None:
+        owner_request_id = str(request_id or "").strip()
+        if not owner_request_id:
+            return False
+        match = _find_qwen_lease_by_owner(owner_request_id)
+        if match is None:
+            return False
+        selected_lease = match[1]
+    _mark_qwen_model_compute_complete(selected_lease)
+    return True
 
 
 def reconcile_qwen_model_lease_failure(

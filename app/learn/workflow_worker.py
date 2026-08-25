@@ -6,6 +6,7 @@ import multiprocessing
 import os
 from copy import deepcopy
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
@@ -34,6 +35,7 @@ from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
 from app.learn.workflow_tasks.two_stage import run_two_stage_understanding_task
 from app.operation.observe.contracts import ObserveScreenTaskInput
+from app.operation.observe.screen_reader import read_screen
 
 
 LEARNING_STAGE_WORKER_CONTRACT_VERSION = "learning_stage_worker_v1"
@@ -176,6 +178,10 @@ def execute_learning_stage_worker_task(
                 run_observe_task(
                     ObserveScreenTaskInput.model_validate(payload),
                     project_root=_PROJECT_ROOT,
+                    screen_reader=partial(
+                        read_screen,
+                        managed_model_lease=model_lease,
+                    ),
                 )
             )
         else:
@@ -194,11 +200,12 @@ def execute_learning_stage_worker_task(
             )
         raise
     if model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
-        from app.core.model_server import release_managed_qwen_model_lease
+        from app.core.model_server import reconcile_qwen_model_lease_failure
 
-        release_managed_qwen_model_lease(
-            model_lease,
-            "managed_consumer_completed",
+        reconcile_qwen_model_lease_failure(
+            model_lease=model_lease,
+            compute_completed=False,
+            reason="managed_consumer_completed",
         )
 
     if hasattr(response, "model_dump"):

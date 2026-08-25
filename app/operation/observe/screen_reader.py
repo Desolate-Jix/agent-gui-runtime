@@ -56,6 +56,7 @@ def read_screen(
     *,
     provider_factory: Any = VisionProviderFactory,
     trace_writer: TraceWriter = write_trace,
+    managed_model_lease: dict[str, Any] | None = None,
 ) -> ObserveScreenReadResult:
     image_path = Path(request.image_path)
     if not image_path.exists():
@@ -74,6 +75,11 @@ def read_screen(
             mode=request.provider_mode,
             config=config,
         )
+        if managed_model_lease is not None:
+            binder = getattr(provider, "bind_managed_model_lease", None)
+            if not callable(binder):
+                raise RuntimeError("managed observation provider cannot bind exact Qwen lease")
+            binder(managed_model_lease)
         response = provider.analyze(
             VisionAnalyzeRequest(
                 image_path=str(image_path),

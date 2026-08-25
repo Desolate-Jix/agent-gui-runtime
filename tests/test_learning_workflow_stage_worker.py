@@ -1302,10 +1302,9 @@ def test_existing_managed_qwen_consumer_uses_shared_lease_lifecycle(
         lambda profile: {"resource_mode": "normal", "model_launch_allowed": True},
     )
     monkeypatch.setattr(
-        "app.core.model_server.release_managed_qwen_model_lease",
-        lambda model_lease, reason: events.append(("release", model_lease, reason))
+        "app.core.model_server.reconcile_qwen_model_lease_failure",
+        lambda **kwargs: events.append(("reconcile", kwargs))
         or {"status": "released"},
-        raising=False,
     )
     monkeypatch.setattr(
         workflow_worker,
@@ -1327,7 +1326,100 @@ def test_existing_managed_qwen_consumer_uses_shared_lease_lifecycle(
     assert events[0][0] == "acquire"
     assert events[0][1]["request_id"] == "observe-owner"
     assert events[1] == ("in_flight", lease)
-    assert events[-1] == ("release", lease, "managed_consumer_completed")
+    assert events[-1] == (
+        "reconcile",
+        {
+            "model_lease": lease,
+            "compute_completed": False,
+            "reason": "managed_consumer_completed",
+        },
+    )
+
+
+def test_non_hybrid_degraded_result_preserves_unproven_provider_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    lease = {"lease_id": "observe-lease", "owner_request_id": "observe-owner"}
+    reconciliations: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *args, **kwargs: lease,
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_recognition_task",
+        lambda *args, **kwargs: {"status": "degraded", "success": False},
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "recognition_result_to_legacy_response",
+        lambda value: value,
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.release_managed_qwen_model_lease",
+        lambda *args, **kwargs: pytest.fail(
+            "unproven provider completion reached the terminal release helper"
+        ),
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.reconcile_qwen_model_lease_failure",
+        lambda **kwargs: reconciliations.append(kwargs)
+        or {"status": "cancellation_acknowledged_pending"},
+    )
+
+    response = execute_learning_stage_worker_task(
+        "panel_learning_recognition_trial",
+        {"app_name": "test"},
+    )
+
+    assert response == {"status": "degraded", "success": False}
+    assert reconciliations == [
+        {
+            "model_lease": lease,
+            "compute_completed": False,
+            "reason": "managed_consumer_completed",
+        }
+    ]
+
+
+def test_observe_worker_binds_exact_lease_into_production_screen_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    lease = {"lease_id": "observe-lease", "owner_request_id": "observe-owner"}
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *args, **kwargs: lease,
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.reconcile_qwen_model_lease_failure",
+        lambda **kwargs: {"status": "cancellation_acknowledged_pending"},
+    )
+
+    def observe(task, *, project_root, screen_reader):
+        del task, project_root
+        assert screen_reader.func is workflow_worker.read_screen
+        assert screen_reader.keywords == {"managed_model_lease": lease}
+        return {"outcome": "completed"}
+
+    monkeypatch.setattr(workflow_worker, "run_observe_task", observe)
+    monkeypatch.setattr(
+        workflow_worker,
+        "observe_result_to_legacy_response",
+        lambda value: value,
+    )
+
+    response = execute_learning_stage_worker_task(
+        "vision_observe_screen",
+        {"capture_live": False, "image_path": "controlled.png"},
+    )
+
+    assert response == {"outcome": "completed"}
 
 
 @pytest.mark.parametrize(

@@ -126,6 +126,16 @@ def _valid_binding_artifacts() -> tuple[dict, dict]:
     return inventory, seal_immutable(parsed)
 
 
+def _current_process_readiness(*, model_id: str) -> dict:
+    process = psutil.Process(os.getpid())
+    return _server_readiness(
+        started=False,
+        pid=process.pid,
+        created_ns=int(round(process.create_time() * 1_000_000_000)),
+        model_id=model_id,
+    )
+
+
 def test_cancel_model_request_verifies_vista_request_termination(monkeypatch) -> None:
     requested: list[dict] = []
     profile = {
@@ -1438,6 +1448,133 @@ def test_qwen_termination_receipt_cleanup_is_retryable_without_second_stop(
 
     assert retried["status"] == "released"
     assert stop_calls == [{"pid": 9101, "create_time_ns": 111}]
+    assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_managed_local_provider_timeout_preserves_request_in_flight(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from app.vision import local_provider
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-timeout-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    model_server._mark_qwen_model_request_in_flight(lease)
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    monkeypatch.setattr(
+        local_provider,
+        "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(TimeoutError("controlled timeout")),
+    )
+    provider = local_provider.LocalVisionProvider(
+        endpoint="http://127.0.0.1:1/v1/chat/completions",
+        model_name="mutable-wrong-model",
+        timeout_seconds=0.01,
+        managed_model_lease=lease,
+    )
+
+    with pytest.raises(TimeoutError, match="controlled timeout"):
+        provider._call_openai_compatible_endpoint(image_path, "controlled")
+
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        exact = model_server._find_exact_lease(state, lease)
+    assert exact["lifecycle_state"] == "request_in_flight"
+    pending = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=lease,
+        compute_completed=False,
+        reason="managed_consumer_completed",
+    )
+    assert pending["status"] == "cancellation_acknowledged_pending"
+    assert model_server.qwen_model_lease_is_active(lease) is True
+
+
+def test_managed_local_provider_release_race_waits_for_exact_response_body(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from app.vision import local_provider
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-race-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    model_server._mark_qwen_model_request_in_flight(lease)
+    image_path = tmp_path / "screen.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    read_entered = Event()
+    release_read = Event()
+    requested_urls: list[str] = []
+
+    class BlockingResponse(_FakeResponse):
+        def read(self, size: int = -1) -> bytes:
+            read_entered.set()
+            assert release_read.wait(timeout=2.0)
+            return super().read(size)
+
+    def controlled_urlopen(request, timeout):
+        del timeout
+        requested_urls.append(request.full_url)
+        return BlockingResponse({"choices": []})
+
+    monkeypatch.setattr(local_provider, "urlopen", controlled_urlopen)
+    provider = local_provider.LocalVisionProvider(
+        endpoint="http://127.0.0.1:1/v1/chat/completions",
+        model_name="mutable-wrong-model",
+        managed_model_lease=lease,
+    )
+    result: dict[str, object] = {}
+    errors: list[BaseException] = []
+
+    def invoke() -> None:
+        try:
+            result.update(provider._call_openai_compatible_endpoint(image_path, "controlled"))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = Thread(target=invoke)
+    worker.start()
+    assert read_entered.wait(timeout=1.0) is True
+    pending = model_server.release_managed_qwen_model_lease(
+        lease,
+        "managed_consumer_completed",
+    )
+    assert pending["status"] == "cancellation_acknowledged_pending"
+    assert model_server.qwen_model_lease_is_active(lease) is True
+
+    release_read.set()
+    worker.join(timeout=2.0)
+    assert worker.is_alive() is False
+    assert errors == []
+    assert result == {"choices": []}
+    assert requested_urls == [profile["endpoint"]]
+    finalized = model_server.reconcile_qwen_model_lease_failure(
+        model_lease=lease,
+        compute_completed=False,
+        reason="response_body_completed",
+    )
+    assert finalized["status"] == "released"
     assert model_server.qwen_model_lease_is_active(lease) is False
 
 
