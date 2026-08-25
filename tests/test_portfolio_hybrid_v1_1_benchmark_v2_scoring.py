@@ -163,8 +163,44 @@ def test_first_verified_regression_and_automatic_human_boundary(tmp_path:Path)->
 def test_direct_cli_cannot_forge_child_authority_and_redacts(tmp_path:Path)->None:
     private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); envelope={"private_manifest_path":str(p["private"]),"prediction_run_path":str(p["run"]),"lifecycle_path":str(p["lifecycle"]),"private_output_path":str(p["output"]),"public_ref_path":str(p["public"])}
     child_env={"SYSTEMROOT":os.environ["SYSTEMROOT"],"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1","BENCHMARK_V2_SCORER_CHILD_CAPABILITY":"forged-matching-token"}
-    proc=subprocess.run([sys.executable,str(SCRIPT),"--closed-stdin"],cwd=tmp_path,env=child_env,input=json.dumps(envelope,separators=(",",":")),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
+    proc=subprocess.run([str(Path(getattr(sys,"_base_executable",sys.executable)).resolve()),str(SCRIPT),"--closed-launch-handle","12345"],cwd=tmp_path,env=child_env,input=json.dumps(envelope,separators=(",",":")),stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
     assert proc.returncode!=0 and str(tmp_path) not in proc.stderr and "opaque" not in proc.stderr
+
+@pytest.mark.parametrize("mutation",["inherited_file","wrong_cwd","wrong_env","no_job"])
+def test_real_nonproduction_launcher_without_exact_os_boundary_fails(tmp_path:Path,mutation:str)->None:
+    import msvcrt
+    from app.learn.hybrid.benchmark_scorer_v2 import _ScorerJob, _process_identity
+    python=Path(getattr(sys,"_base_executable",sys.executable)).resolve(); operation=tmp_path/f"operation-{mutation}"; operation.mkdir()
+    env={"SYSTEMROOT":os.environ["SYSTEMROOT"],"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
+    if mutation=="wrong_env": env["EXTRA_FORBIDDEN"]="1"
+    job=_ScorerJob(); process=None; read_fd=write_fd=-1
+    try:
+        if mutation=="inherited_file":
+            read_fd=os.open(tmp_path/"not-a-pipe.bin",os.O_CREAT|os.O_RDONLY); handle=msvcrt.get_osfhandle(read_fd)
+        else:
+            read_fd,write_fd=os.pipe(); handle=msvcrt.get_osfhandle(read_fd)
+        os.set_handle_inheritable(handle,True); startup=subprocess.STARTUPINFO(); startup.lpAttributeList={"handle_list":[handle]}
+        argv=[str(python),str(SCRIPT),"--closed-launch-handle",str(handle)]
+        if mutation=="wrong_cwd": (operation/"unexpected.txt").write_text("not empty",encoding="utf-8")
+        process=subprocess.Popen(argv,executable=str(python),cwd=operation,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True,startupinfo=startup)
+        os.close(read_fd); read_fd=-1
+        if mutation!="no_job" and mutation!="inherited_file": job.assign(process)
+        if mutation!="inherited_file":
+            parent=os.getpid(); envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_path":str(tmp_path/"run"),"lifecycle_path":str(tmp_path/"life"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":parent,"launcher_process_identity":_process_identity(parent),"expected_process_id":process.pid,"expected_process_identity":_process_identity(process.pid),"job_name":job.name,"job_identity_sha256":job.identity_sha256,"expected_argv_sha256":hashlib.sha256(canonical_bytes([str(SCRIPT),"--closed-launch-handle",str(handle)])).hexdigest(),"expected_env_sha256":hashlib.sha256(canonical_bytes(env)).hexdigest(),"expected_cwd_sha256":hashlib.sha256(canonical_bytes(str(operation.resolve()))).hexdigest(),"expected_executable":str(python)}
+            os.write(write_fd,canonical_bytes(envelope)); os.close(write_fd); write_fd=-1
+        stdout,stderr=process.communicate(timeout=10)
+        assert process.returncode!=0 and "opaque" not in stderr and not (tmp_path/"out").exists()
+    finally:
+        for fd in (read_fd,write_fd):
+            if fd>=0:
+                try: os.close(fd)
+                except OSError: pass
+        if process is not None:
+            if process.poll() is None: process.kill()
+            process.wait(timeout=10)
+            for stream in (process.stdout,process.stderr):
+                if stream is not None: stream.close()
+        job.close()
 
 def test_gate_release_and_import_graph_are_closed()->None:
     gate=json.loads(GATE.read_text()); assert gate["contract_version"]=="portfolio_hybrid_v1_1_automatic_gate_v2" and gate["benchmark_release_id"]==RELEASE and gate["safety"]==SAFETY
@@ -183,10 +219,14 @@ def test_private_loader_direct_call_is_child_only(tmp_path:Path,monkeypatch:pyte
 
 def test_true_child_entry_rejects_matching_self_identity(tmp_path:Path)->None:
     from app.learn.hybrid.benchmark_scorer_v2 import _process_identity, execute_closed_child_envelope
+    import msvcrt
     pid=os.getpid(); identity=_process_identity(pid)
-    envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_path":str(tmp_path/"run"),"lifecycle_path":str(tmp_path/"life"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":pid,"launcher_process_identity":identity,"expected_process_id":pid,"expected_process_identity":identity}
+    envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_path":str(tmp_path/"run"),"lifecycle_path":str(tmp_path/"life"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":pid,"launcher_process_identity":identity,"expected_process_id":pid,"expected_process_identity":identity,"job_name":"self-job","job_identity_sha256":"0"*64,"expected_argv_sha256":"0"*64,"expected_env_sha256":"0"*64,"expected_cwd_sha256":"0"*64,"expected_executable":str(Path(sys.executable).resolve())}
+    read_fd,write_fd=os.pipe(); handle=msvcrt.get_osfhandle(read_fd); os.write(write_fd,canonical_bytes(envelope)); os.close(write_fd)
     with pytest.raises(PermissionError,match="launcher binding"):
-        execute_closed_child_envelope(envelope)
+        execute_closed_child_envelope(handle)
+    try: os.close(read_fd)
+    except OSError: pass
     assert not any(path.exists() for path in (tmp_path/"out",tmp_path/"public"))
 
 def test_verified_gate_snapshot_is_immutable_across_same_size_replace(tmp_path:Path,monkeypatch:pytest.MonkeyPatch)->None:
@@ -207,15 +247,27 @@ def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monk
     import app.learn.hybrid.benchmark_scorer_v2 as scorer
     private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); observed={}; original=scorer.subprocess.Popen
     def capture(*args:object,**kwargs:object):
-        observed.update({"args":deepcopy(args),"env":deepcopy(kwargs["env"]),"cwd":Path(kwargs["cwd"]),"initial":list(Path(kwargs["cwd"]).iterdir())})
+        observed.update({"args":deepcopy(args),"env":deepcopy(kwargs["env"]),"cwd":Path(kwargs["cwd"]),"initial":list(Path(kwargs["cwd"]).iterdir()),"stdin":kwargs["stdin"],"handles":list(kwargs["startupinfo"].lpAttributeList["handle_list"])})
         process=original(*args,**kwargs); observed["child_pid"]=process.pid; return process
     monkeypatch.setattr(scorer.subprocess,"Popen",capture)
     result=run_private_scorer(private_manifest_path=p["private"],prediction_run_path=p["run"],lifecycle_path=p["lifecycle"],private_output_path=p["output"],public_ref_path=p["public"])
     projection=json.dumps({"args":observed["args"],"env":observed["env"],"cwd":str(observed["cwd"])},default=str)
-    assert set(result)=={"status","score_ref","content_sha256"} and observed["initial"]==[]
+    assert set(result)=={"status","score_ref","content_sha256"} and observed["initial"]==[] and observed["stdin"]==subprocess.DEVNULL and len(observed["handles"])==1
     assert str(tmp_path) not in projection and "opaque/" not in projection and "BENCHMARK_V2_SCORER_CHILD_CAPABILITY" not in observed["env"]
-    public=json.loads(p["public"].read_text()); receipt=public["execution_receipt"]
-    assert receipt["process_id"]==observed["child_pid"] and receipt["launcher_process_id"]==os.getpid() and receipt["process_id"]!=receipt["launcher_process_id"]
-    assert len(receipt["nonce"])==64 and len(receipt["pipe_capability_sha256"])==64
+    public=json.loads(p["public"].read_text()); launch=json.loads(base64.b64decode(public["launch_receipt"]["canonical_bytes_b64"])); cleanup=json.loads(base64.b64decode(public["cleanup_receipt"]["canonical_bytes_b64"]))
+    assert launch["child_process_id"]==observed["child_pid"] and launch["launcher_process_id"]==os.getpid() and launch["child_process_id"]!=launch["launcher_process_id"]
+    assert len(launch["pipe_capability_sha256"])==64 and cleanup["job_stable_zero"] is True and public["binding"]["launch_receipt_ref"]==public["launch_receipt"]["ref"]
     expected_python=Path(getattr(sys,"_base_executable",sys.executable)).resolve()
     assert Path(observed["args"][0][0]).resolve()==expected_python
+
+@pytest.mark.parametrize("mutation",["launch_bytes","cleanup_semantics","binding_ref","final_digest"])
+def test_downstream_requires_exact_production_launch_cleanup_chain(tmp_path:Path,mutation:str)->None:
+    from app.learn.hybrid.benchmark_scorer_v2 import _sealed_receipt, validate_private_scorer_public_ref
+    private,run,bundle=evidence(); _,_,public=execute(tmp_path,private,run,bundle); changed=deepcopy(public)
+    if mutation=="launch_bytes": changed["launch_receipt"]["canonical_bytes_b64"]="AA=="
+    elif mutation=="cleanup_semantics":
+        cleanup=json.loads(base64.b64decode(changed["cleanup_receipt"]["canonical_bytes_b64"])); cleanup["job_stable_zero"]=False; changed["cleanup_receipt"]=_sealed_receipt(cleanup,"private-scorer-cleanup"); changed["binding"]["cleanup_receipt_ref"]=changed["cleanup_receipt"]["ref"]
+    elif mutation=="binding_ref": changed["binding"]["launch_receipt_ref"]={"id":"wrong","content_sha256":"0"*64}
+    else: changed["content_sha256"]="0"*64
+    with pytest.raises(ValueError,match="scorer"):
+        validate_private_scorer_public_ref(changed)

@@ -1,6 +1,6 @@
 """Child-only private scorer plus production-owned isolated scorer spawner."""
 from __future__ import annotations
-import base64, hashlib, json, os, secrets, subprocess, sys, tempfile
+import base64, hashlib, json, os, secrets, stat, subprocess, sys, tempfile
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Mapping
@@ -193,21 +193,96 @@ def _process_identity(pid:int)->str:
     stat=Path(f"/proc/{pid}/stat").read_text(encoding="ascii").split()
     return f"proc-start/{stat[21]}"
 
-def execute_closed_child_envelope(envelope:Mapping[str,object])->dict[str,object]:
+def _sealed_receipt(value:Mapping[str,object],kind:str)->dict[str,object]:
+    raw=canonical_bytes(value); digest=hashlib.sha256(raw).hexdigest()
+    return {"ref":{"id":f"{kind}/{digest}","content_sha256":digest},"canonical_bytes_b64":base64.b64encode(raw).decode("ascii")}
+
+class _ScorerJob:
+    def __init__(self)->None:
+        if os.name!="nt": self.name=""; self.identity_sha256="non-windows"; self._handle=None; return
+        import ctypes
+        from ctypes import wintypes
+        class IO(ctypes.Structure): _fields_=[(name,ctypes.c_ulonglong) for name in ("ReadOperationCount","WriteOperationCount","OtherOperationCount","ReadTransferCount","WriteTransferCount","OtherTransferCount")]
+        class BASIC(ctypes.Structure): _fields_=[("PerProcessUserTimeLimit",ctypes.c_longlong),("PerJobUserTimeLimit",ctypes.c_longlong),("LimitFlags",wintypes.DWORD),("MinimumWorkingSetSize",ctypes.c_size_t),("MaximumWorkingSetSize",ctypes.c_size_t),("ActiveProcessLimit",wintypes.DWORD),("Affinity",ctypes.c_size_t),("PriorityClass",wintypes.DWORD),("SchedulingClass",wintypes.DWORD)]
+        class EXTENDED(ctypes.Structure): _fields_=[("BasicLimitInformation",BASIC),("IoInfo",IO),("ProcessMemoryLimit",ctypes.c_size_t),("JobMemoryLimit",ctypes.c_size_t),("PeakProcessMemoryUsed",ctypes.c_size_t),("PeakJobMemoryUsed",ctypes.c_size_t)]
+        class ACCOUNTING(ctypes.Structure): _fields_=[("TotalUserTime",ctypes.c_longlong),("TotalKernelTime",ctypes.c_longlong),("ThisPeriodTotalUserTime",ctypes.c_longlong),("ThisPeriodTotalKernelTime",ctypes.c_longlong),("TotalPageFaultCount",wintypes.DWORD),("TotalProcesses",wintypes.DWORD),("ActiveProcesses",wintypes.DWORD),("TotalTerminatedProcesses",wintypes.DWORD)]
+        kernel=ctypes.WinDLL("kernel32",use_last_error=True); name=f"Local\\portfolio-hybrid-v2-scorer-{os.getpid()}-{secrets.token_hex(16)}"
+        kernel.CreateJobObjectW.argtypes=(ctypes.c_void_p,wintypes.LPCWSTR); kernel.CreateJobObjectW.restype=wintypes.HANDLE
+        kernel.SetInformationJobObject.argtypes=(wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD); kernel.SetInformationJobObject.restype=wintypes.BOOL
+        kernel.AssignProcessToJobObject.argtypes=(wintypes.HANDLE,wintypes.HANDLE); kernel.AssignProcessToJobObject.restype=wintypes.BOOL
+        kernel.QueryInformationJobObject.argtypes=(wintypes.HANDLE,ctypes.c_int,ctypes.c_void_p,wintypes.DWORD,ctypes.POINTER(wintypes.DWORD)); kernel.QueryInformationJobObject.restype=wintypes.BOOL
+        kernel.CloseHandle.argtypes=(wintypes.HANDLE,); kernel.CloseHandle.restype=wintypes.BOOL
+        handle=kernel.CreateJobObjectW(None,name)
+        if not handle: raise OSError(ctypes.get_last_error(),"CreateJobObjectW failed")
+        limits=EXTENDED(); limits.BasicLimitInformation.LimitFlags=0x2000
+        if not kernel.SetInformationJobObject(handle,9,ctypes.byref(limits),ctypes.sizeof(limits)): kernel.CloseHandle(handle); raise OSError(ctypes.get_last_error(),"SetInformationJobObject failed")
+        self._ctypes=ctypes; self._kernel=kernel; self._accounting=ACCOUNTING; self._handle=handle; self.name=name; self.identity_sha256=hashlib.sha256(name.encode("utf-8")).hexdigest()
+    def assign(self,process:subprocess.Popen[str])->None:
+        if os.name=="nt" and not self._kernel.AssignProcessToJobObject(self._handle,int(process._handle)): raise OSError(self._ctypes.get_last_error(),"AssignProcessToJobObject failed")
+    def active_processes(self)->int:
+        if os.name!="nt": return 0
+        value=self._accounting()
+        if not self._kernel.QueryInformationJobObject(self._handle,1,self._ctypes.byref(value),self._ctypes.sizeof(value),None): raise OSError(self._ctypes.get_last_error(),"QueryInformationJobObject failed")
+        return int(value.ActiveProcesses)
+    def close(self)->None:
+        if os.name=="nt" and self._handle:
+            if not self._kernel.CloseHandle(self._handle): raise OSError(self._ctypes.get_last_error(),"CloseHandle(job) failed")
+            self._handle=None
+
+def _verify_job_membership(name:str,expected_sha256:str)->None:
+    if os.name!="nt":
+        if name or expected_sha256!="non-windows": raise PermissionError("private scorer Job identity invalid")
+        return
+    import ctypes
+    from ctypes import wintypes
+    if hashlib.sha256(name.encode("utf-8")).hexdigest()!=expected_sha256: raise PermissionError("private scorer Job identity invalid")
+    kernel=ctypes.WinDLL("kernel32",use_last_error=True); kernel.OpenJobObjectW.argtypes=(wintypes.DWORD,wintypes.BOOL,wintypes.LPCWSTR); kernel.OpenJobObjectW.restype=wintypes.HANDLE; kernel.IsProcessInJob.argtypes=(wintypes.HANDLE,wintypes.HANDLE,ctypes.POINTER(wintypes.BOOL)); kernel.IsProcessInJob.restype=wintypes.BOOL; kernel.GetCurrentProcess.restype=wintypes.HANDLE; kernel.CloseHandle.argtypes=(wintypes.HANDLE,)
+    handle=kernel.OpenJobObjectW(0x0004,False,name)
+    if not handle: raise PermissionError("private scorer Job missing")
+    try:
+        member=wintypes.BOOL()
+        if not kernel.IsProcessInJob(kernel.GetCurrentProcess(),handle,ctypes.byref(member)) or not member.value: raise PermissionError("private scorer Job membership invalid")
+    finally: kernel.CloseHandle(handle)
+
+def _read_launch_capability(handle_value:int)->dict[str,object]:
+    if not isinstance(handle_value,int) or handle_value<=0: raise PermissionError("private scorer launch handle invalid")
+    if os.name=="nt":
+        import ctypes, msvcrt
+        kernel=ctypes.WinDLL("kernel32",use_last_error=True); kernel.GetFileType.argtypes=(ctypes.c_void_p,); kernel.GetFileType.restype=ctypes.c_ulong
+        if kernel.GetFileType(handle_value)!=3: raise PermissionError("private scorer launch handle is not a pipe")
+        fd=msvcrt.open_osfhandle(handle_value,os.O_RDONLY|os.O_BINARY)
+    else:
+        fd=handle_value
+        if not stat.S_ISFIFO(os.fstat(fd).st_mode): raise PermissionError("private scorer launch handle is not a pipe")
+    with os.fdopen(fd,"rb",closefd=True) as stream: raw=stream.read(131073)
+    if not raw or len(raw)>131072: raise PermissionError("private scorer launch pipe payload invalid")
+    value=json.loads(raw.decode("utf-8"))
+    if canonical_bytes(value)!=raw or not isinstance(value,dict): raise PermissionError("private scorer launch pipe payload invalid")
+    return value
+
+def execute_closed_child_envelope(handle_value:int)->dict[str,object]:
     global _CHILD_ENTRY_USED
-    fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","pipe_capability","launcher_process_id","launcher_process_identity","expected_process_id","expected_process_identity"}
+    envelope=_read_launch_capability(handle_value)
+    fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","pipe_capability","launcher_process_id","launcher_process_identity","expected_process_id","expected_process_identity","job_name","job_identity_sha256","expected_argv_sha256","expected_env_sha256","expected_cwd_sha256","expected_executable"}
     if _CHILD_ENTRY_USED or not isinstance(envelope,Mapping) or set(envelope)!=fields: raise PermissionError("private scorer entrypoint state invalid")
     pid=os.getpid(); nonce=envelope["nonce"]; capability=envelope["pipe_capability"]; launcher_pid=envelope["launcher_process_id"]
+    actual_env=dict(os.environ); actual_cwd=Path.cwd().resolve(); actual_argv=list(sys.argv); actual_executable=Path(sys.executable).resolve()
+    projection=canonical_bytes({"argv":actual_argv,"env":actual_env,"cwd":str(actual_cwd),"executable":str(actual_executable)}).decode("utf-8").casefold()
+    private_values=[str(envelope[key]).casefold() for key in fields if key.endswith("_path")]
     if not isinstance(nonce,str) or len(nonce)!=64 or not isinstance(capability,str) or len(capability)!=64 or not isinstance(launcher_pid,int) or pid==launcher_pid or os.getppid()!=launcher_pid or envelope["launcher_process_identity"]!=_process_identity(launcher_pid) or envelope["expected_process_id"]!=pid or envelope["expected_process_identity"]!=_process_identity(pid): raise PermissionError("private scorer launcher binding invalid")
+    if len(actual_argv)!=3 or Path(actual_argv[0]).resolve()!=SCRIPT.resolve() or actual_argv[1]!="--closed-launch-handle" or actual_argv[2]!=str(handle_value) or set(actual_env)!={"SYSTEMROOT","PYTHONIOENCODING","PYTHONUTF8"} or actual_env["PYTHONIOENCODING"]!="utf-8" or actual_env["PYTHONUTF8"]!="1": raise PermissionError("private scorer argv/environment invalid")
+    if hashlib.sha256(canonical_bytes(actual_argv)).hexdigest()!=envelope["expected_argv_sha256"] or hashlib.sha256(canonical_bytes(actual_env)).hexdigest()!=envelope["expected_env_sha256"] or hashlib.sha256(canonical_bytes(str(actual_cwd))).hexdigest()!=envelope["expected_cwd_sha256"] or str(actual_executable)!=envelope["expected_executable"] or any(value in projection for value in private_values): raise PermissionError("private scorer process projection invalid")
+    if any(actual_cwd.iterdir()) or sys.stdin.read()!="": raise PermissionError("private scorer neutral cwd/stdin invalid")
+    _verify_job_membership(str(envelope["job_name"]),str(envelope["job_identity_sha256"]))
     _CHILD_ENTRY_USED=True
     paths={key:Path(str(envelope[key])) for key in fields if key.endswith("_path")}
-    return _run_private_child_once(nonce=nonce,pipe_capability=capability,launcher_process_id=launcher_pid,launcher_process_identity=str(envelope["launcher_process_identity"]),process_identity=str(envelope["expected_process_identity"]),**paths)
+    return _run_private_child_once(nonce=nonce,pipe_capability=capability,launcher_process_id=launcher_pid,launcher_process_identity=str(envelope["launcher_process_identity"]),process_identity=str(envelope["expected_process_identity"]),job_identity_sha256=str(envelope["job_identity_sha256"]),argv_sha256=str(envelope["expected_argv_sha256"]),env_sha256=str(envelope["expected_env_sha256"]),cwd_sha256=str(envelope["expected_cwd_sha256"]),**paths)
 
-def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:int,launcher_process_identity:str,process_identity:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
+def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:int,launcher_process_identity:str,process_identity:str,job_identity_sha256:str,argv_sha256:str,env_sha256:str,cwd_sha256:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
     private,run,bundle=_load(private_manifest_path),_load(prediction_run_path),_load(lifecycle_path)
     rows,cases,gate=_validate(private,run,bundle)
     result=_score(rows,cases,gate); private_result={"contract_version":"portfolio_hybrid_v1_1_private_score_v2",**result,"source_parent_ref":private["source_parent_ref"],"automatic_prediction_ref":run["automatic_prediction_ref"],"estimand_ref":private["estimand_ref"],"gate_ref":private["gate_ref"],"safety":dict(SAFETY)}
-    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
+    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"job_identity_sha256":job_identity_sha256,"argv_sha256":argv_sha256,"env_sha256":env_sha256,"cwd_sha256":cwd_sha256,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
     for path,payload in ((Path(private_output_path),raw),(Path(public_ref_path),canonical_bytes(public)+b"\n")):
         path.parent.mkdir(parents=True,exist_ok=True); tmp=path.with_name("."+path.name+".tmp")
         try: tmp.write_bytes(payload); tmp.replace(path)
@@ -220,32 +295,77 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lif
     nonce=secrets.token_hex(32); pipe_capability=secrets.token_hex(32); launcher_pid=os.getpid(); launcher_identity=_process_identity(launcher_pid)
     env={"SYSTEMROOT":system_root,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
     envelope={k:str(Path(v).resolve()) for k,v in {"private_manifest_path":private_manifest_path,"prediction_run_path":prediction_run_path,"lifecycle_path":lifecycle_path,"private_output_path":private_output_path,"public_ref_path":public_ref_path}.items()}
+    process=None; job=None; stdout=stderr=""; identity=""; active_after=-1; read_fd=write_fd=-1
     with tempfile.TemporaryDirectory(prefix="benchmark-v2-score-") as operation_root:
         root=Path(operation_root).resolve()
         if root==Path(private_output_path).resolve().parent or root==Path(private_manifest_path).resolve().parent or any(root.iterdir()): raise ValueError("private scorer operation root invalid")
         python_executable=_scorer_python_executable()
-        process=subprocess.Popen([str(python_executable),str(SCRIPT),"--closed-stdin"],executable=str(python_executable),cwd=root,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
+        job=_ScorerJob()
         try:
-            identity=_process_identity(process.pid); envelope.update({"nonce":nonce,"pipe_capability":pipe_capability,"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"expected_process_id":process.pid,"expected_process_identity":identity})
-            stdout,stderr=process.communicate(json.dumps(envelope,sort_keys=True,separators=(",",":")),timeout=30)
+            read_fd,write_fd=os.pipe(); startupinfo=None; popen_extra={}
+            if os.name=="nt":
+                import msvcrt
+                inherited_handle=msvcrt.get_osfhandle(read_fd); write_handle=msvcrt.get_osfhandle(write_fd)
+                os.set_handle_inheritable(inherited_handle,True); os.set_handle_inheritable(write_handle,False)
+                startupinfo=subprocess.STARTUPINFO(); startupinfo.lpAttributeList={"handle_list":[inherited_handle]}
+            else:
+                inherited_handle=read_fd; os.set_inheritable(read_fd,True); os.set_inheritable(write_fd,False); popen_extra={"pass_fds":(read_fd,)}
+            argv=[str(python_executable),str(SCRIPT),"--closed-launch-handle",str(inherited_handle)]
+            process=subprocess.Popen(argv,executable=str(python_executable),cwd=root,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True,startupinfo=startupinfo,**popen_extra)
+            os.close(read_fd); read_fd=-1; job.assign(process); identity=_process_identity(process.pid)
+            child_argv=[str(SCRIPT),"--closed-launch-handle",str(inherited_handle)]
+            envelope.update({"nonce":nonce,"pipe_capability":pipe_capability,"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"expected_process_id":process.pid,"expected_process_identity":identity,"job_name":job.name,"job_identity_sha256":job.identity_sha256,"expected_argv_sha256":hashlib.sha256(canonical_bytes(child_argv)).hexdigest(),"expected_env_sha256":hashlib.sha256(canonical_bytes(env)).hexdigest(),"expected_cwd_sha256":hashlib.sha256(canonical_bytes(str(root))).hexdigest(),"expected_executable":str(python_executable)})
+            os.write(write_fd,canonical_bytes(envelope)); os.close(write_fd); write_fd=-1
+            stdout,stderr=process.communicate(timeout=30)
         finally:
             try:
-                if process.poll() is None: process.kill()
+                if read_fd>=0: os.close(read_fd); read_fd=-1
             finally:
                 try:
-                    process.wait(timeout=10)
+                    if write_fd>=0: os.close(write_fd); write_fd=-1
                 finally:
-                    for pipe in (process.stdin,process.stdout,process.stderr):
-                        if pipe is not None:
-                            try: pipe.close()
-                            except OSError: pass
-    if process.returncode!=0: raise ValueError("private scorer failed closed; sensitive details redacted")
+                    try:
+                        if process is not None:
+                            if process.poll() is None: process.kill()
+                            process.wait(timeout=10)
+                            for pipe in (process.stdout,process.stderr):
+                                if pipe is not None: pipe.close()
+                        active_after=job.active_processes()
+                    finally: job.close()
+    if process is None or process.returncode!=0: raise ValueError("private scorer failed closed; sensitive details redacted")
     lines=stdout.splitlines()
     if len(lines)!=1: raise ValueError("private scorer stdout contract invalid")
-    ref=json.loads(lines[0])
-    if not isinstance(ref,dict) or set(ref)!={"status","score_ref","content_sha256"}: raise ValueError("private scorer public stdout ref invalid")
-    public=json.loads(Path(public_ref_path).read_text(encoding="utf-8"))
-    receipt=public.get("execution_receipt")
-    expected_receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"process_id":process.pid,"process_identity":identity,"safety":SAFETY}
-    if os.getpid()!=launcher_pid or _process_identity(launcher_pid)!=launcher_identity or {k:public[k] for k in ref}!=ref or public.get("safety")!=SAFETY or not isinstance(receipt,Mapping) or receipt!=expected_receipt: raise ValueError("private scorer public artifact mismatch")
-    return ref
+    child_ref=json.loads(lines[0]); child_public=json.loads(Path(public_ref_path).read_text(encoding="utf-8")); receipt=child_public.get("execution_receipt")
+    expected_receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"process_id":process.pid,"process_identity":identity,"job_identity_sha256":job.identity_sha256,"argv_sha256":envelope["expected_argv_sha256"],"env_sha256":envelope["expected_env_sha256"],"cwd_sha256":envelope["expected_cwd_sha256"],"safety":SAFETY}
+    if not isinstance(child_ref,dict) or set(child_ref)!={"status","score_ref","content_sha256"} or {k:child_public[k] for k in child_ref}!=child_ref or receipt!=expected_receipt or os.getpid()!=launcher_pid or _process_identity(launcher_pid)!=launcher_identity: raise ValueError("private scorer child artifact mismatch")
+    launch={"contract_version":"private_scorer_launch_receipt_v1","launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"child_process_id":process.pid,"child_process_identity":identity,"pipe_capability_sha256":expected_receipt["pipe_capability_sha256"],"argv_sha256":envelope["expected_argv_sha256"],"env_sha256":envelope["expected_env_sha256"],"cwd_sha256":envelope["expected_cwd_sha256"],"job_identity_sha256":job.identity_sha256,"child_execution_receipt_sha256":hashlib.sha256(canonical_bytes(receipt)).hexdigest(),"child_score_ref":child_ref,"safety":dict(SAFETY)}; launch_env=_sealed_receipt(launch,"private-scorer-launch")
+    cleanup={"contract_version":"private_scorer_cleanup_receipt_v1","launch_receipt_ref":launch_env["ref"],"child_returncode":process.returncode,"job_active_processes_after":active_after,"job_stable_zero":active_after==0,"pipe_handles_closed":read_fd<0 and write_fd<0,"process_pipes_closed":all(pipe is None or pipe.closed for pipe in (process.stdout,process.stderr)),"job_handle_closed":getattr(job,"_handle",None) is None,"safety":dict(SAFETY)}
+    if not all(cleanup[key] is True for key in ("job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed")): raise ValueError("private scorer cleanup did not reach stable zero")
+    cleanup_env=_sealed_receipt(cleanup,"private-scorer-cleanup"); binding={"contract_version":"private_scorer_final_binding_v1","child_score_ref":child_ref,"launch_receipt_ref":launch_env["ref"],"cleanup_receipt_ref":cleanup_env["ref"],"safety":dict(SAFETY)}; digest=hashlib.sha256(canonical_bytes(binding)).hexdigest(); final_ref={"status":child_ref["status"],"score_ref":f"private-score-final/{digest}","content_sha256":digest}
+    final_public={**final_ref,"contract_version":"private_scorer_public_ref_v2","binding":binding,"launch_receipt":launch_env,"cleanup_receipt":cleanup_env,"safety":dict(SAFETY)}
+    final_path=Path(public_ref_path); temporary=final_path.with_name("."+final_path.name+".final.tmp")
+    try: temporary.write_bytes(canonical_bytes(final_public)+b"\n"); temporary.replace(final_path)
+    finally:
+        if temporary.exists(): temporary.unlink()
+    return validate_private_scorer_public_ref(final_public)
+
+def validate_private_scorer_public_ref(public:object)->dict[str,str]:
+    fields={"status","score_ref","content_sha256","contract_version","binding","launch_receipt","cleanup_receipt","safety"}
+    if not isinstance(public,Mapping) or set(public)!=fields or public["contract_version"]!="private_scorer_public_ref_v2" or public["safety"]!=SAFETY: raise ValueError("private scorer public chain invalid")
+    decoded=[]
+    for name,contract,kind in (("launch_receipt","private_scorer_launch_receipt_v1","private-scorer-launch"),("cleanup_receipt","private_scorer_cleanup_receipt_v1","private-scorer-cleanup")):
+        env=public[name]
+        if not isinstance(env,Mapping) or set(env)!={"ref","canonical_bytes_b64"}: raise ValueError("private scorer receipt envelope invalid")
+        try: raw=base64.b64decode(env["canonical_bytes_b64"],validate=True); value=json.loads(raw.decode("utf-8"))
+        except (ValueError,UnicodeDecodeError,base64.binascii.Error) as error: raise ValueError("private scorer receipt encoding invalid") from error
+        digest=hashlib.sha256(raw).hexdigest()
+        if canonical_bytes(value)!=raw or env["ref"]!={"id":f"{kind}/{digest}","content_sha256":digest} or value.get("contract_version")!=contract or value.get("safety")!=SAFETY: raise ValueError("private scorer receipt invalid")
+        decoded.append(value)
+    launch,cleanup=decoded; binding=public["binding"]
+    child_score=binding.get("child_score_ref") if isinstance(binding,Mapping) else None
+    launch_fields={"contract_version","launcher_process_id","launcher_process_identity","child_process_id","child_process_identity","pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256","child_score_ref","safety"}; cleanup_fields={"contract_version","launch_receipt_ref","child_returncode","job_active_processes_after","job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed","safety"}
+    sha_fields=("pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256")
+    if set(launch)!=launch_fields or set(cleanup)!=cleanup_fields or not isinstance(launch.get("launcher_process_id"),int) or not isinstance(launch.get("child_process_id"),int) or launch["launcher_process_id"]<=0 or launch["child_process_id"]<=0 or launch["launcher_process_id"]==launch["child_process_id"] or any(not isinstance(launch.get(key),str) or len(launch[key])!=64 for key in sha_fields) or not isinstance(child_score,Mapping) or set(child_score)!={"status","score_ref","content_sha256"} or launch["child_score_ref"]!=child_score or binding!={"contract_version":"private_scorer_final_binding_v1","child_score_ref":child_score,"launch_receipt_ref":public["launch_receipt"]["ref"],"cleanup_receipt_ref":public["cleanup_receipt"]["ref"],"safety":SAFETY} or cleanup.get("launch_receipt_ref")!=public["launch_receipt"]["ref"] or cleanup.get("child_returncode")!=0 or cleanup.get("job_active_processes_after")!=0 or any(cleanup.get(key) is not True for key in ("job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed")): raise ValueError("private scorer launch/cleanup chain invalid")
+    digest=hashlib.sha256(canonical_bytes(binding)).hexdigest(); result={"status":binding["child_score_ref"]["status"],"score_ref":f"private-score-final/{digest}","content_sha256":digest}
+    if any(public[key]!=value for key,value in result.items()): raise ValueError("private scorer final ref invalid")
+    return result
