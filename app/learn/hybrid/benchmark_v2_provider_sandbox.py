@@ -1,4 +1,9 @@
-"""Production-owned provider bootstrap and irreversible file-open sandbox."""
+"""Production-owned closed Python workload boundary.
+
+This seals one fixed validation workload; it is not an arbitrary malicious-native-code
+sandbox.  A Windows Job Object contains descendants while Python audit and a closed
+workload namespace enforce the declared provider dataflow.
+"""
 
 from __future__ import annotations
 
@@ -45,6 +50,14 @@ _ARGV_FLAGS = (
 )
 
 
+class ProviderSandboxDenied(PermissionError):
+    """A fail-closed denial emitted by the provider boundary itself."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _inside(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -87,10 +100,11 @@ def _canonical_open_path(path: Path) -> Path:
     raw = str(path)
     candidate = Path(raw)
     if not candidate.is_absolute() or _contains_reparse_component(candidate.parent):
-        raise PermissionError("provider open path is relative or reparse-aliased")
+        code = "relative_path_denied" if not candidate.is_absolute() else "path_alias_denied"
+        raise ProviderSandboxDenied(code, "provider open path is relative or reparse-aliased")
     resolved = candidate.resolve(strict=False)
     if raw != str(resolved):
-        raise PermissionError("provider open path is not canonical")
+        raise ProviderSandboxDenied("path_alias_denied", "provider open path is not canonical")
     return resolved
 
 
@@ -228,6 +242,12 @@ def _is_write(mode: object, flags: object) -> bool:
     return False
 
 
+def _is_read_write(mode: object, flags: object) -> bool:
+    return (isinstance(mode, str) and "+" in mode) or (
+        isinstance(flags, int) and bool(flags & os.O_RDWR)
+    )
+
+
 class _AuditState:
     def __init__(self, *, boot_reads: tuple[Path, ...], read_roots: tuple[Path, ...] = ()) -> None:
         self._phase = "boot"
@@ -260,35 +280,71 @@ class _AuditState:
         return ProviderFilePolicy(frozenset(allowed), read_roots, write_roots)
 
     def audit(self, event: str, args: tuple[object, ...]) -> None:
+        if self._phase == "tight":
+            if event in {"subprocess.Popen", "os.system"} or event.startswith(
+                ("os.exec", "os.spawn", "os.posix_spawn")
+            ):
+                raise ProviderSandboxDenied(
+                    "process_creation_denied", "provider process creation is denied"
+                )
+            if event == "os.chdir":
+                raise ProviderSandboxDenied(
+                    "cwd_mutation_denied", "provider cwd mutation is denied"
+                )
+            if event == "import":
+                raise ProviderSandboxDenied(
+                    "dynamic_import_denied", "provider dynamic import is denied"
+                )
+            if event.startswith("ctypes."):
+                raise ProviderSandboxDenied(
+                    "native_loader_denied", "provider native loader is denied"
+                )
+            if event in {"compile", "exec", "marshal.loads", "code.__new__", "function.__new__"}:
+                raise ProviderSandboxDenied(
+                    "dynamic_code_denied", "provider dynamic code is denied"
+                )
         if event != "open" or not args:
             return
         raw_path = args[0]
         if isinstance(raw_path, int):
             if raw_path in {0, 1, 2}:
                 return
-            raise PermissionError("provider integer fd denied without policy provenance")
+            raise ProviderSandboxDenied(
+                "integer_fd_denied", "provider integer fd denied without policy provenance"
+            )
         try:
             decoded = os.fsdecode(raw_path)
         except (TypeError, ValueError, OSError) as exc:
-            raise PermissionError("provider open path is invalid") from exc
+            raise ProviderSandboxDenied("invalid_path_denied", "provider open path is invalid") from exc
         writing = _is_write(args[1] if len(args) > 1 else None, args[2] if len(args) > 2 else None)
         path = _canonical_open_path(Path(decoded))
         if writing:
+            if _is_read_write(
+                args[1] if len(args) > 1 else None,
+                args[2] if len(args) > 2 else None,
+            ):
+                raise ProviderSandboxDenied(
+                    "filesystem_read_denied", "provider mixed read/write access is denied"
+                )
             if self._phase == "tight" and any(_inside(path, root) for root in self._write_roots):
                 return
-            raise PermissionError(f"provider write denied: {path}")
+            raise ProviderSandboxDenied("filesystem_write_denied", f"provider write denied: {path}")
         expected = self._read_identities.get(path)
         if expected is not None:
             try:
                 observed = _identity(path)
             except OSError as exc:
-                raise PermissionError("provider read identity disappeared") from exc
+                raise ProviderSandboxDenied(
+                    "sealed_identity_denied", "provider read identity disappeared"
+                ) from exc
             if observed != expected:
-                raise PermissionError("provider read identity changed after sealing")
+                raise ProviderSandboxDenied(
+                    "sealed_identity_denied", "provider read identity changed after sealing"
+                )
             return
         if any(_inside(path, root) for root in self._read_roots):
             return
-        raise PermissionError(f"provider read denied: {path}")
+        raise ProviderSandboxDenied("filesystem_read_denied", f"provider read denied: {path}")
 
 
 def _validated_policy_paths(
@@ -328,7 +384,9 @@ def install_provider_file_policy(
     return state.tighten(read_files=reads, read_roots=roots, write_roots=writes)
 
 
-def _load_sealed_provider_modules() -> tuple[types.ModuleType, types.ModuleType]:
+def _load_sealed_provider_modules(
+    code_bytes: Mapping[str, bytes],
+) -> tuple[types.ModuleType, types.ModuleType]:
     for name in ("app", "app.learn", "app.learn.hybrid"):
         if name in sys.modules:
             raise RuntimeError("provider package imported before bootstrap audit")
@@ -336,22 +394,21 @@ def _load_sealed_provider_modules() -> tuple[types.ModuleType, types.ModuleType]
         module.__path__ = []
         sys.modules[name] = module
     loaded: list[types.ModuleType] = []
-    for name, path in (
-        ("app.learn.hybrid.benchmark_v2_contracts", _CODE_PATHS["contracts"]),
-        ("app.learn.hybrid.benchmark_v2_provider_corpus", _CODE_PATHS["corpus_loader"]),
+    for name, role, path in (
+        ("app.learn.hybrid.benchmark_v2_contracts", "contracts", _CODE_PATHS["contracts"]),
+        ("app.learn.hybrid.benchmark_v2_provider_corpus", "corpus_loader", _CODE_PATHS["corpus_loader"]),
     ):
         module = types.ModuleType(name)
         module.__file__ = str(path)
         module.__package__ = name.rpartition(".")[0]
         sys.modules[name] = module
-        source = path.read_bytes()
+        source = code_bytes[role]
         exec(compile(source, str(path), "exec"), module.__dict__)
         loaded.append(module)
     return loaded[0], loaded[1]
 
 
-def _manifest_value(path: Path, expected_sha: str) -> dict[str, Any]:
-    raw = path.read_bytes()
+def _manifest_bytes_value(raw: bytes, expected_sha: str) -> dict[str, Any]:
     if hashlib.sha256(raw).hexdigest() != expected_sha:
         raise ValueError("provider manifest file SHA mismatch")
     try:
@@ -364,12 +421,22 @@ def _manifest_value(path: Path, expected_sha: str) -> dict[str, Any]:
     return value
 
 
-def _prevalidate_boot_manifest(value: object, *, expected_child_sha: str) -> dict[str, Any]:
+def _manifest_value(path: Path, expected_sha: str) -> dict[str, Any]:
+    return _manifest_bytes_value(path.read_bytes(), expected_sha)
+
+
+def _prevalidate_boot_manifest(
+    value: object,
+    *,
+    expected_child_sha: str,
+    code_bytes: Mapping[str, bytes],
+) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != {
         "contract_version",
         "benchmark_release_id",
         "provider_corpus_ref",
         "sealed_runtime",
+        "workload",
         "arm_order",
         "safety",
     }:
@@ -388,7 +455,7 @@ def _prevalidate_boot_manifest(value: object, *, expected_child_sha: str) -> dic
         if item.get("role") != role or item.get("relative_path") != relative:
             raise ValueError("provider boot code ref identity is invalid")
         expected_sha = _require_sha(str(item.get("file_sha256")), "provider boot code SHA")
-        if _file_sha(path) != expected_sha:
+        if hashlib.sha256(code_bytes[role]).hexdigest() != expected_sha:
             raise ValueError("provider boot code SHA mismatch before import")
     child_ref = value.get("provider_corpus_ref")
     if (
@@ -416,11 +483,11 @@ def _unexpected_fds() -> list[int]:
     return found
 
 
-def _expect_denied(name: str, action: Any, results: list[str]) -> None:
+def _expect_denied(name: str, action: Any, results: dict[str, str]) -> None:
     try:
         action()
-    except (PermissionError, NotImplementedError, OSError, TypeError, ValueError):
-        results.append(name)
+    except ProviderSandboxDenied as exc:
+        results[name] = exc.code
         return
     raise RuntimeError(f"provider boundary probe escaped audit: {name}")
 
@@ -452,18 +519,25 @@ def _run_provider_bootstrap(argv: tuple[str, ...]) -> dict[str, Any]:
     unexpected_fds = _unexpected_fds()
     if unexpected_fds:
         raise PermissionError("provider process inherited unexpected file descriptors")
-    boot_manifest = _prevalidate_boot_manifest(
-        _manifest_value(
-            manifest_path,
-            _require_sha(values["--provider-manifest-sha256"], "provider manifest SHA"),
-        ),
-        expected_child_sha=values["--provider-child-sha256"],
+    expected_manifest_sha = _require_sha(
+        values["--provider-manifest-sha256"], "provider manifest SHA"
     )
-    _, corpus_module = _load_sealed_provider_modules()
+    expected_child_sha = _require_sha(
+        values["--provider-child-sha256"], "provider child SHA"
+    )
+    manifest_raw = manifest_path.read_bytes()
+    child_raw = child_path.read_bytes()
+    code_bytes = {role: path.read_bytes() for role, path in _CODE_PATHS.items()}
+    boot_manifest = _prevalidate_boot_manifest(
+        _manifest_bytes_value(manifest_raw, expected_manifest_sha),
+        expected_child_sha=expected_child_sha,
+        code_bytes=code_bytes,
+    )
+    _, corpus_module = _load_sealed_provider_modules(code_bytes)
     manifest = corpus_module.validate_provider_manifest(boot_manifest)
-    child = corpus_module.load_provider_corpus(
-        child_path=child_path,
-        expected_sha256=_require_sha(values["--provider-child-sha256"], "provider child SHA"),
+    child = corpus_module.validate_preloaded_provider_corpus(
+        raw=child_raw,
+        expected_sha256=expected_child_sha,
     )
     child_ref = manifest["provider_corpus_ref"]
     if (
@@ -491,38 +565,40 @@ def _run_provider_bootstrap(argv: tuple[str, ...]) -> dict[str, Any]:
         raise ValueError("provider child must resolve exactly 24 screenshots")
     controlled = (*profile_paths, *screenshot_paths)
     state.add_controlled_reads(controlled)
-    for item, path in zip(manifest["sealed_runtime"]["code_refs"], code_paths, strict=True):
-        _verify_file_ref(path, item["file_sha256"], f"provider code {item['role']}")
+    profile_bytes = {path: path.read_bytes() for path in profile_paths}
+    screenshot_bytes = {path: path.read_bytes() for path in screenshot_paths}
     for item, path in zip(manifest["sealed_runtime"]["profile_refs"], profile_paths, strict=True):
-        _verify_file_ref(path, item["file_sha256"], f"provider profile {item['role']}")
+        if hashlib.sha256(profile_bytes[path]).hexdigest() != item["file_sha256"]:
+            raise ValueError(f"provider profile {item['role']} file SHA mismatch")
     screenshot_hashes = {case["image"]["path"]: case["image"]["sha256"] for case in child["cases"]}
     for path in screenshot_paths:
-        _verify_file_ref(path, screenshot_hashes[path.relative_to(_PROJECT_ROOT).as_posix()], "provider screenshot")
-    reads = (manifest_path, child_path, *code_paths, *profile_paths, *screenshot_paths)
-    state.tighten(read_files=reads, read_roots=(), write_roots=write_roots)
-    manifest_path.read_bytes()
-    child_path.read_bytes()
-    for path in code_paths:
-        with open(path, "rb") as stream:
-            if not stream.read(1):
-                raise ValueError("sealed provider code is empty")
-    for path in profile_paths:
-        path.read_bytes()
+        expected = screenshot_hashes[path.relative_to(_PROJECT_ROOT).as_posix()]
+        if hashlib.sha256(screenshot_bytes[path]).hexdigest() != expected:
+            raise ValueError("provider screenshot file SHA mismatch")
+    preloaded: dict[str, str] = {
+        "manifest": hashlib.sha256(manifest_raw).hexdigest(),
+        "child": hashlib.sha256(child_raw).hexdigest(),
+    }
+    preloaded.update(
+        {f"code:{role}": hashlib.sha256(raw).hexdigest() for role, raw in code_bytes.items()}
+    )
+    for item, path in zip(manifest["sealed_runtime"]["profile_refs"], profile_paths, strict=True):
+        preloaded[f"profile:{item['role']}"] = hashlib.sha256(profile_bytes[path]).hexdigest()
     for path in screenshot_paths:
-        descriptor = os.open(path, os.O_RDONLY)
-        try:
-            if not os.read(descriptor, 1):
-                raise ValueError("provider screenshot is empty")
-        finally:
-            os.close(descriptor)
-    for root in write_roots:
-        target = root / "provider-bootstrap-write-probe.json"
-        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            os.write(descriptor, b"{}")
-        finally:
-            os.close(descriptor)
-    denied: list[str] = []
+        relative = path.relative_to(_PROJECT_ROOT).as_posix()
+        preloaded[f"screenshot:{relative}"] = hashlib.sha256(screenshot_bytes[path]).hexdigest()
+    if len(preloaded) != 30:
+        raise ValueError("provider bootstrap did not preload the exact sealed byte set")
+
+    # 保留一个真实、有效的描述符，仅用于证明紧缩策略按策略原因拒绝整数 fd。
+    probe_fd = os.open(manifest_path, os.O_RDONLY)
+    retained_subprocess = subprocess
+    retained_winapi = sys.modules.get("_winapi")
+    for name in ("subprocess", "_winapi", "ctypes", "importlib"):
+        sys.modules.pop(name, None)
+    globals()["subprocess"] = None
+    state.tighten(read_files=(), read_roots=(), write_roots=write_roots)
+    denied: dict[str, str] = {}
     _expect_denied("builtin_parent", lambda: open(_PARENT_PATH, "rb"), denied)
     _expect_denied("pathlib_gold", lambda: _GOLD_PATH.read_bytes(), denied)
     _expect_denied("os_open_parent", lambda: os.open(_PARENT_PATH, os.O_RDONLY), denied)
@@ -531,21 +607,312 @@ def _run_provider_bootstrap(argv: tuple[str, ...]) -> dict[str, Any]:
     alias = write_roots[0] / "provider-boundary-parent-alias" / "corpus-manifest.v1.json"
     if alias.exists():
         _expect_denied("reparse_alias", lambda: alias.read_bytes(), denied)
-    _expect_denied("integer_fd", lambda: open(3, "rb", closefd=False), denied)
-    _expect_denied("dir_fd", lambda: os.open("corpus-manifest.v1.json", os.O_RDONLY, dir_fd=3), denied)
-    return {
-        "contract_version": "portfolio_hybrid_v1_1_provider_bootstrap_receipt_v1",
-        "boot_policy_installed": True,
-        "tight_policy_installed": True,
-        "child_case_count": len(child["cases"]),
+    try:
+        _expect_denied("integer_fd", lambda: state.audit("open", (probe_fd, None, os.O_RDONLY)), denied)
+    finally:
+        os.close(probe_fd)
+    _expect_denied(
+        "relative_dir_fd_branch",
+        lambda: state.audit("open", ("corpus-manifest.v1.json", None, os.O_RDONLY)),
+        denied,
+    )
+    command = os.path.join(os.environ["SYSTEMROOT"], "System32", "cmd.exe")
+    process_marker = write_roots[0] / "provider-process-escape.txt"
+    system_marker = write_roots[0] / "provider-system-escape.txt"
+    _expect_denied(
+        "subprocess_popen",
+        lambda: retained_subprocess.Popen(
+            [command, "/d", "/c", f"echo escaped>{process_marker}"],
+            close_fds=True,
+        ),
+        denied,
+    )
+    _expect_denied(
+        "os_system", lambda: os.system(f'"{command}" /d /c echo escaped>{system_marker}'), denied
+    )
+    def deny_winapi() -> None:
+        if retained_winapi is None:
+            raise ProviderSandboxDenied(
+                "native_process_surface_denied", "native process surface is unavailable"
+            )
+        original = retained_winapi.CreateProcess
+        try:
+            retained_winapi.CreateProcess = lambda *args, **kwargs: (_ for _ in ()).throw(
+                ProviderSandboxDenied(
+                    "native_process_surface_denied", "native process surface is removed"
+                )
+            )
+            retained_winapi.CreateProcess(None, None, None, None, False, 0, None, None, None)
+        finally:
+            retained_winapi.CreateProcess = original
+    _expect_denied("winapi_create_process", deny_winapi, denied)
+    _expect_denied("os_chdir", lambda: os.chdir(write_roots[0].parent), denied)
+    sys.modules.pop("decimal", None)
+    _expect_denied("dynamic_import", lambda: __import__("decimal"), denied)
+    _expect_denied("ctypes_createfile_import", lambda: __import__("ctypes"), denied)
+    if process_marker.exists() or system_marker.exists():
+        raise RuntimeError("provider process denial left an output residue")
+
+    workload_request = manifest["workload"]
+    validated_again = corpus_module.validate_preloaded_provider_corpus(
+        raw=child_raw, expected_sha256=expected_child_sha
+    )
+    partitions = {"regression": set(), "holdout": set()}
+    for case in validated_again["cases"]:
+        partitions[case["partition"]].add(case["screen_group"])
+    workload_result = {
+        "contract_version": "provider_corpus_validation_result_v1",
+        "case_count": len(validated_again["cases"]),
         "screen_count": len(screenshot_paths),
-        "sealed_code_count": len(code_paths),
-        "sealed_profile_count": len(profile_paths),
-        "allowed_read_count": len(reads),
-        "allowed_write_roots": ["operation", "output", "ledger"],
-        "denied_open_probes": denied,
-        "unexpected_inherited_fds": unexpected_fds,
+        "regression_screen_count": len(partitions["regression"]),
+        "holdout_screen_count": len(partitions["holdout"]),
+        "child_content_sha256": validated_again["content_sha256"],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
     }
+    return {
+        "contract_version": "provider_sandbox_workload_receipt_v1",
+        "provider_pid": os.getpid(),
+        "phase_trace": ["boot", "tight", "workload", "complete"],
+        "manifest_ref": {"file_sha256": expected_manifest_sha},
+        "child_ref": {
+            "file_sha256": expected_child_sha,
+            "content_sha256": child["content_sha256"],
+            "source_parent_ref": child["source_parent_ref"],
+        },
+        "preloaded_bytes_sha256_by_role": preloaded,
+        "workload_request": workload_request,
+        "workload_result": workload_result,
+        "preflight": {
+            "contract_version": "provider_sandbox_preflight_receipt_v1",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        },
+        "filesystem_read_policy_after_tight": "deny_all",
+        "tight_read_file_count": 0,
+        "denied_controls": denied,
+        "unexpected_inherited_fds": unexpected_fds,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+
+
+class _WindowsKillJob:
+    """Parent-owned kill-on-close containment for the sealed provider process tree."""
+
+    def __init__(self) -> None:
+        if os.name != "nt":
+            raise RuntimeError("provider process containment requires Windows Job Objects")
+        import ctypes
+        from ctypes import wintypes
+
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_ulonglong) for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+            )]
+
+        class BASIC_LIMIT(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong),
+                ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class EXTENDED_LIMIT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", BASIC_LIMIT),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        class BASIC_ACCOUNTING(ctypes.Structure):
+            _fields_ = [
+                ("TotalUserTime", ctypes.c_longlong),
+                ("TotalKernelTime", ctypes.c_longlong),
+                ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+                ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+                ("TotalPageFaultCount", wintypes.DWORD),
+                ("TotalProcesses", wintypes.DWORD),
+                ("ActiveProcesses", wintypes.DWORD),
+                ("TotalTerminatedProcesses", wintypes.DWORD),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel32.SetInformationJobObject.argtypes = [
+            wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD
+        ]
+        kernel32.SetInformationJobObject.restype = wintypes.BOOL
+        kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel32.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel32.QueryInformationJobObject.argtypes = [
+            wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+        limits = EXTENDED_LIMIT()
+        limits.BasicLimitInformation.LimitFlags = 0x2000
+        if not kernel32.SetInformationJobObject(
+            handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            kernel32.CloseHandle(handle)
+            raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
+        self._ctypes = ctypes
+        self._kernel32 = kernel32
+        self._accounting_type = BASIC_ACCOUNTING
+        self._handle = handle
+
+    def assign(self, process_handle: int) -> None:
+        if not self._kernel32.AssignProcessToJobObject(self._handle, process_handle):
+            raise OSError(self._ctypes.get_last_error(), "AssignProcessToJobObject failed")
+
+    def active_processes(self) -> int:
+        value = self._accounting_type()
+        if not self._kernel32.QueryInformationJobObject(
+            self._handle, 1, self._ctypes.byref(value), self._ctypes.sizeof(value), None
+        ):
+            raise OSError(self._ctypes.get_last_error(), "QueryInformationJobObject failed")
+        return int(value.ActiveProcesses)
+
+    def close(self) -> None:
+        if self._handle:
+            if not self._kernel32.CloseHandle(self._handle):
+                raise OSError(self._ctypes.get_last_error(), "CloseHandle(job) failed")
+            self._handle = None
+
+
+def validate_provider_workload_receipt(value: Mapping[str, object]) -> dict[str, object]:
+    """Accept only a completed, non-authorizing workload receipt."""
+
+    required = {
+        "contract_version", "provider_pid", "phase_trace", "manifest_ref", "child_ref",
+        "preloaded_bytes_sha256_by_role", "workload_request", "workload_result",
+        "preflight", "filesystem_read_policy_after_tight", "tight_read_file_count",
+        "denied_controls", "unexpected_inherited_fds", "artifact_is_authorization",
+        "execute_binding_enabled", "process_id", "launcher_process_id",
+        "job_active_processes_after", "job_stable_zero", "receipt_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise ValueError("provider workload receipt must be an exact closed object")
+    receipt = dict(value)
+    declared = _require_sha(str(receipt.pop("receipt_sha256")), "provider receipt SHA")
+    observed = hashlib.sha256(
+        json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    if observed != declared:
+        raise ValueError("provider workload receipt SHA mismatch")
+    if (
+        receipt["contract_version"] != "provider_sandbox_workload_receipt_v1"
+        or receipt["phase_trace"] != ["boot", "tight", "workload", "complete"]
+        or receipt["provider_pid"] != receipt["process_id"]
+        or receipt["filesystem_read_policy_after_tight"] != "deny_all"
+        or receipt["tight_read_file_count"] != 0
+        or receipt["job_active_processes_after"] != 0
+        or receipt["job_stable_zero"] is not True
+        or receipt["unexpected_inherited_fds"] != []
+        or receipt["artifact_is_authorization"] is not False
+        or receipt["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("provider workload receipt completion boundary is invalid")
+    request = receipt["workload_request"]
+    if request != {
+        "contract_version": "provider_sandbox_workload_request_v1",
+        "command": "validate_provider_corpus",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }:
+        raise ValueError("provider workload receipt request is invalid")
+    if receipt["preflight"] != {
+        "contract_version": "provider_sandbox_preflight_receipt_v1",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }:
+        raise ValueError("provider preflight receipt cannot authorize a workload")
+    expected_denials = {
+        "builtin_parent": "filesystem_read_denied",
+        "pathlib_gold": "filesystem_read_denied",
+        "os_open_parent": "filesystem_read_denied",
+        "relative_parent": "relative_path_denied",
+        "case_alias": "path_alias_denied",
+        "integer_fd": "integer_fd_denied",
+        "relative_dir_fd_branch": "relative_path_denied",
+        "subprocess_popen": "process_creation_denied",
+        "os_system": "process_creation_denied",
+        "winapi_create_process": "native_process_surface_denied",
+        "os_chdir": "cwd_mutation_denied",
+        "dynamic_import": "dynamic_import_denied",
+        "ctypes_createfile_import": "dynamic_import_denied",
+    }
+    observed_denials = receipt["denied_controls"]
+    if not isinstance(observed_denials, Mapping) or any(
+        observed_denials.get(name) != code for name, code in expected_denials.items()
+    ) or set(observed_denials) - {*expected_denials, "reparse_alias"} or (
+        "reparse_alias" in observed_denials
+        and observed_denials["reparse_alias"] != "path_alias_denied"
+    ):
+        raise ValueError("provider workload receipt negative controls are incomplete")
+    result = receipt["workload_result"]
+    if (
+        not isinstance(result, Mapping)
+        or set(result) != {
+            "contract_version", "case_count", "screen_count",
+            "regression_screen_count", "holdout_screen_count",
+            "child_content_sha256", "artifact_is_authorization",
+            "execute_binding_enabled",
+        }
+        or result.get("contract_version") != "provider_corpus_validation_result_v1"
+        or result.get("case_count") != 120
+        or result.get("screen_count") != 24
+        or result.get("regression_screen_count") != 12
+        or result.get("holdout_screen_count") != 12
+        or result.get("artifact_is_authorization") is not False
+        or result.get("execute_binding_enabled") is not False
+    ):
+        raise ValueError("provider workload receipt result is invalid")
+    child_ref = receipt["child_ref"]
+    if (
+        not isinstance(child_ref, Mapping)
+        or set(child_ref) != {"file_sha256", "content_sha256", "source_parent_ref"}
+        or result.get("child_content_sha256") != child_ref.get("content_sha256")
+    ):
+        raise ValueError("provider workload receipt child binding is invalid")
+    _require_sha(str(child_ref["file_sha256"]), "provider receipt child file SHA")
+    _require_sha(str(child_ref["content_sha256"]), "provider receipt child content SHA")
+    manifest_ref = receipt["manifest_ref"]
+    if not isinstance(manifest_ref, Mapping) or set(manifest_ref) != {"file_sha256"}:
+        raise ValueError("provider workload receipt manifest binding is invalid")
+    _require_sha(str(manifest_ref["file_sha256"]), "provider receipt manifest SHA")
+    preloaded = receipt["preloaded_bytes_sha256_by_role"]
+    if not isinstance(preloaded, Mapping) or len(preloaded) != 30:
+        raise ValueError("provider workload receipt preload set is invalid")
+    for role, digest in preloaded.items():
+        if not isinstance(role, str) or not role:
+            raise ValueError("provider workload receipt preload role is invalid")
+        _require_sha(str(digest), f"provider preload SHA {role}")
+    if preloaded.get("manifest") != manifest_ref["file_sha256"] or preloaded.get(
+        "child"
+    ) != child_ref["file_sha256"]:
+        raise ValueError("provider workload receipt preload binding is invalid")
+    receipt["receipt_sha256"] = declared
+    return receipt
 
 
 def spawn_provider_bootstrap(
@@ -604,35 +971,74 @@ def spawn_provider_bootstrap(
     if os.name == "nt":
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.lpAttributeList = {"handle_list": []}
-    process = subprocess.Popen(
-        argv,
-        cwd=operation,
-        env=environment,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        close_fds=True,
-        startupinfo=startupinfo,
-    )
+    job = _WindowsKillJob()
+    process = None
+    stdout = ""
+    stderr = ""
+    active_after: int | None = None
     try:
+        process = subprocess.Popen(
+            argv,
+            cwd=operation,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            close_fds=True,
+            startupinfo=startupinfo,
+        )
+        job.assign(int(process._handle))
         stdout, stderr = process.communicate(timeout=30)
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=10)
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
+        try:
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        process.kill()
+                finally:
+                    try:
+                        process.wait(timeout=10)
+                    finally:
+                        for stream in (process.stdout, process.stderr):
+                            if stream is not None:
+                                try:
+                                    stream.close()
+                                except OSError:
+                                    pass
+            active_after = job.active_processes()
+        finally:
+            job.close()
+    if process is None:
+        raise RuntimeError("provider process was not created")
     if process.returncode != 0:
         raise ValueError(f"provider bootstrap failed closed: {stderr.strip()}")
     try:
         receipt = json.loads(stdout)
     except json.JSONDecodeError as exc:
         raise ValueError("provider bootstrap receipt is invalid") from exc
-    receipt["process_id"] = process.pid
-    return receipt
+    if receipt.get("contract_version") != "provider_sandbox_workload_receipt_v1":
+        raise ValueError("provider bootstrap did not return a workload receipt")
+    if receipt.get("artifact_is_authorization") is not False or receipt.get(
+        "execute_binding_enabled"
+    ) is not False:
+        raise ValueError("provider workload receipt attempted to authorize execution")
+    provider_pid = receipt.get("provider_pid")
+    if not isinstance(provider_pid, int) or provider_pid <= 0:
+        raise ValueError("provider workload receipt PID is invalid")
+    receipt["process_id"] = provider_pid
+    receipt["launcher_process_id"] = process.pid
+    receipt["job_active_processes_after"] = active_after
+    receipt["job_stable_zero"] = active_after == 0
+    if not receipt["job_stable_zero"]:
+        raise RuntimeError("provider Job Object did not reach stable zero")
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return validate_provider_workload_receipt(receipt)
 
 
 def _main() -> int:

@@ -209,8 +209,16 @@ def _validate_provider_corpus(value: object) -> dict[str, Any]:
 
 
 def load_provider_corpus(*, child_path: Path, expected_sha256: str) -> dict[str, object]:
-    require_sha256(expected_sha256, "expected provider child file SHA")
     raw = Path(child_path).read_bytes()
+    return validate_preloaded_provider_corpus(raw=raw, expected_sha256=expected_sha256)
+
+
+def validate_preloaded_provider_corpus(
+    *, raw: bytes, expected_sha256: str
+) -> dict[str, object]:
+    """Validate one immutable child snapshot without reopening its source path."""
+
+    require_sha256(expected_sha256, "expected provider child file SHA")
     if sha256_bytes(raw) != expected_sha256:
         raise ValueError("provider child file SHA mismatch")
     try:
@@ -230,6 +238,7 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
             "benchmark_release_id",
             "provider_corpus_ref",
             "sealed_runtime",
+            "workload",
             "arm_order",
             "safety",
         },
@@ -306,10 +315,28 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
         validated_profiles.append(profile)
     runtime["code_refs"] = validated_code
     runtime["profile_refs"] = validated_profiles
+    workload = closed_mapping(
+        manifest["workload"],
+        {
+            "contract_version",
+            "command",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+        },
+        "provider workload request",
+    )
+    if workload != {
+        "contract_version": "provider_sandbox_workload_request_v1",
+        "command": "validate_provider_corpus",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }:
+        raise ValueError("provider workload request is invalid")
     if manifest["arm_order"] != list(ARM_ORDER):
         raise ValueError("provider manifest arm order is invalid")
     if manifest["safety"] != SAFETY:
         raise ValueError("provider manifest safety boundary is invalid")
     manifest["provider_corpus_ref"] = ref
     manifest["sealed_runtime"] = runtime
+    manifest["workload"] = workload
     return manifest

@@ -88,6 +88,12 @@ def _provider_manifest_value(child: dict[str, Any], file_sha: str) -> dict[str, 
                 }
             ],
         },
+        "workload": {
+            "contract_version": "provider_sandbox_workload_request_v1",
+            "command": "validate_provider_corpus",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        },
         "arm_order": ["qwen_only", "omni_only_discovery", "omni_to_qwen", "omni_to_qwen_vista"],
         "safety": deepcopy(child["safety"]),
     }
@@ -370,6 +376,8 @@ def test_provider_manifest_is_closed_and_parent_bound(
         lambda item: item["sealed_runtime"]["code_refs"][0].update(
             {"relative_path": "app/learn/hybrid/benchmark_scorer_v1.py"}
         ),
+        lambda item: item["workload"].update({"command": "arbitrary_callback"}),
+        lambda item: item["workload"].update({"artifact_is_authorization": True}),
         lambda item: item.update({"purpose": "provider"}),
     ):
         changed = deepcopy(value)
@@ -496,28 +504,100 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
         private_stream.close()
         if alias.exists():
             os.rmdir(alias)
-    assert receipt["contract_version"] == "portfolio_hybrid_v1_1_provider_bootstrap_receipt_v1"
-    assert receipt["boot_policy_installed"] is True
-    assert receipt["tight_policy_installed"] is True
-    assert receipt["child_case_count"] == 120
-    assert receipt["screen_count"] == 24
-    assert receipt["sealed_code_count"] == 3
-    assert receipt["sealed_profile_count"] == 1
-    assert receipt["unexpected_inherited_fds"] == []
-    assert set(receipt["denied_open_probes"]) == {
-        "builtin_parent",
-        "pathlib_gold",
-        "os_open_parent",
-        "relative_parent",
-        "case_alias",
-        "reparse_alias",
-        "integer_fd",
-        "dir_fd",
+    assert receipt["contract_version"] == "provider_sandbox_workload_receipt_v1"
+    assert receipt["provider_pid"] == receipt["process_id"]
+    assert receipt["phase_trace"] == ["boot", "tight", "workload", "complete"]
+    assert receipt["filesystem_read_policy_after_tight"] == "deny_all"
+    assert receipt["workload_request"] == {
+        "contract_version": "provider_sandbox_workload_request_v1",
+        "command": "validate_provider_corpus",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
     }
-    assert receipt["allowed_read_count"] == 30
-    assert receipt["allowed_write_roots"] == ["operation", "output", "ledger"]
-    for root in (files["operation"], files["output"], files["ledger"]):
-        assert (root / "provider-bootstrap-write-probe.json").read_text(encoding="utf-8") == "{}"
+    assert receipt["workload_result"] == {
+        "contract_version": "provider_corpus_validation_result_v1",
+        "case_count": 120,
+        "screen_count": 24,
+        "regression_screen_count": 12,
+        "holdout_screen_count": 12,
+        "child_content_sha256": receipt["child_ref"]["content_sha256"],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    assert receipt["preflight"] == {
+        "contract_version": "provider_sandbox_preflight_receipt_v1",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    assert receipt["tight_read_file_count"] == 0
+    assert len(receipt["preloaded_bytes_sha256_by_role"]) == 30
+    child_value = json.loads(files["child_path"].read_text(encoding="utf-8"))
+    expected_preloaded = {
+        "manifest": _file_sha(files["manifest_path"]),
+        "child": _file_sha(files["child_path"]),
+        **{
+            f"code:{role}": _file_sha(PROJECT_ROOT / relative)
+            for role, relative in PROVIDER_CODE_REFS
+        },
+        "profile:estimand": _file_sha(PROFILE_PATH),
+        **{
+            f"screenshot:{case['image']['path']}": _file_sha(
+                PROJECT_ROOT / case["image"]["path"]
+            )
+            for case in child_value["cases"]
+        },
+    }
+    assert receipt["preloaded_bytes_sha256_by_role"] == expected_preloaded
+    assert receipt["job_active_processes_after"] == 0
+    assert receipt["job_stable_zero"] is True
+    assert receipt["unexpected_inherited_fds"] == []
+    assert receipt["denied_controls"] == {
+        "builtin_parent": "filesystem_read_denied",
+        "pathlib_gold": "filesystem_read_denied",
+        "os_open_parent": "filesystem_read_denied",
+        "relative_parent": "relative_path_denied",
+        "case_alias": "path_alias_denied",
+        "reparse_alias": "path_alias_denied",
+        "integer_fd": "integer_fd_denied",
+        "relative_dir_fd_branch": "relative_path_denied",
+        "subprocess_popen": "process_creation_denied",
+        "os_system": "process_creation_denied",
+        "winapi_create_process": "native_process_surface_denied",
+        "os_chdir": "cwd_mutation_denied",
+        "dynamic_import": "dynamic_import_denied",
+        "ctypes_createfile_import": "dynamic_import_denied",
+    }
+    assert receipt["artifact_is_authorization"] is False
+    assert receipt["execute_binding_enabled"] is False
+    canonical_receipt = dict(receipt)
+    declared_sha = canonical_receipt.pop("receipt_sha256")
+    assert hashlib.sha256(
+        json.dumps(
+            canonical_receipt,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest() == declared_sha
+    for mutation in (
+        {"phase_trace": ["boot", "tight", "complete"]},
+        {"artifact_is_authorization": True},
+        {"job_active_processes_after": 1},
+    ):
+        from app.learn.hybrid.benchmark_v2_provider_sandbox import (
+            validate_provider_workload_receipt,
+        )
+
+        changed = deepcopy(receipt)
+        changed.update(mutation)
+        changed.pop("receipt_sha256")
+        changed["receipt_sha256"] = hashlib.sha256(
+            json.dumps(changed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        with pytest.raises(ValueError):
+            validate_provider_workload_receipt(changed)
+    assert not (files["operation"] / "provider-process-escape.txt").exists()
+    assert not (files["operation"] / "provider-system-escape.txt").exists()
 
 
 def test_parent_spawner_rejects_reparse_alias_before_launch(
@@ -575,7 +655,63 @@ def test_bootstrap_failure_closes_process_and_allows_clean_retry(
         output_root=files["output"],
         ledger_root=files["ledger"],
     )
-    assert receipt["tight_policy_installed"] is True
+    assert receipt["contract_version"] == "provider_sandbox_workload_receipt_v1"
+    assert receipt["phase_trace"] == ["boot", "tight", "workload", "complete"]
+
+
+def test_valid_nonstandard_fd_is_denied_by_policy_reason(tmp_path: Path) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_sandbox import (
+        ProviderSandboxDenied,
+        _AuditState,
+    )
+
+    source = tmp_path / "readable.bin"
+    source.write_bytes(b"sealed")
+    descriptor = os.open(source, os.O_RDONLY)
+    try:
+        os.fstat(descriptor)
+        state = _AuditState(boot_reads=(source.resolve(),))
+        with pytest.raises(ProviderSandboxDenied) as denied:
+            state.audit("open", (descriptor, None, os.O_RDONLY))
+        assert denied.value.code == "integer_fd_denied"
+    finally:
+        os.close(descriptor)
+
+
+def test_denial_probe_rejects_non_policy_exceptions() -> None:
+    from app.learn.hybrid.benchmark_v2_provider_sandbox import _expect_denied
+
+    observed: dict[str, str] = {}
+    with pytest.raises(OSError, match="not policy"):
+        _expect_denied(
+            "generic_error",
+            lambda: (_ for _ in ()).throw(OSError("not policy")),
+            observed,
+        )
+    assert observed == {}
+
+
+def test_preloaded_child_bytes_ignore_same_size_replace_and_restore(
+    projected_child: tuple[Path, dict[str, Any], str],
+) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_preloaded_provider_corpus
+
+    path, expected, file_sha = projected_child
+    preloaded = path.read_bytes()
+    mutated = bytearray(preloaded)
+    position = preloaded.index(b"portfolio_hybrid_v1_1_provider_corpus_v2")
+    mutated[position] = ord("x")
+    assert len(mutated) == len(preloaded)
+    path.write_bytes(mutated)
+    try:
+        validated = validate_preloaded_provider_corpus(
+            raw=preloaded,
+            expected_sha256=file_sha,
+        )
+        assert validated == expected
+    finally:
+        path.write_bytes(preloaded)
+    assert _file_sha(path) == file_sha
 
 
 def test_provider_file_policy_rejects_private_fixture_even_if_declared(tmp_path: Path) -> None:
