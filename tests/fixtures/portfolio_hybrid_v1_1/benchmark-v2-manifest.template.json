@@ -1,0 +1,15 @@
+{
+  "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+  "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_manifest_template_v1",
+  "corpus_parent": {
+    "contract_version": "portfolio_hybrid_v1_1_corpus_manifest_v1",
+    "file_sha256": "8503010496a426893456e903b9d768f2a281ef0509f11230d312b073c0760757",
+    "relative_path": "tests/fixtures/portfolio_hybrid_v1_1/corpus-manifest.v1.json"
+  },
+  "provider_corpus_output": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/provider-corpus.candidate.json",
+  "safety": {
+    "artifact_is_authorization": false,
+    "display_only": true,
+    "execute_binding_enabled": false
+  }
+}
