@@ -351,8 +351,8 @@ function learningPipelineModeStatus(mode = LEARNING_PIPELINE_MODE) {
   if (mode === "hybrid_v1_1") {
     return {
       learning_pipeline_mode: "hybrid_v1_1",
-      rollout: "disabled",
-      reason: "hybrid_rollout_disabled",
+      rollout: "experimental",
+      reason: "hybrid_rollout_experimental",
     };
   }
   return { learning_pipeline_mode: "incumbent", rollout: "active" };

@@ -35,6 +35,10 @@ from app.learn.workflow_tasks.hybrid_review import (
     run_hybrid_review_projection_task,
 )
 from app.learn.recognition.uei.canonical import seal_immutable
+from app.learn.hybrid.gpu_lifecycle import (
+    assert_next_provider_safe_to_start,
+    release_hybrid_provider,
+)
 from app.learn.workflow_tasks.model_review import run_model_review_task
 from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
@@ -89,13 +93,173 @@ _HYBRID_MANAGED_TASK_KINDS = frozenset(
         "panel_learning_hybrid_review_projection",
     }
 )
+HYBRID_STAGE_HANDLER_REGISTRY = {
+    "panel_learning_hybrid_omni_discovery": {
+        "handler": "run_hybrid_omni_task",
+        "provider": "omni",
+        "previous_cleanup_receipt": None,
+    },
+    "panel_learning_hybrid_qwen_binding": {
+        "handler": "run_hybrid_qwen_task",
+        "provider": "qwen",
+        "previous_cleanup_receipt": "omni_cleanup_receipt",
+    },
+    "panel_learning_hybrid_fusion": {
+        "handler": "run_hybrid_fusion_task",
+        "provider": None,
+        "previous_cleanup_receipt": None,
+    },
+    "panel_learning_calibration_sequence": {
+        "handler": "run_learning_calibration_sequence",
+        "provider": "vista",
+        "previous_cleanup_receipt": "qwen_gpu_cleanup_receipt",
+    },
+    "panel_learning_hybrid_review_projection": {
+        "handler": "run_hybrid_review_projection_task",
+        "provider": "review",
+        "previous_cleanup_receipt": "vista_cleanup_receipt",
+    },
+}
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
+_HYBRID_VISTA_CLEANUP_WAIT_SECONDS = 35.0
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class LearningStageWorkerError(ValueError):
     """学习阶段 worker 请求无效或不属于当前 operation。"""
+
+
+def run_learning_calibration_sequence(
+    payload: dict[str, Any],
+    **kwargs: Any,
+) -> Any:
+    """延迟解析既有校准处理器，保留测试替换和真实注册链。"""
+    from app.learn.calibration_sequence import (
+        run_learning_calibration_sequence as calibration_handler,
+    )
+
+    return calibration_handler(payload, **kwargs)
+
+
+def resolve_hybrid_stage_handler(task_kind: str) -> Callable[..., Any]:
+    spec = HYBRID_STAGE_HANDLER_REGISTRY.get(str(task_kind or "").strip())
+    if not isinstance(spec, dict):
+        raise LearningStageWorkerError(f"Hybrid handler is not registered: {task_kind}")
+    handler_name = str(spec.get("handler") or "").strip()
+    handler = globals().get(handler_name)
+    if not callable(handler):
+        raise LearningStageWorkerError(
+            f"Hybrid registered handler is unavailable: {handler_name}"
+        )
+    return handler
+
+
+def hybrid_registered_handler_chain_ready() -> bool:
+    expected_lifecycle = {
+        "panel_learning_hybrid_omni_discovery": ("omni", None),
+        "panel_learning_hybrid_qwen_binding": ("qwen", "omni_cleanup_receipt"),
+        "panel_learning_hybrid_fusion": (None, None),
+        "panel_learning_calibration_sequence": ("vista", "qwen_gpu_cleanup_receipt"),
+        "panel_learning_hybrid_review_projection": ("review", "vista_cleanup_receipt"),
+    }
+    try:
+        return set(HYBRID_STAGE_HANDLER_REGISTRY) == set(expected_lifecycle) and all(
+            callable(resolve_hybrid_stage_handler(task_kind))
+            and (
+                HYBRID_STAGE_HANDLER_REGISTRY[task_kind].get("provider"),
+                HYBRID_STAGE_HANDLER_REGISTRY[task_kind].get(
+                    "previous_cleanup_receipt"
+                ),
+            )
+            == lifecycle
+            for task_kind, lifecycle in expected_lifecycle.items()
+        )
+    except LearningStageWorkerError:
+        return False
+
+
+def _assert_hybrid_provider_start_guard(
+    task_kind: str,
+    orchestration: object,
+) -> None:
+    spec = HYBRID_STAGE_HANDLER_REGISTRY.get(task_kind)
+    if not isinstance(spec, dict):
+        raise LearningStageWorkerError(f"Hybrid handler is not registered: {task_kind}")
+    receipt_name = spec.get("previous_cleanup_receipt")
+    if receipt_name is None:
+        return
+    if not isinstance(orchestration, dict) or not isinstance(
+        orchestration.get(str(receipt_name)), dict
+    ):
+        raise LearningStageWorkerError(
+            f"{receipt_name} is required before Hybrid provider start"
+        )
+    try:
+        assert_next_provider_safe_to_start(
+            orchestration[str(receipt_name)],
+            str(spec.get("provider") or ""),
+        )
+    except (TypeError, ValueError, RuntimeError) as error:
+        raise LearningStageWorkerError(str(error)) from error
+
+
+def _verified_hybrid_process_inventory(
+    provider: str,
+    source_cleanup_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "contract_version": "hybrid_provider_process_inventory_v1",
+        "provider": provider,
+        "release_status": "verified",
+        "termination_reason": "completed",
+        "provider_processes_after": [],
+        "helper_processes_after": [],
+        "orphan_descendant_pids": [],
+        "active_listeners_after": [],
+        "lease_files_after": [],
+        "source_cleanup_evidence": deepcopy(source_cleanup_evidence),
+    }
+
+
+def _omni_cleanup_receipt(result: object) -> dict[str, Any]:
+    if not isinstance(result, dict) or any(
+        (
+            result.get("cleanup_status") != "clean",
+            result.get("provider_claim_status") != "complete",
+            not isinstance(result.get("provider_receipt_ref"), dict),
+        )
+    ):
+        raise LearningStageWorkerError("Hybrid Omni cleanup is not verified")
+    inventory = _verified_hybrid_process_inventory(
+        "omni",
+        {
+            "contract_version": "hybrid_omni_cleanup_evidence_v1",
+            "status": "verified",
+            "provider_receipt_ref": deepcopy(result["provider_receipt_ref"]),
+        },
+    )
+    return release_hybrid_provider("omni", process_inventory=inventory)
+
+
+def _qwen_gpu_cleanup_receipt(result: object) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        raise LearningStageWorkerError("Hybrid Qwen cleanup receipt is required")
+    from app.core.model_server import validate_qwen_cleanup_receipt
+
+    try:
+        exact_receipt = validate_qwen_cleanup_receipt(result)
+    except ValueError as error:
+        raise LearningStageWorkerError(str(error)) from error
+    inventory = _verified_hybrid_process_inventory(
+        "qwen",
+        {
+            "contract_version": "hybrid_qwen_cleanup_evidence_v1",
+            "status": "verified",
+            "qwen_cleanup_receipt": exact_receipt,
+        },
+    )
+    return release_hybrid_provider("qwen", process_inventory=inventory)
 
 
 class _ManagedCancellationEvent:
@@ -172,6 +336,13 @@ def execute_learning_stage_worker_task(
     model_lease: dict[str, Any] | None = None
     lifecycle_evidence: dict[str, Any] = {}
     try:
+        hybrid_handler: Callable[..., Any] | None = (
+            resolve_hybrid_stage_handler(normalized_kind)
+            if normalized_kind in HYBRID_STAGE_HANDLER_REGISTRY
+            else None
+        )
+        if learning_pipeline_mode == "hybrid_v1_1":
+            _assert_hybrid_provider_start_guard(normalized_kind, orchestration)
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
             validate_hybrid_qwen_task_payload(execution_payload)
         model_lease = _ensure_learning_stage_model_ready(
@@ -180,7 +351,8 @@ def execute_learning_stage_worker_task(
             cancellation_event=cancellation_event,
         )
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
-            response = run_hybrid_qwen_task(
+            assert hybrid_handler is not None
+            response = hybrid_handler(
                 execution_payload,
                 cancellation_event=cancellation_event,
                 model_lease=model_lease,
@@ -195,21 +367,41 @@ def execute_learning_stage_worker_task(
             lifecycle_evidence["qwen_cleanup_receipt"] = deepcopy(
                 response["qwen_cleanup_receipt"]
             )
+            if learning_pipeline_mode == "hybrid_v1_1":
+                qwen_gpu_receipt = _qwen_gpu_cleanup_receipt(
+                    response["qwen_cleanup_receipt"]
+                )
+                lifecycle_evidence["qwen_gpu_cleanup_receipt"] = deepcopy(
+                    qwen_gpu_receipt
+                )
+                assert isinstance(orchestration, dict)
+                orchestration["qwen_cleanup_receipt"] = deepcopy(
+                    response["qwen_cleanup_receipt"]
+                )
+                orchestration["qwen_gpu_cleanup_receipt"] = deepcopy(qwen_gpu_receipt)
             response = response.get("qwen_bindings")
         elif normalized_kind == "panel_learning_hybrid_fusion":
-            response = run_hybrid_fusion_task(
+            assert hybrid_handler is not None
+            response = hybrid_handler(
                 execution_payload,
                 cancellation_event=cancellation_event,
             )
             if learning_pipeline_mode == "hybrid_v1_1":
                 response = seal_immutable(response)
         elif normalized_kind == "panel_learning_hybrid_omni_discovery":
-            response = run_hybrid_omni_task(
+            assert hybrid_handler is not None
+            response = hybrid_handler(
                 execution_payload,
                 cancellation_event=cancellation_event,
             )
+            if learning_pipeline_mode == "hybrid_v1_1":
+                omni_receipt = _omni_cleanup_receipt(response)
+                lifecycle_evidence["omni_cleanup_receipt"] = deepcopy(omni_receipt)
+                assert isinstance(orchestration, dict)
+                orchestration["omni_cleanup_receipt"] = deepcopy(omni_receipt)
         elif normalized_kind == "panel_learning_hybrid_review_projection":
-            response = run_hybrid_review_projection_task(
+            assert hybrid_handler is not None
+            response = hybrid_handler(
                 execution_payload,
                 cancellation_event=cancellation_event,
             )
@@ -244,12 +436,15 @@ def execute_learning_stage_worker_task(
                 )
             )
         elif normalized_kind == "panel_learning_calibration_sequence":
-            from app.learn.calibration_sequence import run_learning_calibration_sequence
-
+            calibration_handler = (
+                hybrid_handler
+                if learning_pipeline_mode == "hybrid_v1_1"
+                else run_learning_calibration_sequence
+            )
             if cancellation_event is None:
-                response = run_learning_calibration_sequence(execution_payload)
+                response = calibration_handler(execution_payload)
             else:
-                response = run_learning_calibration_sequence(
+                response = calibration_handler(
                     execution_payload,
                     cancellation_event=cancellation_event,
                 )
@@ -279,6 +474,7 @@ def execute_learning_stage_worker_task(
             lifecycle_evidence = _reconcile_hybrid_handler_failure(
                 model_lease=model_lease,
                 error=error,
+                task_kind=normalized_kind,
             )
             return _hybrid_managed_failure_result(
                 task_kind=normalized_kind,
@@ -295,7 +491,29 @@ def execute_learning_stage_worker_task(
                 reason="managed_consumer_failed",
             )
         raise
-    if model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
+    if (
+        learning_pipeline_mode == "hybrid_v1_1"
+        and normalized_kind == "panel_learning_calibration_sequence"
+        and model_lease is not None
+    ):
+        try:
+            vista_receipt = _release_hybrid_vista_lease(model_lease)
+        except BaseException as error:
+            lifecycle_evidence = {
+                "status": "reconciliation_failed",
+                "error_type": type(error).__name__,
+                "details": str(error),
+            }
+            return _hybrid_managed_failure_result(
+                task_kind=normalized_kind,
+                error=error,
+                orchestration=orchestration,
+                lifecycle_evidence=lifecycle_evidence,
+            )
+        lifecycle_evidence["vista_cleanup_receipt"] = deepcopy(vista_receipt)
+        assert isinstance(orchestration, dict)
+        orchestration["vista_cleanup_receipt"] = deepcopy(vista_receipt)
+    elif model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
         from app.core.model_server import reconcile_qwen_model_lease_failure
 
         reconcile_qwen_model_lease_failure(
@@ -342,9 +560,24 @@ def _reconcile_hybrid_handler_failure(
     *,
     model_lease: dict[str, Any] | None,
     error: BaseException,
+    task_kind: str,
 ) -> dict[str, Any]:
     if model_lease is None:
         return {"status": "model_lease_not_acquired"}
+    if task_kind == "panel_learning_calibration_sequence":
+        try:
+            return {"vista_cleanup_receipt": _release_hybrid_vista_lease(model_lease)}
+        except BaseException as cleanup_error:
+            error.add_note(
+                "Hybrid VISTA lifecycle reconciliation failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+            return {
+                "status": "reconciliation_failed",
+                "error_type": type(cleanup_error).__name__,
+                "details": str(cleanup_error),
+            }
+
     from app.core.model_server import reconcile_qwen_model_lease_failure
 
     try:
@@ -365,6 +598,16 @@ def _reconcile_hybrid_handler_failure(
             "error_type": type(cleanup_error).__name__,
             "details": str(cleanup_error),
         }
+
+
+def _release_hybrid_vista_lease(model_lease: dict[str, Any]) -> dict[str, Any]:
+    from app.core.model_server import release_hybrid_vista_model_lease
+
+    inventory = release_hybrid_vista_model_lease(model_lease)
+    try:
+        return release_hybrid_provider("vista", process_inventory=inventory)
+    except (TypeError, ValueError, RuntimeError) as error:
+        raise LearningStageWorkerError(str(error)) from error
 
 
 def _hybrid_managed_failure_result(
@@ -491,20 +734,43 @@ def _ensure_learning_stage_model_ready(
             raise LearningStageWorkerError(
                 f"model service not ready for {stage}: {status or 'unknown'}"
             )
+        if (
+            task_kind == "panel_learning_calibration_sequence"
+            and payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+        ):
+            from app.core.model_server import build_hybrid_vista_model_lease
+
+            return build_hybrid_vista_model_lease(profile, readiness)
         return None
 
+    managed_vista_acquisition = (
+        task_kind == "panel_learning_calibration_sequence"
+        and payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+    )
     if (
-        task_kind in _MANAGED_QWEN_TASK_KINDS
+        (task_kind in _MANAGED_QWEN_TASK_KINDS or managed_vista_acquisition)
         and cancellation_event is not None
         and hasattr(cancellation_event, "run_if_not_cancelled")
     ):
         allowed, result = cancellation_event.run_if_not_cancelled(
-            "qwen_ensure_and_lease",
+            "vista_ensure_and_lease"
+            if managed_vista_acquisition
+            else "qwen_ensure_and_lease",
             ensure_and_publish,
         )
         if not allowed:
-            raise LearningStageWorkerError("Qwen cancelled before model acquisition")
+            provider = "VISTA" if managed_vista_acquisition else "Qwen"
+            raise LearningStageWorkerError(
+                f"{provider} cancelled before model acquisition"
+            )
         return result
+    if (
+        managed_vista_acquisition
+        and cancellation_event is not None
+        and hasattr(cancellation_event, "is_set")
+        and cancellation_event.is_set()
+    ):
+        raise LearningStageWorkerError("VISTA cancelled before model acquisition")
     return ensure_and_publish()
 
 
@@ -711,6 +977,10 @@ class LearningStageWorkerRegistry:
                 "model_request_id": model_request_id,
                 "payload_sha256": payload_sha256,
             }
+            hybrid_vista_task = (
+                normalized_task_kind == "panel_learning_calibration_sequence"
+                and payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+            )
             cancellation_event = (
                 _ManagedCancellationEvent(
                     event=self._process_context.Event(),
@@ -718,11 +988,13 @@ class LearningStageWorkerRegistry:
                 )
                 if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
                 or normalized_task_kind in _MANAGED_QWEN_TASK_KINDS
+                or hybrid_vista_task
                 else None
             )
             completion_event = (
                 self._process_context.Event()
                 if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                or hybrid_vista_task
                 else None
             )
             process = self._process_factory(
@@ -1096,6 +1368,61 @@ class LearningStageWorkerRegistry:
                     **self._public_record(record),
                     "backend_compute_termination": "terminated",
                     "model_service_compute_termination": "not_covered",
+                    "model_request_cancellation": deepcopy(model_cancellation),
+                    "cooperative_cleanup": cooperative_cleanup,
+                }
+            elif (
+                record["task_kind"] == "panel_learning_calibration_sequence"
+                and record.get("payload", {}).get("learning_pipeline_mode")
+                == "hybrid_v1_1"
+            ):
+                cancellation_event = record.get("cancellation_event")
+                if cancellation_event is not None:
+                    cancellation_event.set()
+                try:
+                    model_cancellation = self._model_request_cancel(
+                        request_id=record["model_request_id"],
+                        task_kind=record["task_kind"],
+                        payload=deepcopy(record["payload"]),
+                    )
+                except Exception as exc:
+                    model_cancellation = {
+                        "contract_version": "model_request_cancellation_v1",
+                        "status": "cancel_failed",
+                        "request_id": record["model_request_id"],
+                        "model_service_compute_termination": "cancel_failed",
+                        "error": str(exc),
+                    }
+                completion_event = record.get("completion_event")
+                handshake_complete = bool(
+                    completion_event is not None
+                    and completion_event.wait(
+                        timeout=_HYBRID_VISTA_CLEANUP_WAIT_SECONDS
+                    )
+                )
+                if not handshake_complete:
+                    raise LearningStageWorkerError(
+                        "Hybrid VISTA cooperative cleanup handshake timed out; "
+                        "worker remains attached"
+                    )
+                process.join(timeout=2.0)
+                self._refresh_record(record)
+                if record.get("status") != "completed":
+                    raise LearningStageWorkerError(
+                        "Hybrid VISTA cooperative cleanup result is invalid"
+                    )
+                cooperative_cleanup = _hybrid_vista_cleanup_evidence(record)
+                if process.is_alive():
+                    raise LearningStageWorkerError(
+                        "Hybrid VISTA cleanup completed but worker exit is still pending"
+                    )
+                return {
+                    **self._public_record(record),
+                    "backend_compute_termination": "terminated",
+                    "model_service_compute_termination": model_cancellation.get(
+                        "model_service_compute_termination",
+                        "request_not_active",
+                    ),
                     "model_request_cancellation": deepcopy(model_cancellation),
                     "cooperative_cleanup": cooperative_cleanup,
                 }
@@ -1626,6 +1953,63 @@ def _hybrid_omni_cleanup_evidence(
         "failure_reason": "runtime_cancelled",
         "cleanup_status": "clean",
     }
+
+
+def _hybrid_vista_cleanup_evidence(record: dict[str, Any]) -> dict[str, Any]:
+    result_envelope = record.get("worker_result")
+    response = (
+        result_envelope.get("response")
+        if isinstance(result_envelope, dict)
+        else None
+    )
+    if (
+        not isinstance(response, dict)
+        or response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("task_kind") != "panel_learning_calibration_sequence"
+    ):
+        raise LearningStageWorkerError(
+            "Hybrid VISTA cooperative cleanup evidence is invalid"
+        )
+    lifecycle = response.get("lifecycle_evidence")
+    receipt = (
+        lifecycle.get("vista_cleanup_receipt")
+        if isinstance(lifecycle, dict)
+        else None
+    )
+    managed_result = response.get("result")
+    model_lifecycle = (
+        managed_result.get("model_lifecycle")
+        if isinstance(managed_result, dict)
+        else None
+    )
+    if not isinstance(receipt, dict) and isinstance(model_lifecycle, dict):
+        receipt = model_lifecycle.get("vista_cleanup_receipt")
+    if isinstance(receipt, dict):
+        try:
+            assert_next_provider_safe_to_start(receipt, "review")
+        except RuntimeError as error:
+            raise LearningStageWorkerError(str(error)) from error
+        return {
+            "contract_version": "hybrid_vista_cooperative_cleanup_v1",
+            "cleanup_status": "verified",
+            "vista_cleanup_receipt": deepcopy(receipt),
+        }
+    if (
+        response.get("outcome") == "failed"
+        and isinstance(model_lifecycle, dict)
+        and model_lifecycle.get("status") == "model_lease_not_acquired"
+        and "cancelled before model acquisition"
+        in str(managed_result.get("failure_reason") or "")
+    ):
+        return {
+            "contract_version": "hybrid_vista_cooperative_cleanup_v1",
+            "cleanup_status": "not_acquired",
+            "vista_cleanup_receipt": None,
+        }
+    raise LearningStageWorkerError(
+        "Hybrid VISTA cooperative cleanup evidence is invalid"
+    )
 
 
 def _is_immutable_ref(value: object) -> bool:

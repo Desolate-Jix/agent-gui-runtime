@@ -8,6 +8,8 @@
   ],
   "intended_pipeline_stage": "parser_provider",
   "provider_mode": "Shadow",
+  "exclusive_resource_group": "gpu_vision",
+  "hybrid_cleanup_contract": "hybrid_provider_cleanup_receipt_v1",
   "model_family": "OmniParser",
   "model_id": "microsoft/OmniParser-v2",
   "max_parameters_b": 1.0,

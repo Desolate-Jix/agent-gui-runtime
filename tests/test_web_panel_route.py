@@ -6499,7 +6499,7 @@ def test_panel_start_worker_request_accepts_hybrid_qwen_task_kind() -> None:
     assert request.task_kind == "panel_learning_hybrid_qwen_binding"
 
 
-def test_hybrid_learning_pipeline_start_is_disabled_without_state_mutation(
+def test_hybrid_learning_pipeline_start_is_experimental_and_incumbent_remains_default(
     monkeypatch,
 ) -> None:
     from app.api import panel as panel_api
@@ -6532,12 +6532,18 @@ def test_hybrid_learning_pipeline_start_is_disabled_without_state_mutation(
         },
     ).json()
 
-    assert response["success"] is False
-    assert response["error"]["code"] == "hybrid_rollout_disabled"
-    assert store.get("run-hybrid-disabled") == state
+    assert response["success"] is True
+    assert response["data"]["status"] == "running"
+    execution = response["data"]["workflow_state"]["stages"]["screen_understanding"]["evidence_refs"]["stage_execution"]
+    assert execution["learning_pipeline_mode"] == "hybrid_v1_1"
+
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    assert 'rollout: "experimental"' in panel_js
+    assert 'reason: "hybrid_rollout_experimental"' in panel_js
+    assert 'return { learning_pipeline_mode: "incumbent", rollout: "active" }' in panel_js
 
 
-def test_public_worker_route_cannot_bypass_hybrid_rollout_disable(monkeypatch) -> None:
+def test_public_worker_route_accepts_only_registered_experimental_hybrid_handler(monkeypatch) -> None:
     from app.api import panel as panel_api
     from app.learn.workflow_service import start_learning_workflow_stage_operation
     from app.learn.workflow_store import LearningWorkflowRunStore
@@ -6565,6 +6571,17 @@ def test_public_worker_route_cannot_bypass_hybrid_rollout_disable(monkeypatch) -
         operation_id="operation-hybrid-disabled",
     )
     monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    started: list[dict] = []
+
+    def start_worker(**kwargs):
+        started.append(dict(kwargs))
+        return {
+            "worker_id": "worker-hybrid-experimental",
+            "status": "running",
+            "task_kind": kwargs["task_kind"],
+        }
+
+    monkeypatch.setattr(panel_api.learning_stage_worker_registry, "start", start_worker)
 
     response = TestClient(app).post(
         "/panel/start_learning_stage_worker",
@@ -6578,5 +6595,6 @@ def test_public_worker_route_cannot_bypass_hybrid_rollout_disable(monkeypatch) -
         },
     ).json()
 
-    assert response["success"] is False
-    assert response["error"]["code"] == "hybrid_rollout_disabled"
+    assert response["success"] is True
+    assert response["data"]["task_kind"] == "panel_learning_hybrid_omni_discovery"
+    assert started[0]["payload"]["learning_pipeline_mode"] == "hybrid_v1_1"

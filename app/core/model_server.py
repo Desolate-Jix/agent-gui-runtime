@@ -2030,6 +2030,10 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def stop_model_server(profile: dict[str, Any]) -> dict[str, Any]:
+    if os.environ.get("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER") == "1":
+        raise RuntimeError(
+            "model server wrapper disabled by inherited test safety sentinel"
+        )
     script = _resolve_path(str(profile.get("stop_script") or "scripts/model_servers/stop_local_vision_server.ps1"))
     if not script.exists():
         raise FileNotFoundError(f"Model stop script not found: {script}")
@@ -2063,6 +2067,161 @@ def stop_model_server(profile: dict[str, Any]) -> dict[str, Any]:
         "stopped": completed.returncode == 0,
         "after": check_model_server(profile),
     }
+
+
+def build_hybrid_vista_model_lease(
+    profile: dict[str, Any],
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    """从同一次 VISTA 启动/就绪观测提取精确释放身份。"""
+    if not isinstance(profile, dict) or not str(profile.get("profile_id") or "").strip():
+        raise ValueError("Hybrid VISTA profile is required")
+    if not isinstance(readiness, dict):
+        raise ValueError("Hybrid VISTA readiness is required")
+    expected_pids: set[int] = set()
+    start = readiness.get("start")
+    if isinstance(start, dict):
+        for field in ("pid", "service_pid"):
+            _append_positive_pid(expected_pids, start.get(field))
+    for section in ("before", "after"):
+        observed = readiness.get(section)
+        if not isinstance(observed, dict):
+            continue
+        _append_positive_pid(expected_pids, observed.get("expected_pid"))
+        health = observed.get("health")
+        if isinstance(health, dict):
+            _append_positive_pid(expected_pids, health.get("pid"))
+    return {
+        "contract_version": "hybrid_vista_model_lease_v1",
+        "provider": "vista",
+        "profile": _public_profile(deepcopy(profile)),
+        "expected_pids": sorted(expected_pids),
+    }
+
+
+def release_hybrid_vista_model_lease(
+    model_lease: dict[str, Any],
+) -> dict[str, Any]:
+    """停止同一 VISTA profile，并把进程、监听和 pid 文件事实返回给协调器。"""
+    if (
+        not isinstance(model_lease, dict)
+        or model_lease.get("contract_version") != "hybrid_vista_model_lease_v1"
+        or model_lease.get("provider") != "vista"
+        or not isinstance(model_lease.get("profile"), dict)
+        or not isinstance(model_lease.get("expected_pids"), list)
+    ):
+        raise ValueError("exact Hybrid VISTA model lease is required")
+    profile = deepcopy(model_lease["profile"])
+    expected_pids: list[int] = []
+    for value in model_lease["expected_pids"]:
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError("Hybrid VISTA model lease PID is invalid")
+        if value not in expected_pids:
+            expected_pids.append(value)
+
+    descendants_before, descendants_observable = _descendant_pids_for_parents(
+        expected_pids
+    )
+    stop_result = stop_model_server(profile)
+    active_provider = [
+        {"pid": pid} for pid in expected_pids if _process_is_alive(pid)
+    ]
+    port = profile.get("port")
+    try:
+        normalized_port = int(port)
+    except (TypeError, ValueError):
+        normalized_port = 0
+    listeners = (
+        [
+            {"port": normalized_port, "pid": pid}
+            for pid in _listening_pids_for_port(normalized_port)
+        ]
+        if normalized_port > 0
+        else []
+    )
+    pid_path = model_profile_pid_path(profile)
+    lease_files = [str(pid_path)] if pid_path.exists() else []
+    orphan_descendants = [
+        pid for pid in descendants_before if _process_is_alive(pid)
+    ]
+    after = stop_result.get("after")
+    after_status = str(
+        after.get("status") if isinstance(after, dict) else ""
+    ).strip().casefold()
+    verified = (
+        stop_result.get("stopped") is True
+        and after_status == "unreachable"
+        and not active_provider
+        and descendants_observable
+        and not orphan_descendants
+        and not listeners
+        and not lease_files
+    )
+    return {
+        "contract_version": "hybrid_provider_process_inventory_v1",
+        "provider": "vista",
+        "release_status": "verified" if verified else "failed",
+        "termination_reason": "completed" if verified else "cleanup_failed",
+        "provider_processes_after": active_provider,
+        "helper_processes_after": [
+            {"pid": pid} for pid in orphan_descendants
+        ],
+        "orphan_descendant_pids": orphan_descendants,
+        "active_listeners_after": listeners,
+        "lease_files_after": lease_files,
+        "source_cleanup_evidence": {
+            "contract_version": "hybrid_vista_cleanup_evidence_v1",
+            "status": "verified" if verified else "failed",
+            "model_lease": deepcopy(model_lease),
+            "stop_result": deepcopy(stop_result),
+            "descendant_inventory_observable": descendants_observable,
+        },
+    }
+
+
+def _append_positive_pid(target: set[int], value: Any) -> None:
+    try:
+        pid = int(value)
+    except (TypeError, ValueError):
+        return
+    if pid > 0:
+        target.add(pid)
+
+
+def _listening_pids_for_port(port: int) -> list[int]:
+    if port <= 0:
+        return []
+    try:
+        connections = list(psutil.net_connections(kind="tcp"))
+    except (psutil.AccessDenied, OSError) as error:
+        raise RuntimeError("Hybrid VISTA listener inventory is unobservable") from error
+    pids: set[int] = set()
+    for connection in connections:
+        address = getattr(connection, "laddr", None)
+        if (
+            connection.status == psutil.CONN_LISTEN
+            and address
+            and int(getattr(address, "port", address[1])) == port
+            and connection.pid
+        ):
+            pids.add(int(connection.pid))
+    return sorted(pids)
+
+
+def _descendant_pids_for_parents(parent_pids: list[int]) -> tuple[list[int], bool]:
+    descendants: set[int] = set()
+    observable = True
+    for parent_pid in parent_pids:
+        try:
+            process = psutil.Process(parent_pid)
+            descendants.update(
+                int(child.pid) for child in process.children(recursive=True)
+            )
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, OSError):
+            observable = False
+    return sorted(descendants), observable
 
 
 def wait_for_model_server(

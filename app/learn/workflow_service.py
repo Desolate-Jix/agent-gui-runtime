@@ -15,6 +15,7 @@ from app.learn.calibration_artifact import (
 from app.learn.calibration_sequence import (
     LEARNING_CALIBRATION_SEQUENCE_REQUEST_CONTRACT_VERSION,
 )
+from app.learn.hybrid.gpu_lifecycle import assert_next_provider_safe_to_start
 from app.learn.workflow_continuation import (
     LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION,
     interpret_learning_stage_worker_result,
@@ -1400,11 +1401,21 @@ def _interpret_hybrid_post_calibration_worker_result(
         raise LearningWorkflowStageOperationError(
             "Hybrid calibration lost Qwen cleanup receipt"
         )
+    vista_cleanup_receipt = orchestration.get("vista_cleanup_receipt")
+    if not isinstance(vista_cleanup_receipt, dict):
+        raise LearningWorkflowStageOperationError(
+            "Hybrid calibration lost VISTA cleanup receipt"
+        )
+    try:
+        assert_next_provider_safe_to_start(vista_cleanup_receipt, "review")
+    except RuntimeError as error:
+        raise LearningWorkflowStageOperationError(str(error)) from error
     payload = {
         "learning_pipeline_mode": "hybrid_v1_1",
         "hybrid_vista_results": deepcopy(results),
         "hybrid_vista_requests": deepcopy(requests),
         "qwen_cleanup_receipt": deepcopy(cleanup_receipt),
+        "vista_cleanup_receipt": deepcopy(vista_cleanup_receipt),
         "hybrid_capture_bundle_ref": deepcopy(
             orchestration.get("hybrid_capture_bundle_ref")
         ),

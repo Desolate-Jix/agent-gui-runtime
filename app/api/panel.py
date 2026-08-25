@@ -90,7 +90,9 @@ from app.learn.workflow_service import (
     transition_learning_workflow_run,
 )
 from app.learn.workflow_worker import (
+    HYBRID_STAGE_HANDLER_REGISTRY,
     LearningStageWorkerError,
+    hybrid_registered_handler_chain_ready,
     learning_stage_worker_registry,
 )
 from app.learn.workflow_state import (
@@ -154,6 +156,21 @@ SCOPED_CAPTURE_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "learning-runs" / "scoped
 continuous_task_memory_store = ReviewedInterfaceMemoryStore(project_root=ROOT_DIR)
 
 router = APIRouter(tags=["panel"])
+
+
+def _hybrid_experimental_rollout_ready() -> bool:
+    from app.learn.hybrid.contracts import load_hybrid_config
+
+    try:
+        config = load_hybrid_config(ROOT_DIR)
+    except (OSError, TypeError, ValueError):
+        return False
+    return (
+        config.get("rollout_mode") == "opt_in"
+        and hybrid_registered_handler_chain_ready()
+    )
+
+
 _INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD = Lock()
 _INTERFACE_WORKFLOW_SAVE_LOCKS: dict[str, Lock] = {}
 
@@ -417,7 +434,8 @@ class PanelStartLearningStageWorkerRequest(BaseModel):
             "panel_learning_calibration_sequence|"
             "panel_learning_hybrid_omni_discovery|"
             "panel_learning_hybrid_qwen_binding|"
-            "panel_learning_hybrid_fusion|vision_locate_target)$"
+            "panel_learning_hybrid_fusion|"
+            "panel_learning_hybrid_review_projection|vision_locate_target)$"
         )
     )
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -784,14 +802,17 @@ def start_learning_workflow_stage_operation_endpoint(
 ) -> APIResponse:
     """签发服务端阶段租约，防止浏览器超时后遗留无主运行状态。"""
 
-    if request.learning_pipeline_mode == "hybrid_v1_1":
+    if (
+        request.learning_pipeline_mode == "hybrid_v1_1"
+        and not _hybrid_experimental_rollout_ready()
+    ):
         return APIResponse(
             success=False,
-            message="Hybrid learning pipeline rollout is disabled",
+            message="Hybrid learning pipeline experimental rollout is unavailable",
             data=None,
             error=ErrorModel(
-                code="hybrid_rollout_disabled",
-                details="hybrid_v1_1 is wired for offline verification only",
+                code="hybrid_experimental_rollout_unavailable",
+                details="hybrid_v1_1 registered lifecycle chain is incomplete",
             ),
         )
 
@@ -876,17 +897,21 @@ def start_learning_stage_worker_endpoint(
 ) -> APIResponse:
     """将当前受管 operation 的白名单任务交给隔离后端进程。"""
 
-    if (
+    hybrid_requested = (
         request.task_kind.startswith("panel_learning_hybrid_")
         or request.payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+    )
+    if hybrid_requested and (
+        not _hybrid_experimental_rollout_ready()
+        or request.task_kind not in HYBRID_STAGE_HANDLER_REGISTRY
     ):
         return APIResponse(
             success=False,
-            message="Hybrid learning pipeline rollout is disabled",
+            message="Hybrid learning pipeline experimental rollout is unavailable",
             data=None,
             error=ErrorModel(
-                code="hybrid_rollout_disabled",
-                details="hybrid_v1_1 is wired for offline verification only",
+                code="hybrid_experimental_rollout_unavailable",
+                details="hybrid_v1_1 registered lifecycle chain is incomplete",
             ),
         )
 

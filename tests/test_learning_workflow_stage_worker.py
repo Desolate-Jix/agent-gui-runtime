@@ -2213,6 +2213,308 @@ while True:
     )
 
 
+def test_hybrid_registered_handler_chain_resolves_actual_callables() -> None:
+    from app.learn import workflow_worker
+
+    expected = {
+        "panel_learning_hybrid_omni_discovery": "run_hybrid_omni_task",
+        "panel_learning_hybrid_qwen_binding": "run_hybrid_qwen_task",
+        "panel_learning_hybrid_fusion": "run_hybrid_fusion_task",
+        "panel_learning_calibration_sequence": "run_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection": "run_hybrid_review_projection_task",
+    }
+    assert set(workflow_worker.HYBRID_STAGE_HANDLER_REGISTRY) == set(expected)
+    for task_kind, name in expected.items():
+        assert workflow_worker.resolve_hybrid_stage_handler(task_kind).__name__ == name
+
+
+@pytest.mark.parametrize(
+    ("task_kind", "required_receipt"),
+    [
+        ("panel_learning_hybrid_qwen_binding", "omni_cleanup_receipt"),
+        ("panel_learning_calibration_sequence", "qwen_gpu_cleanup_receipt"),
+        ("panel_learning_hybrid_review_projection", "vista_cleanup_receipt"),
+    ],
+)
+def test_hybrid_next_provider_guard_runs_before_handler_or_model_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+    task_kind: str,
+    required_receipt: str,
+) -> None:
+    from app.learn import workflow_worker
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        workflow_worker,
+        "validate_hybrid_qwen_task_payload",
+        lambda payload: calls.append("validate"),
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *args, **kwargs: calls.append("model") or None,
+    )
+    handler = workflow_worker.resolve_hybrid_stage_handler(task_kind)
+    monkeypatch.setattr(
+        workflow_worker,
+        handler.__name__,
+        lambda *args, **kwargs: calls.append("handler") or {},
+        raising=False,
+    )
+    response = workflow_worker.execute_learning_stage_worker_task(
+        task_kind,
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": {"run_id": "run-guard"},
+        },
+    )
+    assert response["outcome"] == "failed"
+    assert required_receipt in response["result"]["failure_reason"]
+    assert "model" not in calls
+    assert "handler" not in calls
+
+
+def test_hybrid_omni_completion_publishes_verified_cleanup_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    monkeypatch.setattr(workflow_worker, "_ensure_learning_stage_model_ready", lambda *a, **k: None)
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_hybrid_omni_task",
+        lambda *a, **k: {
+            "contract_version": "hybrid_omni_discovery_result_v1",
+            "outcome": "completed",
+            "provider_claim_status": "complete",
+            "provider_status": "completed",
+            "provider_receipt_ref": {"id": "receipt/omni", "content_sha256": "1" * 64},
+            "cleanup_status": "clean",
+        },
+    )
+    response = workflow_worker.execute_learning_stage_worker_task(
+        "panel_learning_hybrid_omni_discovery",
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": {"run_id": "run-omni-clean"},
+        },
+    )
+    receipt = response["orchestration"]["omni_cleanup_receipt"]
+    assert receipt["provider"] == "omni"
+    assert receipt["cleanup_status"] == "verified"
+
+
+def test_hybrid_vista_completion_releases_before_review_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+
+    qwen_receipt = release_hybrid_provider(
+        "qwen",
+        process_inventory={
+            "contract_version": "hybrid_provider_process_inventory_v1",
+            "provider": "qwen",
+            "release_status": "verified",
+            "termination_reason": "completed",
+            "provider_processes_after": [],
+            "helper_processes_after": [],
+            "orphan_descendant_pids": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "source_cleanup_evidence": {"status": "verified"},
+        },
+    )
+    vista_lease = {
+        "contract_version": "hybrid_vista_model_lease_v1",
+        "provider": "vista",
+        "profile": {"profile_id": "vista"},
+        "expected_pids": [],
+    }
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *a, **k: vista_lease,
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_learning_calibration_sequence",
+        lambda *a, **k: {"contract_version": "learning_calibration_sequence_result_v1"},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "release_hybrid_vista_model_lease",
+        lambda lease: {
+            "contract_version": "hybrid_provider_process_inventory_v1",
+            "provider": "vista",
+            "release_status": "verified",
+            "termination_reason": "completed",
+            "provider_processes_after": [],
+            "helper_processes_after": [],
+            "orphan_descendant_pids": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "source_cleanup_evidence": {"status": "verified"},
+        },
+    )
+    response = workflow_worker.execute_learning_stage_worker_task(
+        "panel_learning_calibration_sequence",
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": {
+                "run_id": "run-vista-clean",
+                "qwen_gpu_cleanup_receipt": qwen_receipt,
+            },
+        },
+    )
+    receipt = response["orchestration"]["vista_cleanup_receipt"]
+    assert receipt["provider"] == "vista"
+    assert receipt["cleanup_status"] == "verified"
+    assert response["lifecycle_evidence"]["vista_cleanup_receipt"] == receipt
+
+
+def test_hybrid_vista_handler_failure_still_releases_exact_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+
+    qwen_receipt = release_hybrid_provider(
+        "qwen",
+        process_inventory={
+            "contract_version": "hybrid_provider_process_inventory_v1",
+            "provider": "qwen",
+            "release_status": "verified",
+            "termination_reason": "completed",
+            "provider_processes_after": [],
+            "helper_processes_after": [],
+            "orphan_descendant_pids": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "source_cleanup_evidence": {"status": "verified"},
+        },
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *a, **k: {
+            "contract_version": "hybrid_vista_model_lease_v1",
+            "provider": "vista",
+            "profile": {"profile_id": "vista"},
+            "expected_pids": [],
+        },
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_learning_calibration_sequence",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("vista handler failed")),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "release_hybrid_vista_model_lease",
+        lambda lease: {
+            "contract_version": "hybrid_provider_process_inventory_v1",
+            "provider": "vista",
+            "release_status": "verified",
+            "termination_reason": "failure_recovery",
+            "provider_processes_after": [],
+            "helper_processes_after": [],
+            "orphan_descendant_pids": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "source_cleanup_evidence": {"status": "verified"},
+        },
+    )
+    response = workflow_worker.execute_learning_stage_worker_task(
+        "panel_learning_calibration_sequence",
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": {
+                "run_id": "run-vista-failure",
+                "qwen_gpu_cleanup_receipt": qwen_receipt,
+            },
+        },
+    )
+    assert response["outcome"] == "failed"
+    assert response["result"]["failure_reason"] == "vista handler failed"
+    assert response["result"]["model_lifecycle"]["vista_cleanup_receipt"]["cleanup_status"] == "verified"
+
+
+def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_termination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+
+    qwen_receipt = release_hybrid_provider(
+        "qwen",
+        process_inventory={
+            "contract_version": "hybrid_provider_process_inventory_v1",
+            "provider": "qwen",
+            "release_status": "verified",
+            "termination_reason": "completed",
+            "provider_processes_after": [],
+            "helper_processes_after": [],
+            "orphan_descendant_pids": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "source_cleanup_evidence": {"status": "verified"},
+        },
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *a, **k: None,
+    )
+
+    def cancelled_handler(*args, **kwargs):
+        raise workflow_worker.LearningStageWorkerError(
+            "VISTA cancelled before model acquisition"
+        )
+
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_learning_calibration_sequence",
+        cancelled_handler,
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_cooperative_fake_process_factory,
+        model_request_cancel=lambda **kwargs: {
+            "contract_version": "model_request_cancellation_v1",
+            "status": "request_not_active",
+            "model_service_compute_termination": "request_not_active",
+        },
+    )
+    started = registry.start(
+        run_id="run-vista-cancel",
+        stage="screen_understanding",
+        operation_id="operation-vista-cancel",
+        task_kind="panel_learning_calibration_sequence",
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": {
+                "qwen_gpu_cleanup_receipt": qwen_receipt,
+            },
+        },
+    )
+    process = registry._records[started["worker_id"]]["process"]
+
+    cancelled = registry.cancel_by_operation(
+        run_id="run-vista-cancel",
+        stage="screen_understanding",
+        operation_id="operation-vista-cancel",
+    )
+
+    assert cancelled["backend_compute_termination"] == "terminated"
+    assert cancelled["cooperative_cleanup"]["cleanup_status"] == "not_acquired"
+    assert process.terminated is False
+    assert process.killed is False
+
+
 def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(
     tmp_path: Path,
 ) -> None:

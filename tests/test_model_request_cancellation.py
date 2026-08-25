@@ -48,6 +48,88 @@ def test_qwen_cleanup_receipt_fails_closed_for_non_exact_evidence(mutation: str)
     else: result["release"] = {"status":"unobservable"}
     with pytest.raises(ValueError):
         build_qwen_cleanup_receipt(release_result=result, model_lease=lease)
+
+
+def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
+    tmp_path, monkeypatch
+) -> None:
+    from app.core import model_server
+
+    profile = {
+        "profile_id": "vista-test",
+        "role": ["locate"],
+        "provider_mode": "local_grounding",
+        "port": 13240,
+        "pid_file": str(tmp_path / "vista.pid"),
+    }
+    lease = {
+        "contract_version": "hybrid_vista_model_lease_v1",
+        "provider": "vista",
+        "profile": profile,
+        "expected_pids": [4123, 4124],
+    }
+    monkeypatch.setattr(
+        model_server,
+        "stop_model_server",
+        lambda selected: {
+            "stopped": True,
+            "after": {"status": "unreachable"},
+        },
+    )
+    monkeypatch.setattr(model_server, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [])
+
+    inventory = model_server.release_hybrid_vista_model_lease(lease)
+
+    assert inventory["release_status"] == "verified"
+    assert inventory["provider_processes_after"] == []
+    assert inventory["active_listeners_after"] == []
+    assert inventory["lease_files_after"] == []
+
+
+def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
+    tmp_path, monkeypatch
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+
+    pid_path = tmp_path / "vista.pid"
+    pid_path.write_text("4123", encoding="utf-8")
+    lease = {
+        "contract_version": "hybrid_vista_model_lease_v1",
+        "provider": "vista",
+        "profile": {
+            "profile_id": "vista-test",
+            "role": ["locate"],
+            "provider_mode": "local_grounding",
+            "port": 13240,
+            "pid_file": str(pid_path),
+        },
+        "expected_pids": [4123],
+    }
+    monkeypatch.setattr(
+        model_server,
+        "stop_model_server",
+        lambda selected: {"stopped": False, "after": {"status": "running"}},
+    )
+    monkeypatch.setattr(model_server, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [4123])
+
+    inventory = model_server.release_hybrid_vista_model_lease(lease)
+
+    assert inventory["release_status"] == "failed"
+    assert inventory["provider_processes_after"] == [{"pid": 4123}]
+    assert inventory["active_listeners_after"] == [{"port": 13240, "pid": 4123}]
+    with pytest.raises(RuntimeError, match="cleanup is not verified"):
+        release_hybrid_provider("vista", process_inventory=inventory)
+
+
+def test_stop_model_server_honors_real_wrapper_test_sentinel(monkeypatch) -> None:
+    from app.core import model_server
+
+    monkeypatch.setenv("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
+    with pytest.raises(RuntimeError, match="wrapper disabled"):
+        model_server.stop_model_server({"profile_id": "must-not-run"})
 import psutil
 
 from app.core import model_server
