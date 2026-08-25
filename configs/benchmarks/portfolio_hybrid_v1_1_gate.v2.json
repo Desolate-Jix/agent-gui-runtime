@@ -1,0 +1,20 @@
+{
+  "automatic_split": "pre_review",
+  "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+  "contract_version": "portfolio_hybrid_v1_1_automatic_gate_v2",
+  "holdout_role": "automatic_gate",
+  "regression_role": "precondition_only",
+  "thresholds": {
+    "min_coverage": "1/5",
+    "min_important_target_correct_coverage_delta": "1/20",
+    "min_semantic_precision_delta": "0/1",
+    "min_vista_submitted_count": 1,
+    "required_vista_gain_numerator": ">0",
+    "wrong_target_count": 0
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "display_only": true,
+    "execute_binding_enabled": false
+  }
+}
