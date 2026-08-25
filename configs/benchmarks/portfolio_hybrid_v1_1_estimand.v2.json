@@ -1,0 +1,216 @@
+{
+  "contract_version": "portfolio_hybrid_v1_1_estimand_v2",
+  "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+  "arms": {
+    "arm_ids": [
+      "qwen_only",
+      "omni_only_discovery",
+      "omni_to_qwen",
+      "omni_to_qwen_vista"
+    ],
+    "release_arm": "omni_to_qwen_vista",
+    "statistical_arm_count": 4
+  },
+  "execution_units": {
+    "hybrid_arms": [
+      "omni_only_discovery",
+      "omni_to_qwen",
+      "omni_to_qwen_vista"
+    ],
+    "hybrid_invocation_unit": "screen_group",
+    "hybrid_invocations_per_screen_group": 1,
+    "incumbent_arm": "qwen_only",
+    "incumbent_invocation_unit": "target",
+    "targets_per_screen_group": 5,
+    "call_count_reports": [
+      "unique_invocation_count",
+      "amortized_per_target_count"
+    ]
+  },
+  "prediction": {
+    "automatic_split": "pre_review",
+    "review_split": "post_review",
+    "logical_record_policy": "immutable_pre_review_append_only_post_review",
+    "release_reads_split": "pre_review"
+  },
+  "point_metric": {
+    "metric_id": "acceptable_region_binary_gain_v1",
+    "sealed": true,
+    "coordinate_space": "capture_pixel_xyxy",
+    "row_key_fields": [
+      "case_id",
+      "target_id",
+      "arm_id",
+      "candidate_id",
+      "vista_request_ref"
+    ],
+    "pair_identity_fields": [
+      "case_id",
+      "target_id",
+      "candidate_id",
+      "vista_request_ref"
+    ],
+    "pair_arm_ids": [
+      "omni_to_qwen",
+      "omni_to_qwen_vista"
+    ],
+    "pair_cardinality": 2,
+    "same_parent_fields": [
+      "fusion_ref",
+      "candidate_id",
+      "capture_ref",
+      "target_binding_ref",
+      "bbox_ref"
+    ],
+    "target_binding": {
+      "ref_contract": "sealed_target_binding_ref_v1",
+      "selection_timing": "before_vista",
+      "candidate_cardinality": 1,
+      "eligibility_values": [
+        "ELIGIBLE",
+        "INELIGIBLE"
+      ],
+      "eligible_submission_status": "SUBMITTED",
+      "eligible_request_cardinality": 1,
+      "ineligible_request_cardinality": 0,
+      "ineligible_reason_required": true,
+      "invalid_conditions": [
+        "duplicate_binding",
+        "missing_binding",
+        "ambiguous_binding",
+        "duplicate_request",
+        "missing_request",
+        "cross_target_request",
+        "cross_candidate_request",
+        "cross_request_pair",
+        "eligible_but_unsent",
+        "ineligible_with_request"
+      ]
+    },
+    "baseline": {
+      "method": "strict_bbox_center_v1",
+      "bbox_format": [
+        "x1",
+        "y1",
+        "x2",
+        "y2"
+      ],
+      "formula": [
+        "(x1+x2)/2",
+        "(y1+y2)/2"
+      ]
+    },
+    "refined": {
+      "source": "unique_validated_proposal_for_vista_request_ref",
+      "field": "canonical_capture_pixel_point"
+    },
+    "acceptable_region_hit_rule": "x1 <= x < x2 && y1 <= y < y2",
+    "multi_region_rule": "logical_or",
+    "submitted_failure_rule": {
+      "statuses": [
+        "failed",
+        "timeout",
+        "out_of_bounds",
+        "missing"
+      ],
+      "refined_hit": 0,
+      "remains_in_denominator": true
+    },
+    "denominator": "submitted_count",
+    "gain_numerator": "sum(refined_hit-baseline_hit)",
+    "gain": "gain_numerator/submitted_count",
+    "comparison_arithmetic": "exact_rational_no_rounding",
+    "min_vista_submitted_count": 1,
+    "required_gain_numerator": ">0",
+    "proposal_selection": "exact_request_only_no_cherry_pick"
+  },
+  "regression_attempt_policy": {
+    "accepted_run_selection": "first_complete_lifecycle_verified_attempt",
+    "cherry_pick_forbidden": true,
+    "same_seal_retry_limit": 1,
+    "same_seal_retry_requires_independent_review": true,
+    "same_seal_retryable_dispositions": [
+      "pre_model_infrastructure_failure",
+      "cleanup_indeterminate"
+    ],
+    "model_quality_or_gate_failure_action": "fix_and_generate_new_seal"
+  },
+  "holdout_claim": {
+    "file_root_template": "%LOCALAPPDATA%\\AgentGuiRuntime\\PortfolioHybridBenchmarkV2\\Claims",
+    "registry_root_template": "HKCU\\Software\\AgentGuiRuntime\\PortfolioHybridBenchmarkV2\\Claims",
+    "claim_identity_schema": {
+      "contract_version": "portfolio_hybrid_benchmark_v2_claim_identity_v1",
+      "canonical_json": "utf8_sorted_keys_compact_no_nan",
+      "exact_fields": [
+        "benchmark_release_id",
+        "corpus_parent_seal_sha256",
+        "partition"
+      ]
+    },
+    "claim_identity_payload": {
+      "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+      "corpus_parent_seal_sha256": "8503010496a426893456e903b9d768f2a281ef0509f11230d312b073c0760757",
+      "partition": "holdout"
+    },
+    "claim_id_formula": "sha256(canonical_json(claim_identity_payload))",
+    "authorization_path_template": "{claim_root}\\{claim_id}.authorization.json",
+    "sentinel_path_template": "{claim_root}\\{claim_id}--{authorization_envelope_sha256}.claim",
+    "registry_key_template": "{registry_root}\\{claim_id}",
+    "attempt_id_formula": "sha256(benchmark-v2-holdout-attempt\\0+claim_id+\\0+authorization_envelope_sha256)",
+    "authorization_task": 14,
+    "authorization_frozen_non_key_fields": [
+      "provider_manifest_sha256",
+      "provider_manifest_contract_version",
+      "code_sha256_by_path",
+      "config_sha256_by_path",
+      "profile_sha256_by_id",
+      "arm_order",
+      "exact_holdout_command",
+      "exact_run_order",
+      "owner_journal_root"
+    ],
+    "non_key_fields": [
+      "provider_manifest_sha256",
+      "provider_manifest_contract_version",
+      "code_sha256_by_path",
+      "config_sha256_by_path",
+      "profile_sha256_by_id",
+      "arm_order",
+      "exact_holdout_command",
+      "exact_run_order",
+      "owner_journal_root"
+    ],
+    "changed_non_key_field_policy": "permanent_release_invalid_no_new_authorization_key_or_attempt",
+    "runner_overrides_forbidden": [
+      "claim_root",
+      "registry_root",
+      "claim_id",
+      "authorization_path",
+      "benchmark_release_id",
+      "corpus_parent_seal_sha256",
+      "partition",
+      "provider_manifest_sha256",
+      "code_sha256",
+      "config_sha256",
+      "profile_sha256"
+    ]
+  },
+  "automatic_gates": {
+    "split": "pre_review",
+    "wrong_target_count": 0,
+    "min_coverage": "1/5",
+    "important_target_correct_coverage_baseline_arm": "qwen_only",
+    "min_important_target_correct_coverage_delta": "1/20",
+    "semantic_precision_baseline_arm": "qwen_only",
+    "min_semantic_precision_delta": "0/1",
+    "min_vista_submitted_count": 1,
+    "required_vista_gain_numerator": ">0"
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "execute_binding_enabled": false,
+    "display_only": true,
+    "real_action_allowed": false,
+    "publish_allowed": false
+  }
+}
