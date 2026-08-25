@@ -66,6 +66,31 @@
       "ref_contract": "sealed_target_binding_ref_v1",
       "selection_timing": "before_vista",
       "candidate_cardinality": 1,
+      "ref_uniqueness_scope": "run",
+      "globally_unique_ref_fields": [
+        "target_binding_ref",
+        "candidate_id",
+        "bbox_ref",
+        "vista_request_ref"
+      ],
+      "binding_ref_exact_mapping_fields": [
+        "case_id",
+        "target_id",
+        "candidate_id",
+        "fusion_ref",
+        "capture_ref",
+        "bbox_ref"
+      ],
+      "request_ref_exact_mapping_fields": [
+        "case_id",
+        "target_id",
+        "target_binding_ref",
+        "candidate_id",
+        "fusion_ref",
+        "capture_ref",
+        "bbox_ref"
+      ],
+      "pair_must_join_selected_mapping": true,
       "eligibility_values": [
         "ELIGIBLE",
         "INELIGIBLE"
@@ -102,7 +127,27 @@
     },
     "refined": {
       "source": "unique_validated_proposal_for_vista_request_ref",
-      "field": "canonical_capture_pixel_point"
+      "field": "canonical_capture_pixel_point",
+      "validated_success_status": "validated",
+      "terminal_status_allowlist": [
+        "validated",
+        "failed",
+        "timeout",
+        "out_of_bounds",
+        "missing"
+      ],
+      "validated_proposal_lineage_fields": [
+        "case_id",
+        "target_id",
+        "vista_request_ref",
+        "candidate_id",
+        "fusion_ref",
+        "capture_ref",
+        "target_binding_ref",
+        "bbox_ref"
+      ],
+      "unknown_status_policy": "run_invalid",
+      "wrong_lineage_policy": "run_invalid"
     },
     "acceptable_region_hit_rule": "x1 <= x < x2 && y1 <= y < y2",
     "multi_region_rule": "logical_or",
@@ -190,9 +235,14 @@
       "corpus_parent_seal_sha256",
       "partition",
       "provider_manifest_sha256",
-      "code_sha256",
-      "config_sha256",
-      "profile_sha256"
+      "provider_manifest_contract_version",
+      "code_sha256_by_path",
+      "config_sha256_by_path",
+      "profile_sha256_by_id",
+      "arm_order",
+      "exact_holdout_command",
+      "exact_run_order",
+      "owner_journal_root"
     ]
   },
   "automatic_gates": {

@@ -199,6 +199,26 @@ def _validate_estimand(value: object) -> dict[str, Any]:
     if metric["refined"] != {
         "source": "unique_validated_proposal_for_vista_request_ref",
         "field": "canonical_capture_pixel_point",
+        "validated_success_status": "validated",
+        "terminal_status_allowlist": [
+            "validated",
+            "failed",
+            "timeout",
+            "out_of_bounds",
+            "missing",
+        ],
+        "validated_proposal_lineage_fields": [
+            "case_id",
+            "target_id",
+            "vista_request_ref",
+            "candidate_id",
+            "fusion_ref",
+            "capture_ref",
+            "target_binding_ref",
+            "bbox_ref",
+        ],
+        "unknown_status_policy": "run_invalid",
+        "wrong_lineage_policy": "run_invalid",
     }:
         raise ValueError("refined point source is invalid")
     if metric["acceptable_region_hit_rule"] != (
@@ -233,6 +253,11 @@ def _validate_estimand(value: object) -> dict[str, Any]:
             "ref_contract",
             "selection_timing",
             "candidate_cardinality",
+            "ref_uniqueness_scope",
+            "globally_unique_ref_fields",
+            "binding_ref_exact_mapping_fields",
+            "request_ref_exact_mapping_fields",
+            "pair_must_join_selected_mapping",
             "eligibility_values",
             "eligible_submission_status",
             "eligible_request_cardinality",
@@ -246,6 +271,31 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         "ref_contract": "sealed_target_binding_ref_v1",
         "selection_timing": "before_vista",
         "candidate_cardinality": 1,
+        "ref_uniqueness_scope": "run",
+        "globally_unique_ref_fields": [
+            "target_binding_ref",
+            "candidate_id",
+            "bbox_ref",
+            "vista_request_ref",
+        ],
+        "binding_ref_exact_mapping_fields": [
+            "case_id",
+            "target_id",
+            "candidate_id",
+            "fusion_ref",
+            "capture_ref",
+            "bbox_ref",
+        ],
+        "request_ref_exact_mapping_fields": [
+            "case_id",
+            "target_id",
+            "target_binding_ref",
+            "candidate_id",
+            "fusion_ref",
+            "capture_ref",
+            "bbox_ref",
+        ],
+        "pair_must_join_selected_mapping": True,
         "eligibility_values": ["ELIGIBLE", "INELIGIBLE"],
         "eligible_submission_status": "SUBMITTED",
         "eligible_request_cardinality": 1,
@@ -377,7 +427,7 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         "permanent_release_invalid_no_new_authorization_key_or_attempt"
     ):
         raise ValueError("changed authorization policy is invalid")
-    if claim["runner_overrides_forbidden"] != [
+    runner_override_prefix = [
         "claim_root",
         "registry_root",
         "claim_id",
@@ -385,12 +435,12 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         "benchmark_release_id",
         "corpus_parent_seal_sha256",
         "partition",
-        "provider_manifest_sha256",
-        "code_sha256",
-        "config_sha256",
-        "profile_sha256",
-    ]:
+    ]
+    runner_overrides = claim["runner_overrides_forbidden"]
+    if runner_overrides != [*runner_override_prefix, *expected_non_key_fields]:
         raise ValueError("runner override policy is invalid")
+    if not set(expected_non_key_fields).issubset(runner_overrides):
+        raise ValueError("frozen authorization field escaped runner denylist")
 
     gates = _exact_keys(
         estimand["automatic_gates"],
@@ -479,18 +529,46 @@ def _validate_target_bindings(
     requests: list[dict[str, str]],
 ) -> dict[tuple[str, str], dict[str, str] | None]:
     selected: dict[tuple[str, str], dict[str, str]] = {}
+    global_ref_owners: dict[tuple[str, str], tuple[str, str]] = {}
     for binding in bindings:
         key = (binding.get("case_id", ""), binding.get("target_id", ""))
         if key not in target_keys or key in selected:
             raise ValueError("duplicate, ambiguous, or cross-target binding")
-        if not binding.get("target_binding_ref") or not binding.get("candidate_id"):
+        if not all(
+            binding.get(field)
+            for field in (
+                "target_binding_ref",
+                "candidate_id",
+                "fusion_ref",
+                "capture_ref",
+                "bbox_ref",
+            )
+        ):
             raise ValueError("binding is not sealed to one candidate")
+        for field in ("target_binding_ref", "candidate_id", "bbox_ref"):
+            owner_key = (field, binding[field])
+            if owner_key in global_ref_owners:
+                raise ValueError(f"{field} must be globally unique within the run")
+            global_ref_owners[owner_key] = key
         eligibility = binding.get("eligibility")
         if eligibility not in {"ELIGIBLE", "INELIGIBLE"}:
             raise ValueError("binding eligibility is invalid")
         selected[key] = binding
     if set(selected) != target_keys:
         raise ValueError("target binding is missing")
+
+    request_ref_owners: dict[str, tuple[str, str, str, str]] = {}
+    for request in requests:
+        request_ref = str(request.get("vista_request_ref") or "")
+        owner = (
+            str(request.get("case_id") or ""),
+            str(request.get("target_id") or ""),
+            str(request.get("target_binding_ref") or ""),
+            str(request.get("candidate_id") or ""),
+        )
+        if not request_ref or request_ref in request_ref_owners:
+            raise ValueError("vista_request_ref must be globally unique within the run")
+        request_ref_owners[request_ref] = owner
 
     request_by_target: dict[tuple[str, str], dict[str, str] | None] = {}
     for key, binding in selected.items():
@@ -513,6 +591,9 @@ def _validate_target_bindings(
             raise ValueError("request candidate crosses target binding")
         if request.get("target_binding_ref") != binding["target_binding_ref"]:
             raise ValueError("request crosses sealed target binding")
+        for field in ("fusion_ref", "capture_ref", "bbox_ref"):
+            if request.get(field) != binding[field]:
+                raise ValueError(f"request selected mapping parent mismatch: {field}")
         if request.get("submission_status") != "SUBMITTED":
             raise ValueError("eligible target was not submitted")
         if not request.get("vista_request_ref"):
@@ -528,7 +609,11 @@ def _validate_target_bindings(
     return request_by_target
 
 
-def _validate_pair_rows(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+def _validate_pair_rows(
+    rows: list[dict[str, Any]],
+    *,
+    selected_mapping: dict[tuple[str, str], dict[str, str] | None],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
     row_keys: set[tuple[str, str, str, str, str]] = set()
     grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     for row in rows:
@@ -548,6 +633,7 @@ def _validate_pair_rows(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any]
         pair_key = (key[0], key[1], key[3], key[4])
         grouped.setdefault(pair_key, []).append(row)
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    pair_ref_owners: dict[tuple[str, str], tuple[str, str]] = {}
     for pair_rows in grouped.values():
         if len(pair_rows) != 2 or {row["arm_id"] for row in pair_rows} != set(PAIR_ARMS):
             raise ValueError("exact Hybrid pair is incomplete")
@@ -556,7 +642,41 @@ def _validate_pair_rows(rows: list[dict[str, Any]]) -> list[tuple[dict[str, Any]
         for field in PAIR_PARENT_FIELDS:
             if baseline.get(field) != refined.get(field):
                 raise ValueError(f"Hybrid pair parent mismatch: {field}")
+        target_key = (str(baseline["case_id"]), str(baseline["target_id"]))
+        selected = selected_mapping.get(target_key)
+        if not isinstance(selected, dict):
+            raise ValueError("Hybrid pair has no eligible selected mapping")
+        for field in (
+            "case_id",
+            "target_id",
+            "candidate_id",
+            "vista_request_ref",
+            "target_binding_ref",
+            "fusion_ref",
+            "capture_ref",
+            "bbox_ref",
+        ):
+            if baseline.get(field) != selected.get(field):
+                raise ValueError(f"Hybrid pair does not join selected mapping: {field}")
+        for field in (
+            "vista_request_ref",
+            "target_binding_ref",
+            "candidate_id",
+            "bbox_ref",
+        ):
+            ref_key = (field, str(baseline[field]))
+            if ref_key in pair_ref_owners:
+                raise ValueError(f"Hybrid pair {field} is not globally one-to-one")
+            pair_ref_owners[ref_key] = target_key
         pairs.append((baseline, refined))
+    expected_pair_targets = {
+        key for key, selected in selected_mapping.items() if isinstance(selected, dict)
+    }
+    if {(
+        str(baseline["case_id"]),
+        str(baseline["target_id"]),
+    ) for baseline, _ in pairs} != expected_pair_targets:
+        raise ValueError("Hybrid pairs do not exactly cover the selected mapping")
     return pairs
 
 
@@ -586,14 +706,33 @@ def _score_submitted_pairs(
     for baseline, refined in pairs:
         regions = baseline["acceptable_regions"]
         baseline_hit = _hits_any_region(_bbox_center(baseline["bbox"]), regions)
-        if refined.get("result_status") in {
+        result_status = refined.get("result_status")
+        failure_statuses = {
             "failed",
             "timeout",
             "out_of_bounds",
             "missing",
-        }:
+        }
+        if result_status not in {"validated", *failure_statuses}:
+            raise ValueError("refinement terminal status is outside the sealed allowlist")
+        if result_status in failure_statuses:
             refined_hit = 0
         else:
+            expected_lineage = {
+                field: refined[field]
+                for field in (
+                    "case_id",
+                    "target_id",
+                    "vista_request_ref",
+                    "candidate_id",
+                    "fusion_ref",
+                    "capture_ref",
+                    "target_binding_ref",
+                    "bbox_ref",
+                )
+            }
+            if refined.get("proposal_lineage") != expected_lineage:
+                raise ValueError("validated proposal lineage is stale or wrong")
             point = refined.get("canonical_capture_pixel_point")
             if not isinstance(point, list) or len(point) != 2:
                 raise ValueError("validated refined point is missing")
@@ -650,21 +789,67 @@ def _authorization_matches(
     return _canonical_bytes(existing) == _canonical_bytes(candidate)
 
 
+def _reject_runner_overrides(
+    config: dict[str, Any],
+    overrides: dict[str, Any],
+) -> None:
+    forbidden = set(config["holdout_claim"]["runner_overrides_forbidden"])
+    attempted = forbidden.intersection(overrides)
+    if attempted:
+        raise ValueError(
+            "runner override would permanently invalidate release: "
+            + ",".join(sorted(attempted))
+        )
+
+
+def _valid_selected_mapping(
+    *,
+    case_id: str = "case/1",
+    target_id: str = "target/1",
+    candidate_id: str = "candidate/1",
+    request_ref: str = "request/1",
+    binding_ref: str = "binding/1",
+    fusion_ref: str = "fusion/1",
+    capture_ref: str = "capture/1",
+    bbox_ref: str = "bbox/1",
+) -> dict[tuple[str, str], dict[str, str] | None]:
+    return {
+        (case_id, target_id): {
+            "case_id": case_id,
+            "target_id": target_id,
+            "candidate_id": candidate_id,
+            "vista_request_ref": request_ref,
+            "target_binding_ref": binding_ref,
+            "fusion_ref": fusion_ref,
+            "capture_ref": capture_ref,
+            "bbox_ref": bbox_ref,
+            "submission_status": "SUBMITTED",
+        }
+    }
+
+
 def _valid_pair(
     *,
+    case_id: str = "case/1",
+    target_id: str = "target/1",
+    candidate_id: str = "candidate/1",
     request_ref: str = "request/1",
+    binding_ref: str = "binding/1",
+    fusion_ref: str = "fusion/1",
+    capture_ref: str = "capture/1",
+    bbox_ref: str = "bbox/1",
     result_status: str = "validated",
     point: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     common: dict[str, Any] = {
-        "case_id": "case/1",
-        "target_id": "target/1",
-        "candidate_id": "candidate/1",
+        "case_id": case_id,
+        "target_id": target_id,
+        "candidate_id": candidate_id,
         "vista_request_ref": request_ref,
-        "fusion_ref": "fusion/1",
-        "capture_ref": "capture/1",
-        "target_binding_ref": "binding/1",
-        "bbox_ref": "bbox/1",
+        "fusion_ref": fusion_ref,
+        "capture_ref": capture_ref,
+        "target_binding_ref": binding_ref,
+        "bbox_ref": bbox_ref,
         "bbox": [0, 0, 4, 4],
         "acceptable_regions": [[3, 3, 5, 5]],
     }
@@ -674,6 +859,16 @@ def _valid_pair(
         "arm_id": "omni_to_qwen_vista",
         "result_status": result_status,
         "canonical_capture_pixel_point": point if point is not None else [3, 3],
+        "proposal_lineage": {
+            "case_id": case_id,
+            "target_id": target_id,
+            "vista_request_ref": request_ref,
+            "candidate_id": candidate_id,
+            "fusion_ref": fusion_ref,
+            "capture_ref": capture_ref,
+            "target_binding_ref": binding_ref,
+            "bbox_ref": bbox_ref,
+        },
     }
     return [baseline, refined]
 
@@ -746,22 +941,23 @@ def test_bbox_center_half_open_upper_edge_and_multi_region_or_are_exact() -> Non
 
 def test_five_key_pair_requires_exact_two_arms_and_same_parents() -> None:
     rows = _valid_pair()
-    assert len(_validate_pair_rows(rows)) == 1
+    selected_mapping = _valid_selected_mapping()
+    assert len(_validate_pair_rows(rows, selected_mapping=selected_mapping)) == 1
 
     for field in ("fusion_ref", "candidate_id", "capture_ref"):
         mismatched = deepcopy(rows)
         mismatched[1][field] = f"different/{field}"
         with pytest.raises(ValueError, match="pair|parent"):
-            _validate_pair_rows(mismatched)
+            _validate_pair_rows(mismatched, selected_mapping=selected_mapping)
 
     duplicate = deepcopy(rows) + [deepcopy(rows[1])]
     with pytest.raises(ValueError, match="five-key"):
-        _validate_pair_rows(duplicate)
+        _validate_pair_rows(duplicate, selected_mapping=selected_mapping)
 
     cross_request = deepcopy(rows)
     cross_request[1]["vista_request_ref"] = "request/other"
     with pytest.raises(ValueError, match="pair"):
-        _validate_pair_rows(cross_request)
+        _validate_pair_rows(cross_request, selected_mapping=selected_mapping)
 
 
 def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_request() -> None:
@@ -772,6 +968,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/1",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/1",
             "eligibility": "ELIGIBLE",
         },
         {
@@ -779,6 +978,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "target_id": "target/2",
             "target_binding_ref": "binding/2",
             "candidate_id": "candidate/2",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/2",
             "eligibility": "INELIGIBLE",
             "reason": "no_fused_candidate",
         },
@@ -789,6 +991,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/1",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/1",
             "vista_request_ref": "request/1",
             "submission_status": "SUBMITTED",
         }
@@ -803,6 +1008,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/better-looking",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/better-looking",
             "vista_request_ref": "request/cherry-pick",
             "submission_status": "SUBMITTED",
         }
@@ -837,6 +1045,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "target_id": "target/2",
             "target_binding_ref": "binding/2",
             "candidate_id": "candidate/2",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/2",
             "vista_request_ref": "request/2",
             "submission_status": "SUBMITTED",
         }
@@ -855,6 +1066,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "target_id": "target/other",
             "target_binding_ref": "binding/other",
             "candidate_id": "candidate/other",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/other",
             "vista_request_ref": "request/other",
             "submission_status": "SUBMITTED",
         }
@@ -864,19 +1078,32 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
 
 
 def test_submitted_failures_remain_in_exact_rational_denominator() -> None:
-    successful_pair = _validate_pair_rows(_valid_pair(point=[3, 3]))[0]
     failed_pair_rows = _valid_pair(
+        case_id="case/2",
+        target_id="target/2",
+        candidate_id="candidate/2",
         request_ref="request/2",
+        binding_ref="binding/2",
+        bbox_ref="bbox/2",
         result_status="timeout",
     )
-    for row in failed_pair_rows:
-        row["case_id"] = "case/2"
-        row["target_id"] = "target/2"
-        row["candidate_id"] = "candidate/2"
-        row["target_binding_ref"] = "binding/2"
-    failed_pair = _validate_pair_rows(failed_pair_rows)[0]
+    selected_mapping = {
+        **_valid_selected_mapping(),
+        **_valid_selected_mapping(
+            case_id="case/2",
+            target_id="target/2",
+            candidate_id="candidate/2",
+            request_ref="request/2",
+            binding_ref="binding/2",
+            bbox_ref="bbox/2",
+        ),
+    }
+    pairs = _validate_pair_rows(
+        [*_valid_pair(point=[3, 3]), *failed_pair_rows],
+        selected_mapping=selected_mapping,
+    )
 
-    score = _score_submitted_pairs([successful_pair, failed_pair])
+    score = _score_submitted_pairs(pairs)
     assert score == {
         "gain_numerator": 1,
         "submitted_count": 2,
@@ -988,3 +1215,215 @@ def test_automatic_gates_are_exact_and_config_has_no_action_point_authority() ->
     assert config["safety"]["execute_binding_enabled"] is False
     assert config["safety"]["real_action_allowed"] is False
     assert config["safety"]["publish_allowed"] is False
+
+
+def test_run_wide_binding_and_request_refs_cannot_be_reused_across_valid_targets() -> None:
+    target_keys = {("case/1", "target/1"), ("case/1", "target/2")}
+    unique_bindings = [
+        {
+            "case_id": "case/1",
+            "target_id": "target/1",
+            "target_binding_ref": "binding/1",
+            "candidate_id": "candidate/1",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/1",
+            "eligibility": "ELIGIBLE",
+        },
+        {
+            "case_id": "case/1",
+            "target_id": "target/2",
+            "target_binding_ref": "binding/2",
+            "candidate_id": "candidate/2",
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/2",
+            "eligibility": "ELIGIBLE",
+        },
+    ]
+    unique_requests = [
+        {
+            "case_id": "case/1",
+            "target_id": target_id,
+            "target_binding_ref": binding_ref,
+            "candidate_id": candidate_id,
+            "fusion_ref": "fusion/1",
+            "capture_ref": "capture/1",
+            "bbox_ref": "bbox/1" if target_id == "target/1" else "bbox/2",
+            "vista_request_ref": request_ref,
+            "submission_status": "SUBMITTED",
+        }
+        for target_id, binding_ref, candidate_id, request_ref in (
+            ("target/1", "binding/1", "candidate/1", "request/1"),
+            ("target/2", "binding/2", "candidate/2", "request/2"),
+        )
+    ]
+
+    shared_binding = deepcopy(unique_bindings)
+    shared_binding[1]["target_binding_ref"] = "binding/1"
+    with pytest.raises(ValueError, match="globally unique"):
+        _validate_target_bindings(target_keys, shared_binding, unique_requests)
+
+    shared_request = deepcopy(unique_requests)
+    shared_request[1]["vista_request_ref"] = "request/1"
+    with pytest.raises(ValueError, match="globally unique"):
+        _validate_target_bindings(target_keys, unique_bindings, shared_request)
+
+    shared_candidate = deepcopy(unique_bindings)
+    shared_candidate[1]["candidate_id"] = "candidate/1"
+    with pytest.raises(ValueError, match="globally unique"):
+        _validate_target_bindings(target_keys, shared_candidate, unique_requests)
+
+
+def test_pair_rows_must_join_the_exact_preselected_request_mapping() -> None:
+    selected_mapping = _validate_target_bindings(
+        {("case/1", "target/1")},
+        [
+            {
+                "case_id": "case/1",
+                "target_id": "target/1",
+                "target_binding_ref": "binding/selected",
+                "candidate_id": "candidate/selected",
+                "fusion_ref": "fusion/1",
+                "capture_ref": "capture/1",
+                "bbox_ref": "bbox/selected",
+                "eligibility": "ELIGIBLE",
+            }
+        ],
+        [
+            {
+                "case_id": "case/1",
+                "target_id": "target/1",
+                "target_binding_ref": "binding/selected",
+                "candidate_id": "candidate/selected",
+                "fusion_ref": "fusion/1",
+                "capture_ref": "capture/1",
+                "bbox_ref": "bbox/selected",
+                "vista_request_ref": "request/selected",
+                "submission_status": "SUBMITTED",
+            }
+        ],
+    )
+    unselected = _valid_pair(request_ref="request/better")
+
+    with pytest.raises(ValueError, match="selected mapping"):
+        _validate_pair_rows(unselected, selected_mapping=selected_mapping)
+
+    two_targets = _validate_target_bindings(
+        {("case/1", "target/1"), ("case/1", "target/2")},
+        [
+            {
+                "case_id": "case/1",
+                "target_id": f"target/{index}",
+                "target_binding_ref": f"binding/{index}",
+                "candidate_id": f"candidate/{index}",
+                "fusion_ref": "fusion/1",
+                "capture_ref": "capture/1",
+                "bbox_ref": f"bbox/{index}",
+                "eligibility": "ELIGIBLE",
+            }
+            for index in (1, 2)
+        ],
+        [
+            {
+                "case_id": "case/1",
+                "target_id": f"target/{index}",
+                "target_binding_ref": f"binding/{index}",
+                "candidate_id": f"candidate/{index}",
+                "fusion_ref": "fusion/1",
+                "capture_ref": "capture/1",
+                "bbox_ref": f"bbox/{index}",
+                "vista_request_ref": f"request/{index}",
+                "submission_status": "SUBMITTED",
+            }
+            for index in (1, 2)
+        ],
+    )
+    cross_attached = [
+        *_valid_pair(
+            target_id="target/1",
+            candidate_id="candidate/2",
+            request_ref="request/2",
+            binding_ref="binding/2",
+            bbox_ref="bbox/2",
+        ),
+        *_valid_pair(
+            target_id="target/2",
+            candidate_id="candidate/1",
+            request_ref="request/1",
+            binding_ref="binding/1",
+            bbox_ref="bbox/1",
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="selected mapping"):
+        _validate_pair_rows(cross_attached, selected_mapping=two_targets)
+
+
+def test_unknown_refinement_status_is_not_treated_as_validated_success() -> None:
+    for failure_status in ("failed", "timeout", "out_of_bounds", "missing"):
+        pair = _validate_pair_rows(
+            _valid_pair(result_status=failure_status),
+            selected_mapping=_valid_selected_mapping(),
+        )[0]
+        assert _score_submitted_pairs([pair]) == {
+            "gain_numerator": 0,
+            "submitted_count": 1,
+            "gain": Fraction(0, 1),
+        }
+
+    for unknown_status in ("clipped", "stale", "wrong_revision"):
+        pair = _validate_pair_rows(
+            _valid_pair(result_status=unknown_status),
+            selected_mapping=_valid_selected_mapping(),
+        )[0]
+        with pytest.raises(ValueError, match="status"):
+            _score_submitted_pairs([pair])
+
+    wrong_lineage_rows = _valid_pair()
+    wrong_lineage_rows[1]["proposal_lineage"]["capture_ref"] = "capture/stale"
+    wrong_lineage_pair = _validate_pair_rows(
+        wrong_lineage_rows,
+        selected_mapping=_valid_selected_mapping(),
+    )[0]
+    with pytest.raises(ValueError, match="lineage"):
+        _score_submitted_pairs([wrong_lineage_pair])
+
+
+def test_all_frozen_authorization_fields_are_forbidden_runner_overrides() -> None:
+    config = _load_estimand()
+    claim = config["holdout_claim"]
+
+    assert set(claim["authorization_frozen_non_key_fields"]).issubset(
+        claim["runner_overrides_forbidden"]
+    )
+    assert not {"code_sha256", "config_sha256", "profile_sha256"}.intersection(
+        claim["runner_overrides_forbidden"]
+    )
+
+    identity = deepcopy(claim["claim_identity_payload"])
+    claim_id = _claim_id(config, identity)
+    authorization = {
+        "provider_manifest_sha256": "1" * 64,
+        "provider_manifest_contract_version": "provider_manifest_v2",
+        "code_sha256_by_path": {"code.py": "2" * 64},
+        "config_sha256_by_path": {"config.json": "3" * 64},
+        "profile_sha256_by_id": {"profile/1": "4" * 64},
+        "arm_order": list(ARM_IDS_V2),
+        "exact_holdout_command": ["runner", "--partition", "holdout"],
+        "exact_run_order": ["screen/1", "screen/2"],
+        "owner_journal_root": "C:/owner-journals/release-1",
+    }
+    for field in claim["authorization_frozen_non_key_fields"]:
+        mutated = deepcopy(authorization)
+        value = mutated[field]
+        if isinstance(value, dict):
+            value["mutation"] = "f" * 64
+        elif isinstance(value, list):
+            value.append("mutation")
+        else:
+            mutated[field] = f"{value}-mutation"
+        assert _claim_id(config, identity) == claim_id
+        assert not _authorization_matches(authorization, mutated)
+        with pytest.raises(ValueError, match="permanently invalidate"):
+            _reject_runner_overrides(config, {field: mutated[field]})
