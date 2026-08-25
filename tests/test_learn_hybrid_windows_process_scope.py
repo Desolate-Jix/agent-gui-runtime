@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -49,6 +51,7 @@ def _spawn_reparenting_helper(tmp_path: Path, index: int):
         cwd=tmp_path,
     )
     root.wait(10)
+    root.close()
     deadline = time.monotonic() + 5
     while not child_pid_path.exists() and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -158,3 +161,78 @@ def test_assignment_failure_never_executes_uncontained_target(
     finally:
         scope.close()
     assert marker.exists() is False
+
+
+def test_scope_name_rejects_noncanonical_provider_or_digest() -> None:
+    from app.learn.hybrid.windows_process_scope import validate_process_scope_name
+
+    valid = process_scope_name(_lineage(103), "omni")
+    assert validate_process_scope_name(valid) == valid
+    for invalid in (
+        "Local\\AgentGuiHybrid-other-" + "a" * 64,
+        "Local\\AgentGuiHybrid-omni-" + "A" * 64,
+        "Local\\AgentGuiHybrid-omni-" + "a" * 63,
+        valid + "x",
+    ):
+        with pytest.raises(ValueError, match="scope name is invalid"):
+            validate_process_scope_name(invalid)
+
+
+def test_scoped_launch_does_not_inherit_unlisted_handle(tmp_path: Path) -> None:
+    import msvcrt
+    import win32api
+    import win32event
+
+    scope_name = process_scope_name(_lineage(104), "omni")
+    scope = WindowsProcessScope(scope_name, create=True)
+    sentinel = win32event.CreateEvent(None, True, False, None)
+    marker = tmp_path / "inherited.txt"
+    win32api.SetHandleInformation(
+        sentinel,
+        1,
+        1,
+    )
+    code = (
+        "import ctypes,sys;"
+        "k=ctypes.WinDLL('kernel32',use_last_error=True);"
+        "ok=k.GetHandleInformation(int(sys.argv[1]),ctypes.byref(ctypes.c_ulong()));"
+        "open(sys.argv[2],'w').write('inherited') if ok else None"
+    )
+    try:
+        with spawn_process_in_scope(
+            [sys.executable, "-c", code, str(int(sentinel)), str(marker)],
+            scope_name=scope_name,
+            cwd=tmp_path,
+        ) as child:
+            assert child.wait(10) == 0
+        assert marker.exists() is False
+    finally:
+        win32api.CloseHandle(sentinel)
+        scope.close()
+
+
+def test_scoped_launch_preserves_stdio_inheritability_and_closes_handle(
+    tmp_path: Path,
+) -> None:
+    import msvcrt
+
+    scope_name = process_scope_name(_lineage(105), "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    output_path = tmp_path / "stdio.txt"
+    with output_path.open("wb", buffering=0) as output:
+        handle = msvcrt.get_osfhandle(output.fileno())
+        before = os.get_handle_inheritable(handle)
+        child = spawn_process_in_scope(
+            [sys.executable, "-c", "print('ok')"],
+            scope_name=scope_name,
+            cwd=tmp_path,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+        )
+        assert child.wait(10) == 0
+        assert os.get_handle_inheritable(handle) is before
+        child.close()
+        child.close()
+        with pytest.raises(HybridProcessScopeError, match="process handle is closed"):
+            child.poll()
+    scope.close()

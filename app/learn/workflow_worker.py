@@ -55,6 +55,8 @@ LEARNING_STAGE_WORKER_RESULT_CONTRACT_VERSION = "learning_stage_worker_result_v2
 LEARNING_STAGE_WORKER_RESULT_ADOPTION_CONTRACT_VERSION = (
     "learning_stage_worker_result_adoption_v1"
 )
+HYBRID_PROVIDER_OWNER_CONTRACT_VERSION = "hybrid_supervised_provider_owner_v1"
+HYBRID_PROVIDER_RUNTIME_CONTRACT_VERSION = "hybrid_supervised_provider_runtime_v1"
 SUPPORTED_LEARNING_STAGE_TASK_KINDS = frozenset(
     {
         "panel_learning_recognition_trial",
@@ -130,6 +132,10 @@ HYBRID_LIFECYCLE_COMPONENT_REGISTRY = {
     "supervisor_reconciliation": ("worker", "_reconcile_supervised_vista_record"),
     "review_guard": ("worker", "_assert_hybrid_provider_start_guard"),
     "windows_owner_scope": ("process_scope", "windows_process_scope_available"),
+    "explicit_handle_scope": ("process_scope", "scoped_process_launch_ready"),
+    "owner_lineage_validator": ("worker", "_load_hybrid_provider_owner"),
+    "omni_abnormal_reconciler": ("omni_adapter", "reconcile_omniparser_invocation_owner"),
+    "qwen_abnormal_reconciler": ("model_server", "reconcile_hybrid_qwen_owner"),
 }
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
@@ -186,6 +192,10 @@ def hybrid_registered_lifecycle_status() -> dict[str, Any]:
         "supervisor_reconciliation": ("worker", "_reconcile_supervised_vista_record"),
         "review_guard": ("worker", "_assert_hybrid_provider_start_guard"),
         "windows_owner_scope": ("process_scope", "windows_process_scope_available"),
+        "explicit_handle_scope": ("process_scope", "scoped_process_launch_ready"),
+        "owner_lineage_validator": ("worker", "_load_hybrid_provider_owner"),
+        "omni_abnormal_reconciler": ("omni_adapter", "reconcile_omniparser_invocation_owner"),
+        "qwen_abnormal_reconciler": ("model_server", "reconcile_hybrid_qwen_owner"),
     }
     components: dict[str, bool] = {}
     for component, (owner, function_name) in expected_components.items():
@@ -196,6 +206,10 @@ def hybrid_registered_lifecycle_status() -> dict[str, Any]:
             from app.core import model_server
 
             resolved = getattr(model_server, function_name, None)
+        elif owner == "omni_adapter":
+            from app.learn.recognition.uei import omniparser_shadow_adapter
+
+            resolved = getattr(omniparser_shadow_adapter, function_name, None)
         else:
             from app.learn.hybrid import windows_process_scope
 
@@ -443,6 +457,101 @@ def _artifact_digest(value: object) -> str:
             )
         return declared
     return content_sha256(value)
+
+
+def _hybrid_provider_lineage(
+    *, run_id: str, workflow_revision: int, operation_id: str, stage: str
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "workflow_revision": workflow_revision,
+        "operation_id": operation_id,
+        "stage": stage,
+        "stage_execution_id": hashlib.sha256(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "workflow_revision": workflow_revision,
+                    "operation_id": operation_id,
+                    "stage": stage,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _write_hybrid_provider_owner(
+    path: Path,
+    *,
+    worker_id: str,
+    task_kind: str,
+    model_request_id: str,
+    provider: str,
+    lineage: dict[str, Any],
+    process_scope_name_value: str,
+    runtime_file: str,
+    predecessor_sha256: str,
+) -> dict[str, Any]:
+    document = seal_immutable({
+        "contract_version": HYBRID_PROVIDER_OWNER_CONTRACT_VERSION,
+        "worker_id": worker_id,
+        "task_kind": task_kind,
+        "model_request_id": model_request_id,
+        "provider": provider,
+        "lineage": validate_hybrid_lineage(lineage),
+        "process_scope_name": process_scope_name_value,
+        "provider_runtime_file": runtime_file,
+        "predecessor_sha256": predecessor_sha256,
+    })
+    _write_json_atomic(path, document)
+    return document
+
+
+def _load_hybrid_provider_owner(
+    path: Path,
+    *,
+    identity: dict[str, str],
+    workflow_revision: int,
+    journal_scope_name: str,
+    runtime_file: str,
+) -> dict[str, Any]:
+    from app.learn.hybrid.windows_process_scope import (
+        process_scope_name,
+        validate_process_scope_name,
+    )
+
+    document = _read_json_object(path, label="Hybrid provider owner")
+    if document.get("content_sha256") != content_sha256(document):
+        raise LearningStageWorkerError("Hybrid provider owner seal is invalid")
+    provider = str(
+        HYBRID_STAGE_HANDLER_REGISTRY.get(identity["task_kind"], {}).get("provider")
+        or ""
+    )
+    lineage = _hybrid_provider_lineage(
+        run_id=identity["run_id"],
+        workflow_revision=workflow_revision,
+        operation_id=identity["operation_id"],
+        stage=identity["stage"],
+    )
+    expected_scope = process_scope_name(lineage, provider)
+    validate_process_scope_name(journal_scope_name)
+    if (
+        document.get("contract_version") != HYBRID_PROVIDER_OWNER_CONTRACT_VERSION
+        or document.get("worker_id") != identity["worker_id"]
+        or document.get("task_kind") != identity["task_kind"]
+        or document.get("model_request_id") != identity["model_request_id"]
+        or document.get("provider") != provider
+        or document.get("lineage") != lineage
+        or document.get("process_scope_name") != expected_scope
+        or journal_scope_name != expected_scope
+        or document.get("provider_runtime_file") != runtime_file
+        or not isinstance(document.get("predecessor_sha256"), str)
+        or len(str(document.get("predecessor_sha256"))) != 64
+    ):
+        raise LearningStageWorkerError("Hybrid provider owner lineage is invalid")
+    return document
 
 
 class _ManagedCancellationEvent:
@@ -1085,28 +1194,67 @@ def _reconcile_vista_scope_without_lease(
 def _reconcile_hybrid_provider_scope_record(
     record: dict[str, Any],
 ) -> dict[str, Any]:
+    if record.get("provider_recovery_blocked") is True:
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v3",
+            "status": "indeterminate",
+            "details": str(record.get("provider_owner_error") or "provider owner is invalid"),
+        }
     if record.get("task_kind") == "panel_learning_calibration_sequence":
         return _reconcile_supervised_vista_record(record)
+    if record.get("task_kind") == "panel_learning_hybrid_omni_discovery":
+        try:
+            from app.learn.recognition.uei.omniparser_shadow_adapter import (
+                reconcile_omniparser_invocation_owner,
+            )
+
+            evidence = reconcile_omniparser_invocation_owner(
+                Path(str(record.get("provider_runtime_path") or "")),
+                expected_lineage=validate_hybrid_lineage(record.get("provider_lineage")),
+                expected_scope_name=str(record.get("provider_scope_name") or ""),
+            )
+        except BaseException as error:
+            return {
+                "contract_version": "hybrid_supervisor_reconciliation_v3",
+                "status": "indeterminate",
+                "error_type": type(error).__name__,
+                "details": str(error),
+            }
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v3",
+            "status": "verified" if evidence.get("status") == "verified" else "indeterminate",
+            "provider_cleanup_evidence": evidence,
+            "scope_cleanup_evidence": deepcopy(
+                evidence.get("cleanup_observation", {}).get("process_scope_cleanup")
+            ),
+        }
+    if record.get("task_kind") == "panel_learning_hybrid_qwen_binding":
+        try:
+            from app.core.model_server import reconcile_hybrid_qwen_owner
+
+            evidence = reconcile_hybrid_qwen_owner(
+                Path(str(record.get("provider_runtime_path") or "")),
+                expected_lineage=validate_hybrid_lineage(record.get("provider_lineage")),
+                expected_scope_name=str(record.get("provider_scope_name") or ""),
+            )
+        except BaseException as error:
+            return {
+                "contract_version": "hybrid_supervisor_reconciliation_v3",
+                "status": "indeterminate",
+                "error_type": type(error).__name__,
+                "details": str(error),
+            }
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v3",
+            "status": "verified" if evidence.get("status") == "verified" else "indeterminate",
+            "provider_cleanup_evidence": evidence,
+            "scope_cleanup_evidence": deepcopy(evidence.get("scope_cleanup_evidence")),
+        }
     from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
 
     scope_name = str(record.get("provider_scope_name") or "")
     listener_ports: list[int] = []
     pid_file = None
-    if record.get("task_kind") == "panel_learning_hybrid_qwen_binding":
-        try:
-            from app.core.model_server import model_profile_pid_path, profile_for_stage
-
-            profile = profile_for_stage("understanding", None)
-            port = int(profile.get("port") or 0)
-            listener_ports = [port] if port > 0 else []
-            pid_file = model_profile_pid_path(profile)
-        except BaseException as error:
-            return {
-                "contract_version": "hybrid_supervisor_reconciliation_v2",
-                "status": "indeterminate",
-                "error_type": type(error).__name__,
-                "details": str(error),
-            }
     evidence = observe_process_scope_cleanup(
         scope_name,
         terminate=True,
@@ -1311,6 +1459,8 @@ def _run_learning_stage_worker_entry(
     result_file = Path(result_path)
     previous_request_id = os.environ.get("AGENT_GUI_MODEL_REQUEST_ID")
     previous_process_scope = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME")
+    previous_provider_runtime = os.environ.get("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH")
+    previous_hybrid_lineage = os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON")
     os.environ["AGENT_GUI_MODEL_REQUEST_ID"] = model_request_id
     supervisor = payload.get("_hybrid_supervisor")
     process_scope_name = (
@@ -1320,6 +1470,14 @@ def _run_learning_stage_worker_entry(
     )
     if process_scope_name:
         os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = process_scope_name
+        os.environ["AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"] = str(
+            supervisor.get("provider_runtime_path") or ""
+        )
+        os.environ["AGENT_GUI_HYBRID_LINEAGE_JSON"] = json.dumps(
+            supervisor.get("lineage"),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     try:
         response = execute_learning_stage_worker_task(
             task_kind,
@@ -1353,6 +1511,14 @@ def _run_learning_stage_worker_entry(
             os.environ.pop("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", None)
         else:
             os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = previous_process_scope
+        if previous_provider_runtime is None:
+            os.environ.pop("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", None)
+        else:
+            os.environ["AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"] = previous_provider_runtime
+        if previous_hybrid_lineage is None:
+            os.environ.pop("AGENT_GUI_HYBRID_LINEAGE_JSON", None)
+        else:
+            os.environ["AGENT_GUI_HYBRID_LINEAGE_JSON"] = previous_hybrid_lineage
     _write_worker_result(result_file, envelope)
     if completion_event is not None:
         completion_event.set()
@@ -1449,6 +1615,12 @@ class LearningStageWorkerRegistry:
             payload["provider_lease_file"] = Path(provider_lease_path).name
         if isinstance(record.get("provider_scope_name"), str):
             payload["provider_scope_name"] = record["provider_scope_name"]
+        if isinstance(record.get("workflow_revision"), int):
+            payload["workflow_revision"] = record["workflow_revision"]
+        if isinstance(record.get("provider_owner_path"), str):
+            payload["provider_owner_file"] = Path(record["provider_owner_path"]).name
+        if isinstance(record.get("provider_runtime_path"), str):
+            payload["provider_runtime_file"] = Path(record["provider_runtime_path"]).name
         if isinstance(record.get("provider_profile_id"), str):
             payload["provider_profile_id"] = record["provider_profile_id"]
         if isinstance(record.get("result_adoption"), dict):
@@ -1537,6 +1709,8 @@ class LearningStageWorkerRegistry:
             result_path = self._result_root / f"{worker_id}.result.json"
             journal_path = self._result_root / f"{worker_id}.worker.json"
             provider_lease_path = self._result_root / f"{worker_id}.provider-lease.json"
+            provider_owner_path = self._result_root / f"{worker_id}.provider-owner.json"
+            provider_runtime_path = self._result_root / f"{worker_id}.provider-runtime.json"
             identity = {
                 "worker_id": worker_id,
                 "run_id": normalized_run_id,
@@ -1554,31 +1728,23 @@ class LearningStageWorkerRegistry:
             provider_scope = None
             provider_scope_name = None
             provider_profile_id = None
+            workflow_revision = None
+            provider = ""
             if hybrid_requested:
                 revision_value = authoritative_workflow_revision
                 assert isinstance(revision_value, int)
-                lineage = {
-                    "run_id": normalized_run_id,
-                    "workflow_revision": revision_value,
-                    "operation_id": normalized_operation_id,
-                    "stage": normalized_stage,
-                    "stage_execution_id": hashlib.sha256(
-                        json.dumps(
-                            {
-                                "run_id": normalized_run_id,
-                                "workflow_revision": revision_value,
-                                "operation_id": normalized_operation_id,
-                                "stage": normalized_stage,
-                            },
-                            sort_keys=True,
-                            separators=(",", ":"),
-                        ).encode("utf-8")
-                    ).hexdigest(),
-                }
+                workflow_revision = revision_value
+                lineage = _hybrid_provider_lineage(
+                    run_id=normalized_run_id,
+                    workflow_revision=revision_value,
+                    operation_id=normalized_operation_id,
+                    stage=normalized_stage,
+                )
                 child_payload["_hybrid_supervisor"] = {
                     "contract_version": "hybrid_worker_supervisor_context_v1",
                     "lineage": lineage,
                     "provider_lease_path": str(provider_lease_path),
+                    "provider_runtime_path": str(provider_runtime_path),
                     "worker_id": worker_id,
                 }
                 provider = str(
@@ -1600,6 +1766,47 @@ class LearningStageWorkerRegistry:
                     child_payload["_hybrid_supervisor"][
                         "process_scope_name"
                     ] = provider_scope_name
+                    orchestration = normalized_payload.get("_hybrid_orchestration")
+                    if provider == "omni":
+                        predecessor = normalized_payload.get("hybrid_capture_bundle_ref")
+                    elif provider == "qwen":
+                        predecessor = (
+                            orchestration.get("omni_inventory")
+                            if isinstance(orchestration, dict)
+                            else None
+                        )
+                    else:
+                        predecessor = (
+                            orchestration.get("fusion_result")
+                            if isinstance(orchestration, dict)
+                            else normalized_payload.get("hybrid_fusion_result")
+                        )
+                    predecessor_sha256 = _artifact_digest(predecessor)
+                    _write_hybrid_provider_owner(
+                        provider_owner_path,
+                        worker_id=worker_id,
+                        task_kind=normalized_task_kind,
+                        model_request_id=model_request_id,
+                        provider=provider,
+                        lineage=lineage,
+                        process_scope_name_value=provider_scope_name,
+                        runtime_file=provider_runtime_path.name,
+                        predecessor_sha256=predecessor_sha256,
+                    )
+                    _write_json_atomic(
+                        provider_runtime_path,
+                        seal_immutable({
+                            "contract_version": HYBRID_PROVIDER_RUNTIME_CONTRACT_VERSION,
+                            "state": "acquiring",
+                            "worker_id": worker_id,
+                            "model_request_id": model_request_id,
+                            "provider": provider,
+                            "lineage": lineage,
+                            "process_scope_name": provider_scope_name,
+                            "provider_identity": None,
+                            "cleanup_observation": None,
+                        }),
+                    )
                 if hybrid_vista_task:
                     provider_profile_id = (
                         str(normalized_payload.get("profile_id") or "").strip()
@@ -1661,6 +1868,15 @@ class LearningStageWorkerRegistry:
                 "provider_lease_path": str(provider_lease_path),
                 "provider_scope_name": provider_scope_name,
                 "provider_scope": provider_scope,
+                "provider_owner_path": (
+                    str(provider_owner_path) if provider_scope_name else None
+                ),
+                "provider_runtime_path": (
+                    str(provider_runtime_path) if provider_scope_name else None
+                ),
+                "provider": provider or None,
+                "provider_lineage": deepcopy(lineage) if hybrid_requested else None,
+                "workflow_revision": workflow_revision,
                 "provider_profile_id": provider_profile_id,
                 "process": process,
                 "payload": deepcopy(normalized_payload),
@@ -2609,14 +2825,66 @@ def _load_worker_journal(
             )
         provider_lease_path = str(candidate)
     provider_scope_name = payload.get("provider_scope_name")
+    provider_owner_path = None
+    provider_runtime_path = None
+    provider_recovery_blocked = False
+    provider_owner_error = None
+    provider_owner_document = None
+    workflow_revision = payload.get("workflow_revision")
     if provider_scope_name is not None:
         provider_scope_name = _required_text(
             provider_scope_name, "provider_scope_name"
         )
-        if not provider_scope_name.startswith("Local\\AgentGuiHybrid-"):
-            raise LearningStageWorkerError(
-                "worker journal provider scope name is invalid"
-            )
+        owner_file_value = payload.get("provider_owner_file")
+        runtime_file_value = payload.get("provider_runtime_file")
+        owner_file = (
+            str(owner_file_value).strip()
+            if isinstance(owner_file_value, str)
+            else ""
+        )
+        runtime_file = (
+            str(runtime_file_value).strip()
+            if isinstance(runtime_file_value, str)
+            else ""
+        )
+        if (
+            not owner_file
+            or not runtime_file
+            or owner_file != f"{worker_id}.provider-owner.json"
+            or runtime_file != f"{worker_id}.provider-runtime.json"
+            or Path(owner_file).name != owner_file
+            or Path(runtime_file).name != runtime_file
+            or isinstance(workflow_revision, bool)
+            or not isinstance(workflow_revision, int)
+            or workflow_revision < 0
+        ):
+            provider_recovery_blocked = True
+            provider_owner_error = "Hybrid provider owner journal fields are invalid"
+        else:
+            provider_owner_candidate = (result_root / owner_file).resolve()
+            provider_runtime_candidate = (result_root / runtime_file).resolve()
+            if (
+                provider_owner_candidate.parent != result_root.resolve()
+                or provider_runtime_candidate.parent != result_root.resolve()
+            ):
+                provider_recovery_blocked = True
+                provider_owner_error = "Hybrid provider owner path escapes result root"
+            else:
+                provider_owner_path = str(provider_owner_candidate)
+                provider_runtime_path = str(provider_runtime_candidate)
+                try:
+                    provider_owner_document = _load_hybrid_provider_owner(
+                        provider_owner_candidate,
+                        identity=identity,
+                        workflow_revision=workflow_revision,
+                        journal_scope_name=provider_scope_name,
+                        runtime_file=runtime_file,
+                    )
+                except (LearningStageWorkerError, ValueError) as error:
+                    provider_recovery_blocked = True
+                    provider_owner_error = str(error)
+        if provider_recovery_blocked:
+            provider_scope_name = None
     provider_profile_id = payload.get("provider_profile_id")
     if provider_profile_id is not None:
         provider_profile_id = _required_text(
@@ -2626,7 +2894,9 @@ def _load_worker_journal(
         "contract_version": LEARNING_STAGE_WORKER_CONTRACT_VERSION,
         **identity,
         "status": (
-            "detached_running" if persisted_status == "running" else persisted_status
+            "recovery_required"
+            if provider_recovery_blocked
+            else "detached_running" if persisted_status == "running" else persisted_status
         ),
         "finished_at": payload.get("finished_at"),
         "result_path": str(result_path),
@@ -2634,6 +2904,21 @@ def _load_worker_journal(
         "provider_lease_path": provider_lease_path,
         "provider_scope_name": provider_scope_name,
         "provider_scope": None,
+        "provider_owner_path": provider_owner_path,
+        "provider_runtime_path": provider_runtime_path,
+        "provider_recovery_blocked": provider_recovery_blocked,
+        "provider_owner_error": provider_owner_error,
+        "provider": (
+            provider_owner_document.get("provider")
+            if isinstance(provider_owner_document, dict)
+            else None
+        ),
+        "provider_lineage": (
+            deepcopy(provider_owner_document.get("lineage"))
+            if isinstance(provider_owner_document, dict)
+            else None
+        ),
+        "workflow_revision": workflow_revision if isinstance(workflow_revision, int) else None,
         "provider_profile_id": provider_profile_id,
         "process": None,
         "payload": None,

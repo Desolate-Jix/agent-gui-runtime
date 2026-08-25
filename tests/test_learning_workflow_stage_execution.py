@@ -3337,6 +3337,10 @@ def test_raised_hybrid_handler_failure_is_adoptable_and_idempotently_safe_stops(
     payload = {
         "learning_pipeline_mode": "hybrid_v1_1",
         "workflow_revision": workflow_revision,
+        "hybrid_capture_bundle_ref": {
+            "id": "hybrid-capture/controlled-handler-failure",
+            "content_sha256": "c" * 64,
+        },
         "_hybrid_orchestration": orchestration,
     }
     started = registry.start(
@@ -3353,6 +3357,22 @@ def test_raised_hybrid_handler_failure_is_adoptable_and_idempotently_safe_stops(
         run_id="run-stage-operation",
         operation_id=operation["operation_id"],
     )
+    if task_kind in {
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+    }:
+        assert status["status"] == "recovery_required"
+        assert status["result_available"] is False
+        assert handler_calls == 1
+        if managed_lease is not None:
+            assert lifecycle_calls == [
+                {
+                    "model_lease": managed_lease,
+                    "compute_completed": False,
+                    "reason": "managed_hybrid_handler_failed",
+                }
+            ]
+        return
     assert status["status"] == "completed"
 
     first_adoption = registry.adopt_result(

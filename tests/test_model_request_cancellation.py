@@ -136,6 +136,7 @@ def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
     assert inventory["provider_processes_after"] == []
     assert inventory["active_listeners_after"] == []
     assert inventory["lease_files_after"] == []
+    helper.close()
 
 
 def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
@@ -267,6 +268,7 @@ def test_hybrid_vista_lease_binds_exact_nonempty_job_membership(
     assert lease["process_identities"] == [identity]
     assert helper.pid in lease["process_scope_acquisition"]["member_pids"]
     assert helper.poll() is not None
+    helper.close()
 
 
 def test_hybrid_vista_release_detects_descendant_appearing_after_stop(
@@ -522,6 +524,143 @@ def test_hybrid_qwen_release_uses_nonempty_exact_job_membership(
     assert helper.pid in released["hybrid_process_scope_acquisition"]["member_pids"]
     assert helper.poll() is not None
     assert inventory["release_status"] == "verified"
+    helper.close()
+
+
+def test_abnormal_qwen_owner_reconciliation_finalizes_exact_lease_and_tombstone(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    scope_name = process_scope_name(_HYBRID_LINEAGE, "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    runtime_path = tmp_path / "qwen-runtime.json"
+    profile = {
+        "profile_id": "qwen-abnormal-test",
+        "endpoint": "http://127.0.0.1:54322/v1/chat/completions",
+        "pid_file": str(tmp_path / "qwen-abnormal.pid"),
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=helper.process_identity["pid"],
+        created_ns=helper.process_identity["create_time_ns"],
+        base_url="http://127.0.0.1:54322/v1",
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(runtime_path))
+    monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", json.dumps(_HYBRID_LINEAGE))
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id="qwen-abnormal-owner",
+            readiness=readiness,
+        )
+        evidence = model_server.reconcile_hybrid_qwen_owner(
+            runtime_path,
+            expected_lineage=_HYBRID_LINEAGE,
+            expected_scope_name=scope_name,
+        )
+        assert evidence["status"] == "verified"
+        assert model_server.qwen_model_lease_is_active(lease) is False
+        assert model_server._load_qwen_owner_tombstone(
+            "qwen-abnormal-owner"
+        )["lease_id"] == lease["lease_id"]
+        assert helper.poll() is not None
+        assert json.loads(runtime_path.read_text(encoding="utf-8"))["state"] == "released"
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_recovery_resolves_exact_lease_from_prelaunch_acquiring_owner(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    scope_name = process_scope_name(_HYBRID_LINEAGE, "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    runtime_path = tmp_path / "qwen-acquiring.json"
+    request_id = "qwen-acquiring-owner"
+    runtime_path.write_text(
+        json.dumps(
+            seal_immutable({
+                "contract_version": "hybrid_supervised_provider_runtime_v1",
+                "state": "acquiring",
+                "worker_id": "worker-acquiring",
+                "model_request_id": request_id,
+                "provider": "qwen",
+                "lineage": _HYBRID_LINEAGE,
+                "process_scope_name": scope_name,
+                "provider_identity": None,
+                "cleanup_observation": None,
+            })
+        ),
+        encoding="utf-8",
+    )
+    profile = {
+        "profile_id": "qwen-acquiring-test",
+        "endpoint": "http://127.0.0.1:54324/v1/chat/completions",
+        "pid_file": str(tmp_path / "qwen-acquiring.pid"),
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=helper.process_identity["pid"],
+        created_ns=helper.process_identity["create_time_ns"],
+        base_url="http://127.0.0.1:54324/v1",
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+        evidence = model_server.reconcile_hybrid_qwen_owner(
+            runtime_path,
+            expected_lineage=_HYBRID_LINEAGE,
+            expected_scope_name=scope_name,
+        )
+        assert evidence["status"] == "verified"
+        assert model_server.qwen_model_lease_is_active(lease) is False
+        assert helper.poll() is not None
+    finally:
+        helper.close()
+        scope.close()
 
 
 def test_stop_model_server_honors_real_wrapper_test_sentinel(monkeypatch) -> None:

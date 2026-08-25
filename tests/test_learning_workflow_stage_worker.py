@@ -2955,6 +2955,7 @@ def test_hybrid_vista_outer_worker_death_during_acquiring_reconciles_exact_job(
 
     assert terminal["status"] == "failed"
     assert helper.poll() is not None
+    helper.close()
     reconciliation = terminal["supervisor_reconciliation"]
     assert reconciliation["status"] == "verified"
     assert helper.pid in reconciliation["scope_cleanup_evidence"][
@@ -2968,6 +2969,7 @@ def test_hybrid_vista_outer_worker_death_during_acquiring_reconciles_exact_job(
 
 def test_hybrid_qwen_outer_worker_death_reconciles_exact_job_scope(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
 
@@ -3006,10 +3008,55 @@ def test_hybrid_qwen_outer_worker_death_reconciles_exact_job_scope(
         },
     )
     record = registry._records[started["worker_id"]]
+    from app.core import model_server
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
     helper = spawn_process_in_scope(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         scope_name=record["provider_scope_name"],
         cwd=tmp_path,
+    )
+    profile = {
+        "profile_id": "qwen-worker-death",
+        "endpoint": "http://127.0.0.1:54323/v1/chat/completions",
+        "pid_file": str(tmp_path / "qwen-worker-death.pid"),
+    }
+    readiness = {
+        "started": True,
+        "after": {
+            "status": "running",
+            "base_url": "http://127.0.0.1:54323/v1",
+            "model_id": "qwen",
+            "server_process_identity": helper.process_identity,
+            "server_socket": {"host": "127.0.0.1", "port": 54323},
+        },
+    }
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", record["provider_scope_name"])
+    monkeypatch.setenv(
+        "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", record["provider_runtime_path"]
+    )
+    monkeypatch.setenv(
+        "AGENT_GUI_HYBRID_LINEAGE_JSON", json.dumps(record["provider_lineage"])
+    )
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_observe_qwen_server_binding",
+        lambda selected, observed: {
+            "base_url": observed["after"]["base_url"],
+            "model_id": observed["after"]["model_id"],
+            "server_process_identity": observed["after"]["server_process_identity"],
+            "server_socket": observed["after"]["server_socket"],
+        },
+    )
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id=record["model_request_id"],
+        readiness=readiness,
     )
     record["process"].alive = False
     record["process"].exitcode = -9
@@ -3026,13 +3073,34 @@ def test_hybrid_qwen_outer_worker_death_reconciles_exact_job_scope(
 
     assert terminal["status"] == "failed"
     assert helper.poll() is not None
+    helper.close()
     evidence = terminal["supervisor_reconciliation"]["scope_cleanup_evidence"]
-    assert helper.pid in evidence["observed_member_pids_before"]
     assert evidence["cleanup_status"] == "verified"
+    assert model_server.qwen_model_lease_is_active(lease) is False
+    assert model_server._load_qwen_owner_tombstone(
+        record["model_request_id"]
+    )["lease_id"] == lease["lease_id"]
+    release_result = terminal["supervisor_reconciliation"][
+        "provider_cleanup_evidence"
+    ]["owner_tombstone"]["release_result"]
+    assert helper.pid in release_result["hybrid_process_scope_acquisition"][
+        "member_pids"
+    ]
+    assert release_result["release"]["status"] == "proven_absent"
+    recovered = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    assert recovered.status(
+        worker_id=started["worker_id"],
+        run_id=run_id,
+        operation_id=operation_id,
+    )["status"] == "failed"
 
 
 def test_hybrid_omni_outer_worker_death_reconciles_exact_job_scope(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
 
@@ -3056,10 +3124,30 @@ def test_hybrid_omni_outer_worker_death_reconciles_exact_job_scope(
         },
     )
     record = registry._records[started["worker_id"]]
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+
+    monkeypatch.setattr(
+        adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "omni-cleanup"
+    )
+    manager = adapter_module.ProcessResourceLeaseManager(root=tmp_path / "omni-leases")
+    lease = manager("gpu_vision")
+    assert lease is not None
+    adapter_module.persist_omniparser_invocation_owner(
+        Path(record["provider_runtime_path"]),
+        invocation_id="invocation/outer-worker-death",
+        resource_group="gpu_vision",
+        resource_lease=lease,
+        lineage=record["provider_lineage"],
+        process_scope_name=record["provider_scope_name"],
+    )
     helper = spawn_process_in_scope(
         [sys.executable, "-c", "import time; time.sleep(30)"],
         scope_name=record["provider_scope_name"],
         cwd=tmp_path,
+    )
+    adapter_module.publish_omniparser_process_identity(
+        Path(record["provider_runtime_path"]),
+        process_identity=helper.process_identity,
     )
     record["process"].alive = False
     record["process"].exitcode = -9
@@ -3076,9 +3164,96 @@ def test_hybrid_omni_outer_worker_death_reconciles_exact_job_scope(
 
     assert terminal["status"] == "failed"
     assert helper.poll() is not None
+    helper.close()
     evidence = terminal["supervisor_reconciliation"]["scope_cleanup_evidence"]
     assert helper.pid in evidence["observed_member_pids_before"]
     assert evidence["cleanup_status"] == "verified"
+    assert list((tmp_path / "omni-leases").glob("*.lock")) == []
+    recovered = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    assert recovered.status(
+        worker_id=started["worker_id"],
+        run_id="run-omni-owner-death",
+        operation_id="operation-omni-owner-death",
+    )["status"] == "failed"
+
+
+@pytest.mark.parametrize("journal_mutation", ["scope_substitution", "missing_owner"])
+def test_recovered_hybrid_journal_scope_substitution_never_opens_unrelated_job(
+    tmp_path: Path,
+    journal_mutation: str,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id="run-journal-owner",
+        stage="screen_understanding",
+        operation_id="operation-journal-owner",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        authoritative_workflow_revision=7,
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "hybrid_capture_bundle_ref": {
+                "id": "hybrid-capture/journal-owner",
+                "content_sha256": "b" * 64,
+            },
+        },
+    )
+    record = registry._records[started["worker_id"]]
+    unrelated_lineage = {
+        "run_id": "run-unrelated",
+        "workflow_revision": 99,
+        "operation_id": "operation-unrelated",
+        "stage": "screen_understanding",
+        "stage_execution_id": "unrelated-execution",
+    }
+    unrelated_name = process_scope_name(unrelated_lineage, "omni")
+    unrelated_scope = WindowsProcessScope(unrelated_name, create=True)
+    unrelated = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=unrelated_name,
+        cwd=tmp_path,
+    )
+    journal_path = Path(record["journal_path"])
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    if journal_mutation == "scope_substitution":
+        journal["provider_scope_name"] = unrelated_name
+    else:
+        journal.pop("provider_owner_file")
+    journal_path.write_text(json.dumps(journal), encoding="utf-8")
+    original_scope = record.get("provider_scope")
+    if original_scope is not None:
+        original_scope.close()
+        record["provider_scope"] = None
+    try:
+        recovered = LearningStageWorkerRegistry(
+            result_root=tmp_path,
+            process_factory=_fake_process_factory,
+        )
+        status = recovered.status(
+            worker_id=started["worker_id"],
+            run_id="run-journal-owner",
+            operation_id="operation-journal-owner",
+        )
+        assert status["status"] == "recovery_required"
+        assert status["provider_recovery_blocked"] is True
+        assert unrelated.poll() is None
+    finally:
+        unrelated_scope.terminate()
+        unrelated.wait(10)
+        unrelated.close()
+        unrelated_scope.close()
 
 
 def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_lease(
@@ -3176,7 +3351,7 @@ def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_le
     assert lease_document["state"] == "released"
 
 
-def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(
+def test_duplicate_hybrid_stage_result_without_provider_owner_cleanup_requires_recovery(
     tmp_path: Path,
 ) -> None:
     registry = LearningStageWorkerRegistry(
@@ -3236,6 +3411,7 @@ def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(
 
     assert duplicate["worker_id"] == first["worker_id"]
     assert duplicate["payload_sha256"] == first["payload_sha256"]
-    assert duplicate["status"] == "completed"
+    assert duplicate["status"] == "recovery_required"
+    assert duplicate["result_available"] is False
     assert duplicate["result_path"] == first["result_path"]
     assert len(registry._records) == 1

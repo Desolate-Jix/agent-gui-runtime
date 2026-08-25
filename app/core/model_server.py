@@ -433,6 +433,7 @@ def ensure_and_acquire_qwen_model_lease(
     profile_validator: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """跨进程串行化 Qwen 首启与租约发布，避免无主启动副作用。"""
+    _validate_qwen_runtime_acquiring(request_id)
     with _qwen_acquisition_lock():
         profile = deepcopy(profile_for_stage(stage, profile_id))
         if profile_validator is not None:
@@ -586,7 +587,202 @@ def acquire_qwen_model_lease(
         state["revision"] = int(state.get("revision") or 0) + 1
         state["leases"].append({**deepcopy(lease), "lifecycle_state": "not_started"})
         _write_qwen_lease_state(state)
+    runtime_path = os.environ.get("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", "").strip()
+    if process_scope_name and runtime_path:
+        _publish_qwen_runtime_acquired(
+            Path(runtime_path),
+            request_id=owner_request_id,
+            model_lease=lease,
+            process_scope_name=process_scope_name,
+        )
     return lease
+
+
+def reconcile_hybrid_qwen_owner(
+    path: Path,
+    *,
+    expected_lineage: dict[str, Any],
+    expected_scope_name: str,
+) -> dict[str, Any]:
+    """异常 worker 退出时仅按持久化精确 Qwen owner 完成原有 tombstone 流程。"""
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+    from app.learn.hybrid.windows_process_scope import (
+        observe_process_scope_cleanup,
+        process_scope_name,
+    )
+
+    lineage = validate_hybrid_lineage(expected_lineage)
+    document = _load_qwen_runtime_owner(path)
+    if (
+        document.get("lineage") != lineage
+        or document.get("process_scope_name") != expected_scope_name
+        or process_scope_name(lineage, "qwen") != expected_scope_name
+    ):
+        raise RuntimeError("Hybrid Qwen owner lineage mismatch")
+    if document.get("contract_version") == "hybrid_supervised_provider_runtime_v1":
+        request_id = str(document.get("model_request_id") or "")
+        match = _find_qwen_lease_by_owner(request_id)
+        if match is None:
+            raise RuntimeError("Hybrid Qwen acquiring owner has no exact durable lease")
+        state, exact_lease = match
+        document = seal_immutable({
+            "contract_version": "hybrid_qwen_model_owner_v1",
+            "state": "acquired",
+            "model_request_id": request_id,
+            "lineage": lineage,
+            "process_scope_name": expected_scope_name,
+            "model_lease": deepcopy(exact_lease),
+            "profile": deepcopy(state["profile"]),
+            "release_result": None,
+            "tombstone_sha256": None,
+            "scope_cleanup": None,
+        })
+        _write_hybrid_qwen_runtime(path, document)
+    lease = document.get("model_lease")
+    if not isinstance(lease, dict) or set(lease) != _QWEN_LEASE_FIELDS:
+        raise RuntimeError("Hybrid Qwen exact model lease is unavailable")
+    if document.get("model_request_id") != lease.get("owner_request_id"):
+        raise RuntimeError("Hybrid Qwen model request identity mismatch")
+    if document.get("state") == "released":
+        release_result = document.get("release_result")
+        if not isinstance(release_result, dict):
+            raise RuntimeError("Hybrid Qwen released owner lost terminal proof")
+    else:
+        release_result = _release_exact_qwen_lease(
+            lease,
+            reason="outer_worker_terminated",
+        )
+    tombstone = _load_qwen_owner_tombstone(str(lease["owner_request_id"]))
+    if (
+        not isinstance(tombstone, dict)
+        or tombstone.get("lease_id") != lease.get("lease_id")
+        or tombstone.get("incarnation_id") != lease.get("incarnation_id")
+        or tombstone.get("profile_id") != lease.get("profile_id")
+        or tombstone.get("release_result") != release_result
+    ):
+        raise RuntimeError("Hybrid Qwen owner tombstone is inconsistent")
+    _validate_exact_qwen_cleanup_evidence(release_result, lease)
+    if qwen_model_lease_is_active(lease) or _qwen_lease_state_path(
+        str(lease["incarnation_id"])
+    ).exists():
+        raise RuntimeError("Hybrid Qwen durable lease remains active")
+    parsed = urlsplit(str(lease.get("server_base_url") or ""))
+    port = int(parsed.port or 0)
+    profile = document.get("profile")
+    pid_file = model_profile_pid_path(profile) if isinstance(profile, dict) else None
+    scope_cleanup = observe_process_scope_cleanup(
+        expected_scope_name,
+        terminate=False,
+        listener_ports=[port] if port > 0 else [],
+        pid_file=pid_file,
+        stable_zero_observations=3,
+    )
+    if scope_cleanup.get("cleanup_status") != "verified":
+        raise RuntimeError("Hybrid Qwen scope cleanup is indeterminate")
+    document.pop("content_sha256", None)
+    document["state"] = "released"
+    document["release_result"] = deepcopy(release_result)
+    document["tombstone_sha256"] = content_sha256(tombstone)
+    document["scope_cleanup"] = scope_cleanup
+    _write_hybrid_qwen_runtime(path, seal_immutable(document))
+    return {
+        "contract_version": "hybrid_qwen_abnormal_reconciliation_v1",
+        "status": "verified",
+        "model_lease": deepcopy(lease),
+        "owner_tombstone": tombstone,
+        "scope_cleanup_evidence": scope_cleanup,
+    }
+
+
+def _validate_qwen_runtime_acquiring(request_id: str) -> None:
+    path_text = os.environ.get("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", "").strip()
+    scope_name = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", "").strip()
+    lineage_text = os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON", "").strip()
+    if not (path_text or scope_name or lineage_text):
+        return
+    try:
+        document = json.loads(Path(path_text).read_text(encoding="utf-8"))
+        lineage = json.loads(lineage_text)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Hybrid Qwen acquiring owner is unreadable") from error
+    if (
+        not isinstance(document, dict)
+        or document.get("content_sha256") != content_sha256(document)
+        or document.get("contract_version") != "hybrid_supervised_provider_runtime_v1"
+        or document.get("state") != "acquiring"
+        or document.get("provider") != "qwen"
+        or document.get("model_request_id") != request_id
+        or document.get("process_scope_name") != scope_name
+        or document.get("lineage") != lineage
+    ):
+        raise RuntimeError("Hybrid Qwen acquiring owner is invalid")
+
+
+def _publish_qwen_runtime_acquired(
+    path: Path,
+    *,
+    request_id: str,
+    model_lease: dict[str, Any],
+    process_scope_name: str,
+) -> None:
+    lineage_text = os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON", "").strip()
+    try:
+        lineage = json.loads(lineage_text)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Hybrid Qwen lineage is unavailable") from error
+    document = seal_immutable({
+        "contract_version": "hybrid_qwen_model_owner_v1",
+        "state": "acquired",
+        "model_request_id": request_id,
+        "lineage": lineage,
+        "process_scope_name": process_scope_name,
+        "model_lease": deepcopy(model_lease),
+        "profile": _profile_from_qwen_lease(model_lease),
+        "release_result": None,
+        "tombstone_sha256": None,
+        "scope_cleanup": None,
+    })
+    _write_hybrid_qwen_runtime(path, document)
+
+
+def _profile_from_qwen_lease(model_lease: dict[str, Any]) -> dict[str, Any]:
+    with _qwen_lease_lock():
+        state = _load_qwen_lease_state(str(model_lease.get("incarnation_id") or ""))
+    if not isinstance(state, dict) or not isinstance(state.get("profile"), dict):
+        raise RuntimeError("Hybrid Qwen profile ownership is unavailable")
+    return deepcopy(state["profile"])
+
+
+def _load_qwen_runtime_owner(path: Path) -> dict[str, Any]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Hybrid Qwen owner is unreadable") from error
+    if (
+        not isinstance(document, dict)
+        or document.get("content_sha256") != content_sha256(document)
+        or document.get("contract_version") not in {
+            "hybrid_qwen_model_owner_v1",
+            "hybrid_supervised_provider_runtime_v1",
+        }
+        or document.get("state") not in {"acquiring", "acquired", "released"}
+        or (
+            document.get("contract_version") == "hybrid_supervised_provider_runtime_v1"
+            and document.get("provider") != "qwen"
+        )
+    ):
+        raise RuntimeError("Hybrid Qwen owner is invalid")
+    return document
+
+
+def _write_hybrid_qwen_runtime(path: Path, document: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
 
 
 def qwen_model_lease_is_active(model_lease: object) -> bool:
@@ -2298,6 +2494,9 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
     returncode = process.poll()
     if returncode is not None:
         log_file.close()
+        close_process = getattr(process, "close", None)
+        if callable(close_process):
+            close_process()
         raise RuntimeError(f"Model start script exited immediately with code {returncode}; see log: {log_path}")
     pid_path = model_profile_pid_path(profile)
     pid_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2308,6 +2507,10 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
         health_timeout = float(profile.get("startup_health_timeout_seconds") or 0.25)
         health_status = check_model_server(profile, timeout=health_timeout)
         pid_sync = _sync_pid_file_from_health(profile, health_status, pid_path=pid_path)
+    log_file.close()
+    close_process = getattr(process, "close", None)
+    if callable(close_process):
+        close_process()
     return {
         "pid": process.pid,
         "pid_source": "health" if pid_sync else "wrapper_process",

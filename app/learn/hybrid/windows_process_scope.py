@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
+import re
 import subprocess
+from threading import Lock
 import time
 from typing import Any, Mapping, Sequence
 
@@ -14,6 +18,10 @@ import psutil
 
 PROCESS_SCOPE_CONTRACT_VERSION = "hybrid_windows_process_scope_v1"
 _PROVIDERS = {"omni", "qwen", "vista"}
+_SCOPE_NAME_RE = re.compile(
+    r"\ALocal\\AgentGuiHybrid-(omni|qwen|vista)-[0-9a-f]{64}\Z"
+)
+_PROCESS_LAUNCH_LOCK = Lock()
 
 try:  # pragma: no cover - 非 Windows 只用于 readiness fail-closed
     import win32api
@@ -34,6 +42,10 @@ def windows_process_scope_available() -> bool:
         module is not None
         for module in (win32api, win32con, win32event, win32job, win32process)
     )
+
+
+def scoped_process_launch_ready() -> bool:
+    return windows_process_scope_available()
 
 
 def process_scope_name(lineage: Mapping[str, Any], provider: str) -> str:
@@ -124,8 +136,14 @@ class ScopedProcess:
         self.pid = int(pid)
         self.process_identity = dict(process_identity)
         self.returncode: int | None = None
+        self._closed = False
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise HybridProcessScopeError("Hybrid process handle is closed")
 
     def poll(self) -> int | None:
+        self._require_open()
         if self.returncode is not None:
             return self.returncode
         code = int(win32process.GetExitCodeProcess(self._handle))
@@ -135,6 +153,7 @@ class ScopedProcess:
         return code
 
     def wait(self, timeout: float | None = None) -> int:
+        self._require_open()
         milliseconds = win32event.INFINITE if timeout is None else max(0, int(timeout * 1000))
         status = win32event.WaitForSingleObject(self._handle, milliseconds)
         if status == win32event.WAIT_TIMEOUT:
@@ -148,11 +167,24 @@ class ScopedProcess:
         return None, None
 
     def kill(self) -> None:
+        self._require_open()
         if self.poll() is None:
             win32process.TerminateProcess(self._handle, 1)
             self.wait(5.0)
 
     terminate = kill
+
+    def close(self) -> None:
+        if not self._closed:
+            win32api.CloseHandle(self._handle)
+            self._closed = True
+
+    def __enter__(self) -> "ScopedProcess":
+        self._require_open()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
 
 
 def spawn_process_in_scope(
@@ -170,28 +202,31 @@ def spawn_process_in_scope(
     scope = WindowsProcessScope(scope_name, create=False)
     opened: list[Any] = []
     process_handle = thread_handle = None
+    duplicates: list[int] = []
     try:
-        startup = win32process.STARTUPINFO()
-        startup.dwFlags |= int(win32process.STARTF_USESTDHANDLES)
-        startup.hStdInput = _stdio_handle(stdin, readable=True, opened=opened)
-        startup.hStdOutput = _stdio_handle(stdout, readable=False, opened=opened)
-        startup.hStdError = (
-            startup.hStdOutput
-            if stderr == subprocess.STDOUT
-            else _stdio_handle(stderr, readable=False, opened=opened)
-        )
-        flags = int(creationflags) | int(win32con.CREATE_SUSPENDED)
-        process_handle, thread_handle, pid, _ = win32process.CreateProcess(
-            None,
-            subprocess.list2cmdline([str(item) for item in command]),
-            None,
-            None,
-            True,
-            flags,
-            dict(env) if env is not None else None,
-            str(cwd),
-            startup,
-        )
+        with _PROCESS_LAUNCH_LOCK:
+            source_input = _stdio_source(stdin, readable=True, opened=opened)
+            source_output = _stdio_source(stdout, readable=False, opened=opened)
+            source_error = (
+                source_output
+                if stderr == subprocess.STDOUT
+                else _stdio_source(stderr, readable=False, opened=opened)
+            )
+            duplicate_by_source: dict[int, int] = {}
+            for source in (source_input, source_output, source_error):
+                if source not in duplicate_by_source:
+                    duplicate_by_source[source] = _duplicate_inheritable_handle(source)
+                    duplicates.append(duplicate_by_source[source])
+            process_handle, thread_handle, pid = _create_suspended_process_with_handles(
+                command,
+                cwd=Path(cwd),
+                env=env,
+                creationflags=creationflags,
+                stdin_handle=duplicate_by_source[source_input],
+                stdout_handle=duplicate_by_source[source_output],
+                stderr_handle=duplicate_by_source[source_error],
+                inherited_handles=duplicates,
+            )
         scope.assign(process_handle)
         process = psutil.Process(int(pid))
         process_identity = {
@@ -211,6 +246,8 @@ def spawn_process_in_scope(
     finally:
         if thread_handle is not None:
             win32api.CloseHandle(thread_handle)
+        for handle in duplicates:
+            win32api.CloseHandle(handle)
         for handle in opened:
             handle.close()
         scope.close()
@@ -305,7 +342,7 @@ def observe_process_scope_cleanup(
             scope.close()
 
 
-def _stdio_handle(value: Any, *, readable: bool, opened: list[Any]) -> Any:
+def _stdio_source(value: Any, *, readable: bool, opened: list[Any]) -> int:
     import msvcrt
 
     if value == subprocess.PIPE:
@@ -313,11 +350,99 @@ def _stdio_handle(value: Any, *, readable: bool, opened: list[Any]) -> Any:
     if value == subprocess.DEVNULL or value is None:
         handle = open(os.devnull, "rb" if readable else "ab", buffering=0)
         opened.append(handle)
-        os.set_handle_inheritable(msvcrt.get_osfhandle(handle.fileno()), True)
-        return msvcrt.get_osfhandle(handle.fileno())
-    os_handle = msvcrt.get_osfhandle(value.fileno())
-    os.set_handle_inheritable(os_handle, True)
-    return os_handle
+        return int(msvcrt.get_osfhandle(handle.fileno()))
+    return int(msvcrt.get_osfhandle(value.fileno()))
+
+
+def _duplicate_inheritable_handle(source: int) -> int:
+    current = win32api.GetCurrentProcess()
+    duplicated = win32api.DuplicateHandle(
+        current,
+        int(source),
+        current,
+        0,
+        True,
+        int(win32con.DUPLICATE_SAME_ACCESS),
+    )
+    return int(duplicated.Detach())
+
+
+class _STARTUPINFOW(ctypes.Structure):
+    _fields_ = [
+        ("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR),
+        ("lpDesktop", wintypes.LPWSTR), ("lpTitle", wintypes.LPWSTR),
+        ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD),
+        ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD),
+        ("dwXCountChars", wintypes.DWORD), ("dwYCountChars", wintypes.DWORD),
+        ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+        ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD),
+        ("lpReserved2", ctypes.POINTER(wintypes.BYTE)),
+        ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE),
+        ("hStdError", wintypes.HANDLE),
+    ]
+
+
+class _STARTUPINFOEXW(ctypes.Structure):
+    _fields_ = [("StartupInfo", _STARTUPINFOW), ("lpAttributeList", ctypes.c_void_p)]
+
+
+class _PROCESS_INFORMATION(ctypes.Structure):
+    _fields_ = [
+        ("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
+        ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD),
+    ]
+
+
+def _create_suspended_process_with_handles(
+    command: Sequence[str], *, cwd: Path, env: Mapping[str, str] | None,
+    creationflags: int, stdin_handle: int, stdout_handle: int,
+    stderr_handle: int, inherited_handles: Sequence[int],
+) -> tuple[int, int, int]:
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    size = ctypes.c_size_t()
+    kernel32.InitializeProcThreadAttributeList(None, 1, 0, ctypes.byref(size))
+    attributes = ctypes.create_string_buffer(size.value)
+    if not kernel32.InitializeProcThreadAttributeList(attributes, 1, 0, ctypes.byref(size)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    handle_array = (wintypes.HANDLE * len(inherited_handles))(
+        *(wintypes.HANDLE(handle) for handle in inherited_handles)
+    )
+    try:
+        if not kernel32.UpdateProcThreadAttribute(
+            attributes, 0, ctypes.c_size_t(0x00020002),
+            ctypes.byref(handle_array), ctypes.sizeof(handle_array), None, None,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        startup = _STARTUPINFOEXW()
+        startup.StartupInfo.cb = ctypes.sizeof(startup)
+        startup.StartupInfo.dwFlags = int(win32process.STARTF_USESTDHANDLES)
+        startup.StartupInfo.hStdInput = wintypes.HANDLE(stdin_handle)
+        startup.StartupInfo.hStdOutput = wintypes.HANDLE(stdout_handle)
+        startup.StartupInfo.hStdError = wintypes.HANDLE(stderr_handle)
+        startup.lpAttributeList = ctypes.cast(attributes, ctypes.c_void_p)
+        information = _PROCESS_INFORMATION()
+        command_line = ctypes.create_unicode_buffer(
+            subprocess.list2cmdline([str(item) for item in command])
+        )
+        environment = None
+        flags = (
+            int(creationflags)
+            | int(win32con.CREATE_SUSPENDED)
+            | 0x00080000
+        )
+        if env is not None:
+            environment = ctypes.create_unicode_buffer(
+                "\0".join(f"{key}={value}" for key, value in sorted(env.items())) + "\0\0"
+            )
+            flags |= 0x00000400
+        if not kernel32.CreateProcessW(
+            None, command_line, None, None, True, flags,
+            environment, str(cwd), ctypes.byref(startup), ctypes.byref(information),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return int(information.hProcess), int(information.hThread), int(information.dwProcessId)
+    finally:
+        kernel32.DeleteProcThreadAttributeList(attributes)
 
 
 def _listeners(ports: Sequence[int]) -> list[dict[str, int]]:
@@ -356,9 +481,13 @@ def _identities_for_pids(pids: Sequence[int]) -> list[dict[str, int]]:
 
 def _scope_name(value: str) -> str:
     normalized = str(value or "").strip()
-    if not normalized.startswith("Local\\AgentGuiHybrid-") or len(normalized) > 240:
+    if _SCOPE_NAME_RE.fullmatch(normalized) is None:
         raise ValueError("Hybrid process scope name is invalid")
     return normalized
+
+
+def validate_process_scope_name(value: str) -> str:
+    return _scope_name(value)
 
 
 def _job_not_found(error: BaseException) -> bool:
@@ -391,6 +520,8 @@ __all__ = [
     "WindowsProcessScope",
     "observe_process_scope_cleanup",
     "process_scope_name",
+    "validate_process_scope_name",
     "spawn_process_in_scope",
+    "scoped_process_launch_ready",
     "windows_process_scope_available",
 ]

@@ -151,6 +151,10 @@ def test_adapter_persists_exact_invocation_cleanup_observation(
     scope_name = windows_process_scope.process_scope_name(lineage, "omni")
     scope = windows_process_scope.WindowsProcessScope(scope_name, create=True)
     monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv(
+        "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(tmp_path / "runtime.json")
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", json.dumps(lineage))
     real_spawn = windows_process_scope.spawn_process_in_scope
 
     def controlled_scoped_spawn(command, **kwargs):
@@ -175,7 +179,12 @@ def test_adapter_persists_exact_invocation_cleanup_observation(
     )
 
     try:
-        adapter_module.OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke(
+        adapter_module.OmniParserShadowAdapter(
+            configuration=_config(tmp_path),
+            resource_lease_manager=adapter_module.ProcessResourceLeaseManager(
+                root=tmp_path / "leases"
+            ),
+        ).invoke(
             capture=_capture(tmp_path),
             budget=_budget(),
             invocation_id="invocation/cleanup-observed",
@@ -201,6 +210,75 @@ def test_adapter_persists_exact_invocation_cleanup_observation(
     assert provider_pid in observation["process_scope_cleanup"][
         "observed_member_pids_before"
     ] or observation["process_scope_cleanup"]["observed_member_pids_before"] == []
+
+
+@pytest.mark.parametrize("owner_scope_closed", [False, True])
+def test_abnormal_reconciliation_removes_exact_resource_lease_and_seals_observation(
+    tmp_path: Path,
+    monkeypatch,
+    owner_scope_closed: bool,
+) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    monkeypatch.setattr(adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "cleanup")
+    lineage = {
+        "run_id": "run-omni-abnormal",
+        "workflow_revision": 7,
+        "operation_id": "operation-omni-abnormal",
+        "stage": "screen_understanding",
+        "stage_execution_id": "execution-omni-abnormal",
+    }
+    scope_name = process_scope_name(lineage, "omni")
+    scope = WindowsProcessScope(scope_name, create=True)
+    manager = adapter_module.ProcessResourceLeaseManager(root=tmp_path / "leases")
+    lease = manager("gpu_vision")
+    assert lease is not None
+    runtime_path = tmp_path / "omni-runtime.json"
+    adapter_module.persist_omniparser_invocation_owner(
+        runtime_path,
+        invocation_id="invocation/abnormal-owner",
+        resource_group="gpu_vision",
+        resource_lease=lease,
+        lineage=lineage,
+        process_scope_name=scope_name,
+    )
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    adapter_module.publish_omniparser_process_identity(
+        runtime_path,
+        process_identity=helper.process_identity,
+    )
+    if owner_scope_closed:
+        scope.close()
+        helper.wait(10)
+        assert helper.poll() is not None
+    try:
+        evidence = adapter_module.reconcile_omniparser_invocation_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        assert evidence["status"] == "verified"
+        assert list((tmp_path / "leases").glob("*.lock")) == []
+        assert helper.poll() is not None
+        observation = adapter_module.load_omniparser_invocation_cleanup_observation(
+            "invocation/abnormal-owner"
+        )
+        assert observation["cleanup_status"] == "verified"
+        assert observation["cleanup_reason"] == "outer_worker_terminated"
+        assert observation["lineage"] == lineage
+    finally:
+        helper.close()
+        if not owner_scope_closed:
+            scope.close()
 
 
 @pytest.mark.parametrize("payload", [

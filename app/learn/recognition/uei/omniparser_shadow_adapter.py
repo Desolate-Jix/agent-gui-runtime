@@ -219,6 +219,28 @@ class OmniParserShadowAdapter:
             "inventory_observable": True,
         }
         lease_path = getattr(resource_lease, "_path", None)
+        lease_token = getattr(resource_lease, "_token", None)
+        runtime_path_text = os.environ.get("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", "").strip()
+        lineage_text = os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON", "").strip()
+        process_scope_name = os.environ.get(
+            "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+        ).strip()
+        runtime_path = Path(runtime_path_text) if runtime_path_text else None
+        if process_scope_name or runtime_path is not None or lineage_text:
+            try:
+                lineage = json.loads(lineage_text)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise OmniParserShadowAdapterError("runtime_configuration_unavailable") from error
+            if runtime_path is None or not process_scope_name or not isinstance(lineage, dict):
+                raise OmniParserShadowAdapterError("runtime_configuration_unavailable")
+            persist_omniparser_invocation_owner(
+                runtime_path,
+                invocation_id=invocation_id,
+                resource_group=budget.resource_group,
+                resource_lease=resource_lease,
+                lineage=lineage,
+                process_scope_name=process_scope_name,
+            )
         try:
             if cancellation_event is not None and cancellation_event.is_set():
                 raise OmniParserShadowAdapterError("runtime_cancelled")
@@ -238,8 +260,11 @@ class OmniParserShadowAdapter:
                 self._persist_cleanup_observation(
                     invocation_id,
                     lease_path=lease_path if isinstance(lease_path, Path) else None,
+                    lease_token=lease_token if isinstance(lease_token, str) else None,
                     cleanup_status=cleanup_status,
                 )
+                if runtime_path is not None:
+                    _mark_omniparser_runtime_released(runtime_path, invocation_id)
 
     def _validate_preflight(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget, invocation_id: str,
@@ -332,6 +357,14 @@ class OmniParserShadowAdapter:
                         self._cleanup_observation["process_identity"] = deepcopy(
                             spawned_identity
                         )
+                        runtime_path_text = os.environ.get(
+                            "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", ""
+                        ).strip()
+                        if runtime_path_text:
+                            publish_omniparser_process_identity(
+                                Path(runtime_path_text),
+                                process_identity=spawned_identity,
+                            )
                 self._capture_cleanup_process_tree(process)
                 deadline = time.monotonic() + budget.timeout_ms / 1000
                 while process.poll() is None:
@@ -359,6 +392,9 @@ class OmniParserShadowAdapter:
                     self._terminate_tree(process)
                 if process is not None:
                     self._capture_cleanup_process_tree(process)
+                    close = getattr(process, "close", None)
+                    if callable(close):
+                        close()
 
     def _capture_cleanup_process_tree(self, process: subprocess.Popen[bytes]) -> None:
         observation = self._cleanup_observation
@@ -392,6 +428,7 @@ class OmniParserShadowAdapter:
         invocation_id: str,
         *,
         lease_path: Path | None,
+        lease_token: str | None,
         cleanup_status: str,
     ) -> None:
         observation = deepcopy(self._cleanup_observation) if isinstance(self._cleanup_observation, dict) else {}
@@ -466,6 +503,12 @@ class OmniParserShadowAdapter:
             "process_scope_name": process_scope_name or None,
             "process_scope_cleanup": scope_cleanup,
             "process_scope_acquisition": scope_acquisition,
+            "cleanup_reason": "completed",
+            "lineage": _hybrid_lineage_from_environment(),
+            "resource_lease_identity": _resource_lease_identity(
+                lease_path=lease_path,
+                token=lease_token,
+            ),
             "cleanup_status": "verified" if verified else "indeterminate",
         })
         OMNI_CLEANUP_OBSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
@@ -547,6 +590,7 @@ def load_omniparser_invocation_cleanup_observation(
         "lease_path", "lease_files_after", "inventory_observable", "cleanup_status",
         "process_scope_name", "process_scope_cleanup",
         "process_scope_acquisition",
+        "cleanup_reason", "lineage", "resource_lease_identity",
         "content_sha256",
     }
     if (
@@ -560,6 +604,7 @@ def load_omniparser_invocation_cleanup_observation(
         != "omniparser_invocation_cleanup_observation_v1"
         or document.get("provider_invocation_id") != invocation_id
         or document.get("cleanup_status") not in {"verified", "indeterminate"}
+        or document.get("cleanup_reason") not in {"completed", "outer_worker_terminated"}
         or not isinstance(document.get("inventory_observable"), bool)
         or any(
             not isinstance(document.get(field), list)
@@ -572,6 +617,258 @@ def load_omniparser_invocation_cleanup_observation(
     ):
         raise OmniParserShadowAdapterError("runtime_cleanup_failed")
     return deepcopy(document)
+
+
+def persist_omniparser_invocation_owner(
+    path: Path,
+    *,
+    invocation_id: str,
+    resource_group: str,
+    resource_lease: ResourceLease,
+    lineage: dict[str, object],
+    process_scope_name: str,
+) -> dict[str, object]:
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+    from app.learn.hybrid.windows_process_scope import process_scope_name as expected_name
+
+    lease_path = getattr(resource_lease, "_path", None)
+    lease_token = getattr(resource_lease, "_token", None)
+    exact_lineage = validate_hybrid_lineage(lineage)
+    if (
+        not isinstance(lease_path, Path)
+        or not isinstance(lease_token, str)
+        or not lease_token
+        or expected_name(exact_lineage, "omni") != process_scope_name
+    ):
+        raise OmniParserShadowAdapterError("runtime_configuration_unavailable")
+    document = seal_immutable({
+        "contract_version": "omniparser_invocation_owner_v1",
+        "state": "acquired",
+        "provider_invocation_id": invocation_id,
+        "resource_group": resource_group,
+        "resource_lease_path": str(lease_path.resolve()),
+        "resource_lease_token": lease_token,
+        "lineage": exact_lineage,
+        "process_scope_name": process_scope_name,
+        "process_identity": None,
+        "process_scope_acquisition": None,
+        "cleanup_observation_sha256": None,
+    })
+    _write_sealed_json(path, document)
+    return deepcopy(document)
+
+
+def publish_omniparser_process_identity(
+    path: Path, *, process_identity: dict[str, object]
+) -> None:
+    document = _load_omniparser_owner(path)
+    if (
+        not isinstance(process_identity, dict)
+        or not isinstance(process_identity.get("pid"), int)
+        or not isinstance(process_identity.get("create_time_ns"), int)
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    document.pop("content_sha256", None)
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    scope = WindowsProcessScope(str(document["process_scope_name"]), create=False)
+    try:
+        member_pids = scope.pids()
+    finally:
+        scope.close()
+    if process_identity["pid"] not in member_pids:
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    document["state"] = "running"
+    document["process_identity"] = deepcopy(process_identity)
+    document["process_scope_acquisition"] = {
+        "contract_version": "hybrid_process_scope_acquisition_v1",
+        "scope_name": document["process_scope_name"],
+        "member_pids": member_pids,
+        "provider_pid": process_identity["pid"],
+    }
+    _write_sealed_json(path, seal_immutable(document))
+
+
+def reconcile_omniparser_invocation_owner(
+    path: Path,
+    *,
+    expected_lineage: dict[str, object],
+    expected_scope_name: str,
+) -> dict[str, object]:
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        observe_process_scope_cleanup,
+        process_scope_name,
+    )
+
+    exact_lineage = validate_hybrid_lineage(expected_lineage)
+    document = _load_omniparser_owner(path)
+    if (
+        document.get("lineage") != exact_lineage
+        or document.get("process_scope_name") != expected_scope_name
+        or process_scope_name(exact_lineage, "omni") != expected_scope_name
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    if document.get("state") == "released":
+        observation = load_omniparser_invocation_cleanup_observation(
+            str(document["provider_invocation_id"])
+        )
+        if observation.get("content_sha256") != document.get("cleanup_observation_sha256"):
+            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+        return {"status": "verified", "cleanup_observation": observation}
+    lease_path = Path(str(document.get("resource_lease_path") or "")).resolve()
+    token = str(document.get("resource_lease_token") or "")
+    recorded_acquisition = document.get("process_scope_acquisition")
+    if (
+        not isinstance(recorded_acquisition, dict)
+        or recorded_acquisition.get("scope_name") != expected_scope_name
+        or not isinstance(recorded_acquisition.get("member_pids"), list)
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    acquisition_pids = list(recorded_acquisition["member_pids"])
+    try:
+        scope = WindowsProcessScope(expected_scope_name, create=False)
+    except BaseException as error:
+        if getattr(error, "winerror", None) != 2 and getattr(error, "args", [None])[0] != 2:
+            raise
+        scope = None
+    if scope is not None:
+        try:
+            current_pids = scope.pids()
+        finally:
+            scope.close()
+        if current_pids:
+            acquisition_pids = current_pids
+    process_identity = document.get("process_identity")
+    if (
+        not isinstance(process_identity, dict)
+        or process_identity.get("pid") not in acquisition_pids
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    if scope is None and _probe_process_identity(process_identity) != "proven_absent":
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    try:
+        if lease_path.read_text(encoding="utf-8") != token:
+            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+        lease_path.unlink()
+    except (OSError, UnicodeError) as error:
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed") from error
+    scope_cleanup = observe_process_scope_cleanup(
+        expected_scope_name,
+        terminate=True,
+        stable_zero_observations=3,
+    )
+    if scope_cleanup.get("cleanup_status") != "verified" or lease_path.exists():
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    observation = seal_immutable({
+        "contract_version": "omniparser_invocation_cleanup_observation_v1",
+        "provider_invocation_id": document["provider_invocation_id"],
+        "process_identity": deepcopy(process_identity),
+        "descendant_identities": [],
+        "provider_processes_after": [],
+        "orphan_descendant_identities": [],
+        "active_listeners_after": [],
+        "pid_file_paths": [],
+        "lease_path": str(lease_path),
+        "lease_files_after": [],
+        "inventory_observable": True,
+        "process_scope_name": expected_scope_name,
+        "process_scope_cleanup": scope_cleanup,
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": expected_scope_name,
+            "member_pids": acquisition_pids,
+            "provider_pid": process_identity["pid"],
+        },
+        "cleanup_reason": "outer_worker_terminated",
+        "lineage": exact_lineage,
+        "resource_lease_identity": _resource_lease_identity(
+            lease_path=lease_path,
+            token=token,
+        ),
+        "cleanup_status": "verified",
+    })
+    target = _cleanup_observation_path(str(document["provider_invocation_id"]))
+    _write_sealed_json(target, observation)
+    document.pop("content_sha256", None)
+    document["state"] = "released"
+    document["cleanup_observation_sha256"] = observation["content_sha256"]
+    _write_sealed_json(path, seal_immutable(document))
+    verified = load_omniparser_invocation_cleanup_observation(
+        str(document["provider_invocation_id"])
+    )
+    return {"status": "verified", "cleanup_observation": verified}
+
+
+def _load_omniparser_owner(path: Path) -> dict[str, object]:
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed") from error
+    if (
+        not isinstance(document, dict)
+        or document.get("content_sha256") != content_sha256(document)
+        or document.get("contract_version") != "omniparser_invocation_owner_v1"
+        or document.get("state") not in {"acquired", "running", "released"}
+        or not isinstance(document.get("provider_invocation_id"), str)
+        or not str(document.get("provider_invocation_id")).startswith("invocation/")
+        or not isinstance(document.get("resource_group"), str)
+        or not isinstance(document.get("resource_lease_path"), str)
+        or not isinstance(document.get("resource_lease_token"), str)
+        or len(str(document.get("resource_lease_token"))) != 32
+        or any(
+            character not in "0123456789abcdef"
+            for character in str(document.get("resource_lease_token"))
+        )
+        or Path(str(document.get("resource_lease_path"))).name
+        != f"{document.get('resource_group')}.lock"
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    return document
+
+
+def _mark_omniparser_runtime_released(path: Path, invocation_id: str) -> None:
+    document = _load_omniparser_owner(path)
+    observation = load_omniparser_invocation_cleanup_observation(invocation_id)
+    if observation.get("cleanup_status") != "verified":
+        return
+    document.pop("content_sha256", None)
+    document["state"] = "released"
+    document["cleanup_observation_sha256"] = observation["content_sha256"]
+    _write_sealed_json(path, seal_immutable(document))
+
+
+def _write_sealed_json(path: Path, document: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    temporary.write_text(
+        json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _hybrid_lineage_from_environment() -> dict[str, object] | None:
+    raw = os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _resource_lease_identity(
+    *, lease_path: Path | None, token: str | None
+) -> dict[str, object] | None:
+    if lease_path is None:
+        return None
+    return {
+        "lease_path": str(lease_path.resolve()),
+        "lease_token_sha256": sha256(token.encode("utf-8")).hexdigest() if token else None,
+    }
 
 
 def _cleanup_observation_path(invocation_id: str) -> Path:
