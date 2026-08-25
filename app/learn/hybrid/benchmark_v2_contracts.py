@@ -23,6 +23,11 @@ ARM_ORDER = (
     "omni_to_qwen",
     "omni_to_qwen_vista",
 )
+PROVIDER_CODE_REFS = (
+    ("bootstrap", "app/learn/hybrid/benchmark_v2_provider_sandbox.py"),
+    ("contracts", "app/learn/hybrid/benchmark_v2_contracts.py"),
+    ("corpus_loader", "app/learn/hybrid/benchmark_v2_provider_corpus.py"),
+)
 SAFETY = {
     "artifact_is_authorization": False,
     "execute_binding_enabled": False,

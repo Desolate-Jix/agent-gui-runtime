@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from app.learn.hybrid.benchmark_v2_contracts import (
     BENCHMARK_RELEASE_ID,
+    PARENT_CONTENT_SHA256,
     PARENT_FILE_SHA256,
     PARENT_REF,
     PROVIDER_CORPUS_CONTRACT,
@@ -77,7 +78,16 @@ def _inside_project(relative: object) -> Path:
     return path
 
 
-def _load_frozen_parent(path: Path) -> dict[str, Any]:
+def _parent_ref_from_verified_content_sha(value: str) -> dict[str, str]:
+    if value != PARENT_CONTENT_SHA256:
+        raise ValueError("recomputed frozen parent content SHA does not match lineage")
+    return {
+        **PARENT_REF,
+        "content_sha256": value,
+    }
+
+
+def _load_frozen_parent(path: Path) -> tuple[dict[str, Any], dict[str, str]]:
     raw = path.read_bytes()
     if sha256_bytes(raw) != PARENT_FILE_SHA256:
         raise ValueError("parent manifest raw SHA does not match the frozen seal")
@@ -87,8 +97,10 @@ def _load_frozen_parent(path: Path) -> dict[str, Any]:
         raise ValueError("parent manifest is not UTF-8 JSON") from exc
     if not isinstance(value, Mapping) or value.get("contract_version") != _PARENT_CONTRACT:
         raise ValueError("parent manifest contract is invalid")
-    if value.get("content_sha256") != content_sha256(value):
+    recomputed_content_sha = content_sha256(value)
+    if value.get("content_sha256") != recomputed_content_sha:
         raise ValueError("parent manifest content SHA is invalid")
+    parent_ref = _parent_ref_from_verified_content_sha(recomputed_content_sha)
     if value.get("artifact_is_authorization") is not False:
         raise ValueError("parent manifest must remain non-authorizing")
     if value.get("execute_binding_enabled") is not False:
@@ -99,7 +111,7 @@ def _load_frozen_parent(path: Path) -> dict[str, Any]:
         raise ValueError("frozen parent must contain exactly 24 screenshots")
     if not isinstance(targets, list) or len(targets) != 120:
         raise ValueError("frozen parent must contain exactly 120 targets")
-    return dict(value)
+    return dict(value), parent_ref
 
 
 def _validated_screens(parent: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -201,12 +213,12 @@ def _project_cases(
 def project_provider_corpus(
     *, parent_manifest_path: Path, output_path: Path
 ) -> dict[str, str]:
-    parent = _load_frozen_parent(Path(parent_manifest_path).resolve())
+    parent, parent_ref = _load_frozen_parent(Path(parent_manifest_path).resolve())
     screens = _validated_screens(parent)
     child: dict[str, Any] = {
         "contract_version": PROVIDER_CORPUS_CONTRACT,
         "benchmark_release_id": BENCHMARK_RELEASE_ID,
-        "source_parent_ref": dict(PARENT_REF),
+        "source_parent_ref": parent_ref,
         "provider_boundary": {
             "opaque_case_ids": True,
             "opaque_screen_groups": True,

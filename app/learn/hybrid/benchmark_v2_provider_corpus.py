@@ -12,6 +12,7 @@ from app.learn.hybrid.benchmark_v2_contracts import (
     ARM_ORDER,
     BENCHMARK_RELEASE_ID,
     PROVIDER_CORPUS_CONTRACT,
+    PROVIDER_CODE_REFS,
     PROVIDER_MANIFEST_CONTRACT,
     SAFETY,
     canonical_json_bytes,
@@ -228,6 +229,7 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
             "contract_version",
             "benchmark_release_id",
             "provider_corpus_ref",
+            "sealed_runtime",
             "arm_order",
             "safety",
         },
@@ -252,14 +254,62 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
     if ref["contract_version"] != PROVIDER_CORPUS_CONTRACT:
         raise ValueError("provider corpus ref contract is invalid")
     relative_path = require_relative_posix_path(ref["relative_path"], "provider corpus path")
-    if relative_path != "tests/fixtures/portfolio_hybrid_v1_1/provider-corpus.v2.json":
+    if relative_path != "provider-corpus.v2.json":
         raise ValueError("provider corpus path is not the sealed provider-safe child")
     require_sha256(ref["file_sha256"], "provider corpus file SHA")
     require_sha256(ref["content_sha256"], "provider corpus content SHA")
     ref["source_parent_ref"] = validate_parent_ref(ref["source_parent_ref"])
+    runtime = closed_mapping(
+        manifest["sealed_runtime"],
+        {"code_refs", "profile_refs"},
+        "provider sealed runtime",
+    )
+    code_refs = runtime["code_refs"]
+    if not isinstance(code_refs, list) or len(code_refs) != len(PROVIDER_CODE_REFS):
+        raise ValueError("provider manifest must seal the exact bootstrap code set")
+    validated_code: list[dict[str, Any]] = []
+    for item, expected in zip(code_refs, PROVIDER_CODE_REFS, strict=True):
+        code = closed_mapping(
+            item,
+            {"role", "relative_path", "file_sha256"},
+            "provider code ref",
+        )
+        if (code["role"], code["relative_path"]) != expected:
+            raise ValueError("provider code ref role/path is invalid")
+        require_relative_posix_path(code["relative_path"], "provider code path")
+        require_sha256(code["file_sha256"], "provider code file SHA")
+        validated_code.append(code)
+    profile_refs = runtime["profile_refs"]
+    if not isinstance(profile_refs, list) or not 1 <= len(profile_refs) <= 16:
+        raise ValueError("provider manifest profile refs are invalid")
+    validated_profiles: list[dict[str, Any]] = []
+    seen_profiles: set[str] = set()
+    for item in profile_refs:
+        profile = closed_mapping(
+            item,
+            {"role", "relative_path", "file_sha256"},
+            "provider profile ref",
+        )
+        path = require_relative_posix_path(
+            profile["relative_path"], "provider profile path"
+        )
+        if (
+            not path.startswith("configs/")
+            or not path.endswith(".json")
+            or path in seen_profiles
+            or not isinstance(profile["role"], str)
+            or not profile["role"]
+        ):
+            raise ValueError("provider profile ref is invalid")
+        require_sha256(profile["file_sha256"], "provider profile file SHA")
+        seen_profiles.add(path)
+        validated_profiles.append(profile)
+    runtime["code_refs"] = validated_code
+    runtime["profile_refs"] = validated_profiles
     if manifest["arm_order"] != list(ARM_ORDER):
         raise ValueError("provider manifest arm order is invalid")
     if manifest["safety"] != SAFETY:
         raise ValueError("provider manifest safety boundary is invalid")
     manifest["provider_corpus_ref"] = ref
+    manifest["sealed_runtime"] = runtime
     return manifest
