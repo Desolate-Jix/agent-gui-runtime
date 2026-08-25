@@ -279,15 +279,19 @@ def _validate_authorization_for_backend(
         "absolute_owner_journal_root": backend.owner_journal_root,
     }
     actual = {
-        "fixed_authorization_path": Path(payload["fixed_authorization_path"]),
-        "absolute_ledger_root": Path(ledger["absolute_ledger_root"]),
-        "holdout_events_path": Path(ledger["holdout_events_path"]),
-        "absolute_owner_journal_root": Path(payload["absolute_owner_journal_root"]),
+        "fixed_authorization_path": payload["fixed_authorization_path"],
+        "absolute_ledger_root": ledger["absolute_ledger_root"],
+        "holdout_events_path": ledger["holdout_events_path"],
+        "absolute_owner_journal_root": payload["absolute_owner_journal_root"],
     }
-    if any(actual[key].resolve() != value.resolve() for key, value in expected.items()):
-        raise ValueError("holdout authorization paths are not bound to backend")
-    if any(str(actual[key]) != str(actual[key].resolve()) for key in actual):
-        raise ValueError("holdout authorization paths are not canonical")
+    expected_text = {key: str(value) for key, value in expected.items()}
+    mismatched = {
+        key: (actual[key], expected_text[key])
+        for key in expected
+        if actual[key] != expected_text[key]
+    }
+    if mismatched:
+        raise ValueError(f"holdout authorization paths are not bound to backend: {mismatched}")
 
 
 def _current_user_sid() -> str:
@@ -311,35 +315,109 @@ class _SECURITY_ATTRIBUTES(ctypes.Structure):
     ]
 
 
-@contextmanager
-def _security_attributes(kind: str) -> Iterator[ctypes.POINTER(_SECURITY_ATTRIBUTES)]:
-    rights = {"file": "FA", "registry": "KA", "mutex": "GA"}[kind]
-    sddl = f"D:P(A;;{rights};;;SY)(A;;{rights};;;{_current_user_sid()})"
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    pointer = ctypes.c_void_p()
-    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = (
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(wintypes.DWORD),
-    )
-    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
-    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        sddl, 1, ctypes.byref(pointer), None
-    ):
-        raise ctypes.WinError(ctypes.get_last_error())
-    attributes = _SECURITY_ATTRIBUTES(
-        ctypes.sizeof(_SECURITY_ATTRIBUTES), pointer, False
-    )
-    try:
-        yield ctypes.pointer(attributes)
-    finally:
-        kernel.LocalFree.argtypes = (ctypes.c_void_p,)
-        kernel.LocalFree.restype = ctypes.c_void_p
-        remaining = kernel.LocalFree(pointer)
-        if remaining:
+def _control_matches(
+    control: Mapping[str, object] | None, key: str, label: str
+) -> bool:
+    return dict(control or {}).get(key) == label
+
+
+class _SecurityBuffer:
+    def __init__(
+        self,
+        kind: str,
+        label: str,
+        control: Mapping[str, object] | None,
+    ) -> None:
+        rights = {"file": "FA", "registry": "KA", "mutex": "GA"}[kind]
+        sddl = f"D:P(A;;{rights};;;SY)(A;;{rights};;;{_current_user_sid()})"
+        self._label = label
+        self._control = control
+        self._kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        self._pointer = ctypes.c_void_p()
+        self._closed = False
+        self._advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = (
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.DWORD),
+        )
+        self._advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = (
+            wintypes.BOOL
+        )
+        if not self._advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, 1, ctypes.byref(self._pointer), None
+        ):
             raise ctypes.WinError(ctypes.get_last_error())
+        self._attributes = _SECURITY_ATTRIBUTES(
+            ctypes.sizeof(_SECURITY_ATTRIBUTES), self._pointer, False
+        )
+
+    @property
+    def pointer(self) -> ctypes.POINTER(_SECURITY_ATTRIBUTES):
+        if self._closed:
+            raise RuntimeError("security buffer is closed")
+        return ctypes.pointer(self._attributes)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._kernel.LocalFree.argtypes = (ctypes.c_void_p,)
+        self._kernel.LocalFree.restype = ctypes.c_void_p
+        self._kernel.SetLastError.argtypes = (wintypes.DWORD,)
+        if _control_matches(
+            self._control, "security_clobber_last_error_for", self._label
+        ):
+            self._kernel.SetLastError(5)
+        remaining = self._kernel.LocalFree(self._pointer)
+        free_error = ctypes.get_last_error()
+        if remaining:
+            retry_remaining = self._kernel.LocalFree(remaining)
+            retry_error = ctypes.get_last_error()
+            if retry_remaining:
+                raise BaseExceptionGroup(
+                    f"{self._label} security cleanup failed",
+                    [ctypes.WinError(free_error), ctypes.WinError(retry_error)],
+                )
+            self._closed = True
+            raise ctypes.WinError(free_error)
+        self._closed = True
+        if _control_matches(
+            self._control, "security_cleanup_failure_for", self._label
+        ):
+            raise OSError(995, f"{self._label} security cleanup failure")
+
+
+def _raise_wrapper_failures(
+    primary: BaseException | None, cleanup: list[BaseException]
+) -> None:
+    if primary is not None and cleanup:
+        raise BaseExceptionGroup("wrapper cleanup failed", [primary, *cleanup])
+    if primary is not None:
+        raise primary
+    if cleanup:
+        raise BaseExceptionGroup("wrapper cleanup failed", cleanup)
+
+
+def _close_kernel_handle(
+    kernel: object,
+    handle: int,
+    *,
+    label: str,
+    control: Mapping[str, object] | None,
+) -> None:
+    try:
+        _close_handle_checked(kernel, handle)
+    except BaseException as first:
+        try:
+            _close_handle_checked(kernel, handle)
+        except BaseException as second:
+            raise BaseExceptionGroup(
+                f"{label} handle cleanup failed", [first, second]
+            )
+        raise first
+    if _control_matches(control, "close_failure_for", label):
+        raise OSError(6, f"{label} injected close failure")
 
 
 def _lock_name(kind: str, material: str) -> str:
@@ -348,7 +426,9 @@ def _lock_name(kind: str, material: str) -> str:
 
 
 @contextmanager
-def _named_mutex(name: str) -> Iterator[None]:
+def _named_mutex(
+    name: str, *, test_control: Mapping[str, object] | None = None
+) -> Iterator[None]:
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
     kernel.CreateMutexW.restype = wintypes.HANDLE
@@ -358,24 +438,45 @@ def _named_mutex(name: str) -> Iterator[None]:
     kernel.ReleaseMutex.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel.CloseHandle.restype = wintypes.BOOL
-    with _security_attributes("mutex") as security:
-        handle = kernel.CreateMutexW(security, False, name)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
+    security = _SecurityBuffer("mutex", "mutex", test_control)
+    handle = None
     acquired = False
+    primary: BaseException | None = None
+    cleanup: list[BaseException] = []
     try:
+        handle = kernel.CreateMutexW(security.pointer, False, name)
+        create_error = ctypes.get_last_error()
+        if not handle:
+            raise ctypes.WinError(create_error)
         wait = int(kernel.WaitForSingleObject(handle, _INFINITE))
         if wait not in {_WAIT_OBJECT_0, _WAIT_ABANDONED}:
             raise OSError(wait, "WaitForSingleObject mutex failed")
         acquired = True
         yield
+    except BaseException as error:
+        primary = error
     finally:
-        release_error = None
-        if acquired and not kernel.ReleaseMutex(handle):
-            release_error = ctypes.WinError(ctypes.get_last_error())
-        _close_handle_checked(kernel, handle)
-        if release_error is not None:
-            raise release_error
+        if acquired:
+            try:
+                if not kernel.ReleaseMutex(handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            except BaseException as error:
+                cleanup.append(error)
+        if handle:
+            try:
+                _close_kernel_handle(
+                    kernel,
+                    handle,
+                    label="mutex",
+                    control=test_control,
+                )
+            except BaseException as error:
+                cleanup.append(error)
+        try:
+            security.close()
+        except BaseException as error:
+            cleanup.append(error)
+    _raise_wrapper_failures(primary, cleanup)
 
 
 def _claim_mutex_name(backend: _Backend) -> str:
@@ -463,48 +564,70 @@ def _write_secure_new_file(
     kernel.FlushFileBuffers.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel.CloseHandle.restype = wintypes.BOOL
-    with _security_attributes("file") as security:
+    security = _SecurityBuffer("file", "authorization", test_control)
+    handle = None
+    primary: BaseException | None = None
+    cleanup: list[BaseException] = []
+    result: bool | None = None
+    try:
         handle = kernel.CreateFileW(
             str(path),
             _GENERIC_WRITE | _FILE_READ_ATTRIBUTES | _SYNCHRONIZE,
             _FILE_SHARE_READ,
-            security,
+            security.pointer,
             _CREATE_NEW,
             _FILE_ATTRIBUTE_READONLY | _FILE_FLAG_WRITE_THROUGH,
             None,
         )
-    if handle == _INVALID_HANDLE:
-        if ctypes.get_last_error() in {80, 183}:
-            return False
-        raise ctypes.WinError(ctypes.get_last_error())
-    close_error = None
-    try:
-        pause = dict(test_control or {}).get("pause_after_authorization_create")
-        if isinstance(pause, Mapping):
-            Path(str(pause["ready_path"])).write_text("created", encoding="utf-8")
-            release = Path(str(pause["release_path"]))
-            deadline = time.monotonic() + 20
-            while not release.exists():
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(release)
-                time.sleep(0.01)
-        if raw:
-            buffer = ctypes.create_string_buffer(raw)
-            written = wintypes.DWORD()
-            if not kernel.WriteFile(
-                handle, buffer, len(raw), ctypes.byref(written), None
-            ) or int(written.value) != len(raw):
+        create_error = ctypes.get_last_error()
+        if handle == _INVALID_HANDLE:
+            handle = None
+            if create_error in {80, 183}:
+                result = False
+            else:
+                raise ctypes.WinError(create_error)
+        else:
+            pause = dict(test_control or {}).get("pause_after_authorization_create")
+            if isinstance(pause, Mapping):
+                Path(str(pause["ready_path"])).write_text("created", encoding="utf-8")
+                release = Path(str(pause["release_path"]))
+                deadline = time.monotonic() + 20
+                while not release.exists():
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(release)
+                    time.sleep(0.01)
+            if _control_matches(test_control, "body_failure_for", "authorization"):
+                raise ValueError("authorization injected body failure")
+            if raw:
+                buffer = ctypes.create_string_buffer(raw)
+                written = wintypes.DWORD()
+                if not kernel.WriteFile(
+                    handle, buffer, len(raw), ctypes.byref(written), None
+                ) or int(written.value) != len(raw):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            if not kernel.FlushFileBuffers(handle):
                 raise ctypes.WinError(ctypes.get_last_error())
-        if not kernel.FlushFileBuffers(handle):
-            raise ctypes.WinError(ctypes.get_last_error())
+            result = True
+    except BaseException as error:
+        primary = error
     finally:
+        if handle:
+            try:
+                _close_kernel_handle(
+                    kernel,
+                    handle,
+                    label="authorization",
+                    control=test_control,
+                )
+            except BaseException as error:
+                cleanup.append(error)
         try:
-            _close_handle_checked(kernel, handle)
-        except OSError as error:
-            close_error = error
-    if close_error is not None:
-        raise close_error
-    return True
+            security.close()
+        except BaseException as error:
+            cleanup.append(error)
+    _raise_wrapper_failures(primary, cleanup)
+    assert result is not None
+    return result
 
 
 def _authorization_ref(
@@ -538,7 +661,12 @@ def _create_authorization(
     return _authorization_ref(backend, wrapped, digest)
 
 
-def _sentinel_create(path: Path, failpoint: str | None) -> bool:
+def _sentinel_create(
+    path: Path,
+    failpoint: str | None,
+    *,
+    test_control: Mapping[str, object] | None = None,
+) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.CreateFileW.argtypes = (
@@ -555,36 +683,58 @@ def _sentinel_create(path: Path, failpoint: str | None) -> bool:
     kernel.FlushFileBuffers.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel.CloseHandle.restype = wintypes.BOOL
-    with _security_attributes("file") as security:
+    security = _SecurityBuffer("file", "sentinel", test_control)
+    handle = None
+    primary: BaseException | None = None
+    cleanup: list[BaseException] = []
+    result: bool | None = None
+    try:
         handle = kernel.CreateFileW(
             str(path),
             _GENERIC_WRITE | _FILE_READ_ATTRIBUTES | _SYNCHRONIZE,
             _FILE_SHARE_READ,
-            security,
+            security.pointer,
             _CREATE_NEW,
             _FILE_ATTRIBUTE_READONLY | _FILE_FLAG_WRITE_THROUGH,
             None,
         )
-    if handle == _INVALID_HANDLE:
-        if ctypes.get_last_error() in {80, 183}:
-            return False
-        raise ctypes.WinError(ctypes.get_last_error())
-    if failpoint == "sentinel_before_flush":
-        os._exit(89)
-    close_error = None
-    try:
-        if not kernel.FlushFileBuffers(handle):
-            raise ctypes.WinError(ctypes.get_last_error())
+        create_error = ctypes.get_last_error()
+        if handle == _INVALID_HANDLE:
+            handle = None
+            if create_error in {80, 183}:
+                result = False
+            else:
+                raise ctypes.WinError(create_error)
+        else:
+            if failpoint == "sentinel_before_flush":
+                os._exit(89)
+            if _control_matches(test_control, "body_failure_for", "sentinel"):
+                raise ValueError("sentinel injected body failure")
+            if not kernel.FlushFileBuffers(handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            result = True
+    except BaseException as error:
+        primary = error
     finally:
+        if handle:
+            try:
+                _close_kernel_handle(
+                    kernel,
+                    handle,
+                    label="sentinel",
+                    control=test_control,
+                )
+            except BaseException as error:
+                cleanup.append(error)
         try:
-            _close_handle_checked(kernel, handle)
-        except OSError as error:
-            close_error = error
-    if close_error is not None:
-        raise close_error
-    if not _file_anchor_exact(path, size=0):
+            security.close()
+        except BaseException as error:
+            cleanup.append(error)
+    _raise_wrapper_failures(primary, cleanup)
+    assert result is not None
+    if result and not _file_anchor_exact(path, size=0):
         raise ValueError("sentinel attributes or security invalid")
-    return True
+    return result
 
 
 _REG_VALUES = {
@@ -646,6 +796,8 @@ def _registry_create(
     cid: str,
     values: Mapping[str, object],
     failpoint: str | None,
+    *,
+    test_control: Mapping[str, object] | None = None,
 ) -> bool:
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
     handle = wintypes.HKEY()
@@ -672,7 +824,12 @@ def _registry_create(
     advapi.RegFlushKey.argtypes = (wintypes.HKEY,)
     advapi.RegCloseKey.argtypes = (wintypes.HKEY,)
     subkey = backend.registry_root + "\\" + cid
-    with _security_attributes("registry") as security:
+    security = _SecurityBuffer("registry", "registry", test_control)
+    acquired = False
+    primary: BaseException | None = None
+    cleanup: list[BaseException] = []
+    result: bool | None = None
+    try:
         rc = advapi.RegCreateKeyExW(
             0x80000001,
             subkey,
@@ -680,55 +837,82 @@ def _registry_create(
             None,
             0,
             0x1 | 0x2 | 0x4 | 0x20000 | 0x100,
-            security,
+            security.pointer,
             ctypes.byref(handle),
             ctypes.byref(disposition),
         )
-    if rc:
-        raise OSError(rc, "RegCreateKeyExW failed")
-    try:
+        if rc:
+            raise OSError(rc, "RegCreateKeyExW failed")
+        acquired = True
         if disposition.value != 1:
-            return False
-        if failpoint == "registry_create":
-            os._exit(91)
-        for name in (
-            "ContractVersion",
-            "ClaimId",
-            "AuthorizationEnvelopeSha256",
-            "ClaimEnvelope",
-            "ClaimEnvelopeSha256",
-        ):
-            value = values[name]
-            if isinstance(value, bytes):
-                buffer = ctypes.create_string_buffer(value)
-                kind = 3
-                size = len(value)
-            else:
-                buffer = ctypes.create_unicode_buffer(str(value))
-                kind = 1
-                size = ctypes.sizeof(buffer)
-            rc = advapi.RegSetValueExW(
-                handle,
-                name,
-                0,
-                kind,
-                ctypes.cast(buffer, ctypes.c_void_p),
-                size,
-            )
+            result = False
+        else:
+            if failpoint == "registry_create":
+                os._exit(91)
+            if _control_matches(test_control, "body_failure_for", "registry"):
+                raise ValueError("registry injected body failure")
+            for name in (
+                "ContractVersion",
+                "ClaimId",
+                "AuthorizationEnvelopeSha256",
+                "ClaimEnvelope",
+                "ClaimEnvelopeSha256",
+            ):
+                value = values[name]
+                if isinstance(value, bytes):
+                    buffer = ctypes.create_string_buffer(value)
+                    kind = 3
+                    size = len(value)
+                else:
+                    buffer = ctypes.create_unicode_buffer(str(value))
+                    kind = 1
+                    size = ctypes.sizeof(buffer)
+                rc = advapi.RegSetValueExW(
+                    handle,
+                    name,
+                    0,
+                    kind,
+                    ctypes.cast(buffer, ctypes.c_void_p),
+                    size,
+                )
+                if rc:
+                    raise OSError(rc, "RegSetValueExW failed")
+                if failpoint == "registry_record" and name == "ClaimEnvelope":
+                    os._exit(92)
+            if failpoint == "registry_flush":
+                os._exit(93)
+            rc = advapi.RegFlushKey(handle)
             if rc:
-                raise OSError(rc, "RegSetValueExW failed")
-            if failpoint == "registry_record" and name == "ClaimEnvelope":
-                os._exit(92)
-        if failpoint == "registry_flush":
-            os._exit(93)
-        rc = advapi.RegFlushKey(handle)
-        if rc:
-            raise OSError(rc, "RegFlushKey failed")
+                raise OSError(rc, "RegFlushKey failed")
+            result = True
+    except BaseException as error:
+        primary = error
     finally:
-        rc = advapi.RegCloseKey(handle)
-        if rc:
-            raise OSError(rc, "RegCloseKey failed")
-    return True
+        if acquired:
+            try:
+                rc = advapi.RegCloseKey(handle)
+                if rc:
+                    retry_rc = advapi.RegCloseKey(handle)
+                    if retry_rc:
+                        raise BaseExceptionGroup(
+                            "registry handle cleanup failed",
+                            [
+                                OSError(rc, "RegCloseKey failed"),
+                                OSError(retry_rc, "RegCloseKey retry failed"),
+                            ],
+                        )
+                    raise OSError(rc, "RegCloseKey failed before successful retry")
+                if _control_matches(test_control, "close_failure_for", "registry"):
+                    raise OSError(6, "registry injected close failure")
+            except BaseException as error:
+                cleanup.append(error)
+        try:
+            security.close()
+        except BaseException as error:
+            cleanup.append(error)
+    _raise_wrapper_failures(primary, cleanup)
+    assert result is not None
+    return result
 
 
 def _claim_payload(
@@ -920,7 +1104,9 @@ def _claim_with_backend(
             backend.file_root
             / f"{payload['claim_id']}--{auth_ref['envelope_sha256']}.claim"
         )
-        if not _sentinel_create(sentinel, failpoint):
+        if not _sentinel_create(
+            sentinel, failpoint, test_control=test_control
+        ):
             return {
                 "state": "consumed_incomplete",
                 "claim_id": payload["claim_id"],
@@ -931,7 +1117,11 @@ def _claim_with_backend(
         if failpoint == "sentinel_create":
             os._exit(90)
         created = _registry_create(
-            backend, str(payload["claim_id"]), expected, failpoint
+            backend,
+            str(payload["claim_id"]),
+            expected,
+            failpoint,
+            test_control=test_control,
         )
         state = _inspect(backend, auth_ref, expected)
         if state == "consumed":
