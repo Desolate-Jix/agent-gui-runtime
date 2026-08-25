@@ -13,13 +13,18 @@ from app.learn.hybrid.benchmark import (
     ARM_IDS,
     build_prediction_request,
     contains_gold_fields,
+    content_sha256,
     provider_manifest_projection,
     seal_benchmark_manifest,
+    seal_prediction_run,
+    validate_prediction_record,
     verify_benchmark_manifest,
 )
 from app.learn.hybrid.benchmark_scorer_v1 import (
     evaluate_release_gate,
     score_benchmark_predictions,
+    seal_lifecycle_evidence,
+    validate_gate_config,
 )
 
 
@@ -62,9 +67,38 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
     }
     for name, relative in files.items():
         _write(tmp_path / relative, f"{name}\n".encode("utf-8"))
-    _write(tmp_path / "images/case-001.png", b"synthetic-image")
     identity_a = hashlib.sha256(b"annotator-a").hexdigest()
     identity_b = hashlib.sha256(b"reviewer-b").hexdigest()
+    identity_c = hashlib.sha256(b"image-reviewer-c").hexdigest()
+    cases: list[dict[str, object]] = []
+    for image_index in range(20):
+        partition = "regression" if image_index < 10 else "holdout"
+        image_path = f"images/image-{image_index:03d}.png"
+        _write(tmp_path / image_path, f"synthetic-image-{image_index}\n".encode("utf-8"))
+        for target_index in range(5):
+            case_id = f"case-{image_index:03d}-{target_index:02d}"
+            cases.append(
+                {
+                    "case_id": case_id,
+                    "partition": partition,
+                    "image_path": image_path,
+                    "image_review": {
+                        "reviewer_identity_hash": identity_c,
+                        "review_status": "approved",
+                        "privacy_review_status": "approved",
+                    },
+                    "goal": f"Select important target {target_index}",
+                    "gold": {
+                        "acceptable_candidate_ids": [f"candidate/{case_id}"],
+                        "acceptable_regions": [[10, 10, 30, 30]],
+                        "annotator_identity_hash": identity_a,
+                        "reviewer_identity_hash": identity_b,
+                        "acceptable_region_disagreement": "resolved_by_independent_review",
+                        "review_status": "approved",
+                        "important_target": True,
+                    },
+                }
+            )
     shared_budget = {
         "max_provider_calls_per_case": 3,
         "max_output_tokens_per_case": 2048,
@@ -93,21 +127,7 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
             _arm("omni_to_qwen", "pre-vista", ["omni", "qwen"]),
             _arm("omni_to_qwen_vista", "post-vista", ["omni", "qwen", "vista"]),
         ],
-        "cases": [
-            {
-                "case_id": "case-001",
-                "partition": "regression",
-                "image_path": "images/case-001.png",
-                "goal": "Open the application flow",
-                "gold": {
-                    "acceptable_candidate_ids": ["candidate/expected"],
-                    "acceptable_regions": [[10, 10, 30, 30]],
-                    "annotator_identity_hash": identity_a,
-                    "reviewer_identity_hash": identity_b,
-                    "acceptable_region_disagreement": "resolved_by_independent_review",
-                },
-            }
-        ],
+        "cases": cases,
         "evidence_policy": {
             "public": "aggregate_metrics_only",
             "private": "case_level_gold_and_predictions",
@@ -119,47 +139,134 @@ def _sealed(tmp_path: Path) -> dict[str, object]:
     return seal_benchmark_manifest(_manifest_template(tmp_path), root=tmp_path)
 
 
-def _selection(selected: bool, *, candidate_id: str | None = None) -> dict[str, object]:
+def _collapse_first_image(template: dict[str, object]) -> None:
+    replacement = template["cases"][5]["image_path"]
+    for case in template["cases"][:5]:
+        case["image_path"] = replacement
+
+
+def _drop_private_provider_evidence(report: dict[str, object]) -> None:
+    prediction = report["private_evidence"]["prediction_records"][0]
+    prediction["provider_evidence"] = []
+    prediction["content_sha256"] = content_sha256(prediction)
+
+
+def _diverge_case_from_prediction(report: dict[str, object]) -> None:
+    report["private_evidence"]["case_results"][0]["candidate_id"] = "candidate/fabricated"
+
+
+def _run(tmp_path: Path, sealed: dict[str, object], partition: str = "holdout") -> dict[str, object]:
+    return seal_prediction_run(
+        sealed,
+        run_id=f"run/{partition}/001",
+        partition=partition,
+        root=tmp_path,
+    )
+
+
+def _requests(
+    tmp_path: Path, sealed: dict[str, object], run: dict[str, object]
+) -> list[dict[str, object]]:
+    return [
+        build_prediction_request(
+            sealed,
+            arm_id,
+            case["case_id"],
+            root=tmp_path,
+            prediction_run=run,
+        )
+        for arm_id in ARM_IDS
+        for case in sealed["cases"]
+        if case["partition"] == run["partition"]
+    ]
+
+
+def _lifecycle_template() -> dict[str, object]:
+    return {
+        "contract_version": "portfolio_hybrid_v1_1_lifecycle_evidence_template_v1",
+        "max_simultaneous_gpu_owners": 1,
+        "providers": [
+            {
+                "provider_id": provider_id,
+                "cleanup_status": "verified",
+                "vram_release_delta_mb": delta,
+                "compute_termination_after_cancellation": "verified",
+                "compute_termination_after_timeout": "verified",
+            }
+            for provider_id, delta in (("omni", 8), ("qwen", 16), ("vista", 32))
+        ],
+        "orphan_provider_pids": 0,
+        "orphan_helper_pids": 0,
+        "lease_files_remaining": 0,
+    }
+
+
+def _lifecycle(run: dict[str, object], requests: list[dict[str, object]]) -> dict[str, object]:
+    return seal_lifecycle_evidence(_lifecycle_template(), run, requests)
+
+
+def _selection(case_id: str, selected: bool = True) -> dict[str, object]:
     return {
         "selected": selected,
-        "candidate_id": candidate_id,
+        "candidate_id": f"candidate/{case_id}" if selected else None,
         "point": [20, 20] if selected else None,
     }
 
 
 def _prediction(
-    sealed: dict[str, object],
-    arm_id: str,
-    *,
+    request: dict[str, object], lifecycle: dict[str, object], *,
     selected: bool = True,
-    candidate_id: str | None = "candidate/expected",
+    review_status: str = "approved",
+    vista_status: str | None = None,
 ) -> dict[str, object]:
-    selection = _selection(selected, candidate_id=candidate_id if selected else None)
-    return {
+    case_id = request["case"]["case_id"]
+    selection = _selection(case_id, selected)
+    is_vista = request["arm_id"] == "omni_to_qwen_vista"
+    status = vista_status or ("succeeded" if is_vista else "not_requested")
+    prediction = {
         "contract_version": "portfolio_hybrid_v1_1_prediction_v1",
-        "benchmark_ref": {
-            "id": sealed["benchmark_id"],
-            "content_sha256": sealed["content_sha256"],
-        },
-        "arm_id": arm_id,
-        "case_id": "case-001",
-        "partition": "regression",
-        "producer_revision_sha256": SHA,
+        "benchmark_ref": deepcopy(request["benchmark_ref"]),
+        "run_ref": deepcopy(request["run_ref"]),
+        "request_ref": {"id": request["request_id"], "content_sha256": request["content_sha256"]},
+        "arm_id": request["arm_id"],
+        "statistical_identity_sha256": request["statistical_identity_sha256"],
+        "case_id": case_id,
+        "partition": request["case"]["partition"],
+        "producer_artifact_ref": deepcopy(request["producer_artifact_ref"]),
+        "provider_revisions_sha256": request["provider_revisions_sha256"],
+        "budget_sha256": request["budget_sha256"],
+        "context_policy_sha256": request["context_policy_sha256"],
         "pre_review": deepcopy(selection),
-        "post_review": {"status": "reviewed", **deepcopy(selection)},
+        "post_review": {"status": review_status, **deepcopy(selection)},
         "vista": {
-            "status": "not_requested" if "vista" not in arm_id else "succeeded",
-            "candidate_id": candidate_id if "vista" in arm_id else None,
-            "candidate_bbox_ref": None,
-            "roi_ref": None,
-            "affine_transform_ref": None,
-            "canonical_point": [20, 20] if "vista" in arm_id else None,
+            "requested": is_vista,
+            "status": status,
+            "candidate_id": f"candidate/{case_id}" if is_vista and status == "succeeded" else None,
+            "candidate_bbox_ref": {"id": f"bbox/{case_id}", "content_sha256": SHA} if is_vista and status == "succeeded" else None,
+            "roi_ref": {"id": f"roi/{case_id}", "content_sha256": SHA} if is_vista and status == "succeeded" else None,
+            "affine_transform_ref": {"id": f"transform/{case_id}", "content_sha256": SHA} if is_vista and status == "succeeded" else None,
+            "canonical_point": [20, 20] if is_vista and status == "succeeded" else None,
         },
-        "provider_evidence_refs": [],
-        "cleanup_evidence_ref": None,
+        "provider_evidence": [
+            {
+                "provider_id": provider_id,
+                "evidence_ref": {"id": f"evidence/{request['request_id']}/{provider_id}", "content_sha256": SHA},
+            }
+            for provider_id in request["required_provider_ids"]
+        ],
+        "cleanup_evidence_ref": {
+            "id": lifecycle["evidence_id"],
+            "content_sha256": lifecycle["content_sha256"],
+        },
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
     }
+    prediction["content_sha256"] = content_sha256(prediction)
+    return prediction
+
+
+def _predictions(requests: list[dict[str, object]], lifecycle: dict[str, object], **kwargs: object) -> list[dict[str, object]]:
+    return [_prediction(request, lifecycle, **kwargs) for request in requests]
 
 
 def _gate_config() -> dict[str, object]:
@@ -169,10 +276,19 @@ def _gate_config() -> dict[str, object]:
         "quality": {
             "release_arm": "omni_to_qwen_vista",
             "split": "post_review",
+            "required_partition": "holdout",
             "min_selected_count": 1,
             "min_selection_precision": 1.0,
             "min_target_recall": 1.0,
             "max_wrong_selected_count": 0,
+            "min_distinct_image_count": 20,
+            "max_distinct_image_count": 30,
+            "min_target_count": 100,
+            "max_target_count": 200,
+            "required_image_review_status": "approved",
+            "required_target_review_status": "approved",
+            "required_post_review_status": "approved",
+            "require_vista_success": True,
         },
         "cleanup": {
             "max_simultaneous_gpu_owners": 1,
@@ -188,238 +304,336 @@ def _gate_config() -> dict[str, object]:
             "private": "sealed_case_evidence",
         },
     }
-    encoded = json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    config["config_sha256"] = hashlib.sha256(encoded).hexdigest()
+    config["config_sha256"] = hashlib.sha256(
+        json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     return config
 
 
-def _verified_cleanup() -> dict[str, object]:
-    return {
-        "max_simultaneous_gpu_owners": 1,
-        "providers": [
-            {
-                "provider_id": "omni",
-                "cleanup_status": "verified",
-                "vram_release_delta_mb": 8,
-            },
-            {
-                "provider_id": "qwen",
-                "cleanup_status": "verified",
-                "vram_release_delta_mb": 16,
-            },
-            {
-                "provider_id": "vista",
-                "cleanup_status": "verified",
-                "vram_release_delta_mb": 32,
-            },
-        ],
-        "orphan_provider_pids": 0,
-        "orphan_helper_pids": 0,
-        "lease_files_remaining": 0,
-        "cancel_timeout_compute_termination": "verified",
-    }
-
-
-def test_provider_projection_never_contains_gold_or_expected_target(tmp_path: Path) -> None:
-    projection = provider_manifest_projection(_sealed(tmp_path))
-    encoded = json.dumps(projection, sort_keys=True)
-
-    assert contains_gold_fields(projection) is False
-    assert "gold" not in encoded.casefold()
-    assert "expected_candidate" not in encoded.casefold()
-    assert "acceptable_bbox" not in encoded.casefold()
-    assert "acceptable_region" not in encoded.casefold()
-    assert "annotator" not in encoded.casefold()
-    assert "reviewer" not in encoded.casefold()
-
-
-def test_seal_binds_every_file_revision_budget_and_context_before_prediction(tmp_path: Path) -> None:
+def _score_bundle(tmp_path: Path, partition: str = "holdout", **prediction_kwargs: object) -> tuple[dict[str, object], ...]:
     sealed = _sealed(tmp_path)
-
-    assert set(sealed["artifact_seals"]) == {
-        "gate_config",
-        "benchmark_producer",
-        "benchmark_runner",
-        "scorer",
-        "corpus_manifest",
-        "gold",
-    }
-    assert all(len(item["sha256"]) == 64 for item in sealed["artifact_seals"].values())
-    assert len(sealed["cases"][0]["image_sha256"]) == 64
-    assert len(sealed["cases"][0]["gold_sha256"]) == 64
-    assert len(sealed["provider_revisions_sha256"]) == 64
-    assert len(sealed["shared_budget_sha256"]) == 64
-    assert len(sealed["shared_context_policy_sha256"]) == 64
-    assert verify_benchmark_manifest(sealed, root=tmp_path) == sealed
+    run = _run(tmp_path, sealed, partition)
+    requests = _requests(tmp_path, sealed, run)
+    lifecycle = _lifecycle(run, requests)
+    predictions = _predictions(requests, lifecycle, **prediction_kwargs)
+    report = score_benchmark_predictions(sealed, run, requests, predictions, lifecycle)
+    return sealed, run, requests, lifecycle, predictions, report
 
 
-def test_post_seal_manifest_or_file_mutation_is_rejected(tmp_path: Path) -> None:
+def test_provider_projection_and_requests_never_contain_scorer_private_fields(tmp_path: Path) -> None:
     sealed = _sealed(tmp_path)
-    mutated = deepcopy(sealed)
-    mutated["cases"][0]["goal"] = "A changed goal"
-
-    with pytest.raises(ValueError, match="content_sha256 mismatch"):
-        provider_manifest_projection(mutated)
-
-    (tmp_path / "scorer.py").write_text("mutated\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="artifact seal mismatch: scorer"):
-        verify_benchmark_manifest(sealed, root=tmp_path)
-
-
-def test_seal_rejects_unequal_non_omni_context(tmp_path: Path) -> None:
-    template = _manifest_template(tmp_path)
-    template["arms"][2]["context_policy"]["ocr"] = "disabled"
-
-    with pytest.raises(ValueError, match="shared UIA/OCR context policy"):
-        seal_benchmark_manifest(template, root=tmp_path)
-
-
-def test_seal_rejects_unequal_budgets(tmp_path: Path) -> None:
-    template = _manifest_template(tmp_path)
-    template["arms"][1]["budget"]["max_provider_calls_per_case"] = 2
-
-    with pytest.raises(ValueError, match="equal budgets"):
-        seal_benchmark_manifest(template, root=tmp_path)
-
-
-def test_seal_rejects_duplicate_statistical_arms(tmp_path: Path) -> None:
-    template = _manifest_template(tmp_path)
-    duplicate = deepcopy(template["arms"][2])
-    duplicate["arm_id"] = "duplicate_alias"
-    template["arms"].append(duplicate)
-
-    with pytest.raises(ValueError, match="duplicate statistical arm"):
-        seal_benchmark_manifest(template, root=tmp_path)
-
-
-def test_generic_prediction_requests_cover_every_arm_and_future_vista_fields(tmp_path: Path) -> None:
-    sealed = _sealed(tmp_path)
-
-    requests = [build_prediction_request(sealed, arm_id, "case-001") for arm_id in ARM_IDS]
-
-    assert [item["arm_id"] for item in requests] == list(ARM_IDS)
-    assert all(set(item["vista_payload"]) == {
-        "enabled",
-        "proposal_contract_version",
-        "candidate_id",
-        "candidate_bbox_ref",
-        "roi_ref",
-        "affine_transform_ref",
-        "canonical_point",
-    } for item in requests)
-    assert requests[-1]["vista_payload"]["enabled"] is True
-    assert all(contains_gold_fields(item) is False for item in requests)
-
-
-def test_scorer_keeps_public_aggregate_separate_from_private_case_evidence(tmp_path: Path) -> None:
-    sealed = _sealed(tmp_path)
-    report = score_benchmark_predictions(
-        sealed,
-        [_prediction(sealed, arm_id) for arm_id in ARM_IDS],
+    run = _run(tmp_path, sealed)
+    projection = provider_manifest_projection(sealed, root=tmp_path)
+    request = build_prediction_request(
+        sealed, "omni_to_qwen_vista", "case-010-00", root=tmp_path, prediction_run=run
     )
-
-    public = json.dumps(report["public_evidence"], sort_keys=True)
-    private = report["private_evidence"]
-    assert "case-001" not in public
-    assert "gold" not in public.casefold()
-    assert "acceptable" not in public.casefold()
-    assert private["visibility"] == "private_gold_evaluation"
-    assert private["case_results"][0]["case_id"] == "case-001"
-    assert set(report["arms"]["omni_to_qwen_vista"]) >= {"pre_review", "post_review", "vista"}
-
-
-def test_zero_selection_cannot_produce_false_gate_success(tmp_path: Path) -> None:
-    sealed = _sealed(tmp_path)
-    report = score_benchmark_predictions(
-        sealed,
-        [_prediction(sealed, arm_id, selected=False, candidate_id=None) for arm_id in ARM_IDS],
+    forbidden = (
+        "gold", "expected", "acceptable", "annotator", "reviewer",
+        "scorer_only", "private_evidence", "ground_truth",
     )
-
-    metrics = report["arms"]["omni_to_qwen_vista"]["post_review"]
-    assert metrics["selected_count"] == 0
-    assert metrics["selection_precision"] is None
-    decision = evaluate_release_gate(report, _gate_config(), _verified_cleanup())
-    assert decision["eligible"] is False
-    assert decision["decision"] == "KEEP_EXPERIMENTAL"
-    assert "quality.min_selected_count" in {item["gate_id"] for item in decision["blocking_failures"]}
+    for artifact in (projection, request):
+        encoded = json.dumps(artifact, sort_keys=True).casefold()
+        assert not any(token in encoded for token in forbidden)
+        assert contains_gold_fields(artifact) is False
 
 
 @pytest.mark.parametrize(
-    ("mutate", "gate_id"),
+    "private_key",
     [
-        (lambda evidence: evidence.pop("orphan_provider_pids"), "cleanup.orphan_provider_pids"),
-        (lambda evidence: evidence.__setitem__("orphan_helper_pids", None), "cleanup.orphan_helper_pids"),
-        (lambda evidence: evidence["providers"][0].__setitem__("cleanup_status", "indeterminate"), "cleanup.provider_status"),
-        (lambda evidence: evidence.__setitem__("lease_files_remaining", 1), "cleanup.lease_files_remaining"),
-        (lambda evidence: evidence.__setitem__("max_simultaneous_gpu_owners", 2), "cleanup.max_simultaneous_gpu_owners"),
-        (lambda evidence: evidence["providers"][1].__setitem__("vram_release_delta_mb", 65), "cleanup.vram_release"),
-        (lambda evidence: evidence.__setitem__("cancel_timeout_compute_termination", "indeterminate"), "cleanup.cancel_timeout_termination"),
+        "gold_label", "expected_target", "acceptable_candidate_ids", "acceptable_regions",
+        "annotator_hash", "reviewer_hash", "scorer_only_hint", "private_evidence",
+        "ground_truth_target",
     ],
 )
-def test_release_gate_fails_closed_on_missing_or_indeterminate_cleanup(
-    tmp_path: Path, mutate: object, gate_id: str
-) -> None:
+def test_gold_field_detector_rejects_adversarial_nested_private_keys(private_key: str) -> None:
+    assert contains_gold_fields({"safe": [{"nested": {private_key: "secret"}}]}) is True
+
+
+def test_seal_binds_release_corpus_cardinality_and_review_completeness(tmp_path: Path) -> None:
     sealed = _sealed(tmp_path)
-    report = score_benchmark_predictions(
-        sealed,
-        [_prediction(sealed, arm_id) for arm_id in ARM_IDS],
+    assert sealed["corpus_coverage"] == {
+        "distinct_image_count": 20,
+        "target_count": 100,
+        "partition_image_counts": {"holdout": 10, "regression": 10},
+        "partition_target_counts": {"holdout": 50, "regression": 50},
+        "image_review_complete": True,
+        "target_review_complete": True,
+    }
+    assert verify_benchmark_manifest(sealed, root=tmp_path) == sealed
+
+
+@pytest.mark.parametrize(
+    ("mutate", "reason"),
+    [
+        (lambda template: template["cases"].pop(), "100 to 200"),
+        (_collapse_first_image, "20 to 30"),
+        (lambda template: template["cases"][0]["image_review"].__setitem__("review_status", "pending"), "image review"),
+        (lambda template: template["cases"][0]["gold"].__setitem__("review_status", "pending"), "target review"),
+        (lambda template: template["cases"][0]["gold"].__setitem__("important_target", False), "important target"),
+    ],
+)
+def test_seal_rejects_incomplete_release_corpus(tmp_path: Path, mutate: object, reason: str) -> None:
+    template = _manifest_template(tmp_path)
+    mutate(template)
+    with pytest.raises(ValueError, match=reason):
+        seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_actual_request_path_rehashes_all_sealed_files(tmp_path: Path) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    (tmp_path / "scorer.py").write_text("mutated\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact seal mismatch: scorer"):
+        build_prediction_request(
+            sealed, "qwen_only", "case-010-00", root=tmp_path, prediction_run=run
+        )
+
+
+def test_seal_rejects_unequal_context_budget_and_duplicate_arms(tmp_path: Path) -> None:
+    for mutation, reason in (
+        (lambda value: value["arms"][2]["context_policy"].__setitem__("ocr", "disabled"), "shared UIA/OCR"),
+        (lambda value: value["arms"][1]["budget"].__setitem__("max_provider_calls_per_case", 2), "equal budgets"),
+        (lambda value: value["arms"].append({**deepcopy(value["arms"][2]), "arm_id": "alias"}), "duplicate statistical arm"),
+    ):
+        template = _manifest_template(tmp_path)
+        mutation(template)
+        with pytest.raises(ValueError, match=reason):
+            seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_sealed_request_binds_exact_run_arm_budget_context_producer_and_revisions(tmp_path: Path) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    request = build_prediction_request(
+        sealed, "omni_to_qwen_vista", "case-010-00", root=tmp_path, prediction_run=run
     )
-    cleanup = _verified_cleanup()
-    mutate(cleanup)
+    arm = next(item for item in sealed["arms"] if item["arm_id"] == "omni_to_qwen_vista")
+    assert request["run_ref"] == {"id": run["run_id"], "content_sha256": run["content_sha256"]}
+    assert request["statistical_identity_sha256"] == arm["statistical_identity_sha256"]
+    assert request["producer_artifact_ref"] == sealed["artifact_seals"]["benchmark_producer"]
+    assert request["provider_revisions_sha256"] == sealed["provider_revisions_sha256"]
+    assert request["budget_sha256"] == sealed["shared_budget_sha256"]
+    assert request["context_policy_sha256"] == sealed["shared_context_policy_sha256"]
+    assert request["required_provider_ids"] == ["omni", "qwen", "vista"]
+    assert request["vista_payload"]["enabled"] is True
+    assert len(request["content_sha256"]) == 64
 
-    decision = evaluate_release_gate(report, _gate_config(), cleanup)
 
+@pytest.mark.parametrize(
+    ("mutate", "reason"),
+    [
+        (lambda prediction: prediction.__setitem__("run_ref", {"id": "stale", "content_sha256": SHA}), "run_ref"),
+        (lambda prediction: prediction.__setitem__("statistical_identity_sha256", SHA), "statistical identity"),
+        (lambda prediction: prediction.__setitem__("provider_evidence", []), "provider evidence"),
+        (lambda prediction: prediction.__setitem__("cleanup_evidence_ref", None), "cleanup_evidence_ref"),
+        (lambda prediction: prediction["vista"].__setitem__("candidate_bbox_ref", None), "bounded VISTA evidence"),
+    ],
+)
+def test_prediction_rejects_unbound_or_missing_execution_evidence(tmp_path: Path, mutate: object, reason: str) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    requests = _requests(tmp_path, sealed, run)
+    request = requests[-1]
+    lifecycle = _lifecycle(run, requests)
+    prediction = _prediction(request, lifecycle)
+    mutate(prediction)
+    prediction["content_sha256"] = content_sha256(prediction)
+    with pytest.raises(ValueError, match=reason):
+        validate_prediction_record(prediction, sealed, run, request, lifecycle)
+
+
+def test_regression_report_can_never_be_promotion_eligible(tmp_path: Path) -> None:
+    sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "regression")
+    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
     assert decision["eligible"] is False
-    assert gate_id in {item["gate_id"] for item in decision["blocking_failures"]}
+    assert decision["decision"] == "KEEP_EXPERIMENTAL"
+    assert "quality.required_partition" in {item["gate_id"] for item in decision["blocking_failures"]}
 
 
-def test_verified_cleanup_and_nonzero_quality_can_pass_gate(tmp_path: Path) -> None:
-    sealed = _sealed(tmp_path)
-    report = score_benchmark_predictions(
-        sealed,
-        [_prediction(sealed, arm_id) for arm_id in ARM_IDS],
-    )
+def test_holdout_release_requires_vista_success_and_approved_post_review(tmp_path: Path) -> None:
+    for kwargs, gate_id in (
+        ({"vista_status": "not_requested"}, "quality.vista_success"),
+        ({"review_status": "not_reviewed"}, "quality.post_review_status"),
+    ):
+        sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout", **kwargs)
+        decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+        assert decision["eligible"] is False
+        assert gate_id in {item["gate_id"] for item in decision["blocking_failures"]}
 
-    decision = evaluate_release_gate(report, _gate_config(), _verified_cleanup())
 
+def test_exact_holdout_run_and_verified_evidence_can_pass_gate(tmp_path: Path) -> None:
+    sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout")
+    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
     assert decision["eligible"] is True
     assert decision["decision"] == "PROMOTION_ELIGIBLE"
     assert decision["blocking_failures"] == []
 
 
-def test_regression_pre_vista_dry_run_is_deterministic_and_never_predicts_holdout(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ("none", "lifecycle evidence must be an object"),
+        ("missing_providers", "missing fields"),
+        ("duplicate_provider", "duplicate lifecycle provider"),
+        ("unexpected_provider", "unexpected lifecycle provider"),
+        ("nan_owner", "finite non-negative"),
+        ("negative_pid", "finite non-negative"),
+        ("boolean_lease", "finite non-negative"),
+        ("infinite_vram", "finite non-negative"),
+        ("indeterminate_cleanup", "cleanup_status"),
+        ("indeterminate_termination", "termination"),
+    ],
+)
+def test_lifecycle_contract_rejects_missing_duplicate_unexpected_and_invalid_values(
+    tmp_path: Path, mutation: str, reason: str
+) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    requests = _requests(tmp_path, sealed, run)
+    candidate: object = _lifecycle_template()
+    if mutation == "none":
+        candidate = None
+    elif mutation == "missing_providers":
+        candidate.pop("providers")
+    elif mutation == "duplicate_provider":
+        candidate["providers"].append(deepcopy(candidate["providers"][0]))
+    elif mutation == "unexpected_provider":
+        candidate["providers"].append({**deepcopy(candidate["providers"][0]), "provider_id": "unexpected"})
+    elif mutation == "nan_owner":
+        candidate["max_simultaneous_gpu_owners"] = float("nan")
+    elif mutation == "negative_pid":
+        candidate["orphan_provider_pids"] = -1
+    elif mutation == "boolean_lease":
+        candidate["lease_files_remaining"] = True
+    elif mutation == "infinite_vram":
+        candidate["providers"][0]["vram_release_delta_mb"] = float("inf")
+    elif mutation == "indeterminate_cleanup":
+        candidate["providers"][0]["cleanup_status"] = "indeterminate"
+    elif mutation == "indeterminate_termination":
+        candidate["providers"][0]["compute_termination_after_timeout"] = "indeterminate"
+    with pytest.raises(ValueError, match=reason):
+        seal_lifecycle_evidence(candidate, run, requests)
+
+
+def test_gate_rejects_stale_lifecycle_and_prediction_cleanup_refs(tmp_path: Path) -> None:
+    sealed, run, requests, lifecycle, predictions, report = _score_bundle(tmp_path, "holdout")
+    stale = deepcopy(lifecycle)
+    stale["run_ref"] = {"id": "run/stale", "content_sha256": SHA}
+    stale["content_sha256"] = content_sha256(stale)
+    with pytest.raises(ValueError, match="run_ref"):
+        evaluate_release_gate(report, _gate_config(), stale, sealed, run, requests)
+    prediction = deepcopy(predictions[0])
+    prediction["cleanup_evidence_ref"] = {"id": "cleanup/stale", "content_sha256": SHA}
+    prediction["content_sha256"] = content_sha256(prediction)
+    predictions[0] = prediction
+    with pytest.raises(ValueError, match="cleanup_evidence_ref"):
+        score_benchmark_predictions(sealed, run, requests, predictions, lifecycle)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "reason"),
+    [
+        (lambda report: report["arms"]["omni_to_qwen_vista"]["post_review"].__setitem__("selected_count", 999), "metric arithmetic"),
+        (lambda report: report.__setitem__("partition", "regression"), "partition lineage"),
+        (lambda report: report.__setitem__("provider_ids", ["omni"]), "provider set"),
+        (lambda report: report["public_evidence"].__setitem__("arms", {}), "public arms"),
+        (lambda report: report["private_evidence"]["case_results"].pop(), "case coverage"),
+        (lambda report: report["private_evidence"]["case_results"][0].__setitem__("selected", 1), "selection schema"),
+        (_drop_private_provider_evidence, "provider evidence"),
+        (_diverge_case_from_prediction, "prediction projection"),
+    ],
+)
+def test_gate_fully_revalidates_score_report_not_just_its_hash(
+    tmp_path: Path, mutate: object, reason: str
+) -> None:
+    sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout")
+    mutate(report)
+    report["private_evidence_ref"]["content_sha256"] = hashlib.sha256(
+        json.dumps(report["private_evidence"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    report["content_sha256"] = content_sha256(report)
+    with pytest.raises(ValueError, match=reason):
+        evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "reason"),
+    [
+        (("quality", "min_selection_precision"), float("nan"), "finite"),
+        (("quality", "min_target_recall"), True, "finite"),
+        (("quality", "min_selected_count"), -1, "non-negative integer"),
+        (("quality", "required_partition"), "regression", "holdout"),
+        (("quality", "release_arm"), "qwen_only", "VISTA"),
+        (("cleanup", "vram_release_tolerance_mb"), -1, "finite non-negative"),
+        (("cleanup", "max_orphan_provider_pids"), True, "non-negative integer"),
+        (("cleanup", "required_cleanup_status"), "indeterminate", "verified"),
+        (("cleanup", "require_cancel_timeout_compute_termination"), 1, "boolean true"),
+    ],
+)
+def test_gate_config_rejects_invalid_or_weakened_semantics(path: tuple[str, str], value: object, reason: str) -> None:
+    config = _gate_config()
+    config[path[0]][path[1]] = value
+    config["config_sha256"] = hashlib.sha256(
+        json.dumps({key: child for key, child in config.items() if key != "config_sha256"}, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=True).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(ValueError, match=reason):
+        validate_gate_config(config)
+
+
+def test_zero_selection_cannot_produce_false_gate_success(tmp_path: Path) -> None:
+    sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout", selected=False)
+    metrics = report["arms"]["omni_to_qwen_vista"]["post_review"]
+    assert metrics["selected_count"] == 0
+    assert metrics["selection_precision"] is None
+    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+    assert decision["eligible"] is False
+    assert "quality.min_selected_count" in {item["gate_id"] for item in decision["blocking_failures"]}
+
+
+def test_regression_pre_vista_dry_run_validates_all_frozen_interfaces(tmp_path: Path) -> None:
     outputs = [tmp_path / "one.json", tmp_path / "two.json"]
     command = [
         sys.executable,
         str(ROOT / "scripts/run_portfolio_hybrid_v1_1_benchmark.py"),
-        "--partition",
-        "regression",
-        "--phase",
-        "pre-vista",
-        "--dry-run",
+        "--partition", "regression", "--phase", "pre-vista", "--dry-run",
     ]
-    completed = []
-    for output in outputs:
-        completed.append(subprocess.run(
-            [*command, "--output", str(output)],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        ))
-
+    completed = [subprocess.run(
+        [*command, "--output", str(output)], cwd=ROOT, capture_output=True,
+        text=True, encoding="utf-8", check=False,
+    ) for output in outputs]
     assert all(item.returncode == 0 for item in completed), completed[-1].stderr
     first = json.loads(outputs[0].read_text(encoding="utf-8"))
     second = json.loads(outputs[1].read_text(encoding="utf-8"))
     assert first == second
-    assert first["partition"] == "regression"
-    assert first["phase"] == "pre-vista"
     assert first["arms"] == ["qwen_only", "omni_only_discovery", "omni_to_qwen"]
-    assert first["provider_launch_count"] == 0
-    assert first["prediction_count"] == 0
-    assert first["holdout_prediction_count"] == 0
-    assert first["owned_process_count"] == 0
+    assert set(first["frozen_interfaces"]) == {
+        "manifest_template", "gate_config", "benchmark_producer", "benchmark_runner", "scorer"
+    }
+    assert all(len(value["sha256"]) == 64 for value in first["frozen_interfaces"].values())
+    assert first["gate_validation_status"] == "verified"
+    assert {key: first[key] for key in (
+        "provider_launch_count", "prediction_count", "holdout_prediction_count", "owned_process_count"
+    )} == {key: 0 for key in (
+        "provider_launch_count", "prediction_count", "holdout_prediction_count", "owned_process_count"
+    )}
+
+
+def test_dry_run_rejects_rehashed_malformed_gate(tmp_path: Path) -> None:
+    gate = _gate_config()
+    gate["quality"]["required_partition"] = "regression"
+    gate["config_sha256"] = hashlib.sha256(
+        json.dumps({key: value for key, value in gate.items() if key != "config_sha256"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    gate_path = tmp_path / "gate.json"
+    gate_path.write_text(json.dumps(gate), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/run_portfolio_hybrid_v1_1_benchmark.py"),
+         "--partition", "regression", "--phase", "pre-vista", "--dry-run",
+         "--gate-config", str(gate_path), "--output", str(tmp_path / "out.json")],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    assert completed.returncode != 0
+    assert "holdout" in completed.stderr
 
 
 def test_runner_refuses_holdout_and_non_dry_run_before_vista(tmp_path: Path) -> None:
@@ -430,11 +644,7 @@ def test_runner_refuses_holdout_and_non_dry_run_before_vista(tmp_path: Path) -> 
     ):
         completed = subprocess.run(
             [sys.executable, script, *extra, "--output", str(tmp_path / "out.json")],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False,
         )
         assert completed.returncode != 0
         assert "regression-only dry-run" in completed.stderr

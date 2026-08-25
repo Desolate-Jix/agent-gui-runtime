@@ -4,10 +4,19 @@
   "quality": {
     "release_arm": "omni_to_qwen_vista",
     "split": "post_review",
+    "required_partition": "holdout",
     "min_selected_count": 1,
     "min_selection_precision": 0.95,
     "min_target_recall": 0.9,
-    "max_wrong_selected_count": 0
+    "max_wrong_selected_count": 0,
+    "min_distinct_image_count": 20,
+    "max_distinct_image_count": 30,
+    "min_target_count": 100,
+    "max_target_count": 200,
+    "required_image_review_status": "approved",
+    "required_target_review_status": "approved",
+    "required_post_review_status": "approved",
+    "require_vista_success": true
   },
   "cleanup": {
     "max_simultaneous_gpu_owners": 1,
@@ -22,5 +31,5 @@
     "public": "aggregate_only",
     "private": "sealed_case_evidence"
   },
-  "config_sha256": "b1256ecb0e443255c862b46d9fa5838c8397056a1340299d9bde4b41bf9c7b23"
+  "config_sha256": "adafefba7e6c536407102571d8fefa626f8c7ff1b85046608696b9d6f1fbc75b"
 }

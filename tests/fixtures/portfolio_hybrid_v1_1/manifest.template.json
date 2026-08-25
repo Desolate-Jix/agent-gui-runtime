@@ -92,13 +92,20 @@
       "case_id": "REPLACE_WITH_CASE_ID",
       "partition": "REPLACE_WITH_REGRESSION_OR_HOLDOUT",
       "image_path": "REPLACE_WITH_REPOSITORY_RELATIVE_IMAGE_PATH",
+      "image_review": {
+        "reviewer_identity_hash": "2222222222222222222222222222222222222222222222222222222222222222",
+        "review_status": "approved",
+        "privacy_review_status": "approved"
+      },
       "goal": "REPLACE_WITH_PROVIDER_VISIBLE_GOAL",
       "gold": {
         "acceptable_candidate_ids": [],
         "acceptable_regions": [[0, 0, 1, 1]],
         "annotator_identity_hash": "0000000000000000000000000000000000000000000000000000000000000000",
         "reviewer_identity_hash": "1111111111111111111111111111111111111111111111111111111111111111",
-        "acceptable_region_disagreement": "none"
+        "acceptable_region_disagreement": "none",
+        "review_status": "approved",
+        "important_target": true
       }
     }
   ],
