@@ -125,6 +125,7 @@ let learningDraftOwnershipSelections = {};
 let imageInspectorEditContext = null;
 let imageInspectorSelection = null;
 let learningDraftEditorState = null;
+let learningHybridReviewState = null;
 let learningDraftEditorRevision = 0;
 let learningDraftEditorLoadToken = 0;
 let learningDraftEditorSelected = null;
@@ -369,10 +370,15 @@ async function refreshHybridRolloutStatus() {
 
 function learningPipelineModeStatus(mode = LEARNING_PIPELINE_MODE) {
   if (mode === "hybrid_v1_1") {
+    const status = typeof backendHybridRolloutStatus === "object"
+      ? backendHybridRolloutStatus
+      : { ready: false, reason: "hybrid_rollout_disabled" };
     return {
       learning_pipeline_mode: "hybrid_v1_1",
-      rollout: backendHybridRolloutStatus.ready === true ? "experimental" : "unavailable",
-      reason: backendHybridRolloutStatus.reason,
+      rollout: status.ready === true
+        ? "experimental"
+        : status.reason === "hybrid_rollout_disabled" ? "disabled" : "unavailable",
+      reason: status.reason,
     };
   }
   return { learning_pipeline_mode: "incumbent", rollout: "active" };
@@ -3605,6 +3611,7 @@ function updateLearningDraftEditorControls() {
   const undo = $("imageInspectorUndoBtn");
   const redo = $("imageInspectorRedoBtn");
   const remove = $("imageInspectorDeleteBoxBtn");
+  const humanPoint = $("imageInspectorHybridPointBtn");
   const label = $("imageInspectorLabel");
   const description = $("imageInspectorDescription");
   const role = $("imageInspectorRoleSelect");
@@ -3629,6 +3636,11 @@ function updateLearningDraftEditorControls() {
   if (undo) undo.disabled = !learningDraftEditorState?.canUndo();
   if (redo) redo.disabled = !learningDraftEditorState?.canRedo();
   if (remove) remove.disabled = !selected;
+  if (humanPoint) {
+    const hybridSelected = Boolean(selected && learningHybridReviewCandidate(selected.target_id));
+    humanPoint.hidden = !hybridSelected;
+    humanPoint.disabled = !hybridSelected;
+  }
   if (label) {
     label.disabled = !selected;
     label.value = String(selected?.label || "");
@@ -3703,6 +3715,13 @@ function applyLearningDraftEditorMetadataFromControls() {
   const destination = { kind: destinationKind };
   if (destinationKind === "interface") destination.target_interface_id = destinationValue;
   if (destinationKind === "url") destination.url = destinationValue;
+  if (learningHybridReviewCandidate(learningDraftEditorSelected.target_id)) {
+    learningHybridReviewState.editSemantics(learningDraftEditorSelected.target_id, {
+      label: String($("imageInspectorLabel")?.value || "").trim(),
+      role: String($("imageInspectorRoleSelect")?.value || "review_only"),
+      description: String($("imageInspectorDescription")?.value || "").trim(),
+    });
+  }
   learningDraftEditorState.apply({
     op: "update_metadata",
     ...learningDraftEditorSelected,
@@ -3887,6 +3906,7 @@ function selectLearningDraftEditorItem(targetKind, targetId) {
   const item = learningDraftEditorState?.getItem(targetKind, targetId);
   if (!item) return;
   learningDraftEditorSelected = { target_kind: targetKind, target_id: targetId };
+  if (learningHybridReviewCandidate(targetId)) learningHybridReviewState.select(targetId);
   const bbox = normalizeBbox(item.bbox);
   imageInspectorSelection = bbox ? {
     bbox,
@@ -3894,6 +3914,7 @@ function selectLearningDraftEditorItem(targetKind, targetId) {
   } : null;
   drawImageInspectorSelection(imageInspectorSelection?.bbox, imageInspectorSelection?.point);
   syncLearningDraftEditorWorkflowSelection(item);
+  renderLearningHybridReviewAudit();
   renderLearningDraftEditorBoxes();
 }
 
@@ -3939,6 +3960,15 @@ function startLearningDraftEditorDrag(event, mode) {
     window.removeEventListener("mouseup", up);
     learningDraftEditorDrag = null;
     if (!imageInspectorSelection?.bbox || !learningDraftEditorSelected) return;
+    if (learningHybridReviewCandidate(learningDraftEditorSelected.target_id)) {
+      const box = imageInspectorSelection.bbox;
+      learningHybridReviewState.rebox(learningDraftEditorSelected.target_id, [
+        box.x,
+        box.y,
+        box.x + box.width,
+        box.y + box.height,
+      ]);
+    }
     learningDraftEditorState.apply({
       op: "update_bbox",
       target_kind: learningDraftEditorSelected.target_kind,
@@ -14842,7 +14872,16 @@ function bindImageInspectorEditDrag() {
       const existing = learningDraftEditorState?.listItems().filter((item) => item.target_kind === "region") || [];
       let nextIndex = existing.length + 1;
       while (learningDraftEditorState?.getItem("region", `manual_region_${nextIndex}`)) nextIndex += 1;
-      const targetId = `manual_region_${nextIndex}`;
+      const addedHybrid = learningHybridReviewState?.add(
+        [
+          imageInspectorSelection.bbox.x,
+          imageInspectorSelection.bbox.y,
+          imageInspectorSelection.bbox.x + imageInspectorSelection.bbox.width,
+          imageInspectorSelection.bbox.y + imageInspectorSelection.bbox.height,
+        ],
+        { role: "review_only", label: `Human region ${nextIndex}`, description: "" },
+      );
+      const targetId = addedHybrid?.candidate_id || `manual_region_${nextIndex}`;
       learningDraftEditorState?.apply({
         op: "add",
         target_kind: "region",
@@ -14885,6 +14924,15 @@ function bindImageInspectorEditDrag() {
   });
   $("imageInspectorDeleteBoxBtn")?.addEventListener("click", () => {
     if (!learningDraftEditorSelected || !learningDraftEditorState) return;
+    if (learningHybridReviewCandidate(learningDraftEditorSelected.target_id)) {
+      learningHybridReviewState.tombstone(
+        learningDraftEditorSelected.target_id,
+        String($("imageInspectorReason")?.value || "deleted_by_reviewer").trim(),
+      );
+      renderLearningHybridReviewAudit();
+      updateLearningDraftEditorControls();
+      return;
+    }
     learningDraftEditorState.apply({
       op: "delete",
       ...learningDraftEditorSelected,
@@ -14896,7 +14944,19 @@ function bindImageInspectorEditDrag() {
     drawImageInspectorSelection(null, null);
     renderLearningDraftEditorBoxes();
   });
+  $("imageInspectorHybridPointBtn")?.addEventListener("click", () => {
+    if (!learningDraftEditorSelected || !imageInspectorSelection?.point) return;
+    const candidateId = learningDraftEditorSelected.target_id;
+    if (!learningHybridReviewCandidate(candidateId)) return;
+    learningHybridReviewState.proposeHumanPoint(candidateId, [
+      imageInspectorSelection.point.x,
+      imageInspectorSelection.point.y,
+    ]);
+    renderLearningHybridReviewAudit();
+    updateLearningDraftEditorControls();
+  });
   $("imageInspectorUndoBtn")?.addEventListener("click", () => {
+    learningHybridReviewState?.undo();
     learningDraftEditorState?.undo();
     learningDraftEditorSelected = null;
     imageInspectorSelection = null;
@@ -14905,6 +14965,7 @@ function bindImageInspectorEditDrag() {
     renderLearningDraftEditorBoxes();
   });
   $("imageInspectorRedoBtn")?.addEventListener("click", () => {
+    learningHybridReviewState?.redo();
     learningDraftEditorState?.redo();
     learningDraftEditorSelected = null;
     imageInspectorSelection = null;
@@ -15508,6 +15569,13 @@ function resetLearningDraftEditorState(review = null) {
     ? globalThis.LearningDraftEditorState.createLearningDraftEditorState
     : null;
   const draft = review?.draft && typeof review.draft === "object" ? review.draft : {};
+  const hybridProjection = review?.hybrid_review_projection;
+  learningHybridReviewState = (
+    hybridProjection?.contract_version === "hybrid_review_projection_v2"
+    && typeof globalThis.InterfaceWorkflowReview?.createHybridReviewState === "function"
+  )
+    ? globalThis.InterfaceWorkflowReview.createHybridReviewState(hybridProjection)
+    : null;
   const items = [
     ...learningDraftArray(draft.regions).map((item) => ({
       ...item,
@@ -15551,10 +15619,58 @@ function syncLearningDraftReviewFromEditor() {
       return action;
     });
   syncImageInspectorConfirmAndStoreButton();
+  renderLearningHybridReviewAudit();
 }
 
 function learningDraftEditorOperations() {
-  return learningDraftEditorState ? learningDraftEditorState.exportOperations() : [];
+  if (!learningDraftEditorState) return [];
+  const hybridIds = new Set(
+    learningHybridReviewState?.candidates().map((candidate) => candidate.candidate_id) || [],
+  );
+  return learningDraftEditorState.exportOperations().filter(
+    (operation) => !hybridIds.has(String(operation?.target_id || "")),
+  );
+}
+
+function learningHybridReviewCandidate(candidateId) {
+  if (!learningHybridReviewState) return null;
+  return learningHybridReviewState.candidates().find(
+    (candidate) => candidate.candidate_id === String(candidateId || ""),
+  ) || null;
+}
+
+function renderLearningHybridReviewAudit() {
+  const screenHost = $("imageInspectorHybridScreenFacts");
+  const candidateHost = $("imageInspectorHybridCandidateFacts");
+  if (!screenHost || !candidateHost) return;
+  if (!learningHybridReviewState) {
+    screenHost.hidden = true;
+    candidateHost.hidden = true;
+    return;
+  }
+  const screen = learningHybridReviewState.screenFacts();
+  const candidate = learningDraftEditorSelected
+    ? learningHybridReviewCandidate(learningDraftEditorSelected.target_id)
+    : null;
+  screenHost.hidden = false;
+  screenHost.innerHTML = `<strong>Screen facts</strong><span>capture=${escapeHtml(screen.capture_id || "")} · sha=${escapeHtml(String(screen.displayed_image?.sha256 || "").slice(0, 12))} · ${escapeHtml((screen.warnings || []).join("、") || "no warnings")}</span>`;
+  candidateHost.hidden = !candidate;
+  if (!candidate) {
+    candidateHost.innerHTML = "";
+    return;
+  }
+  const original = candidate.model_proposal?.bbox_original;
+  const current = candidate.reviewed_geometry?.bbox;
+  const provenance = candidate.model_proposal?.compact_provenance || {
+    provider_id: "human",
+    source_item_id: candidate.origin_id,
+  };
+  candidateHost.innerHTML = `
+    <strong>Selected candidate facts</strong>
+    <span>original=${escapeHtml(JSON.stringify(original ?? null))} · current=${escapeHtml(JSON.stringify(current ?? null))}</span>
+    <span>source=${escapeHtml(provenance.provider_id || "")} / ${escapeHtml(provenance.source_item_id || "")}</span>
+    <span>warnings=${escapeHtml((candidate.warnings || []).join("、") || "none")} · decisions=${candidate.review_decisions?.length || 0}${candidate.tombstone ? " · tombstoned" : ""}</span>
+  `;
 }
 
 function setLearningDraftOwnershipSelection(conflictId, parentGroupId) {
@@ -15646,10 +15762,12 @@ function learningDraftReviewPatch() {
   };
   const ownershipOperations = learningDraftOwnershipOperations();
   const operations = [...learningDraftEditorOperations(), ...ownershipOperations];
+  const hybridPatch = learningHybridReviewState?.reviewPatch() || null;
   if (ownershipOperations.length) patch.review_status = "needs_human_review";
-  if (!operations.length) return patch;
+  if (!operations.length && !hybridPatch) return patch;
   return {
     ...patch,
+    ...(hybridPatch || {}),
     contract_version: "human_review_patch_v1",
     screenshot_path: learningDraftSourceImagePath(learningDraftReview?.draft || {}),
     screenshot_sha256: learningDraftSourceImageSha256(learningDraftReview?.draft || {}),

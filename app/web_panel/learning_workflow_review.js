@@ -1965,6 +1965,241 @@
     };
   }
 
+  function createHybridReviewState(inputProjection) {
+    let projection = clone(inputProjection || {});
+    if (projection.contract_version !== "hybrid_review_projection_v2") {
+      throw new Error("Hybrid review projection contract is invalid");
+    }
+    if (!Array.isArray(projection.candidates) || projection.candidates.length === 0) {
+      throw new Error("Hybrid review projection candidates are required");
+    }
+    const ids = projection.candidates.map((candidate) => String(candidate?.candidate_id || ""));
+    if (ids.some((candidateId) => !candidateId) || new Set(ids).size !== ids.length) {
+      throw new Error("Hybrid review candidate identity set is invalid");
+    }
+    let selectedCandidateId = ids[0];
+    const undoHistory = [];
+    const redoHistory = [];
+    if (!Array.isArray(projection.review_decisions)) projection.review_decisions = [];
+
+    function recordHistory() {
+      undoHistory.push({ projection: clone(projection), selectedCandidateId });
+      redoHistory.length = 0;
+    }
+
+    function candidateById(candidateId) {
+      const candidate = projection.candidates.find((item) => item.candidate_id === candidateId);
+      if (!candidate) throw new Error(`Unknown Hybrid review candidate: ${candidateId}`);
+      return candidate;
+    }
+
+    function appendDecision(candidate, decisionType, payload) {
+      const decisions = Array.isArray(candidate.review_decisions)
+        ? candidate.review_decisions
+        : [];
+      const revision = decisions.length + 1;
+      const decisionId = `decision/${candidate.candidate_id}/${revision}`;
+      const rawDecision = {
+        decision_id: decisionId,
+        decision_type: decisionType,
+        candidate_id: candidate.candidate_id,
+        ...clone(payload),
+      };
+      candidate.review_decisions = [...decisions, { ...clone(rawDecision), revision }];
+      projection.review_decisions.push(clone(rawDecision));
+      candidate.reviewed_by_human = false;
+      return candidate.review_decisions[revision - 1];
+    }
+
+    function validateBbox(value) {
+      if (!Array.isArray(value) || value.length !== 4
+          || !value.every((edge) => Number.isFinite(edge))
+          || value[0] < 0 || value[1] < 0
+          || value[0] >= value[2] || value[1] >= value[3]) {
+        throw new Error("Hybrid review bbox must be a valid xyxy list");
+      }
+      const size = projection.screen_facts?.displayed_image?.image_size || {};
+      if (value[2] > Number(size.width) || value[3] > Number(size.height)) {
+        throw new Error("Hybrid review bbox must remain inside the current capture");
+      }
+      return value.map((edge) => Number(edge));
+    }
+
+    return {
+      select(candidateId) {
+        candidateById(candidateId);
+        selectedCandidateId = candidateId;
+        return this.currentCandidate();
+      },
+      currentCandidate() {
+        return clone(candidateById(selectedCandidateId));
+      },
+      candidates() {
+        return clone(projection.candidates);
+      },
+      screenFacts() {
+        return clone(projection.screen_facts || {});
+      },
+      rebox(candidateId, bbox) {
+        const candidate = candidateById(candidateId);
+        const nextBbox = validateBbox(bbox);
+        recordHistory();
+        appendDecision(candidate, "rebox", {
+          bbox: clone(nextBbox),
+        });
+        candidate.reviewed_geometry = {
+          bbox: clone(nextBbox),
+          coordinate_space: "capture_pixel_xyxy",
+          source: "human_rebox",
+          revision: candidate.review_decisions.length,
+        };
+        selectedCandidateId = candidateId;
+        return this.currentCandidate();
+      },
+      editSemantics(candidateId, semantics) {
+        const candidate = candidateById(candidateId);
+        const next = {
+          role: String(semantics?.role || "").trim(),
+          label: String(semantics?.label || "").trim(),
+          description: String(semantics?.description || "").trim(),
+        };
+        if (!next.role || !next.label) throw new Error("Hybrid review role and label are required");
+        recordHistory();
+        appendDecision(candidate, "semantic_edit", { semantics: clone(next) });
+        candidate.reviewed_semantics = {
+          ...next,
+          revision: candidate.review_decisions.length,
+        };
+        selectedCandidateId = candidateId;
+        return this.currentCandidate();
+      },
+      proposeHumanPoint(candidateId, xy) {
+        const candidate = candidateById(candidateId);
+        if (!Array.isArray(xy) || xy.length !== 2 || !xy.every((edge) => Number.isFinite(edge))) {
+          throw new Error("Hybrid human point proposal must be a finite xy list");
+        }
+        const bbox = candidate.reviewed_geometry?.bbox || candidate.model_proposal?.bbox_original;
+        if (!bbox || xy[0] < bbox[0] || xy[0] > bbox[2] || xy[1] < bbox[1] || xy[1] > bbox[3]) {
+          throw new Error("Hybrid human point proposal must remain inside reviewed geometry");
+        }
+        recordHistory();
+        appendDecision(candidate, "human_point", {
+          human_point_proposal: {
+            coordinate_space: "capture_pixel_xyxy",
+            xy: clone(xy),
+          },
+        });
+        candidate.human_point_proposal = {
+          coordinate_space: "capture_pixel_xyxy",
+          xy: clone(xy),
+          source: "human_review",
+          revision: candidate.review_decisions.length,
+        };
+        selectedCandidateId = candidateId;
+        return this.currentCandidate();
+      },
+      tombstone(candidateId, reason = "deleted_by_reviewer") {
+        const candidate = candidateById(candidateId);
+        const normalizedReason = String(reason || "").trim();
+        if (!normalizedReason) throw new Error("Hybrid tombstone reason is required");
+        recordHistory();
+        appendDecision(candidate, "tombstone", { reason: normalizedReason });
+        candidate.tombstone = {
+          reason: normalizedReason,
+          decision_type: "tombstone",
+          revision: candidate.review_decisions.length,
+        };
+        selectedCandidateId = candidateId;
+        return this.currentCandidate();
+      },
+      add(bbox, semantics) {
+        const nextBbox = validateBbox(bbox);
+        const nextSemantics = {
+          role: String(semantics?.role || "").trim(),
+          label: String(semantics?.label || "").trim(),
+          description: String(semantics?.description || "").trim(),
+        };
+        if (!nextSemantics.role || !nextSemantics.label) {
+          throw new Error("Hybrid review role and label are required");
+        }
+        recordHistory();
+        const sequence = projection.candidates
+          .filter((candidate) => String(candidate?.origin_id || "").startsWith("human/"))
+          .length + 1;
+        const projectionToken = String(projection.projection_id || "hybrid")
+          .split("/").filter(Boolean).pop().replace(/[^A-Za-z0-9_.-]/g, "_");
+        const candidateId = `human/${projectionToken}/${sequence}`;
+        const candidate = {
+          candidate_id: candidateId,
+          origin_id: candidateId,
+          model_proposal: null,
+          human_origin: {
+            bbox_initial: clone(nextBbox),
+            semantics_initial: clone(nextSemantics),
+            coordinate_space: "capture_pixel_xyxy",
+          },
+          review_decisions: [],
+          reviewed_geometry: {
+            bbox: clone(nextBbox),
+            coordinate_space: "capture_pixel_xyxy",
+            source: "human_add",
+            revision: 1,
+          },
+          reviewed_semantics: { ...nextSemantics, revision: 1 },
+          human_point_proposal: null,
+          tombstone: null,
+          warnings: [],
+          reviewed_by_human: false,
+        };
+        appendDecision(candidate, "add", {
+          bbox: clone(nextBbox),
+          semantics: clone(nextSemantics),
+        });
+        projection.candidates.push(candidate);
+        selectedCandidateId = candidateId;
+        return this.currentCandidate();
+      },
+      undo() {
+        if (undoHistory.length === 0) return false;
+        redoHistory.push({ projection: clone(projection), selectedCandidateId });
+        const previous = undoHistory.pop();
+        projection = clone(previous.projection);
+        selectedCandidateId = previous.selectedCandidateId;
+        if (!projection.candidates.some((candidate) => candidate.candidate_id === selectedCandidateId)) {
+          selectedCandidateId = projection.candidates[0].candidate_id;
+        }
+        return true;
+      },
+      redo() {
+        if (redoHistory.length === 0) return false;
+        undoHistory.push({ projection: clone(projection), selectedCandidateId });
+        const next = redoHistory.pop();
+        projection = clone(next.projection);
+        selectedCandidateId = next.selectedCandidateId;
+        return true;
+      },
+      canUndo() {
+        return undoHistory.length > 0;
+      },
+      canRedo() {
+        return redoHistory.length > 0;
+      },
+      reviewPatch() {
+        return {
+          hybrid_review_decisions: clone(projection.review_decisions),
+          artifact_is_authorization: false,
+          execute_binding_enabled: false,
+          final_submit_forbidden: true,
+          real_action_requires_gate: true,
+          authorization_scope: "display_and_review_only",
+        };
+      },
+      snapshot() {
+        return clone(projection);
+      },
+    };
+  }
+
   const api = {
     CONTRACT_VERSION,
     buildAttachDialogModel,
@@ -1976,6 +2211,7 @@
     createLatestInterfaceWorkflowLoadGuard,
     createInterfaceWorkflowWorkbenchState,
     createInterfaceWorkflowReviewState,
+    createHybridReviewState,
     interfaceWorkflowControlChoices,
     mergeEditableWorkflowReview,
     projectLiveSafeFillPreflightReview,

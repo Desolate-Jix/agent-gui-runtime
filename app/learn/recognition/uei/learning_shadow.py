@@ -11,6 +11,7 @@ from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
 from app.learn.hybrid.omni_candidates import build_omni_candidate_ledger
 from app.learn.hybrid.review_projection import (
     build_hybrid_review_projection,
+    render_full_parent_hybrid_review_candidates,
     render_hybrid_review_candidates,
     validate_hybrid_review_projection,
 )
@@ -46,12 +47,38 @@ def load_hybrid_large_review_projection(
     ):
         return _invalid_hybrid_review("hybrid_expectations_missing")
     if (
-        not _is_ref(projection_ref)
-        or not isinstance(displayed_source_sha256, str)
+        not isinstance(displayed_source_sha256, str)
         or not isinstance(displayed_source_size, dict)
     ):
         return _invalid_hybrid_review("hybrid_projection_context_invalid")
     try:
+        if (
+            isinstance(projection_ref, dict)
+            and projection_ref.get("contract_version") == "hybrid_review_projection_v2"
+        ):
+            stored_projection = validate_hybrid_review_projection(projection_ref)
+            parent_bundle = stored_projection["parent_evidence"]["capture_bundle"]
+            screen = stored_projection["screen_facts"]
+            displayed = screen["displayed_image"]
+            if (
+                parent_bundle.get("run_id") != expected_hybrid_run_id
+                or parent_bundle.get("workflow_revision")
+                != expected_hybrid_workflow_revision
+                or displayed.get("sha256") != displayed_source_sha256
+                or displayed.get("image_size") != displayed_source_size
+            ):
+                return _invalid_hybrid_review("hybrid_projection_evidence_mismatch")
+            regions = render_full_parent_hybrid_review_candidates(stored_projection)
+            generated = [str(region.get("region_id") or "") for region in regions]
+            if len(generated) != len(set(generated)) or set(generated) & existing_region_ids:
+                return _invalid_hybrid_review("hybrid_region_id_collision")
+            return {
+                "projection": deepcopy(stored_projection),
+                "status": _hybrid_review_status(status="projected", reason=None),
+                "regions": deepcopy(regions),
+            }
+        if not _is_ref(projection_ref):
+            return _invalid_hybrid_review("hybrid_projection_context_invalid")
         store = UEIObjectStore(root=project_root / _STORE_RELATIVE_PATH)
         stored_projection = validate_hybrid_review_projection(store.get(
             projection_ref,

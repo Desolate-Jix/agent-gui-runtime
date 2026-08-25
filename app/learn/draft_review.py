@@ -9,6 +9,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from app.learn.hybrid.review_projection import (
+    apply_hybrid_review_decisions,
+    validate_hybrid_review_projection,
+)
+
 from PIL import Image, ImageDraw, UnidentifiedImageError
 
 from app.learn.correction_memory import record_human_review_correction
@@ -282,6 +287,120 @@ def _workflow_node_identity(payload: dict[str, Any], root: Path) -> dict[str, st
     return {}
 
 
+def _apply_hybrid_review_decision_patch(
+    draft: dict[str, Any],
+    *,
+    review: dict[str, Any],
+    review_patch: dict[str, Any],
+) -> dict[str, Any] | None:
+    """保存完整 Hybrid 投影，并只追加尚未持久化的人工决定。"""
+    projection = review.get("hybrid_review_projection")
+    if not isinstance(projection, dict) or projection.get("contract_version") != "hybrid_review_projection_v2":
+        return None
+    requested = review_patch.get("hybrid_review_decisions", [])
+    if not isinstance(requested, list) or not all(isinstance(item, dict) for item in requested):
+        raise ValueError("hybrid_review_decisions must be an object list")
+    existing = projection.get("review_decisions")
+    if not isinstance(existing, list):
+        raise ValueError("Hybrid review decision ledger is invalid")
+    existing_by_id = {
+        item.get("decision_id"): item
+        for item in existing
+        if isinstance(item, dict) and isinstance(item.get("decision_id"), str)
+    }
+    if len(existing_by_id) != len(existing):
+        raise ValueError("Hybrid review decision ledger contains duplicate ids")
+    additions: list[dict[str, Any]] = []
+    for decision in requested:
+        normalized_decision = {
+            key: deepcopy(value)
+            for key, value in decision.items()
+            if key not in {"decision_index", "revokes_current_approval"}
+        }
+        decision_id = normalized_decision.get("decision_id")
+        if not isinstance(decision_id, str):
+            raise ValueError("Hybrid review decision_id is invalid")
+        prior = existing_by_id.get(decision_id)
+        if prior is None:
+            additions.append(normalized_decision)
+            continue
+        comparable_prior = {
+            key: deepcopy(value)
+            for key, value in prior.items()
+            if key not in {"decision_index", "revokes_current_approval"}
+        }
+        if comparable_prior.get("decision_type") == "add" and normalized_decision.get("candidate_id") is None:
+            comparable_prior["candidate_id"] = None
+        if json.dumps(comparable_prior, ensure_ascii=False, sort_keys=True) != json.dumps(
+            normalized_decision,
+            ensure_ascii=False,
+            sort_keys=True,
+        ):
+            raise ValueError("Hybrid review decision_id cannot be rewritten")
+    updated = (
+        apply_hybrid_review_decisions(projection, additions)
+        if additions
+        else deepcopy(projection)
+    )
+    hybrid_ids = {
+        item.get("candidate_id")
+        for item in updated.get("candidates", [])
+        if isinstance(item, dict)
+    }
+    regions = draft.get("regions")
+    if isinstance(regions, list):
+        draft["regions"] = [
+            item
+            for item in regions
+            if not (
+                isinstance(item, dict)
+                and item.get("candidate_id") in hybrid_ids
+                and item.get("review_only") is True
+            )
+        ]
+    draft.pop("hybrid_review_projection_ref", None)
+    draft["hybrid_review_projection"] = deepcopy(updated)
+    return updated
+
+
+def _validated_hybrid_expectations_from_source(
+    source_path: str | Path,
+    *,
+    root: Path,
+) -> tuple[str, int] | None:
+    """只从已复验的完整父投影解析当前 run/revision。"""
+    try:
+        resolved = _resolve_source_path(source_path, root)
+        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    candidates = [payload]
+    for key in ("draft", "learning_draft", "best_learning_draft"):
+        child = payload.get(key)
+        if isinstance(child, dict):
+            candidates.append(child)
+    for candidate in candidates:
+        projection = candidate.get("hybrid_review_projection")
+        if not isinstance(projection, dict) or projection.get("contract_version") != "hybrid_review_projection_v2":
+            continue
+        validated = validate_hybrid_review_projection(projection)
+        bundle = validated["parent_evidence"]["capture_bundle"]
+        run_id = bundle.get("run_id")
+        revision = bundle.get("workflow_revision")
+        if (
+            not isinstance(run_id, str)
+            or not run_id
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 0
+        ):
+            raise ValueError("Hybrid review current capture expectations are invalid")
+        return run_id, revision
+    return None
+
+
 def save_reviewed_template_candidate(
     source_path: str | Path,
     review_patch: dict[str, Any] | None,
@@ -291,6 +410,10 @@ def save_reviewed_template_candidate(
     """保存人工审核后的候选模板；候选件仍不授权执行。"""
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
     review_patch = review_patch if isinstance(review_patch, dict) else {}
+    hybrid_expectations = _validated_hybrid_expectations_from_source(
+        source_path,
+        root=root,
+    )
     review = load_learning_draft_review(
         source_path,
         project_root=root,
@@ -298,9 +421,23 @@ def save_reviewed_template_candidate(
             source_path,
             root,
         ),
+        expected_hybrid_run_id=(
+            hybrid_expectations[0] if hybrid_expectations is not None else None
+        ),
+        expected_hybrid_workflow_revision=(
+            hybrid_expectations[1] if hybrid_expectations is not None else None
+        ),
     )
     draft = deepcopy(review["draft"])
-    out_dir = root / "artifacts" / "learning-draft-review" / _slug_for_output(review["source"])
+    source_resolved_for_output = _resolve_source_path(source_path, root)
+    review_root = (root / "artifacts" / "learning-draft-review").resolve()
+    if (
+        source_resolved_for_output.name == "reviewed_template_candidate.json"
+        and source_resolved_for_output.parent.parent == review_root
+    ):
+        out_dir = source_resolved_for_output.parent
+    else:
+        out_dir = review_root / _slug_for_output(review["source"])
     out_dir.mkdir(parents=True, exist_ok=True)
     human_review_patch, human_review_patch_path = _prepare_human_review_patch(
         review_patch,
@@ -312,6 +449,15 @@ def save_reviewed_template_candidate(
     if human_review_patch:
         review_patch = _compile_human_review_patch(review_patch, human_review_patch)
     changes: list[str] = []
+    hybrid_projection = _apply_hybrid_review_decision_patch(
+        draft,
+        review=review,
+        review_patch=review_patch,
+    )
+    if hybrid_projection is not None:
+        changes.append(
+            f"hybrid_review_decisions:{len(hybrid_projection.get('review_decisions', []))}"
+        )
     hierarchy_ownership_review = _apply_hierarchy_ownership_corrections(
         draft,
         human_review_patch,
@@ -394,6 +540,8 @@ def save_reviewed_template_candidate(
         review_status = "needs_human_review"
     if hierarchy_ownership_review:
         review_status = "needs_human_review"
+    if hybrid_projection is not None:
+        review_status = "needs_human_review"
     requested_source = str(review_patch.get("source_after_review") or "mixed").strip()
     source_after_review = "assisted_generation" if requested_source == "assisted_generation" else "mixed"
     manual_bbox_edit_summary = _manual_bbox_edit_summary(draft)
@@ -420,7 +568,7 @@ def save_reviewed_template_candidate(
         "counts_as_pure_model_generated": False,
         "artifact_is_authorization": False,
         "draft_only": False,
-        "reviewed_by_human": True,
+        "reviewed_by_human": hybrid_projection is None,
         "review_status": review_status,
         "final_submit_forbidden": True,
         "real_action_requires_gate": True,

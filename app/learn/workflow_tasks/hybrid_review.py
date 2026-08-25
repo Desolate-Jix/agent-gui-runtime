@@ -20,6 +20,7 @@ def run_hybrid_review_projection_task(
     if _cancelled(cancellation_event):
         return {
             "contract_version": "hybrid_review_projection_v1",
+            "projection_shape": "hybrid_vista_review_task_projection_v1",
             "outcome": "safe_stopped",
             "failure_reason": "cancelled_before_review_projection",
             "review_status": "REVIEW_REQUIRED",
@@ -74,6 +75,7 @@ def run_hybrid_review_projection_task(
     return seal_immutable(
         {
             "contract_version": "hybrid_review_projection_v1",
+            "projection_shape": "hybrid_vista_review_task_projection_v1",
             "outcome": "completed",
             "review_status": "REVIEW_REQUIRED",
             "automatic_acceptance": False,

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.core.runtime_artifacts import write_trace
+from app.learn.hybrid.review_projection import validate_hybrid_review_projection
 from app.learn.recognition import (
     build_learning_recognition_trial,
     fusion_status_from_two_stage,
@@ -35,6 +36,7 @@ def run_recognition_task(
 ) -> LearningTaskResult:
     """生成只读学习草稿，并保持执行授权始终关闭。"""
 
+    provider_task_input = task_input
     task_input = task_input.model_copy(
         update={
             "observation_evidence": _provider_safe_observation_evidence(
@@ -44,6 +46,12 @@ def run_recognition_task(
     )
     root = project_root.resolve()
     try:
+        provider_observe_bundle = _build_observe_bundle(provider_task_input)
+        raw_provider_result = provider_task_input.observation_evidence.get("omniparser")
+        if isinstance(raw_provider_result, dict):
+            provider_observe_bundle["sources"]["omniparser"] = deepcopy(
+                raw_provider_result
+            )
         observe_bundle = _build_observe_bundle(task_input)
         two_stage_report = _load_two_stage_report(
             task_input.two_stage_report_path,
@@ -89,11 +97,15 @@ def run_recognition_task(
             "real_action_requires_gate": True,
         }
         provider_summary = _omniparser_provider_summary(
-            observe_bundle=observe_bundle,
+            observe_bundle=provider_observe_bundle,
             result=result,
         )
         _attach_provider_summary_to_draft(result, provider_summary)
         _attach_uei_shadow_result_ref_to_draft(result, task_input.observation_evidence)
+        _attach_hybrid_review_projection_to_draft(
+            result,
+            task_input.observation_evidence,
+        )
         model_provenance = _model_provenance(
             observe_bundle,
             project_root=root,
@@ -1053,6 +1065,42 @@ def _attach_uei_shadow_result_ref_to_draft(
     page_details = deepcopy(draft.get("page_details")) if isinstance(draft.get("page_details"), dict) else {}
     page_details["uei_shadow_result_ref"] = {"id": reference["id"], "content_sha256": reference["content_sha256"]}
     draft["page_details"] = page_details
+
+
+def _attach_hybrid_review_projection_to_draft(
+    result: dict[str, Any], observation_evidence: dict[str, Any],
+) -> None:
+    """仅把已复验且与当前展示截图一致的完整父投影附到草稿。"""
+    draft = result.get("learning_draft")
+    raw_projection = (
+        observation_evidence.get("hybrid_review_projection")
+        if isinstance(observation_evidence, dict)
+        else None
+    )
+    if raw_projection is None:
+        return
+    if not isinstance(draft, dict) or not isinstance(raw_projection, dict):
+        raise ValueError("Hybrid review projection attachment is invalid")
+    projection = validate_hybrid_review_projection(raw_projection)
+    if projection.get("contract_version") != "hybrid_review_projection_v2":
+        raise ValueError("Hybrid review full-parent projection is required")
+    page_details = draft.get("page_details")
+    screen = page_details.get("screen") if isinstance(page_details, dict) else None
+    displayed_sha = (
+        str(screen.get("source_image_sha256") or "").strip().lower()
+        if isinstance(screen, dict)
+        else ""
+    )
+    expected_sha = str(
+        projection["screen_facts"]["displayed_image"]["sha256"]
+    ).lower()
+    if not displayed_sha or displayed_sha != expected_sha:
+        raise ValueError("Hybrid review projection does not match displayed screenshot")
+    draft_lineage = draft.get("capture_lineage_ref")
+    projected_lineage = projection["screen_facts"]["capture_lineage_ref"]
+    if draft_lineage is not None and draft_lineage != projected_lineage:
+        raise ValueError("Hybrid review projection does not match current capture lineage")
+    draft["hybrid_review_projection"] = deepcopy(projection)
 
 
 def _omniparser_provider_summary(
