@@ -572,6 +572,33 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
         },
     }
     assert receipt["preloaded_bytes_sha256_by_role"] == expected_preloaded
+    expected_projection = {
+        "manifest": deepcopy(expected_preloaded["manifest"]),
+        "child": {
+            **deepcopy(expected_preloaded["child"]),
+            "content_sha256": child_value["content_sha256"],
+            "source_parent_ref": deepcopy(child_value["source_parent_ref"]),
+        },
+        "runtime": {
+            "code_refs": [
+                {"role": role, **deepcopy(expected_preloaded[f"code:{role}"])}
+                for role, _ in PROVIDER_CODE_REFS
+            ],
+            "profile_refs": [
+                {"role": "estimand", **deepcopy(expected_preloaded["profile:estimand"])}
+            ],
+        },
+        "screenshot_refs": [
+            deepcopy(expected_preloaded[role])
+            for role in sorted(expected_preloaded)
+            if role.startswith("screenshot:")
+        ],
+    }
+    assert receipt["sealed_input_projection"] == expected_projection
+    expected_projection_sha = hashlib.sha256(
+        json.dumps(expected_projection, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    assert receipt["parent_expected_projection_sha256"] == expected_projection_sha
     assert receipt["job_active_processes_after"] == 0
     assert receipt["job_stable_zero"] is True
     assert receipt["unexpected_inherited_fds"] == []
@@ -612,6 +639,7 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
         "process_id",
         "launcher_process_id",
         "launcher_identity",
+        "parent_expected_projection_sha256",
         "job_active_processes_after",
         "job_stable_zero",
         "receipt_sha256",
@@ -624,6 +652,8 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
             observed_process_id=receipt["launcher_process_id"],
             launcher_identity=receipt["launcher_identity"],
             job_active_processes_after=0,
+            expected_sealed_input_projection=expected_projection,
+            expected_projection_sha256=expected_projection_sha,
         )
     for mutation in (
         {"phase_trace": ["boot", "tight", "complete"]},
@@ -663,6 +693,8 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
             validate_provider_workload_receipt(
                 changed,
                 expected_launcher_identity=receipt["launcher_identity"],
+                expected_sealed_input_projection=expected_projection,
+                expected_projection_sha256=expected_projection_sha,
             )
     for role_mutation in (
         "fake_role",
@@ -697,6 +729,53 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
             validate_provider_workload_receipt(
                 changed,
                 expected_launcher_identity=receipt["launcher_identity"],
+                expected_sealed_input_projection=expected_projection,
+                expected_projection_sha256=expected_projection_sha,
+            )
+    for synchronized_mutation in (
+        "code",
+        "profile",
+        "screenshot_sha_length",
+        "screenshot_path",
+    ):
+        from app.learn.hybrid.benchmark_v2_provider_sandbox import (
+            validate_provider_workload_receipt,
+        )
+
+        changed = deepcopy(receipt)
+        projection = changed["sealed_input_projection"]
+        preload = changed["preloaded_bytes_sha256_by_role"]
+        if synchronized_mutation == "code":
+            projection["runtime"]["code_refs"][1]["sha256"] = "1" * 64
+            preload["code:contracts"]["sha256"] = "1" * 64
+        elif synchronized_mutation == "profile":
+            projection["runtime"]["profile_refs"][0]["sha256"] = "2" * 64
+            preload["profile:estimand"]["sha256"] = "2" * 64
+        elif synchronized_mutation == "screenshot_sha_length":
+            screen = projection["screenshot_refs"][0]
+            role = f"screenshot:{screen['path']}"
+            screen["sha256"] = "3" * 64
+            screen["byte_length"] += 1
+            preload[role]["sha256"] = "3" * 64
+            preload[role]["byte_length"] += 1
+        else:
+            screen = projection["screenshot_refs"][0]
+            old_role = f"screenshot:{screen['path']}"
+            replacement_path = screen["path"].rsplit("/", 1)[0] + "/case-999.png"
+            screen["path"] = replacement_path
+            replacement = preload.pop(old_role)
+            replacement["path"] = replacement_path
+            preload[f"screenshot:{replacement_path}"] = replacement
+        changed.pop("receipt_sha256")
+        changed["receipt_sha256"] = hashlib.sha256(
+            json.dumps(changed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        with pytest.raises(ValueError):
+            validate_provider_workload_receipt(
+                changed,
+                expected_launcher_identity=receipt["launcher_identity"],
+                expected_sealed_input_projection=expected_projection,
+                expected_projection_sha256=expected_projection_sha,
             )
     assert not (files["operation"] / "provider-process-escape.txt").exists()
     assert not (files["operation"] / "provider-system-escape.txt").exists()
@@ -737,7 +816,7 @@ def test_bootstrap_failure_closes_process_and_allows_clean_retry(
     mutated = json.loads(original.decode("utf-8"))
     mutated["sealed_runtime"]["code_refs"][0]["file_sha256"] = "0" * 64
     files["manifest_path"].write_bytes(_canonical_bytes(mutated))
-    with pytest.raises(ValueError, match="failed closed"):
+    with pytest.raises(ValueError, match="failed closed|parent expected"):
         spawn_provider_bootstrap(
             provider_manifest_path=files["manifest_path"],
             expected_manifest_sha256=_file_sha(files["manifest_path"]),

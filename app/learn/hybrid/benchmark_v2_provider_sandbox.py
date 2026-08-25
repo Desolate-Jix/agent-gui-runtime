@@ -894,16 +894,114 @@ class _WindowsKillJob:
             self._handle = None
 
 
+def _parent_expected_sealed_projection(
+    *,
+    manifest_path: Path,
+    expected_manifest_sha256: str,
+    child_path: Path,
+    expected_child_sha256: str,
+    manifest: Mapping[str, object],
+    child: Mapping[str, object],
+) -> tuple[dict[str, object], str]:
+    """Build the expected preload projection from parent-verified local inputs."""
+
+    manifest_raw = manifest_path.read_bytes()
+    child_raw = child_path.read_bytes()
+    if hashlib.sha256(manifest_raw).hexdigest() != expected_manifest_sha256:
+        raise ValueError("parent expected manifest bytes changed before launch")
+    if hashlib.sha256(child_raw).hexdigest() != expected_child_sha256:
+        raise ValueError("parent expected child bytes changed before launch")
+    runtime = manifest["sealed_runtime"]
+    code_refs: list[dict[str, object]] = []
+    for item, (role, actual_path) in zip(
+        runtime["code_refs"], _CODE_PATHS.items(), strict=True
+    ):
+        raw = actual_path.read_bytes()
+        relative = actual_path.relative_to(_PROJECT_ROOT).as_posix()
+        digest = hashlib.sha256(raw).hexdigest()
+        if item["role"] != role or item["relative_path"] != relative or item[
+            "file_sha256"
+        ] != digest:
+            raise ValueError("parent expected code projection differs from sealed manifest")
+        code_refs.append(
+            {
+                "role": role,
+                "path": relative,
+                "sha256": digest,
+                "byte_length": len(raw),
+            }
+        )
+    profile_refs: list[dict[str, object]] = []
+    for item in runtime["profile_refs"]:
+        actual_path = _canonical_existing(
+            _PROJECT_ROOT / item["relative_path"], kind="parent expected provider profile"
+        )
+        raw = actual_path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if item["file_sha256"] != digest:
+            raise ValueError("parent expected profile differs from sealed manifest")
+        profile_refs.append(
+            {
+                "role": item["role"],
+                "path": item["relative_path"],
+                "sha256": digest,
+                "byte_length": len(raw),
+            }
+        )
+    screenshot_identities = {
+        case["image"]["path"]: case["image"]["sha256"] for case in child["cases"]
+    }
+    if len(screenshot_identities) != 24:
+        raise ValueError("parent expected child must bind exactly 24 screenshots")
+    screenshot_refs: list[dict[str, object]] = []
+    for relative, declared_sha in sorted(screenshot_identities.items()):
+        actual_path = _canonical_existing(
+            _PROJECT_ROOT / relative, kind="parent expected provider screenshot"
+        )
+        raw = actual_path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest != declared_sha:
+            raise ValueError("parent expected screenshot differs from validated child")
+        screenshot_refs.append(
+            {"path": relative, "sha256": digest, "byte_length": len(raw)}
+        )
+    projection: dict[str, object] = {
+        "manifest": {
+            "path": str(manifest_path),
+            "sha256": expected_manifest_sha256,
+            "byte_length": len(manifest_raw),
+        },
+        "child": {
+            "path": str(child_path),
+            "sha256": expected_child_sha256,
+            "byte_length": len(child_raw),
+            "content_sha256": child["content_sha256"],
+            "source_parent_ref": child["source_parent_ref"],
+        },
+        "runtime": {"code_refs": code_refs, "profile_refs": profile_refs},
+        "screenshot_refs": screenshot_refs,
+    }
+    digest = hashlib.sha256(
+        json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return projection, digest
+
+
 def validate_provider_workload_receipt(
     value: Mapping[str, object],
     *,
     expected_launcher_identity: Mapping[str, object],
+    expected_sealed_input_projection: Mapping[str, object],
+    expected_projection_sha256: str,
 ) -> dict[str, object]:
     """Accept only a completed, non-authorizing workload receipt."""
 
     required = {
         "contract_version", "provider_pid", "phase_trace", "manifest_ref", "child_ref",
         "preloaded_bytes_sha256_by_role", "sealed_input_projection",
+        "parent_expected_projection_sha256",
         "workload_request", "workload_result",
         "preflight", "filesystem_read_policy_after_tight", "tight_read_file_count",
         "denied_controls", "unexpected_inherited_fds", "artifact_is_authorization",
@@ -921,6 +1019,22 @@ def validate_provider_workload_receipt(
     ).hexdigest()
     if observed != declared:
         raise ValueError("provider workload receipt SHA mismatch")
+    expected_projection = dict(expected_sealed_input_projection)
+    independently_observed_projection_sha = hashlib.sha256(
+        json.dumps(
+            expected_projection,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        independently_observed_projection_sha
+        != _require_sha(expected_projection_sha256, "parent expected projection SHA")
+        or receipt["parent_expected_projection_sha256"] != expected_projection_sha256
+        or receipt["sealed_input_projection"] != expected_projection
+    ):
+        raise ValueError("provider receipt differs from parent-owned sealed projection")
     if (
         receipt["contract_version"] != "provider_sandbox_workload_receipt_v1"
         or receipt["phase_trace"] != ["boot", "tight", "workload", "complete"]
@@ -1028,7 +1142,7 @@ def validate_provider_workload_receipt(
             raise ValueError(f"{name} byte length is invalid")
         return entry
 
-    projection = receipt["sealed_input_projection"]
+    projection = expected_projection
     if not isinstance(projection, Mapping) or set(projection) != {
         "manifest", "child", "runtime", "screenshot_refs"
     }:
@@ -1119,6 +1233,8 @@ def _bind_provider_receipt_to_launcher(
     observed_process_id: int,
     launcher_identity: Mapping[str, object],
     job_active_processes_after: int,
+    expected_sealed_input_projection: Mapping[str, object],
+    expected_projection_sha256: str,
 ) -> dict[str, object]:
     receipt = dict(child_receipt)
     if receipt.get("contract_version") != "provider_sandbox_workload_receipt_v1":
@@ -1135,6 +1251,7 @@ def _bind_provider_receipt_to_launcher(
     receipt["process_id"] = observed_process_id
     receipt["launcher_process_id"] = observed_process_id
     receipt["launcher_identity"] = dict(launcher_identity)
+    receipt["parent_expected_projection_sha256"] = expected_projection_sha256
     receipt["job_active_processes_after"] = job_active_processes_after
     receipt["job_stable_zero"] = job_active_processes_after == 0
     if not receipt["job_stable_zero"]:
@@ -1147,6 +1264,8 @@ def _bind_provider_receipt_to_launcher(
     return validate_provider_workload_receipt(
         receipt,
         expected_launcher_identity=launcher_identity,
+        expected_sealed_input_projection=expected_sealed_input_projection,
+        expected_projection_sha256=expected_projection_sha256,
     )
 
 
@@ -1202,6 +1321,16 @@ def spawn_provider_bootstrap(
         or child_ref["source_parent_ref"] != child["source_parent_ref"]
     ):
         raise ValueError("provider manifest and child identity differ before spawn")
+    expected_projection, expected_projection_sha = _parent_expected_sealed_projection(
+        manifest_path=_canonical_existing(
+            provider_manifest_path, kind="parent expected provider manifest"
+        ),
+        expected_manifest_sha256=expected_manifest_sha256,
+        child_path=_canonical_existing(provider_child_path, kind="parent expected provider child"),
+        expected_child_sha256=expected_child_sha256,
+        manifest=manifest,
+        child=child,
+    )
     startupinfo = None
     if os.name == "nt":
         startupinfo = subprocess.STARTUPINFO()
@@ -1270,6 +1399,8 @@ def spawn_provider_bootstrap(
         observed_process_id=process.pid,
         launcher_identity=launcher_identity,
         job_active_processes_after=active_after,
+        expected_sealed_input_projection=expected_projection,
+        expected_projection_sha256=expected_projection_sha,
     )
 
 
