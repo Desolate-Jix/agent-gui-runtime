@@ -1,0 +1,109 @@
+{
+  "contract_version": "portfolio_hybrid_v1_1_benchmark_manifest_template_v1",
+  "benchmark_id": "portfolio-hybrid-v1-1",
+  "corpus_id": "portfolio-hybrid-v1-1-public-synthetic",
+  "artifact_paths": {
+    "gate_config": "configs/benchmarks/portfolio_hybrid_v1_1_gate.json",
+    "benchmark_producer": "app/learn/hybrid/benchmark.py",
+    "benchmark_runner": "scripts/run_portfolio_hybrid_v1_1_benchmark.py",
+    "scorer": "app/learn/hybrid/benchmark_scorer_v1.py",
+    "corpus_manifest": "tests/fixtures/portfolio_hybrid_v1_1/corpus-manifest.v1.json",
+    "gold": "tests/fixtures/portfolio_hybrid_v1_1/gold.v1.json"
+  },
+  "provider_revisions": {
+    "omni": "PINNED_OMNI_REVISION",
+    "qwen": "PINNED_QWEN_REVISION",
+    "vista": "PINNED_VISTA_REVISION"
+  },
+  "shared_budget": {
+    "max_provider_calls_per_case": 3,
+    "max_output_tokens_per_case": 2048,
+    "max_wall_time_ms_per_case": 120000
+  },
+  "shared_context_policy": {
+    "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+    "uia": "same_capture_optional",
+    "ocr": "same_capture_optional"
+  },
+  "arms": [
+    {
+      "arm_id": "qwen_only",
+      "phase": "pre-vista",
+      "producer_stages": ["qwen"],
+      "budget": {
+        "max_provider_calls_per_case": 3,
+        "max_output_tokens_per_case": 2048,
+        "max_wall_time_ms_per_case": 120000
+      },
+      "context_policy": {
+        "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+        "uia": "same_capture_optional",
+        "ocr": "same_capture_optional"
+      }
+    },
+    {
+      "arm_id": "omni_only_discovery",
+      "phase": "pre-vista",
+      "producer_stages": ["omni"],
+      "budget": {
+        "max_provider_calls_per_case": 3,
+        "max_output_tokens_per_case": 2048,
+        "max_wall_time_ms_per_case": 120000
+      },
+      "context_policy": {
+        "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+        "uia": "same_capture_optional",
+        "ocr": "same_capture_optional"
+      }
+    },
+    {
+      "arm_id": "omni_to_qwen",
+      "phase": "pre-vista",
+      "producer_stages": ["omni", "qwen"],
+      "budget": {
+        "max_provider_calls_per_case": 3,
+        "max_output_tokens_per_case": 2048,
+        "max_wall_time_ms_per_case": 120000
+      },
+      "context_policy": {
+        "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+        "uia": "same_capture_optional",
+        "ocr": "same_capture_optional"
+      }
+    },
+    {
+      "arm_id": "omni_to_qwen_vista",
+      "phase": "post-vista",
+      "producer_stages": ["omni", "qwen", "vista"],
+      "budget": {
+        "max_provider_calls_per_case": 3,
+        "max_output_tokens_per_case": 2048,
+        "max_wall_time_ms_per_case": 120000
+      },
+      "context_policy": {
+        "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+        "uia": "same_capture_optional",
+        "ocr": "same_capture_optional"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "REPLACE_WITH_CASE_ID",
+      "partition": "REPLACE_WITH_REGRESSION_OR_HOLDOUT",
+      "image_path": "REPLACE_WITH_REPOSITORY_RELATIVE_IMAGE_PATH",
+      "goal": "REPLACE_WITH_PROVIDER_VISIBLE_GOAL",
+      "gold": {
+        "acceptable_candidate_ids": [],
+        "acceptable_regions": [[0, 0, 1, 1]],
+        "annotator_identity_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "reviewer_identity_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "acceptable_region_disagreement": "none"
+      }
+    }
+  ],
+  "evidence_policy": {
+    "public": "aggregate_metrics_only",
+    "private": "case_level_gold_and_predictions"
+  }
+}

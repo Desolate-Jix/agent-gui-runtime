@@ -1,0 +1,26 @@
+{
+  "contract_version": "portfolio_hybrid_v1_1_release_gate_v1",
+  "config_id": "portfolio-hybrid-v1-1-gate",
+  "quality": {
+    "release_arm": "omni_to_qwen_vista",
+    "split": "post_review",
+    "min_selected_count": 1,
+    "min_selection_precision": 0.95,
+    "min_target_recall": 0.9,
+    "max_wrong_selected_count": 0
+  },
+  "cleanup": {
+    "max_simultaneous_gpu_owners": 1,
+    "required_cleanup_status": "verified",
+    "max_orphan_provider_pids": 0,
+    "max_orphan_helper_pids": 0,
+    "max_lease_files_remaining": 0,
+    "vram_release_tolerance_mb": 64,
+    "require_cancel_timeout_compute_termination": true
+  },
+  "evidence_policy": {
+    "public": "aggregate_only",
+    "private": "sealed_case_evidence"
+  },
+  "config_sha256": "b1256ecb0e443255c862b46d9fa5838c8397056a1340299d9bde4b41bf9c7b23"
+}
