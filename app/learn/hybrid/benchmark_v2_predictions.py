@@ -9,6 +9,7 @@ from typing import Any, Mapping
 SAFETY={"artifact_is_authorization":False,"execute_binding_enabled":False,"display_only":True}
 ARMS=("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista")
 STATUSES={"selected","missing","failed"}
+ELIGIBILITY={"selected":"ELIGIBLE","missing":"INELIGIBLE","failed":"INELIGIBLE"}
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -46,8 +47,9 @@ def _validate_pre(pre: Mapping[str,object])->dict[str,object]:
     keys=set(); checked=[]
     for raw in rows:
         if not isinstance(raw,Mapping): raise ValueError("automatic row invalid")
-        row=deepcopy(dict(raw)); base={"case_id","arm_id","selection_status"}
+        row=deepcopy(dict(raw)); base={"case_id","arm_id","selection_status","eligibility"}
         if not base.issubset(row) or row["arm_id"] not in ARMS or row["selection_status"] not in STATUSES: raise ValueError("automatic row identity invalid")
+        if row["eligibility"]!=ELIGIBILITY[row["selection_status"]]: raise ValueError("automatic row eligibility invalid")
         key=(row["case_id"],row["arm_id"])
         if key in keys: raise ValueError("duplicate automatic arm/case")
         keys.add(key)
@@ -66,6 +68,15 @@ def _validate_pre(pre: Mapping[str,object])->dict[str,object]:
             if not isinstance(row.get("failure_reason"),str) or not row["failure_reason"]: raise ValueError("missing/failed selection requires reason")
         if set(row)-allowed: raise ValueError("automatic row has extra fields")
         checked.append(row)
+    by={(row["case_id"],row["arm_id"]):row for row in checked}
+    for case_id in {row["case_id"] for row in checked}:
+        baseline=by.get((case_id,"omni_to_qwen")); vista=by.get((case_id,"omni_to_qwen_vista"))
+        if baseline is None or vista is None: continue
+        if baseline["selection_status"]!=vista["selection_status"] or baseline["eligibility"]!=vista["eligibility"]: raise ValueError("paired arm eligibility mismatch")
+        if baseline["selection_status"]=="selected":
+            if baseline["target_binding_ref"]!=vista["target_binding_ref"] or baseline["vista_request_ref"]!=vista["vista_request_ref"]: raise ValueError("selected pair evidence mismatch")
+        elif baseline["failure_reason"]!=vista["failure_reason"]:
+            raise ValueError("ineligible pair reason mismatch")
     value=deepcopy(dict(pre)); value["rows"]=checked
     return value
 
@@ -73,14 +84,46 @@ def seal_automatic_prediction(*,request_ref:Mapping[str,str],pre_review:Mapping[
     artifact=_validate_pre(pre_review); pre_ref=artifact_ref(artifact)
     record={"contract_version":"automatic_prediction_record_v2","prediction_id":artifact["prediction_id"],"request_ref":exact_ref(request_ref,"request"),"pre_review_ref":pre_ref,"execution_refs":[exact_ref(x,"execution") for x in execution_refs],"lifecycle_ref":exact_ref(lifecycle_ref,"lifecycle"),"decisions":[],"post_review_ref":pre_ref,"safety":deepcopy(SAFETY)}
     record["revision_ref"]={"id":"prediction-revision/0","content_sha256":hashlib.sha256(canonical_bytes(record)).hexdigest()}
-    return {"record":record,"pre_review_artifact":sealed_artifact_envelope(artifact)}
+    return {"record":record,"record_ref":prediction_record_ref(record),"pre_review_artifact":sealed_artifact_envelope(artifact)}
 
-def append_review_decisions(record:Mapping[str,object],decisions:list[Mapping[str,object]],*,pre_review_artifact_bytes:bytes,expected_pre_review_ref:Mapping[str,str])->dict[str,object]:
+def prediction_record_ref(record:Mapping[str,object])->dict[str,str]:
+    prediction_id=record.get("prediction_id")
+    if not isinstance(prediction_id,str) or not prediction_id: raise ValueError("prediction record identity invalid")
+    return {"id":f"prediction-record/{prediction_id}","content_sha256":hashlib.sha256(canonical_bytes(record)).hexdigest()}
+
+def _validate_existing_record(record:Mapping[str,object],artifact:Mapping[str,object],expected_pre:Mapping[str,str])->dict[str,object]:
+    fields={"contract_version","prediction_id","request_ref","pre_review_ref","execution_refs","lifecycle_ref","decisions","post_review_ref","safety","revision_ref"}
+    if set(record)!=fields or record["contract_version"]!="automatic_prediction_record_v2" or record["prediction_id"]!=artifact["prediction_id"] or record["pre_review_ref"]!=expected_pre or record["safety"]!=SAFETY: raise ValueError("prediction record not closed")
+    exact_ref(record["request_ref"],"request"); exact_ref(record["lifecycle_ref"],"lifecycle")
+    if not isinstance(record["execution_refs"],list): raise ValueError("execution refs invalid")
+    for item in record["execution_refs"]: exact_ref(item,"execution")
+    allowed_bindings={canonical_bytes(row["target_binding_ref"]) for row in artifact["rows"] if row["selection_status"]=="selected"}
+    current={k:deepcopy(v) for k,v in record.items() if k not in {"decisions","post_review_ref","revision_ref"}}
+    current["decisions"]=[]; current["post_review_ref"]=deepcopy(expected_pre)
+    current["revision_ref"]={"id":"prediction-revision/0","content_sha256":hashlib.sha256(canonical_bytes({k:v for k,v in current.items() if k!="revision_ref"})).hexdigest()}
+    seen=set()
+    raw_decisions=record["decisions"]
+    if not isinstance(raw_decisions,list): raise ValueError("decision chain invalid")
+    for index,raw in enumerate(raw_decisions,1):
+        if not isinstance(raw,Mapping): raise ValueError("decision invalid")
+        item=deepcopy(dict(raw))
+        if set(item)!={"decision_id","predecessor_ref","target_binding_ref","disposition","replacement_candidate_id"} or not isinstance(item["decision_id"],str) or not item["decision_id"] or item["decision_id"] in seen or item["predecessor_ref"]!=current["revision_ref"]: raise ValueError("existing decision chain invalid")
+        if canonical_bytes(exact_ref(item["target_binding_ref"],"decision binding")) not in allowed_bindings: raise ValueError("decision binding is not in pre-review")
+        if not isinstance(item["disposition"],str) or not item["disposition"] or not isinstance(item["replacement_candidate_id"],str) or not item["replacement_candidate_id"]: raise ValueError("decision value invalid")
+        seen.add(item["decision_id"]); current["decisions"].append(item)
+        current["post_review_ref"]={"id":f"post-review/{index}","content_sha256":hashlib.sha256(canonical_bytes({"pre_review_ref":expected_pre,"decisions":current["decisions"]})).hexdigest()}
+        current["revision_ref"]={"id":f"prediction-revision/{index}","content_sha256":hashlib.sha256(canonical_bytes({k:v for k,v in current.items() if k!="revision_ref"})).hexdigest()}
+    if current!=record: raise ValueError("existing prediction record derived state invalid")
+    return current
+
+def append_review_decisions(record:Mapping[str,object],decisions:list[Mapping[str,object]],*,pre_review_artifact_bytes:bytes,expected_pre_review_ref:Mapping[str,str],expected_record_ref:Mapping[str,str])->dict[str,object]:
     value=deepcopy(dict(record)); expected=exact_ref(expected_pre_review_ref,"expected pre-review")
+    if prediction_record_ref(value)!=exact_ref(expected_record_ref,"expected record"): raise ValueError("external attempt record anchor mismatch")
     if value.get("pre_review_ref")!=expected or hashlib.sha256(pre_review_artifact_bytes).hexdigest()!=expected["content_sha256"]: raise ValueError("external pre-review anchor mismatch")
     artifact=json.loads(pre_review_artifact_bytes.decode("utf-8"))
     if canonical_bytes(artifact)!=pre_review_artifact_bytes or artifact_ref(artifact)!=expected: raise ValueError("pre-review CAS bytes invalid")
-    _validate_pre(artifact)
+    artifact=_validate_pre(artifact)
+    value=_validate_existing_record(value,artifact,expected)
     existing={d["decision_id"]:d for d in value["decisions"]}
     for raw in decisions:
         item=deepcopy(dict(raw)); prior=existing.get(item.get("decision_id"))

@@ -1,6 +1,6 @@
 """Child-only private scorer plus production-owned isolated scorer spawner."""
 from __future__ import annotations
-import base64, hashlib, json, os, secrets, subprocess, sys
+import base64, hashlib, json, os, secrets, subprocess, sys, tempfile
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Mapping
@@ -20,8 +20,19 @@ def _load(path:Path)->Any:
     return value
 
 def config_ref(path:Path)->dict[str,str]:
-    raw=path.read_bytes(); value=json.loads(raw.decode("utf-8"))
+    raw=path.read_bytes(); return _config_ref_from_bytes(path,raw)
+
+def _config_ref_from_bytes(path:Path,raw:bytes)->dict[str,str]:
+    value=json.loads(raw.decode("utf-8"))
     return {"relative_path":path.relative_to(ROOT).as_posix(),"file_sha256":hashlib.sha256(raw).hexdigest(),"content_sha256":hashlib.sha256(canonical_bytes(value)).hexdigest(),"contract_version":value["contract_version"],"release_id":value["benchmark_release_id"]}
+
+def _verified_config_snapshot(path:Path,expected:object)->dict[str,Any]:
+    raw=Path(path).read_bytes()
+    if not isinstance(expected,Mapping) or set(expected)!={"relative_path","file_sha256","content_sha256","contract_version","release_id"}: raise ValueError("configuration ref invalid")
+    value=json.loads(raw.decode("utf-8"))
+    observed={"relative_path":expected["relative_path"],"file_sha256":hashlib.sha256(raw).hexdigest(),"content_sha256":hashlib.sha256(canonical_bytes(value)).hexdigest(),"contract_version":value["contract_version"],"release_id":value["benchmark_release_id"]}
+    if observed!=expected: raise ValueError("configuration byte lineage mismatch")
+    return json.loads(canonical_bytes(value).decode("utf-8"))
 
 def _envelopes(items:object)->dict[str,dict[str,Any]]:
     if not isinstance(items,list): raise ValueError("sealed artifacts must be list")
@@ -79,12 +90,12 @@ def _validate_lifecycle(bundle:object,run:Mapping[str,object],private:Mapping[st
     if run["lifecycle_ref"]!=entry["lifecycle_ref"]: raise ValueError("run cherry-picked a later lifecycle")
     return life
 
-def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dict[str,Any]],dict[str,dict[str,Any]]]:
+def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dict[str,Any]],dict[str,dict[str,Any]],dict[str,Any]]:
     private=_closed(private,{"contract_version","source_parent_ref","partition","release_id","cases","expected_automatic_prediction_ref","expected_attempt_ledger_ref","expected_regression_precondition_ref","estimand_ref","gate_ref"},"private manifest")
     if private["contract_version"]!="portfolio_hybrid_v1_1_private_manifest_v2_synthetic" or private["release_id"]!=RELEASE or private["partition"]!="holdout": raise ValueError("private manifest invalid")
     exact_ref(private["source_parent_ref"],"parent")
-    observed_estimand=config_ref(ESTIMAND_PATH); observed_gate=config_ref(GATE_PATH)
-    if observed_estimand["contract_version"]!="portfolio_hybrid_v1_1_estimand_v2" or observed_estimand["release_id"]!=RELEASE or observed_gate["contract_version"]!="portfolio_hybrid_v1_1_automatic_gate_v2" or observed_gate["release_id"]!=RELEASE or private["estimand_ref"]!=observed_estimand or private["gate_ref"]!=observed_gate: raise ValueError("estimand/gate release lineage mismatch")
+    estimand=_verified_config_snapshot(ESTIMAND_PATH,private["estimand_ref"]); gate=_verified_config_snapshot(GATE_PATH,private["gate_ref"])
+    if estimand["contract_version"]!="portfolio_hybrid_v1_1_estimand_v2" or estimand["benchmark_release_id"]!=RELEASE or gate["contract_version"]!="portfolio_hybrid_v1_1_automatic_gate_v2" or gate["benchmark_release_id"]!=RELEASE: raise ValueError("estimand/gate release lineage mismatch")
     run=_closed(run,{"contract_version","release_id","partition","source_parent_ref","automatic_prediction_ref","attempt_ledger_ref","regression_precondition_ref","lifecycle_ref","sealed_artifacts","safety"},"prediction run")
     if run["contract_version"]!="benchmark_v2_prediction_run_v2" or run["release_id"]!=RELEASE or run["partition"]!=private["partition"] or run["source_parent_ref"]!=private["source_parent_ref"] or run["safety"]!=SAFETY: raise ValueError("prediction run lineage invalid")
     for field,expected in (("automatic_prediction_ref",private["expected_automatic_prediction_ref"]),("attempt_ledger_ref",private["expected_attempt_ledger_ref"]),("regression_precondition_ref",private["expected_regression_precondition_ref"])):
@@ -106,6 +117,7 @@ def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dic
             binding=_closed(binding,{"contract_version","artifact_id","case_id","target_id","candidate_id","fusion_ref","capture_ref","bbox_ref","bbox","source_parent_ref","safety"},"binding")
             if binding["contract_version"]!="sealed_target_binding_v2" or binding["case_id"]!=case_id or binding["source_parent_ref"]!=private["source_parent_ref"] or binding["safety"]!=SAFETY: raise ValueError("cross-target binding")
             bref=artifact_ref(binding); binding_by_row[(case_id,arm)]=bref
+            row["_target_id"]=binding["target_id"]; row["_bbox"]=list(binding["bbox"])
             for field,value in (("binding_ref",bref["id"]),("candidate_id",binding["candidate_id"]),("bbox_ref",binding["bbox_ref"]["id"])):
                 owner=global_owners[field].setdefault(value,case_id)
                 if owner!=case_id: raise ValueError(f"{field} reused across targets")
@@ -122,11 +134,16 @@ def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dic
                     result=row["vista_result"]
                     if result["request_ref"]!=qref or result["target_binding_ref"]!=bref: raise ValueError("VISTA proposal parent mismatch")
         pair_keys=[(case_id,a) for a in ("omni_to_qwen","omni_to_qwen_vista")]
-        if all(key in binding_by_row for key in pair_keys) and binding_by_row[pair_keys[0]]!=binding_by_row[pair_keys[1]]: raise ValueError("selected pair binding mismatch")
-        if all(key in request_by_row for key in pair_keys) and request_by_row[pair_keys[0]]!=request_by_row[pair_keys[1]]: raise ValueError("cross-request pair")
-    return list(by.values()),cases
+        pair=[by[key] for key in pair_keys]
+        if pair[0]["selection_status"]!=pair[1]["selection_status"] or pair[0]["eligibility"]!=pair[1]["eligibility"]: raise ValueError("paired arm eligibility mismatch")
+        if pair[0]["selection_status"]=="selected":
+            if any(key not in binding_by_row or key not in request_by_row for key in pair_keys): raise ValueError("selected pair evidence missing")
+            if binding_by_row[pair_keys[0]]!=binding_by_row[pair_keys[1]] or request_by_row[pair_keys[0]]!=request_by_row[pair_keys[1]]: raise ValueError("selected pair evidence mismatch")
+        elif pair[0]["failure_reason"]!=pair[1]["failure_reason"]:
+            raise ValueError("ineligible pair reason mismatch")
+    return list(by.values()),cases,gate
 
-def _score(rows:list[dict[str,Any]],cases:dict[str,dict[str,Any]])->dict[str,object]:
+def _score(rows:list[dict[str,Any]],cases:dict[str,dict[str,Any]],gate:Mapping[str,Any])->dict[str,object]:
     metrics={}
     selected_bindings={}
     # binding target and bbox are joined earlier; reload from attached cached metadata is forbidden, so caller annotates below
@@ -137,27 +154,56 @@ def _score(rows:list[dict[str,Any]],cases:dict[str,dict[str,Any]])->dict[str,obj
         important_total=sum(bool(c["important"]) for c in cases.values()); important_correct=sum(r["_target_id"]==cases[r["case_id"]]["target_id"] and cases[r["case_id"]]["important"] for r in selected)
         metrics[arm]={"coverage":Fraction(len(selected),len(cases)),"important_correct_coverage":Fraction(important_correct,important_total),"semantic_precision":Fraction(correct,len(selected)),"wrong":len(selected)-correct}
     numerator=submitted=0
+    baselines={r["case_id"]:r for r in rows if r["arm_id"]=="omni_to_qwen"}
     for r in rows:
         if r["arm_id"]!="omni_to_qwen_vista" or r["selection_status"]!="selected": continue
-        submitted+=1; a,b,c,d=r["_bbox"]; baseline=_hit((Fraction(a+c,2),Fraction(b+d,2)),cases[r["case_id"]]["acceptable_regions"]); result=r["vista_result"]
+        baseline_row=baselines[r["case_id"]]
+        if baseline_row["selection_status"]!="selected": raise ValueError("VISTA selection has no exact baseline")
+        submitted+=1; a,b,c,d=baseline_row["_bbox"]; baseline=_hit((Fraction(a+c,2),Fraction(b+d,2)),cases[r["case_id"]]["acceptable_regions"]); result=r["vista_result"]
         refined=0 if result["status"] in FAILURES else _hit(tuple(Fraction(v) for v in result["canonical_capture_pixel_point"]),cases[r["case_id"]]["acceptable_regions"]); numerator+=refined-baseline
     if not submitted: raise ValueError("zero submitted denominator")
-    gate=json.loads(GATE_PATH.read_text(encoding="utf-8")); t=gate["thresholds"]; release,base=metrics["omni_to_qwen_vista"],metrics["qwen_only"]
+    t=gate["thresholds"]; release,base=metrics["omni_to_qwen_vista"],metrics["qwen_only"]
     passed=release["wrong"]==t["wrong_target_count"] and release["coverage"]>=Fraction(t["min_coverage"]) and release["important_correct_coverage"]-base["important_correct_coverage"]>=Fraction(t["min_important_target_correct_coverage_delta"]) and release["semantic_precision"]-base["semantic_precision"]>=Fraction(t["min_semantic_precision_delta"]) and submitted>=t["min_vista_submitted_count"] and numerator>0
     serial={a:{k:(f"{v.numerator}/{v.denominator}" if isinstance(v,Fraction) else v) for k,v in m.items()} for a,m in metrics.items()}
     return {"automatic":{"wrong_target_count":release["wrong"],"arm_metrics":serial},"point_metric":{"gain_numerator":numerator,"submitted_count":submitted,"gain":f"{Fraction(numerator,submitted).numerator}/{Fraction(numerator,submitted).denominator}"},"gate":{"status":"PASS" if passed else "FAIL","automatic_split":"pre_review","regression_role":"precondition_only"}}
 
-def _score_private_child(*,child_capability:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
-    if not child_capability or child_capability!=os.environ.get("BENCHMARK_V2_SCORER_CHILD_CAPABILITY"): raise PermissionError("private scorer direct path is child-only")
+def _score_private_child(**_:object)->dict[str,object]:
+    raise PermissionError("private scorer direct path is child-only")
+
+_CHILD_ENTRY_USED=False
+
+def _process_identity(pid:int)->str:
+    if os.name=="nt":
+        import ctypes
+        kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+        kernel.OpenProcess.argtypes=(ctypes.c_ulong,ctypes.c_int,ctypes.c_ulong); kernel.OpenProcess.restype=ctypes.c_void_p
+        kernel.CloseHandle.argtypes=(ctypes.c_void_p,); kernel.CloseHandle.restype=ctypes.c_int
+        kernel.GetProcessTimes.argtypes=(ctypes.c_void_p,ctypes.c_void_p,ctypes.c_void_p,ctypes.c_void_p,ctypes.c_void_p); kernel.GetProcessTimes.restype=ctypes.c_int
+        handle=kernel.OpenProcess(0x1000,False,pid)
+        if not handle: raise OSError("process identity unavailable")
+        try:
+            creation=ctypes.c_ulonglong(); exit_time=ctypes.c_ulonglong(); kernel_time=ctypes.c_ulonglong(); user_time=ctypes.c_ulonglong()
+            if not kernel.GetProcessTimes(handle,ctypes.byref(creation),ctypes.byref(exit_time),ctypes.byref(kernel_time),ctypes.byref(user_time)): raise OSError("process identity unavailable")
+            return f"win-filetime/{creation.value}"
+        finally: kernel.CloseHandle(handle)
+    stat=Path(f"/proc/{pid}/stat").read_text(encoding="ascii").split()
+    return f"proc-start/{stat[21]}"
+
+def execute_closed_child_envelope(envelope:Mapping[str,object])->dict[str,object]:
+    global _CHILD_ENTRY_USED
+    fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","expected_process_id","expected_process_identity"}
+    if _CHILD_ENTRY_USED or not isinstance(envelope,Mapping) or set(envelope)!=fields: raise PermissionError("private scorer entrypoint state invalid")
+    pid=os.getpid(); nonce=envelope["nonce"]
+    if not isinstance(nonce,str) or len(nonce)!=64 or envelope["expected_process_id"]!=pid or envelope["expected_process_identity"]!=_process_identity(pid): raise PermissionError("private scorer launcher binding invalid")
+    _CHILD_ENTRY_USED=True
+    paths={key:Path(str(envelope[key])) for key in fields if key.endswith("_path")}
+    return _run_private_child_once(nonce=nonce,process_identity=str(envelope["expected_process_identity"]),**paths)
+
+def _run_private_child_once(*,nonce:str,process_identity:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
     private,run,bundle=_load(private_manifest_path),_load(prediction_run_path),_load(lifecycle_path)
-    rows,cases=_validate(private,run,bundle)
-    # attach only scorer-derived private joins after validation; they are never persisted in public inputs
-    arts=_envelopes(run["sealed_artifacts"])
-    for row in rows:
-        if row["selection_status"]=="selected":
-            binding=_get(arts,row["target_binding_ref"],"binding"); row["_target_id"]=binding["target_id"]; row["_bbox"]=binding["bbox"]
-    result=_score(rows,cases); private_result={"contract_version":"portfolio_hybrid_v1_1_private_score_v2",**result,"source_parent_ref":private["source_parent_ref"],"automatic_prediction_ref":run["automatic_prediction_ref"],"estimand_ref":private["estimand_ref"],"gate_ref":private["gate_ref"],"safety":dict(SAFETY)}
-    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"safety":dict(SAFETY)}
+    rows,cases,gate=_validate(private,run,bundle)
+    result=_score(rows,cases,gate); private_result={"contract_version":"portfolio_hybrid_v1_1_private_score_v2",**result,"source_parent_ref":private["source_parent_ref"],"automatic_prediction_ref":run["automatic_prediction_ref"],"estimand_ref":private["estimand_ref"],"gate_ref":private["gate_ref"],"safety":dict(SAFETY)}
+    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"process_id":os.getpid(),"process_identity":process_identity,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
     for path,payload in ((Path(private_output_path),raw),(Path(public_ref_path),canonical_bytes(public)+b"\n")):
         path.parent.mkdir(parents=True,exist_ok=True); tmp=path.with_name("."+path.name+".tmp")
         try: tmp.write_bytes(payload); tmp.replace(path)
@@ -167,28 +213,33 @@ def _score_private_child(*,child_capability:str,private_manifest_path:Path,predi
 
 def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,str]:
     system_root=os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot")
-    capability=secrets.token_hex(32)
-    env={"SYSTEMROOT":system_root,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1","BENCHMARK_V2_SCORER_CHILD_CAPABILITY":capability}
+    nonce=secrets.token_hex(32)
+    env={"SYSTEMROOT":system_root,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
     envelope={k:str(Path(v).resolve()) for k,v in {"private_manifest_path":private_manifest_path,"prediction_run_path":prediction_run_path,"lifecycle_path":lifecycle_path,"private_output_path":private_output_path,"public_ref_path":public_ref_path}.items()}
-    process=subprocess.Popen([sys.executable,str(SCRIPT),"--closed-stdin"],cwd=Path(private_output_path).resolve().parent,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
-    try:
-        stdout,stderr=process.communicate(json.dumps(envelope,sort_keys=True,separators=(",",":")),timeout=30)
-    finally:
+    with tempfile.TemporaryDirectory(prefix="benchmark-v2-score-") as operation_root:
+        root=Path(operation_root).resolve()
+        if root==Path(private_output_path).resolve().parent or root==Path(private_manifest_path).resolve().parent or any(root.iterdir()): raise ValueError("private scorer operation root invalid")
+        process=subprocess.Popen([sys.executable,str(SCRIPT),"--closed-stdin"],cwd=root,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
         try:
-            if process.poll() is None: process.kill()
+            identity=_process_identity(process.pid); envelope.update({"nonce":nonce,"expected_process_id":process.pid,"expected_process_identity":identity})
+            stdout,stderr=process.communicate(json.dumps(envelope,sort_keys=True,separators=(",",":")),timeout=30)
         finally:
             try:
-                process.wait(timeout=10)
+                if process.poll() is None: process.kill()
             finally:
-                for pipe in (process.stdin,process.stdout,process.stderr):
-                    if pipe is not None:
-                        try: pipe.close()
-                        except OSError: pass
+                try:
+                    process.wait(timeout=10)
+                finally:
+                    for pipe in (process.stdin,process.stdout,process.stderr):
+                        if pipe is not None:
+                            try: pipe.close()
+                            except OSError: pass
     if process.returncode!=0: raise ValueError("private scorer failed closed; sensitive details redacted")
     lines=stdout.splitlines()
     if len(lines)!=1: raise ValueError("private scorer stdout contract invalid")
     ref=json.loads(lines[0])
     if not isinstance(ref,dict) or set(ref)!={"status","score_ref","content_sha256"}: raise ValueError("private scorer public stdout ref invalid")
     public=json.loads(Path(public_ref_path).read_text(encoding="utf-8"))
-    if {k:public[k] for k in ref}!=ref or public.get("safety")!=SAFETY: raise ValueError("private scorer public artifact mismatch")
+    receipt=public.get("execution_receipt")
+    if {k:public[k] for k in ref}!=ref or public.get("safety")!=SAFETY or not isinstance(receipt,Mapping) or receipt!={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"process_id":process.pid,"process_identity":identity,"safety":SAFETY}: raise ValueError("private scorer public artifact mismatch")
     return ref
