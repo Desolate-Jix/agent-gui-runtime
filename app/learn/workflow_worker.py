@@ -147,6 +147,14 @@ class LearningStageWorkerError(ValueError):
     """学习阶段 worker 请求无效或不属于当前 operation。"""
 
 
+class LearningStageWorkerCleanupError(LearningStageWorkerError):
+    """学习阶段 worker 启动清理无法证明为完成。"""
+
+    def __init__(self, evidence: dict[str, Any]) -> None:
+        super().__init__("Hybrid worker start cleanup is indeterminate")
+        self.cleanup_evidence = deepcopy(evidence)
+
+
 def run_learning_calibration_sequence(
     payload: dict[str, Any],
     **kwargs: Any,
@@ -1555,6 +1563,9 @@ class LearningStageWorkerRegistry:
             tuple[str, str, str, str, str],
             str,
         ] = {}
+        self._failed_start_cleanups: dict[
+            tuple[str, str, str], dict[str, Any]
+        ] = {}
         self._load_journals()
 
     def _load_journals(self) -> None:
@@ -1625,7 +1636,34 @@ class LearningStageWorkerRegistry:
             payload["provider_profile_id"] = record["provider_profile_id"]
         if isinstance(record.get("result_adoption"), dict):
             payload["result_adoption"] = deepcopy(record["result_adoption"])
+        if isinstance(record.get("start_cleanup_evidence"), dict):
+            payload["start_cleanup_evidence"] = deepcopy(
+                record["start_cleanup_evidence"]
+            )
         _write_json_atomic(journal_path, payload)
+
+    def _cleanup_failed_start_or_retain(
+        self,
+        *,
+        operation_key: tuple[str, str, str],
+        provider_scope: Any,
+        process: Any,
+        artifact_paths: tuple[Path, ...],
+    ) -> dict[str, Any]:
+        try:
+            return _cleanup_failed_worker_start(
+                provider_scope=provider_scope,
+                process=process,
+                artifact_paths=artifact_paths,
+            )
+        except LearningStageWorkerCleanupError as error:
+            self._failed_start_cleanups[operation_key] = {
+                "provider_scope": provider_scope,
+                "process": process,
+                "artifact_paths": tuple(artifact_paths),
+                "cleanup_evidence": deepcopy(error.cleanup_evidence),
+            }
+            raise
 
     def start(
         self,
@@ -1702,6 +1740,10 @@ class LearningStageWorkerRegistry:
                 raise LearningStageWorkerError(
                     "operation already has an active worker with a different "
                     "task or payload identity"
+                )
+            if operation_key in self._failed_start_cleanups:
+                raise LearningStageWorkerError(
+                    "operation has indeterminate worker start cleanup"
                 )
 
             worker_id = uuid4().hex
@@ -1809,7 +1851,8 @@ class LearningStageWorkerRegistry:
                             }),
                         )
                     except BaseException:
-                        _cleanup_failed_worker_start(
+                        self._cleanup_failed_start_or_retain(
+                            operation_key=operation_key,
                             provider_scope=provider_scope,
                             process=None,
                             artifact_paths=(
@@ -1840,7 +1883,8 @@ class LearningStageWorkerRegistry:
                             profile_id=provider_profile_id,
                         )
                     except BaseException:
-                        _cleanup_failed_worker_start(
+                        self._cleanup_failed_start_or_retain(
+                            operation_key=operation_key,
                             provider_scope=provider_scope,
                             process=None,
                             artifact_paths=(
@@ -1885,7 +1929,8 @@ class LearningStageWorkerRegistry:
                     name=f"learning-stage-{normalized_stage}-{worker_id[:8]}",
                 )
             except BaseException:
-                _cleanup_failed_worker_start(
+                self._cleanup_failed_start_or_retain(
+                    operation_key=operation_key,
                     provider_scope=provider_scope,
                     process=process,
                     artifact_paths=(
@@ -1928,7 +1973,8 @@ class LearningStageWorkerRegistry:
             try:
                 self._persist_record_journal(record)
             except BaseException:
-                _cleanup_failed_worker_start(
+                self._cleanup_failed_start_or_retain(
+                    operation_key=operation_key,
                     provider_scope=provider_scope,
                     process=process,
                     artifact_paths=(
@@ -1947,7 +1993,37 @@ class LearningStageWorkerRegistry:
             self._workers_by_invocation[invocation_key] = worker_id
             try:
                 process.start()
-            except BaseException:
+            except BaseException as start_error:
+                try:
+                    cleanup_evidence = self._cleanup_failed_start_or_retain(
+                        operation_key=operation_key,
+                        provider_scope=provider_scope,
+                        process=process,
+                        artifact_paths=(
+                            result_path,
+                            journal_path,
+                            provider_lease_path,
+                            provider_owner_path,
+                            provider_runtime_path,
+                        ),
+                    )
+                except LearningStageWorkerCleanupError as cleanup_error:
+                    record["status"] = "recovery_required"
+                    record["start_cleanup_evidence"] = deepcopy(
+                        cleanup_error.cleanup_evidence
+                    )
+                    try:
+                        self._persist_record_journal(record)
+                    except BaseException as journal_error:
+                        cleanup_error.cleanup_evidence["failures"].append({
+                            "step": "recovery_journal_write",
+                            "error_type": type(journal_error).__name__,
+                            "message": str(journal_error),
+                        })
+                        record["start_cleanup_evidence"] = deepcopy(
+                            cleanup_error.cleanup_evidence
+                        )
+                    raise cleanup_error from start_error
                 self._active_by_operation.pop(operation_key, None)
                 self._records.pop(worker_id, None)
                 workers = self._workers_by_operation.get(operation_key, [])
@@ -1956,17 +2032,7 @@ class LearningStageWorkerRegistry:
                 if not workers:
                     self._workers_by_operation.pop(operation_key, None)
                 self._workers_by_invocation.pop(invocation_key, None)
-                _cleanup_failed_worker_start(
-                    provider_scope=provider_scope,
-                    process=process,
-                    artifact_paths=(
-                        result_path,
-                        journal_path,
-                        provider_lease_path,
-                        provider_owner_path,
-                        provider_runtime_path,
-                    ),
-                )
+                record["start_cleanup_evidence"] = cleanup_evidence
                 record["provider_scope"] = None
                 raise
             return self._public_record(record)
@@ -2537,6 +2603,13 @@ class LearningStageWorkerRegistry:
         return active or records[-1]
 
     def _refresh_record(self, record: dict[str, Any]) -> None:
+        if (
+            record.get("status") == "recovery_required"
+            and isinstance(record.get("start_cleanup_evidence"), dict)
+            and record["start_cleanup_evidence"].get("cleanup_status")
+            == "indeterminate"
+        ):
+            return
         if record["status"] in {"cancelled", "cancel_failed"}:
             return
         if (
@@ -2743,37 +2816,98 @@ def _cleanup_failed_worker_start(
     provider_scope: Any,
     process: Any,
     artifact_paths: tuple[Path, ...],
-) -> None:
+) -> dict[str, Any]:
     """清理尚未成功启动的 worker 所有权与精确工件。"""
+
+    failures: list[dict[str, str]] = []
+
+    def record_failure(step: str, error: BaseException) -> None:
+        failures.append({
+            "step": step,
+            "error_type": type(error).__name__,
+            "message": str(error),
+        })
 
     if process is not None:
         try:
             is_alive = getattr(process, "is_alive", None)
-            if callable(is_alive) and is_alive():
+            alive_before = bool(callable(is_alive) and is_alive())
+        except BaseException as error:
+            alive_before = True
+            record_failure("process_observe_before", error)
+        if alive_before:
+            try:
                 terminate = getattr(process, "terminate", None)
                 if callable(terminate):
                     terminate()
+                else:
+                    raise RuntimeError("process terminate is unavailable")
+            except BaseException as error:
+                record_failure("process_terminate", error)
+            try:
                 join = getattr(process, "join", None)
                 if callable(join):
                     join(timeout=5)
-        except BaseException:
-            pass
+                else:
+                    raise RuntimeError("process join is unavailable")
+            except BaseException as error:
+                record_failure("process_join", error)
+        try:
+            is_alive = getattr(process, "is_alive", None)
+            if callable(is_alive) and is_alive():
+                raise RuntimeError("worker process remains active")
+        except BaseException as error:
+            record_failure("process_observe_after", error)
         try:
             close = getattr(process, "close", None)
             if callable(close):
                 close()
-        except BaseException:
-            pass
+        except BaseException as error:
+            record_failure("process_close", error)
+    scope_name = str(getattr(provider_scope, "name", "") or "")
     if provider_scope is not None:
         try:
             provider_scope.close()
-        except BaseException:
-            pass
-    for path in artifact_paths:
+        except BaseException as error:
+            record_failure("provider_scope_close", error)
+    if not failures and scope_name:
         try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+            from app.learn.hybrid.windows_process_scope import (
+                observe_process_scope_cleanup,
+            )
+
+            scope_evidence = observe_process_scope_cleanup(
+                scope_name,
+                terminate=False,
+                stable_zero_observations=3,
+            )
+            if scope_evidence.get("cleanup_status") != "verified":
+                raise RuntimeError("provider scope is not reusable")
+        except BaseException as error:
+            record_failure("provider_scope_reuse_observation", error)
+    else:
+        scope_evidence = None
+    if not failures:
+        for path in artifact_paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                record_failure("artifact_unlink", error)
+    artifacts_after = [
+        str(path.resolve()) for path in artifact_paths if path.exists()
+    ]
+    evidence = {
+        "contract_version": "hybrid_worker_start_cleanup_v1",
+        "cleanup_status": "indeterminate" if failures else "verified",
+        "process_present": process is not None,
+        "provider_scope_name": scope_name or None,
+        "provider_scope_cleanup": scope_evidence,
+        "artifact_paths_after": artifacts_after,
+        "failures": failures,
+    }
+    if failures:
+        raise LearningStageWorkerCleanupError(evidence)
+    return evidence
 
 
 def _required_text(value: Any, field: str) -> str:
@@ -3034,6 +3168,11 @@ def _load_worker_journal(
         "cancellation_event": None,
         "completion_event": None,
         "result_adoption": result_adoption,
+        "start_cleanup_evidence": (
+            deepcopy(payload.get("start_cleanup_evidence"))
+            if isinstance(payload.get("start_cleanup_evidence"), dict)
+            else None
+        ),
         "recovered_from_journal": True,
     }
 

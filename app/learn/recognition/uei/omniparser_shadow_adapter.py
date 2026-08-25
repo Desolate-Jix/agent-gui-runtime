@@ -960,14 +960,45 @@ def _advance_omniparser_finalization(
 def _mark_omniparser_runtime_released(path: Path, invocation_id: str) -> None:
     document = _load_omniparser_owner(path)
     observation = load_omniparser_invocation_cleanup_observation(invocation_id)
-    if observation.get("cleanup_status") != "verified":
-        return
-    _advance_omniparser_finalization(
-        path,
-        "observation_written",
-        cleanup_observation_sha256=observation["content_sha256"],
+    finalization = document.get("finalization")
+    scope_cleanup = observation.get("process_scope_cleanup")
+    exact_lease_identity = _resource_lease_identity(
+        lease_path=Path(str(document.get("resource_lease_path") or "")).resolve(),
+        token=str(document.get("resource_lease_token") or ""),
     )
-    _advance_omniparser_finalization(path, "released")
+    if (
+        not isinstance(finalization, dict)
+        or observation.get("cleanup_status") != "verified"
+        or observation.get("cleanup_reason") != "completed"
+        or observation.get("provider_invocation_id") != document.get(
+            "provider_invocation_id"
+        )
+        or observation.get("lineage") != document.get("lineage")
+        or observation.get("process_scope_name")
+        != document.get("process_scope_name")
+        or observation.get("resource_lease_identity") != exact_lease_identity
+        or not isinstance(scope_cleanup, dict)
+        or scope_cleanup.get("cleanup_status") != "verified"
+        or scope_cleanup.get("scope_name") != document.get("process_scope_name")
+    ):
+        return
+    phase = str(finalization.get("phase") or "")
+    if phase == "lease_removed":
+        document = _advance_omniparser_finalization(
+            path,
+            "scope_cleaned",
+            scope_cleanup_evidence=scope_cleanup,
+        )
+        phase = str(document["finalization"].get("phase") or "")
+    if phase == "scope_cleaned":
+        document = _advance_omniparser_finalization(
+            path,
+            "observation_written",
+            cleanup_observation_sha256=observation["content_sha256"],
+        )
+        phase = str(document["finalization"].get("phase") or "")
+    if phase == "observation_written":
+        _advance_omniparser_finalization(path, "released")
 
 
 def _write_sealed_json(path: Path, document: dict[str, object]) -> None:

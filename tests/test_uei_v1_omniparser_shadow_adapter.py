@@ -435,6 +435,129 @@ def test_omni_normal_finally_interruption_recovers_owned_lease_removal(
         scope.close()
 
 
+@pytest.mark.parametrize(
+    "crash_phase", ["lease_removed", "scope_cleaned", "observation_written", "released"]
+)
+def test_real_normal_omni_finalizer_recovers_after_every_durable_advance(
+    tmp_path: Path,
+    monkeypatch,
+    crash_phase: str,
+) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+    from app.learn.hybrid import windows_process_scope
+
+    monkeypatch.setattr(adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "cleanup")
+    lineage = {
+        "run_id": f"run-normal-advance-{crash_phase}",
+        "workflow_revision": 7,
+        "operation_id": f"operation-normal-advance-{crash_phase}",
+        "stage": "screen_understanding",
+        "stage_execution_id": f"execution-normal-advance-{crash_phase}",
+    }
+    scope_name = windows_process_scope.process_scope_name(lineage, "omni")
+    scope = windows_process_scope.WindowsProcessScope(scope_name, create=True)
+    runtime_path = tmp_path / "runtime.json"
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(runtime_path))
+    monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", json.dumps(lineage))
+    real_spawn = windows_process_scope.spawn_process_in_scope
+
+    def controlled_scoped_spawn(command, **kwargs):
+        output_path = Path(command[command.index("--output-json") + 1])
+        payload = {"items": [], "duration_ms": 2, "resource_units": 1}
+        code = (
+            "import json,time;"
+            f"open({str(output_path)!r},'w',encoding='utf-8').write("
+            f"json.dumps({payload!r}));time.sleep(0.03)"
+        )
+        return real_spawn(
+            [sys.executable, "-c", code],
+            scope_name=kwargs["scope_name"],
+            cwd=kwargs["cwd"],
+        )
+
+    monkeypatch.setattr(
+        windows_process_scope, "spawn_process_in_scope", controlled_scoped_spawn
+    )
+    original_advance = adapter_module._advance_omniparser_finalization
+    injected = False
+
+    def crash_after_advance(path, phase, **evidence):
+        nonlocal injected
+        document = original_advance(path, phase, **evidence)
+        if not injected and phase == crash_phase:
+            injected = True
+            raise RuntimeError(f"injected-normal-{crash_phase}")
+        return document
+
+    monkeypatch.setattr(
+        adapter_module, "_advance_omniparser_finalization", crash_after_advance
+    )
+    invocation_id = f"invocation/normal-advance-{crash_phase}"
+    try:
+        with pytest.raises(RuntimeError, match=f"injected-normal-{crash_phase}"):
+            adapter_module.OmniParserShadowAdapter(
+                configuration=_config(tmp_path),
+                resource_lease_manager=adapter_module.ProcessResourceLeaseManager(
+                    root=tmp_path / "leases"
+                ),
+            ).invoke(
+                capture=_capture(tmp_path),
+                budget=_budget(),
+                invocation_id=invocation_id,
+            )
+        if crash_phase == "scope_cleaned":
+            observation_path = adapter_module._cleanup_observation_path(invocation_id)
+            exact_observation = json.loads(
+                observation_path.read_text(encoding="utf-8")
+            )
+            stale_observation = dict(exact_observation)
+            stale_observation.pop("content_sha256")
+            stale_observation["resource_lease_identity"] = {
+                **stale_observation["resource_lease_identity"],
+                "lease_token_sha256": "f" * 64,
+            }
+            observation_path.write_text(
+                json.dumps(adapter_module.seal_immutable(stale_observation)),
+                encoding="utf-8",
+            )
+            adapter_module._mark_omniparser_runtime_released(
+                runtime_path, invocation_id
+            )
+            stale_owner = json.loads(runtime_path.read_text(encoding="utf-8"))
+            assert stale_owner["finalization"]["phase"] == "scope_cleaned"
+            observation_path.write_text(
+                json.dumps(exact_observation), encoding="utf-8"
+            )
+        monkeypatch.setattr(
+            adapter_module,
+            "_advance_omniparser_finalization",
+            original_advance,
+        )
+        first = adapter_module.reconcile_omniparser_invocation_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        second = adapter_module.reconcile_omniparser_invocation_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        assert first == second
+        assert first["status"] == "verified"
+        assert first["cleanup_observation"]["cleanup_reason"] == "completed"
+        owner = json.loads(runtime_path.read_text(encoding="utf-8"))
+        assert owner["state"] == "released"
+        assert owner["finalization"]["phase"] == "released"
+        assert owner["finalization"]["scope_cleanup_evidence"][
+            "cleanup_status"
+        ] == "verified"
+        assert list((tmp_path / "leases").glob("*.lock")) == []
+    finally:
+        scope.close()
+
+
 @pytest.mark.parametrize("payload", [
     {"items": [], "duration_ms": 1, "resource_units": 0, "capture_id": "forged"},
     {"items": [{"source_item_id": "item/1", "kind": "text", "safe_text": "Authorization: Bearer token",

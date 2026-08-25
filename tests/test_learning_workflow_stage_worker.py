@@ -3567,3 +3567,363 @@ def test_hybrid_worker_start_failure_closes_scope_and_allows_safe_retry(
     assert retried_record["process"].started is True
     retried_record["provider_scope"].close()
     retried_record["provider_scope"] = None
+
+
+def test_failed_worker_start_cleanup_surfaces_each_failure_and_retains_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    lineage = _hybrid_lineage(
+        run_id="run-cleanup-failure-evidence",
+        task_kind="panel_learning_hybrid_omni_discovery",
+    )
+    scope_name = process_scope_name(lineage, "omni")
+
+    class ThrowingProcess:
+        def is_alive(self):
+            return True
+
+        def terminate(self):
+            raise RuntimeError("terminate-failed")
+
+        def join(self, timeout=None):
+            del timeout
+            raise RuntimeError("join-failed")
+
+        def close(self):
+            raise RuntimeError("process-close-failed")
+
+    class ThrowingScope:
+        name = scope_name
+
+        def close(self):
+            raise RuntimeError("job-close-failed")
+
+    first = tmp_path / "first.owner.json"
+    second = tmp_path / "second.runtime.json"
+    first.write_text("owner", encoding="utf-8")
+    second.write_text("runtime", encoding="utf-8")
+    with pytest.raises(
+        workflow_worker.LearningStageWorkerCleanupError,
+        match="Hybrid worker start cleanup is indeterminate",
+    ) as captured:
+        workflow_worker._cleanup_failed_worker_start(
+            provider_scope=ThrowingScope(),
+            process=ThrowingProcess(),
+            artifact_paths=(first, second),
+        )
+
+    evidence = captured.value.cleanup_evidence
+    assert evidence["cleanup_status"] == "indeterminate"
+    assert {item["step"] for item in evidence["failures"]} == {
+        "process_terminate",
+        "process_join",
+        "process_observe_after",
+        "process_close",
+        "provider_scope_close",
+    }
+    assert first.exists() is True
+    assert second.exists() is True
+    assert evidence["artifact_paths_after"] == [
+        str(first.resolve()),
+        str(second.resolve()),
+    ]
+
+
+def test_failed_worker_start_cleanup_surfaces_artifact_unlink_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+
+    first = tmp_path / "first.owner.json"
+    second = tmp_path / "second.runtime.json"
+    first.write_text("owner", encoding="utf-8")
+    second.write_text("runtime", encoding="utf-8")
+    real_unlink = Path.unlink
+
+    def fail_one_unlink(path, *args, **kwargs):
+        if path == first:
+            raise OSError("unlink-failed")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_one_unlink)
+    with pytest.raises(workflow_worker.LearningStageWorkerCleanupError) as captured:
+        workflow_worker._cleanup_failed_worker_start(
+            provider_scope=None,
+            process=None,
+            artifact_paths=(first, second),
+        )
+
+    evidence = captured.value.cleanup_evidence
+    assert evidence["cleanup_status"] == "indeterminate"
+    assert [item["step"] for item in evidence["failures"]] == [
+        "artifact_unlink"
+    ]
+    assert first.exists() is True
+    assert second.exists() is False
+    assert evidence["artifact_paths_after"] == [str(first.resolve())]
+
+
+def test_registry_retains_recovery_state_when_start_cleanup_is_indeterminate(
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    run_id = "run-start-cleanup-indeterminate"
+    operation_id = "operation-start-cleanup-indeterminate"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind="panel_learning_hybrid_omni_discovery",
+        operation_id=operation_id,
+    )
+    exact_scope_name = process_scope_name(lineage, "omni")
+    unrelated_lineage = {
+        **lineage,
+        "run_id": "run-start-cleanup-unrelated",
+        "operation_id": "operation-start-cleanup-unrelated",
+        "stage_execution_id": "execution-start-cleanup-unrelated",
+    }
+    unrelated_scope_name = process_scope_name(unrelated_lineage, "omni")
+    unrelated_scope = WindowsProcessScope(unrelated_scope_name, create=True)
+    unrelated = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=unrelated_scope_name,
+        cwd=tmp_path,
+    )
+    processes = []
+
+    class IndeterminateStartProcess(_FakeProcess):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.helper = None
+            self.join_called = False
+            self.close_called = False
+
+        def start(self) -> None:
+            self.helper = spawn_process_in_scope(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                scope_name=exact_scope_name,
+                cwd=tmp_path,
+            )
+            raise RuntimeError("injected-start-after-helper")
+
+        def is_alive(self) -> bool:
+            return self.helper is not None and self.helper.poll() is None
+
+        def terminate(self) -> None:
+            raise RuntimeError("injected-terminate-failure")
+
+        def join(self, timeout=None) -> None:
+            del timeout
+            self.join_called = True
+            raise RuntimeError("injected-join-failure")
+
+        def close(self) -> None:
+            self.close_called = True
+            raise RuntimeError("injected-process-close-failure")
+
+    def process_factory(*, target, args, name):
+        process = IndeterminateStartProcess(target=target, args=args, name=name)
+        processes.append(process)
+        return process
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=process_factory,
+    )
+    payload = {
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "workflow_revision": 7,
+        "hybrid_capture_bundle_ref": {
+            "id": "hybrid-capture/start-cleanup-indeterminate",
+            "content_sha256": "d" * 64,
+        },
+    }
+    try:
+        with pytest.raises(
+            workflow_worker.LearningStageWorkerCleanupError,
+            match="Hybrid worker start cleanup is indeterminate",
+        ) as captured:
+            registry.start(
+                run_id=run_id,
+                stage="screen_understanding",
+                operation_id=operation_id,
+                task_kind="panel_learning_hybrid_omni_discovery",
+                authoritative_workflow_revision=7,
+                payload=payload,
+            )
+        evidence = captured.value.cleanup_evidence
+        assert evidence["cleanup_status"] == "indeterminate"
+        assert processes[0].join_called is True
+        assert processes[0].close_called is True
+        assert processes[0].helper.poll() is not None
+        assert unrelated.poll() is None
+        assert len(registry._records) == 1
+        record = next(iter(registry._records.values()))
+        assert record["status"] == "recovery_required"
+        assert record["start_cleanup_evidence"] == evidence
+        assert Path(record["provider_owner_path"]).exists()
+        assert Path(record["provider_runtime_path"]).exists()
+        with pytest.raises(LearningStageWorkerError, match="operation already has"):
+            registry.start(
+                run_id=run_id,
+                stage="screen_understanding",
+                operation_id=operation_id,
+                task_kind="panel_learning_hybrid_omni_discovery",
+                authoritative_workflow_revision=7,
+                payload={**payload, "retry_nonce": 1},
+            )
+        assert unrelated.poll() is None
+        restarted = LearningStageWorkerRegistry(
+            result_root=tmp_path,
+            process_factory=_fake_process_factory,
+        )
+        restarted_record = next(iter(restarted._records.values()))
+        assert restarted_record["status"] == "recovery_required"
+        assert restarted_record["start_cleanup_evidence"] == evidence
+        assert unrelated.poll() is None
+    finally:
+        if processes and processes[0].helper is not None:
+            processes[0].helper.close()
+        unrelated_scope.terminate()
+        unrelated.wait(10)
+        unrelated.close()
+        unrelated_scope.close()
+
+
+def test_registry_job_close_failure_retains_exact_scope_and_never_touches_unrelated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    run_id = "run-job-close-failure"
+    operation_id = "operation-job-close-failure"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind="panel_learning_hybrid_omni_discovery",
+        operation_id=operation_id,
+    )
+    exact_scope_name = process_scope_name(lineage, "omni")
+    unrelated_lineage = {
+        **lineage,
+        "run_id": "run-job-close-unrelated",
+        "operation_id": "operation-job-close-unrelated",
+        "stage_execution_id": "execution-job-close-unrelated",
+    }
+    unrelated_scope_name = process_scope_name(unrelated_lineage, "omni")
+    unrelated_scope = WindowsProcessScope(unrelated_scope_name, create=True)
+    unrelated = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=unrelated_scope_name,
+        cwd=tmp_path,
+    )
+    real_scope_close = WindowsProcessScope.close
+    exact_close_calls = 0
+
+    def fail_owner_close(scope):
+        nonlocal exact_close_calls
+        if scope.name == exact_scope_name:
+            exact_close_calls += 1
+            if exact_close_calls == 2:
+                raise RuntimeError("injected-exact-job-close-failure")
+        return real_scope_close(scope)
+
+    monkeypatch.setattr(WindowsProcessScope, "close", fail_owner_close)
+    processes = []
+
+    class JobCloseFailureProcess(_FakeProcess):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.helper = None
+            self.closed = False
+
+        def start(self) -> None:
+            self.helper = spawn_process_in_scope(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                scope_name=exact_scope_name,
+                cwd=tmp_path,
+            )
+            raise RuntimeError("injected-start-before-job-close")
+
+        def is_alive(self) -> bool:
+            return self.helper is not None and self.helper.poll() is None
+
+        def terminate(self) -> None:
+            assert self.helper is not None
+            self.helper.terminate()
+
+        def join(self, timeout=None) -> None:
+            assert self.helper is not None
+            self.helper.wait(timeout)
+
+        def close(self) -> None:
+            assert self.helper is not None
+            self.helper.close()
+            self.closed = True
+
+    def process_factory(*, target, args, name):
+        process = JobCloseFailureProcess(target=target, args=args, name=name)
+        processes.append(process)
+        return process
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=process_factory,
+    )
+    try:
+        with pytest.raises(
+            workflow_worker.LearningStageWorkerCleanupError
+        ) as captured:
+            registry.start(
+                run_id=run_id,
+                stage="screen_understanding",
+                operation_id=operation_id,
+                task_kind="panel_learning_hybrid_omni_discovery",
+                authoritative_workflow_revision=7,
+                payload={
+                    "learning_pipeline_mode": "hybrid_v1_1",
+                    "workflow_revision": 7,
+                    "hybrid_capture_bundle_ref": {
+                        "id": "hybrid-capture/job-close-failure",
+                        "content_sha256": "e" * 64,
+                    },
+                },
+            )
+        evidence = captured.value.cleanup_evidence
+        assert {item["step"] for item in evidence["failures"]} == {
+            "provider_scope_close"
+        }
+        assert evidence["provider_scope_name"] == exact_scope_name
+        assert unrelated.poll() is None
+        record = next(iter(registry._records.values()))
+        assert record["status"] == "recovery_required"
+        assert record["provider_scope"]._closed is False
+        assert Path(record["provider_owner_path"]).exists()
+        assert Path(record["provider_runtime_path"]).exists()
+    finally:
+        monkeypatch.setattr(WindowsProcessScope, "close", real_scope_close)
+        if processes and processes[0].helper is not None and not processes[0].closed:
+            processes[0].helper.close()
+        if registry._records:
+            retained = next(iter(registry._records.values())).get("provider_scope")
+            if retained is not None and not retained._closed:
+                retained.close()
+        unrelated_scope.terminate()
+        unrelated.wait(10)
+        unrelated.close()
+        unrelated_scope.close()

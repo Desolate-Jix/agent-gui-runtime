@@ -872,6 +872,100 @@ def test_scoped_model_start_failure_closes_process_log_and_job_membership(
         scope.close()
 
 
+def test_scoped_model_start_process_close_failure_still_closes_log_and_surfaces_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from pathlib import Path
+
+    from app.core import model_server
+    from app.learn.hybrid import windows_process_scope
+
+    lineage = {**_HYBRID_LINEAGE, "operation_id": "operation-start-close-failure"}
+    scope_name = windows_process_scope.process_scope_name(lineage, "qwen")
+    scope = windows_process_scope.WindowsProcessScope(scope_name, create=True)
+    real_spawn = windows_process_scope.spawn_process_in_scope
+    spawned = []
+
+    def controlled_spawn(command, **kwargs):
+        child = real_spawn(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            scope_name=kwargs["scope_name"],
+            cwd=tmp_path,
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+        )
+        spawned.append(child)
+        child.poll = lambda: (_ for _ in ()).throw(RuntimeError("injected-poll"))
+        real_close = child.close
+
+        def close_then_throw():
+            real_close()
+            raise RuntimeError("injected-process-handle-close")
+
+        child.close = close_then_throw
+        return child
+
+    log_path = tmp_path / "close-failure.log"
+    real_path_open = Path.open
+    tracking = {}
+
+    class TrackingLog:
+        def __init__(self, handle) -> None:
+            self.handle = handle
+            self.close_called = False
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def close(self):
+            self.close_called = True
+            self.handle.close()
+
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+
+    def tracked_open(path, *args, **kwargs):
+        handle = real_path_open(path, *args, **kwargs)
+        if Path(path) == log_path:
+            wrapper = TrackingLog(handle)
+            tracking["log"] = wrapper
+            return wrapper
+        return handle
+
+    monkeypatch.setattr(windows_process_scope, "spawn_process_in_scope", controlled_spawn)
+    monkeypatch.setattr(Path, "open", tracked_open)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    profile = {
+        "profile_id": "start-close-failure",
+        "runtime": "llama",
+        "port": 54327,
+        "pid_file": str(tmp_path / "close-failure.pid"),
+        "startup_exit_check_seconds": 0,
+    }
+    try:
+        with pytest.raises(
+            model_server.HybridModelLaunchCleanupError,
+            match="Hybrid model launch handle cleanup is indeterminate",
+        ) as captured:
+            model_server._launch_model_server_process(
+                profile=profile,
+                log_path=log_path,
+                command=["controlled-no-wrapper"],
+            )
+        evidence = captured.value.cleanup_evidence
+        assert evidence["process_handle_close"] == "failed"
+        assert evidence["log_handle_close"] == "closed"
+        assert evidence["scope_cleanup_evidence"]["cleanup_status"] == "verified"
+        assert tracking["log"].close_called is True
+        assert spawned[0]._closed is True
+    finally:
+        if spawned and not spawned[0]._closed:
+            spawned[0].close()
+        if not scope._closed:
+            scope.close()
+
+
 def test_stop_model_server_honors_real_wrapper_test_sentinel(monkeypatch) -> None:
     from app.core import model_server
 

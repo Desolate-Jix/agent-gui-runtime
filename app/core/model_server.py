@@ -66,6 +66,14 @@ class QwenModelRequestTimeout(TimeoutError):
 class QwenModelRequestCancelled(RuntimeError):
     """Qwen HTTP 请求由精确受管请求取消。"""
 
+
+class HybridModelLaunchCleanupError(RuntimeError):
+    """Hybrid 模型启动后的句柄清理无法证明为完成。"""
+
+    def __init__(self, evidence: dict[str, Any]) -> None:
+        super().__init__("Hybrid model launch handle cleanup is indeterminate")
+        self.cleanup_evidence = deepcopy(evidence)
+
 STAGE_PROFILE_IDS = {
     "observe": "qwen3_vl_8b_q4_k_m",
     "understanding": "qwen3_vl_8b_q4_k_m",
@@ -2700,6 +2708,7 @@ def _launch_model_server_process(
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
         subprocess, "CREATE_NO_WINDOW", 0
     )
+    scope_cleanup_evidence = None
     try:
         if hybrid_scope_name:
             from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
@@ -2752,7 +2761,7 @@ def _launch_model_server_process(
                 observe_process_scope_cleanup,
             )
 
-            evidence = observe_process_scope_cleanup(
+            scope_cleanup_evidence = observe_process_scope_cleanup(
                 hybrid_scope_name,
                 terminate=True,
                 listener_ports=[int(profile.get("port") or 0)],
@@ -2760,7 +2769,7 @@ def _launch_model_server_process(
                 remove_owned_pid_file=True,
                 stable_zero_observations=3,
             )
-            if evidence.get("cleanup_status") != "verified":
+            if scope_cleanup_evidence.get("cleanup_status") != "verified":
                 raise RuntimeError(
                     "Hybrid model start failure cleanup is indeterminate"
                 ) from error
@@ -2769,10 +2778,74 @@ def _launch_model_server_process(
             process.wait(timeout=5)
         raise
     finally:
-        close_process = getattr(process, "close", None)
-        if callable(close_process):
-            close_process()
-        log_file.close()
+        process_close_error = None
+        log_close_error = None
+        try:
+            close_process = getattr(process, "close", None)
+            if callable(close_process):
+                close_process()
+        except BaseException as error:
+            process_close_error = error
+        try:
+            log_file.close()
+        except BaseException as error:
+            log_close_error = error
+        if process_close_error is not None or log_close_error is not None:
+            if hybrid_scope_name and (
+                not isinstance(scope_cleanup_evidence, dict)
+                or scope_cleanup_evidence.get("cleanup_status") != "verified"
+            ):
+                try:
+                    from app.learn.hybrid.windows_process_scope import (
+                        observe_process_scope_cleanup,
+                    )
+
+                    scope_cleanup_evidence = observe_process_scope_cleanup(
+                        hybrid_scope_name,
+                        terminate=True,
+                        listener_ports=[int(profile.get("port") or 0)],
+                        pid_file=pid_path,
+                        remove_owned_pid_file=True,
+                        stable_zero_observations=3,
+                    )
+                except BaseException as scope_error:
+                    scope_cleanup_evidence = {
+                        "contract_version": "hybrid_windows_process_scope_v1",
+                        "scope_name": hybrid_scope_name,
+                        "cleanup_status": "indeterminate",
+                        "error_type": type(scope_error).__name__,
+                        "message": str(scope_error),
+                    }
+            cleanup_evidence = {
+                "contract_version": "hybrid_model_launch_handle_cleanup_v1",
+                "cleanup_status": "indeterminate",
+                "process_handle_close": (
+                    "failed" if process_close_error is not None else "closed"
+                ),
+                "log_handle_close": (
+                    "failed" if log_close_error is not None else "closed"
+                ),
+                "process_close_error": (
+                    {
+                        "error_type": type(process_close_error).__name__,
+                        "message": str(process_close_error),
+                    }
+                    if process_close_error is not None
+                    else None
+                ),
+                "log_close_error": (
+                    {
+                        "error_type": type(log_close_error).__name__,
+                        "message": str(log_close_error),
+                    }
+                    if log_close_error is not None
+                    else None
+                ),
+                "scope_cleanup_evidence": deepcopy(scope_cleanup_evidence),
+            }
+            raise HybridModelLaunchCleanupError(cleanup_evidence) from (
+                process_close_error or log_close_error
+            )
 
 
 def _write_model_profile_pid(path: Path, pid: int) -> None:
