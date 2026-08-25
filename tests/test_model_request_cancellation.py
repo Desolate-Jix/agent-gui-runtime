@@ -663,6 +663,215 @@ def test_qwen_recovery_resolves_exact_lease_from_prelaunch_acquiring_owner(
         scope.close()
 
 
+def test_qwen_started_without_durable_lease_aborts_exact_job_and_restarts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from pathlib import Path
+
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    lineage = {**_HYBRID_LINEAGE, "operation_id": "operation-qwen-no-lease"}
+    scope_name = process_scope_name(lineage, "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper_holder = []
+    request_id = "qwen-started-no-lease"
+    runtime_path = tmp_path / "qwen-no-lease.json"
+    runtime_path.write_text(
+        json.dumps(seal_immutable({
+            "contract_version": "hybrid_supervised_provider_runtime_v1",
+            "state": "acquiring",
+            "worker_id": "worker-no-lease",
+            "model_request_id": request_id,
+            "provider": "qwen",
+            "lineage": lineage,
+            "process_scope_name": scope_name,
+            "provider_identity": None,
+            "cleanup_observation": None,
+        })),
+        encoding="utf-8",
+    )
+    profile = {
+        "profile_id": "qwen-no-lease",
+        "endpoint": "http://127.0.0.1:54325/v1/chat/completions",
+        "pid_file": str(tmp_path / "qwen-no-lease.pid"),
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda *args: profile)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(runtime_path))
+    monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", json.dumps(lineage))
+
+    def start_then_lose_outer_worker(**kwargs):
+        del kwargs
+        helper = spawn_process_in_scope(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            scope_name=scope_name,
+            cwd=tmp_path,
+        )
+        helper_holder.append(helper)
+        Path(profile["pid_file"]).write_text(str(helper.pid), encoding="utf-8")
+        raise RuntimeError("simulated-outer-worker-death-before-lease")
+
+    monkeypatch.setattr(
+        model_server, "_ensure_model_server_for_profile", start_then_lose_outer_worker
+    )
+    try:
+        with pytest.raises(
+            RuntimeError, match="simulated-outer-worker-death-before-lease"
+        ):
+            model_server.ensure_and_acquire_qwen_model_lease(
+                stage="screen_understanding",
+                profile_id=profile["profile_id"],
+                request_id=request_id,
+                wait_seconds=0,
+            )
+        helper = helper_holder[0]
+        original_write = model_server._write_hybrid_qwen_runtime
+        injected = False
+
+        def crash_after_tombstone(path, document):
+            nonlocal injected
+            original_write(path, document)
+            if (
+                not injected
+                and document.get("contract_version")
+                == "hybrid_qwen_aborted_acquisition_tombstone_v1"
+            ):
+                injected = True
+                raise RuntimeError("injected-after-qwen-abort-tombstone")
+
+        monkeypatch.setattr(
+            model_server, "_write_hybrid_qwen_runtime", crash_after_tombstone
+        )
+        with pytest.raises(RuntimeError, match="injected-after-qwen-abort-tombstone"):
+            model_server.reconcile_hybrid_qwen_owner(
+                runtime_path,
+                expected_lineage=lineage,
+                expected_scope_name=scope_name,
+            )
+        monkeypatch.setattr(
+            model_server, "_write_hybrid_qwen_runtime", original_write
+        )
+        first = model_server.reconcile_hybrid_qwen_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        second = model_server.reconcile_hybrid_qwen_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        assert first["status"] == second["status"] == "verified"
+        assert first["aborted_acquisition_tombstone"]["model_request_id"] == request_id
+        assert first["aborted_acquisition_tombstone"] == second[
+            "aborted_acquisition_tombstone"
+        ]
+        assert helper.poll() is not None
+        assert Path(profile["pid_file"]).exists() is False
+    finally:
+        if helper_holder:
+            helper_holder[0].close()
+        scope.close()
+
+
+@pytest.mark.parametrize("failure_stage", ["poll", "pid_write", "readiness", "sync"])
+def test_scoped_model_start_failure_closes_process_log_and_job_membership(
+    tmp_path,
+    monkeypatch,
+    failure_stage: str,
+) -> None:
+    from pathlib import Path
+
+    import psutil
+    from app.core import model_server
+    from app.learn.hybrid import windows_process_scope
+
+    lineage = {**_HYBRID_LINEAGE, "operation_id": f"operation-start-{failure_stage}"}
+    scope_name = windows_process_scope.process_scope_name(lineage, "qwen")
+    scope = windows_process_scope.WindowsProcessScope(scope_name, create=True)
+    real_spawn = windows_process_scope.spawn_process_in_scope
+    spawned = []
+
+    def controlled_spawn(command, **kwargs):
+        child = real_spawn(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            scope_name=kwargs["scope_name"],
+            cwd=tmp_path,
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+        )
+        spawned.append(child)
+        if failure_stage == "poll":
+            child.poll = lambda: (_ for _ in ()).throw(RuntimeError("injected-poll"))
+        return child
+
+    monkeypatch.setattr(windows_process_scope, "spawn_process_in_scope", controlled_spawn)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    profile = {
+        "profile_id": f"start-failure-{failure_stage}",
+        "runtime": "transformers" if failure_stage in {"readiness", "sync"} else "llama",
+        "port": 54326,
+        "pid_file": str(tmp_path / f"{failure_stage}.pid"),
+        "startup_exit_check_seconds": 0,
+    }
+    if failure_stage == "pid_write":
+        monkeypatch.setattr(
+            model_server,
+            "_write_model_profile_pid",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("injected-pid-write")
+            ),
+        )
+    elif failure_stage == "readiness":
+        monkeypatch.setattr(
+            model_server,
+            "check_model_server",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("injected-readiness")
+            ),
+        )
+    elif failure_stage == "sync":
+        monkeypatch.setattr(
+            model_server,
+            "check_model_server",
+            lambda *args, **kwargs: {"status": "running", "health": {"pid": 1}},
+        )
+        monkeypatch.setattr(
+            model_server,
+            "_sync_pid_file_from_health",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("injected-sync")
+            ),
+        )
+    log_path = tmp_path / f"{failure_stage}.log"
+    try:
+        with pytest.raises(RuntimeError, match=f"injected-{failure_stage.replace('_', '-')}"):
+            model_server._launch_model_server_process(
+                profile=profile,
+                log_path=log_path,
+                command=["controlled-no-wrapper"],
+            )
+        assert len(spawned) == 1
+        assert spawned[0]._closed is True
+        assert psutil.pid_exists(spawned[0].pid) is False
+        assert scope.pids() == []
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write("closed")
+    finally:
+        for child in spawned:
+            if not child._closed:
+                child.close()
+        scope.close()
+
+
 def test_stop_model_server_honors_real_wrapper_test_sentinel(monkeypatch) -> None:
     from app.core import model_server
 

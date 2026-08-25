@@ -281,6 +281,160 @@ def test_abnormal_reconciliation_removes_exact_resource_lease_and_seals_observat
             scope.close()
 
 
+@pytest.mark.parametrize(
+    "crash_phase", ["intent", "lease_removed", "scope_cleaned", "observation_written"]
+)
+def test_omni_abnormal_finalization_retries_each_durable_phase(
+    tmp_path: Path,
+    monkeypatch,
+    crash_phase: str,
+) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    monkeypatch.setattr(adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "cleanup")
+    lineage = {
+        "run_id": f"run-omni-crash-{crash_phase}",
+        "workflow_revision": 7,
+        "operation_id": f"operation-omni-crash-{crash_phase}",
+        "stage": "screen_understanding",
+        "stage_execution_id": f"execution-omni-crash-{crash_phase}",
+    }
+    scope_name = process_scope_name(lineage, "omni")
+    scope = WindowsProcessScope(scope_name, create=True)
+    lease = adapter_module.ProcessResourceLeaseManager(root=tmp_path / "leases")(
+        "gpu_vision"
+    )
+    assert lease is not None
+    runtime_path = tmp_path / "runtime.json"
+    adapter_module.persist_omniparser_invocation_owner(
+        runtime_path,
+        invocation_id=f"invocation/crash-{crash_phase}",
+        resource_group="gpu_vision",
+        resource_lease=lease,
+        lineage=lineage,
+        process_scope_name=scope_name,
+    )
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    adapter_module.publish_omniparser_process_identity(
+        runtime_path,
+        process_identity=helper.process_identity,
+    )
+    original_write = adapter_module._write_sealed_json
+    injected = False
+
+    def crash_after_phase(path, document):
+        nonlocal injected
+        original_write(path, document)
+        finalization = document.get("finalization") if isinstance(document, dict) else None
+        if (
+            not injected
+            and isinstance(finalization, dict)
+            and finalization.get("phase") == crash_phase
+        ):
+            injected = True
+            raise RuntimeError(f"injected-{crash_phase}")
+
+    monkeypatch.setattr(adapter_module, "_write_sealed_json", crash_after_phase)
+    try:
+        with pytest.raises(RuntimeError, match=f"injected-{crash_phase}"):
+            adapter_module.reconcile_omniparser_invocation_owner(
+                runtime_path,
+                expected_lineage=lineage,
+                expected_scope_name=scope_name,
+            )
+        monkeypatch.setattr(adapter_module, "_write_sealed_json", original_write)
+        recovered = adapter_module.reconcile_omniparser_invocation_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        assert recovered["status"] == "verified"
+        owner = json.loads(runtime_path.read_text(encoding="utf-8"))
+        assert owner["state"] == "released"
+        assert owner["finalization"]["phase"] == "released"
+        assert list((tmp_path / "leases").glob("*.lock")) == []
+    finally:
+        if helper.poll() is None:
+            scope.terminate()
+            helper.wait(10)
+        helper.close()
+        scope.close()
+
+
+def test_omni_normal_finally_interruption_recovers_owned_lease_removal(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    monkeypatch.setattr(adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "cleanup")
+    lineage = {
+        "run_id": "run-omni-normal-interruption",
+        "workflow_revision": 7,
+        "operation_id": "operation-omni-normal-interruption",
+        "stage": "screen_understanding",
+        "stage_execution_id": "execution-omni-normal-interruption",
+    }
+    scope_name = process_scope_name(lineage, "omni")
+    scope = WindowsProcessScope(scope_name, create=True)
+    lease = adapter_module.ProcessResourceLeaseManager(root=tmp_path / "leases")(
+        "gpu_vision"
+    )
+    assert lease is not None
+    runtime_path = tmp_path / "runtime.json"
+    adapter_module.persist_omniparser_invocation_owner(
+        runtime_path,
+        invocation_id="invocation/normal-finally-interrupted",
+        resource_group="gpu_vision",
+        resource_lease=lease,
+        lineage=lineage,
+        process_scope_name=scope_name,
+    )
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    adapter_module.publish_omniparser_process_identity(
+        runtime_path,
+        process_identity=helper.process_identity,
+    )
+    adapter_module._begin_omniparser_finalization(runtime_path, "completed")
+    lease.release()
+    try:
+        recovered = adapter_module.reconcile_omniparser_invocation_owner(
+            runtime_path,
+            expected_lineage=lineage,
+            expected_scope_name=scope_name,
+        )
+        assert recovered["status"] == "verified"
+        observation = recovered["cleanup_observation"]
+        assert observation["cleanup_reason"] == "completed"
+        assert observation["cleanup_status"] == "verified"
+        assert list((tmp_path / "leases").glob("*.lock")) == []
+        assert helper.poll() is not None
+    finally:
+        if helper.poll() is None:
+            scope.terminate()
+            helper.wait(10)
+        helper.close()
+        scope.close()
+
+
 @pytest.mark.parametrize("payload", [
     {"items": [], "duration_ms": 1, "resource_units": 0, "capture_id": "forged"},
     {"items": [{"source_item_id": "item/1", "kind": "text", "safe_text": "Authorization: Bearer token",

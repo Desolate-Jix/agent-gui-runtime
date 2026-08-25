@@ -1763,50 +1763,65 @@ class LearningStageWorkerRegistry:
                     provider_scope = WindowsProcessScope(
                         provider_scope_name, create=True
                     )
-                    child_payload["_hybrid_supervisor"][
-                        "process_scope_name"
-                    ] = provider_scope_name
-                    orchestration = normalized_payload.get("_hybrid_orchestration")
-                    if provider == "omni":
-                        predecessor = normalized_payload.get("hybrid_capture_bundle_ref")
-                    elif provider == "qwen":
-                        predecessor = (
-                            orchestration.get("omni_inventory")
-                            if isinstance(orchestration, dict)
-                            else None
+                    try:
+                        child_payload["_hybrid_supervisor"][
+                            "process_scope_name"
+                        ] = provider_scope_name
+                        orchestration = normalized_payload.get("_hybrid_orchestration")
+                        if provider == "omni":
+                            predecessor = normalized_payload.get("hybrid_capture_bundle_ref")
+                        elif provider == "qwen":
+                            predecessor = (
+                                orchestration.get("omni_inventory")
+                                if isinstance(orchestration, dict)
+                                else None
+                            )
+                        else:
+                            predecessor = (
+                                orchestration.get("fusion_result")
+                                if isinstance(orchestration, dict)
+                                else normalized_payload.get("hybrid_fusion_result")
+                            )
+                        predecessor_sha256 = _artifact_digest(predecessor)
+                        _write_hybrid_provider_owner(
+                            provider_owner_path,
+                            worker_id=worker_id,
+                            task_kind=normalized_task_kind,
+                            model_request_id=model_request_id,
+                            provider=provider,
+                            lineage=lineage,
+                            process_scope_name_value=provider_scope_name,
+                            runtime_file=provider_runtime_path.name,
+                            predecessor_sha256=predecessor_sha256,
                         )
-                    else:
-                        predecessor = (
-                            orchestration.get("fusion_result")
-                            if isinstance(orchestration, dict)
-                            else normalized_payload.get("hybrid_fusion_result")
+                        _write_json_atomic(
+                            provider_runtime_path,
+                            seal_immutable({
+                                "contract_version": HYBRID_PROVIDER_RUNTIME_CONTRACT_VERSION,
+                                "state": "acquiring",
+                                "worker_id": worker_id,
+                                "model_request_id": model_request_id,
+                                "provider": provider,
+                                "lineage": lineage,
+                                "process_scope_name": provider_scope_name,
+                                "provider_identity": None,
+                                "cleanup_observation": None,
+                            }),
                         )
-                    predecessor_sha256 = _artifact_digest(predecessor)
-                    _write_hybrid_provider_owner(
-                        provider_owner_path,
-                        worker_id=worker_id,
-                        task_kind=normalized_task_kind,
-                        model_request_id=model_request_id,
-                        provider=provider,
-                        lineage=lineage,
-                        process_scope_name_value=provider_scope_name,
-                        runtime_file=provider_runtime_path.name,
-                        predecessor_sha256=predecessor_sha256,
-                    )
-                    _write_json_atomic(
-                        provider_runtime_path,
-                        seal_immutable({
-                            "contract_version": HYBRID_PROVIDER_RUNTIME_CONTRACT_VERSION,
-                            "state": "acquiring",
-                            "worker_id": worker_id,
-                            "model_request_id": model_request_id,
-                            "provider": provider,
-                            "lineage": lineage,
-                            "process_scope_name": provider_scope_name,
-                            "provider_identity": None,
-                            "cleanup_observation": None,
-                        }),
-                    )
+                    except BaseException:
+                        _cleanup_failed_worker_start(
+                            provider_scope=provider_scope,
+                            process=None,
+                            artifact_paths=(
+                                result_path,
+                                journal_path,
+                                provider_lease_path,
+                                provider_owner_path,
+                                provider_runtime_path,
+                            ),
+                        )
+                        provider_scope = None
+                        raise
                 if hybrid_vista_task:
                     provider_profile_id = (
                         str(normalized_payload.get("profile_id") or "").strip()
@@ -1825,38 +1840,64 @@ class LearningStageWorkerRegistry:
                             profile_id=provider_profile_id,
                         )
                     except BaseException:
-                        if provider_scope is not None:
-                            provider_scope.close()
+                        _cleanup_failed_worker_start(
+                            provider_scope=provider_scope,
+                            process=None,
+                            artifact_paths=(
+                                result_path,
+                                journal_path,
+                                provider_lease_path,
+                                provider_owner_path,
+                                provider_runtime_path,
+                            ),
+                        )
+                        provider_scope = None
                         raise
-            cancellation_event = (
-                _ManagedCancellationEvent(
-                    event=self._process_context.Event(),
-                    lock=self._process_context.Lock(),
+            process = None
+            try:
+                cancellation_event = (
+                    _ManagedCancellationEvent(
+                        event=self._process_context.Event(),
+                        lock=self._process_context.Lock(),
+                    )
+                    if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                    or normalized_task_kind in _MANAGED_QWEN_TASK_KINDS
+                    or hybrid_vista_task
+                    else None
                 )
-                if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
-                or normalized_task_kind in _MANAGED_QWEN_TASK_KINDS
-                or hybrid_vista_task
-                else None
-            )
-            completion_event = (
-                self._process_context.Event()
-                if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
-                or hybrid_vista_task
-                else None
-            )
-            process = self._process_factory(
-                target=_run_learning_stage_worker_entry,
-                args=(
-                    str(result_path),
-                    normalized_task_kind,
-                    child_payload,
-                    model_request_id,
-                    deepcopy(identity),
-                    cancellation_event,
-                    completion_event,
-                ),
-                name=f"learning-stage-{normalized_stage}-{worker_id[:8]}",
-            )
+                completion_event = (
+                    self._process_context.Event()
+                    if normalized_task_kind == "panel_learning_hybrid_omni_discovery"
+                    or hybrid_vista_task
+                    else None
+                )
+                process = self._process_factory(
+                    target=_run_learning_stage_worker_entry,
+                    args=(
+                        str(result_path),
+                        normalized_task_kind,
+                        child_payload,
+                        model_request_id,
+                        deepcopy(identity),
+                        cancellation_event,
+                        completion_event,
+                    ),
+                    name=f"learning-stage-{normalized_stage}-{worker_id[:8]}",
+                )
+            except BaseException:
+                _cleanup_failed_worker_start(
+                    provider_scope=provider_scope,
+                    process=process,
+                    artifact_paths=(
+                        result_path,
+                        journal_path,
+                        provider_lease_path,
+                        provider_owner_path,
+                        provider_runtime_path,
+                    ),
+                )
+                provider_scope = None
+                raise
             record = {
                 "contract_version": LEARNING_STAGE_WORKER_CONTRACT_VERSION,
                 **identity,
@@ -1884,7 +1925,22 @@ class LearningStageWorkerRegistry:
                 "completion_event": completion_event,
                 "recovered_from_journal": False,
             }
-            self._persist_record_journal(record)
+            try:
+                self._persist_record_journal(record)
+            except BaseException:
+                _cleanup_failed_worker_start(
+                    provider_scope=provider_scope,
+                    process=process,
+                    artifact_paths=(
+                        result_path,
+                        journal_path,
+                        provider_lease_path,
+                        provider_owner_path,
+                        provider_runtime_path,
+                    ),
+                )
+                record["provider_scope"] = None
+                raise
             self._records[worker_id] = record
             self._active_by_operation[operation_key] = worker_id
             self._workers_by_operation.setdefault(operation_key, []).append(worker_id)
@@ -1892,11 +1948,26 @@ class LearningStageWorkerRegistry:
             try:
                 process.start()
             except BaseException:
-                record["status"] = "failed"
-                record["finished_at"] = _utc_now_iso()
                 self._active_by_operation.pop(operation_key, None)
-                self._persist_record_journal(record)
-                _close_provider_scope(record)
+                self._records.pop(worker_id, None)
+                workers = self._workers_by_operation.get(operation_key, [])
+                if worker_id in workers:
+                    workers.remove(worker_id)
+                if not workers:
+                    self._workers_by_operation.pop(operation_key, None)
+                self._workers_by_invocation.pop(invocation_key, None)
+                _cleanup_failed_worker_start(
+                    provider_scope=provider_scope,
+                    process=process,
+                    artifact_paths=(
+                        result_path,
+                        journal_path,
+                        provider_lease_path,
+                        provider_owner_path,
+                        provider_runtime_path,
+                    ),
+                )
+                record["provider_scope"] = None
                 raise
             return self._public_record(record)
 
@@ -2665,6 +2736,44 @@ def _close_provider_scope(record: dict[str, Any]) -> None:
         scope.close()
     finally:
         record["provider_scope"] = None
+
+
+def _cleanup_failed_worker_start(
+    *,
+    provider_scope: Any,
+    process: Any,
+    artifact_paths: tuple[Path, ...],
+) -> None:
+    """清理尚未成功启动的 worker 所有权与精确工件。"""
+
+    if process is not None:
+        try:
+            is_alive = getattr(process, "is_alive", None)
+            if callable(is_alive) and is_alive():
+                terminate = getattr(process, "terminate", None)
+                if callable(terminate):
+                    terminate()
+                join = getattr(process, "join", None)
+                if callable(join):
+                    join(timeout=5)
+        except BaseException:
+            pass
+        try:
+            close = getattr(process, "close", None)
+            if callable(close):
+                close()
+        except BaseException:
+            pass
+    if provider_scope is not None:
+        try:
+            provider_scope.close()
+        except BaseException:
+            pass
+    for path in artifact_paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _required_text(value: Any, field: str) -> str:

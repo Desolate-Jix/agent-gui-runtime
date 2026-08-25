@@ -438,6 +438,21 @@ def ensure_and_acquire_qwen_model_lease(
         profile = deepcopy(profile_for_stage(stage, profile_id))
         if profile_validator is not None:
             profile_validator(deepcopy(profile))
+        runtime_path_text = os.environ.get(
+            "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", ""
+        ).strip()
+        if runtime_path_text:
+            _publish_qwen_runtime_start_intent(
+                Path(runtime_path_text),
+                request_id=request_id,
+                profile=profile,
+                expected_lineage=json.loads(
+                    os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON", "{}")
+                ),
+                expected_scope_name=os.environ.get(
+                    "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+                ).strip(),
+            )
         readiness = _ensure_model_server_for_profile(
             profile=profile,
             stage=stage,
@@ -619,11 +634,47 @@ def reconcile_hybrid_qwen_owner(
         or process_scope_name(lineage, "qwen") != expected_scope_name
     ):
         raise RuntimeError("Hybrid Qwen owner lineage mismatch")
+    if document.get("contract_version") == "hybrid_qwen_aborted_acquisition_v1":
+        tombstone = _load_qwen_aborted_acquisition_tombstone(
+            path,
+            expected_lineage=lineage,
+            expected_scope_name=expected_scope_name,
+        )
+        return {
+            "contract_version": "hybrid_qwen_abnormal_reconciliation_v2",
+            "status": "verified",
+            "aborted_acquisition_tombstone": tombstone,
+            "scope_cleanup_evidence": deepcopy(tombstone["scope_cleanup_evidence"]),
+        }
     if document.get("contract_version") == "hybrid_supervised_provider_runtime_v1":
         request_id = str(document.get("model_request_id") or "")
         match = _find_qwen_lease_by_owner(request_id)
         if match is None:
             raise RuntimeError("Hybrid Qwen acquiring owner has no exact durable lease")
+        state, exact_lease = match
+        document = seal_immutable({
+            "contract_version": "hybrid_qwen_model_owner_v1",
+            "state": "acquired",
+            "model_request_id": request_id,
+            "lineage": lineage,
+            "process_scope_name": expected_scope_name,
+            "model_lease": deepcopy(exact_lease),
+            "profile": deepcopy(state["profile"]),
+            "release_result": None,
+            "tombstone_sha256": None,
+            "scope_cleanup": None,
+        })
+        _write_hybrid_qwen_runtime(path, document)
+    if document.get("contract_version") == "hybrid_qwen_acquisition_intent_v1":
+        request_id = str(document.get("model_request_id") or "")
+        match = _find_qwen_lease_by_owner(request_id)
+        if match is None:
+            return _abort_qwen_acquisition_without_lease(
+                path,
+                document=document,
+                expected_lineage=lineage,
+                expected_scope_name=expected_scope_name,
+            )
         state, exact_lease = match
         document = seal_immutable({
             "contract_version": "hybrid_qwen_model_owner_v1",
@@ -718,6 +769,164 @@ def _validate_qwen_runtime_acquiring(request_id: str) -> None:
         raise RuntimeError("Hybrid Qwen acquiring owner is invalid")
 
 
+def _publish_qwen_runtime_start_intent(
+    path: Path,
+    *,
+    request_id: str,
+    profile: dict[str, Any],
+    expected_lineage: dict[str, Any],
+    expected_scope_name: str,
+) -> None:
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    lineage = validate_hybrid_lineage(expected_lineage)
+    current = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(current, dict)
+        or current.get("content_sha256") != content_sha256(current)
+        or current.get("contract_version")
+        != "hybrid_supervised_provider_runtime_v1"
+        or current.get("state") != "acquiring"
+        or current.get("provider") != "qwen"
+        or current.get("model_request_id") != request_id
+        or current.get("lineage") != lineage
+        or current.get("process_scope_name") != expected_scope_name
+        or process_scope_name(lineage, "qwen") != expected_scope_name
+    ):
+        raise RuntimeError("Hybrid Qwen start intent owner is invalid")
+    parsed = urlsplit(
+        str(profile.get("endpoint") or profile.get("base_url") or "")
+    )
+    port = int(profile.get("port") or parsed.port or 0)
+    if port <= 0:
+        raise RuntimeError("Hybrid Qwen start intent listener is invalid")
+    intent = seal_immutable({
+        "contract_version": "hybrid_qwen_acquisition_intent_v1",
+        "state": "starting",
+        "worker_id": current.get("worker_id"),
+        "model_request_id": request_id,
+        "provider": "qwen",
+        "lineage": lineage,
+        "process_scope_name": expected_scope_name,
+        "profile": deepcopy(profile),
+        "profile_sha256": content_sha256(_public_profile(profile)),
+        "listener_port": port,
+        "pid_file": str(model_profile_pid_path(profile)),
+        "aborted_tombstone_sha256": None,
+    })
+    _write_hybrid_qwen_runtime(path, intent)
+
+
+def _abort_qwen_acquisition_without_lease(
+    path: Path,
+    *,
+    document: dict[str, Any],
+    expected_lineage: dict[str, Any],
+    expected_scope_name: str,
+) -> dict[str, Any]:
+    from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
+
+    profile = document.get("profile")
+    if not isinstance(profile, dict):
+        raise RuntimeError("Hybrid Qwen acquisition profile is unavailable")
+    tombstone_path = path.with_name(f"{path.stem}.aborted.json")
+    if tombstone_path.exists():
+        tombstone = json.loads(tombstone_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(tombstone, dict)
+            or tombstone.get("content_sha256") != content_sha256(tombstone)
+            or tombstone.get("contract_version")
+            != "hybrid_qwen_aborted_acquisition_tombstone_v1"
+            or tombstone.get("status") != "aborted_before_lease"
+            or tombstone.get("model_request_id") != document["model_request_id"]
+            or tombstone.get("provider") != "qwen"
+            or tombstone.get("lineage") != expected_lineage
+            or tombstone.get("process_scope_name") != expected_scope_name
+            or tombstone.get("profile_sha256") != document["profile_sha256"]
+            or tombstone.get("listener_port") != document["listener_port"]
+            or tombstone.get("pid_file") != document["pid_file"]
+            or tombstone.get("scope_cleanup_evidence", {}).get(
+                "cleanup_status"
+            )
+            != "verified"
+        ):
+            raise RuntimeError("Hybrid Qwen aborted acquisition tombstone conflicts")
+    else:
+        evidence = observe_process_scope_cleanup(
+            expected_scope_name,
+            terminate=True,
+            listener_ports=[int(document.get("listener_port") or 0)],
+            pid_file=str(document.get("pid_file") or ""),
+            remove_owned_pid_file=True,
+            stable_zero_observations=3,
+        )
+        if evidence.get("cleanup_status") != "verified":
+            raise RuntimeError(
+                "Hybrid Qwen aborted acquisition cleanup is indeterminate"
+            )
+        tombstone = seal_immutable({
+            "contract_version": "hybrid_qwen_aborted_acquisition_tombstone_v1",
+            "status": "aborted_before_lease",
+            "model_request_id": document["model_request_id"],
+            "provider": "qwen",
+            "lineage": deepcopy(expected_lineage),
+            "process_scope_name": expected_scope_name,
+            "profile_sha256": document["profile_sha256"],
+            "listener_port": document["listener_port"],
+            "pid_file": document["pid_file"],
+            "scope_cleanup_evidence": evidence,
+        })
+        _write_hybrid_qwen_runtime(tombstone_path, tombstone)
+    evidence = deepcopy(tombstone["scope_cleanup_evidence"])
+    aborted = seal_immutable({
+        "contract_version": "hybrid_qwen_aborted_acquisition_v1",
+        "state": "aborted",
+        "model_request_id": document["model_request_id"],
+        "provider": "qwen",
+        "lineage": deepcopy(expected_lineage),
+        "process_scope_name": expected_scope_name,
+        "profile": deepcopy(profile),
+        "aborted_tombstone_file": tombstone_path.name,
+        "aborted_tombstone_sha256": tombstone["content_sha256"],
+    })
+    _write_hybrid_qwen_runtime(path, aborted)
+    return {
+        "contract_version": "hybrid_qwen_abnormal_reconciliation_v2",
+        "status": "verified",
+        "aborted_acquisition_tombstone": tombstone,
+        "scope_cleanup_evidence": evidence,
+    }
+
+
+def _load_qwen_aborted_acquisition_tombstone(
+    path: Path,
+    *,
+    expected_lineage: dict[str, Any],
+    expected_scope_name: str,
+) -> dict[str, Any]:
+    owner = _load_qwen_runtime_owner(path)
+    filename = str(owner.get("aborted_tombstone_file") or "")
+    if Path(filename).name != filename or not filename:
+        raise RuntimeError("Hybrid Qwen aborted tombstone path is invalid")
+    tombstone = json.loads(path.with_name(filename).read_text(encoding="utf-8"))
+    if (
+        not isinstance(tombstone, dict)
+        or tombstone.get("content_sha256") != content_sha256(tombstone)
+        or tombstone.get("content_sha256")
+        != owner.get("aborted_tombstone_sha256")
+        or tombstone.get("contract_version")
+        != "hybrid_qwen_aborted_acquisition_tombstone_v1"
+        or tombstone.get("model_request_id") != owner.get("model_request_id")
+        or tombstone.get("lineage") != expected_lineage
+        or tombstone.get("process_scope_name") != expected_scope_name
+        or tombstone.get("scope_cleanup_evidence", {}).get("cleanup_status")
+        != "verified"
+    ):
+        raise RuntimeError("Hybrid Qwen aborted acquisition tombstone is invalid")
+    return tombstone
+
+
 def _publish_qwen_runtime_acquired(
     path: Path,
     *,
@@ -764,8 +973,12 @@ def _load_qwen_runtime_owner(path: Path) -> dict[str, Any]:
         or document.get("contract_version") not in {
             "hybrid_qwen_model_owner_v1",
             "hybrid_supervised_provider_runtime_v1",
+            "hybrid_qwen_acquisition_intent_v1",
+            "hybrid_qwen_aborted_acquisition_v1",
         }
-        or document.get("state") not in {"acquiring", "acquired", "released"}
+        or document.get("state") not in {
+            "acquiring", "starting", "acquired", "released", "aborted"
+        }
         or (
             document.get("contract_version") == "hybrid_supervised_provider_runtime_v1"
             and document.get("provider") != "qwen"
@@ -2468,58 +2681,103 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
             else:
                 command.extend([parameter, str(value)])
 
-    log_file = log_path.open("a", encoding="utf-8")
-    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    hybrid_scope_name = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", "").strip()
-    if hybrid_scope_name:
-        from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
+    return _launch_model_server_process(
+        profile=profile,
+        log_path=log_path,
+        command=command,
+    )
 
-        process = spawn_process_in_scope(
-            command,
-            scope_name=hybrid_scope_name,
-            cwd=str(ROOT_DIR),
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-        )
-    else:
-        process = subprocess.Popen(
-            command,
-            cwd=str(ROOT_DIR),
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            creationflags=creationflags,
-        )
-    time.sleep(float(profile.get("startup_exit_check_seconds") or 0.75))
-    returncode = process.poll()
-    if returncode is not None:
-        log_file.close()
+
+def _launch_model_server_process(
+    *, profile: dict[str, Any], log_path: Path, command: list[str]
+) -> dict[str, Any]:
+    log_file = log_path.open("a", encoding="utf-8")
+    process = None
+    hybrid_scope_name = os.environ.get(
+        "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+    ).strip()
+    pid_path = model_profile_pid_path(profile)
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+        subprocess, "CREATE_NO_WINDOW", 0
+    )
+    try:
+        if hybrid_scope_name:
+            from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
+
+            process = spawn_process_in_scope(
+                command,
+                scope_name=hybrid_scope_name,
+                cwd=str(ROOT_DIR),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+            )
+        else:
+            process = subprocess.Popen(
+                command,
+                cwd=str(ROOT_DIR),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+            )
+        time.sleep(float(profile.get("startup_exit_check_seconds") or 0.75))
+        returncode = process.poll()
+        if returncode is not None:
+            raise RuntimeError(
+                f"Model start script exited immediately with code {returncode}; see log: {log_path}"
+            )
+        _write_model_profile_pid(pid_path, int(process.pid))
+        health_status: dict[str, Any] | None = None
+        pid_sync = None
+        if _profile_supports_health_status(profile):
+            health_timeout = float(
+                profile.get("startup_health_timeout_seconds") or 0.25
+            )
+            health_status = check_model_server(profile, timeout=health_timeout)
+            pid_sync = _sync_pid_file_from_health(
+                profile, health_status, pid_path=pid_path
+            )
+        return {
+            "pid": process.pid,
+            "pid_source": "health" if pid_sync else "wrapper_process",
+            "service_pid": pid_sync["pid"] if pid_sync else None,
+            "command": command,
+            "log_path": str(log_path),
+            "pid_path": str(pid_path),
+            "health_after_start": health_status,
+        }
+    except BaseException as error:
+        if hybrid_scope_name and process is not None:
+            from app.learn.hybrid.windows_process_scope import (
+                observe_process_scope_cleanup,
+            )
+
+            evidence = observe_process_scope_cleanup(
+                hybrid_scope_name,
+                terminate=True,
+                listener_ports=[int(profile.get("port") or 0)],
+                pid_file=pid_path,
+                remove_owned_pid_file=True,
+                stable_zero_observations=3,
+            )
+            if evidence.get("cleanup_status") != "verified":
+                raise RuntimeError(
+                    "Hybrid model start failure cleanup is indeterminate"
+                ) from error
+        elif process is not None and process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        raise
+    finally:
         close_process = getattr(process, "close", None)
         if callable(close_process):
             close_process()
-        raise RuntimeError(f"Model start script exited immediately with code {returncode}; see log: {log_path}")
-    pid_path = model_profile_pid_path(profile)
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(process.pid), encoding="utf-8")
-    health_status: dict[str, Any] | None = None
-    pid_sync = None
-    if _profile_supports_health_status(profile):
-        health_timeout = float(profile.get("startup_health_timeout_seconds") or 0.25)
-        health_status = check_model_server(profile, timeout=health_timeout)
-        pid_sync = _sync_pid_file_from_health(profile, health_status, pid_path=pid_path)
-    log_file.close()
-    close_process = getattr(process, "close", None)
-    if callable(close_process):
-        close_process()
-    return {
-        "pid": process.pid,
-        "pid_source": "health" if pid_sync else "wrapper_process",
-        "service_pid": pid_sync["pid"] if pid_sync else None,
-        "command": command,
-        "log_path": str(log_path),
-        "pid_path": str(pid_path),
-        "health_after_start": health_status,
-    }
+        log_file.close()
+
+
+def _write_model_profile_pid(path: Path, pid: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(pid), encoding="utf-8")
 
 
 def stop_model_server(profile: dict[str, Any]) -> dict[str, Any]:

@@ -3415,3 +3415,155 @@ def test_duplicate_hybrid_stage_result_without_provider_owner_cleanup_requires_r
     assert duplicate["result_available"] is False
     assert duplicate["result_path"] == first["result_path"]
     assert len(registry._records) == 1
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    ["owner_write", "runtime_write", "process_factory", "journal_write", "process_start"],
+)
+def test_hybrid_worker_start_failure_closes_scope_and_allows_safe_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    run_id = f"run-start-failure-{failure_stage}"
+    operation_id = f"operation-start-failure-{failure_stage}"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind="panel_learning_hybrid_omni_discovery",
+        operation_id=operation_id,
+    )
+    scope_name = process_scope_name(lineage, "omni")
+    original_owner_write = workflow_worker._write_hybrid_provider_owner
+    original_json_write = workflow_worker._write_json_atomic
+    failed_processes = []
+
+    class StartFailureProcess(_FakeProcess):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.closed = False
+            self.helper = None
+            self.helper_returncode = None
+
+        def start(self) -> None:
+            self.helper = spawn_process_in_scope(
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+                scope_name=scope_name,
+                cwd=tmp_path,
+            )
+            raise RuntimeError("injected-process-start")
+
+        def is_alive(self) -> bool:
+            return self.helper is not None and self.helper.poll() is None
+
+        def terminate(self) -> None:
+            assert self.helper is not None
+            self.helper.terminate()
+
+        def join(self, timeout: float | None = None) -> None:
+            assert self.helper is not None
+            self.helper.wait(timeout)
+
+        def close(self) -> None:
+            if self.helper is not None:
+                self.helper_returncode = self.helper.poll()
+                self.helper.close()
+            self.closed = True
+
+    def failing_json_write(path: Path, payload: dict) -> None:
+        if failure_stage == "runtime_write" and path.name.endswith(
+            ".provider-runtime.json"
+        ):
+            raise RuntimeError("injected-runtime-write")
+        original_json_write(path, payload)
+
+    if failure_stage == "owner_write":
+        monkeypatch.setattr(
+            workflow_worker,
+            "_write_hybrid_provider_owner",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("injected-owner-write")
+            ),
+        )
+    elif failure_stage == "runtime_write":
+        monkeypatch.setattr(workflow_worker, "_write_json_atomic", failing_json_write)
+
+    def factory(*, target, args, name):
+        if failure_stage == "process_factory":
+            raise RuntimeError("injected-process-factory")
+        if failure_stage == "process_start":
+            process = StartFailureProcess(target=target, args=args, name=name)
+            failed_processes.append(process)
+            return process
+        return _FakeProcess(target=target, args=args, name=name)
+
+    registry = LearningStageWorkerRegistry(result_root=tmp_path, process_factory=factory)
+    if failure_stage == "journal_write":
+        monkeypatch.setattr(
+            registry,
+            "_persist_record_journal",
+            lambda record: (_ for _ in ()).throw(
+                RuntimeError("injected-journal-write")
+            ),
+        )
+
+    payload = {
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "workflow_revision": 7,
+        "hybrid_capture_bundle_ref": {
+            "id": f"hybrid-capture/{failure_stage}",
+            "content_sha256": "c" * 64,
+        },
+    }
+    with pytest.raises(
+        RuntimeError, match=f"injected-{failure_stage.replace('_', '-')}"
+    ):
+        registry.start(
+            run_id=run_id,
+            stage="screen_understanding",
+            operation_id=operation_id,
+            task_kind="panel_learning_hybrid_omni_discovery",
+            authoritative_workflow_revision=7,
+            payload=payload,
+        )
+
+    assert registry._records == {}
+    assert registry._active_by_operation == {}
+    assert registry._workers_by_operation == {}
+    assert registry._workers_by_invocation == {}
+    assert list(tmp_path.glob("*.provider-owner.json")) == []
+    assert list(tmp_path.glob("*.provider-runtime.json")) == []
+    assert list(tmp_path.glob("*.worker.json")) == []
+    if failure_stage == "process_start":
+        assert failed_processes[0].closed is True
+        assert failed_processes[0].helper_returncode is not None
+    probe = WindowsProcessScope(scope_name, create=True)
+    probe.close()
+
+    monkeypatch.setattr(workflow_worker, "_write_hybrid_provider_owner", original_owner_write)
+    monkeypatch.setattr(workflow_worker, "_write_json_atomic", original_json_write)
+    monkeypatch.setattr(
+        registry,
+        "_persist_record_journal",
+        registry.__class__._persist_record_journal.__get__(registry),
+    )
+    registry._process_factory = _fake_process_factory
+    retried = registry.start(
+        run_id=run_id,
+        stage="screen_understanding",
+        operation_id=operation_id,
+        task_kind="panel_learning_hybrid_omni_discovery",
+        authoritative_workflow_revision=7,
+        payload=payload,
+    )
+    retried_record = registry._records[retried["worker_id"]]
+    assert retried_record["process"].started is True
+    retried_record["provider_scope"].close()
+    retried_record["provider_scope"] = None

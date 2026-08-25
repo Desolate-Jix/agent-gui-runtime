@@ -251,8 +251,14 @@ class OmniParserShadowAdapter:
             )
         finally:
             cleanup_status = "verified"
+            if runtime_path is not None:
+                _begin_omniparser_finalization(runtime_path, "completed")
             try:
                 resource_lease.release()
+                if runtime_path is not None:
+                    _advance_omniparser_finalization(
+                        runtime_path, "lease_removed"
+                    )
             except BaseException:
                 cleanup_status = "failed"
                 raise
@@ -717,6 +723,10 @@ def reconcile_omniparser_invocation_owner(
         if observation.get("content_sha256") != document.get("cleanup_observation_sha256"):
             raise OmniParserShadowAdapterError("runtime_cleanup_failed")
         return {"status": "verified", "cleanup_observation": observation}
+    document = _begin_omniparser_finalization(
+        path, "outer_worker_terminated"
+    )
+    finalization = document["finalization"]
     lease_path = Path(str(document.get("resource_lease_path") or "")).resolve()
     token = str(document.get("resource_lease_token") or "")
     recorded_acquisition = document.get("process_scope_acquisition")
@@ -748,19 +758,37 @@ def reconcile_omniparser_invocation_owner(
         raise OmniParserShadowAdapterError("runtime_cleanup_failed")
     if scope is None and _probe_process_identity(process_identity) != "proven_absent":
         raise OmniParserShadowAdapterError("runtime_cleanup_failed")
-    try:
-        if lease_path.read_text(encoding="utf-8") != token:
-            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
-        lease_path.unlink()
-    except (OSError, UnicodeError) as error:
-        raise OmniParserShadowAdapterError("runtime_cleanup_failed") from error
-    scope_cleanup = observe_process_scope_cleanup(
-        expected_scope_name,
-        terminate=True,
-        stable_zero_observations=3,
-    )
-    if scope_cleanup.get("cleanup_status") != "verified" or lease_path.exists():
+    phase = str(finalization.get("phase") or "")
+    if phase == "intent":
+        if lease_path.exists():
+            try:
+                if lease_path.read_text(encoding="utf-8") != token:
+                    raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+                lease_path.unlink()
+            except (OSError, UnicodeError) as error:
+                raise OmniParserShadowAdapterError("runtime_cleanup_failed") from error
+        document = _advance_omniparser_finalization(path, "lease_removed")
+        phase = "lease_removed"
+    if lease_path.exists():
         raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    if phase == "lease_removed":
+        scope_cleanup = observe_process_scope_cleanup(
+            expected_scope_name,
+            terminate=True,
+            stable_zero_observations=3,
+        )
+        if scope_cleanup.get("cleanup_status") != "verified":
+            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+        document = _advance_omniparser_finalization(
+            path,
+            "scope_cleaned",
+            scope_cleanup_evidence=scope_cleanup,
+        )
+        phase = "scope_cleaned"
+    else:
+        scope_cleanup = deepcopy(document["finalization"].get("scope_cleanup_evidence"))
+        if not isinstance(scope_cleanup, dict) or scope_cleanup.get("cleanup_status") != "verified":
+            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
     observation = seal_immutable({
         "contract_version": "omniparser_invocation_cleanup_observation_v1",
         "provider_invocation_id": document["provider_invocation_id"],
@@ -781,7 +809,7 @@ def reconcile_omniparser_invocation_owner(
             "member_pids": acquisition_pids,
             "provider_pid": process_identity["pid"],
         },
-        "cleanup_reason": "outer_worker_terminated",
+        "cleanup_reason": str(finalization.get("cleanup_reason") or ""),
         "lineage": exact_lineage,
         "resource_lease_identity": _resource_lease_identity(
             lease_path=lease_path,
@@ -790,11 +818,25 @@ def reconcile_omniparser_invocation_owner(
         "cleanup_status": "verified",
     })
     target = _cleanup_observation_path(str(document["provider_invocation_id"]))
-    _write_sealed_json(target, observation)
-    document.pop("content_sha256", None)
-    document["state"] = "released"
-    document["cleanup_observation_sha256"] = observation["content_sha256"]
-    _write_sealed_json(path, seal_immutable(document))
+    if phase == "scope_cleaned":
+        _write_sealed_json(target, observation)
+        document = _advance_omniparser_finalization(
+            path,
+            "observation_written",
+            cleanup_observation_sha256=observation["content_sha256"],
+        )
+        phase = "observation_written"
+    else:
+        observation = load_omniparser_invocation_cleanup_observation(
+            str(document["provider_invocation_id"])
+        )
+        expected_digest = document["finalization"].get(
+            "cleanup_observation_sha256"
+        )
+        if observation.get("content_sha256") != expected_digest:
+            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    if phase == "observation_written":
+        _advance_omniparser_finalization(path, "released")
     verified = load_omniparser_invocation_cleanup_observation(
         str(document["provider_invocation_id"])
     )
@@ -810,7 +852,9 @@ def _load_omniparser_owner(path: Path) -> dict[str, object]:
         not isinstance(document, dict)
         or document.get("content_sha256") != content_sha256(document)
         or document.get("contract_version") != "omniparser_invocation_owner_v1"
-        or document.get("state") not in {"acquired", "running", "released"}
+        or document.get("state") not in {
+            "acquired", "running", "finalizing", "released"
+        }
         or not isinstance(document.get("provider_invocation_id"), str)
         or not str(document.get("provider_invocation_id")).startswith("invocation/")
         or not isinstance(document.get("resource_group"), str)
@@ -828,15 +872,102 @@ def _load_omniparser_owner(path: Path) -> dict[str, object]:
     return document
 
 
+_OMNI_FINALIZATION_PHASES = {
+    "intent": 0,
+    "lease_removed": 1,
+    "scope_cleaned": 2,
+    "observation_written": 3,
+    "released": 4,
+}
+
+
+def _begin_omniparser_finalization(path: Path, cleanup_reason: str) -> dict[str, object]:
+    document = _load_omniparser_owner(path)
+    if document.get("state") == "released":
+        return document
+    existing = document.get("finalization")
+    if isinstance(existing, dict):
+        if (
+            existing.get("cleanup_reason") != cleanup_reason
+            and existing.get("cleanup_reason") not in {
+                "completed", "outer_worker_terminated"
+            }
+        ):
+            raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+        return document
+    document.pop("content_sha256", None)
+    document["state"] = "finalizing"
+    document["finalization"] = {
+        "contract_version": "omniparser_invocation_finalization_v1",
+        "token": uuid4().hex,
+        "phase": "intent",
+        "cleanup_reason": cleanup_reason,
+        "provider_invocation_id": document["provider_invocation_id"],
+        "resource_lease_path": document["resource_lease_path"],
+        "resource_lease_token_sha256": sha256(
+            str(document["resource_lease_token"]).encode("utf-8")
+        ).hexdigest(),
+        "lineage": deepcopy(document["lineage"]),
+        "process_scope_name": document["process_scope_name"],
+        "scope_cleanup_evidence": None,
+        "cleanup_observation_sha256": None,
+    }
+    sealed = seal_immutable(document)
+    _write_sealed_json(path, sealed)
+    return sealed
+
+
+def _advance_omniparser_finalization(
+    path: Path,
+    phase: str,
+    **evidence: object,
+) -> dict[str, object]:
+    document = _load_omniparser_owner(path)
+    finalization = document.get("finalization")
+    if (
+        phase not in _OMNI_FINALIZATION_PHASES
+        or not isinstance(finalization, dict)
+        or finalization.get("contract_version")
+        != "omniparser_invocation_finalization_v1"
+        or finalization.get("provider_invocation_id")
+        != document.get("provider_invocation_id")
+        or finalization.get("resource_lease_path")
+        != document.get("resource_lease_path")
+        or finalization.get("lineage") != document.get("lineage")
+        or finalization.get("process_scope_name")
+        != document.get("process_scope_name")
+    ):
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    current = str(finalization.get("phase") or "")
+    if current not in _OMNI_FINALIZATION_PHASES:
+        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+    if _OMNI_FINALIZATION_PHASES[phase] < _OMNI_FINALIZATION_PHASES[current]:
+        return document
+    document.pop("content_sha256", None)
+    finalization["phase"] = phase
+    for key, value in evidence.items():
+        finalization[key] = deepcopy(value)
+    if phase == "released":
+        document["state"] = "released"
+        document["cleanup_observation_sha256"] = finalization.get(
+            "cleanup_observation_sha256"
+        )
+    sealed = seal_immutable(document)
+    _write_sealed_json(path, sealed)
+    return sealed
+
+
 def _mark_omniparser_runtime_released(path: Path, invocation_id: str) -> None:
     document = _load_omniparser_owner(path)
     observation = load_omniparser_invocation_cleanup_observation(invocation_id)
     if observation.get("cleanup_status") != "verified":
         return
-    document.pop("content_sha256", None)
-    document["state"] = "released"
-    document["cleanup_observation_sha256"] = observation["content_sha256"]
-    _write_sealed_json(path, seal_immutable(document))
+    _advance_omniparser_finalization(
+        path,
+        "observation_written",
+        cleanup_observation_sha256=observation["content_sha256"],
+    )
+    _advance_omniparser_finalization(path, "released")
 
 
 def _write_sealed_json(path: Path, document: dict[str, object]) -> None:
