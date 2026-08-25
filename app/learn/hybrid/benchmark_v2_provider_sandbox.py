@@ -123,6 +123,13 @@ def _require_sha(value: str, name: str) -> str:
     return value
 
 
+def _provider_python_executable() -> Path:
+    return _canonical_existing(
+        Path(getattr(sys, "_base_executable", sys.executable)),
+        kind="provider executable",
+    )
+
+
 def minimal_provider_environment() -> dict[str, str]:
     system_root = os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot")
     if not system_root:
@@ -171,7 +178,7 @@ def validate_provider_process_projection(
     if stdin != b"":
         raise ValueError("provider stdin must be fixed empty")
     executable = _canonical_existing(Path(argv[0]), kind="provider executable")
-    if executable != _canonical_existing(Path(sys.executable), kind="current executable"):
+    if executable != _provider_python_executable():
         raise ValueError("provider executable identity is invalid")
     manifest = _canonical_existing(Path(values["--provider-manifest"]), kind="provider manifest")
     child = _canonical_existing(Path(values["--provider-child"]), kind="provider child")
@@ -208,7 +215,7 @@ def build_provider_bootstrap_command(
     output_root: Path,
     ledger_root: Path,
 ) -> tuple[str, ...]:
-    executable = _canonical_existing(Path(sys.executable), kind="provider executable")
+    executable = _provider_python_executable()
     manifest = _canonical_existing(provider_manifest_path, kind="provider manifest")
     child = _canonical_existing(provider_child_path, kind="provider child")
     operation = _canonical_existing(operation_root, kind="operation root")
@@ -493,7 +500,7 @@ def _expect_denied(name: str, action: Any, results: dict[str, str]) -> None:
 
 
 def _bootstrap_argv_values(argv: tuple[str, ...]) -> dict[str, str]:
-    full = (str(_canonical_existing(Path(sys.executable), kind="provider executable")), "-I", "-S", str(_BOOTSTRAP_PATH), *argv)
+    full = (str(_provider_python_executable()), "-I", "-S", str(_BOOTSTRAP_PATH), *argv)
     return _command_values(full)
 
 
@@ -508,7 +515,7 @@ def _run_provider_bootstrap(argv: tuple[str, ...]) -> dict[str, Any]:
     boot_reads = (manifest_path, child_path, *_CODE_PATHS.values())
     state = _AuditState(boot_reads=boot_reads)
     sys.addaudithook(state.audit)
-    full_argv = (str(_canonical_existing(Path(sys.executable), kind="provider executable")), "-I", "-S", str(_BOOTSTRAP_PATH), *argv)
+    full_argv = (str(_provider_python_executable()), "-I", "-S", str(_BOOTSTRAP_PATH), *argv)
     validate_provider_process_projection(
         argv=full_argv,
         env=dict(os.environ),
@@ -575,18 +582,43 @@ def _run_provider_bootstrap(argv: tuple[str, ...]) -> dict[str, Any]:
         expected = screenshot_hashes[path.relative_to(_PROJECT_ROOT).as_posix()]
         if hashlib.sha256(screenshot_bytes[path]).hexdigest() != expected:
             raise ValueError("provider screenshot file SHA mismatch")
-    preloaded: dict[str, str] = {
-        "manifest": hashlib.sha256(manifest_raw).hexdigest(),
-        "child": hashlib.sha256(child_raw).hexdigest(),
+    preloaded: dict[str, dict[str, object]] = {
+        "manifest": {
+            "path": str(manifest_path),
+            "sha256": hashlib.sha256(manifest_raw).hexdigest(),
+            "byte_length": len(manifest_raw),
+        },
+        "child": {
+            "path": str(child_path),
+            "sha256": hashlib.sha256(child_raw).hexdigest(),
+            "byte_length": len(child_raw),
+        },
     }
     preloaded.update(
-        {f"code:{role}": hashlib.sha256(raw).hexdigest() for role, raw in code_bytes.items()}
+        {
+            f"code:{role}": {
+                "path": _CODE_PATHS[role].relative_to(_PROJECT_ROOT).as_posix(),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "byte_length": len(raw),
+            }
+            for role, raw in code_bytes.items()
+        }
     )
     for item, path in zip(manifest["sealed_runtime"]["profile_refs"], profile_paths, strict=True):
-        preloaded[f"profile:{item['role']}"] = hashlib.sha256(profile_bytes[path]).hexdigest()
+        raw = profile_bytes[path]
+        preloaded[f"profile:{item['role']}"] = {
+            "path": item["relative_path"],
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "byte_length": len(raw),
+        }
     for path in screenshot_paths:
         relative = path.relative_to(_PROJECT_ROOT).as_posix()
-        preloaded[f"screenshot:{relative}"] = hashlib.sha256(screenshot_bytes[path]).hexdigest()
+        raw = screenshot_bytes[path]
+        preloaded[f"screenshot:{relative}"] = {
+            "path": relative,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "byte_length": len(raw),
+        }
     if len(preloaded) != 30:
         raise ValueError("provider bootstrap did not preload the exact sealed byte set")
 
@@ -681,6 +713,34 @@ def _run_provider_bootstrap(argv: tuple[str, ...]) -> dict[str, Any]:
             "source_parent_ref": child["source_parent_ref"],
         },
         "preloaded_bytes_sha256_by_role": preloaded,
+        "sealed_input_projection": {
+            "manifest": dict(preloaded["manifest"]),
+            "child": {
+                **preloaded["child"],
+                "content_sha256": child["content_sha256"],
+                "source_parent_ref": child["source_parent_ref"],
+            },
+            "runtime": {
+                "code_refs": [
+                    {
+                        "role": item["role"],
+                        **preloaded[f"code:{item['role']}"],
+                    }
+                    for item in manifest["sealed_runtime"]["code_refs"]
+                ],
+                "profile_refs": [
+                    {
+                        "role": item["role"],
+                        **preloaded[f"profile:{item['role']}"],
+                    }
+                    for item in manifest["sealed_runtime"]["profile_refs"]
+                ],
+            },
+            "screenshot_refs": [
+                dict(preloaded[f"screenshot:{path.relative_to(_PROJECT_ROOT).as_posix()}"])
+                for path in screenshot_paths
+            ],
+        },
         "workload_request": workload_request,
         "workload_result": workload_result,
         "preflight": {
@@ -705,6 +765,7 @@ class _WindowsKillJob:
             raise RuntimeError("provider process containment requires Windows Job Objects")
         import ctypes
         from ctypes import wintypes
+        import secrets
 
         class IO_COUNTERS(ctypes.Structure):
             _fields_ = [(name, ctypes.c_ulonglong) for name in (
@@ -763,9 +824,22 @@ class _WindowsKillJob:
         kernel32.QueryInformationJobObject.restype = wintypes.BOOL
         kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel32.CloseHandle.restype = wintypes.BOOL
-        handle = kernel32.CreateJobObjectW(None, None)
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        job_name = f"Local\\portfolio-hybrid-v2-provider-{os.getpid()}-{secrets.token_hex(16)}"
+        ctypes.set_last_error(0)
+        handle = kernel32.CreateJobObjectW(None, job_name)
         if not handle:
             raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+        if ctypes.get_last_error() == 183:
+            kernel32.CloseHandle(handle)
+            raise RuntimeError("provider Job Object identity already exists")
         limits = EXTENDED_LIMIT()
         limits.BasicLimitInformation.LimitFlags = 0x2000
         if not kernel32.SetInformationJobObject(
@@ -777,10 +851,33 @@ class _WindowsKillJob:
         self._kernel32 = kernel32
         self._accounting_type = BASIC_ACCOUNTING
         self._handle = handle
+        self.identity_sha256 = hashlib.sha256(job_name.encode("utf-8")).hexdigest()
 
     def assign(self, process_handle: int) -> None:
         if not self._kernel32.AssignProcessToJobObject(self._handle, process_handle):
             raise OSError(self._ctypes.get_last_error(), "AssignProcessToJobObject failed")
+
+    def observe_process(self, process_handle: int, pid: int) -> dict[str, object]:
+        from ctypes import wintypes
+
+        creation = wintypes.FILETIME()
+        exit_time = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        if not self._kernel32.GetProcessTimes(
+            process_handle,
+            self._ctypes.byref(creation),
+            self._ctypes.byref(exit_time),
+            self._ctypes.byref(kernel),
+            self._ctypes.byref(user),
+        ):
+            raise OSError(self._ctypes.get_last_error(), "GetProcessTimes failed")
+        create_time = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+        return {
+            "pid": pid,
+            "create_time_100ns": create_time,
+            "job_identity_sha256": self.identity_sha256,
+        }
 
     def active_processes(self) -> int:
         value = self._accounting_type()
@@ -797,15 +894,20 @@ class _WindowsKillJob:
             self._handle = None
 
 
-def validate_provider_workload_receipt(value: Mapping[str, object]) -> dict[str, object]:
+def validate_provider_workload_receipt(
+    value: Mapping[str, object],
+    *,
+    expected_launcher_identity: Mapping[str, object],
+) -> dict[str, object]:
     """Accept only a completed, non-authorizing workload receipt."""
 
     required = {
         "contract_version", "provider_pid", "phase_trace", "manifest_ref", "child_ref",
-        "preloaded_bytes_sha256_by_role", "workload_request", "workload_result",
+        "preloaded_bytes_sha256_by_role", "sealed_input_projection",
+        "workload_request", "workload_result",
         "preflight", "filesystem_read_policy_after_tight", "tight_read_file_count",
         "denied_controls", "unexpected_inherited_fds", "artifact_is_authorization",
-        "execute_binding_enabled", "process_id", "launcher_process_id",
+        "execute_binding_enabled", "process_id", "launcher_process_id", "launcher_identity",
         "job_active_processes_after", "job_stable_zero", "receipt_sha256",
     }
     if not isinstance(value, Mapping) or set(value) != required:
@@ -823,6 +925,8 @@ def validate_provider_workload_receipt(value: Mapping[str, object]) -> dict[str,
         receipt["contract_version"] != "provider_sandbox_workload_receipt_v1"
         or receipt["phase_trace"] != ["boot", "tight", "workload", "complete"]
         or receipt["provider_pid"] != receipt["process_id"]
+        or receipt["provider_pid"] != receipt["launcher_process_id"]
+        or receipt["launcher_identity"] != dict(expected_launcher_identity)
         or receipt["filesystem_read_policy_after_tight"] != "deny_all"
         or receipt["tight_read_file_count"] != 0
         or receipt["job_active_processes_after"] != 0
@@ -900,19 +1004,150 @@ def validate_provider_workload_receipt(value: Mapping[str, object]) -> dict[str,
     if not isinstance(manifest_ref, Mapping) or set(manifest_ref) != {"file_sha256"}:
         raise ValueError("provider workload receipt manifest binding is invalid")
     _require_sha(str(manifest_ref["file_sha256"]), "provider receipt manifest SHA")
+    launcher_identity = receipt["launcher_identity"]
+    if (
+        not isinstance(launcher_identity, Mapping)
+        or set(launcher_identity) != {"pid", "create_time_100ns", "job_identity_sha256"}
+        or launcher_identity["pid"] != receipt["launcher_process_id"]
+        or not isinstance(launcher_identity["create_time_100ns"], int)
+        or launcher_identity["create_time_100ns"] <= 0
+    ):
+        raise ValueError("provider workload launcher identity is invalid")
+    _require_sha(
+        str(launcher_identity["job_identity_sha256"]), "provider Job identity SHA"
+    )
+
+    def exact_entry(item: object, name: str) -> dict[str, object]:
+        if not isinstance(item, Mapping) or set(item) != {"path", "sha256", "byte_length"}:
+            raise ValueError(f"{name} must be an exact preload entry")
+        entry = dict(item)
+        if not isinstance(entry["path"], str) or not entry["path"]:
+            raise ValueError(f"{name} path is invalid")
+        _require_sha(str(entry["sha256"]), f"{name} SHA")
+        if not isinstance(entry["byte_length"], int) or entry["byte_length"] <= 0:
+            raise ValueError(f"{name} byte length is invalid")
+        return entry
+
+    projection = receipt["sealed_input_projection"]
+    if not isinstance(projection, Mapping) or set(projection) != {
+        "manifest", "child", "runtime", "screenshot_refs"
+    }:
+        raise ValueError("provider sealed input projection is invalid")
+    expected_preloaded: dict[str, dict[str, object]] = {
+        "manifest": exact_entry(projection["manifest"], "manifest preload"),
+    }
+    projected_child = projection["child"]
+    if not isinstance(projected_child, Mapping) or set(projected_child) != {
+        "path", "sha256", "byte_length", "content_sha256", "source_parent_ref"
+    }:
+        raise ValueError("provider projected child ref is invalid")
+    expected_preloaded["child"] = exact_entry(
+        {key: projected_child[key] for key in ("path", "sha256", "byte_length")},
+        "child preload",
+    )
+    if (
+        projected_child["sha256"] != child_ref["file_sha256"]
+        or projected_child["content_sha256"] != child_ref["content_sha256"]
+        or projected_child["source_parent_ref"] != child_ref["source_parent_ref"]
+        or projection["manifest"]["sha256"] != manifest_ref["file_sha256"]
+    ):
+        raise ValueError("provider sealed projection ref binding is invalid")
+    runtime = projection["runtime"]
+    if not isinstance(runtime, Mapping) or set(runtime) != {"code_refs", "profile_refs"}:
+        raise ValueError("provider sealed runtime projection is invalid")
+    code_refs = runtime["code_refs"]
+    if not isinstance(code_refs, list) or len(code_refs) != len(_CODE_PATHS):
+        raise ValueError("provider sealed code projection is invalid")
+    for item, (role, path) in zip(code_refs, _CODE_PATHS.items(), strict=True):
+        if not isinstance(item, Mapping) or set(item) != {
+            "role", "path", "sha256", "byte_length"
+        } or item["role"] != role or item["path"] != path.relative_to(
+            _PROJECT_ROOT
+        ).as_posix():
+            raise ValueError("provider sealed code role/path is invalid")
+        expected_preloaded[f"code:{role}"] = exact_entry(
+            {key: item[key] for key in ("path", "sha256", "byte_length")},
+            f"code preload {role}",
+        )
+    profile_refs = runtime["profile_refs"]
+    if not isinstance(profile_refs, list) or len(profile_refs) != 1:
+        raise ValueError("provider sealed profile projection is invalid")
+    for item in profile_refs:
+        if not isinstance(item, Mapping) or set(item) != {
+            "role", "path", "sha256", "byte_length"
+        } or not isinstance(item["role"], str) or not item["role"]:
+            raise ValueError("provider sealed profile role is invalid")
+        role = str(item["role"])
+        if role != "estimand" or item["path"] != (
+            "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"
+        ):
+            raise ValueError("provider sealed profile identity is invalid")
+        expected_preloaded[f"profile:{role}"] = exact_entry(
+            {key: item[key] for key in ("path", "sha256", "byte_length")},
+            f"profile preload {role}",
+        )
+    screenshots = projection["screenshot_refs"]
+    if not isinstance(screenshots, list) or len(screenshots) != 24:
+        raise ValueError("provider sealed screenshot projection is invalid")
+    screenshot_partitions = {"regression": 0, "holdout": 0}
+    screenshot_pattern = re.compile(
+        r"^tests/fixtures/portfolio_hybrid_v1_1/corpus/"
+        r"(regression|holdout)/case-[0-9]{3}\.png$"
+    )
+    for item in screenshots:
+        entry = exact_entry(item, "screenshot preload")
+        match = screenshot_pattern.fullmatch(str(entry["path"]))
+        if match is None:
+            raise ValueError("provider sealed screenshot path is invalid")
+        screenshot_partitions[match.group(1)] += 1
+        role = f"screenshot:{entry['path']}"
+        if role in expected_preloaded:
+            raise ValueError("provider sealed screenshot roles must be unique")
+        expected_preloaded[role] = entry
+    if screenshot_partitions != {"regression": 12, "holdout": 12}:
+        raise ValueError("provider sealed screenshot projection must be 12+12")
     preloaded = receipt["preloaded_bytes_sha256_by_role"]
-    if not isinstance(preloaded, Mapping) or len(preloaded) != 30:
-        raise ValueError("provider workload receipt preload set is invalid")
-    for role, digest in preloaded.items():
-        if not isinstance(role, str) or not role:
-            raise ValueError("provider workload receipt preload role is invalid")
-        _require_sha(str(digest), f"provider preload SHA {role}")
-    if preloaded.get("manifest") != manifest_ref["file_sha256"] or preloaded.get(
-        "child"
-    ) != child_ref["file_sha256"]:
-        raise ValueError("provider workload receipt preload binding is invalid")
+    if preloaded != expected_preloaded or len(expected_preloaded) != 30:
+        raise ValueError("provider workload receipt preload map is not exact")
     receipt["receipt_sha256"] = declared
     return receipt
+
+
+def _bind_provider_receipt_to_launcher(
+    child_receipt: Mapping[str, object],
+    *,
+    observed_process_id: int,
+    launcher_identity: Mapping[str, object],
+    job_active_processes_after: int,
+) -> dict[str, object]:
+    receipt = dict(child_receipt)
+    if receipt.get("contract_version") != "provider_sandbox_workload_receipt_v1":
+        raise ValueError("provider bootstrap did not return a workload receipt")
+    if receipt.get("artifact_is_authorization") is not False or receipt.get(
+        "execute_binding_enabled"
+    ) is not False:
+        raise ValueError("provider workload receipt attempted to authorize execution")
+    provider_pid = receipt.get("provider_pid")
+    if not isinstance(provider_pid, int) or provider_pid <= 0:
+        raise ValueError("provider workload receipt PID is invalid")
+    if provider_pid != observed_process_id:
+        raise ValueError("provider workload receipt PID differs from the observed launcher")
+    receipt["process_id"] = observed_process_id
+    receipt["launcher_process_id"] = observed_process_id
+    receipt["launcher_identity"] = dict(launcher_identity)
+    receipt["job_active_processes_after"] = job_active_processes_after
+    receipt["job_stable_zero"] = job_active_processes_after == 0
+    if not receipt["job_stable_zero"]:
+        raise RuntimeError("provider Job Object did not reach stable zero")
+    receipt["receipt_sha256"] = hashlib.sha256(
+        json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return validate_provider_workload_receipt(
+        receipt,
+        expected_launcher_identity=launcher_identity,
+    )
 
 
 def spawn_provider_bootstrap(
@@ -976,9 +1211,16 @@ def spawn_provider_bootstrap(
     stdout = ""
     stderr = ""
     active_after: int | None = None
+    launcher_identity: dict[str, object] | None = None
     try:
         process = subprocess.Popen(
             argv,
+            executable=str(
+                _canonical_existing(
+                    Path(getattr(sys, "_base_executable", sys.executable)),
+                    kind="provider base executable",
+                )
+            ),
             cwd=operation,
             env=environment,
             stdin=subprocess.DEVNULL,
@@ -990,6 +1232,7 @@ def spawn_provider_bootstrap(
             startupinfo=startupinfo,
         )
         job.assign(int(process._handle))
+        launcher_identity = job.observe_process(int(process._handle), process.pid)
         stdout, stderr = process.communicate(timeout=30)
     finally:
         try:
@@ -1018,27 +1261,16 @@ def spawn_provider_bootstrap(
         receipt = json.loads(stdout)
     except json.JSONDecodeError as exc:
         raise ValueError("provider bootstrap receipt is invalid") from exc
-    if receipt.get("contract_version") != "provider_sandbox_workload_receipt_v1":
-        raise ValueError("provider bootstrap did not return a workload receipt")
-    if receipt.get("artifact_is_authorization") is not False or receipt.get(
-        "execute_binding_enabled"
-    ) is not False:
-        raise ValueError("provider workload receipt attempted to authorize execution")
-    provider_pid = receipt.get("provider_pid")
-    if not isinstance(provider_pid, int) or provider_pid <= 0:
-        raise ValueError("provider workload receipt PID is invalid")
-    receipt["process_id"] = provider_pid
-    receipt["launcher_process_id"] = process.pid
-    receipt["job_active_processes_after"] = active_after
-    receipt["job_stable_zero"] = active_after == 0
-    if not receipt["job_stable_zero"]:
-        raise RuntimeError("provider Job Object did not reach stable zero")
-    receipt["receipt_sha256"] = hashlib.sha256(
-        json.dumps(receipt, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
-    return validate_provider_workload_receipt(receipt)
+    if launcher_identity is None:
+        raise RuntimeError("provider launcher identity was not observed")
+    if active_after is None:
+        raise RuntimeError("provider Job Object state was not observed")
+    return _bind_provider_receipt_to_launcher(
+        receipt,
+        observed_process_id=process.pid,
+        launcher_identity=launcher_identity,
+        job_active_processes_after=active_after,
+    )
 
 
 def _main() -> int:

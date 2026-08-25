@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import msvcrt
@@ -505,7 +506,12 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
         if alias.exists():
             os.rmdir(alias)
     assert receipt["contract_version"] == "provider_sandbox_workload_receipt_v1"
-    assert receipt["provider_pid"] == receipt["process_id"]
+    assert receipt["provider_pid"] == receipt["process_id"] == receipt["launcher_process_id"]
+    assert receipt["launcher_identity"]["pid"] == receipt["launcher_process_id"]
+    assert receipt["launcher_identity"]["create_time_100ns"] > 0
+    assert re.fullmatch(
+        r"[0-9a-f]{64}", receipt["launcher_identity"]["job_identity_sha256"]
+    )
     assert receipt["phase_trace"] == ["boot", "tight", "workload", "complete"]
     assert receipt["filesystem_read_policy_after_tight"] == "deny_all"
     assert receipt["workload_request"] == {
@@ -533,17 +539,35 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
     assert len(receipt["preloaded_bytes_sha256_by_role"]) == 30
     child_value = json.loads(files["child_path"].read_text(encoding="utf-8"))
     expected_preloaded = {
-        "manifest": _file_sha(files["manifest_path"]),
-        "child": _file_sha(files["child_path"]),
+        "manifest": {
+            "path": str(files["manifest_path"]),
+            "sha256": _file_sha(files["manifest_path"]),
+            "byte_length": len(files["manifest_path"].read_bytes()),
+        },
+        "child": {
+            "path": str(files["child_path"]),
+            "sha256": _file_sha(files["child_path"]),
+            "byte_length": len(files["child_path"].read_bytes()),
+        },
         **{
-            f"code:{role}": _file_sha(PROJECT_ROOT / relative)
+            f"code:{role}": {
+                "path": relative,
+                "sha256": _file_sha(PROJECT_ROOT / relative),
+                "byte_length": len((PROJECT_ROOT / relative).read_bytes()),
+            }
             for role, relative in PROVIDER_CODE_REFS
         },
-        "profile:estimand": _file_sha(PROFILE_PATH),
+        "profile:estimand": {
+            "path": PROFILE_PATH.relative_to(PROJECT_ROOT).as_posix(),
+            "sha256": _file_sha(PROFILE_PATH),
+            "byte_length": len(PROFILE_PATH.read_bytes()),
+        },
         **{
-            f"screenshot:{case['image']['path']}": _file_sha(
-                PROJECT_ROOT / case["image"]["path"]
-            )
+            f"screenshot:{case['image']['path']}": {
+                "path": case["image"]["path"],
+                "sha256": _file_sha(PROJECT_ROOT / case["image"]["path"]),
+                "byte_length": len((PROJECT_ROOT / case["image"]["path"]).read_bytes()),
+            }
             for case in child_value["cases"]
         },
     }
@@ -579,10 +603,51 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest() == declared_sha
+    from app.learn.hybrid.benchmark_v2_provider_sandbox import (
+        _bind_provider_receipt_to_launcher,
+    )
+
+    child_claim = deepcopy(receipt)
+    for field in (
+        "process_id",
+        "launcher_process_id",
+        "launcher_identity",
+        "job_active_processes_after",
+        "job_stable_zero",
+        "receipt_sha256",
+    ):
+        child_claim.pop(field)
+    child_claim["provider_pid"] = receipt["launcher_process_id"] + 1
+    with pytest.raises(ValueError, match="differs from the observed launcher"):
+        _bind_provider_receipt_to_launcher(
+            child_claim,
+            observed_process_id=receipt["launcher_process_id"],
+            launcher_identity=receipt["launcher_identity"],
+            job_active_processes_after=0,
+        )
     for mutation in (
         {"phase_trace": ["boot", "tight", "complete"]},
         {"artifact_is_authorization": True},
         {"job_active_processes_after": 1},
+        {
+            "provider_pid": receipt["provider_pid"] + 1,
+            "process_id": receipt["provider_pid"] + 1,
+        },
+        {
+            "provider_pid": receipt["provider_pid"] + 1,
+            "process_id": receipt["provider_pid"] + 1,
+            "launcher_process_id": receipt["provider_pid"] + 1,
+            "launcher_identity": {
+                **receipt["launcher_identity"],
+                "pid": receipt["provider_pid"] + 1,
+            },
+        },
+        {
+            "launcher_identity": {
+                **receipt["launcher_identity"],
+                "create_time_100ns": receipt["launcher_identity"]["create_time_100ns"] + 1,
+            }
+        },
     ):
         from app.learn.hybrid.benchmark_v2_provider_sandbox import (
             validate_provider_workload_receipt,
@@ -595,7 +660,44 @@ def test_production_bootstrap_owns_load_tighten_and_open_audit(
             json.dumps(changed, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         with pytest.raises(ValueError):
-            validate_provider_workload_receipt(changed)
+            validate_provider_workload_receipt(
+                changed,
+                expected_launcher_identity=receipt["launcher_identity"],
+            )
+    for role_mutation in (
+        "fake_role",
+        "code_sha",
+        "profile_sha",
+        "screenshot_sha",
+        "byte_length",
+    ):
+        from app.learn.hybrid.benchmark_v2_provider_sandbox import (
+            validate_provider_workload_receipt,
+        )
+
+        changed = deepcopy(receipt)
+        preloaded = changed["preloaded_bytes_sha256_by_role"]
+        if role_mutation == "fake_role":
+            removed = preloaded.pop("code:contracts")
+            preloaded["code:fake"] = removed
+        elif role_mutation == "code_sha":
+            preloaded["code:contracts"]["sha256"] = "0" * 64
+        elif role_mutation == "profile_sha":
+            preloaded["profile:estimand"]["sha256"] = "0" * 64
+        elif role_mutation == "screenshot_sha":
+            role = next(key for key in preloaded if key.startswith("screenshot:"))
+            preloaded[role]["sha256"] = "0" * 64
+        else:
+            preloaded["code:bootstrap"]["byte_length"] += 1
+        changed.pop("receipt_sha256")
+        changed["receipt_sha256"] = hashlib.sha256(
+            json.dumps(changed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        with pytest.raises(ValueError):
+            validate_provider_workload_receipt(
+                changed,
+                expected_launcher_identity=receipt["launcher_identity"],
+            )
     assert not (files["operation"] / "provider-process-escape.txt").exists()
     assert not (files["operation"] / "provider-system-escape.txt").exists()
 
