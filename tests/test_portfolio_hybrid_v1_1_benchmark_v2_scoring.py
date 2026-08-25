@@ -3,7 +3,7 @@ import ast, base64, hashlib, json, os, subprocess, sys
 from copy import deepcopy
 from pathlib import Path
 import pytest
-from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, canonical_bytes, prediction_record_ref, seal_automatic_prediction, seal_target_binding, seal_vista_request, sealed_artifact_envelope
+from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, canonical_bytes, prediction_record_ref, seal_automatic_prediction, seal_review_decision, seal_target_binding, seal_vista_request, sealed_artifact_envelope
 from app.learn.hybrid.benchmark_scorer_v2 import _score_private_child, _verified_config_snapshot, config_ref, run_private_scorer
 
 ROOT=Path(__file__).resolve().parents[1]; SCRIPT=ROOT/"scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py"; GATE=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json"; ESTIMAND=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"; RELEASE="portfolio_hybrid_v1_1_benchmark_v2_release_1"
@@ -77,7 +77,7 @@ def test_sealed_evidence_scores_exact_pair_and_stdout_ref(tmp_path:Path)->None:
 def test_pre_review_requires_external_anchor_and_noop_is_stable()->None:
     private,run,bundle=evidence(); env=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); raw=base64.b64decode(env["canonical_bytes_b64"])
     sealed=seal_automatic_prediction(request_ref=ref("r"),pre_review=decode(env),execution_refs=[ref("e")],lifecycle_ref=ref("l")); record=sealed["record"]
-    decision={"decision_id":"d1","predecessor_ref":record["revision_ref"],"target_binding_ref":next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected"),"disposition":"corrected","replacement_candidate_id":"reviewed"}
+    decision=seal_review_decision(predecessor_ref=record["revision_ref"],target_binding_ref=next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected"),disposition="corrected",replacement_candidate_id="reviewed")
     revised=append_review_decisions(record,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=sealed["record_ref"])
     assert canonical_bytes(append_review_decisions(revised,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=prediction_record_ref(revised)))==canonical_bytes(revised)
     reminted=deepcopy(raw); changed=json.loads(reminted); changed["rows"][0]["failure_reason"]="rewrite" if "failure_reason" in changed["rows"][0] else None
@@ -86,12 +86,41 @@ def test_pre_review_requires_external_anchor_and_noop_is_stable()->None:
 def test_existing_review_chain_is_rebuilt_from_external_attempt_anchor()->None:
     _,run,_=evidence(); env=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); raw=base64.b64decode(env["canonical_bytes_b64"])
     sealed=seal_automatic_prediction(request_ref=ref("r"),pre_review=decode(env),execution_refs=[ref("e")],lifecycle_ref=ref("l")); record=sealed["record"]
-    decision={"decision_id":"d1","predecessor_ref":record["revision_ref"],"target_binding_ref":next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected"),"disposition":"corrected","replacement_candidate_id":"reviewed"}
+    decision=seal_review_decision(predecessor_ref=record["revision_ref"],target_binding_ref=next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected"),disposition="corrected",replacement_candidate_id="reviewed")
     revised=append_review_decisions(record,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=sealed["record_ref"])
-    forged_decision=deepcopy(decision); forged_decision["replacement_candidate_id"]="reminted"
+    forged_decision=seal_review_decision(predecessor_ref=record["revision_ref"],target_binding_ref=decision["target_binding_ref"],disposition="corrected",replacement_candidate_id="reminted")
     forged=append_review_decisions(record,[forged_decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=sealed["record_ref"])
     with pytest.raises(ValueError,match="anchor"):
         append_review_decisions(forged,[],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=prediction_record_ref(revised))
+
+@pytest.mark.parametrize("mutation",["decision_id","decision_type","nonmember","content_sha256","semantics"])
+def test_new_review_decision_is_closed_before_append_mutation(mutation:str)->None:
+    _,run,_=evidence(); env=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); raw=base64.b64decode(env["canonical_bytes_b64"])
+    sealed=seal_automatic_prediction(request_ref=ref("r"),pre_review=decode(env),execution_refs=[ref("e")],lifecycle_ref=ref("l")); record=sealed["record"]
+    binding=next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected")
+    decision=seal_review_decision(predecessor_ref=record["revision_ref"],target_binding_ref=binding,disposition="corrected",replacement_candidate_id="reviewed")
+    if mutation=="decision_id": decision["decision_id"]="not-content-addressed"
+    elif mutation=="decision_type": decision["decision_type"]="arbitrary"
+    elif mutation=="nonmember": decision=seal_review_decision(predecessor_ref=record["revision_ref"],target_binding_ref=ref("binding/not-selected"),disposition="corrected",replacement_candidate_id="reviewed")
+    elif mutation=="content_sha256": decision["content_sha256"]="0"*64
+    else: decision["disposition"]="accepted"
+    before=canonical_bytes(record)
+    with pytest.raises(ValueError,match="decision"):
+        append_review_decisions(record,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=sealed["record_ref"])
+    assert canonical_bytes(record)==before
+
+def test_append_postcondition_revalidates_derived_record(monkeypatch:pytest.MonkeyPatch)->None:
+    import app.learn.hybrid.benchmark_v2_predictions as predictions
+    _,run,_=evidence(); env=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); raw=base64.b64decode(env["canonical_bytes_b64"])
+    sealed=seal_automatic_prediction(request_ref=ref("r"),pre_review=decode(env),execution_refs=[ref("e")],lifecycle_ref=ref("l")); record=sealed["record"]
+    decision=seal_review_decision(predecessor_ref=record["revision_ref"],target_binding_ref=next(r["target_binding_ref"] for r in decode(env)["rows"] if r["selection_status"]=="selected"),disposition="corrected",replacement_candidate_id="reviewed")
+    original=predictions._advance_review_record; calls={"count":0}
+    def corrupt(value:dict[str,object],item:dict[str,object],expected:dict[str,str])->None:
+        original(value,item,expected); calls["count"]+=1
+        if calls["count"]==1: value["revision_ref"]["content_sha256"]="0"*64
+    monkeypatch.setattr(predictions,"_advance_review_record",corrupt)
+    with pytest.raises(ValueError,match="derived state"):
+        append_review_decisions(record,[decision],pre_review_artifact_bytes=raw,expected_pre_review_ref=env["ref"],expected_record_ref=sealed["record_ref"])
 
 @pytest.mark.parametrize("pair_mode",["baseline_missing","vista_missing","binding_mismatch","reason_mismatch"])
 def test_independently_anchored_partial_pair_fails_closed(tmp_path:Path,pair_mode:str)->None:
@@ -152,6 +181,14 @@ def test_private_loader_direct_call_is_child_only(tmp_path:Path,monkeypatch:pyte
     with pytest.raises(PermissionError,match="child-only"):
         _score_private_child(child_capability="forged-matching-token",private_manifest_path=tmp_path/"private",prediction_run_path=tmp_path/"run",lifecycle_path=tmp_path/"life",private_output_path=tmp_path/"out",public_ref_path=tmp_path/"public")
 
+def test_true_child_entry_rejects_matching_self_identity(tmp_path:Path)->None:
+    from app.learn.hybrid.benchmark_scorer_v2 import _process_identity, execute_closed_child_envelope
+    pid=os.getpid(); identity=_process_identity(pid)
+    envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_path":str(tmp_path/"run"),"lifecycle_path":str(tmp_path/"life"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":pid,"launcher_process_identity":identity,"expected_process_id":pid,"expected_process_identity":identity}
+    with pytest.raises(PermissionError,match="launcher binding"):
+        execute_closed_child_envelope(envelope)
+    assert not any(path.exists() for path in (tmp_path/"out",tmp_path/"public"))
+
 def test_verified_gate_snapshot_is_immutable_across_same_size_replace(tmp_path:Path,monkeypatch:pytest.MonkeyPatch)->None:
     import app.learn.hybrid.benchmark_scorer_v2 as scorer
     raw=GATE.read_bytes(); gate_path=tmp_path/"gate.json"; gate_path.write_bytes(raw)
@@ -171,12 +208,14 @@ def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monk
     private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); observed={}; original=scorer.subprocess.Popen
     def capture(*args:object,**kwargs:object):
         observed.update({"args":deepcopy(args),"env":deepcopy(kwargs["env"]),"cwd":Path(kwargs["cwd"]),"initial":list(Path(kwargs["cwd"]).iterdir())})
-        process=original(*args,**kwargs); observed["launcher_pid"]=process.pid; return process
+        process=original(*args,**kwargs); observed["child_pid"]=process.pid; return process
     monkeypatch.setattr(scorer.subprocess,"Popen",capture)
     result=run_private_scorer(private_manifest_path=p["private"],prediction_run_path=p["run"],lifecycle_path=p["lifecycle"],private_output_path=p["output"],public_ref_path=p["public"])
     projection=json.dumps({"args":observed["args"],"env":observed["env"],"cwd":str(observed["cwd"])},default=str)
     assert set(result)=={"status","score_ref","content_sha256"} and observed["initial"]==[]
     assert str(tmp_path) not in projection and "opaque/" not in projection and "BENCHMARK_V2_SCORER_CHILD_CAPABILITY" not in observed["env"]
-    public=json.loads(p["public"].read_text()); assert public["execution_receipt"]["process_id"]==observed["launcher_pid"] and len(public["execution_receipt"]["nonce"])==64
+    public=json.loads(p["public"].read_text()); receipt=public["execution_receipt"]
+    assert receipt["process_id"]==observed["child_pid"] and receipt["launcher_process_id"]==os.getpid() and receipt["process_id"]!=receipt["launcher_process_id"]
+    assert len(receipt["nonce"])==64 and len(receipt["pipe_capability_sha256"])==64
     expected_python=Path(getattr(sys,"_base_executable",sys.executable)).resolve()
     assert Path(observed["args"][0][0]).resolve()==expected_python

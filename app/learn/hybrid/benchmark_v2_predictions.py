@@ -91,6 +91,31 @@ def prediction_record_ref(record:Mapping[str,object])->dict[str,str]:
     if not isinstance(prediction_id,str) or not prediction_id: raise ValueError("prediction record identity invalid")
     return {"id":f"prediction-record/{prediction_id}","content_sha256":hashlib.sha256(canonical_bytes(record)).hexdigest()}
 
+def seal_review_decision(*,predecessor_ref:Mapping[str,str],target_binding_ref:Mapping[str,str],disposition:str,replacement_candidate_id:str|None)->dict[str,object]:
+    if disposition not in {"accepted","corrected","rejected"}: raise ValueError("review disposition invalid")
+    if (disposition=="corrected") != (isinstance(replacement_candidate_id,str) and bool(replacement_candidate_id)): raise ValueError("review replacement semantics invalid")
+    payload={"contract_version":"automatic_review_decision_v2","decision_type":"candidate_review","predecessor_ref":exact_ref(predecessor_ref,"decision predecessor"),"target_binding_ref":exact_ref(target_binding_ref,"decision binding"),"disposition":disposition,"replacement_candidate_id":replacement_candidate_id}
+    digest=hashlib.sha256(canonical_bytes(payload)).hexdigest()
+    return {**payload,"decision_id":f"review-decision/{digest}","content_sha256":digest}
+
+def _validate_decision(raw:object,predecessor_ref:Mapping[str,str],allowed_bindings:set[bytes])->dict[str,object]:
+    if not isinstance(raw,Mapping): raise ValueError("decision invalid")
+    fields={"contract_version","decision_id","decision_type","predecessor_ref","target_binding_ref","disposition","replacement_candidate_id","content_sha256"}
+    item=deepcopy(dict(raw))
+    if set(item)!=fields or item["contract_version"]!="automatic_review_decision_v2" or item["decision_type"]!="candidate_review" or item["predecessor_ref"]!=predecessor_ref: raise ValueError("decision schema/type/predecessor invalid")
+    if canonical_bytes(exact_ref(item["target_binding_ref"],"decision binding")) not in allowed_bindings: raise ValueError("decision binding is not in pre-review")
+    if item["disposition"] not in {"accepted","corrected","rejected"} or (item["disposition"]=="corrected") != (isinstance(item["replacement_candidate_id"],str) and bool(item["replacement_candidate_id"])): raise ValueError("decision semantics invalid")
+    payload={k:item[k] for k in ("contract_version","decision_type","predecessor_ref","target_binding_ref","disposition","replacement_candidate_id")}
+    digest=hashlib.sha256(canonical_bytes(payload)).hexdigest()
+    if item["content_sha256"]!=digest or item["decision_id"]!=f"review-decision/{digest}": raise ValueError("decision content identity invalid")
+    return item
+
+def _advance_review_record(value:dict[str,object],item:dict[str,object],expected_pre:Mapping[str,str])->None:
+    value["decisions"].append(item)
+    index=len(value["decisions"])
+    value["post_review_ref"]={"id":f"post-review/{index}","content_sha256":hashlib.sha256(canonical_bytes({"pre_review_ref":expected_pre,"decisions":value["decisions"]})).hexdigest()}
+    value["revision_ref"]={"id":f"prediction-revision/{index}","content_sha256":hashlib.sha256(canonical_bytes({k:v for k,v in value.items() if k!="revision_ref"})).hexdigest()}
+
 def _validate_existing_record(record:Mapping[str,object],artifact:Mapping[str,object],expected_pre:Mapping[str,str])->dict[str,object]:
     fields={"contract_version","prediction_id","request_ref","pre_review_ref","execution_refs","lifecycle_ref","decisions","post_review_ref","safety","revision_ref"}
     if set(record)!=fields or record["contract_version"]!="automatic_prediction_record_v2" or record["prediction_id"]!=artifact["prediction_id"] or record["pre_review_ref"]!=expected_pre or record["safety"]!=SAFETY: raise ValueError("prediction record not closed")
@@ -105,14 +130,9 @@ def _validate_existing_record(record:Mapping[str,object],artifact:Mapping[str,ob
     raw_decisions=record["decisions"]
     if not isinstance(raw_decisions,list): raise ValueError("decision chain invalid")
     for index,raw in enumerate(raw_decisions,1):
-        if not isinstance(raw,Mapping): raise ValueError("decision invalid")
-        item=deepcopy(dict(raw))
-        if set(item)!={"decision_id","predecessor_ref","target_binding_ref","disposition","replacement_candidate_id"} or not isinstance(item["decision_id"],str) or not item["decision_id"] or item["decision_id"] in seen or item["predecessor_ref"]!=current["revision_ref"]: raise ValueError("existing decision chain invalid")
-        if canonical_bytes(exact_ref(item["target_binding_ref"],"decision binding")) not in allowed_bindings: raise ValueError("decision binding is not in pre-review")
-        if not isinstance(item["disposition"],str) or not item["disposition"] or not isinstance(item["replacement_candidate_id"],str) or not item["replacement_candidate_id"]: raise ValueError("decision value invalid")
-        seen.add(item["decision_id"]); current["decisions"].append(item)
-        current["post_review_ref"]={"id":f"post-review/{index}","content_sha256":hashlib.sha256(canonical_bytes({"pre_review_ref":expected_pre,"decisions":current["decisions"]})).hexdigest()}
-        current["revision_ref"]={"id":f"prediction-revision/{index}","content_sha256":hashlib.sha256(canonical_bytes({k:v for k,v in current.items() if k!="revision_ref"})).hexdigest()}
+        item=_validate_decision(raw,current["revision_ref"],allowed_bindings)
+        if item["decision_id"] in seen: raise ValueError("duplicate decision identity")
+        seen.add(item["decision_id"]); _advance_review_record(current,item,expected_pre)
     if current!=record: raise ValueError("existing prediction record derived state invalid")
     return current
 
@@ -125,14 +145,12 @@ def append_review_decisions(record:Mapping[str,object],decisions:list[Mapping[st
     artifact=_validate_pre(artifact)
     value=_validate_existing_record(value,artifact,expected)
     existing={d["decision_id"]:d for d in value["decisions"]}
+    allowed_bindings={canonical_bytes(row["target_binding_ref"]) for row in artifact["rows"] if row["selection_status"]=="selected"}
     for raw in decisions:
-        item=deepcopy(dict(raw)); prior=existing.get(item.get("decision_id"))
+        prior=existing.get(raw.get("decision_id")) if isinstance(raw,Mapping) else None
+        item=_validate_decision(raw,prior["predecessor_ref"] if prior is not None else value["revision_ref"],allowed_bindings)
         if prior is not None:
             if prior!=item: raise ValueError("decision rewrite")
             continue
-        if set(item)!={"decision_id","predecessor_ref","target_binding_ref","disposition","replacement_candidate_id"} or item["predecessor_ref"]!=value["revision_ref"]: raise ValueError("decision predecessor invalid")
-        value["decisions"].append(item); existing[item["decision_id"]]=item
-        value["post_review_ref"]={"id":f"post-review/{len(value['decisions'])}","content_sha256":hashlib.sha256(canonical_bytes({"pre_review_ref":expected,"decisions":value["decisions"]})).hexdigest()}
-        draft={k:v for k,v in value.items() if k!="revision_ref"}
-        value["revision_ref"]={"id":f"prediction-revision/{len(value['decisions'])}","content_sha256":hashlib.sha256(canonical_bytes(draft)).hexdigest()}
-    return value
+        _advance_review_record(value,item,expected); existing[item["decision_id"]]=item
+    return _validate_existing_record(value,artifact,expected)

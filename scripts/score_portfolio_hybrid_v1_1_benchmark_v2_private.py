@@ -11,7 +11,7 @@ def main()->int:
     parser=argparse.ArgumentParser(); parser.add_argument("--closed-stdin",action="store_true",required=True); parser.parse_args()
     try:
         envelope=json.loads(sys.stdin.read())
-        fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","expected_process_id","expected_process_identity"}
+        fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","pipe_capability","launcher_process_id","launcher_process_identity","expected_process_id","expected_process_identity"}
         if not isinstance(envelope,dict) or set(envelope)!=fields: raise ValueError("closed stdin invalid")
         public=execute_closed_child_envelope(envelope)
         stdout={k:public[k] for k in ("status","score_ref","content_sha256")}

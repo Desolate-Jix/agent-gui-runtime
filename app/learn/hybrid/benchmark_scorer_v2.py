@@ -195,19 +195,19 @@ def _process_identity(pid:int)->str:
 
 def execute_closed_child_envelope(envelope:Mapping[str,object])->dict[str,object]:
     global _CHILD_ENTRY_USED
-    fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","expected_process_id","expected_process_identity"}
+    fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","pipe_capability","launcher_process_id","launcher_process_identity","expected_process_id","expected_process_identity"}
     if _CHILD_ENTRY_USED or not isinstance(envelope,Mapping) or set(envelope)!=fields: raise PermissionError("private scorer entrypoint state invalid")
-    pid=os.getpid(); nonce=envelope["nonce"]
-    if not isinstance(nonce,str) or len(nonce)!=64 or envelope["expected_process_id"]!=pid or envelope["expected_process_identity"]!=_process_identity(pid): raise PermissionError("private scorer launcher binding invalid")
+    pid=os.getpid(); nonce=envelope["nonce"]; capability=envelope["pipe_capability"]; launcher_pid=envelope["launcher_process_id"]
+    if not isinstance(nonce,str) or len(nonce)!=64 or not isinstance(capability,str) or len(capability)!=64 or not isinstance(launcher_pid,int) or pid==launcher_pid or os.getppid()!=launcher_pid or envelope["launcher_process_identity"]!=_process_identity(launcher_pid) or envelope["expected_process_id"]!=pid or envelope["expected_process_identity"]!=_process_identity(pid): raise PermissionError("private scorer launcher binding invalid")
     _CHILD_ENTRY_USED=True
     paths={key:Path(str(envelope[key])) for key in fields if key.endswith("_path")}
-    return _run_private_child_once(nonce=nonce,process_identity=str(envelope["expected_process_identity"]),**paths)
+    return _run_private_child_once(nonce=nonce,pipe_capability=capability,launcher_process_id=launcher_pid,launcher_process_identity=str(envelope["launcher_process_identity"]),process_identity=str(envelope["expected_process_identity"]),**paths)
 
-def _run_private_child_once(*,nonce:str,process_identity:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
+def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:int,launcher_process_identity:str,process_identity:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
     private,run,bundle=_load(private_manifest_path),_load(prediction_run_path),_load(lifecycle_path)
     rows,cases,gate=_validate(private,run,bundle)
     result=_score(rows,cases,gate); private_result={"contract_version":"portfolio_hybrid_v1_1_private_score_v2",**result,"source_parent_ref":private["source_parent_ref"],"automatic_prediction_ref":run["automatic_prediction_ref"],"estimand_ref":private["estimand_ref"],"gate_ref":private["gate_ref"],"safety":dict(SAFETY)}
-    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"process_id":os.getpid(),"process_identity":process_identity,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
+    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
     for path,payload in ((Path(private_output_path),raw),(Path(public_ref_path),canonical_bytes(public)+b"\n")):
         path.parent.mkdir(parents=True,exist_ok=True); tmp=path.with_name("."+path.name+".tmp")
         try: tmp.write_bytes(payload); tmp.replace(path)
@@ -217,7 +217,7 @@ def _run_private_child_once(*,nonce:str,process_identity:str,private_manifest_pa
 
 def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,str]:
     system_root=os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot")
-    nonce=secrets.token_hex(32)
+    nonce=secrets.token_hex(32); pipe_capability=secrets.token_hex(32); launcher_pid=os.getpid(); launcher_identity=_process_identity(launcher_pid)
     env={"SYSTEMROOT":system_root,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
     envelope={k:str(Path(v).resolve()) for k,v in {"private_manifest_path":private_manifest_path,"prediction_run_path":prediction_run_path,"lifecycle_path":lifecycle_path,"private_output_path":private_output_path,"public_ref_path":public_ref_path}.items()}
     with tempfile.TemporaryDirectory(prefix="benchmark-v2-score-") as operation_root:
@@ -226,7 +226,7 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lif
         python_executable=_scorer_python_executable()
         process=subprocess.Popen([str(python_executable),str(SCRIPT),"--closed-stdin"],executable=str(python_executable),cwd=root,env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True)
         try:
-            identity=_process_identity(process.pid); envelope.update({"nonce":nonce,"expected_process_id":process.pid,"expected_process_identity":identity})
+            identity=_process_identity(process.pid); envelope.update({"nonce":nonce,"pipe_capability":pipe_capability,"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"expected_process_id":process.pid,"expected_process_identity":identity})
             stdout,stderr=process.communicate(json.dumps(envelope,sort_keys=True,separators=(",",":")),timeout=30)
         finally:
             try:
@@ -246,5 +246,6 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lif
     if not isinstance(ref,dict) or set(ref)!={"status","score_ref","content_sha256"}: raise ValueError("private scorer public stdout ref invalid")
     public=json.loads(Path(public_ref_path).read_text(encoding="utf-8"))
     receipt=public.get("execution_receipt")
-    if {k:public[k] for k in ref}!=ref or public.get("safety")!=SAFETY or not isinstance(receipt,Mapping) or receipt!={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"process_id":process.pid,"process_identity":identity,"safety":SAFETY}: raise ValueError("private scorer public artifact mismatch")
+    expected_receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"process_id":process.pid,"process_identity":identity,"safety":SAFETY}
+    if os.getpid()!=launcher_pid or _process_identity(launcher_pid)!=launcher_identity or {k:public[k] for k in ref}!=ref or public.get("safety")!=SAFETY or not isinstance(receipt,Mapping) or receipt!=expected_receipt: raise ValueError("private scorer public artifact mismatch")
     return ref
