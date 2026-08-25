@@ -1,0 +1,4104 @@
+{
+  "artifact_is_authorization": false,
+  "artifacts": {
+    "benchmark_producer": {
+      "path": "app/learn/hybrid/benchmark.py",
+      "sha256": "5c633f48ff54192ac49b6483960c0ae6075e4ccf97234b477b1508aac7115c7a"
+    },
+    "benchmark_runner": {
+      "path": "scripts/run_portfolio_hybrid_v1_1_benchmark.py",
+      "sha256": "9a83f101a2eb28190d890b5abcb027c140bde56795142c18e2296b863c3d583d"
+    },
+    "gate_config": {
+      "path": "configs/benchmarks/portfolio_hybrid_v1_1_gate.json",
+      "sha256": "1c54e2216aea626e6581977522139921c51e2e97fcbf3248a1d679c311ac6173"
+    },
+    "gold": {
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/gold.v1.json",
+      "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+    },
+    "scorer": {
+      "path": "app/learn/hybrid/benchmark_scorer_v1.py",
+      "sha256": "cfdade5c1bc7b9c6dc44cb66743fa4c22f70df85a6b7fadc8cdf6a10eec8a89a"
+    },
+    "sealer": {
+      "path": "scripts/seal_portfolio_hybrid_v1_1_corpus.py",
+      "sha256": "51ad50ed13ebc1dcf91ea894cb63c47b1eec15d96e5598ce38c5461fa30a69a6"
+    }
+  },
+  "benchmark_id": "portfolio-hybrid-v1-1",
+  "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
+  "contract_version": "portfolio_hybrid_v1_1_corpus_manifest_v1",
+  "corpus_id": "portfolio-hybrid-v1-1-public-synthetic",
+  "execute_binding_enabled": false,
+  "gate_config_identity": {
+    "artifact_sha256": "1c54e2216aea626e6581977522139921c51e2e97fcbf3248a1d679c311ac6173",
+    "config_id": "portfolio-hybrid-v1-1-gate",
+    "config_sha256": "07298c0acb2fe496ee291c6019523a2f78d72424a88ed3edf6864f3f96dbe8d0"
+  },
+  "gold_contract_version": "portfolio_hybrid_v1_1_gold_records_v1",
+  "gold_records": [
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-001/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          48,
+          88,
+          166,
+          126
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        48,
+        88,
+        166,
+        126
+      ],
+      "goal": "Select the button labeled 'New task'",
+      "important_target": true,
+      "label": "New task",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-001",
+      "target_id": "case-001-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-001/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          420,
+          78,
+          700,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        420,
+        78,
+        700,
+        118
+      ],
+      "goal": "Select the textbox labeled 'Search board'",
+      "important_target": true,
+      "label": "Search board",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-001",
+      "target_id": "case-001-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-001/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          282,
+          150,
+          364,
+          184
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        282,
+        150,
+        364,
+        184
+      ],
+      "goal": "Select the tab labeled 'Active'",
+      "important_target": true,
+      "label": "Active",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-001",
+      "target_id": "case-001-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-001/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          982,
+          150,
+          1116,
+          188
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        982,
+        150,
+        1116,
+        188
+      ],
+      "goal": "Select the combobox labeled 'Filter'",
+      "important_target": true,
+      "label": "Filter",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-001",
+      "target_id": "case-001-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-001/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          52,
+          648,
+          132,
+          676
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        52,
+        648,
+        132,
+        676
+      ],
+      "goal": "Select the link labeled 'Settings'",
+      "important_target": true,
+      "label": "Settings",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-001",
+      "target_id": "case-001-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-002/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          34,
+          78,
+          142,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        34,
+        78,
+        142,
+        114
+      ],
+      "goal": "Select the button labeled 'Compose'",
+      "important_target": true,
+      "label": "Compose",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-002",
+      "target_id": "case-002-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-002/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          310,
+          70,
+          738,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        310,
+        70,
+        738,
+        108
+      ],
+      "goal": "Select the textbox labeled 'Search mail'",
+      "important_target": true,
+      "label": "Search mail",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-002",
+      "target_id": "case-002-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-002/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          242,
+          140,
+          332,
+          172
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        242,
+        140,
+        332,
+        172
+      ],
+      "goal": "Select the tab labeled 'Primary'",
+      "important_target": true,
+      "label": "Primary",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-002",
+      "target_id": "case-002-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-002/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          230,
+          194,
+          326,
+          222
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        230,
+        194,
+        326,
+        222
+      ],
+      "goal": "Select the checkbox labeled 'Select all'",
+      "important_target": true,
+      "label": "Select all",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-002",
+      "target_id": "case-002-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-002/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1160,
+          140,
+          1224,
+          170
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1160,
+        140,
+        1224,
+        170
+      ],
+      "goal": "Select the menuitem labeled 'More'",
+      "important_target": true,
+      "label": "More",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "menuitem",
+      "screen_id": "case-002",
+      "target_id": "case-002-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-003/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          28,
+          38,
+          98,
+          72
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        28,
+        38,
+        98,
+        72
+      ],
+      "goal": "Select the button labeled 'Back'",
+      "important_target": true,
+      "label": "Back",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-003",
+      "target_id": "case-003-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-003/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          246,
+          38,
+          610,
+          76
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        246,
+        38,
+        610,
+        76
+      ],
+      "goal": "Select the textbox labeled 'Find a setting'",
+      "important_target": true,
+      "label": "Find a setting",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-003",
+      "target_id": "case-003-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-003/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          330,
+          174,
+          448,
+          206
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        330,
+        174,
+        448,
+        206
+      ],
+      "goal": "Select the checkbox labeled 'Bluetooth'",
+      "important_target": true,
+      "label": "Bluetooth",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-003",
+      "target_id": "case-003-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-003/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          32,
+          126,
+          118,
+          160
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        32,
+        126,
+        118,
+        160
+      ],
+      "goal": "Select the tab labeled 'Display'",
+      "important_target": true,
+      "label": "Display",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-003",
+      "target_id": "case-003-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-003/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          334,
+          606,
+          430,
+          634
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        334,
+        606,
+        430,
+        634
+      ],
+      "goal": "Select the link labeled 'Advanced'",
+      "important_target": true,
+      "label": "Advanced",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-003",
+      "target_id": "case-003-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-004/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          18,
+          46,
+          78,
+          76
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        18,
+        46,
+        78,
+        76
+      ],
+      "goal": "Select the button labeled 'Back'",
+      "important_target": true,
+      "label": "Back",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-004",
+      "target_id": "case-004-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-004/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          744,
+          42,
+          1068,
+          78
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        744,
+        42,
+        1068,
+        78
+      ],
+      "goal": "Select the textbox labeled 'Search files'",
+      "important_target": true,
+      "label": "Search files",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-004",
+      "target_id": "case-004-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-004/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          102,
+          102,
+          208,
+          136
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        102,
+        102,
+        208,
+        136
+      ],
+      "goal": "Select the button labeled 'New folder'",
+      "important_target": true,
+      "label": "New folder",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-004",
+      "target_id": "case-004-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-004/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1090,
+          100,
+          1194,
+          134
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1090,
+        100,
+        1194,
+        134
+      ],
+      "goal": "Select the combobox labeled 'View'",
+      "important_target": true,
+      "label": "View",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-004",
+      "target_id": "case-004-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-004/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          872,
+          100,
+          956,
+          134
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        872,
+        100,
+        956,
+        134
+      ],
+      "goal": "Select the tab labeled 'Details'",
+      "important_target": true,
+      "label": "Details",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-004",
+      "target_id": "case-004-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-005/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          34,
+          82,
+          112,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        34,
+        82,
+        112,
+        118
+      ],
+      "goal": "Select the button labeled 'Today'",
+      "important_target": true,
+      "label": "Today",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-005",
+      "target_id": "case-005-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-005/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          116,
+          82,
+          232,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        116,
+        82,
+        232,
+        118
+      ],
+      "goal": "Select the button labeled 'New event'",
+      "important_target": true,
+      "label": "New event",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-005",
+      "target_id": "case-005-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-005/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          536,
+          82,
+          648,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        536,
+        82,
+        648,
+        118
+      ],
+      "goal": "Select the combobox labeled 'Month'",
+      "important_target": true,
+      "label": "Month",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-005",
+      "target_id": "case-005-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-005/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          830,
+          80,
+          1086,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        830,
+        80,
+        1086,
+        118
+      ],
+      "goal": "Select the textbox labeled 'Search calendar'",
+      "important_target": true,
+      "label": "Search calendar",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-005",
+      "target_id": "case-005-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-005/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1148,
+          86,
+          1222,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1148,
+        86,
+        1222,
+        112
+      ],
+      "goal": "Select the link labeled 'Settings'",
+      "important_target": true,
+      "label": "Settings",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-005",
+      "target_id": "case-005-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-006/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          880,
+          70,
+          966,
+          102
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        880,
+        70,
+        966,
+        102
+      ],
+      "goal": "Select the button labeled 'Refresh'",
+      "important_target": true,
+      "label": "Refresh",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-006",
+      "target_id": "case-006-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-006/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          972,
+          70,
+          1090,
+          102
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        972,
+        70,
+        1090,
+        102
+      ],
+      "goal": "Select the combobox labeled 'Date range'",
+      "important_target": true,
+      "label": "Date range",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-006",
+      "target_id": "case-006-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-006/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1098,
+          70,
+          1178,
+          102
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1098,
+        70,
+        1178,
+        102
+      ],
+      "goal": "Select the button labeled 'Export'",
+      "important_target": true,
+      "label": "Export",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-006",
+      "target_id": "case-006-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-006/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1042,
+          130,
+          1120,
+          156
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1042,
+        130,
+        1120,
+        156
+      ],
+      "goal": "Select the checkbox labeled 'Alerts'",
+      "important_target": true,
+      "label": "Alerts",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-006",
+      "target_id": "case-006-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-006/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          260,
+          128,
+          340,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        260,
+        128,
+        340,
+        158
+      ],
+      "goal": "Select the tab labeled 'Reports'",
+      "important_target": true,
+      "label": "Reports",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-006",
+      "target_id": "case-006-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-007/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          20,
+          82,
+          76,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        20,
+        82,
+        76,
+        112
+      ],
+      "goal": "Select the button labeled 'Undo'",
+      "important_target": true,
+      "label": "Undo",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-007",
+      "target_id": "case-007-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-007/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          84,
+          82,
+          142,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        84,
+        82,
+        142,
+        112
+      ],
+      "goal": "Select the button labeled 'Save'",
+      "important_target": true,
+      "label": "Save",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-007",
+      "target_id": "case-007-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-007/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1150,
+          76,
+          1222,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1150,
+        76,
+        1222,
+        112
+      ],
+      "goal": "Select the button labeled 'Share'",
+      "important_target": true,
+      "label": "Share",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-007",
+      "target_id": "case-007-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-007/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          826,
+          80,
+          914,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        826,
+        80,
+        914,
+        112
+      ],
+      "goal": "Select the combobox labeled 'Zoom'",
+      "important_target": true,
+      "label": "Zoom",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-007",
+      "target_id": "case-007-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-007/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1018,
+          84,
+          1104,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1018,
+        84,
+        1104,
+        108
+      ],
+      "goal": "Select the link labeled 'Comments'",
+      "important_target": true,
+      "label": "Comments",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-007",
+      "target_id": "case-007-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-008/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          28,
+          76,
+          138,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        28,
+        76,
+        138,
+        112
+      ],
+      "goal": "Select the button labeled 'New chat'",
+      "important_target": true,
+      "label": "New chat",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-008",
+      "target_id": "case-008-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-008/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          158,
+          76,
+          394,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        158,
+        76,
+        394,
+        112
+      ],
+      "goal": "Select the textbox labeled 'Search'",
+      "important_target": true,
+      "label": "Search",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-008",
+      "target_id": "case-008-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-008/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          32,
+          134,
+          102,
+          166
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        32,
+        134,
+        102,
+        166
+      ],
+      "goal": "Select the tab labeled 'Inbox'",
+      "important_target": true,
+      "label": "Inbox",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-008",
+      "target_id": "case-008-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-008/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1048,
+          88,
+          1116,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1048,
+        88,
+        1116,
+        114
+      ],
+      "goal": "Select the checkbox labeled 'Mute'",
+      "important_target": true,
+      "label": "Mute",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-008",
+      "target_id": "case-008-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-008/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1180,
+          88,
+          1222,
+          112
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1180,
+        88,
+        1222,
+        112
+      ],
+      "goal": "Select the link labeled 'Help'",
+      "important_target": true,
+      "label": "Help",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-008",
+      "target_id": "case-008-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-009/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          322,
+          68,
+          744,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        322,
+        68,
+        744,
+        108
+      ],
+      "goal": "Select the textbox labeled 'Search products'",
+      "important_target": true,
+      "label": "Search products",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-009",
+      "target_id": "case-009-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-009/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          758,
+          68,
+          894,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        758,
+        68,
+        894,
+        108
+      ],
+      "goal": "Select the combobox labeled 'Category'",
+      "important_target": true,
+      "label": "Category",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-009",
+      "target_id": "case-009-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-009/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          252,
+          128,
+          320,
+          160
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        252,
+        128,
+        320,
+        160
+      ],
+      "goal": "Select the tab labeled 'Deals'",
+      "important_target": true,
+      "label": "Deals",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-009",
+      "target_id": "case-009-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-009/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1010,
+          134,
+          1100,
+          162
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1010,
+        134,
+        1100,
+        162
+      ],
+      "goal": "Select the checkbox labeled 'Compare'",
+      "important_target": true,
+      "label": "Compare",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-009",
+      "target_id": "case-009-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-009/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1170,
+          78,
+          1214,
+          104
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1170,
+        78,
+        1214,
+        104
+      ],
+      "goal": "Select the link labeled 'Cart'",
+      "important_target": true,
+      "label": "Cart",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-009",
+      "target_id": "case-009-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-010/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          22,
+          74,
+          72,
+          104
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        22,
+        74,
+        72,
+        104
+      ],
+      "goal": "Select the button labeled 'Run'",
+      "important_target": true,
+      "label": "Run",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-010",
+      "target_id": "case-010-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-010/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          78,
+          74,
+          132,
+          104
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        78,
+        74,
+        132,
+        104
+      ],
+      "goal": "Select the button labeled 'Stop'",
+      "important_target": true,
+      "label": "Stop",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-010",
+      "target_id": "case-010-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-010/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          842,
+          72,
+          996,
+          106
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        842,
+        72,
+        996,
+        106
+      ],
+      "goal": "Select the combobox labeled 'Environment'",
+      "important_target": true,
+      "label": "Environment",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-010",
+      "target_id": "case-010-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-010/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          218,
+          126,
+          274,
+          156
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        218,
+        126,
+        274,
+        156
+      ],
+      "goal": "Select the tab labeled 'Logs'",
+      "important_target": true,
+      "label": "Logs",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-010",
+      "target_id": "case-010-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-010/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1090,
+          130,
+          1200,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1090,
+        130,
+        1200,
+        158
+      ],
+      "goal": "Select the checkbox labeled 'Auto scroll'",
+      "important_target": true,
+      "label": "Auto scroll",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-010",
+      "target_id": "case-010-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-011/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          34,
+          78,
+          114,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        34,
+        78,
+        114,
+        114
+      ],
+      "goal": "Select the button labeled 'Upload'",
+      "important_target": true,
+      "label": "Upload",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-011",
+      "target_id": "case-011-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-011/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          336,
+          76,
+          684,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        336,
+        76,
+        684,
+        114
+      ],
+      "goal": "Select the textbox labeled 'Search media'",
+      "important_target": true,
+      "label": "Search media",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-011",
+      "target_id": "case-011-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-011/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          214,
+          138,
+          266,
+          168
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        214,
+        138,
+        266,
+        168
+      ],
+      "goal": "Select the tab labeled 'Grid'",
+      "important_target": true,
+      "label": "Grid",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-011",
+      "target_id": "case-011-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-011/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1014,
+          136,
+          1108,
+          170
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1014,
+        136,
+        1108,
+        170
+      ],
+      "goal": "Select the combobox labeled 'Sort'",
+      "important_target": true,
+      "label": "Sort",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-011",
+      "target_id": "case-011-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-011/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1122,
+          140,
+          1218,
+          168
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1122,
+        140,
+        1218,
+        168
+      ],
+      "goal": "Select the checkbox labeled 'Favorites'",
+      "important_target": true,
+      "label": "Favorites",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-011",
+      "target_id": "case-011-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-012/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          28,
+          194,
+          104,
+          226
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        28,
+        194,
+        104,
+        226
+      ],
+      "goal": "Select the button labeled 'Zoom in'",
+      "important_target": true,
+      "label": "Zoom in",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-012",
+      "target_id": "case-012-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-012/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          28,
+          78,
+          360,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        28,
+        78,
+        360,
+        118
+      ],
+      "goal": "Select the textbox labeled 'Search places'",
+      "important_target": true,
+      "label": "Search places",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-012",
+      "target_id": "case-012-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-012/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1112,
+          78,
+          1218,
+          116
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1112,
+        78,
+        1218,
+        116
+      ],
+      "goal": "Select the combobox labeled 'Layers'",
+      "important_target": true,
+      "label": "Layers",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-012",
+      "target_id": "case-012-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-012/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1108,
+          130,
+          1194,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1108,
+        130,
+        1194,
+        158
+      ],
+      "goal": "Select the checkbox labeled 'Transit'",
+      "important_target": true,
+      "label": "Transit",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-012",
+      "target_id": "case-012-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-012/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          48,
+          136,
+          134,
+          162
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        48,
+        136,
+        134,
+        162
+      ],
+      "goal": "Select the link labeled 'Directions'",
+      "important_target": true,
+      "label": "Directions",
+      "partition": "regression",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-012",
+      "target_id": "case-012-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-013/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          842,
+          636,
+          936,
+          674
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        842,
+        636,
+        936,
+        674
+      ],
+      "goal": "Select the button labeled 'Previous'",
+      "important_target": true,
+      "label": "Previous",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-013",
+      "target_id": "case-013-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-013/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1044,
+          636,
+          1126,
+          674
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1044,
+        636,
+        1126,
+        674
+      ],
+      "goal": "Select the button labeled 'Install'",
+      "important_target": true,
+      "label": "Install",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-013",
+      "target_id": "case-013-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-013/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1134,
+          636,
+          1214,
+          674
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1134,
+        636,
+        1214,
+        674
+      ],
+      "goal": "Select the button labeled 'Cancel'",
+      "important_target": true,
+      "label": "Cancel",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-013",
+      "target_id": "case-013-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-013/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          356,
+          402,
+          522,
+          432
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        356,
+        402,
+        522,
+        432
+      ],
+      "goal": "Select the checkbox labeled 'Desktop shortcut'",
+      "important_target": true,
+      "label": "Desktop shortcut",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-013",
+      "target_id": "case-013-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-013/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          356,
+          342,
+          528,
+          380
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        356,
+        342,
+        528,
+        380
+      ],
+      "goal": "Select the combobox labeled 'Install for'",
+      "important_target": true,
+      "label": "Install for",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-013",
+      "target_id": "case-013-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-014/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          232,
+          128,
+          320,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        232,
+        128,
+        320,
+        158
+      ],
+      "goal": "Select the tab labeled 'Overview'",
+      "important_target": true,
+      "label": "Overview",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-014",
+      "target_id": "case-014-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-014/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          326,
+          128,
+          402,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        326,
+        128,
+        402,
+        158
+      ],
+      "goal": "Select the tab labeled 'Sources'",
+      "important_target": true,
+      "label": "Sources",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-014",
+      "target_id": "case-014-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-014/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          970,
+          72,
+          1104,
+          104
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        970,
+        72,
+        1104,
+        104
+      ],
+      "goal": "Select the combobox labeled 'Last 30 days'",
+      "important_target": true,
+      "label": "Last 30 days",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-014",
+      "target_id": "case-014-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-014/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1112,
+          72,
+          1210,
+          104
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1112,
+        72,
+        1210,
+        104
+      ],
+      "goal": "Select the button labeled 'Download'",
+      "important_target": true,
+      "label": "Download",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-014",
+      "target_id": "case-014-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-014/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1044,
+          132,
+          1132,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1044,
+        132,
+        1132,
+        158
+      ],
+      "goal": "Select the checkbox labeled 'Compare'",
+      "important_target": true,
+      "label": "Compare",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-014",
+      "target_id": "case-014-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-015/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          272,
+          568,
+          344,
+          598
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        272,
+        568,
+        344,
+        598
+      ],
+      "goal": "Select the button labeled 'Mute A'",
+      "important_target": true,
+      "label": "Mute A",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-015",
+      "target_id": "case-015-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-015/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          422,
+          568,
+          494,
+          598
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        422,
+        568,
+        494,
+        598
+      ],
+      "goal": "Select the button labeled 'Mute B'",
+      "important_target": true,
+      "label": "Mute B",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-015",
+      "target_id": "case-015-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-015/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          572,
+          568,
+          644,
+          598
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        572,
+        568,
+        644,
+        598
+      ],
+      "goal": "Select the button labeled 'Mute C'",
+      "important_target": true,
+      "label": "Mute C",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-015",
+      "target_id": "case-015-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-015/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          958,
+          76,
+          1084,
+          110
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        958,
+        76,
+        1084,
+        110
+      ],
+      "goal": "Select the combobox labeled 'Output'",
+      "important_target": true,
+      "label": "Output",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-015",
+      "target_id": "case-015-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-015/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1094,
+          80,
+          1190,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1094,
+        80,
+        1190,
+        108
+      ],
+      "goal": "Select the checkbox labeled 'Monitor'",
+      "important_target": true,
+      "label": "Monitor",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-015",
+      "target_id": "case-015-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-016/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          34,
+          86,
+          124,
+          118
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        34,
+        86,
+        124,
+        118
+      ],
+      "goal": "Select the button labeled 'Add card'",
+      "important_target": true,
+      "label": "Add card",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-016",
+      "target_id": "case-016-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-016/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          396,
+          80,
+          692,
+          116
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        396,
+        80,
+        692,
+        116
+      ],
+      "goal": "Select the textbox labeled 'Search cards'",
+      "important_target": true,
+      "label": "Search cards",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-016",
+      "target_id": "case-016-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-016/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          936,
+          82,
+          1058,
+          116
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        936,
+        82,
+        1058,
+        116
+      ],
+      "goal": "Select the combobox labeled 'Assignee'",
+      "important_target": true,
+      "label": "Assignee",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-016",
+      "target_id": "case-016-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-016/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1068,
+          86,
+          1156,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1068,
+        86,
+        1156,
+        114
+      ],
+      "goal": "Select the checkbox labeled 'My items'",
+      "important_target": true,
+      "label": "My items",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-016",
+      "target_id": "case-016-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-016/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1162,
+          82,
+          1240,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1162,
+        82,
+        1240,
+        114
+      ],
+      "goal": "Select the menuitem labeled 'Board menu'",
+      "important_target": true,
+      "label": "Board menu",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "menuitem",
+      "screen_id": "case-016",
+      "target_id": "case-016-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-017/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          224,
+          78,
+          318,
+          110
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        224,
+        78,
+        318,
+        110
+      ],
+      "goal": "Select the button labeled 'New query'",
+      "important_target": true,
+      "label": "New query",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-017",
+      "target_id": "case-017-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-017/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          326,
+          78,
+          420,
+          110
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        326,
+        78,
+        420,
+        110
+      ],
+      "goal": "Select the button labeled 'Run query'",
+      "important_target": true,
+      "label": "Run query",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-017",
+      "target_id": "case-017-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-017/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          790,
+          76,
+          920,
+          110
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        790,
+        76,
+        920,
+        110
+      ],
+      "goal": "Select the combobox labeled 'Database'",
+      "important_target": true,
+      "label": "Database",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-017",
+      "target_id": "case-017-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-017/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          250,
+          130,
+          324,
+          160
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        250,
+        130,
+        324,
+        160
+      ],
+      "goal": "Select the tab labeled 'Results'",
+      "important_target": true,
+      "label": "Results",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-017",
+      "target_id": "case-017-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-017/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1028,
+          132,
+          1126,
+          160
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1028,
+        132,
+        1126,
+        160
+      ],
+      "goal": "Select the checkbox labeled 'Limit 100'",
+      "important_target": true,
+      "label": "Limit 100",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-017",
+      "target_id": "case-017-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-018/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          306,
+          74,
+          630,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        306,
+        74,
+        630,
+        114
+      ],
+      "goal": "Select the textbox labeled 'Search city'",
+      "important_target": true,
+      "label": "Search city",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-018",
+      "target_id": "case-018-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-018/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          640,
+          74,
+          760,
+          114
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        640,
+        74,
+        760,
+        114
+      ],
+      "goal": "Select the button labeled 'Use location'",
+      "important_target": true,
+      "label": "Use location",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-018",
+      "target_id": "case-018-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-018/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          300,
+          142,
+          374,
+          174
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        300,
+        142,
+        374,
+        174
+      ],
+      "goal": "Select the tab labeled 'Hourly'",
+      "important_target": true,
+      "label": "Hourly",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-018",
+      "target_id": "case-018-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-018/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          382,
+          142,
+          466,
+          174
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        382,
+        142,
+        466,
+        174
+      ],
+      "goal": "Select the tab labeled 'Ten day'",
+      "important_target": true,
+      "label": "Ten day",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-018",
+      "target_id": "case-018-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-018/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1164,
+          84,
+          1206,
+          110
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1164,
+        84,
+        1206,
+        110
+      ],
+      "goal": "Select the link labeled 'Map'",
+      "important_target": true,
+      "label": "Map",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-018",
+      "target_id": "case-018-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-019/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          26,
+          40,
+          88,
+          72
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        26,
+        40,
+        88,
+        72
+      ],
+      "goal": "Select the button labeled 'Back'",
+      "important_target": true,
+      "label": "Back",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-019",
+      "target_id": "case-019-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-019/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          238,
+          38,
+          560,
+          76
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        238,
+        38,
+        560,
+        76
+      ],
+      "goal": "Select the textbox labeled 'Find option'",
+      "important_target": true,
+      "label": "Find option",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-019",
+      "target_id": "case-019-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-019/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          340,
+          178,
+          476,
+          208
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        340,
+        178,
+        476,
+        208
+      ],
+      "goal": "Select the checkbox labeled 'High contrast'",
+      "important_target": true,
+      "label": "High contrast",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-019",
+      "target_id": "case-019-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-019/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          340,
+          232,
+          476,
+          262
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        340,
+        232,
+        476,
+        262
+      ],
+      "goal": "Select the checkbox labeled 'Screen reader'",
+      "important_target": true,
+      "label": "Screen reader",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-019",
+      "target_id": "case-019-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-019/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          340,
+          594,
+          472,
+          622
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        340,
+        594,
+        472,
+        622
+      ],
+      "goal": "Select the link labeled 'Keyboard help'",
+      "important_target": true,
+      "label": "Keyboard help",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "link",
+      "screen_id": "case-019",
+      "target_id": "case-019-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-020/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          132,
+          166,
+          356,
+          206
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        132,
+        166,
+        356,
+        206
+      ],
+      "goal": "Select the textbox labeled 'From'",
+      "important_target": true,
+      "label": "From",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-020",
+      "target_id": "case-020-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-020/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          366,
+          166,
+          590,
+          206
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        366,
+        166,
+        590,
+        206
+      ],
+      "goal": "Select the textbox labeled 'To'",
+      "important_target": true,
+      "label": "To",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-020",
+      "target_id": "case-020-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-020/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          600,
+          166,
+          758,
+          206
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        600,
+        166,
+        758,
+        206
+      ],
+      "goal": "Select the combobox labeled 'Travel date'",
+      "important_target": true,
+      "label": "Travel date",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-020",
+      "target_id": "case-020-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-020/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          770,
+          172,
+          882,
+          202
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        770,
+        172,
+        882,
+        202
+      ],
+      "goal": "Select the checkbox labeled 'Round trip'",
+      "important_target": true,
+      "label": "Round trip",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-020",
+      "target_id": "case-020-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-020/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1034,
+          164,
+          1142,
+          208
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1034,
+        164,
+        1142,
+        208
+      ],
+      "goal": "Select the button labeled 'Search'",
+      "important_target": true,
+      "label": "Search",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-020",
+      "target_id": "case-020-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-021/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          324,
+          72,
+          636,
+          106
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        324,
+        72,
+        636,
+        106
+      ],
+      "goal": "Select the textbox labeled 'Filter process'",
+      "important_target": true,
+      "label": "Filter process",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-021",
+      "target_id": "case-021-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-021/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1098,
+          72,
+          1190,
+          104
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1098,
+        72,
+        1190,
+        104
+      ],
+      "goal": "Select the button labeled 'End task'",
+      "important_target": true,
+      "label": "End task",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-021",
+      "target_id": "case-021-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-021/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          218,
+          126,
+          310,
+          156
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        218,
+        126,
+        310,
+        156
+      ],
+      "goal": "Select the tab labeled 'Processes'",
+      "important_target": true,
+      "label": "Processes",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-021",
+      "target_id": "case-021-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-021/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          318,
+          126,
+          426,
+          156
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        318,
+        126,
+        426,
+        156
+      ],
+      "goal": "Select the tab labeled 'Performance'",
+      "important_target": true,
+      "label": "Performance",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-021",
+      "target_id": "case-021-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-021/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1018,
+          130,
+          1148,
+          158
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1018,
+        130,
+        1148,
+        158
+      ],
+      "goal": "Select the checkbox labeled 'Group by app'",
+      "important_target": true,
+      "label": "Group by app",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-021",
+      "target_id": "case-021-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-022/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1014,
+          76,
+          1074,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1014,
+        76,
+        1074,
+        108
+      ],
+      "goal": "Select the button labeled 'Save'",
+      "important_target": true,
+      "label": "Save",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-022",
+      "target_id": "case-022-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-022/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1080,
+          76,
+          1156,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1080,
+        76,
+        1156,
+        108
+      ],
+      "goal": "Select the button labeled 'Save as'",
+      "important_target": true,
+      "label": "Save as",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-022",
+      "target_id": "case-022-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-022/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          926,
+          76,
+          1008,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        926,
+        76,
+        1008,
+        108
+      ],
+      "goal": "Select the button labeled 'Preview'",
+      "important_target": true,
+      "label": "Preview",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-022",
+      "target_id": "case-022-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-022/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          36,
+          132,
+          96,
+          162
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        36,
+        132,
+        96,
+        162
+      ],
+      "goal": "Select the tab labeled 'Fields'",
+      "important_target": true,
+      "label": "Fields",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "tab",
+      "screen_id": "case-022",
+      "target_id": "case-022-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-022/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          984,
+          188,
+          1076,
+          216
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        984,
+        188,
+        1076,
+        216
+      ],
+      "goal": "Select the checkbox labeled 'Required'",
+      "important_target": true,
+      "label": "Required",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-022",
+      "target_id": "case-022-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-023/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          30,
+          76,
+          116,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        30,
+        76,
+        116,
+        108
+      ],
+      "goal": "Select the button labeled 'Add item'",
+      "important_target": true,
+      "label": "Add item",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-023",
+      "target_id": "case-023-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-023/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          324,
+          72,
+          656,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        324,
+        72,
+        656,
+        108
+      ],
+      "goal": "Select the textbox labeled 'Search SKU'",
+      "important_target": true,
+      "label": "Search SKU",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-023",
+      "target_id": "case-023-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-023/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          846,
+          74,
+          976,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        846,
+        74,
+        976,
+        108
+      ],
+      "goal": "Select the combobox labeled 'Warehouse'",
+      "important_target": true,
+      "label": "Warehouse",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "combobox",
+      "screen_id": "case-023",
+      "target_id": "case-023-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-023/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          988,
+          78,
+          1084,
+          106
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        988,
+        78,
+        1084,
+        106
+      ],
+      "goal": "Select the checkbox labeled 'Low stock'",
+      "important_target": true,
+      "label": "Low stock",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "checkbox",
+      "screen_id": "case-023",
+      "target_id": "case-023-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-023/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          1094,
+          74,
+          1174,
+          108
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        1094,
+        74,
+        1174,
+        108
+      ],
+      "goal": "Select the button labeled 'Export'",
+      "important_target": true,
+      "label": "Export",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "button",
+      "screen_id": "case-023",
+      "target_id": "case-023-target-05"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-024/01"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          354,
+          158,
+          926,
+          198
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        354,
+        158,
+        926,
+        198
+      ],
+      "goal": "Select the textbox labeled 'Type a command'",
+      "important_target": true,
+      "label": "Type a command",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "textbox",
+      "screen_id": "case-024",
+      "target_id": "case-024-target-01"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-024/02"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          370,
+          222,
+          910,
+          250
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        370,
+        222,
+        910,
+        250
+      ],
+      "goal": "Select the menuitem labeled 'Open file'",
+      "important_target": true,
+      "label": "Open file",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "menuitem",
+      "screen_id": "case-024",
+      "target_id": "case-024-target-02"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-024/03"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          370,
+          254,
+          910,
+          282
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        370,
+        254,
+        910,
+        282
+      ],
+      "goal": "Select the menuitem labeled 'Open folder'",
+      "important_target": true,
+      "label": "Open folder",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "menuitem",
+      "screen_id": "case-024",
+      "target_id": "case-024-target-03"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-024/04"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          370,
+          286,
+          910,
+          314
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        370,
+        286,
+        910,
+        314
+      ],
+      "goal": "Select the menuitem labeled 'Toggle panel'",
+      "important_target": true,
+      "label": "Toggle panel",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "menuitem",
+      "screen_id": "case-024",
+      "target_id": "case-024-target-04"
+    },
+    {
+      "acceptable_candidate_ids": [
+        "candidate/case-024/05"
+      ],
+      "acceptable_region_disagreement": "none",
+      "acceptable_regions": [
+        [
+          370,
+          318,
+          910,
+          346
+        ]
+      ],
+      "annotator_identity_hash": "bec0ecbd6b22480cefe47efbfd31a3e1436f9ecda082df2e722fd41eb4934cb5",
+      "bbox": [
+        370,
+        318,
+        910,
+        346
+      ],
+      "goal": "Select the menuitem labeled 'Preferences'",
+      "important_target": true,
+      "label": "Preferences",
+      "partition": "holdout",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "role": "menuitem",
+      "screen_id": "case-024",
+      "target_id": "case-024-target-05"
+    }
+  ],
+  "gold_records_sha256": "588e617bed0face147f7af52894ecea81e8628c290a020c8c6fa32d39501185d",
+  "holdout_development_policy": "sealed_not_used_for_prompt_rule_or_threshold_development",
+  "holdout_prediction_count": 0,
+  "prediction_counts": {
+    "holdout": 0,
+    "regression": 0,
+    "total": 0
+  },
+  "provider_revisions": {
+    "omni": "PINNED_OMNI_REVISION",
+    "qwen": "PINNED_QWEN_REVISION",
+    "vista": "PINNED_VISTA_REVISION"
+  },
+  "provider_revisions_sha256": "25ff2b06d0f5c3fa24809b9e3b046994f3a1d3a472fecffd252238aaa0a0e1c4",
+  "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+  "screenshots": [
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "project_board",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-001",
+      "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "existing_five_screen_regression",
+      "surface": "web_like",
+      "title": "Project Board",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "mail_inbox",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-002",
+      "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "existing_five_screen_regression",
+      "surface": "web_like",
+      "title": "Mail Inbox",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "desktop_settings",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-003",
+      "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "existing_five_screen_regression",
+      "surface": "native_like",
+      "title": "System Settings",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "file_manager",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-004",
+      "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "existing_five_screen_regression",
+      "surface": "native_like",
+      "title": "File Manager",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "calendar",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-005",
+      "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "existing_five_screen_regression",
+      "surface": "web_like",
+      "title": "Team Calendar",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "analytics_dashboard",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-006.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-006",
+      "sha256": "087de010c4a9e9ddb4e654bcab85c4babfbb6c171de5d55267a8aa205ef2942d",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Analytics Dashboard",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "document_editor",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-007.png",
+      "precision_case": "ambiguous",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-007",
+      "sha256": "cc9f5ca95d8f89d3bf9648c1ff6b934815d1dc1397999214e7852d4a36a294cc",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Document Editor",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "team_chat",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-008.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-008",
+      "sha256": "b932f104987a67640dab1d8c8c42e9ad3bb4e73108cc89cf1534dc23aa7a3bb2",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "Team Chat",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "storefront",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-009.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-009",
+      "sha256": "28cc001c3894c6019170c994fdea97ae97e59c6a5e02d37dedaf95abf7565283",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Sample Store",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "developer_console",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-010.png",
+      "precision_case": "ambiguous",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-010",
+      "sha256": "4b79ee26c4f0a8ecca7d979e85a9c824a91fbf9aba3c784d1da550825ce22e16",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "Developer Console",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "media_library",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-011.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-011",
+      "sha256": "44b97a83d2273a99d66c44d3aa08a53268d71cf2fa7ccf7ced11cc74dc35adbe",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Media Library",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "city_map",
+      "partition": "regression",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-012.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-012",
+      "sha256": "1f026af8bc494da0535b091c80040e0c894754d7ce1761296177cf9039af788b",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "City Map",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "installer",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-013.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-013",
+      "sha256": "56e54eb6662c0621a54da58099a6109cfaf9281aa33841ea4e554e0a99d37bfa",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "Application Installer",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "traffic_report",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-014.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-014",
+      "sha256": "5bc4b3a52b41a2eb0940ee5fe342e988ac54bf01ac34fc5abc1f89446b5f0c8c",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Traffic Report",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "audio_mixer",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-015.png",
+      "precision_case": "ambiguous",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-015",
+      "sha256": "cfbab0c4e50a9fc6027dc2b62b45bc7d3f3341d9f27a9647fe3855681e5e1848",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "Audio Mixer",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "kanban",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-016.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-016",
+      "sha256": "4967accf5a096282ab3bd4d9664c879179f2d3b2ce8c2b3107becf4fc3ff5cc7",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Sprint Board",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "database_admin",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-017.png",
+      "precision_case": "ambiguous",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-017",
+      "sha256": "f49fb07bf8c9ce90f68c9359d30d5a5e0c3cb5c9dff4e2f0a472a3e4253c3a31",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Database Admin",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "weather",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-018.png",
+      "precision_case": "normal",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-018",
+      "sha256": "16c0d871bc0896299340c06f2deae91ffa49d9db2b874810fb66f407d8f8d8d4",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Weather Center",
+      "width": 1280
+    },
+    {
+      "density": "standard",
+      "height": 720,
+      "layout_id": "accessibility",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-019.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-019",
+      "sha256": "cb5ea1c13cad32918ba6360c3e2004f1a2b06b1d5c66165d675693f294ed1859",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "Accessibility",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "travel_booking",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-020.png",
+      "precision_case": "ambiguous",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-020",
+      "sha256": "1ec74be1a60fa758598da0cc6ba0d42c3320715c5fc1d90657f4a8b62b7c89fe",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Travel Booking",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "system_monitor",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-021.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-021",
+      "sha256": "1dfae38125797351fe28aafb18d03b3a90abdd79cc713c091708d821dafe5c67",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "System Monitor",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "form_builder",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-022.png",
+      "precision_case": "ambiguous",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-022",
+      "sha256": "3a462c3b49ab35959f88df29fbb5885efbd0dd3d459f776d497673f23f92b00d",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Form Builder",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "inventory",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-023.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-023",
+      "sha256": "92e841c3b0047896eb2fbf91c5fb734a0fb90f7c5a499d4eb8964e1b60f438d9",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "web_like",
+      "title": "Inventory",
+      "width": 1280
+    },
+    {
+      "density": "dense",
+      "height": 720,
+      "layout_id": "command_palette",
+      "partition": "holdout",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-024.png",
+      "precision_case": "small",
+      "privacy_review_status": "approved",
+      "review_status": "approved",
+      "reviewer_identity_hash": "3e0ac642d4b3185404bb9ed04658f7b4c1a813038b6c44912a5aee7a72cb3a9b",
+      "screen_id": "case-024",
+      "sha256": "88dce62abbca0ae44660553e3f9da1c0e61ce69ac54f0f80ca0796c9f7073352",
+      "source_kind": "privacy_safe_synthetic",
+      "source_provenance": "public_synthetic_new",
+      "surface": "native_like",
+      "title": "Command Palette",
+      "width": 1280
+    }
+  ],
+  "seal_state": "approved",
+  "shared_budget": {
+    "max_output_tokens_per_case": 2048,
+    "max_provider_calls_per_case": 3,
+    "max_wall_time_ms_per_case": 120000
+  },
+  "shared_budget_sha256": "ee15ff899063c6e6ce6de50d635886699b2bc4c3962ca441f3ea2cbf23028932",
+  "shared_context_policy": {
+    "ocr": "same_capture_optional",
+    "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+    "uia": "same_capture_optional"
+  },
+  "shared_context_policy_sha256": "a02c7efbb9c639d1c45c8e621be5f24a474a85aa34205e46a5b654d84eb1d31e"
+}
