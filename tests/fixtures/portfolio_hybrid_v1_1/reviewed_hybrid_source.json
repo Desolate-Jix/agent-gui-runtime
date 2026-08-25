@@ -1,0 +1,158 @@
+{
+  "contract_version": "single_application_workflow_review_v1",
+  "fixture_purpose": "compiler_negative_control_only",
+  "display_only": true,
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "workflow": {
+    "workflow_id": "portfolio_hybrid_fixture_negative_control",
+    "goal": "Open a detail and stop at the application entry boundary.",
+    "application_identity": {
+      "url": "https://fixture.example.test/jobs"
+    },
+    "entry_node_id": "home",
+    "node_ids": [
+      "home",
+      "detail",
+      "apply_entry"
+    ],
+    "edge_ids": [
+      "home_to_detail",
+      "detail_to_apply"
+    ],
+    "review_status": "needs_human_review"
+  },
+  "nodes": [
+    {
+      "node_id": "home",
+      "display_name": "Fixture result list",
+      "surface_type": "results",
+      "state_signature": "fixture-home",
+      "source_paths": [],
+      "evidence": {},
+      "controls": [
+        {
+          "control_id": "job_card",
+          "label": "Fixture result"
+        }
+      ],
+      "regions": [
+        {
+          "region_id": "hybrid_fixture_region",
+          "candidate_id": "candidate/fixture",
+          "label": "Fixture Hybrid proposal",
+          "model_proposal": {
+            "vista_proposal": {
+              "point": {
+                "coordinate_space": "capture_pixel_xyxy",
+                "xy": [60, 45]
+              },
+              "review_required": true
+            }
+          },
+          "human_point_proposal": {
+            "coordinate_space": "capture_pixel_xyxy",
+            "xy": [62, 44]
+          },
+          "artifact_is_authorization": false,
+          "execute_binding_enabled": false
+        }
+      ],
+      "action_candidates": [
+        {
+          "action_template_id": "open_job_detail",
+          "semantic_action": "open_detail",
+          "target_control_id": "job_card",
+          "target_region_id": "",
+          "target_interface_id": "detail"
+        }
+      ],
+      "review_status": "needs_human_review",
+      "reviewed_by_human": false
+    },
+    {
+      "node_id": "detail",
+      "display_name": "Fixture detail",
+      "surface_type": "detail",
+      "state_signature": "fixture-detail",
+      "source_paths": [],
+      "evidence": {},
+      "controls": [
+        {
+          "control_id": "apply_entry",
+          "label": "Open application flow"
+        }
+      ],
+      "regions": [],
+      "action_candidates": [
+        {
+          "action_template_id": "open_apply_entry",
+          "semantic_action": "open_apply_flow",
+          "target_control_id": "apply_entry",
+          "target_region_id": "",
+          "target_interface_id": "apply_entry"
+        }
+      ],
+      "review_status": "needs_human_review",
+      "reviewed_by_human": false
+    },
+    {
+      "node_id": "apply_entry",
+      "display_name": "Fixture application entry boundary",
+      "surface_type": "application",
+      "state_signature": "fixture-apply-entry",
+      "source_paths": [],
+      "evidence": {},
+      "controls": [],
+      "regions": [],
+      "action_candidates": [],
+      "review_status": "needs_learning",
+      "reviewed_by_human": false
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "home_to_detail",
+      "operation_id": "home_to_detail",
+      "source_node_id": "home",
+      "target_node_id": "detail",
+      "action_type": "open_detail",
+      "action_template_id": "open_job_detail",
+      "target_control_id": "job_card",
+      "target_region_id": "",
+      "risk_level": "low",
+      "requires_user_confirmation": false,
+      "preconditions": [],
+      "success_conditions": [
+        "Fixture detail identity is visible"
+      ],
+      "failure_conditions": [],
+      "review_status": "needs_human_review"
+    },
+    {
+      "edge_id": "detail_to_apply",
+      "operation_id": "detail_to_apply",
+      "source_node_id": "detail",
+      "target_node_id": "apply_entry",
+      "action_type": "open_apply_flow",
+      "action_template_id": "open_apply_entry",
+      "target_control_id": "apply_entry",
+      "target_region_id": "",
+      "risk_level": "low",
+      "requires_user_confirmation": false,
+      "preconditions": [],
+      "success_conditions": [
+        "Fixture application entry identity is visible"
+      ],
+      "failure_conditions": [],
+      "review_status": "needs_human_review"
+    }
+  ],
+  "safety": {
+    "review_draft_only": true,
+    "runtime_requires_fresh_capture": true,
+    "runtime_requires_fresh_grounding": true,
+    "runtime_requires_gate": true,
+    "final_submit_forbidden": true
+  }
+}

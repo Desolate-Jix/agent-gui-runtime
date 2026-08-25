@@ -3055,6 +3055,32 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     assert projection["proposals"][0]["raw_provider_result"] == raw
 
 
+def test_hybrid_persistence_driver_uses_all_managed_fake_provider_boundaries(
+    tmp_path: Path,
+) -> None:
+    """捕获持久化证明绕过 managed Hybrid 顺序或绕过 Large Review Save。"""
+
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        build_managed_hybrid_review_source,
+    )
+
+    result = build_managed_hybrid_review_source(tmp_path)
+
+    assert result["provider_boundary_trace"] == ["omni", "qwen", "fusion", "vista"]
+    assert result["large_review_save"]["status"] == "saved"
+    saved_candidate = json.loads(
+        Path(result["large_review_save"]["reviewed_candidate_path"]).read_text(
+            encoding="utf-8"
+        )
+    )
+    serialized = json.dumps(saved_candidate, ensure_ascii=False)
+    assert '"hybrid_review_projection"' in serialized
+    assert '"vista_proposal"' in serialized
+    assert '"human_point_proposal"' in serialized
+    assert saved_candidate["artifact_is_authorization"] is False
+    assert saved_candidate["execute_binding_enabled"] is False
+
+
 def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:
     from app.learn.workflow_continuation import interpret_learning_stage_worker_result
 
