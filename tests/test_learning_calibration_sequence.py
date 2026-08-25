@@ -9,6 +9,7 @@ from app.learn.calibration_sequence import (
     LearningCalibrationSequenceError,
     run_learning_calibration_sequence,
 )
+from app.learn.recognition.uei.canonical import seal_immutable
 
 
 def _locate_response(
@@ -243,3 +244,172 @@ def test_calibration_sequence_retries_transient_model_busy_without_losing_result
     assert sequence["transient_recovery_attempts"] == 1
     assert sequence["completed_count"] == 2
     assert sleeps == []
+
+
+def _hybrid_sequence_payload() -> dict[str, Any]:
+    capture_identity = {
+        "capture_id": "capture/hybrid-calibration",
+        "screenshot_sha256": "a" * 64,
+        "artifact_sha256": "a" * 64,
+        "workflow_revision": "9",
+        "image_size": {"width": 400, "height": 300},
+        "capture_lineage_ref": {
+            "id": "capture-lineage/hybrid-calibration",
+            "content_sha256": "b" * 64,
+        },
+    }
+    fusion = seal_immutable(
+        {
+            "contract_version": "hybrid_fusion_result_v1",
+            "capture_identity": deepcopy(capture_identity),
+            "config_sha256": "c" * 64,
+            "candidates": [
+                {
+                    "candidate_id": candidate_id,
+                    "bbox_original": bbox,
+                    "coordinate_space": "capture_pixel_xyxy",
+                    "state": "BOUND",
+                    "vista_eligible": True,
+                }
+                for candidate_id, bbox in (
+                    ("candidate/one", [40, 50, 100, 90]),
+                    ("candidate/two", [180, 120, 260, 180]),
+                )
+            ],
+        }
+    )
+    bundle = seal_immutable(
+        {
+            "contract_version": "hybrid_capture_bundle_v1",
+            "capture_identity": deepcopy(capture_identity),
+            "workflow_revision": 9,
+        }
+    )
+    payload = _sequence_payload()
+    payload.update(
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "candidate_count": 2,
+            "calibration_source_revision": "c" * 64,
+            "hybrid_fusion_result": fusion,
+            "capture_bundle": bundle,
+        }
+    )
+    payload["locate_payload"]["metadata"].pop("two_stage_report_path")
+    return payload
+
+
+def _hybrid_locate_response(
+    requests: list[dict[str, Any]],
+    *,
+    completed_ids: list[str],
+    remaining_count: int,
+    resumable: bool,
+) -> dict[str, Any]:
+    request_by_id = {item["candidate_id"]: item for item in requests}
+    results = []
+    for candidate_id in completed_ids:
+        request = request_by_id[candidate_id]
+        results.append(
+            {
+                "contract_version": "learn_vista_target_coordinate_validation_v1",
+                "status": "needs_review",
+                "candidate_id": candidate_id,
+                "final_numbering_revision": request["source_revision"],
+                "hybrid_vista_request": deepcopy(request),
+                "hybrid_vista_proposal": {
+                    "candidate_id": candidate_id,
+                    "candidate_bbox_ref": deepcopy(request["candidate_bbox_ref"]),
+                    "roi_ref": deepcopy(request["roi_ref"]),
+                    "affine_transform_ref": deepcopy(request["affine_transform_ref"]),
+                    "source_revision": request["source_revision"],
+                    "capture_sha256": request["capture_sha256"],
+                    "status": "PROPOSED",
+                    "review_status": "REVIEW_REQUIRED",
+                },
+            }
+        )
+    return {
+        "success": True,
+        "message": "located",
+        "data": {
+            "result": {
+                "trace_path": "logs/traces/vision/hybrid-locate.json",
+                "learn_all_targets": {
+                    "overlay_path": "artifacts/review-overlays/hybrid-locate.png",
+                    "vista_coordinate_validation": {
+                        "results": results,
+                        "batch": {
+                            "completed_candidate_ids": completed_ids,
+                            "completed_count": len(completed_ids),
+                            "remaining_count": remaining_count,
+                            "resumable": resumable,
+                        },
+                    },
+                },
+            }
+        },
+    }
+
+
+def test_hybrid_calibration_batch_resume_preserves_exact_request_lineage() -> None:
+    submitted_batches: list[list[dict[str, Any]]] = []
+
+    def locate(payload: dict[str, Any]) -> dict[str, Any]:
+        requests = deepcopy(payload["metadata"]["learn_hybrid_vista_requests"])
+        submitted_batches.append(requests)
+        if len(submitted_batches) == 1:
+            return _hybrid_locate_response(
+                requests,
+                completed_ids=["candidate/one"],
+                remaining_count=1,
+                resumable=True,
+            )
+        return _hybrid_locate_response(
+            requests,
+            completed_ids=["candidate/one", "candidate/two"],
+            remaining_count=0,
+            resumable=False,
+        )
+
+    response = run_learning_calibration_sequence(
+        _hybrid_sequence_payload(),
+        locate_runner=locate,
+        profile_loader=lambda _stage, _profile_id: {"profile_id": "vista-test"},
+        resource_preflight_builder=_normal_preflight,
+    )
+
+    assert response["success"] is True
+    first_by_id = {item["candidate_id"]: item for item in submitted_batches[0]}
+    second_by_id = {item["candidate_id"]: item for item in submitted_batches[1]}
+    for field in ("candidate_bbox_ref", "roi_ref", "affine_transform_ref", "source_revision", "capture_sha256"):
+        assert second_by_id["candidate/one"][field] == first_by_id["candidate/one"][field]
+    resume = submitted_batches and response["data"]["result"]["calibration_sequence"]
+    assert resume["hybrid_vista_results"][0]["hybrid_vista_request"] == first_by_id["candidate/one"]
+
+
+def test_hybrid_calibration_cancellation_stops_before_vista_acquisition() -> None:
+    class Cancelled:
+        @staticmethod
+        def is_set() -> bool:
+            return True
+
+    locate_called = False
+
+    def locate(_payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal locate_called
+        locate_called = True
+        return {}
+
+    response = run_learning_calibration_sequence(
+        _hybrid_sequence_payload(),
+        locate_runner=locate,
+        profile_loader=lambda _stage, _profile_id: {"profile_id": "vista-test"},
+        resource_preflight_builder=_normal_preflight,
+        cancellation_event=Cancelled(),
+    )
+
+    assert response["success"] is False
+    assert response["data"]["failure_category"] == "calibration_cancelled"
+    assert response["data"]["remaining_count"] == 2
+    assert locate_called is False

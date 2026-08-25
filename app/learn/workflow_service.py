@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -644,12 +645,18 @@ def continue_learning_stage_worker_result(
             expected_revision=expected_revision,
             current=current,
         )
-    decision = interpret_learning_stage_worker_result(
+    decision = _interpret_hybrid_post_calibration_worker_result(
         stage=stage,
         task_kind=task_kind,
         response=response,
-        learning_pipeline_mode=learning_pipeline_mode,
-    )
+    ) if learning_pipeline_mode == "hybrid_v1_1" else None
+    if decision is None:
+        decision = interpret_learning_stage_worker_result(
+            stage=stage,
+            task_kind=task_kind,
+            response=response,
+            learning_pipeline_mode=learning_pipeline_mode,
+        )
     artifact_request = decision.pop("artifact_request", None)
     replay = _matching_worker_continuation_replay(
         workflow_state=current,
@@ -871,6 +878,14 @@ def _ensure_next_managed_stage_operation(
     now: datetime | None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     current = store.get(run_id)
+    if (
+        str(completed_stage or "").strip() == "screen_understanding"
+        and normalize_learning_pipeline_mode(
+            _learning_pipeline_mode_for_stage(current, completed_stage)
+        )
+        == "hybrid_v1_1"
+    ):
+        return None, current
     next_spec = _NEXT_MANAGED_STAGE.get(str(completed_stage or "").strip())
     if outcome != "completed" or next_spec is None:
         return None, current
@@ -1285,6 +1300,141 @@ def _next_stage_operation_descriptor(
         "task_kind": task_kind,
         "owner": "backend_continuation",
     }
+
+
+def _interpret_hybrid_post_calibration_worker_result(
+    *,
+    stage: str,
+    task_kind: str,
+    response: dict[str, Any],
+) -> dict[str, Any] | None:
+    """只解释 Hybrid 的校准后两步，避免进入 incumbent review-repair。"""
+
+    if task_kind not in {
+        "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection",
+    }:
+        return None
+    if stage != "screen_understanding":
+        raise LearningWorkflowStageOperationError(
+            "Hybrid post-calibration task must remain in screen_understanding"
+        )
+    if (
+        not isinstance(response, dict)
+        or response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+        or response.get("task_kind") != task_kind
+    ):
+        raise LearningWorkflowStageOperationError(
+            "Hybrid post-calibration worker result contract is invalid"
+        )
+    result = response.get("result")
+    orchestration = response.get("orchestration")
+    if not isinstance(result, dict) or not isinstance(orchestration, dict):
+        raise LearningWorkflowStageOperationError(
+            "Hybrid post-calibration result lost orchestration lineage"
+        )
+    if response.get("outcome") != "completed":
+        return {
+            "stage": stage,
+            "task_kind": task_kind,
+            "stage_finished": True,
+            "continuation_status": "terminal_result",
+            "outcome": "safe_stopped",
+            "reason": f"SAFE_STOP · {task_kind} failed",
+            "evidence_refs": {},
+        }
+    if task_kind == "panel_learning_hybrid_review_projection":
+        if (
+            result.get("contract_version") != "hybrid_review_projection_v1"
+            or result.get("outcome") != "completed"
+            or result.get("review_status") != "REVIEW_REQUIRED"
+            or result.get("automatic_acceptance") is not False
+        ):
+            raise LearningWorkflowStageOperationError(
+                "Hybrid review projection result is invalid"
+            )
+        return {
+            "stage": stage,
+            "task_kind": task_kind,
+            "stage_finished": True,
+            "continuation_status": "terminal_result",
+            "outcome": "completed",
+            "reason": "Hybrid managed review projection completed",
+            "evidence_refs": {
+                "hybrid_review_projection": deepcopy(result),
+                "hybrid_capture_bundle_ref": deepcopy(
+                    orchestration.get("hybrid_capture_bundle_ref")
+                ),
+            },
+        }
+
+    sequence = _hybrid_calibration_sequence_payload(result)
+    results = sequence.get("hybrid_vista_results")
+    if (
+        sequence.get("contract_version")
+        != "learning_calibration_sequence_result_v1"
+        or sequence.get("status") != "completed"
+        or sequence.get("remaining_count") != 0
+        or not isinstance(results, list)
+        or not results
+    ):
+        raise LearningWorkflowStageOperationError(
+            "Hybrid calibration completion is incomplete"
+        )
+    prerequisite = sequence.get("qwen_release_prerequisite")
+    if not isinstance(prerequisite, dict):
+        raise LearningWorkflowStageOperationError(
+            "Hybrid calibration lost Qwen release prerequisite"
+        )
+    payload = {
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "hybrid_vista_results": deepcopy(results),
+        "qwen_release_prerequisite": deepcopy(prerequisite),
+        "hybrid_capture_bundle_ref": deepcopy(
+            orchestration.get("hybrid_capture_bundle_ref")
+        ),
+        "calibration_sequence": deepcopy(sequence),
+        "_hybrid_orchestration": deepcopy(orchestration),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        "stage": stage,
+        "task_kind": task_kind,
+        "stage_finished": False,
+        "continuation_status": "intermediate_result",
+        "outcome": None,
+        "reason": "Hybrid calibration advances only to managed review projection",
+        "evidence_refs": {
+            "hybrid_capture_bundle_ref": deepcopy(
+                orchestration.get("hybrid_capture_bundle_ref")
+            )
+        },
+        "next_worker": {
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "payload": payload,
+            "payload_sha256": hashlib.sha256(encoded).hexdigest(),
+        },
+    }
+
+
+def _hybrid_calibration_sequence_payload(result: dict[str, Any]) -> dict[str, Any]:
+    data = result.get("data")
+    nested_result = data.get("result") if isinstance(data, dict) else None
+    sequence = (
+        nested_result.get("calibration_sequence")
+        if isinstance(nested_result, dict)
+        else None
+    )
+    if not isinstance(sequence, dict):
+        sequence = result.get("calibration_sequence")
+    return deepcopy(sequence) if isinstance(sequence, dict) else {}
 
 
 def recover_expired_learning_workflow_stage_operation(

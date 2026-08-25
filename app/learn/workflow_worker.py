@@ -31,6 +31,9 @@ from app.learn.workflow_tasks.hybrid_qwen import (
     run_hybrid_qwen_task,
     validate_hybrid_qwen_task_payload,
 )
+from app.learn.workflow_tasks.hybrid_review import (
+    run_hybrid_review_projection_task,
+)
 from app.learn.workflow_tasks.model_review import run_model_review_task
 from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
@@ -54,6 +57,7 @@ SUPPORTED_LEARNING_STAGE_TASK_KINDS = frozenset(
         "panel_learning_hybrid_omni_discovery",
         "panel_learning_hybrid_qwen_binding",
         "panel_learning_hybrid_fusion",
+        "panel_learning_hybrid_review_projection",
         "vision_observe_screen",
         "vision_locate_target",
     }
@@ -81,6 +85,7 @@ _HYBRID_MANAGED_TASK_KINDS = frozenset(
         "panel_learning_hybrid_qwen_binding",
         "panel_learning_hybrid_fusion",
         "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection",
     }
 )
 _MODEL_READY_WAIT_SECONDS = 180.0
@@ -138,6 +143,20 @@ def execute_learning_stage_worker_task(
     execution_payload = deepcopy(payload)
     orchestration = execution_payload.pop("_hybrid_orchestration", None)
     execution_payload.pop("learning_pipeline_mode", None)
+    if (
+        learning_pipeline_mode == "hybrid_v1_1"
+        and normalized_kind == "panel_learning_calibration_sequence"
+        and isinstance(orchestration, dict)
+    ):
+        execution_payload["learning_pipeline_mode"] = "hybrid_v1_1"
+        execution_payload.setdefault(
+            "hybrid_fusion_result",
+            deepcopy(orchestration.get("fusion_result")),
+        )
+        execution_payload.setdefault(
+            "capture_bundle",
+            deepcopy(orchestration.get("capture_bundle")),
+        )
 
     model_lease: dict[str, Any] | None = None
     try:
@@ -161,6 +180,11 @@ def execute_learning_stage_worker_task(
             )
         elif normalized_kind == "panel_learning_hybrid_omni_discovery":
             response = run_hybrid_omni_task(
+                execution_payload,
+                cancellation_event=cancellation_event,
+            )
+        elif normalized_kind == "panel_learning_hybrid_review_projection":
+            response = run_hybrid_review_projection_task(
                 execution_payload,
                 cancellation_event=cancellation_event,
             )
@@ -197,7 +221,13 @@ def execute_learning_stage_worker_task(
         elif normalized_kind == "panel_learning_calibration_sequence":
             from app.learn.calibration_sequence import run_learning_calibration_sequence
 
-            response = run_learning_calibration_sequence(execution_payload)
+            if cancellation_event is None:
+                response = run_learning_calibration_sequence(execution_payload)
+            else:
+                response = run_learning_calibration_sequence(
+                    execution_payload,
+                    cancellation_event=cancellation_event,
+                )
         elif normalized_kind == "vision_observe_screen":
             response = observe_result_to_legacy_response(
                 run_observe_task(

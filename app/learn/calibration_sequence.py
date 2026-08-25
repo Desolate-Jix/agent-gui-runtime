@@ -4,6 +4,12 @@ import time
 from copy import deepcopy
 from typing import Any, Callable
 
+from app.learn.hybrid.vista_refinement import (
+    QWEN_RELEASE_PREREQUISITE,
+    build_vista_requests,
+)
+from app.learn.recognition.uei.canonical import canonical_json_bytes
+
 
 LEARNING_CALIBRATION_SEQUENCE_REQUEST_CONTRACT_VERSION = (
     "learning_calibration_sequence_request_v1"
@@ -31,6 +37,7 @@ def run_learning_calibration_sequence(
         [dict[str, Any]], dict[str, Any]
     ]
     | None = None,
+    cancellation_event: Any | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """在一个后端 worker 内完成所有 VISTA 校准批次。"""
@@ -48,6 +55,10 @@ def run_learning_calibration_sequence(
     maximum_transient_attempts = request["maximum_transient_recovery_attempts"]
     maximum_batches = candidate_count + 2 + maximum_transient_attempts
     base_payload = request["locate_payload"]
+    hybrid_vista_requests = request["hybrid_vista_requests"]
+    hybrid_request_by_id = {
+        item["candidate_id"]: item for item in hybrid_vista_requests
+    }
 
     resume_results: list[dict[str, Any]] = []
     previous_completed_signature = ""
@@ -55,6 +66,14 @@ def run_learning_calibration_sequence(
     latest_batch: dict[str, Any] = {}
 
     for batch_index in range(1, maximum_batches + 1):
+        if _cancellation_requested(cancellation_event):
+            return _failure_response(
+                "calibration_cancelled",
+                batch_count=batch_index - 1,
+                final_numbering_revision=source_revision,
+                remaining_count=max(0, candidate_count - len(resume_results)),
+                completed_results=resume_results,
+            )
         preflight = build_preflight(profile)
         if (
             str(preflight.get("resource_mode") or "") == "critical"
@@ -88,9 +107,45 @@ def run_learning_calibration_sequence(
             "stop_on_failure": False,
             "use_numbered_overlay": True,
         }
+        if hybrid_vista_requests:
+            metadata["learn_hybrid_vista_requests"] = deepcopy(
+                hybrid_vista_requests
+            )
+            metadata["qwen_release_prerequisite"] = deepcopy(
+                QWEN_RELEASE_PREREQUISITE
+            )
+            metadata["final_numbering_revision"] = source_revision
         locate_payload["metadata"] = metadata
 
-        response = locate(locate_payload)
+        if _cancellation_requested(cancellation_event):
+            return _failure_response(
+                "calibration_cancelled",
+                batch_count=batch_index - 1,
+                final_numbering_revision=source_revision,
+                remaining_count=max(0, candidate_count - len(resume_results)),
+                completed_results=resume_results,
+            )
+        if (
+            cancellation_event is not None
+            and hasattr(cancellation_event, "run_if_not_cancelled")
+        ):
+            allowed, response = cancellation_event.run_if_not_cancelled(
+                "vista_batch_acquisition",
+                lambda: locate(locate_payload),
+            )
+            if not allowed:
+                return _failure_response(
+                    "calibration_cancelled",
+                    batch_count=batch_index - 1,
+                    final_numbering_revision=source_revision,
+                    remaining_count=max(
+                        0,
+                        candidate_count - len(resume_results),
+                    ),
+                    completed_results=resume_results,
+                )
+        else:
+            response = locate(locate_payload)
         if not isinstance(response, dict):
             return _failure_response(
                 "calibration_worker_response_invalid",
@@ -113,6 +168,20 @@ def run_learning_calibration_sequence(
             else {}
         )
         resume_results = _completed_resume_results(validation)
+        if hybrid_request_by_id:
+            lineage_error = _hybrid_resume_lineage_error(
+                resume_results,
+                request_by_id=hybrid_request_by_id,
+                source_revision=source_revision,
+            )
+            if lineage_error:
+                return _failure_response(
+                    "calibration_hybrid_resume_lineage_mismatch",
+                    batch_count=batch_index,
+                    final_numbering_revision=source_revision,
+                    remaining_count=max(0, candidate_count - len(resume_results)),
+                    lineage_error=lineage_error,
+                )
         completed_ids = _completed_candidate_ids(latest_batch, resume_results)
         completed_signature = "|".join(completed_ids)
         remaining_count = _non_negative_int(
@@ -142,6 +211,8 @@ def run_learning_calibration_sequence(
                     response,
                     locate_payload=base_payload,
                 ),
+                hybrid_vista_requests=hybrid_vista_requests,
+                hybrid_vista_results=resume_results,
             )
 
         if abort_reason in _RETRYABLE_ABORT_REASONS:
@@ -238,11 +309,42 @@ def _validated_request(payload: dict[str, Any]) -> dict[str, Any]:
         raise LearningCalibrationSequenceError(
             "calibration_source_revision is required"
         )
+    learning_pipeline_mode = str(
+        payload.get("learning_pipeline_mode") or "incumbent"
+    ).strip()
+    if learning_pipeline_mode not in {"incumbent", "hybrid_v1_1"}:
+        raise LearningCalibrationSequenceError(
+            "learning_pipeline_mode must be incumbent or hybrid_v1_1"
+        )
+    hybrid_vista_requests: list[dict[str, Any]] = []
+    if learning_pipeline_mode == "hybrid_v1_1":
+        try:
+            hybrid_vista_requests = build_vista_requests(
+                payload.get("hybrid_fusion_result"),
+                payload.get("capture_bundle"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise LearningCalibrationSequenceError(
+                f"Hybrid VISTA request lineage is invalid: {exc}"
+            ) from exc
+        if len(hybrid_vista_requests) != candidate_count:
+            raise LearningCalibrationSequenceError(
+                "Hybrid candidate_count must equal exact BOUND request count"
+            )
+        if any(
+            item.get("source_revision") != source_revision
+            for item in hybrid_vista_requests
+        ):
+            raise LearningCalibrationSequenceError(
+                "Hybrid calibration source revision does not match fusion"
+            )
     return {
+        "learning_pipeline_mode": learning_pipeline_mode,
         "profile_id": str(payload.get("profile_id") or "").strip() or None,
         "candidate_count": candidate_count,
         "calibration_source_revision": source_revision,
         "locate_payload": deepcopy(locate_payload),
+        "hybrid_vista_requests": hybrid_vista_requests,
         "maximum_batch_size": min(
             32,
             _positive_int(payload.get("maximum_batch_size"), default=8),
@@ -399,10 +501,12 @@ def _attach_sequence_result(
     transient_recovery_attempts: int,
     final_numbering_revision: str,
     artifact_inputs: dict[str, str],
+    hybrid_vista_requests: list[dict[str, Any]] | None = None,
+    hybrid_vista_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     normalized = deepcopy(response)
     result = _response_result(normalized)
-    result["calibration_sequence"] = {
+    sequence = {
         "contract_version": LEARNING_CALIBRATION_SEQUENCE_RESULT_CONTRACT_VERSION,
         "status": "completed",
         "batch_count": batch_count,
@@ -414,6 +518,18 @@ def _attach_sequence_result(
         "no_live_click_authorization": True,
         "dry_run": True,
     }
+    if hybrid_vista_requests:
+        sequence.update(
+            {
+                "hybrid_vista_requests": deepcopy(hybrid_vista_requests),
+                "hybrid_vista_results": deepcopy(hybrid_vista_results or []),
+                "qwen_release_prerequisite": deepcopy(
+                    QWEN_RELEASE_PREREQUISITE
+                ),
+                "review_projection_required": True,
+            }
+        )
+    result["calibration_sequence"] = sequence
     return normalized
 
 
@@ -443,8 +559,7 @@ def _completed_resume_results(
             if isinstance(item.get("precise_locator_evidence"), dict)
             else {}
         )
-        completed.append(
-            {
+        normalized = {
                 "contract_version": item.get("contract_version"),
                 "status": item.get("status"),
                 "failure_category": item.get("failure_category"),
@@ -480,8 +595,60 @@ def _completed_resume_results(
                     ),
                 },
             }
-        )
+        if isinstance(item.get("hybrid_vista_request"), dict):
+            normalized["hybrid_vista_request"] = deepcopy(
+                item["hybrid_vista_request"]
+            )
+        if isinstance(item.get("hybrid_vista_proposal"), dict):
+            normalized["hybrid_vista_proposal"] = deepcopy(
+                item["hybrid_vista_proposal"]
+            )
+        completed.append(normalized)
     return completed
+
+
+def _hybrid_resume_lineage_error(
+    results: list[dict[str, Any]],
+    *,
+    request_by_id: dict[str, dict[str, Any]],
+    source_revision: str,
+) -> str:
+    seen: set[str] = set()
+    for result in results:
+        candidate_id = str(result.get("candidate_id") or "").strip()
+        if not candidate_id or candidate_id in seen:
+            return "duplicate_or_missing_candidate_id"
+        seen.add(candidate_id)
+        expected = request_by_id.get(candidate_id)
+        if expected is None:
+            return f"unknown_candidate_id:{candidate_id}"
+        if result.get("final_numbering_revision") != source_revision:
+            return f"stale_source_revision:{candidate_id}"
+        submitted = result.get("hybrid_vista_request")
+        proposal = result.get("hybrid_vista_proposal")
+        if not isinstance(submitted, dict) or not isinstance(proposal, dict):
+            return f"missing_hybrid_lineage:{candidate_id}"
+        if canonical_json_bytes(submitted) != canonical_json_bytes(expected):
+            return f"request_lineage_mismatch:{candidate_id}"
+        for field in (
+            "candidate_id",
+            "candidate_bbox_ref",
+            "roi_ref",
+            "affine_transform_ref",
+            "source_revision",
+            "capture_sha256",
+        ):
+            if proposal.get(field) != expected.get(field):
+                return f"proposal_{field}_mismatch:{candidate_id}"
+    return ""
+
+
+def _cancellation_requested(cancellation_event: Any | None) -> bool:
+    return bool(
+        cancellation_event is not None
+        and hasattr(cancellation_event, "is_set")
+        and cancellation_event.is_set()
+    )
 
 
 def _completed_candidate_ids(

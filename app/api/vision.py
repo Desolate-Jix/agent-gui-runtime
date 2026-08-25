@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import time
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from difflib import SequenceMatcher
@@ -4758,7 +4759,7 @@ def _screen_map_calibration_candidate_to_target(candidate: dict[str, Any], index
     target = _screen_map_candidate_to_learn_target(candidate, index)
     if target is None:
         return None
-    return {
+    normalized = {
         **target,
         "locator_prompt": " ".join(str(candidate.get("locator_prompt") or "").split())[:600],
         "locator_context": candidate.get("locator_context") if isinstance(candidate.get("locator_context"), dict) else {},
@@ -4769,6 +4770,15 @@ def _screen_map_calibration_candidate_to_target(candidate: dict[str, Any], index
         "artifact_is_authorization": False,
         "coordinate_source": "two_stage_stage2_numbering",
     }
+    if isinstance(candidate.get("hybrid_vista_request"), dict):
+        normalized["hybrid_vista_request"] = deepcopy(
+            candidate["hybrid_vista_request"]
+        )
+        normalized["final_numbering_revision"] = str(
+            candidate["hybrid_vista_request"].get("source_revision") or ""
+        )
+        normalized["coordinate_source"] = "hybrid_vista_exact_roi_v1"
+    return normalized
 
 
 def _screen_map_candidate_to_learn_review_box(candidate: dict[str, Any], index: int, *, review_status: str) -> dict[str, Any] | None:
@@ -5581,6 +5591,23 @@ def _apply_vista_coordinate_validation_to_learn_targets(
     validated_targets = pending_targets[:batch_size] if batch_size else pending_targets
     batch_results: list[dict[str, Any]] = []
     for index, target in enumerate(validated_targets, start=1):
+        if isinstance(target.get("hybrid_vista_request"), dict):
+            result = _run_hybrid_vista_validation(
+                target,
+                image_path=image_path,
+                image_size=image_size,
+                local_config=local_config,
+                timeout_seconds=per_target_timeout,
+            )
+            target["vista_coordinate_validation"] = result
+            results.append(result)
+            batch_results.append(result)
+            if result.get("failure_category"):
+                abort_reason = str(result["failure_category"])
+                break
+            if result.get("status") == "failed" and stop_on_failure:
+                break
+            continue
         bbox = _normalize_map_bbox(target.get("bbox"))
         label = _first_compact_text(target.get("label"), target.get("candidate_id"))
         if not bbox or not label:
@@ -5861,6 +5888,117 @@ def _apply_vista_coordinate_validation_to_learn_targets(
         "use_numbered_overlay": use_numbered_overlay,
         "interpretation": "dry-run locator evidence only; no click authorization and no action executed",
         "results": results,
+    }
+
+
+def _run_hybrid_vista_validation(
+    target: dict[str, Any],
+    *,
+    image_path: str,
+    image_size: dict[str, int],
+    local_config: dict[str, Any],
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """用请求中封存的唯一 ROI 调用 VISTA，并保留未经改写的 provider 结果。"""
+
+    from app.learn.hybrid.vista_refinement import validate_vista_proposal
+
+    request = deepcopy(target.get("hybrid_vista_request"))
+    candidate_id = str(target.get("candidate_id") or "").strip()
+    raw_result: dict[str, Any]
+    model_io: dict[str, Any] = {}
+    try:
+        roi_ref = request.get("roi_ref") if isinstance(request, dict) else None
+        roi_xyxy = roi_ref.get("xyxy") if isinstance(roi_ref, dict) else None
+        if not isinstance(roi_xyxy, list) or len(roi_xyxy) != 4:
+            raise ValueError("Hybrid VISTA request is missing exact ROI")
+        roi_bbox = {
+            "x": int(roi_xyxy[0]),
+            "y": int(roi_xyxy[1]),
+            "w": int(roi_xyxy[2]) - int(roi_xyxy[0]),
+            "h": int(roi_xyxy[3]) - int(roi_xyxy[1]),
+        }
+        source_size = ImageSize(
+            width=int(image_size.get("width") or 0),
+            height=int(image_size.get("height") or 0),
+        )
+        preprocess = _prepare_vista_region_roi_image(
+            Path(image_path),
+            source_size,
+            region_bbox=roi_bbox,
+            padding=0,
+            max_edge=0,
+        )
+        preprocess["source_bbox"] = deepcopy(roi_bbox)
+        processed_size = preprocess["processed_size"]
+        provider_payload = _call_vista_point_prompt(
+            local_config=local_config,
+            image_path=Path(preprocess["processed_image_path"]),
+            goal=f"Click {target.get('label') or candidate_id}",
+            prompt=f"Locate {target.get('label') or candidate_id}",
+            image_size=ImageSize(
+                width=int(processed_size["width"]),
+                height=int(processed_size["height"]),
+            ),
+            original_image_size=source_size,
+            coordinate_transform=preprocess["transform"],
+            image_preprocess=preprocess,
+            timeout_seconds=max(1.0, float(timeout_seconds)),
+            max_tokens=int(local_config.get("max_new_tokens") or 32),
+            provider_name=(
+                f"{str(local_config.get('profile_id') or 'vista').strip()}_"
+                "hybrid_exact_roi"
+            ),
+        )
+        point = provider_payload.get("point")
+        if not isinstance(point, dict):
+            raise ValueError("Hybrid VISTA provider returned no canonical point")
+        model_io = _vista_model_io_trace(provider_payload)
+        raw_result = {
+            "status": "PROPOSED",
+            "candidate_id": request.get("candidate_id"),
+            "capture_id": request.get("capture_id"),
+            "capture_sha256": request.get("capture_sha256"),
+            "source_revision": request.get("source_revision"),
+            "affine_transform_ref": deepcopy(
+                request.get("affine_transform_ref")
+            ),
+            "point_coordinate_space": "capture_pixel_xyxy",
+            "point": [point.get("x"), point.get("y")],
+            "provenance": {
+                "provider": str(provider_payload.get("provider") or local_config.get("profile_id") or "vista"),
+                "request_id": str(provider_payload.get("request_id") or ""),
+                "model_io": deepcopy(model_io),
+                "image_preprocess": deepcopy(preprocess),
+            },
+            "provider_payload": deepcopy(provider_payload),
+        }
+    except Exception as exc:
+        raw_result = {
+            "status": "VISTA_FAILED",
+            "candidate_id": request.get("candidate_id") if isinstance(request, dict) else candidate_id,
+            "capture_id": request.get("capture_id") if isinstance(request, dict) else "",
+            "capture_sha256": request.get("capture_sha256") if isinstance(request, dict) else "",
+            "source_revision": request.get("source_revision") if isinstance(request, dict) else "",
+            "affine_transform_ref": deepcopy(request.get("affine_transform_ref")) if isinstance(request, dict) else {},
+            "error": str(exc),
+            "provenance": {
+                "provider": str(local_config.get("profile_id") or "vista"),
+                "model_io": _model_io_failure_payload(exc),
+            },
+        }
+    proposal = validate_vista_proposal(request=request, raw_result=raw_result)
+    proposal_status = str(proposal.get("status") or "TRANSFORM_INVALID")
+    return {
+        "contract_version": "learn_vista_target_coordinate_validation_v1",
+        "status": "needs_review" if proposal_status == "PROPOSED" else "failed",
+        "candidate_id": candidate_id,
+        "final_numbering_revision": request.get("source_revision") if isinstance(request, dict) else "",
+        "hybrid_vista_request": deepcopy(request),
+        "hybrid_vista_proposal": proposal,
+        "model_io": model_io,
+        "updated_click_point": False,
+        "automatic_acceptance": False,
     }
 
 
@@ -6570,6 +6708,65 @@ def _build_learn_all_targets_from_screen_map(
     }
 
 
+def _attach_hybrid_vista_requests(
+    observe_reuse: dict[str, Any],
+    *,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    requests = metadata.get("learn_hybrid_vista_requests")
+    if not isinstance(requests, list):
+        return observe_reuse
+    calibration_candidates: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, dict):
+            raise ValueError("Hybrid VISTA request must be an object")
+        bbox_ref = request.get("candidate_bbox_ref")
+        xyxy = bbox_ref.get("xyxy") if isinstance(bbox_ref, dict) else None
+        if not isinstance(xyxy, list) or len(xyxy) != 4:
+            raise ValueError("Hybrid VISTA request candidate bbox is invalid")
+        calibration_candidates.append(
+            {
+                "candidate_id": str(request.get("candidate_id") or ""),
+                "label": str(request.get("candidate_id") or ""),
+                "role": "control",
+                "bbox": {
+                    "x": int(xyxy[0]),
+                    "y": int(xyxy[1]),
+                    "w": int(xyxy[2]) - int(xyxy[0]),
+                    "h": int(xyxy[3]) - int(xyxy[1]),
+                },
+                "click_point": None,
+                "source": "hybrid_fusion_bound_candidate",
+                "confidence": 0.0,
+                "hybrid_vista_request": deepcopy(request),
+            }
+        )
+    normalized = deepcopy(observe_reuse)
+    screen_map = (
+        deepcopy(normalized.get("screen_map"))
+        if isinstance(normalized.get("screen_map"), dict)
+        else {}
+    )
+    screen_map.update(
+        {
+            "state_id": str(screen_map.get("state_id") or "hybrid_v1_1"),
+            "calibration_candidates": calibration_candidates,
+            "two_stage_calibration_authoritative": True,
+        }
+    )
+    normalized.update(
+        {
+            "status": "ready",
+            "screen_map": screen_map,
+            "candidate_count": len(calibration_candidates),
+            "ocr_anchors": [],
+            "trace_path": "",
+            "anchor_source": "hybrid_vista_exact_lineage",
+        }
+    )
+    return normalized
+
+
 def _learn_all_targets_location_status(learn_all_targets: dict[str, Any]) -> str:
     """区分可执行定位目标和学习模式只读识别框。"""
 
@@ -6631,6 +6828,10 @@ def locate_target(request: VisionLocateTargetRequestModel) -> APIResponse:
             report_path_value=metadata.get("two_stage_report_path"),
             image_path=image_path,
             expected_final_numbering_revision=metadata.get("final_numbering_revision"),
+        )
+        observe_reuse = _attach_hybrid_vista_requests(
+            observe_reuse,
+            metadata=metadata,
         )
         if observe_reuse.get("status") == "ready":
             metadata["reused_ocr_anchors"] = observe_reuse["ocr_anchors"]

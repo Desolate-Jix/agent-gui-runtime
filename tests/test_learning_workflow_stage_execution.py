@@ -2774,6 +2774,100 @@ def test_hybrid_stage_failure_is_explicit_safe_stop(task_kind: str) -> None:
     assert decision["reason"].startswith("SAFE_STOP")
 
 
+def test_hybrid_calibration_continues_only_to_managed_review_projection() -> None:
+    from app.learn import workflow_worker
+    from app.learn.workflow_service import (
+        _interpret_hybrid_post_calibration_worker_result,
+    )
+
+    orchestration = {
+        "run_id": "run-hybrid-review",
+        "workflow_revision": 11,
+        "hybrid_capture_bundle_ref": {
+            "id": "hybrid-capture/review",
+            "content_sha256": "1" * 64,
+        },
+        "fusion_result": {
+            "contract_version": "hybrid_fusion_result_v1",
+            "content_sha256": "2" * 64,
+        },
+        "capture_bundle": {
+            "contract_version": "hybrid_capture_bundle_v1",
+            "content_sha256": "3" * 64,
+        },
+    }
+    vista_result = {
+        "candidate_id": "candidate/one",
+        "candidate_bbox_ref": {"content_sha256": "4" * 64},
+        "roi_ref": {"content_sha256": "5" * 64},
+        "affine_transform_ref": {"content_sha256": "6" * 64},
+        "source_revision": "2" * 64,
+        "capture_sha256": "7" * 64,
+        "status": "PROPOSED",
+        "review_status": "REVIEW_REQUIRED",
+        "raw_provider_result": {
+            "point": [40, 50],
+            "provenance": {"provider": "fake-vista"},
+        },
+    }
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "outcome": "completed",
+        "result": {
+            "success": True,
+            "data": {
+                "result": {
+                    "calibration_sequence": {
+                        "contract_version": "learning_calibration_sequence_result_v1",
+                        "status": "completed",
+                        "remaining_count": 0,
+                        "hybrid_vista_results": [vista_result],
+                        "qwen_release_prerequisite": {
+                            "provider": "qwen",
+                            "required_status": "cleanup_verified",
+                            "purpose": "before_vista_acquisition",
+                        },
+                    }
+                }
+            },
+        },
+        "orchestration": orchestration,
+    }
+
+    decision = _interpret_hybrid_post_calibration_worker_result(
+        stage="screen_understanding",
+        task_kind="panel_learning_calibration_sequence",
+        response=response,
+    )
+
+    assert decision is not None
+    assert decision["stage_finished"] is False
+    assert decision["next_worker"]["task_kind"] == "panel_learning_hybrid_review_projection"
+    assert "panel_learning_model_review_repair" not in str(decision)
+    assert decision["next_worker"]["payload"]["qwen_release_prerequisite"]["required_status"] == "cleanup_verified"
+
+    review_response = workflow_worker.execute_learning_stage_worker_task(
+        decision["next_worker"]["task_kind"],
+        decision["next_worker"]["payload"],
+    )
+    review_decision = _interpret_hybrid_post_calibration_worker_result(
+        stage="screen_understanding",
+        task_kind="panel_learning_hybrid_review_projection",
+        response=review_response,
+    )
+
+    assert review_decision is not None
+    assert review_decision["stage_finished"] is True
+    assert review_decision["outcome"] == "completed"
+    projection = review_response["result"]
+    assert projection["contract_version"] == "hybrid_review_projection_v1"
+    assert projection["review_status"] == "REVIEW_REQUIRED"
+    assert projection["automatic_acceptance"] is False
+    assert projection["proposals"][0]["raw_provider_result"] == vista_result["raw_provider_result"]
+
+
 def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:
     from app.learn.workflow_continuation import interpret_learning_stage_worker_result
 

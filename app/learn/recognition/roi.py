@@ -63,6 +63,73 @@ def restore_local_point_to_screen(transform: dict[str, Any], local_point: dict[s
     }
 
 
+def restore_local_point_to_screen_exact(
+    transform: dict[str, Any],
+    local_point: dict[str, Any],
+) -> dict[str, float]:
+    """严格投影 ROI 点；拒绝越界，不执行裁剪或取最近点。"""
+
+    roi, crop, scale_x, scale_y = _validated_exact_transform(transform)
+    x = _finite_number(local_point.get("x") if isinstance(local_point, dict) else None, "local_point.x")
+    y = _finite_number(local_point.get("y") if isinstance(local_point, dict) else None, "local_point.y")
+    if not (0.0 <= x <= crop["width"] and 0.0 <= y <= crop["height"]):
+        raise ValueError("local point is outside exact ROI crop")
+    return {
+        "x": roi["x"] + (x / scale_x),
+        "y": roi["y"] + (y / scale_y),
+    }
+
+
+def project_screen_point_to_local_exact(
+    transform: dict[str, Any],
+    screen_point: dict[str, Any],
+) -> dict[str, float]:
+    """严格反投影截图点；拒绝 ROI 外坐标，不执行裁剪。"""
+
+    roi, crop, scale_x, scale_y = _validated_exact_transform(transform)
+    x = _finite_number(screen_point.get("x") if isinstance(screen_point, dict) else None, "screen_point.x")
+    y = _finite_number(screen_point.get("y") if isinstance(screen_point, dict) else None, "screen_point.y")
+    if not (
+        roi["x"] <= x <= roi["x"] + roi["w"]
+        and roi["y"] <= y <= roi["y"] + roi["h"]
+    ):
+        raise ValueError("screen point is outside exact ROI")
+    local_x = (x - roi["x"]) * scale_x
+    local_y = (y - roi["y"]) * scale_y
+    if not (0.0 <= local_x <= crop["width"] and 0.0 <= local_y <= crop["height"]):
+        raise ValueError("screen point cannot be represented by exact ROI transform")
+    return {"x": local_x, "y": local_y}
+
+
+def _validated_exact_transform(
+    transform: dict[str, Any],
+) -> tuple[dict[str, int], dict[str, int], float, float]:
+    if not isinstance(transform, dict):
+        raise ValueError("coordinate transform must be an object")
+    roi = _normalize_bbox(transform.get("roi_bbox"))
+    crop = _normalize_size(transform.get("crop_size"))
+    if roi["w"] <= 0 or roi["h"] <= 0 or crop["width"] <= 0 or crop["height"] <= 0:
+        raise ValueError("coordinate transform geometry must be positive")
+    scale_x = _finite_number(transform.get("scale_x"), "coordinate_transform.scale_x")
+    scale_y = _finite_number(transform.get("scale_y"), "coordinate_transform.scale_y")
+    if scale_x <= 0.0 or scale_y <= 0.0:
+        raise ValueError("coordinate transform scale must be positive")
+    expected_x = crop["width"] / roi["w"]
+    expected_y = crop["height"] / roi["h"]
+    if abs(scale_x - expected_x) > 1e-6 or abs(scale_y - expected_y) > 1e-6:
+        raise ValueError("coordinate transform scale does not match exact ROI geometry")
+    return roi, crop, scale_x, scale_y
+
+
+def _finite_number(value: Any, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a finite number")
+    normalized = float(value)
+    if normalized != normalized or normalized in {float("inf"), float("-inf")}:
+        raise ValueError(f"{field} must be a finite number")
+    return normalized
+
+
 def _expanded_roi_bbox(source: dict[str, int], bbox: dict[str, int], *, expand_scale: float) -> dict[str, int]:
     target_w = max(1, int(round(bbox["w"] * expand_scale)))
     target_h = max(1, int(round(bbox["h"] * expand_scale)))
