@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
 
 const {
   createInterfaceWorkflowReviewState,
@@ -37,6 +40,117 @@ function fixture() {
     execute_binding_enabled: false,
   };
 }
+
+function panelHybridHistoryHarness() {
+  const panelSource = fs.readFileSync(
+    path.join(__dirname, "../../app/web_panel/panel.js"),
+    "utf8",
+  );
+  const controlsStart = panelSource.indexOf("function updateLearningDraftEditorControls()");
+  const controlsEnd = panelSource.indexOf(
+    "\nfunction applyLearningDraftEditorMetadataFromControls",
+    controlsStart,
+  );
+  const listenersStart = panelSource.indexOf(
+    '  $("imageInspectorHybridPointBtn")?.addEventListener("click", () => {',
+  );
+  const listenersEnd = panelSource.indexOf(
+    '  $("imageInspectorRoleSelect")?.addEventListener("change",',
+    listenersStart,
+  );
+  assert.ok(controlsStart >= 0 && controlsEnd > controlsStart);
+  assert.ok(listenersStart >= 0 && listenersEnd > listenersStart);
+
+  function button() {
+    const listeners = new Map();
+    return {
+      disabled: true,
+      addEventListener(type, listener) {
+        listeners.set(type, listener);
+      },
+      click() {
+        if (!this.disabled) listeners.get("click")?.({ target: this });
+      },
+    };
+  }
+
+  const elements = {
+    imageInspectorHybridPointBtn: button(),
+    imageInspectorUndoBtn: button(),
+    imageInspectorRedoBtn: button(),
+  };
+  const hybridState = createHybridReviewState(fixture());
+  const context = vm.createContext({
+    learningHybridReviewState: hybridState,
+    learningDraftEditorState: { canUndo: () => false, canRedo: () => false },
+    learningDraftEditorSelected: { target_kind: "region", target_id: "candidate/abc" },
+    learningDraftEditorWorkflowBinding: null,
+    learningDraftEditorAddMode: false,
+    learningDraftEditorCompactMode: true,
+    imageInspectorSelection: { point: { x: 44, y: 32 } },
+    learningDraftEditorSelectedItem: () => ({
+      target_kind: "region",
+      target_id: "candidate/abc",
+    }),
+    learningHybridReviewCandidate: (candidateId) => (
+      hybridState.candidates().find((candidate) => candidate.candidate_id === candidateId) || null
+    ),
+    rebuildLearningDraftEditorHybridMirror: () => {},
+    syncLearningDraftReviewFromEditor: () => {},
+    renderLearningHybridReviewAudit: () => {},
+    drawImageInspectorSelection: () => {},
+    setSelectValueIfPresent: () => {},
+    escapeAttr: String,
+    escapeHtml: String,
+    $: (id) => elements[id] || null,
+  });
+  vm.runInContext(panelSource.slice(controlsStart, controlsEnd), context);
+  context.renderLearningDraftEditorBoxes = () => context.updateLearningDraftEditorControls();
+  vm.runInContext(
+    `function bindHybridHistoryControls() {\n${panelSource.slice(listenersStart, listenersEnd)}\n}\nbindHybridHistoryControls();`,
+    context,
+  );
+  context.updateLearningDraftEditorControls();
+  return { context, elements, hybridState };
+}
+
+test("Large Review Hybrid history controls follow edit undo and redo state", () => {
+  const { context, elements, hybridState } = panelHybridHistoryHarness();
+  assert.deepEqual(
+    [elements.imageInspectorUndoBtn.disabled, elements.imageInspectorRedoBtn.disabled],
+    [true, true],
+  );
+  assert.equal(elements.imageInspectorHybridPointBtn.disabled, false);
+
+  elements.imageInspectorHybridPointBtn.click();
+  assert.deepEqual(hybridState.currentCandidate().human_point_proposal.xy, [44, 32]);
+  assert.deepEqual(
+    [elements.imageInspectorUndoBtn.disabled, elements.imageInspectorRedoBtn.disabled],
+    [false, true],
+  );
+
+  elements.imageInspectorUndoBtn.click();
+  assert.equal(hybridState.currentCandidate().human_point_proposal, null);
+  assert.deepEqual(
+    [elements.imageInspectorUndoBtn.disabled, elements.imageInspectorRedoBtn.disabled],
+    [true, false],
+  );
+
+  elements.imageInspectorRedoBtn.click();
+  assert.deepEqual(hybridState.currentCandidate().human_point_proposal.xy, [44, 32]);
+  assert.deepEqual(
+    [elements.imageInspectorUndoBtn.disabled, elements.imageInspectorRedoBtn.disabled],
+    [false, true],
+  );
+
+  context.learningHybridReviewState = null;
+  context.learningDraftEditorState = { canUndo: () => false, canRedo: () => true };
+  context.updateLearningDraftEditorControls();
+  assert.deepEqual(
+    [elements.imageInspectorUndoBtn.disabled, elements.imageInspectorRedoBtn.disabled],
+    [true, false],
+  );
+});
 
 test("rebox preserves model bbox, appends a decision, and revokes current approval", () => {
   const state = createHybridReviewState(fixture());

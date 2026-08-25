@@ -3609,6 +3609,7 @@ function learningDraftEditorSelectedItem() {
 function updateLearningDraftEditorControls() {
   const selected = learningDraftEditorSelectedItem();
   const workflowBound = learningDraftEditorWorkflowBinding?.authority === "workflow";
+  const historyState = learningHybridReviewState || learningDraftEditorState;
   const undo = $("imageInspectorUndoBtn");
   const redo = $("imageInspectorRedoBtn");
   const remove = $("imageInspectorDeleteBoxBtn");
@@ -3634,8 +3635,8 @@ function updateLearningDraftEditorControls() {
         : "Provider 操作建议";
     }
   }
-  if (undo) undo.disabled = !learningDraftEditorState?.canUndo();
-  if (redo) redo.disabled = !learningDraftEditorState?.canRedo();
+  if (undo) undo.disabled = !historyState?.canUndo();
+  if (redo) redo.disabled = !historyState?.canRedo();
   if (remove) remove.disabled = !selected;
   if (humanPoint) {
     const hybridSelected = Boolean(selected && learningHybridReviewCandidate(selected.target_id));
