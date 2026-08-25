@@ -16,7 +16,9 @@
     "required_image_review_status": "approved",
     "required_target_review_status": "approved",
     "required_post_review_status": "approved",
-    "require_vista_success": true
+    "require_vista_success": true,
+    "min_holdout_distinct_image_count": 10,
+    "min_holdout_target_count": 50
   },
   "cleanup": {
     "max_simultaneous_gpu_owners": 1,
@@ -31,5 +33,5 @@
     "public": "aggregate_only",
     "private": "sealed_case_evidence"
   },
-  "config_sha256": "adafefba7e6c536407102571d8fefa626f8c7ff1b85046608696b9d6f1fbc75b"
+  "config_sha256": "07298c0acb2fe496ee291c6019523a2f78d72424a88ed3edf6864f3f96dbe8d0"
 }

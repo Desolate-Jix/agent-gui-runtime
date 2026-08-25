@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 import hashlib
 import math
+from pathlib import Path
 import re
 from typing import Any
 
@@ -246,8 +247,10 @@ def score_benchmark_predictions(
     prediction_requests: list[Mapping[str, Any]],
     predictions: list[Mapping[str, Any]],
     lifecycle_evidence: Mapping[str, Any],
+    *,
+    root: str | Path,
 ) -> dict[str, Any]:
-    manifest = verify_benchmark_manifest(sealed_manifest)
+    manifest = verify_benchmark_manifest(sealed_manifest, root=root)
     run = verify_prediction_run(prediction_run, manifest)
     requests = _validated_requests(prediction_requests, manifest, run)
     lifecycle = validate_lifecycle_evidence(lifecycle_evidence, run, requests)
@@ -356,6 +359,7 @@ def score_benchmark_predictions(
         "run_ref": _run_ref(run),
         "partition": run["partition"],
         "artifact_seals": deepcopy(run["artifact_seals"]),
+        "gate_config_identity": deepcopy(run["gate_config_identity"]),
         "provider_ids": sorted(run["provider_revisions"]),
         "provider_revisions_sha256": run["provider_revisions_sha256"],
         "budget_sha256": run["budget_sha256"],
@@ -381,10 +385,22 @@ def evaluate_release_gate(
     sealed_manifest: Mapping[str, Any],
     prediction_run: Mapping[str, Any],
     prediction_requests: list[Mapping[str, Any]],
+    *,
+    root: str | Path,
 ) -> dict[str, Any]:
-    config = validate_gate_config(gate_config)
-    manifest = verify_benchmark_manifest(sealed_manifest)
+    manifest = verify_benchmark_manifest(sealed_manifest, root=root)
     run = verify_prediction_run(prediction_run, manifest)
+    config = validate_gate_config(gate_config)
+    evaluated_gate_identity = {
+        "artifact_sha256": manifest["artifact_seals"]["gate_config"]["sha256"],
+        "config_id": config["config_id"],
+        "config_sha256": config["config_sha256"],
+    }
+    if (
+        evaluated_gate_identity != manifest["gate_config_identity"]
+        or evaluated_gate_identity != run["gate_config_identity"]
+    ):
+        raise ValueError("evaluated gate config does not match sealed gate artifact")
     requests = _validated_requests(prediction_requests, manifest, run)
     lifecycle = validate_lifecycle_evidence(lifecycle_evidence, run, requests)
     report = _validate_score_report(score_report, manifest, run, requests, lifecycle)
@@ -402,6 +418,18 @@ def evaluate_release_gate(
     _at_most(failures, "quality.max_distinct_image_count", coverage["distinct_image_count"], quality["max_distinct_image_count"])
     _at_least(failures, "quality.min_target_count", coverage["target_count"], quality["min_target_count"])
     _at_most(failures, "quality.max_target_count", coverage["target_count"], quality["max_target_count"])
+    _at_least(
+        failures,
+        "quality.min_holdout_distinct_image_count",
+        coverage["partition_image_counts"]["holdout"],
+        quality["min_holdout_distinct_image_count"],
+    )
+    _at_least(
+        failures,
+        "quality.min_holdout_target_count",
+        coverage["partition_target_counts"]["holdout"],
+        quality["min_holdout_target_count"],
+    )
     _equal(failures, "quality.image_review_complete", coverage["image_review_complete"], True)
     _equal(failures, "quality.target_review_complete", coverage["target_review_complete"], True)
     vista = report["arms"][quality["release_arm"]]["vista"]
@@ -432,6 +460,7 @@ def evaluate_release_gate(
         "score_report_ref": {"id": f"score-report/{run['run_id']}", "content_sha256": report["content_sha256"]},
         "lifecycle_ref": _lifecycle_ref(lifecycle),
         "gate_config_sha256": config["config_sha256"],
+        "gate_config_identity": deepcopy(evaluated_gate_identity),
         "eligible": eligible,
         "decision": "PROMOTION_ELIGIBLE" if eligible else "KEEP_EXPERIMENTAL",
         "blocking_failures": failures,
@@ -474,6 +503,8 @@ def validate_gate_config(value: Mapping[str, Any]) -> dict[str, Any]:
             "max_distinct_image_count",
             "min_target_count",
             "max_target_count",
+            "min_holdout_distinct_image_count",
+            "min_holdout_target_count",
             "required_image_review_status",
             "required_target_review_status",
             "required_post_review_status",
@@ -497,6 +528,8 @@ def validate_gate_config(value: Mapping[str, Any]) -> dict[str, Any]:
         "max_distinct_image_count",
         "min_target_count",
         "max_target_count",
+        "min_holdout_distinct_image_count",
+        "min_holdout_target_count",
     ):
         quality[field] = _non_negative_number(quality[field], f"quality.{field}", integer=True)
     if quality["min_selected_count"] < 1:
@@ -508,6 +541,11 @@ def validate_gate_config(value: Mapping[str, Any]) -> dict[str, Any]:
         or quality["max_target_count"] != 200
     ):
         raise ValueError("gate corpus bounds must remain 20-30 images and 100-200 targets")
+    if (
+        quality["min_holdout_distinct_image_count"] != 10
+        or quality["min_holdout_target_count"] != 50
+    ):
+        raise ValueError("gate holdout bounds must remain at least 10 images and 50 targets")
     for field in ("required_image_review_status", "required_target_review_status", "required_post_review_status"):
         if quality[field] != "approved":
             raise ValueError(f"quality.{field} must be approved")
@@ -574,6 +612,7 @@ def _validate_score_report(
             "run_ref",
             "partition",
             "artifact_seals",
+            "gate_config_identity",
             "provider_ids",
             "provider_revisions_sha256",
             "budget_sha256",
@@ -602,6 +641,8 @@ def _validate_score_report(
         raise ValueError("score report partition lineage mismatch")
     if report["artifact_seals"] != manifest["artifact_seals"]:
         raise ValueError("score report sealed artifact identity mismatch")
+    if report["gate_config_identity"] != manifest["gate_config_identity"]:
+        raise ValueError("score report gate config identity mismatch")
     if report["provider_ids"] != sorted(manifest["provider_revisions"]):
         raise ValueError("score report provider set mismatch")
     for field, expected in (

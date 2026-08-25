@@ -54,8 +54,11 @@ _NON_AUTHORIZING = {
     "artifact_is_authorization": False,
     "execute_binding_enabled": False,
 }
-_VERIFIED_FILE_CACHE: dict[tuple[str, str], tuple[int, int, str]] = {}
-_VERIFIED_MANIFESTS: set[str] = set()
+_CORPUS_RECORDS_CONTRACT = "portfolio_hybrid_v1_1_corpus_records_v1"
+_GOLD_RECORDS_CONTRACT = "portfolio_hybrid_v1_1_gold_records_v1"
+_VISTA_PROPOSAL_CONTRACT = "hybrid_vista_proposals_v1"
+_SOURCE_PROVENANCE = {"existing_five_screen_regression", "public_synthetic_new"}
+_STRUCTURALLY_VERIFIED_MANIFESTS: set[str] = set()
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -122,6 +125,15 @@ def seal_benchmark_manifest(
             "path": relative,
             "sha256": _file_sha(_inside(root_path, relative)),
         }
+    gate_config_identity = _gate_config_identity(
+        _inside(root_path, artifact_seals["gate_config"]["path"]),
+        artifact_seals["gate_config"]["sha256"],
+    )
+    corpus_records, gold_records = _canonical_case_artifacts(
+        template["cases"],
+        _inside(root_path, artifact_seals["corpus_manifest"]["path"]),
+        _inside(root_path, artifact_seals["gold"]["path"]),
+    )
     revisions = _closed(
         template["provider_revisions"], "provider_revisions", {"omni", "qwen", "vista"}
     )
@@ -130,7 +142,9 @@ def seal_benchmark_manifest(
     budget = _budget(template["shared_budget"], "shared_budget")
     context = _context(template["shared_context_policy"], "shared_context_policy")
     arms = _arms(template["arms"], budget, context)
-    cases = _seal_cases(template["cases"], root_path)
+    cases = _seal_cases(
+        template["cases"], root_path, corpus_records, gold_records, artifact_seals
+    )
     coverage = _corpus_coverage(cases)
     evidence_policy = _closed(
         template["evidence_policy"], "evidence_policy", {"public", "private"}
@@ -145,6 +159,7 @@ def seal_benchmark_manifest(
         "benchmark_id": template["benchmark_id"],
         "corpus_id": template["corpus_id"],
         "artifact_seals": artifact_seals,
+        "gate_config_identity": gate_config_identity,
         "provider_revisions": revisions,
         "provider_revisions_sha256": _hash(revisions),
         "shared_budget": budget,
@@ -172,6 +187,7 @@ def verify_benchmark_manifest(
             "benchmark_id",
             "corpus_id",
             "artifact_seals",
+            "gate_config_identity",
             "provider_revisions",
             "provider_revisions_sha256",
             "shared_budget",
@@ -193,7 +209,7 @@ def verify_benchmark_manifest(
     declared_manifest_sha = _sha(sealed["content_sha256"], "content_sha256")
     if declared_manifest_sha != content_sha256(sealed):
         raise ValueError("benchmark manifest content_sha256 mismatch")
-    if declared_manifest_sha in _VERIFIED_MANIFESTS:
+    if declared_manifest_sha in _STRUCTURALLY_VERIFIED_MANIFESTS:
         _verify_current_manifest_files(sealed, root)
         return sealed
     revisions = _closed(
@@ -216,7 +232,33 @@ def verify_benchmark_manifest(
         item = _closed(value, f"artifact_seals.{name}", {"path", "sha256"})
         _relative(item["path"], f"artifact_seals.{name}.path")
         _sha(item["sha256"], f"artifact_seals.{name}.sha256")
-    _VERIFIED_MANIFESTS.add(declared_manifest_sha)
+    for case in sealed["cases"]:
+        corpus_record = {
+            key: deepcopy(case[key])
+            for key in (
+                "case_id", "partition", "image_path", "source_provenance",
+                "image_review", "goal",
+            )
+        }
+        gold_record = {"case_id": case["case_id"], "gold": deepcopy(case["gold"])}
+        if case["corpus_record_sha256"] != _hash(corpus_record):
+            raise ValueError(f"corpus record lineage mismatch: {case['case_id']}")
+        if case["gold_record_sha256"] != _hash(gold_record):
+            raise ValueError(f"Gold record lineage mismatch: {case['case_id']}")
+        if case["corpus_artifact_sha256"] != artifacts["corpus_manifest"]["sha256"]:
+            raise ValueError(f"corpus artifact lineage mismatch: {case['case_id']}")
+        if case["gold_artifact_sha256"] != artifacts["gold"]["sha256"]:
+            raise ValueError(f"Gold artifact lineage mismatch: {case['case_id']}")
+    gate_identity = _closed(
+        sealed["gate_config_identity"],
+        "gate_config_identity",
+        {"artifact_sha256", "config_id", "config_sha256"},
+    )
+    if _sha(gate_identity["artifact_sha256"], "gate artifact SHA") != artifacts["gate_config"]["sha256"]:
+        raise ValueError("gate_config_identity artifact mismatch")
+    _string(gate_identity["config_id"], "gate config_id")
+    _sha(gate_identity["config_sha256"], "gate config_sha256")
+    _STRUCTURALLY_VERIFIED_MANIFESTS.add(declared_manifest_sha)
     _verify_current_manifest_files(sealed, root)
     return sealed
 
@@ -239,6 +281,7 @@ def seal_prediction_run(
         "benchmark_ref": _benchmark_ref(manifest),
         "partition": partition,
         "artifact_seals": deepcopy(manifest["artifact_seals"]),
+        "gate_config_identity": deepcopy(manifest["gate_config_identity"]),
         "provider_revisions": deepcopy(manifest["provider_revisions"]),
         "provider_revisions_sha256": manifest["provider_revisions_sha256"],
         "budget": deepcopy(manifest["shared_budget"]),
@@ -268,6 +311,7 @@ def verify_prediction_run(
             "benchmark_ref",
             "partition",
             "artifact_seals",
+            "gate_config_identity",
             "provider_revisions",
             "provider_revisions_sha256",
             "budget",
@@ -299,6 +343,7 @@ def verify_prediction_run(
     }
     comparisons = (
         ("artifact seals", run["artifact_seals"], manifest["artifact_seals"]),
+        ("gate config identity", run["gate_config_identity"], manifest["gate_config_identity"]),
         ("provider revisions", run["provider_revisions"], manifest["provider_revisions"]),
         ("provider revisions SHA", run["provider_revisions_sha256"], manifest["provider_revisions_sha256"]),
         ("budget", run["budget"], manifest["shared_budget"]),
@@ -315,9 +360,11 @@ def verify_prediction_run(
 
 
 def provider_manifest_projection(
-    sealed_manifest: Mapping[str, Any], arm_id: str | None = None, *, root: str | Path
+    sealed_manifest: Mapping[str, Any], prediction_run: Mapping[str, Any],
+    arm_id: str | None = None, *, root: str | Path
 ) -> dict[str, Any]:
     manifest = verify_benchmark_manifest(sealed_manifest, root=root)
+    run = verify_prediction_run(prediction_run, manifest)
     arms = manifest["arms"]
     if arm_id is not None:
         arms = [arm for arm in arms if arm["arm_id"] == arm_id]
@@ -326,6 +373,7 @@ def provider_manifest_projection(
     projection = {
         "contract_version": PROJECTION_CONTRACT,
         "benchmark_ref": _benchmark_ref(manifest),
+        "run_ref": _run_ref(run),
         "corpus_id": manifest["corpus_id"],
         "provider_revisions": deepcopy(manifest["provider_revisions"]),
         "shared_budget": deepcopy(manifest["shared_budget"]),
@@ -338,7 +386,7 @@ def provider_manifest_projection(
                 "image_ref": {"path": case["image_path"], "sha256": case["image_sha256"]},
                 "goal": case["goal"],
             }
-            for case in manifest["cases"]
+            for case in manifest["cases"] if case["partition"] == run["partition"]
         ],
         **_NON_AUTHORIZING,
     }
@@ -357,6 +405,32 @@ def build_prediction_request(
 ) -> dict[str, Any]:
     manifest = verify_benchmark_manifest(sealed_manifest, root=root)
     run = verify_prediction_run(prediction_run, manifest)
+    return _build_prediction_request_from_verified(manifest, run, arm_id, case_id)
+
+
+def build_prediction_requests(
+    sealed_manifest: Mapping[str, Any], *, root: str | Path,
+    prediction_run: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Produce a run matrix while rehashing frozen bytes before every request."""
+    manifest = verify_benchmark_manifest(sealed_manifest, root=root)
+    run = verify_prediction_run(prediction_run, manifest)
+    return [
+        build_prediction_request(
+            manifest,
+            arm["arm_id"],
+            case_id,
+            root=root,
+            prediction_run=run,
+        )
+        for arm in manifest["arms"]
+        for case_id in run["case_ids"]
+    ]
+
+
+def _build_prediction_request_from_verified(
+    manifest: Mapping[str, Any], run: Mapping[str, Any], arm_id: str, case_id: str
+) -> dict[str, Any]:
     arms = [arm for arm in manifest["arms"] if arm["arm_id"] == arm_id]
     cases = [case for case in manifest["cases"] if case["case_id"] == case_id]
     if len(arms) != 1:
@@ -396,7 +470,7 @@ def build_prediction_request(
         "context_policy_sha256": manifest["shared_context_policy_sha256"],
         "vista_payload": {
             "enabled": arm_id == "omni_to_qwen_vista",
-            "proposal_contract_version": "hybrid_vista_proposals_v1",
+            "proposal_contract_version": _VISTA_PROPOSAL_CONTRACT,
             "candidate_id": None,
             "candidate_bbox_ref": None,
             "roi_ref": None,
@@ -491,8 +565,24 @@ def validate_prediction_request(
     }
     if request["request_id"] != "request/" + hashlib.sha256(canonical_json_bytes(identity)).hexdigest():
         raise ValueError("prediction request request_id mismatch")
-    vista = request["vista_payload"]
-    if not isinstance(vista, Mapping) or vista.get("enabled") is not (request["arm_id"] == "omni_to_qwen_vista"):
+    vista = _closed(
+        request["vista_payload"],
+        "prediction request VISTA payload",
+        {
+            "enabled", "proposal_contract_version", "candidate_id",
+            "candidate_bbox_ref", "roi_ref", "affine_transform_ref", "canonical_point",
+        },
+    )
+    expected_vista = {
+        "enabled": request["arm_id"] == "omni_to_qwen_vista",
+        "proposal_contract_version": _VISTA_PROPOSAL_CONTRACT,
+        "candidate_id": None,
+        "candidate_bbox_ref": None,
+        "roi_ref": None,
+        "affine_transform_ref": None,
+        "canonical_point": None,
+    }
+    if vista != expected_vista:
         raise ValueError("prediction request VISTA payload mismatch")
     if contains_gold_fields(request):
         raise ValueError("prediction request contains scorer-private fields")
@@ -587,7 +677,86 @@ def validate_prediction_record(
     return record
 
 
-def _seal_cases(value: Any, root: Path) -> list[dict[str, Any]]:
+def _read_json_object(path: Path, name: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{name} must be readable canonical UTF-8 JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} must be a JSON object")
+    return value
+
+
+def _gate_config_identity(path: Path, artifact_sha256: str) -> dict[str, str]:
+    config = _read_json_object(path, "gate config artifact")
+    config_id = _string(config.get("config_id"), "gate config_id")
+    declared = _sha(config.get("config_sha256"), "gate config_sha256")
+    unhashed = dict(config)
+    unhashed.pop("config_sha256", None)
+    if declared != hashlib.sha256(canonical_json_bytes(unhashed)).hexdigest():
+        raise ValueError("gate config artifact config_sha256 mismatch")
+    return {
+        "artifact_sha256": artifact_sha256,
+        "config_id": config_id,
+        "config_sha256": declared,
+    }
+
+
+def _canonical_case_artifacts(
+    inline_cases: Any, corpus_path: Path, gold_path: Path
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not isinstance(inline_cases, list):
+        raise ValueError("cases must be a list")
+    corpus = _closed(
+        _read_json_object(corpus_path, "canonical corpus artifact"),
+        "canonical corpus artifact",
+        {"contract_version", "cases"},
+    )
+    if corpus["contract_version"] != _CORPUS_RECORDS_CONTRACT or not isinstance(corpus["cases"], list):
+        raise ValueError("canonical corpus artifact contract is invalid")
+    expected_corpus = [
+        {
+            key: deepcopy(case[key])
+            for key in (
+                "case_id", "partition", "image_path", "source_provenance",
+                "image_review", "goal",
+            )
+        }
+        if isinstance(case, Mapping) and all(
+            key in case for key in (
+                "case_id", "partition", "image_path", "source_provenance",
+                "image_review", "goal",
+            )
+        )
+        else {}
+        for case in inline_cases
+    ]
+    if corpus["cases"] != expected_corpus:
+        raise ValueError("canonical corpus artifact does not match inline cases")
+    gold = _closed(
+        _read_json_object(gold_path, "canonical Gold artifact"),
+        "canonical Gold artifact",
+        {"contract_version", "targets"},
+    )
+    if gold["contract_version"] != _GOLD_RECORDS_CONTRACT or not isinstance(gold["targets"], list):
+        raise ValueError("canonical Gold artifact contract is invalid")
+    expected_gold = [
+        {"case_id": case["case_id"], "gold": deepcopy(case["gold"])}
+        if isinstance(case, Mapping) and "case_id" in case and "gold" in case else {}
+        for case in inline_cases
+    ]
+    if gold["targets"] != expected_gold:
+        raise ValueError("canonical Gold artifact does not match inline Gold")
+    return deepcopy(corpus["cases"]), deepcopy(gold["targets"])
+
+
+def _seal_cases(
+    value: Any,
+    root: Path,
+    corpus_records: list[dict[str, Any]],
+    gold_records: list[dict[str, Any]],
+    artifact_seals: Mapping[str, Mapping[str, str]],
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise ValueError("cases must be a list")
     results: list[dict[str, Any]] = []
@@ -598,7 +767,10 @@ def _seal_cases(value: Any, root: Path) -> list[dict[str, Any]]:
         case = _closed(
             item,
             f"cases[{index}]",
-            {"case_id", "partition", "image_path", "image_review", "goal", "gold"},
+            {
+                "case_id", "partition", "image_path", "source_provenance",
+                "image_review", "goal", "gold",
+            },
         )
         case_id = _string(case["case_id"], "case_id")
         if case_id in seen:
@@ -606,6 +778,11 @@ def _seal_cases(value: Any, root: Path) -> list[dict[str, Any]]:
         seen.add(case_id)
         if case["partition"] not in {"regression", "holdout"}:
             raise ValueError("case partition must be regression or holdout")
+        provenance = _string(case["source_provenance"], "source_provenance")
+        if provenance not in _SOURCE_PROVENANCE:
+            raise ValueError("source_provenance is invalid")
+        if provenance == "existing_five_screen_regression" and case["partition"] != "regression":
+            raise ValueError("existing five-screen provenance is regression-only")
         image_path = _relative(case["image_path"], "image_path")
         image_sha = _file_sha(_inside(root, image_path))
         image_review = _image_review(case["image_review"])
@@ -622,10 +799,15 @@ def _seal_cases(value: Any, root: Path) -> list[dict[str, Any]]:
                 "partition": case["partition"],
                 "image_path": image_path,
                 "image_sha256": image_sha,
+                "source_provenance": provenance,
                 "image_review": image_review,
                 "goal": _string(case["goal"], "goal"),
                 "gold": gold,
                 "gold_sha256": _hash(gold),
+                "corpus_record_sha256": _hash(corpus_records[index]),
+                "gold_record_sha256": _hash(gold_records[index]),
+                "corpus_artifact_sha256": artifact_seals["corpus_manifest"]["sha256"],
+                "gold_artifact_sha256": artifact_seals["gold"]["sha256"],
             }
         )
     return results
@@ -639,7 +821,11 @@ def _validate_sealed_cases(value: Any) -> list[dict[str, Any]]:
         case = _closed(
             item,
             "sealed case",
-            {"case_id", "partition", "image_path", "image_sha256", "image_review", "goal", "gold", "gold_sha256"},
+            {
+                "case_id", "partition", "image_path", "image_sha256", "source_provenance",
+                "image_review", "goal", "gold", "gold_sha256", "corpus_record_sha256",
+                "gold_record_sha256", "corpus_artifact_sha256", "gold_artifact_sha256",
+            },
         )
         case_id = _string(case["case_id"], "case_id")
         if case_id in seen:
@@ -647,6 +833,11 @@ def _validate_sealed_cases(value: Any) -> list[dict[str, Any]]:
         seen.add(case_id)
         if case["partition"] not in {"regression", "holdout"}:
             raise ValueError("case partition must be regression or holdout")
+        provenance = _string(case["source_provenance"], "source_provenance")
+        if provenance not in _SOURCE_PROVENANCE:
+            raise ValueError("source_provenance is invalid")
+        if provenance == "existing_five_screen_regression" and case["partition"] != "regression":
+            raise ValueError("existing five-screen provenance is regression-only")
         _relative(case["image_path"], "image_path")
         _sha(case["image_sha256"], "image_sha256")
         _image_review(case["image_review"])
@@ -654,6 +845,11 @@ def _validate_sealed_cases(value: Any) -> list[dict[str, Any]]:
         gold = _gold(case["gold"], "gold")
         if _sha(case["gold_sha256"], "gold_sha256") != _hash(gold):
             raise ValueError(f"gold_sha256 mismatch: {case_id}")
+        for field in (
+            "corpus_record_sha256", "gold_record_sha256", "corpus_artifact_sha256",
+            "gold_artifact_sha256",
+        ):
+            _sha(case[field], field)
     return deepcopy(value)
 
 
@@ -673,6 +869,18 @@ def _corpus_coverage(cases: list[Mapping[str, Any]]) -> dict[str, Any]:
         partition: len({case["image_path"] for case in cases if case["partition"] == partition})
         for partition in ("holdout", "regression")
     }
+    partition_paths = {
+        partition: {case["image_path"] for case in cases if case["partition"] == partition}
+        for partition in ("holdout", "regression")
+    }
+    partition_hashes = {
+        partition: {case["image_sha256"] for case in cases if case["partition"] == partition}
+        for partition in ("holdout", "regression")
+    }
+    if partition_paths["holdout"] & partition_paths["regression"] or partition_hashes["holdout"] & partition_hashes["regression"]:
+        raise ValueError("partition image paths and hashes must be disjoint")
+    if partition_image_counts["holdout"] < 10 or partition_target_counts["holdout"] < 50:
+        raise ValueError("holdout must contain at least 10 distinct screenshots and 50 targets")
     if any(count <= 0 for count in (*partition_target_counts.values(), *partition_image_counts.values())):
         raise ValueError("sealed corpus must cover regression and holdout partitions")
     image_review_complete = all(
@@ -691,11 +899,19 @@ def _corpus_coverage(cases: list[Mapping[str, Any]]) -> dict[str, Any]:
         if any(case["gold"]["important_target"] is not True for case in cases):
             raise ValueError("sealed corpus contains a non-important target")
         raise ValueError("sealed corpus target review is incomplete")
+    existing_paths = {
+        case["image_path"] for case in cases
+        if case["source_provenance"] == "existing_five_screen_regression"
+    }
+    if len(existing_paths) != 5:
+        raise ValueError("existing five-screen provenance must identify exactly 5 regression screenshots")
     return {
         "distinct_image_count": len(paths),
         "target_count": target_count,
         "partition_image_counts": partition_image_counts,
         "partition_target_counts": partition_target_counts,
+        "partitions_disjoint": True,
+        "existing_five_screen_regression_image_count": len(existing_paths),
         "image_review_complete": image_review_complete,
         "target_review_complete": target_review_complete,
     }
@@ -951,33 +1167,19 @@ def _file_sha(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _verified_file_sha(path: Path, manifest_sha256: str) -> str:
-    stat = path.stat()
-    key = (manifest_sha256, str(path))
-    cached = _VERIFIED_FILE_CACHE.get(key)
-    state = (stat.st_size, stat.st_mtime_ns)
-    if cached is not None and cached[:2] == state:
-        return cached[2]
-    digest = _file_sha(path)
-    _VERIFIED_FILE_CACHE[key] = (state[0], state[1], digest)
-    return digest
-
-
 def _verify_current_manifest_files(sealed: Mapping[str, Any], root: str | Path | None) -> None:
     if root is None:
         return
     root_path = Path(root).resolve()
     for name, item in sealed["artifact_seals"].items():
-        if _verified_file_sha(_inside(root_path, item["path"]), sealed["content_sha256"]) != item["sha256"]:
+        if _file_sha(_inside(root_path, item["path"])) != item["sha256"]:
             raise ValueError(f"artifact seal mismatch: {name}")
     checked_images: set[str] = set()
     for case in sealed["cases"]:
         if case["image_path"] in checked_images:
             continue
         checked_images.add(case["image_path"])
-        if _verified_file_sha(
-            _inside(root_path, case["image_path"]), sealed["content_sha256"]
-        ) != case["image_sha256"]:
+        if _file_sha(_inside(root_path, case["image_path"])) != case["image_sha256"]:
             raise ValueError(f"image seal mismatch: {case['case_id']}")
 
 
@@ -991,6 +1193,7 @@ __all__ = [
     "ARM_IDS",
     "PRE_VISTA_ARM_IDS",
     "build_prediction_request",
+    "build_prediction_requests",
     "canonical_json_bytes",
     "contains_gold_fields",
     "content_sha256",

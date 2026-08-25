@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,11 +13,13 @@ import pytest
 from app.learn.hybrid.benchmark import (
     ARM_IDS,
     build_prediction_request,
+    build_prediction_requests,
     contains_gold_fields,
     content_sha256,
     provider_manifest_projection,
     seal_benchmark_manifest,
     seal_prediction_run,
+    validate_prediction_request,
     validate_prediction_record,
     verify_benchmark_manifest,
 )
@@ -66,6 +69,8 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
         "gold": "gold.json",
     }
     for name, relative in files.items():
+        if name in {"gate_config", "corpus_manifest", "gold"}:
+            continue
         _write(tmp_path / relative, f"{name}\n".encode("utf-8"))
     identity_a = hashlib.sha256(b"annotator-a").hexdigest()
     identity_b = hashlib.sha256(b"reviewer-b").hexdigest()
@@ -82,6 +87,11 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
                     "case_id": case_id,
                     "partition": partition,
                     "image_path": image_path,
+                    "source_provenance": (
+                        "existing_five_screen_regression"
+                        if image_index < 5
+                        else "public_synthetic_new"
+                    ),
                     "image_review": {
                         "reviewer_identity_hash": identity_c,
                         "review_status": "approved",
@@ -99,17 +109,7 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
                     },
                 }
             )
-    shared_budget = {
-        "max_provider_calls_per_case": 3,
-        "max_output_tokens_per_case": 2048,
-        "max_wall_time_ms_per_case": 120000,
-    }
-    shared_context = {
-        "policy_version": "shared-uia-ocr-v1",
-        "uia": "same_capture_optional",
-        "ocr": "same_capture_optional",
-    }
-    return {
+    template = {
         "contract_version": "portfolio_hybrid_v1_1_benchmark_manifest_template_v1",
         "benchmark_id": "portfolio-hybrid-v1-1-test",
         "corpus_id": "synthetic-test-corpus",
@@ -119,8 +119,16 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
             "qwen": "Qwen/Qwen2.5-VL@synthetic-revision",
             "vista": "portfolio-vista@future-revision",
         },
-        "shared_budget": shared_budget,
-        "shared_context_policy": shared_context,
+        "shared_budget": {
+            "max_provider_calls_per_case": 3,
+            "max_output_tokens_per_case": 2048,
+            "max_wall_time_ms_per_case": 120000,
+        },
+        "shared_context_policy": {
+            "policy_version": "shared-uia-ocr-v1",
+            "uia": "same_capture_optional",
+            "ocr": "same_capture_optional",
+        },
         "arms": [
             _arm("qwen_only", "pre-vista", ["qwen"]),
             _arm("omni_only_discovery", "pre-vista", ["omni"]),
@@ -133,6 +141,39 @@ def _manifest_template(tmp_path: Path) -> dict[str, object]:
             "private": "case_level_gold_and_predictions",
         },
     }
+    _write_canonical_evidence(template, tmp_path)
+    return template
+
+
+def _write_canonical_evidence(template: dict[str, object], tmp_path: Path) -> None:
+    cases = template["cases"]
+    files = template["artifact_paths"]
+    corpus_document = {
+        "contract_version": "portfolio_hybrid_v1_1_corpus_records_v1",
+        "cases": [
+            {key: deepcopy(case[key]) for key in (
+                "case_id", "partition", "image_path", "source_provenance",
+                "image_review", "goal",
+            )}
+            for case in cases
+        ],
+    }
+    gold_document = {
+        "contract_version": "portfolio_hybrid_v1_1_gold_records_v1",
+        "targets": [
+            {"case_id": case["case_id"], "gold": deepcopy(case["gold"])}
+            for case in cases
+        ],
+    }
+    for relative, document in (
+        (files["gate_config"], _gate_config()),
+        (files["corpus_manifest"], corpus_document),
+        (files["gold"], gold_document),
+    ):
+        _write(
+            tmp_path / relative,
+            (json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"),
+        )
 
 
 def _sealed(tmp_path: Path) -> dict[str, object]:
@@ -167,18 +208,7 @@ def _run(tmp_path: Path, sealed: dict[str, object], partition: str = "holdout") 
 def _requests(
     tmp_path: Path, sealed: dict[str, object], run: dict[str, object]
 ) -> list[dict[str, object]]:
-    return [
-        build_prediction_request(
-            sealed,
-            arm_id,
-            case["case_id"],
-            root=tmp_path,
-            prediction_run=run,
-        )
-        for arm_id in ARM_IDS
-        for case in sealed["cases"]
-        if case["partition"] == run["partition"]
-    ]
+    return build_prediction_requests(sealed, root=tmp_path, prediction_run=run)
 
 
 def _lifecycle_template() -> dict[str, object]:
@@ -285,6 +315,8 @@ def _gate_config() -> dict[str, object]:
             "max_distinct_image_count": 30,
             "min_target_count": 100,
             "max_target_count": 200,
+            "min_holdout_distinct_image_count": 10,
+            "min_holdout_target_count": 50,
             "required_image_review_status": "approved",
             "required_target_review_status": "approved",
             "required_post_review_status": "approved",
@@ -316,14 +348,16 @@ def _score_bundle(tmp_path: Path, partition: str = "holdout", **prediction_kwarg
     requests = _requests(tmp_path, sealed, run)
     lifecycle = _lifecycle(run, requests)
     predictions = _predictions(requests, lifecycle, **prediction_kwargs)
-    report = score_benchmark_predictions(sealed, run, requests, predictions, lifecycle)
+    report = score_benchmark_predictions(
+        sealed, run, requests, predictions, lifecycle, root=tmp_path
+    )
     return sealed, run, requests, lifecycle, predictions, report
 
 
 def test_provider_projection_and_requests_never_contain_scorer_private_fields(tmp_path: Path) -> None:
     sealed = _sealed(tmp_path)
     run = _run(tmp_path, sealed)
-    projection = provider_manifest_projection(sealed, root=tmp_path)
+    projection = provider_manifest_projection(sealed, run, root=tmp_path)
     request = build_prediction_request(
         sealed, "omni_to_qwen_vista", "case-010-00", root=tmp_path, prediction_run=run
     )
@@ -356,6 +390,8 @@ def test_seal_binds_release_corpus_cardinality_and_review_completeness(tmp_path:
         "target_count": 100,
         "partition_image_counts": {"holdout": 10, "regression": 10},
         "partition_target_counts": {"holdout": 50, "regression": 50},
+        "partitions_disjoint": True,
+        "existing_five_screen_regression_image_count": 5,
         "image_review_complete": True,
         "target_review_complete": True,
     }
@@ -375,14 +411,72 @@ def test_seal_binds_release_corpus_cardinality_and_review_completeness(tmp_path:
 def test_seal_rejects_incomplete_release_corpus(tmp_path: Path, mutate: object, reason: str) -> None:
     template = _manifest_template(tmp_path)
     mutate(template)
+    _write_canonical_evidence(template, tmp_path)
     with pytest.raises(ValueError, match=reason):
         seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_seal_rejects_cross_partition_image_paths_and_hashes(tmp_path: Path) -> None:
+    template = _manifest_template(tmp_path)
+    regression_path = template["cases"][0]["image_path"]
+    template["cases"][50]["image_path"] = regression_path
+    _write_canonical_evidence(template, tmp_path)
+    with pytest.raises(ValueError, match="partition image paths and hashes must be disjoint"):
+        seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_seal_requires_minimum_holdout_images_and_targets(tmp_path: Path) -> None:
+    template = _manifest_template(tmp_path)
+    for case in template["cases"][50:95]:
+        case["partition"] = "regression"
+    _write_canonical_evidence(template, tmp_path)
+    with pytest.raises(ValueError, match="holdout must contain at least 10 distinct screenshots and 50 targets"):
+        seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_existing_five_screen_provenance_is_regression_only(tmp_path: Path) -> None:
+    template = _manifest_template(tmp_path)
+    template["cases"][0]["partition"] = "holdout"
+    _write_canonical_evidence(template, tmp_path)
+    with pytest.raises(ValueError, match="existing five-screen provenance is regression-only"):
+        seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_provider_projection_is_scoped_to_exact_run_partition(tmp_path: Path) -> None:
+    sealed = _sealed(tmp_path)
+    regression_run = _run(tmp_path, sealed, "regression")
+    holdout_run = _run(tmp_path, sealed, "holdout")
+    regression = provider_manifest_projection(sealed, regression_run, root=tmp_path)
+    holdout = provider_manifest_projection(sealed, holdout_run, root=tmp_path)
+    assert {case["partition"] for case in regression["cases"]} == {"regression"}
+    assert {case["partition"] for case in holdout["cases"]} == {"holdout"}
+    assert {case["case_id"] for case in regression["cases"]}.isdisjoint(
+        case["case_id"] for case in holdout["cases"]
+    )
+    assert regression["run_ref"] == {"id": regression_run["run_id"], "content_sha256": regression_run["content_sha256"]}
 
 
 def test_actual_request_path_rehashes_all_sealed_files(tmp_path: Path) -> None:
     sealed = _sealed(tmp_path)
     run = _run(tmp_path, sealed)
     (tmp_path / "scorer.py").write_text("mutated\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="artifact seal mismatch: scorer"):
+        build_prediction_request(
+            sealed, "qwen_only", "case-010-00", root=tmp_path, prediction_run=run
+        )
+
+
+def test_request_rehash_rejects_same_size_restored_mtime_mutation(tmp_path: Path) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    build_prediction_request(
+        sealed, "qwen_only", "case-010-00", root=tmp_path, prediction_run=run
+    )
+    path = tmp_path / "scorer.py"
+    stat = path.stat()
+    assert len(path.read_bytes()) == len(b"SCORER\n")
+    path.write_bytes(b"SCORER\n")
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
     with pytest.raises(ValueError, match="artifact seal mismatch: scorer"):
         build_prediction_request(
             sealed, "qwen_only", "case-010-00", root=tmp_path, prediction_run=run
@@ -420,6 +514,75 @@ def test_sealed_request_binds_exact_run_arm_budget_context_producer_and_revision
 
 
 @pytest.mark.parametrize(
+    "mutation",
+    ["missing", "extra", "contract", "enabled", "candidate", "bbox", "roi", "transform", "point"],
+)
+def test_vista_request_payload_is_closed_exact_and_pre_execution_null(
+    tmp_path: Path, mutation: str
+) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    request = build_prediction_request(
+        sealed, "omni_to_qwen_vista", "case-010-00", root=tmp_path, prediction_run=run
+    )
+    payload = request["vista_payload"]
+    if mutation == "missing":
+        payload.pop("roi_ref")
+    elif mutation == "extra":
+        payload["proposal"] = "unexpected"
+    elif mutation == "contract":
+        payload["proposal_contract_version"] = "hybrid_vista_proposals_v2"
+    elif mutation == "enabled":
+        payload["enabled"] = False
+    elif mutation == "candidate":
+        payload["candidate_id"] = "candidate/preexecuted"
+    elif mutation == "bbox":
+        payload["candidate_bbox_ref"] = {"id": "bbox/preexecuted", "content_sha256": SHA}
+    elif mutation == "roi":
+        payload["roi_ref"] = {"id": "roi/preexecuted", "content_sha256": SHA}
+    elif mutation == "transform":
+        payload["affine_transform_ref"] = {"id": "transform/preexecuted", "content_sha256": SHA}
+    else:
+        payload["canonical_point"] = [20, 20]
+    request["content_sha256"] = content_sha256(request)
+    with pytest.raises(ValueError, match="VISTA payload"):
+        validate_prediction_request(request, sealed, run)
+
+
+def test_canonical_corpus_and_gold_artifacts_must_equal_scored_records(tmp_path: Path) -> None:
+    template = _manifest_template(tmp_path)
+    corpus_path = tmp_path / template["artifact_paths"]["corpus_manifest"]
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+    corpus["cases"][0]["goal"] = "divergent corpus goal"
+    corpus_path.write_text(
+        json.dumps(corpus, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="canonical corpus artifact does not match inline cases"):
+        seal_benchmark_manifest(template, root=tmp_path)
+
+    template = _manifest_template(tmp_path)
+    gold_path = tmp_path / template["artifact_paths"]["gold"]
+    gold = json.loads(gold_path.read_text(encoding="utf-8"))
+    gold["targets"][0]["gold"]["acceptable_candidate_ids"] = ["candidate/divergent"]
+    gold_path.write_text(
+        json.dumps(gold, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="canonical Gold artifact does not match inline Gold"):
+        seal_benchmark_manifest(template, root=tmp_path)
+
+
+def test_sealed_cases_bind_corpus_and_gold_artifact_lineage(tmp_path: Path) -> None:
+    sealed = _sealed(tmp_path)
+    case = sealed["cases"][0]
+    assert case["corpus_artifact_sha256"] == sealed["artifact_seals"]["corpus_manifest"]["sha256"]
+    assert case["gold_artifact_sha256"] == sealed["artifact_seals"]["gold"]["sha256"]
+    assert len(case["corpus_record_sha256"]) == 64
+    assert len(case["gold_record_sha256"]) == 64
+
+
+@pytest.mark.parametrize(
     ("mutate", "reason"),
     [
         (lambda prediction: prediction.__setitem__("run_ref", {"id": "stale", "content_sha256": SHA}), "run_ref"),
@@ -444,7 +607,7 @@ def test_prediction_rejects_unbound_or_missing_execution_evidence(tmp_path: Path
 
 def test_regression_report_can_never_be_promotion_eligible(tmp_path: Path) -> None:
     sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "regression")
-    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests, root=tmp_path)
     assert decision["eligible"] is False
     assert decision["decision"] == "KEEP_EXPERIMENTAL"
     assert "quality.required_partition" in {item["gate_id"] for item in decision["blocking_failures"]}
@@ -456,14 +619,14 @@ def test_holdout_release_requires_vista_success_and_approved_post_review(tmp_pat
         ({"review_status": "not_reviewed"}, "quality.post_review_status"),
     ):
         sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout", **kwargs)
-        decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+        decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests, root=tmp_path)
         assert decision["eligible"] is False
         assert gate_id in {item["gate_id"] for item in decision["blocking_failures"]}
 
 
 def test_exact_holdout_run_and_verified_evidence_can_pass_gate(tmp_path: Path) -> None:
     sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout")
-    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests, root=tmp_path)
     assert decision["eligible"] is True
     assert decision["decision"] == "PROMOTION_ELIGIBLE"
     assert decision["blocking_failures"] == []
@@ -521,13 +684,38 @@ def test_gate_rejects_stale_lifecycle_and_prediction_cleanup_refs(tmp_path: Path
     stale["run_ref"] = {"id": "run/stale", "content_sha256": SHA}
     stale["content_sha256"] = content_sha256(stale)
     with pytest.raises(ValueError, match="run_ref"):
-        evaluate_release_gate(report, _gate_config(), stale, sealed, run, requests)
+        evaluate_release_gate(report, _gate_config(), stale, sealed, run, requests, root=tmp_path)
     prediction = deepcopy(predictions[0])
     prediction["cleanup_evidence_ref"] = {"id": "cleanup/stale", "content_sha256": SHA}
     prediction["content_sha256"] = content_sha256(prediction)
     predictions[0] = prediction
     with pytest.raises(ValueError, match="cleanup_evidence_ref"):
-        score_benchmark_predictions(sealed, run, requests, predictions, lifecycle)
+        score_benchmark_predictions(sealed, run, requests, predictions, lifecycle, root=tmp_path)
+
+
+def test_score_and_gate_rehash_files_after_request_and_scoring(tmp_path: Path) -> None:
+    sealed = _sealed(tmp_path)
+    run = _run(tmp_path, sealed)
+    requests = _requests(tmp_path, sealed, run)
+    lifecycle = _lifecycle(run, requests)
+    predictions = _predictions(requests, lifecycle)
+    gold_path = tmp_path / "gold.json"
+    original_gold = gold_path.read_bytes()
+    gold_path.write_bytes(original_gold.replace(b"case-000-00", b"case-000-XX", 1))
+    with pytest.raises(ValueError, match="artifact seal mismatch: gold"):
+        score_benchmark_predictions(
+            sealed, run, requests, predictions, lifecycle, root=tmp_path
+        )
+    gold_path.write_bytes(original_gold)
+    report = score_benchmark_predictions(
+        sealed, run, requests, predictions, lifecycle, root=tmp_path
+    )
+    producer_path = tmp_path / "benchmark.py"
+    producer_path.write_bytes(b"BENCHMARK\n")
+    with pytest.raises(ValueError, match="artifact seal mismatch: benchmark_producer"):
+        evaluate_release_gate(
+            report, _gate_config(), lifecycle, sealed, run, requests, root=tmp_path
+        )
 
 
 @pytest.mark.parametrize(
@@ -553,7 +741,7 @@ def test_gate_fully_revalidates_score_report_not_just_its_hash(
     ).hexdigest()
     report["content_sha256"] = content_sha256(report)
     with pytest.raises(ValueError, match=reason):
-        evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+        evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests, root=tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -580,12 +768,43 @@ def test_gate_config_rejects_invalid_or_weakened_semantics(path: tuple[str, str]
         validate_gate_config(config)
 
 
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("quality", "min_selection_precision", 0.5),
+        ("quality", "min_target_recall", 0.5),
+        ("quality", "max_wrong_selected_count", 1),
+        (None, "config_id", "rehashed-weakened-gate"),
+        ("cleanup", "vram_release_tolerance_mb", 65),
+    ],
+)
+def test_evaluation_rejects_finite_rehashed_gate_not_identical_to_sealed_artifact(
+    tmp_path: Path, section: str | None, field: str, value: object
+) -> None:
+    sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout")
+    config = _gate_config()
+    target = config if section is None else config[section]
+    target[field] = value
+    config["config_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: child for key, child in config.items() if key != "config_sha256"},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(ValueError, match="sealed gate artifact"):
+        evaluate_release_gate(
+            report, config, lifecycle, sealed, run, requests, root=tmp_path
+        )
+
+
 def test_zero_selection_cannot_produce_false_gate_success(tmp_path: Path) -> None:
     sealed, run, requests, lifecycle, _, report = _score_bundle(tmp_path, "holdout", selected=False)
     metrics = report["arms"]["omni_to_qwen_vista"]["post_review"]
     assert metrics["selected_count"] == 0
     assert metrics["selection_precision"] is None
-    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests)
+    decision = evaluate_release_gate(report, _gate_config(), lifecycle, sealed, run, requests, root=tmp_path)
     assert decision["eligible"] is False
     assert "quality.min_selected_count" in {item["gate_id"] for item in decision["blocking_failures"]}
 

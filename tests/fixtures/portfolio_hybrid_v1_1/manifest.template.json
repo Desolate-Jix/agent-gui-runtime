@@ -29,7 +29,9 @@
     {
       "arm_id": "qwen_only",
       "phase": "pre-vista",
-      "producer_stages": ["qwen"],
+      "producer_stages": [
+        "qwen"
+      ],
       "budget": {
         "max_provider_calls_per_case": 3,
         "max_output_tokens_per_case": 2048,
@@ -44,7 +46,9 @@
     {
       "arm_id": "omni_only_discovery",
       "phase": "pre-vista",
-      "producer_stages": ["omni"],
+      "producer_stages": [
+        "omni"
+      ],
       "budget": {
         "max_provider_calls_per_case": 3,
         "max_output_tokens_per_case": 2048,
@@ -59,7 +63,10 @@
     {
       "arm_id": "omni_to_qwen",
       "phase": "pre-vista",
-      "producer_stages": ["omni", "qwen"],
+      "producer_stages": [
+        "omni",
+        "qwen"
+      ],
       "budget": {
         "max_provider_calls_per_case": 3,
         "max_output_tokens_per_case": 2048,
@@ -74,7 +81,11 @@
     {
       "arm_id": "omni_to_qwen_vista",
       "phase": "post-vista",
-      "producer_stages": ["omni", "qwen", "vista"],
+      "producer_stages": [
+        "omni",
+        "qwen",
+        "vista"
+      ],
       "budget": {
         "max_provider_calls_per_case": 3,
         "max_output_tokens_per_case": 2048,
@@ -100,13 +111,21 @@
       "goal": "REPLACE_WITH_PROVIDER_VISIBLE_GOAL",
       "gold": {
         "acceptable_candidate_ids": [],
-        "acceptable_regions": [[0, 0, 1, 1]],
+        "acceptable_regions": [
+          [
+            0,
+            0,
+            1,
+            1
+          ]
+        ],
         "annotator_identity_hash": "0000000000000000000000000000000000000000000000000000000000000000",
         "reviewer_identity_hash": "1111111111111111111111111111111111111111111111111111111111111111",
         "acceptable_region_disagreement": "none",
         "review_status": "approved",
         "important_target": true
-      }
+      },
+      "source_provenance": "REPLACE_WITH_existing_five_screen_regression_OR_public_synthetic_new"
     }
   ],
   "evidence_policy": {
