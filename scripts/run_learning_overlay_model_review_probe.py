@@ -66,6 +66,7 @@ def run_probe(
     endpoint: str = "http://127.0.0.1:13240/v1/chat/completions",
     model_name: str = "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
     timeout_seconds: float = 240.0,
+    managed_model_lease: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source = _load_json(stage2_json_path)
     stage2, source_context = _extract_stage2(source)
@@ -106,6 +107,7 @@ def run_probe(
             image_path=Path(review_input["overlay_path"]),
             prompt=prompt,
             timeout_seconds=timeout_seconds,
+            managed_model_lease=managed_model_lease,
         )
         raw_text = _message_text(endpoint_response)
         source_type = "actual_model_call"
@@ -147,6 +149,7 @@ def run_probe(
             image_path=Path(review_input["overlay_path"]),
             prompt=schema_repair_prompt,
             timeout_seconds=timeout_seconds,
+            managed_model_lease=managed_model_lease,
         )
         schema_repair_raw = _message_text(schema_repair_response)
         schema_repair_raw_path = out_dir / "schema_repair_raw_model_output.txt"
@@ -179,6 +182,7 @@ def run_probe(
             model_name=model_name,
             timeout_seconds=timeout_seconds,
             batch_size=8,
+            managed_model_lease=managed_model_lease,
         )
     parsed_patch = merge_deterministic_review_keeps(
         parsed_patch,
@@ -212,6 +216,7 @@ def run_probe(
                     image_path=Path(focused_input["overlay_path"]),
                     prompt=focused_prompt,
                     timeout_seconds=timeout_seconds,
+                    managed_model_lease=managed_model_lease,
                 )
                 focused_raw = _message_text(focused_endpoint_response)
                 (focused_dir / f"{stem}_raw.txt").write_text(focused_raw, encoding="utf-8")
@@ -326,6 +331,7 @@ def run_probe(
                     image_path=Path(candidate_overlay["overlay_path"]),
                     prompt=candidate_prompt,
                     timeout_seconds=timeout_seconds,
+                    managed_model_lease=managed_model_lease,
                 )
                 candidate_raw = _message_text(candidate_response)
                 candidate_raw_path = candidate_dir / "raw_model_output.txt"
@@ -554,6 +560,7 @@ def _review_omitted_groups(
     model_name: str,
     timeout_seconds: float,
     batch_size: int,
+    managed_model_lease: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     omitted_ids = sorted(
         {
@@ -630,6 +637,7 @@ def _review_omitted_groups(
                     image_path=Path(batch_input["overlay_path"]),
                     prompt=prompt,
                     timeout_seconds=timeout_seconds,
+                    managed_model_lease=managed_model_lease,
                 )
                 raw = _message_text(endpoint_response)
                 (out_dir / f"{batch_stem}_raw.txt").write_text(raw, encoding="utf-8")
@@ -755,10 +763,23 @@ def _call_model(
     image_path: Path,
     prompt: str,
     timeout_seconds: float,
+    managed_model_lease: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     image_url = "data:image/png;base64," + base64.b64encode(image_path.read_bytes()).decode("ascii")
+    dispatch_endpoint = endpoint
+    dispatch_model_name = model_name
+    if managed_model_lease is not None:
+        from app.core.model_server import _profile_for_qwen_model_lease
+
+        sealed_profile = _profile_for_qwen_model_lease(managed_model_lease)
+        dispatch_endpoint = str(sealed_profile.get("endpoint") or "").strip()
+        dispatch_model_name = str(
+            sealed_profile.get("model_name") or sealed_profile.get("model_id") or ""
+        ).strip()
+        if not dispatch_endpoint or not dispatch_model_name:
+            raise RuntimeError("managed Qwen lease lacks a sealed endpoint or model name")
     payload = {
-        "model": model_name,
+        "model": dispatch_model_name,
         "temperature": 0.0,
         "max_tokens": 4096,
         "response_format": {"type": "json_object"},
@@ -782,7 +803,7 @@ def _call_model(
         payload["request_id"] = request_id
         headers["X-Agent-GUI-Request-ID"] = request_id
     request = Request(
-        endpoint,
+        dispatch_endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers=headers,
         method="POST",
@@ -792,13 +813,32 @@ def _call_model(
         mark_qwen_model_response_body_complete,
     )
 
-    request_attempt = mark_qwen_model_request_in_flight(request_id=request_id)
+    request_attempt = None
+    if managed_model_lease is not None:
+        request_attempt = mark_qwen_model_request_in_flight(
+            model_lease=managed_model_lease,
+            request_id=request_id,
+        )
+        if request_attempt is None:
+            raise RuntimeError("managed Qwen lease could not open an exact request attempt")
+        reattested_profile = _profile_for_qwen_model_lease(managed_model_lease)
+        reattested_endpoint = str(reattested_profile.get("endpoint") or "").strip()
+        reattested_model_name = str(
+            reattested_profile.get("model_name") or reattested_profile.get("model_id") or ""
+        ).strip()
+        if (
+            reattested_endpoint != dispatch_endpoint
+            or reattested_model_name != dispatch_model_name
+        ):
+            raise RuntimeError("managed Qwen sealed request profile changed before dispatch")
     with urlopen(request, timeout=float(timeout_seconds)) as response:
         response_bytes = response.read()
-        mark_qwen_model_response_body_complete(
-            request_id=request_id,
-            request_attempt=request_attempt,
-        )
+        if managed_model_lease is not None:
+            mark_qwen_model_response_body_complete(
+                model_lease=managed_model_lease,
+                request_id=request_id,
+                request_attempt=request_attempt,
+            )
         decoded = json.loads(response_bytes.decode("utf-8"))
     if not isinstance(decoded, dict):
         raise ValueError("model endpoint response must be a JSON object")

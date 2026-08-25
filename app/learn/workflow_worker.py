@@ -179,10 +179,19 @@ def execute_learning_stage_worker_task(
                 )
             )
         elif normalized_kind == "panel_learning_model_review_repair":
+            review_task_options: dict[str, Any] = {}
+            if model_lease is not None:
+                from app.learn.recognition import panel_review_pipeline
+
+                review_task_options["review_runner"] = partial(
+                    panel_review_pipeline.run_panel_learning_model_review_repair,
+                    managed_model_lease=deepcopy(model_lease),
+                )
             response = model_review_result_to_legacy_response(
                 run_model_review_task(
                     ModelReviewTaskInput.model_validate(execution_payload),
                     project_root=_PROJECT_ROOT,
+                    **review_task_options,
                 )
             )
         elif normalized_kind == "panel_learning_calibration_sequence":

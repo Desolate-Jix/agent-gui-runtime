@@ -1422,6 +1422,64 @@ def test_observe_worker_binds_exact_lease_into_production_screen_reader(
     assert response == {"outcome": "completed"}
 
 
+def test_worker_passes_exact_model_review_lease_to_production_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from functools import partial
+
+    from app.learn import workflow_worker
+    from app.learn.recognition import panel_review_pipeline
+    from app.learn.workflow_contracts import LearningTaskResult
+
+    lease = {
+        "lease_id": "review-lease",
+        "incarnation_id": "review-incarnation",
+        "owner_request_id": "review-owner",
+    }
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        lambda *args, **kwargs: lease,
+    )
+    monkeypatch.setattr(
+        "app.core.model_server.reconcile_qwen_model_lease_failure",
+        lambda **kwargs: {"status": "released"},
+    )
+
+    def production_runner(**kwargs):
+        del kwargs
+        return {}
+
+    monkeypatch.setattr(
+        panel_review_pipeline,
+        "run_panel_learning_model_review_repair",
+        production_runner,
+    )
+
+    def run_task(task_input, *, project_root, review_runner):
+        del task_input, project_root
+        assert isinstance(review_runner, partial)
+        assert review_runner.func is production_runner
+        assert review_runner.keywords == {"managed_model_lease": lease}
+        return LearningTaskResult(
+            outcome="completed",
+            payload={"status": "ready_for_calibration", "calibration_permission": True},
+        )
+
+    monkeypatch.setattr(workflow_worker, "run_model_review_task", run_task)
+
+    response = execute_learning_stage_worker_task(
+        "panel_learning_model_review_repair",
+        {
+            "two_stage_report_path": "two-stage.json",
+            "screenshot_path": "screen.png",
+            "composite_overlay_path": "overlay.png",
+        },
+    )
+
+    assert response["success"] is True
+
+
 @pytest.mark.parametrize(
     "task_kind",
     [

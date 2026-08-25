@@ -1760,23 +1760,38 @@ def test_model_review_http_attempt_reopens_completed_lease_before_later_timeout(
     monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "managed-model-review-owner")
     image_path = tmp_path / "review.png"
     Image.new("RGB", (8, 8), "white").save(image_path)
+    drifted_profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13241/v1/chat/completions",
+        "model_name": "qwen-drifted",
+    }
+    monkeypatch.setattr(model_server, "load_model_profiles", lambda: [drifted_profile])
     dispatch_count = 0
+    dispatched_requests: list[dict[str, object]] = []
 
     def controlled_urlopen(request, timeout):
         nonlocal dispatch_count
-        del request, timeout
         dispatch_count += 1
+        dispatched_requests.append(
+            {
+                "url": request.full_url,
+                "body": json.loads(request.data.decode("utf-8")),
+                "timeout": timeout,
+            }
+        )
         if dispatch_count == 1:
             return _FakeResponse({"choices": [{"message": {"content": "{}"}}]})
         raise TimeoutError("controlled model-review timeout")
 
     monkeypatch.setattr(review_probe, "urlopen", controlled_urlopen)
     first = review_probe._call_model(
-        endpoint=profile["endpoint"],
-        model_name=profile["model_name"],
+        endpoint=drifted_profile["endpoint"],
+        model_name=drifted_profile["model_name"],
         image_path=image_path,
         prompt="first",
         timeout_seconds=0.01,
+        managed_model_lease=lease,
     )
     assert first["choices"]
     with model_server._qwen_lease_lock():
@@ -1789,11 +1804,12 @@ def test_model_review_http_attempt_reopens_completed_lease_before_later_timeout(
 
     with pytest.raises(TimeoutError, match="controlled model-review timeout"):
         review_probe._call_model(
-            endpoint=profile["endpoint"],
-            model_name=profile["model_name"],
+            endpoint=drifted_profile["endpoint"],
+            model_name=drifted_profile["model_name"],
             image_path=image_path,
             prompt="retry",
             timeout_seconds=0.01,
+            managed_model_lease=lease,
         )
 
     with model_server._qwen_lease_lock():
@@ -1802,6 +1818,164 @@ def test_model_review_http_attempt_reopens_completed_lease_before_later_timeout(
     assert exact["lifecycle_state"] == "request_in_flight"
     assert exact["request_attempt"] == 2
     assert "completed_request_attempt" not in exact
+    assert [item["url"] for item in dispatched_requests] == [
+        profile["endpoint"],
+        profile["endpoint"],
+    ]
+    assert [item["body"]["model"] for item in dispatched_requests] == [
+        profile["model_name"],
+        profile["model_name"],
+    ]
+
+
+def test_unbound_model_review_response_cannot_complete_ambient_managed_lease(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from scripts import run_learning_overlay_model_review_probe as review_probe
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    drifted_endpoint = "http://127.0.0.1:13241/v1/chat/completions"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-model-review-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "managed-model-review-owner")
+    image_path = tmp_path / "review.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    requested_urls: list[str] = []
+
+    def controlled_urlopen(request, timeout):
+        del timeout
+        requested_urls.append(request.full_url)
+        return _FakeResponse({"choices": [{"message": {"content": "{}"}}]})
+
+    monkeypatch.setattr(review_probe, "urlopen", controlled_urlopen)
+    response = review_probe._call_model(
+        endpoint=drifted_endpoint,
+        model_name="qwen-drifted",
+        image_path=image_path,
+        prompt="unbound",
+        timeout_seconds=0.01,
+    )
+
+    assert response["choices"]
+    assert requested_urls == [drifted_endpoint]
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        exact = model_server._find_exact_lease(state, lease)
+    assert exact["lifecycle_state"] == "not_started"
+    assert "request_attempt" not in exact
+
+
+def test_managed_model_review_fails_closed_when_exact_attempt_cannot_open(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from scripts import run_learning_overlay_model_review_probe as review_probe
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-model-review-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    image_path = tmp_path / "review.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    monkeypatch.setattr(
+        model_server,
+        "mark_qwen_model_request_in_flight",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        review_probe,
+        "urlopen",
+        lambda *args, **kwargs: pytest.fail("inactive exact lease reached HTTP dispatch"),
+    )
+
+    with pytest.raises(RuntimeError, match="exact request attempt"):
+        review_probe._call_model(
+            endpoint=profile["endpoint"],
+            model_name=profile["model_name"],
+            image_path=image_path,
+            prompt="closed lease",
+            timeout_seconds=0.01,
+            managed_model_lease=lease,
+        )
+
+
+def test_managed_model_review_reattests_exact_socket_after_attempt_open(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from PIL import Image
+    from scripts import run_learning_overlay_model_review_probe as review_probe
+
+    profile = {
+        "profile_id": "qwen",
+        "provider_mode": "local_understanding",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-controlled",
+    }
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    lease = model_server.acquire_qwen_model_lease(
+        profile=profile,
+        request_id="managed-model-review-owner",
+        readiness=_current_process_readiness(model_id="qwen-controlled"),
+    )
+    image_path = tmp_path / "review.png"
+    Image.new("RGB", (8, 8), "white").save(image_path)
+    production_mark = model_server.mark_qwen_model_request_in_flight
+
+    def open_attempt_then_drift(**kwargs):
+        attempt = production_mark(**kwargs)
+        monkeypatch.setattr(
+            model_server,
+            "_attest_exact_qwen_socket_owner",
+            lambda server_socket, process_identity: False,
+        )
+        return attempt
+
+    monkeypatch.setattr(
+        model_server,
+        "mark_qwen_model_request_in_flight",
+        open_attempt_then_drift,
+    )
+    monkeypatch.setattr(
+        review_probe,
+        "urlopen",
+        lambda *args, **kwargs: pytest.fail("drifted socket reached HTTP dispatch"),
+    )
+
+    with pytest.raises(RuntimeError, match="socket ownership changed"):
+        review_probe._call_model(
+            endpoint=profile["endpoint"],
+            model_name=profile["model_name"],
+            image_path=image_path,
+            prompt="drift after attempt open",
+            timeout_seconds=0.01,
+            managed_model_lease=lease,
+        )
+
+    with model_server._qwen_lease_lock():
+        state = model_server._load_qwen_lease_state(lease["incarnation_id"])
+        exact = model_server._find_exact_lease(state, lease)
+    assert exact["lifecycle_state"] == "request_in_flight"
 
 
 def test_qwen_finalizer_crash_after_stop_recovers_from_proven_absence_without_second_stop(

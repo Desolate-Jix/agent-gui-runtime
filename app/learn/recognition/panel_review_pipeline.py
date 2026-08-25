@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image
 
-from app.core.model_server import profile_for_stage
+from app.core.model_server import _profile_for_qwen_model_lease, profile_for_stage
 from app.learn.hierarchy_draft import build_hierarchy_learning_draft
 from app.learn.recognition.review_finalization import finalize_reviewed_stage2_for_calibration
 from app.learn.recognition.two_stage import _fusion_boxes, summarize_stage2_calibration_partition
@@ -26,13 +26,18 @@ def run_panel_learning_model_review_repair(
     composite_overlay_path: Path,
     model_profile_id: str,
     timeout_seconds: float,
+    managed_model_lease: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """调用统一复核、修复和最终编号闭环，供面板与测试共同使用。"""
 
     source_report_path = _resolve_existing(two_stage_report_path)
     screenshot = _resolve_existing(screenshot_path)
     composite_overlay = _resolve_existing(composite_overlay_path)
-    profile = profile_for_stage("observe", model_profile_id)
+    profile = (
+        _profile_for_qwen_model_lease(managed_model_lease)
+        if managed_model_lease is not None
+        else profile_for_stage("observe", model_profile_id)
+    )
     endpoint = str(profile.get("endpoint") or "").strip()
     model_name = str(profile.get("model_name") or profile.get("model_id") or "").strip()
     if not endpoint or not model_name:
@@ -50,6 +55,7 @@ def run_panel_learning_model_review_repair(
         endpoint=endpoint,
         model_name=model_name,
         timeout_seconds=timeout_seconds,
+        managed_model_lease=managed_model_lease,
     )
     closure_path = run_dir / "repair_closure" / "learning_review_repair_closure_report.json"
     closure = run_closure(
