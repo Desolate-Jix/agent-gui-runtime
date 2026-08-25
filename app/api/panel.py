@@ -1532,14 +1532,58 @@ def _authoritative_managed_hybrid_trial_expectations(
 ) -> tuple[bool, int | None, dict[str, str] | None]:
     """从服务端绑定的 managed trial 恢复生成投影时的操作版本。"""
 
+    resolved_trial = trial_path.resolve()
+    managed_completions: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for event in state.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        refs = event.get("evidence_refs")
+        if not isinstance(refs, dict):
+            continue
+        continuation = refs.get("worker_continuation")
+        event_trial = refs.get("trial_path")
+        try:
+            event_trial_path = (
+                _resolve_panel_artifact_file(event_trial)
+                if isinstance(event_trial, str) and event_trial.strip()
+                else None
+            )
+        except (OSError, TypeError, ValueError):
+            event_trial_path = None
+        if (
+            event_trial_path == resolved_trial
+            and isinstance(continuation, dict)
+            and continuation.get("task_kind")
+            == "panel_learning_hybrid_review_projection"
+        ):
+            managed_completions.append((event, refs, continuation))
+    if not managed_completions:
+        return False, None, None
+    if len(managed_completions) != 1:
+        return True, None, None
+    completion_event, completion_refs, continuation = managed_completions[0]
+    if (
+        completion_event.get("stage") != "screen_understanding"
+        or completion_event.get("outcome") != "completed"
+    ):
+        return True, None, None
     try:
         payload = json.loads(trial_path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        return False, None, None
+        return True, None, None
     if not isinstance(payload, dict) or "managed_hybrid_lineage" not in payload:
-        return False, None, None
+        return True, None, None
     managed = payload.get("managed_hybrid_lineage")
-    if not isinstance(managed, dict):
+    expected_managed_fields = {
+        "run_id",
+        "workflow_revision",
+        "operation_id",
+        "worker_id",
+        "result_sha256",
+        "capture_lineage_ref",
+        "hybrid_capture_bundle_ref",
+    }
+    if not isinstance(managed, dict) or set(managed) != expected_managed_fields:
         return True, None, None
     run_id = managed.get("run_id")
     operation_revision = managed.get("workflow_revision")
@@ -1557,11 +1601,14 @@ def _authoritative_managed_hybrid_trial_expectations(
         )
         or len(result_sha256) != 64
         or managed.get("capture_lineage_ref") != capture_lineage_ref
+        or managed.get("hybrid_capture_bundle_ref")
+        != completion_refs.get("hybrid_capture_bundle_ref")
+        or continuation.get("operation_id") != operation_id
+        or continuation.get("worker_id") != worker_id
+        or continuation.get("result_sha256") != result_sha256
     ):
         return True, None, None
     operation_bound = False
-    completion_bound = False
-    resolved_trial = trial_path.resolve()
     for event in state.get("events", []):
         if not isinstance(event, dict):
             continue
@@ -1576,29 +1623,11 @@ def _authoritative_managed_hybrid_trial_expectations(
             and execution.get("stage") == "screen_understanding"
         ):
             operation_bound = True
-        continuation = refs.get("worker_continuation")
-        event_trial = refs.get("trial_path")
-        try:
-            event_trial_path = (
-                _resolve_panel_artifact_file(event_trial)
-                if isinstance(event_trial, str) and event_trial.strip()
-                else None
-            )
-        except (OSError, TypeError, ValueError):
-            event_trial_path = None
-        if (
-            event_trial_path == resolved_trial
-            and isinstance(continuation, dict)
-            and continuation.get("operation_id") == operation_id
-            and continuation.get("worker_id") == worker_id
-            and continuation.get("result_sha256") == result_sha256
-            and continuation.get("task_kind")
-            == "panel_learning_hybrid_review_projection"
-            and isinstance(event.get("revision"), int)
-            and event["revision"] > operation_revision
-        ):
-            completion_bound = True
-    if not operation_bound or not completion_bound:
+    if (
+        not operation_bound
+        or not isinstance(completion_event.get("revision"), int)
+        or completion_event["revision"] <= operation_revision
+    ):
         return True, None, None
     return True, operation_revision, deepcopy(capture_lineage_ref)
 

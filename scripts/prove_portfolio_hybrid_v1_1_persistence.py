@@ -107,6 +107,37 @@ def _contains_proposals(value: object) -> tuple[bool, bool]:
     return "vista_proposal" in serialized, "human_point_proposal" in serialized
 
 
+def _exact_task8_source_node(
+    nodes: object, *, reviewed_relative: str
+) -> dict[str, Any] | None:
+    matches = [
+        node
+        for node in (nodes if isinstance(nodes, list) else [])
+        if isinstance(node, dict)
+        and isinstance(node.get("source_paths"), list)
+        and reviewed_relative in node["source_paths"]
+    ]
+    if (
+        len(matches) != 1
+        or matches[0].get("source_paths") != [reviewed_relative]
+    ):
+        return None
+    return matches[0]
+
+
+def _reload_identity_matches(
+    *, expected: Mapping[str, Any], actual: Mapping[str, Any]
+) -> bool:
+    required = {
+        "source_path",
+        "source_sha256",
+        "capture_lineage_ref",
+        "projection_ledger_digest",
+        "decision_ledger_digest",
+    }
+    return set(expected) == required and set(actual) == required and actual == expected
+
+
 def _window_binding() -> dict[str, object]:
     return {
         "window_binding_id": "window:managed-proof",
@@ -2071,6 +2102,39 @@ def _cas_snapshot(
     }
 
 
+def _publish_integrity_predicates(
+    *,
+    publish_snapshot: Mapping[str, Any],
+    duplicate_snapshot: Mapping[str, Any],
+    single_event: Mapping[str, Any],
+    expected_asset_id: str,
+    expected_content_sha256: str,
+    expected_registry_revision: int,
+) -> dict[str, bool]:
+    return {
+        "duplicate_full_snapshot_unchanged": (
+            duplicate_snapshot == publish_snapshot
+        ),
+        "single_publish_event_bound": (
+            single_event.get("event_type") == "publish"
+            and single_event.get("asset_id") == expected_asset_id
+            and single_event.get("content_sha256")
+            == expected_content_sha256
+            and single_event.get("registry_revision")
+            == expected_registry_revision
+            and single_event.get("artifact_is_authorization") is False
+        ),
+    }
+
+
+def _require_proof_predicates(predicates: Mapping[str, bool]) -> None:
+    failed = sorted(name for name, passed in predicates.items() if not passed)
+    if failed:
+        raise RuntimeError(
+            "managed persistence proof predicates failed: " + ", ".join(failed)
+        )
+
+
 def _write_proof_artifact(
     proof: dict[str, Any], output_path: Path
 ) -> dict[str, Any]:
@@ -2111,20 +2175,27 @@ def run_managed_two_process_persistence_proof(
     reviewed_projection = reviewed_draft["hybrid_review_projection"]
     capture_lineage_ref = deepcopy(reviewed_draft["capture_lineage_ref"])
     reviewed_relative = reviewed_path.relative_to(root).as_posix()
-    reviewed_source_nodes = [
-        node
-        for node in compiler_review.get("nodes", [])
-        if isinstance(node, dict)
-        and isinstance(node.get("source_paths"), list)
-        and reviewed_relative in node["source_paths"]
-    ]
-    compiler_source_references_reviewed = len(reviewed_source_nodes) == 1
+    reviewed_source_node = _exact_task8_source_node(
+        compiler_review.get("nodes"), reviewed_relative=reviewed_relative
+    )
+    exact_compiler_reviewed_source_binding = reviewed_source_node is not None
+    compiler_source_references_reviewed = exact_compiler_reviewed_source_binding
     review_has_vista, review_has_human = _contains_proposals(compiler_review)
     if not compiler_source_references_reviewed:
         raise RuntimeError("compiler source does not reference exact Task 8 reviewed candidate")
     if not review_has_vista or not review_has_human:
         raise RuntimeError("compiler review source lost non-authorizing Hybrid proposals")
-    reviewed_source_node = reviewed_source_nodes[0]
+    if reviewed_source_node is None:
+        raise RuntimeError("compiler source must bind exactly one Task 8 parent")
+    expected_reload_identity = {
+        "source_path": reviewed_relative,
+        "source_sha256": _sha256_bytes(reviewed_bytes),
+        "capture_lineage_ref": capture_lineage_ref,
+        "projection_ledger_digest": reviewed_projection["content_sha256"],
+        "decision_ledger_digest": _sha256_bytes(
+            _canonical_bytes(reviewed_projection["review_decisions"])
+        ),
+    }
     workflow_store_path = Path(managed["workflow_store_path"])
     compile_payload = {
         "application_identity_key": managed["application_identity_key"],
@@ -2197,6 +2268,13 @@ def run_managed_two_process_persistence_proof(
                 _canonical_bytes(reload_projection.get("review_decisions") or [])
             ),
         }
+        exact_public_reload_identity = _reload_identity_matches(
+            expected=expected_reload_identity,
+            actual=public_reload_b_identity,
+        )
+        public_reload_b_exact = (
+            public_reload_b_exact and exact_public_reload_identity
+        )
         compile_b_envelope = _http_api_data(
             server_b["base_url"],
             "/panel/compile_reviewed_workflow_asset",
@@ -2266,6 +2344,14 @@ def run_managed_two_process_persistence_proof(
     if len(new_events) != 1:
         raise RuntimeError("publish did not append exactly one registry event")
     single_publish_event = deepcopy(new_events[0])
+    publish_integrity = _publish_integrity_predicates(
+        publish_snapshot=cas_after_publish,
+        duplicate_snapshot=cas_after_duplicate,
+        single_event=single_publish_event,
+        expected_asset_id=asset_b["asset_id"],
+        expected_content_sha256=compiled_sha_b,
+        expected_registry_revision=cas_after_publish["registry_revision"],
+    )
     from app.agent.reviewed_workflow_asset import (
         ReviewedWorkflowAssetStore,
         content_sha256,
@@ -2291,6 +2377,10 @@ def run_managed_two_process_persistence_proof(
         "server_a_exited_before_b": process_a_terminated,
         "both_servers_clean": server_a_exit_code == 0 and server_b_exit_code == 0,
         "public_exact_managed_reload": public_reload_b_exact,
+        "exact_compiler_reviewed_source_binding": (
+            exact_compiler_reviewed_source_binding
+        ),
+        "exact_public_reload_identity": exact_public_reload_identity,
         "compiler_source_sha_equal": source_sha == source_sha_a == source_sha_b,
         "compiled_asset_sha_equal": compiled_sha_a == compiled_sha_b,
         "compile_a_read_only": cas_before_a == cas_after_a,
@@ -2300,8 +2390,18 @@ def run_managed_two_process_persistence_proof(
             duplicate_result["status"] == "already_published"
             and duplicate_event_delta == 0
             and duplicate_revision_delta == 0
+            and publish_integrity["duplicate_full_snapshot_unchanged"]
         ),
-        "registry_cas_verified": registry_cas_verified,
+        "duplicate_full_snapshot_unchanged": publish_integrity[
+            "duplicate_full_snapshot_unchanged"
+        ],
+        "single_publish_event_bound": publish_integrity[
+            "single_publish_event_bound"
+        ],
+        "registry_cas_verified": (
+            registry_cas_verified
+            and publish_integrity["single_publish_event_bound"]
+        ),
         "no_runtime_point_values": published_runtime_points == [],
         "fresh_grounding_gate_preserved": (
             asset_safety["fresh_grounding_required"] is True
@@ -2363,6 +2463,7 @@ def run_managed_two_process_persistence_proof(
         ),
         "public_reload_b_exact_managed_bytes": public_reload_b_exact,
         "public_reload_b_identity": public_reload_b_identity,
+        "expected_reload_identity": expected_reload_identity,
         "compile_a_status": compile_a["status"],
         "compile_b_status": compile_b["status"],
         "compile_a_registry_revision_before": cas_before_a["registry_revision"],
@@ -2380,6 +2481,8 @@ def run_managed_two_process_persistence_proof(
         "registry_revision_after": cas_after_duplicate["registry_revision"],
         "registry_publish_event_count": event_delta,
         "single_publish_event": single_publish_event,
+        "publish_snapshot_after": cas_after_publish,
+        "duplicate_snapshot_after": cas_after_duplicate,
         "published_asset_id": asset_b["asset_id"],
         "event_count_delta": event_delta,
         "duplicate_event_count_delta": duplicate_event_delta,
@@ -2403,6 +2506,7 @@ def run_managed_two_process_persistence_proof(
         "predicate_results": predicates,
         "all_predicates_satisfied": all(predicates.values()),
     }
+    _require_proof_predicates(predicates)
     destination = (
         Path(output_path).resolve()
         if output_path is not None

@@ -603,7 +603,35 @@ def _materialize_editable_node_review_sources(
             for value in (node.get("source_paths") if isinstance(node.get("source_paths"), list) else [])
             if str(value or "").strip() and str(value or "").strip() != source_ref
         ]
-        node["source_paths"] = [source_ref, *existing_paths]
+        has_authoritative_reviewed_source = any(
+            _is_reviewed_candidate_source(value, project_root=project_root)
+            for value in existing_paths
+        )
+        node["source_paths"] = (
+            existing_paths
+            if has_authoritative_reviewed_source
+            else [source_ref, *existing_paths]
+        )
+
+
+def _is_reviewed_candidate_source(value: str, *, project_root: Path) -> bool:
+    """仅把现存的 Task 8 reviewed candidate 识别为权威父来源。"""
+
+    candidate = Path(value)
+    resolved = (
+        candidate.resolve()
+        if candidate.is_absolute()
+        else (project_root / candidate).resolve()
+    )
+    try:
+        resolved.relative_to(project_root.resolve())
+        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("contract_version") == "reviewed_template_candidate_v1"
+    )
 
 
 def _editable_action_templates(node: dict[str, Any]) -> list[dict[str, Any]]:

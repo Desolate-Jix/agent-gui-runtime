@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -152,9 +153,9 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     )
     assert proof["compiler_reviewed_source_field"] == "nodes[*].source_paths"
     assert proof["compiler_reviewed_source_relative_path"] in source_node["source_paths"]
-    assert source_node["source_paths"].count(
+    assert source_node["source_paths"] == [
         proof["compiler_reviewed_source_relative_path"]
-    ) == 1
+    ]
     assert proof["compiler_reviewed_source_sha256"] == hashlib.sha256(
         reviewed_bytes
     ).hexdigest()
@@ -162,6 +163,7 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     assert proof["review_source_human_proposal_present"] is True
     assert proof["public_reload_b_exact_managed_bytes"] is True
     reload_identity = proof["public_reload_b_identity"]
+    assert proof["expected_reload_identity"] == reload_identity
     assert reload_identity["source_path"] == proof[
         "compiler_reviewed_source_relative_path"
     ]
@@ -198,6 +200,9 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     assert publish_event["asset_id"] == proof["published_asset_id"]
     assert publish_event["content_sha256"] == proof["compiled_asset_sha_b"]
     assert publish_event["registry_revision"] == proof["registry_revision_after"]
+    assert publish_event["event_type"] == "publish"
+    assert publish_event["artifact_is_authorization"] is False
+    assert proof["publish_snapshot_after"] == proof["duplicate_snapshot_after"]
     assert proof["event_count_delta"] == 1
     assert proof["registry_cas_verified"] is True
     assert proof["active_content_sha256"] == proof["compiled_asset_sha_b"]
@@ -210,6 +215,10 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
     assert proof["artifact_is_authorization"] is False
     assert proof["execute_binding_enabled"] is False
     assert proof["all_predicates_satisfied"] is True
+    assert proof["predicate_results"]["exact_compiler_reviewed_source_binding"] is True
+    assert proof["predicate_results"]["exact_public_reload_identity"] is True
+    assert proof["predicate_results"]["duplicate_full_snapshot_unchanged"] is True
+    assert proof["predicate_results"]["single_publish_event_bound"] is True
 
     proof_path = Path(proof["proof_artifact_path"])
     assert proof_path.is_file()
@@ -249,3 +258,109 @@ def test_hand_written_fixture_is_explicit_no_publish_negative_control(
     assert proof["compiled_status"] == "compiled"
     assert proof["compiled_runtime_point_fields"] == []
     assert proof["fixture_contains_non_authorizing_proposals"] is True
+
+
+def test_publish_integrity_predicates_reject_hidden_duplicate_and_event_mutations() -> None:
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _publish_integrity_predicates,
+        _require_proof_predicates,
+    )
+
+    event = {
+        "event_type": "publish",
+        "asset_id": "asset/one",
+        "content_sha256": "a" * 64,
+        "registry_revision": 1,
+        "artifact_is_authorization": False,
+    }
+    published = {
+        "registry_revision": 1,
+        "event_count": 1,
+        "registry_raw": {"sha256": "b" * 64},
+        "registry_events": [event],
+        "registry_objects": {},
+        "cas_object_sha256_by_name": {"a.json": "a" * 64},
+        "relevant_store_files": {},
+    }
+    assert all(
+        _publish_integrity_predicates(
+            publish_snapshot=published,
+            duplicate_snapshot=deepcopy(published),
+            single_event=event,
+            expected_asset_id="asset/one",
+            expected_content_sha256="a" * 64,
+            expected_registry_revision=1,
+        ).values()
+    )
+    hidden_duplicate = deepcopy(published)
+    hidden_duplicate["registry_raw"]["sha256"] = "c" * 64
+    duplicate_predicates = _publish_integrity_predicates(
+        publish_snapshot=published,
+        duplicate_snapshot=hidden_duplicate,
+        single_event=event,
+        expected_asset_id="asset/one",
+        expected_content_sha256="a" * 64,
+        expected_registry_revision=1,
+    )
+    assert duplicate_predicates["duplicate_full_snapshot_unchanged"] is False
+    with pytest.raises(RuntimeError, match="duplicate_full_snapshot_unchanged"):
+        _require_proof_predicates(duplicate_predicates)
+    for field, wrong_value in (
+        ("event_type", "replace"),
+        ("asset_id", "asset/stale"),
+        ("content_sha256", "c" * 64),
+        ("registry_revision", 2),
+        ("artifact_is_authorization", True),
+    ):
+        wrong_event = {**event, field: wrong_value}
+        event_predicates = _publish_integrity_predicates(
+            publish_snapshot=published,
+            duplicate_snapshot=deepcopy(published),
+            single_event=wrong_event,
+            expected_asset_id="asset/one",
+            expected_content_sha256="a" * 64,
+            expected_registry_revision=1,
+        )
+        assert event_predicates["single_publish_event_bound"] is False
+        with pytest.raises(RuntimeError, match="single_publish_event_bound"):
+            _require_proof_predicates(event_predicates)
+
+
+def test_exact_reload_and_node_binding_reject_each_identity_mutation() -> None:
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _exact_task8_source_node,
+        _reload_identity_matches,
+    )
+
+    reviewed = "artifacts/learning-draft-review/reviewed.json"
+    node = {"node_id": "home", "source_paths": [reviewed]}
+    assert _exact_task8_source_node([node], reviewed_relative=reviewed) == node
+    assert _exact_task8_source_node(
+        [{**node, "source_paths": [reviewed, "other.json"]}],
+        reviewed_relative=reviewed,
+    ) is None
+    assert _exact_task8_source_node(
+        [node, {"node_id": "duplicate", "source_paths": [reviewed]}],
+        reviewed_relative=reviewed,
+    ) is None
+
+    expected = {
+        "source_path": reviewed,
+        "source_sha256": "a" * 64,
+        "capture_lineage_ref": {"id": "capture/one", "content_sha256": "b" * 64},
+        "projection_ledger_digest": "c" * 64,
+        "decision_ledger_digest": "d" * 64,
+    }
+    assert _reload_identity_matches(expected=expected, actual=deepcopy(expected))
+    for field, wrong_value in (
+        ("source_path", "stale.json"),
+        ("source_sha256", "e" * 64),
+        (
+            "capture_lineage_ref",
+            {"id": "capture/stale", "content_sha256": "f" * 64},
+        ),
+        ("projection_ledger_digest", "1" * 64),
+        ("decision_ledger_digest", "2" * 64),
+    ):
+        mutated = {**deepcopy(expected), field: wrong_value}
+        assert not _reload_identity_matches(expected=expected, actual=mutated)

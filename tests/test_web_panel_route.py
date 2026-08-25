@@ -314,12 +314,33 @@ def test_panel_managed_hybrid_trial_binds_operation_revision_after_finish(
         assert load_status(client)["status"] == "projected"
         original = json.loads(original_trial.decode("utf-8"))
         mutations = []
+        missing_marker = deepcopy(original)
+        missing_marker.pop("managed_hybrid_lineage")
+        mutations.append(missing_marker)
+        wrong_marker_type = deepcopy(original)
+        wrong_marker_type["managed_hybrid_lineage"] = []
+        mutations.append(wrong_marker_type)
         wrong_run = deepcopy(original)
         wrong_run["managed_hybrid_lineage"]["run_id"] = "run-stale"
         mutations.append(wrong_run)
         wrong_revision = deepcopy(original)
         wrong_revision["managed_hybrid_lineage"]["workflow_revision"] += 1
         mutations.append(wrong_revision)
+        wrong_operation = deepcopy(original)
+        wrong_operation["managed_hybrid_lineage"]["operation_id"] = "operation-stale"
+        mutations.append(wrong_operation)
+        wrong_worker = deepcopy(original)
+        wrong_worker["managed_hybrid_lineage"]["worker_id"] = "worker-stale"
+        mutations.append(wrong_worker)
+        wrong_result = deepcopy(original)
+        wrong_result["managed_hybrid_lineage"]["result_sha256"] = "e" * 64
+        mutations.append(wrong_result)
+        wrong_bundle = deepcopy(original)
+        wrong_bundle["managed_hybrid_lineage"]["hybrid_capture_bundle_ref"] = {
+            "id": "hybrid-capture/stale",
+            "content_sha256": "d" * 64,
+        }
+        mutations.append(wrong_bundle)
         wrong_lineage = deepcopy(original)
         wrong_lineage["managed_hybrid_lineage"]["capture_lineage_ref"] = {
             "id": "capture/stale",

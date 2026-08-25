@@ -564,6 +564,43 @@ def test_saved_workflow_materializes_editable_evidence_for_each_interface(
     assert loaded["execute_binding_enabled"] is False
 
 
+def test_saved_workflow_keeps_reviewed_candidate_as_exact_authoritative_source(
+    tmp_path: Path,
+) -> None:
+    reviewed_path = (
+        tmp_path / "artifacts" / "learning-draft-review" / "reviewed.json"
+    )
+    reviewed_path.parent.mkdir(parents=True)
+    reviewed_path.write_text(
+        json.dumps(
+            {
+                "contract_version": "reviewed_template_candidate_v1",
+                "draft": {"contract_version": "learning_template_draft_v1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    review = build_interface_workflow_review(
+        goal="Review exact source lineage",
+        application_identity={"name": "ExampleApp"},
+        draft_sources=[
+            _review(
+                source_path=reviewed_path.relative_to(tmp_path).as_posix(),
+                signature="reviewed-source",
+                summary="Reviewed source",
+                screenshot_path="artifacts/screenshots/reviewed.png",
+            )
+        ],
+    )
+
+    result = save_interface_workflow_review_candidate(review, project_root=tmp_path)
+
+    node = json.loads(Path(result["path"]).read_text(encoding="utf-8"))["nodes"][0]
+    assert node["source_paths"] == [reviewed_path.relative_to(tmp_path).as_posix()]
+    assert "/node-review-sources/" in node["editable_review_source_path"]
+    assert (tmp_path / node["editable_review_source_path"]).is_file()
+
+
 def test_saved_workflow_owns_durable_node_evidence_after_source_cleanup(
     tmp_path: Path,
 ) -> None:
