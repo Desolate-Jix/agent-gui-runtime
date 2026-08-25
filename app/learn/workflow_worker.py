@@ -129,6 +129,7 @@ HYBRID_LIFECYCLE_COMPONENT_REGISTRY = {
     "vista_cleanup_observer": ("model_server", "release_hybrid_vista_model_lease"),
     "supervisor_reconciliation": ("worker", "_reconcile_supervised_vista_record"),
     "review_guard": ("worker", "_assert_hybrid_provider_start_guard"),
+    "windows_owner_scope": ("process_scope", "windows_process_scope_available"),
 }
 _MODEL_READY_WAIT_SECONDS = 180.0
 _HYBRID_OMNI_CLEANUP_WAIT_SECONDS = 35.0
@@ -184,17 +185,26 @@ def hybrid_registered_lifecycle_status() -> dict[str, Any]:
         "vista_cleanup_observer": ("model_server", "release_hybrid_vista_model_lease"),
         "supervisor_reconciliation": ("worker", "_reconcile_supervised_vista_record"),
         "review_guard": ("worker", "_assert_hybrid_provider_start_guard"),
+        "windows_owner_scope": ("process_scope", "windows_process_scope_available"),
     }
     components: dict[str, bool] = {}
     for component, (owner, function_name) in expected_components.items():
         configured = HYBRID_LIFECYCLE_COMPONENT_REGISTRY.get(component)
         if owner == "worker":
             resolved = globals().get(function_name)
-        else:
+        elif owner == "model_server":
             from app.core import model_server
 
             resolved = getattr(model_server, function_name, None)
-        components[component] = configured == (owner, function_name) and callable(resolved)
+        else:
+            from app.learn.hybrid import windows_process_scope
+
+            resolved = getattr(windows_process_scope, function_name, None)
+        components[component] = (
+            configured == (owner, function_name)
+            and callable(resolved)
+            and (resolved() is True if owner == "process_scope" else True)
+        )
     try:
         handlers_ready = set(HYBRID_STAGE_HANDLER_REGISTRY) == set(expected_lifecycle) and all(
             callable(resolve_hybrid_stage_handler(task_kind))
@@ -335,6 +345,12 @@ def _observe_hybrid_omni_cleanup(
         and omni_inventory.get("provider_result_ref") == result_ref
     )
     cleanup_observation = load_omniparser_invocation_cleanup_observation(invocation_id)
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    exact_lineage = validate_hybrid_lineage(lineage)
+    expected_scope_name = process_scope_name(exact_lineage, "omni")
+    scope_cleanup = cleanup_observation.get("process_scope_cleanup")
+    scope_acquisition = cleanup_observation.get("process_scope_acquisition")
     provider_processes = deepcopy(cleanup_observation["provider_processes_after"])
     orphan_identities = deepcopy(cleanup_observation["orphan_descendant_identities"])
     lease_files = deepcopy(cleanup_observation["lease_files_after"])
@@ -343,6 +359,14 @@ def _observe_hybrid_omni_cleanup(
     verified = (
         refs_match
         and cleanup_observation.get("cleanup_status") == "verified"
+        and cleanup_observation.get("process_scope_name") == expected_scope_name
+        and isinstance(scope_cleanup, dict)
+        and scope_cleanup.get("scope_name") == expected_scope_name
+        and scope_cleanup.get("cleanup_status") == "verified"
+        and isinstance(scope_acquisition, dict)
+        and scope_acquisition.get("scope_name") == expected_scope_name
+        and cleanup_observation.get("process_identity", {}).get("pid")
+        in scope_acquisition.get("member_pids", [])
         and inventory_observable
         and not provider_processes
         and not orphan_identities
@@ -355,11 +379,12 @@ def _observe_hybrid_omni_cleanup(
         "observer_contract": "hybrid_omni_cleanup_observer_v1",
         "release_status": "verified" if verified else "failed",
         "termination_reason": "completed" if verified else "cleanup_failed",
-        "lineage": validate_hybrid_lineage(lineage),
+        "lineage": exact_lineage,
         "provider_lease_identity": {
             "provider_invocation_id": invocation_id,
             "provider_receipt_ref": deepcopy(receipt_ref),
             "process_identity": deepcopy(cleanup_observation["process_identity"]),
+            "process_scope_name": expected_scope_name,
         },
         "predecessor_sha256": predecessor_sha256,
         "provider_result_sha256": provider_result_sha256,
@@ -865,14 +890,40 @@ def _publish_supervised_vista_lease(
         or not isinstance(supervisor_context.get("worker_id"), str)
     ):
         raise LearningStageWorkerError("Hybrid VISTA supervisor context is invalid")
+    document = _load_supervised_vista_lease(supervisor_context)
+    if document.get("state") not in {"acquiring", "recovery_required"}:
+        raise LearningStageWorkerError(
+            "Hybrid VISTA acquiring journal is unavailable before lease publication"
+        )
+    if model_lease.get("process_scope_name") != document.get("process_scope_name"):
+        raise LearningStageWorkerError("Hybrid VISTA process scope mismatch")
+    document.pop("content_sha256", None)
+    document["state"] = "acquired"
+    document["predecessor_sha256"] = predecessor_sha256
+    document["model_lease"] = deepcopy(model_lease)
+    document = seal_immutable(document)
+    _write_json_atomic(Path(supervisor_context["provider_lease_path"]), document)
+
+
+def _publish_supervised_vista_acquiring(
+    supervisor_context: dict[str, Any],
+    *,
+    predecessor_sha256: str,
+    profile_id: str | None,
+) -> None:
     document = seal_immutable({
-        "contract_version": "hybrid_supervised_provider_lease_v1",
-        "state": "acquired",
+        "contract_version": "hybrid_supervised_provider_lease_v2",
+        "state": "acquiring",
         "worker_id": supervisor_context["worker_id"],
         "lineage": validate_hybrid_lineage(supervisor_context.get("lineage")),
+        "process_scope_name": _required_text(
+            supervisor_context.get("process_scope_name"), "process_scope_name"
+        ),
+        "profile_id": str(profile_id or "").strip() or None,
         "predecessor_sha256": predecessor_sha256,
-        "model_lease": deepcopy(model_lease),
+        "model_lease": None,
         "cleanup_receipt": None,
+        "scope_cleanup_evidence": None,
     })
     _write_json_atomic(Path(supervisor_context["provider_lease_path"]), document)
 
@@ -886,10 +937,15 @@ def _load_supervised_vista_lease(
     if digest != content_sha256(document):
         raise LearningStageWorkerError("Hybrid VISTA supervisor lease seal is invalid")
     if (
-        document.get("contract_version") != "hybrid_supervised_provider_lease_v1"
+        document.get("contract_version") != "hybrid_supervised_provider_lease_v2"
         or document.get("worker_id") != supervisor_context.get("worker_id")
-        or document.get("state") not in {"acquired", "released"}
-        or not isinstance(document.get("model_lease"), dict)
+        or document.get("state")
+        not in {"acquiring", "acquired", "recovery_required", "recovered", "released"}
+        or not isinstance(document.get("process_scope_name"), str)
+        or (
+            document.get("state") in {"acquired", "released"}
+            and not isinstance(document.get("model_lease"), dict)
+        )
     ):
         raise LearningStageWorkerError("Hybrid VISTA supervisor lease is invalid")
     document["lineage"] = validate_hybrid_lineage(document.get("lineage"))
@@ -914,10 +970,11 @@ def _mark_supervised_vista_released(
 
 
 def _reconcile_supervised_vista_record(record: dict[str, Any]) -> dict[str, Any]:
-    """父进程只按持久化精确 lease 回收，不按端口猜测 provider 身份。"""
+    """父进程用持久化 lease 或 Job Object 权威回收。"""
     context = {
         "provider_lease_path": str(record.get("provider_lease_path") or ""),
         "worker_id": str(record.get("worker_id") or ""),
+        "process_scope_name": str(record.get("provider_scope_name") or ""),
     }
     try:
         document = _load_supervised_vista_lease(context)
@@ -932,6 +989,19 @@ def _reconcile_supervised_vista_record(record: dict[str, Any]) -> dict[str, Any]
                 "status": "verified",
                 "cleanup_receipt": deepcopy(receipt),
             }
+        if document.get("state") == "recovered":
+            evidence = document.get("scope_cleanup_evidence")
+            if not isinstance(evidence, dict) or evidence.get("cleanup_status") != "verified":
+                raise LearningStageWorkerError(
+                    "recovered Hybrid VISTA scope lost cleanup evidence"
+                )
+            return {
+                "contract_version": "hybrid_supervisor_reconciliation_v2",
+                "status": "verified",
+                "scope_cleanup_evidence": deepcopy(evidence),
+            }
+        if document.get("state") in {"acquiring", "recovery_required"}:
+            return _reconcile_vista_scope_without_lease(record, document)
         receipt = _release_hybrid_vista_lease(
             document["model_lease"],
             lineage=document["lineage"],
@@ -943,17 +1013,117 @@ def _reconcile_supervised_vista_record(record: dict[str, Any]) -> dict[str, Any]
         )
         _mark_supervised_vista_released(context, receipt)
         return {
-            "contract_version": "hybrid_supervisor_reconciliation_v1",
+            "contract_version": "hybrid_supervisor_reconciliation_v2",
             "status": "verified",
             "cleanup_receipt": receipt,
         }
     except BaseException as error:
+        fallback = _reconcile_vista_scope_without_lease(record, None)
+        if fallback.get("status") == "verified":
+            return fallback
         return {
-            "contract_version": "hybrid_supervisor_reconciliation_v1",
+            "contract_version": "hybrid_supervisor_reconciliation_v2",
+            "status": "indeterminate",
+            "error_type": type(error).__name__,
+            "details": str(error),
+            "scope_reconciliation": fallback,
+        }
+
+
+def _reconcile_vista_scope_without_lease(
+    record: dict[str, Any],
+    document: dict[str, Any] | None,
+) -> dict[str, Any]:
+    from app.core.model_server import model_profile_pid_path, profile_for_stage
+    from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
+
+    scope_name = str(
+        (document or {}).get("process_scope_name")
+        or record.get("provider_scope_name")
+        or ""
+    )
+    profile_id = (document or {}).get("profile_id") or record.get("provider_profile_id")
+    try:
+        profile = profile_for_stage("locate", str(profile_id or "").strip() or None)
+        port = int(profile.get("port") or 0)
+        evidence = observe_process_scope_cleanup(
+            scope_name,
+            terminate=True,
+            listener_ports=[port] if port > 0 else [],
+            pid_file=model_profile_pid_path(profile),
+            remove_owned_pid_file=True,
+            stable_zero_observations=3,
+        )
+    except BaseException as error:
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v2",
             "status": "indeterminate",
             "error_type": type(error).__name__,
             "details": str(error),
         }
+    if evidence.get("cleanup_status") != "verified":
+        return {
+            "contract_version": "hybrid_supervisor_reconciliation_v2",
+            "status": "indeterminate",
+            "scope_cleanup_evidence": evidence,
+        }
+    if isinstance(document, dict):
+        document.pop("content_sha256", None)
+        document["state"] = "recovered"
+        document["scope_cleanup_evidence"] = deepcopy(evidence)
+        _write_json_atomic(
+            Path(str(record.get("provider_lease_path") or "")),
+            seal_immutable(document),
+        )
+    return {
+        "contract_version": "hybrid_supervisor_reconciliation_v2",
+        "status": "verified",
+        "scope_cleanup_evidence": evidence,
+    }
+
+
+def _reconcile_hybrid_provider_scope_record(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    if record.get("task_kind") == "panel_learning_calibration_sequence":
+        return _reconcile_supervised_vista_record(record)
+    from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
+
+    scope_name = str(record.get("provider_scope_name") or "")
+    listener_ports: list[int] = []
+    pid_file = None
+    if record.get("task_kind") == "panel_learning_hybrid_qwen_binding":
+        try:
+            from app.core.model_server import model_profile_pid_path, profile_for_stage
+
+            profile = profile_for_stage("understanding", None)
+            port = int(profile.get("port") or 0)
+            listener_ports = [port] if port > 0 else []
+            pid_file = model_profile_pid_path(profile)
+        except BaseException as error:
+            return {
+                "contract_version": "hybrid_supervisor_reconciliation_v2",
+                "status": "indeterminate",
+                "error_type": type(error).__name__,
+                "details": str(error),
+            }
+    evidence = observe_process_scope_cleanup(
+        scope_name,
+        terminate=True,
+        listener_ports=listener_ports,
+        pid_file=pid_file,
+        remove_owned_pid_file=pid_file is not None,
+        stable_zero_observations=3,
+    )
+    return {
+        "contract_version": "hybrid_supervisor_reconciliation_v2",
+        "status": (
+            "verified"
+            if evidence.get("cleanup_status") == "verified"
+            else "indeterminate"
+        ),
+        "scope_cleanup_evidence": evidence,
+    }
 
 
 def _hybrid_managed_failure_result(
@@ -1089,9 +1259,6 @@ def _ensure_learning_stage_model_ready(
             try:
                 lease = build_hybrid_vista_model_lease(profile, readiness)
             except ValueError as error:
-                from app.core.model_server import stop_model_server
-
-                stop_model_server(profile)
                 raise LearningStageWorkerError(str(error)) from error
             _publish_supervised_vista_lease(
                 supervisor_context,
@@ -1143,7 +1310,16 @@ def _run_learning_stage_worker_entry(
 ) -> None:
     result_file = Path(result_path)
     previous_request_id = os.environ.get("AGENT_GUI_MODEL_REQUEST_ID")
+    previous_process_scope = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME")
     os.environ["AGENT_GUI_MODEL_REQUEST_ID"] = model_request_id
+    supervisor = payload.get("_hybrid_supervisor")
+    process_scope_name = (
+        str(supervisor.get("process_scope_name") or "").strip()
+        if isinstance(supervisor, dict)
+        else ""
+    )
+    if process_scope_name:
+        os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = process_scope_name
     try:
         response = execute_learning_stage_worker_task(
             task_kind,
@@ -1173,6 +1349,10 @@ def _run_learning_stage_worker_entry(
             os.environ.pop("AGENT_GUI_MODEL_REQUEST_ID", None)
         else:
             os.environ["AGENT_GUI_MODEL_REQUEST_ID"] = previous_request_id
+        if previous_process_scope is None:
+            os.environ.pop("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", None)
+        else:
+            os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = previous_process_scope
     _write_worker_result(result_file, envelope)
     if completion_event is not None:
         completion_event.set()
@@ -1260,13 +1440,17 @@ class LearningStageWorkerRegistry:
         }
         if payload["status"] == "detached_running":
             payload["status"] = "running"
-        if payload["status"] == "reconciliation_pending":
+        if payload["status"] in {"reconciliation_pending", "recovery_required"}:
             payload["status"] = "running"
         payload["contract_version"] = LEARNING_STAGE_WORKER_JOURNAL_CONTRACT_VERSION
         payload["result_file"] = Path(record["result_path"]).name
         provider_lease_path = record.get("provider_lease_path")
         if isinstance(provider_lease_path, str):
             payload["provider_lease_file"] = Path(provider_lease_path).name
+        if isinstance(record.get("provider_scope_name"), str):
+            payload["provider_scope_name"] = record["provider_scope_name"]
+        if isinstance(record.get("provider_profile_id"), str):
+            payload["provider_profile_id"] = record["provider_profile_id"]
         if isinstance(record.get("result_adoption"), dict):
             payload["result_adoption"] = deepcopy(record["result_adoption"])
         _write_json_atomic(journal_path, payload)
@@ -1280,6 +1464,7 @@ class LearningStageWorkerRegistry:
         task_kind: str,
         payload: dict[str, Any],
         reuse_active_identical: bool = False,
+        authoritative_workflow_revision: int | None = None,
     ) -> dict[str, Any]:
         normalized_run_id = _required_text(run_id, "run_id")
         normalized_stage = _required_text(stage, "stage")
@@ -1291,7 +1476,27 @@ class LearningStageWorkerRegistry:
             )
         if not isinstance(payload, dict):
             raise LearningStageWorkerError("worker payload must be an object")
-        payload_sha256 = _payload_sha256(payload)
+        normalized_payload = deepcopy(payload)
+        hybrid_requested = normalized_payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+        if hybrid_requested:
+            if (
+                isinstance(authoritative_workflow_revision, bool)
+                or not isinstance(authoritative_workflow_revision, int)
+                or authoritative_workflow_revision < 0
+            ):
+                raise LearningStageWorkerError(
+                    "Hybrid authoritative workflow revision is required"
+                )
+            supplied_revision = normalized_payload.get("workflow_revision")
+            if (
+                supplied_revision is not None
+                and supplied_revision != authoritative_workflow_revision
+            ):
+                raise LearningStageWorkerError(
+                    "Hybrid payload workflow revision does not match authoritative revision"
+                )
+            normalized_payload["workflow_revision"] = authoritative_workflow_revision
+        payload_sha256 = _payload_sha256(normalized_payload)
 
         operation_key = (
             normalized_run_id,
@@ -1343,22 +1548,15 @@ class LearningStageWorkerRegistry:
             }
             hybrid_vista_task = (
                 normalized_task_kind == "panel_learning_calibration_sequence"
-                and payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+                and hybrid_requested
             )
-            child_payload = deepcopy(payload)
-            if payload.get("learning_pipeline_mode") == "hybrid_v1_1":
-                orchestration = payload.get("_hybrid_orchestration")
-                revision_value = payload.get("workflow_revision")
-                if revision_value is None and isinstance(orchestration, dict):
-                    revision_value = orchestration.get("workflow_revision")
-                if (
-                    isinstance(revision_value, bool)
-                    or not isinstance(revision_value, int)
-                    or revision_value < 0
-                ):
-                    raise LearningStageWorkerError(
-                        "Hybrid supervisor workflow revision is required"
-                    )
+            child_payload = deepcopy(normalized_payload)
+            provider_scope = None
+            provider_scope_name = None
+            provider_profile_id = None
+            if hybrid_requested:
+                revision_value = authoritative_workflow_revision
+                assert isinstance(revision_value, int)
                 lineage = {
                     "run_id": normalized_run_id,
                     "workflow_revision": revision_value,
@@ -1383,6 +1581,46 @@ class LearningStageWorkerRegistry:
                     "provider_lease_path": str(provider_lease_path),
                     "worker_id": worker_id,
                 }
+                provider = str(
+                    HYBRID_STAGE_HANDLER_REGISTRY.get(normalized_task_kind, {}).get(
+                        "provider"
+                    )
+                    or ""
+                )
+                if provider in {"omni", "qwen", "vista"}:
+                    from app.learn.hybrid.windows_process_scope import (
+                        WindowsProcessScope,
+                        process_scope_name,
+                    )
+
+                    provider_scope_name = process_scope_name(lineage, provider)
+                    provider_scope = WindowsProcessScope(
+                        provider_scope_name, create=True
+                    )
+                    child_payload["_hybrid_supervisor"][
+                        "process_scope_name"
+                    ] = provider_scope_name
+                if hybrid_vista_task:
+                    provider_profile_id = (
+                        str(normalized_payload.get("profile_id") or "").strip()
+                        or None
+                    )
+                    orchestration = normalized_payload.get("_hybrid_orchestration")
+                    predecessor = normalized_payload.get("hybrid_fusion_result")
+                    if not isinstance(predecessor, dict) and isinstance(
+                        orchestration, dict
+                    ):
+                        predecessor = orchestration.get("fusion_result")
+                    try:
+                        _publish_supervised_vista_acquiring(
+                            child_payload["_hybrid_supervisor"],
+                            predecessor_sha256=_artifact_digest(predecessor),
+                            profile_id=provider_profile_id,
+                        )
+                    except BaseException:
+                        if provider_scope is not None:
+                            provider_scope.close()
+                        raise
             cancellation_event = (
                 _ManagedCancellationEvent(
                     event=self._process_context.Event(),
@@ -1421,8 +1659,11 @@ class LearningStageWorkerRegistry:
                 "result_path": str(result_path),
                 "journal_path": str(journal_path),
                 "provider_lease_path": str(provider_lease_path),
+                "provider_scope_name": provider_scope_name,
+                "provider_scope": provider_scope,
+                "provider_profile_id": provider_profile_id,
                 "process": process,
-                "payload": deepcopy(payload),
+                "payload": deepcopy(normalized_payload),
                 "cancellation_event": cancellation_event,
                 "completion_event": completion_event,
                 "recovered_from_journal": False,
@@ -1439,6 +1680,7 @@ class LearningStageWorkerRegistry:
                 record["finished_at"] = _utc_now_iso()
                 self._active_by_operation.pop(operation_key, None)
                 self._persist_record_journal(record)
+                _close_provider_scope(record)
                 raise
             return self._public_record(record)
 
@@ -1642,6 +1884,7 @@ class LearningStageWorkerRegistry:
                 "running",
                 "detached_running",
                 "reconciliation_pending",
+                "recovery_required",
             }:
                 if (
                     record["task_kind"] in _MANAGED_QWEN_TASK_KINDS
@@ -1690,17 +1933,19 @@ class LearningStageWorkerRegistry:
             if process is None:
                 if (
                     record["task_kind"] == "panel_learning_calibration_sequence"
-                    and isinstance(record.get("provider_lease_path"), str)
-                    and Path(record["provider_lease_path"]).is_file()
+                    and isinstance(record.get("provider_scope_name"), str)
+                    and record.get("provider_scope_name")
                 ):
                     reconciliation = _reconcile_supervised_vista_record(record)
                     record["supervisor_reconciliation"] = reconciliation
                     record["status"] = (
                         "cancelled"
                         if reconciliation.get("status") == "verified"
-                        else "reconciliation_pending"
+                        else "recovery_required"
                     )
                     self._persist_record_journal(record)
+                    if reconciliation.get("status") == "verified":
+                        _close_provider_scope(record)
                     return {
                         **self._public_record(record),
                         "backend_compute_termination": "not_covered",
@@ -1713,7 +1958,7 @@ class LearningStageWorkerRegistry:
                             "contract_version": "model_request_cancellation_v1",
                             "status": "supervisor_reconciled"
                             if reconciliation.get("status") == "verified"
-                            else "reconciliation_pending",
+                            else "recovery_required",
                             "model_service_compute_termination": (
                                 "terminated"
                                 if reconciliation.get("status") == "verified"
@@ -1848,11 +2093,11 @@ class LearningStageWorkerRegistry:
                     reconciliation = _reconcile_supervised_vista_record(record)
                     record["supervisor_reconciliation"] = reconciliation
                     if reconciliation.get("status") != "verified":
-                        record["status"] = "reconciliation_pending"
+                        record["status"] = "recovery_required"
                         self._persist_record_journal(record)
                         return {
                             **self._public_record(record),
-                            "status": "reconciliation_pending",
+                            "status": "recovery_required",
                             "backend_compute_termination": "terminated"
                             if not process.is_alive()
                             else "termination_failed",
@@ -1864,6 +2109,7 @@ class LearningStageWorkerRegistry:
                     record["finished_at"] = _utc_now_iso()
                     self._active_by_operation.pop(operation_key, None)
                     self._persist_record_journal(record)
+                    _close_provider_scope(record)
                     return {
                         **self._public_record(record),
                         "backend_compute_termination": "terminated",
@@ -1987,7 +2233,9 @@ class LearningStageWorkerRegistry:
         detached = [
             item
             for item in records
-            if item.get("status") in {"detached_running", "reconciliation_pending"}
+            if item.get("status") in {
+                "detached_running", "reconciliation_pending", "recovery_required"
+            }
         ]
         return detached[-1] if detached else None
 
@@ -2012,6 +2260,15 @@ class LearningStageWorkerRegistry:
 
         result_path = Path(record["result_path"])
         if result_path.is_file():
+            if isinstance(record.get("provider_scope_name"), str) and record.get(
+                "provider_scope_name"
+            ):
+                reconciliation = _reconcile_hybrid_provider_scope_record(record)
+                record["supervisor_reconciliation"] = reconciliation
+                if reconciliation.get("status") != "verified":
+                    record["status"] = "recovery_required"
+                    self._persist_record_journal(record)
+                    return
             try:
                 result = _load_worker_result(result_path, record)
             except LearningStageWorkerError as exc:
@@ -2057,18 +2314,19 @@ class LearningStageWorkerRegistry:
             if self._active_by_operation.get(operation_key) == record["worker_id"]:
                 self._active_by_operation.pop(operation_key, None)
             self._persist_record_journal(record)
+            _close_provider_scope(record)
             return
 
         process = record.get("process")
         if process is None:
             if (
-                record.get("task_kind") == "panel_learning_calibration_sequence"
-                and Path(str(record.get("provider_lease_path") or "")).is_file()
+                isinstance(record.get("provider_scope_name"), str)
+                and record.get("provider_scope_name")
             ):
-                reconciliation = _reconcile_supervised_vista_record(record)
+                reconciliation = _reconcile_hybrid_provider_scope_record(record)
                 record["supervisor_reconciliation"] = reconciliation
                 if reconciliation.get("status") != "verified":
-                    record["status"] = "reconciliation_pending"
+                    record["status"] = "recovery_required"
                     self._persist_record_journal(record)
                     return
                 record["status"] = "failed"
@@ -2078,13 +2336,14 @@ class LearningStageWorkerRegistry:
                     "error": {
                         "type": "WorkerResultMissing",
                         "details": (
-                            "recovered Hybrid VISTA worker has no result envelope "
+                            "recovered Hybrid provider worker has no result envelope "
                             "after verified supervisor cleanup"
                         ),
                     },
                 }
                 record["finished_at"] = record.get("finished_at") or _utc_now_iso()
                 self._persist_record_journal(record)
+                _close_provider_scope(record)
                 return
             if record["status"] in {"running", "detached_running"}:
                 record["status"] = "detached_running"
@@ -2108,14 +2367,13 @@ class LearningStageWorkerRegistry:
             return
 
         process.join(timeout=0)
-        if (
-            record.get("task_kind") == "panel_learning_calibration_sequence"
-            and Path(str(record.get("provider_lease_path") or "")).is_file()
+        if isinstance(record.get("provider_scope_name"), str) and record.get(
+            "provider_scope_name"
         ):
-            reconciliation = _reconcile_supervised_vista_record(record)
+            reconciliation = _reconcile_hybrid_provider_scope_record(record)
             record["supervisor_reconciliation"] = reconciliation
             if reconciliation.get("status") != "verified":
-                record["status"] = "reconciliation_pending"
+                record["status"] = "recovery_required"
                 self._persist_record_journal(record)
                 return
         record["status"] = "failed"
@@ -2139,6 +2397,7 @@ class LearningStageWorkerRegistry:
         if self._active_by_operation.get(operation_key) == record["worker_id"]:
             self._active_by_operation.pop(operation_key, None)
         self._persist_record_journal(record)
+        _close_provider_scope(record)
 
     @staticmethod
     def _public_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -2152,6 +2411,7 @@ class LearningStageWorkerRegistry:
                 "result_adoption",
                 "cancellation_event",
                 "completion_event",
+                "provider_scope",
             }
         }
         process = record.get("process")
@@ -2179,6 +2439,16 @@ class LearningStageWorkerRegistry:
             if worker_result.get("status") != "completed":
                 result["error"] = deepcopy(worker_result.get("error"))
         return result
+
+
+def _close_provider_scope(record: dict[str, Any]) -> None:
+    scope = record.get("provider_scope")
+    if scope is None:
+        return
+    try:
+        scope.close()
+    finally:
+        record["provider_scope"] = None
 
 
 def _required_text(value: Any, field: str) -> str:
@@ -2338,6 +2608,20 @@ def _load_worker_journal(
                 "worker journal provider_lease_file escapes the result root"
             )
         provider_lease_path = str(candidate)
+    provider_scope_name = payload.get("provider_scope_name")
+    if provider_scope_name is not None:
+        provider_scope_name = _required_text(
+            provider_scope_name, "provider_scope_name"
+        )
+        if not provider_scope_name.startswith("Local\\AgentGuiHybrid-"):
+            raise LearningStageWorkerError(
+                "worker journal provider scope name is invalid"
+            )
+    provider_profile_id = payload.get("provider_profile_id")
+    if provider_profile_id is not None:
+        provider_profile_id = _required_text(
+            provider_profile_id, "provider_profile_id"
+        )
     return {
         "contract_version": LEARNING_STAGE_WORKER_CONTRACT_VERSION,
         **identity,
@@ -2348,6 +2632,9 @@ def _load_worker_journal(
         "result_path": str(result_path),
         "journal_path": str(journal_path.resolve()),
         "provider_lease_path": provider_lease_path,
+        "provider_scope_name": provider_scope_name,
+        "provider_scope": None,
+        "provider_profile_id": provider_profile_id,
         "process": None,
         "payload": None,
         "cancellation_event": None,

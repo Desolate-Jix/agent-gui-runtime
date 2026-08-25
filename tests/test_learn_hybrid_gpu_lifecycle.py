@@ -9,6 +9,7 @@ from app.learn.hybrid.gpu_lifecycle import (
     assert_next_provider_safe_to_start,
     release_hybrid_provider,
 )
+from app.learn.hybrid.windows_process_scope import process_scope_name
 
 
 def _lineage(run_id: str = "run-a", revision: int = 7) -> dict:
@@ -48,6 +49,9 @@ class _FakeCleanupObserver:
                 "profile_id": "vista-profile",
                 "process_identities": [process_identity],
             }
+        self.identity["process_scope_name"] = process_scope_name(
+            self.lineage, provider
+        )
         self.release_status = "verified"
         self.provider_processes: list[dict] = []
         self.helpers: list[dict] = []

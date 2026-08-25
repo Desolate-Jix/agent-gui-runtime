@@ -65,6 +65,11 @@ def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
     tmp_path, monkeypatch
 ) -> None:
     from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
 
     profile = {
         "profile_id": "vista-test",
@@ -73,16 +78,31 @@ def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
         "port": 13240,
         "pid_file": str(tmp_path / "vista.pid"),
     }
-    identities = [
-        {"pid": 4123, "create_time_ns": 100_000_000_000},
-        {"pid": 4124, "create_time_ns": 200_000_000_000},
-    ]
+    scope_name = process_scope_name(_HYBRID_LINEAGE, "vista")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    process = __import__("psutil").Process(helper.pid)
+    identities = [{
+        "pid": helper.pid,
+        "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+    }]
     lease = {
         "contract_version": "hybrid_vista_model_lease_v2",
         "provider": "vista",
         "incarnation_id": "vista-incarnation",
         "profile": profile,
         "process_identities": identities,
+        "process_scope_name": scope_name,
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": scope_name,
+            "member_pids": [identity["pid"] for identity in identities],
+            "process_identities": identities,
+        },
     }
     monkeypatch.setattr(
         model_server,
@@ -102,12 +122,15 @@ def test_hybrid_vista_release_builds_inventory_from_observed_cleanup(
     )
     monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [])
 
-    inventory = model_server.release_hybrid_vista_model_lease(
-        lease,
-        lineage=_HYBRID_LINEAGE,
-        predecessor_sha256=_PREDECESSOR_SHA256,
-        provider_result_sha256=_PROVIDER_RESULT_SHA256,
-    )
+    try:
+        inventory = model_server.release_hybrid_vista_model_lease(
+            lease,
+            lineage=_HYBRID_LINEAGE,
+            predecessor_sha256=_PREDECESSOR_SHA256,
+            provider_result_sha256=_PROVIDER_RESULT_SHA256,
+        )
+    finally:
+        scope.close()
 
     assert inventory["release_status"] == "verified"
     assert inventory["provider_processes_after"] == []
@@ -120,6 +143,7 @@ def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
 ) -> None:
     from app.core import model_server
     from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+    from app.learn.hybrid.windows_process_scope import process_scope_name
 
     pid_path = tmp_path / "vista.pid"
     pid_path.write_text("4123", encoding="utf-8")
@@ -136,6 +160,13 @@ def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
             "pid_file": str(pid_path),
         },
         "process_identities": [identity],
+        "process_scope_name": process_scope_name(_HYBRID_LINEAGE, "vista"),
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": process_scope_name(_HYBRID_LINEAGE, "vista"),
+            "member_pids": [identity["pid"]],
+            "process_identities": [identity],
+        },
     }
     monkeypatch.setattr(
         model_server,
@@ -150,7 +181,19 @@ def test_hybrid_vista_release_fails_closed_on_listener_or_failed_stop(
     monkeypatch.setattr(
         model_server, "_descendant_identities_for_parents", lambda parents: ([], True)
     )
-    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [4123])
+    from app.learn.hybrid import windows_process_scope
+
+    monkeypatch.setattr(
+        windows_process_scope,
+        "observe_process_scope_cleanup",
+        lambda name, **kwargs: {
+            "contract_version": "hybrid_windows_process_scope_v1",
+            "scope_name": name,
+            "cleanup_status": "indeterminate",
+            "member_pids_after": [4123],
+            "active_listeners_after": [{"port": 13240, "pid": 4123}],
+        },
+    )
 
     inventory = model_server.release_hybrid_vista_model_lease(
         lease,
@@ -170,12 +213,60 @@ def test_hybrid_vista_lease_rejects_missing_or_ambiguous_process_identity() -> N
     from app.core.model_server import build_hybrid_vista_model_lease
 
     profile = {"profile_id": "vista-test", "provider_mode": "local_grounding"}
+    os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = (
+        "Local\\AgentGuiHybrid-vista-" + "1" * 64
+    )
 
-    with pytest.raises(ValueError, match="no exact process identity"):
-        build_hybrid_vista_model_lease(
-            profile,
-            {"before": {"status": "unreachable"}, "after": {"status": "ready"}},
+    try:
+        with pytest.raises(ValueError, match="no exact process identity"):
+            build_hybrid_vista_model_lease(
+                profile,
+                {"before": {"status": "unreachable"}, "after": {"status": "ready"}},
+            )
+    finally:
+        os.environ.pop("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", None)
+
+
+def test_hybrid_vista_lease_binds_exact_nonempty_job_membership(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core.model_server import build_hybrid_vista_model_lease
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    scope_name = process_scope_name(_HYBRID_LINEAGE, "vista")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    process = __import__("psutil").Process(helper.pid)
+    identity = {
+        "pid": helper.pid,
+        "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+    }
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    try:
+        lease = build_hybrid_vista_model_lease(
+            {"profile_id": "vista-job-test"},
+            {"start": {"pid": helper.pid}},
         )
+        with pytest.raises(ValueError, match="outside its exact scope"):
+            build_hybrid_vista_model_lease(
+                {"profile_id": "vista-job-test"},
+                {"start": {"pid": os.getpid()}},
+            )
+    finally:
+        scope.close()
+
+    assert lease["process_identities"] == [identity]
+    assert helper.pid in lease["process_scope_acquisition"]["member_pids"]
+    assert helper.poll() is not None
 
 
 def test_hybrid_vista_release_detects_descendant_appearing_after_stop(
@@ -183,6 +274,7 @@ def test_hybrid_vista_release_detects_descendant_appearing_after_stop(
     monkeypatch,
 ) -> None:
     from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import process_scope_name
 
     parent = {"pid": 4123, "create_time_ns": 100_000_000_000}
     raced_child = {"pid": 4999, "create_time_ns": 200_000_000_000}
@@ -197,12 +289,26 @@ def test_hybrid_vista_release_detects_descendant_appearing_after_stop(
             "pid_file": str(tmp_path / "vista.pid"),
         },
         "process_identities": [parent],
+        "process_scope_name": process_scope_name(_HYBRID_LINEAGE, "vista"),
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": process_scope_name(_HYBRID_LINEAGE, "vista"),
+            "member_pids": [parent["pid"]],
+            "process_identities": [parent],
+        },
     }
-    observations = iter([([], True), ([raced_child], True), ([raced_child], True)])
+    from app.learn.hybrid import windows_process_scope
     monkeypatch.setattr(
-        model_server,
-        "_descendant_identities_for_parents",
-        lambda parents: next(observations),
+        windows_process_scope,
+        "observe_process_scope_cleanup",
+        lambda name, **kwargs: {
+            "contract_version": "hybrid_windows_process_scope_v1",
+            "scope_name": name,
+            "cleanup_status": "indeterminate",
+            "member_pids_after": [raced_child["pid"]],
+            "member_identities_after": [raced_child],
+            "active_listeners_after": [],
+        },
     )
     monkeypatch.setattr(
         model_server,
@@ -273,8 +379,10 @@ def test_hybrid_qwen_observer_requires_exact_server_owned_lifecycle_tombstone(
     monkeypatch,
 ) -> None:
     from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import process_scope_name
 
     lease = _cleanup_lease()
+    scope_name = process_scope_name(_HYBRID_LINEAGE, "qwen")
     release_result = {
         "status": "released",
         "lease": lease,
@@ -293,6 +401,18 @@ def test_hybrid_qwen_observer_requires_exact_server_owned_lifecycle_tombstone(
                     "identity": {"pid": 8124, "create_time_ns": 812_400_000_000},
                 }
             ],
+        },
+        "hybrid_process_scope_name": scope_name,
+        "hybrid_process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": scope_name,
+            "member_pids": [lease["server_process_identity"]["pid"]],
+            "server_process_identity": lease["server_process_identity"],
+        },
+        "hybrid_process_scope_cleanup": {
+            "contract_version": "hybrid_windows_process_scope_v1",
+            "scope_name": scope_name,
+            "cleanup_status": "verified",
         },
     }
     receipt = model_server.build_qwen_cleanup_receipt(
@@ -330,6 +450,78 @@ def test_hybrid_qwen_observer_requires_exact_server_owned_lifecycle_tombstone(
 
     assert inventory["release_status"] == "verified"
     assert inventory["source_cleanup_evidence"]["lifecycle_verified"] is True
+
+
+def test_hybrid_qwen_release_uses_nonempty_exact_job_membership(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    scope_name = process_scope_name(_HYBRID_LINEAGE, "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    process = __import__("psutil").Process(helper.pid)
+    identity = {
+        "pid": helper.pid,
+        "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+    }
+    profile = {
+        "profile_id": "qwen-job-test",
+        "endpoint": "http://127.0.0.1:54321/v1/chat/completions",
+        "pid_file": str(tmp_path / "qwen-job-test.pid"),
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=identity["pid"],
+        created_ns=identity["create_time_ns"],
+        base_url="http://127.0.0.1:54321/v1",
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id="qwen-job-owner",
+            readiness=readiness,
+        )
+        released = model_server._release_exact_qwen_lease(
+            lease,
+            reason="controlled-job-release",
+        )
+        receipt = model_server.build_qwen_cleanup_receipt(
+            release_result=released,
+            model_lease=lease,
+        )
+        inventory = model_server.observe_hybrid_qwen_cleanup(
+            receipt,
+            lineage=_HYBRID_LINEAGE,
+            predecessor_sha256=_PREDECESSOR_SHA256,
+            provider_result_sha256=_PROVIDER_RESULT_SHA256,
+        )
+    finally:
+        scope.close()
+
+    assert released["hybrid_process_scope_name"] == scope_name
+    cleanup = released["hybrid_process_scope_cleanup"]
+    assert cleanup["cleanup_status"] == "verified"
+    assert helper.pid in released["hybrid_process_scope_acquisition"]["member_pids"]
+    assert helper.poll() is not None
+    assert inventory["release_status"] == "verified"
 
 
 def test_stop_model_server_honors_real_wrapper_test_sentinel(monkeypatch) -> None:

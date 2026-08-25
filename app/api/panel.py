@@ -979,13 +979,21 @@ def start_learning_stage_worker_endpoint(
         worker_payload = deepcopy(request.payload)
         worker_payload.pop("_hybrid_supervisor", None)
         if hybrid_requested:
-            worker_payload.setdefault("workflow_revision", request.expected_revision)
+            supplied_revision = worker_payload.get("workflow_revision")
+            if supplied_revision is not None and supplied_revision != request.expected_revision:
+                raise LearningStageWorkerError(
+                    "Hybrid caller workflow revision does not match active revision"
+                )
+            worker_payload["workflow_revision"] = request.expected_revision
         result = learning_stage_worker_registry.start(
             run_id=request.run_id,
             stage=request.stage,
             operation_id=request.operation_id,
             task_kind=request.task_kind,
             payload=worker_payload,
+            authoritative_workflow_revision=(
+                request.expected_revision if hybrid_requested else None
+            ),
         )
         try:
             require_active_learning_workflow_stage_operation(

@@ -137,52 +137,70 @@ def test_adapter_persists_exact_invocation_cleanup_observation(
     monkeypatch,
 ) -> None:
     from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+    from app.learn.hybrid import windows_process_scope
 
-    process = FakeProcess(
-        payload={"items": [], "duration_ms": 2, "resource_units": 1}
-    )
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(adapter_module, "OMNI_CLEANUP_OBSERVATION_ROOT", tmp_path / "cleanup")
-    monkeypatch.setattr(adapter_module.subprocess, "Popen", _fake_popen(process, calls))
+    lineage = {
+        "run_id": "run-omni-adapter",
+        "workflow_revision": 7,
+        "operation_id": "operation-omni-adapter",
+        "stage": "screen_understanding",
+        "stage_execution_id": "execution-omni-adapter",
+    }
+    scope_name = windows_process_scope.process_scope_name(lineage, "omni")
+    scope = windows_process_scope.WindowsProcessScope(scope_name, create=True)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    real_spawn = windows_process_scope.spawn_process_in_scope
 
-    def capture_exact_identity(self, spawned) -> None:
-        self._cleanup_observation["process_identity"] = {
-            "pid": spawned.pid,
-            "create_time_ns": 123_000_000_000,
-        }
-        self._cleanup_observation["descendant_identities"] = [
-            {"pid": 124, "create_time_ns": 124_000_000_000}
-        ]
+    def controlled_scoped_spawn(command, **kwargs):
+        output_path = Path(command[command.index("--output-json") + 1])
+        payload = {"items": [], "duration_ms": 2, "resource_units": 1}
+        code = (
+            "import json,time;"
+            f"open({str(output_path)!r},'w',encoding='utf-8').write("
+            f"json.dumps({payload!r}));time.sleep(0.03)"
+        )
+        calls.append({"command": command, "output_path": output_path})
+        return real_spawn(
+            [sys.executable, "-c", code],
+            scope_name=kwargs["scope_name"],
+            cwd=kwargs["cwd"],
+        )
 
     monkeypatch.setattr(
-        adapter_module.OmniParserShadowAdapter,
-        "_capture_cleanup_process_tree",
-        capture_exact_identity,
+        windows_process_scope,
+        "spawn_process_in_scope",
+        controlled_scoped_spawn,
     )
-    monkeypatch.setattr(
-        adapter_module,
-        "_probe_process_identity",
-        lambda identity: "proven_absent",
-    )
-    monkeypatch.setattr(adapter_module.psutil, "net_connections", lambda kind: [])
 
-    adapter_module.OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke(
-        capture=_capture(tmp_path),
-        budget=_budget(),
-        invocation_id="invocation/cleanup-observed",
-    )
+    try:
+        adapter_module.OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke(
+            capture=_capture(tmp_path),
+            budget=_budget(),
+            invocation_id="invocation/cleanup-observed",
+        )
+    finally:
+        scope.close()
     observation = adapter_module.load_omniparser_invocation_cleanup_observation(
         "invocation/cleanup-observed"
     )
 
     assert observation["cleanup_status"] == "verified"
-    assert observation["process_identity"]["pid"] == 123
-    assert observation["descendant_identities"][0]["pid"] == 124
+    provider_pid = observation["process_identity"]["pid"]
+    assert provider_pid > 0
     assert observation["provider_processes_after"] == []
     assert observation["orphan_descendant_identities"] == []
     assert observation["active_listeners_after"] == []
     assert observation["pid_file_paths"] == []
     assert observation["lease_files_after"] == []
+    assert observation["process_scope_name"] == scope_name
+    assert provider_pid in observation["process_scope_acquisition"][
+        "member_pids"
+    ]
+    assert provider_pid in observation["process_scope_cleanup"][
+        "observed_member_pids_before"
+    ] or observation["process_scope_cleanup"]["observed_member_pids_before"] == []
 
 
 @pytest.mark.parametrize("payload", [

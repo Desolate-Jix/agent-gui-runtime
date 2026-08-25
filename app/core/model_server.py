@@ -455,6 +455,33 @@ def ensure_and_acquire_qwen_model_lease(
             )
         if readiness.get("profile") != _public_profile(profile):
             raise RuntimeError("Qwen readiness profile does not match acquisition snapshot")
+        process_scope_name = os.environ.get(
+            "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+        ).strip()
+        if process_scope_name:
+            if readiness.get("started") is not True:
+                raise RuntimeError(
+                    "Hybrid Qwen cannot adopt a provider outside its exact process scope"
+                )
+            from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+            scope = WindowsProcessScope(process_scope_name, create=False)
+            try:
+                binding = _observe_qwen_server_binding(profile, readiness)
+                identity = (
+                    binding.get("server_process_identity")
+                    if isinstance(binding, dict)
+                    else None
+                )
+                if (
+                    not _valid_process_identity(identity)
+                    or identity["pid"] not in scope.pids()
+                ):
+                    raise RuntimeError(
+                        "Hybrid Qwen provider identity is outside its exact process scope"
+                    )
+            finally:
+                scope.close()
         return acquire_qwen_model_lease(
             profile=profile,
             request_id=request_id,
@@ -473,6 +500,31 @@ def acquire_qwen_model_lease(
     if not profile_id or not owner_request_id:
         raise ValueError("Qwen model lease identity is incomplete")
     incarnation = _qwen_server_incarnation(profile, readiness)
+    process_scope_name = os.environ.get(
+        "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+    ).strip() or None
+    process_scope_acquisition = None
+    if process_scope_name:
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+        scope = WindowsProcessScope(process_scope_name, create=False)
+        try:
+            member_pids = scope.pids()
+        finally:
+            scope.close()
+        exact_pid = int(incarnation["server_process_identity"]["pid"])
+        if exact_pid not in member_pids:
+            raise RuntimeError(
+                "Qwen exact server process is outside its provider scope"
+            )
+        process_scope_acquisition = {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": process_scope_name,
+            "member_pids": member_pids,
+            "server_process_identity": deepcopy(
+                incarnation["server_process_identity"]
+            ),
+        }
     with _qwen_lease_lock():
         for existing in _load_all_qwen_lease_states():
             if not existing["leases"]:
@@ -499,6 +551,8 @@ def acquire_qwen_model_lease(
                 "profile": deepcopy(profile),
                 "incarnation": incarnation,
                 "server_started_by_runtime": bool(readiness.get("started")),
+                "process_scope_name": process_scope_name,
+                "process_scope_acquisition": process_scope_acquisition,
                 "revision": 0,
                 "finalization": None,
                 "leases": [],
@@ -507,6 +561,10 @@ def acquire_qwen_model_lease(
             raise ValueError("Qwen server incarnation mismatch")
         else:
             incarnation = deepcopy(state["incarnation"])
+            if state.get("process_scope_name") != process_scope_name:
+                raise ValueError("Qwen process scope mismatch for existing lease")
+            if state.get("process_scope_acquisition") != process_scope_acquisition:
+                raise ValueError("Qwen process scope acquisition mismatch")
         lease = {
             "contract_version": "qwen_model_server_lease_v2",
             "lease_id": uuid4().hex,
@@ -626,6 +684,13 @@ def observe_hybrid_qwen_cleanup(
     """从既有精确 Qwen 回执和当前 OS/lease 事实构造 Hybrid observer inventory。"""
     from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
 
+    exact_lineage = validate_hybrid_lineage(lineage)
+    from app.learn.hybrid.windows_process_scope import (
+        observe_process_scope_cleanup,
+        process_scope_name,
+    )
+
+    expected_scope_name = process_scope_name(exact_lineage, "qwen")
     exact_receipt = validate_qwen_cleanup_receipt(receipt)
     lease = exact_receipt["lease"]
     process_identity = exact_receipt["process_identity"]
@@ -657,6 +722,12 @@ def observe_hybrid_qwen_cleanup(
             )
             if isinstance(observed_descendants, dict):
                 descendant_cleanup = deepcopy(observed_descendants)
+            persisted_scope_cleanup = owner_receipt["release_result"].get(
+                "hybrid_process_scope_cleanup"
+            )
+            persisted_scope_acquisition = owner_receipt["release_result"].get(
+                "hybrid_process_scope_acquisition"
+            )
             identities = descendant_cleanup.get("descendant_identities")
             probes = descendant_cleanup.get("probes")
             lifecycle_verified = (
@@ -670,6 +741,18 @@ def observe_hybrid_qwen_cleanup(
                     and probe.get("status") == "proven_absent"
                     for identity, probe in zip(identities, probes)
                 )
+                and owner_receipt["release_result"].get(
+                    "hybrid_process_scope_name"
+                )
+                == expected_scope_name
+                and isinstance(persisted_scope_cleanup, dict)
+                and persisted_scope_cleanup.get("scope_name") == expected_scope_name
+                and persisted_scope_cleanup.get("cleanup_status") == "verified"
+                and isinstance(persisted_scope_acquisition, dict)
+                and persisted_scope_acquisition.get("scope_name")
+                == expected_scope_name
+                and process_identity.get("pid")
+                in persisted_scope_acquisition.get("member_pids", [])
             )
     process_probe = _probe_exact_qwen_process(process_identity)
     parsed = urlsplit(str(lease.get("server_base_url") or ""))
@@ -684,8 +767,15 @@ def observe_hybrid_qwen_cleanup(
     )
     listeners = [{"port": port, "pid": pid} for pid in listener_pids]
     lease_files = [f"active-qwen-lease:{lease['lease_id']}"] if lease_active else []
+    scope_cleanup = observe_process_scope_cleanup(
+        expected_scope_name,
+        terminate=False,
+        listener_ports=[port] if port > 0 else [],
+        stable_zero_observations=3,
+    )
     verified = (
         lifecycle_verified
+        and scope_cleanup.get("cleanup_status") == "verified"
         and observable
         and not provider_processes
         and not listeners
@@ -697,12 +787,13 @@ def observe_hybrid_qwen_cleanup(
         "observer_contract": "hybrid_qwen_cleanup_observer_v1",
         "release_status": "verified" if verified else "failed",
         "termination_reason": "completed" if verified else "cleanup_failed",
-        "lineage": validate_hybrid_lineage(lineage),
+        "lineage": exact_lineage,
         "provider_lease_identity": {
             "lease_id": lease["lease_id"],
             "incarnation_id": lease["incarnation_id"],
             "profile_id": lease["profile_id"],
             "server_process_identity": deepcopy(process_identity),
+            "process_scope_name": expected_scope_name,
         },
         "predecessor_sha256": predecessor_sha256,
         "provider_result_sha256": provider_result_sha256,
@@ -737,6 +828,7 @@ def observe_hybrid_qwen_cleanup(
             "descendant_cleanup": descendant_cleanup,
             "process_probe": process_probe,
             "lease_active": lease_active,
+            "process_scope_cleanup": scope_cleanup,
         },
     }
 
@@ -965,7 +1057,33 @@ def _stop_and_finalize_qwen_incarnation(
         if failure_reason == "process_exit_unobservable":
             raise RuntimeError("Qwen exact server process exit is unobservable")
         raise RuntimeError("Qwen exact server process is still running after release")
-    descendant_cleanup = _observe_known_qwen_descendant_cleanup(known_descendants)
+    process_scope_name = state.get("process_scope_name")
+    scope_cleanup = None
+    if isinstance(process_scope_name, str) and process_scope_name:
+        from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
+
+        parsed = urlsplit(str(incarnation.get("server_base_url") or ""))
+        port = int(parsed.port or 0)
+        scope_cleanup = observe_process_scope_cleanup(
+            process_scope_name,
+            terminate=True,
+            listener_ports=[port] if port > 0 else [],
+            pid_file=model_profile_pid_path(state["profile"]),
+            remove_owned_pid_file=True,
+            stable_zero_observations=3,
+        )
+        descendant_cleanup = {
+            "status": (
+                "verified"
+                if scope_cleanup.get("cleanup_status") == "verified"
+                else "indeterminate"
+            ),
+            "descendant_identities": [],
+            "probes": [],
+            "process_scope_cleanup": scope_cleanup,
+        }
+    else:
+        descendant_cleanup = _observe_known_qwen_descendant_cleanup(known_descendants)
     if descendant_cleanup["status"] != "verified":
         _record_qwen_finalization_failure(
             state, token, revision, "descendant_cleanup_unverified"
@@ -981,6 +1099,11 @@ def _stop_and_finalize_qwen_incarnation(
         "after": health,
         "process_identity": expected_process,
         "hybrid_descendant_cleanup": descendant_cleanup,
+        "hybrid_process_scope_name": process_scope_name,
+        "hybrid_process_scope_acquisition": deepcopy(
+            state.get("process_scope_acquisition")
+        ),
+        "hybrid_process_scope_cleanup": scope_cleanup,
     }
     _persist_qwen_termination_proof(
         state,
@@ -2151,13 +2274,26 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
 
     log_file = log_path.open("a", encoding="utf-8")
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    process = subprocess.Popen(
-        command,
-        cwd=str(ROOT_DIR),
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        creationflags=creationflags,
-    )
+    hybrid_scope_name = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", "").strip()
+    if hybrid_scope_name:
+        from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
+
+        process = spawn_process_in_scope(
+            command,
+            scope_name=hybrid_scope_name,
+            cwd=str(ROOT_DIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=creationflags,
+        )
+    else:
+        process = subprocess.Popen(
+            command,
+            cwd=str(ROOT_DIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=creationflags,
+        )
     time.sleep(float(profile.get("startup_exit_check_seconds") or 0.75))
     returncode = process.poll()
     if returncode is not None:
@@ -2232,6 +2368,11 @@ def build_hybrid_vista_model_lease(
         raise ValueError("Hybrid VISTA profile is required")
     if not isinstance(readiness, dict):
         raise ValueError("Hybrid VISTA readiness is required")
+    process_scope_name = os.environ.get(
+        "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+    ).strip()
+    if not process_scope_name:
+        raise ValueError("Hybrid VISTA process scope is required")
     identities: dict[tuple[int, int], dict[str, int]] = {}
 
     def collect_identity(value: object) -> None:
@@ -2259,6 +2400,15 @@ def build_hybrid_vista_model_lease(
     process_identities = sorted(identities.values(), key=lambda item: (item["pid"], item["create_time_ns"]))
     if not process_identities:
         raise ValueError("Hybrid VISTA readiness has no exact process identity")
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    scope = WindowsProcessScope(process_scope_name, create=False)
+    try:
+        member_pids = scope.pids()
+    finally:
+        scope.close()
+    if any(identity["pid"] not in member_pids for identity in process_identities):
+        raise ValueError("Hybrid VISTA process identity is outside its exact scope")
     incarnation_id = content_sha256({
         "profile_id": profile["profile_id"],
         "process_identities": process_identities,
@@ -2269,6 +2419,13 @@ def build_hybrid_vista_model_lease(
         "incarnation_id": incarnation_id,
         "profile": _public_profile(deepcopy(profile)),
         "process_identities": process_identities,
+        "process_scope_name": process_scope_name,
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": process_scope_name,
+            "member_pids": member_pids,
+            "process_identities": deepcopy(process_identities),
+        },
     }
 
 
@@ -2288,6 +2445,9 @@ def release_hybrid_vista_model_lease(
         or not isinstance(model_lease.get("profile"), dict)
         or not isinstance(model_lease.get("process_identities"), list)
         or not model_lease.get("process_identities")
+        or not isinstance(model_lease.get("process_scope_name"), str)
+        or not model_lease.get("process_scope_name")
+        or not isinstance(model_lease.get("process_scope_acquisition"), dict)
     ):
         raise ValueError("exact Hybrid VISTA model lease is required")
     from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
@@ -2296,67 +2456,71 @@ def release_hybrid_vista_model_lease(
     expected_identities = deepcopy(model_lease["process_identities"])
     if any(not _valid_process_identity(identity) for identity in expected_identities):
         raise ValueError("Hybrid VISTA model lease identity is invalid")
-    known_descendants, descendants_observable = _descendant_identities_for_parents(expected_identities)
-    stop_result = stop_model_server(profile)
-    stable_rounds = 0
-    previous_descendants: list[dict[str, int]] | None = None
-    for _ in range(5):
-        observed, observable = _descendant_identities_for_parents(expected_identities)
-        descendants_observable = descendants_observable and observable
-        for identity in observed:
-            if identity not in known_descendants:
-                known_descendants.append(identity)
-        normalized = sorted(known_descendants, key=lambda item: (item["pid"], item["create_time_ns"]))
-        if normalized == previous_descendants:
-            stable_rounds += 1
-        else:
-            stable_rounds = 0
-        previous_descendants = normalized
-        if stable_rounds >= 1:
-            break
-        time.sleep(0.01)
-    tree_stable = stable_rounds >= 1
+    from app.learn.hybrid.windows_process_scope import (
+        observe_process_scope_cleanup,
+        process_scope_name as expected_process_scope_name,
+    )
+
+    exact_lineage = validate_hybrid_lineage(lineage)
+    scope_name = model_lease["process_scope_name"]
+    if scope_name != expected_process_scope_name(exact_lineage, "vista"):
+        raise ValueError("Hybrid VISTA process scope lineage mismatch")
+    acquisition = model_lease["process_scope_acquisition"]
+    if (
+        acquisition.get("contract_version")
+        != "hybrid_process_scope_acquisition_v1"
+        or acquisition.get("scope_name") != scope_name
+        or not isinstance(acquisition.get("member_pids"), list)
+        or any(
+            identity["pid"] not in acquisition["member_pids"]
+            for identity in expected_identities
+        )
+    ):
+        raise ValueError("Hybrid VISTA process scope acquisition is invalid")
+    try:
+        stop_result = stop_model_server(profile)
+    except BaseException as error:
+        stop_result = {
+            "stopped": False,
+            "error_type": type(error).__name__,
+            "details": str(error),
+        }
+    port = profile.get("port")
+    try:
+        normalized_port = int(port)
+    except (TypeError, ValueError):
+        normalized_port = 0
+    scope_cleanup = observe_process_scope_cleanup(
+        scope_name,
+        terminate=True,
+        listener_ports=[normalized_port] if normalized_port > 0 else [],
+        pid_file=model_profile_pid_path(profile),
+        remove_owned_pid_file=True,
+        stable_zero_observations=3,
+    )
     provider_probes = [_probe_exact_qwen_process(identity) for identity in expected_identities]
-    descendant_probes = [_probe_exact_qwen_process(identity) for identity in known_descendants]
-    inventory_observable = descendants_observable and all(
-        probe.get("status") != "unobservable" for probe in (*provider_probes, *descendant_probes)
+    inventory_observable = scope_cleanup.get("cleanup_status") == "verified" and all(
+        probe.get("status") != "unobservable" for probe in provider_probes
     )
     active_provider = [
         deepcopy(identity)
         for identity, probe in zip(expected_identities, provider_probes)
         if probe.get("status") == "exact_live"
     ]
-    port = profile.get("port")
-    try:
-        normalized_port = int(port)
-    except (TypeError, ValueError):
-        normalized_port = 0
-    listeners = (
-        [
-            {"port": normalized_port, "pid": pid}
-            for pid in _listening_pids_for_port(normalized_port)
-        ]
-        if normalized_port > 0
-        else []
-    )
+    listeners = deepcopy(scope_cleanup.get("active_listeners_after") or [])
     pid_path = model_profile_pid_path(profile)
     lease_files = [str(pid_path)] if pid_path.exists() else []
-    orphan_descendant_identities = [
-        deepcopy(identity)
-        for identity, probe in zip(known_descendants, descendant_probes)
-        if probe.get("status") == "exact_live"
-    ]
-    orphan_descendants = [identity["pid"] for identity in orphan_descendant_identities]
-    after = stop_result.get("after")
-    after_status = str(
-        after.get("status") if isinstance(after, dict) else ""
-    ).strip().casefold()
+    orphan_descendants = list(scope_cleanup.get("member_pids_after") or [])
+    scoped_identities = scope_cleanup.get("member_identities_after")
+    orphan_descendant_identities = (
+        deepcopy(scoped_identities)
+        if isinstance(scoped_identities, list)
+        else [{"pid": int(pid), "create_time_ns": 0} for pid in orphan_descendants]
+    )
     verified = (
-        stop_result.get("stopped") is True
-        and after_status == "unreachable"
-        and not active_provider
+        scope_cleanup.get("cleanup_status") == "verified"
         and inventory_observable
-        and tree_stable
+        and not active_provider
         and not orphan_descendants
         and not listeners
         and not lease_files
@@ -2367,11 +2531,12 @@ def release_hybrid_vista_model_lease(
         "observer_contract": "hybrid_vista_cleanup_observer_v1",
         "release_status": "verified" if verified else "failed",
         "termination_reason": "completed" if verified else "cleanup_failed",
-        "lineage": validate_hybrid_lineage(lineage),
+        "lineage": exact_lineage,
         "provider_lease_identity": {
             "incarnation_id": model_lease["incarnation_id"],
             "profile_id": profile["profile_id"],
             "process_identities": expected_identities,
+            "process_scope_name": scope_name,
         },
         "predecessor_sha256": predecessor_sha256,
         "provider_result_sha256": provider_result_sha256,
@@ -2386,9 +2551,8 @@ def release_hybrid_vista_model_lease(
             "model_lease": deepcopy(model_lease),
             "stop_result": deepcopy(stop_result),
             "inventory_observable": inventory_observable,
-            "tree_stable": tree_stable,
+            "process_scope_cleanup": scope_cleanup,
             "provider_probes": provider_probes,
-            "descendant_probes": descendant_probes,
         },
     }
 

@@ -727,6 +727,11 @@ def continue_learning_stage_worker_result(
                 task_kind=next_task_kind,
                 payload=deepcopy(next_payload),
                 reuse_active_identical=True,
+                **(
+                    {"authoritative_workflow_revision": expected_revision}
+                    if next_payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+                    else {}
+                ),
             )
             decision = {
                 **decision,
@@ -978,6 +983,15 @@ def _start_next_managed_stage_worker(
             task_kind=str(next_stage_operation["task_kind"]),
             payload=payload,
             reuse_active_identical=True,
+            **(
+                {
+                    "authoritative_workflow_revision": int(
+                        workflow_state["revision"]
+                    )
+                }
+                if payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+                else {}
+            ),
         )
     except Exception as exc:
         failure_reason = f"backend continuation worker start failed · {exc}"

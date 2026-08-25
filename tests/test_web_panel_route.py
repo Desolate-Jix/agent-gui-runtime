@@ -6558,6 +6558,7 @@ def test_hybrid_learning_pipeline_start_is_experimental_and_incumbent_remains_de
         "qwen_cleanup_observer",
         "vista_cleanup_observer",
         "supervisor_reconciliation",
+        "windows_owner_scope",
         "review_guard",
         "handlers",
     ],
@@ -6642,6 +6643,30 @@ def test_public_worker_route_accepts_only_registered_experimental_hybrid_handler
     assert response["success"] is True
     assert response["data"]["task_kind"] == "panel_learning_hybrid_omni_discovery"
     assert started[0]["payload"]["learning_pipeline_mode"] == "hybrid_v1_1"
+    assert started[0]["payload"]["workflow_revision"] == operation[
+        "workflow_state"
+    ]["revision"]
+    assert started[0]["authoritative_workflow_revision"] == operation[
+        "workflow_state"
+    ]["revision"]
+
+    stale_payload = TestClient(app).post(
+        "/panel/start_learning_stage_worker",
+        json={
+            "run_id": "run-hybrid-worker-disabled",
+            "expected_revision": operation["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": "operation-hybrid-disabled",
+            "task_kind": "panel_learning_hybrid_omni_discovery",
+            "payload": {
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "workflow_revision": operation["workflow_state"]["revision"] - 1,
+            },
+        },
+    ).json()
+    assert stale_payload["success"] is False
+    assert "does not match active revision" in stale_payload["error"]["details"]
+    assert len(started) == 1
 
     replay = TestClient(app).post(
         "/panel/start_learning_stage_worker",

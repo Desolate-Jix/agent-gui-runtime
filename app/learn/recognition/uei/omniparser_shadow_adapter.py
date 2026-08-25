@@ -274,19 +274,64 @@ class OmniParserShadowAdapter:
                 }
                 if os.name != "nt":
                     spawn_options["start_new_session"] = True
+                command = (
+                    [str(self._configuration.interpreter), str(self._configuration.worker_script),
+                     "--input-json", str(input_path), "--output-json", str(output_path)]
+                    + (["--benchmark"] if self._benchmark_mode else [])
+                )
+                process_scope_name = os.environ.get(
+                    "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+                ).strip()
+                if process_scope_name:
+                    from app.learn.hybrid.windows_process_scope import (
+                        spawn_process_in_scope,
+                    )
+
+                    spawn = lambda: spawn_process_in_scope(
+                        command,
+                        scope_name=process_scope_name,
+                        cwd=str(ROOT),
+                        env=spawn_options["env"],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=int(spawn_options.get("creationflags") or 0),
+                    )
+                else:
+                    spawn = lambda: subprocess.Popen(command, **spawn_options)
                 spawn_allowed, spawned_process = _cancellable_transition(
                     cancellation_event,
                     "before_popen",
-                    lambda: subprocess.Popen(
-                        [str(self._configuration.interpreter), str(self._configuration.worker_script),
-                         "--input-json", str(input_path), "--output-json", str(output_path)]
-                        + (["--benchmark"] if self._benchmark_mode else []),
-                        **spawn_options,
-                    ),
+                    spawn,
                 )
                 if not spawn_allowed:
                     raise OmniParserShadowAdapterError("runtime_cancelled")
                 process = spawned_process
+                if process_scope_name:
+                    from app.learn.hybrid.windows_process_scope import (
+                        WindowsProcessScope,
+                    )
+
+                    scope = WindowsProcessScope(process_scope_name, create=False)
+                    try:
+                        member_pids = scope.pids()
+                    finally:
+                        scope.close()
+                    if int(process.pid) not in member_pids:
+                        self._terminate_tree(process)
+                        raise OmniParserShadowAdapterError("runtime_cleanup_failed")
+                    assert isinstance(self._cleanup_observation, dict)
+                    self._cleanup_observation["process_scope_acquisition"] = {
+                        "contract_version": "hybrid_process_scope_acquisition_v1",
+                        "scope_name": process_scope_name,
+                        "member_pids": member_pids,
+                        "provider_pid": int(process.pid),
+                    }
+                    spawned_identity = getattr(process, "process_identity", None)
+                    if isinstance(spawned_identity, dict):
+                        self._cleanup_observation["process_identity"] = deepcopy(
+                            spawned_identity
+                        )
                 self._capture_cleanup_process_tree(process)
                 deadline = time.monotonic() + budget.timeout_ms / 1000
                 while process.poll() is None:
@@ -350,6 +395,9 @@ class OmniParserShadowAdapter:
         cleanup_status: str,
     ) -> None:
         observation = deepcopy(self._cleanup_observation) if isinstance(self._cleanup_observation, dict) else {}
+        process_scope_name = os.environ.get(
+            "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+        ).strip()
         process_identity = observation.get("process_identity")
         descendant_identities = observation.get("descendant_identities")
         provider_after, descendants_after = [], []
@@ -376,10 +424,28 @@ class OmniParserShadowAdapter:
         )
         observable = observable and listeners_observable
         lease_files = [str(lease_path)] if lease_path is not None and lease_path.exists() else []
+        scope_cleanup = None
+        scope_acquisition = observation.get("process_scope_acquisition")
+        if process_scope_name:
+            from app.learn.hybrid.windows_process_scope import (
+                observe_process_scope_cleanup,
+            )
+
+            scope_cleanup = observe_process_scope_cleanup(
+                process_scope_name,
+                terminate=True,
+                stable_zero_observations=3,
+            )
         verified = (
             cleanup_status == "verified"
             and isinstance(process_identity, dict)
             and observable
+            and isinstance(scope_cleanup, dict)
+            and scope_cleanup.get("cleanup_status") == "verified"
+            and isinstance(scope_acquisition, dict)
+            and scope_acquisition.get("scope_name") == process_scope_name
+            and process_identity.get("pid")
+            in scope_acquisition.get("member_pids", [])
             and not provider_after
             and not descendants_after
             and not active_listeners
@@ -397,6 +463,9 @@ class OmniParserShadowAdapter:
             "lease_path": str(lease_path) if lease_path is not None else None,
             "lease_files_after": lease_files,
             "inventory_observable": observable,
+            "process_scope_name": process_scope_name or None,
+            "process_scope_cleanup": scope_cleanup,
+            "process_scope_acquisition": scope_acquisition,
             "cleanup_status": "verified" if verified else "indeterminate",
         })
         OMNI_CLEANUP_OBSERVATION_ROOT.mkdir(parents=True, exist_ok=True)
@@ -476,6 +545,8 @@ def load_omniparser_invocation_cleanup_observation(
         "descendant_identities", "provider_processes_after",
         "orphan_descendant_identities", "active_listeners_after", "pid_file_paths",
         "lease_path", "lease_files_after", "inventory_observable", "cleanup_status",
+        "process_scope_name", "process_scope_cleanup",
+        "process_scope_acquisition",
         "content_sha256",
     }
     if (

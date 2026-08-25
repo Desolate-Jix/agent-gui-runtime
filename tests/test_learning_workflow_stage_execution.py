@@ -64,6 +64,7 @@ def _observed_hybrid_cleanup_receipt(
     provider_result: dict,
 ) -> dict:
     from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+    from app.learn.hybrid.windows_process_scope import process_scope_name
     from app.learn.recognition.uei.canonical import content_sha256
 
     process_identity = {
@@ -92,6 +93,7 @@ def _observed_hybrid_cleanup_receipt(
             "profile_id": "vista-profile",
             "process_identities": [process_identity],
         }
+    provider_identity["process_scope_name"] = process_scope_name(lineage, provider)
     inventory = {
         "contract_version": "hybrid_provider_process_inventory_v2",
         "provider": provider,
@@ -2798,6 +2800,8 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
     )
 
     def observed_inventory(provider: str, **kwargs) -> dict:
+        from app.learn.hybrid.windows_process_scope import process_scope_name
+
         process_identity = {
             "pid": 5200 + len(provider),
             "create_time_ns": 100_000_000_000,
@@ -2818,6 +2822,9 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
                 "profile_id": "qwen-profile",
                 "server_process_identity": process_identity,
             }
+        )
+        provider_identity["process_scope_name"] = process_scope_name(
+            kwargs["lineage"], provider
         )
         return {
             "contract_version": "hybrid_provider_process_inventory_v2",
@@ -2865,11 +2872,18 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
     payload_hashes: list[str] = []
     for _ in range(3):
         task_kinds.append(current["task_kind"])
+        from app.learn.hybrid.windows_process_scope import process_scope_name
+
+        provider = {
+            "panel_learning_hybrid_omni_discovery": "omni",
+            "panel_learning_hybrid_qwen_binding": "qwen",
+        }.get(current["task_kind"], "vista")
         current["payload"]["_hybrid_supervisor"] = {
             "contract_version": "hybrid_worker_supervisor_context_v1",
             "worker_id": "worker-hybrid-chain",
             "provider_lease_path": str(tmp_path / "vista-lease.json"),
             "lineage": lineage,
+            "process_scope_name": process_scope_name(lineage, provider),
         }
         response = workflow_worker.execute_learning_stage_worker_task(
             current["task_kind"], current["payload"]
@@ -3331,6 +3345,7 @@ def test_raised_hybrid_handler_failure_is_adoptable_and_idempotently_safe_stops(
         operation_id=operation["operation_id"],
         task_kind=task_kind,
         payload=payload,
+        authoritative_workflow_revision=workflow_revision,
         reuse_active_identical=True,
     )
     status = registry.status(

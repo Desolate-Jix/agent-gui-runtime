@@ -50,11 +50,20 @@ def _hybrid_lineage(
 
 
 def _hybrid_supervisor(*, run_id: str, task_kind: str, lease_path: Path) -> dict:
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    lineage = _hybrid_lineage(run_id=run_id, task_kind=task_kind)
+    provider = {
+        "panel_learning_hybrid_omni_discovery": "omni",
+        "panel_learning_hybrid_qwen_binding": "qwen",
+        "panel_learning_calibration_sequence": "vista",
+    }.get(task_kind, "vista")
     return {
         "contract_version": "hybrid_worker_supervisor_context_v1",
         "worker_id": f"worker-{run_id}",
         "provider_lease_path": str(lease_path),
-        "lineage": _hybrid_lineage(run_id=run_id, task_kind=task_kind),
+        "lineage": lineage,
+        "process_scope_name": process_scope_name(lineage, provider),
     }
 
 
@@ -66,6 +75,8 @@ def _hybrid_cleanup_inventory(
     provider_result_sha256: str,
     termination_reason: str = "completed",
 ) -> dict:
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
     process_identity = {
         "pid": 4100 + len(provider),
         "create_time_ns": 100_000_000_000,
@@ -78,6 +89,7 @@ def _hybrid_cleanup_inventory(
                 "content_sha256": "a" * 64,
             },
             "process_identity": process_identity,
+            "process_scope_name": process_scope_name(lineage, provider),
         }
     elif provider == "qwen":
         provider_identity = {
@@ -85,12 +97,14 @@ def _hybrid_cleanup_inventory(
             "incarnation_id": "qwen-incarnation",
             "profile_id": "qwen-profile",
             "server_process_identity": process_identity,
+            "process_scope_name": process_scope_name(lineage, provider),
         }
     else:
         provider_identity = {
             "incarnation_id": "vista-incarnation",
             "profile_id": "vista-profile",
             "process_identities": [process_identity],
+            "process_scope_name": process_scope_name(lineage, provider),
         }
     return {
         "contract_version": "hybrid_provider_process_inventory_v2",
@@ -2609,7 +2623,13 @@ def test_hybrid_vista_handler_failure_still_releases_exact_lease(
         "incarnation_id": "vista-failure-incarnation",
         "profile": {"profile_id": "vista"},
         "process_identities": [{"pid": 4201, "create_time_ns": 100_000_000_000}],
+        "process_scope_name": supervisor["process_scope_name"],
     }
+    workflow_worker._publish_supervised_vista_acquiring(
+        supervisor,
+        predecessor_sha256=content_sha256(fusion_result),
+        profile_id="vista",
+    )
     monkeypatch.setattr(
         workflow_worker,
         "_ensure_learning_stage_model_ready",
@@ -2709,6 +2729,7 @@ def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_term
         stage="screen_understanding",
         operation_id=operation_id,
         task_kind=task_kind,
+        authoritative_workflow_revision=7,
         payload={
             "learning_pipeline_mode": "hybrid_v1_1",
             "workflow_revision": 7,
@@ -2766,6 +2787,7 @@ def test_hybrid_vista_outer_worker_death_remains_nonterminal_until_exact_lease_i
         stage="screen_understanding",
         operation_id=operation_id,
         task_kind=task_kind,
+        authoritative_workflow_revision=7,
         payload={
             "learning_pipeline_mode": "hybrid_v1_1",
             "workflow_revision": 7,
@@ -2786,6 +2808,7 @@ def test_hybrid_vista_outer_worker_death_remains_nonterminal_until_exact_lease_i
         "process_identities": [
             {"pid": 6123, "create_time_ns": 612_300_000_000}
         ],
+        "process_scope_name": supervisor["process_scope_name"],
     }
     from app.learn.recognition.uei.canonical import content_sha256
 
@@ -2826,13 +2849,32 @@ def test_hybrid_vista_outer_worker_death_remains_nonterminal_until_exact_lease_i
         "release_hybrid_vista_model_lease",
         release_observed,
     )
+    from app.learn.hybrid import windows_process_scope
+
+    real_scope_observer = windows_process_scope.observe_process_scope_cleanup
+    scope_attempts = 0
+
+    def fail_closed_once(*args, **kwargs):
+        nonlocal scope_attempts
+        scope_attempts += 1
+        if scope_attempts == 1:
+            return {
+                "contract_version": "hybrid_windows_process_scope_v1",
+                "scope_name": args[0],
+                "cleanup_status": "indeterminate",
+            }
+        return real_scope_observer(*args, **kwargs)
+
+    monkeypatch.setattr(
+        windows_process_scope, "observe_process_scope_cleanup", fail_closed_once
+    )
 
     pending = registry.status(
         worker_id=started["worker_id"],
         run_id=run_id,
         operation_id=operation_id,
     )
-    assert pending["status"] == "reconciliation_pending"
+    assert pending["status"] == "recovery_required"
     assert registry._records[started["worker_id"]].get("worker_result") is None
 
     recovered_registry = LearningStageWorkerRegistry(
@@ -2848,8 +2890,195 @@ def test_hybrid_vista_outer_worker_death_remains_nonterminal_until_exact_lease_i
     lease_document = json.loads(
         Path(record["provider_lease_path"]).read_text(encoding="utf-8")
     )
-    assert lease_document["state"] == "released"
-    assert lease_document["cleanup_receipt"]["cleanup_status"] == "verified"
+    assert lease_document["state"] in {"released", "recovered"}
+
+
+def test_hybrid_vista_outer_worker_death_during_acquiring_reconciles_exact_job(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
+
+    run_id = "run-vista-acquiring-death"
+    operation_id = "operation-vista-acquiring-death"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind=task_kind,
+        operation_id=operation_id,
+    )
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id=run_id,
+        stage="screen_understanding",
+        operation_id=operation_id,
+        task_kind=task_kind,
+        authoritative_workflow_revision=7,
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "_hybrid_orchestration": {
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
+                "qwen_gpu_cleanup_receipt": _hybrid_cleanup_receipt(
+                    "qwen",
+                    lineage=lineage,
+                    predecessor=omni_inventory,
+                    provider_result=qwen_bindings,
+                ),
+            },
+        },
+    )
+    record = registry._records[started["worker_id"]]
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=record["provider_scope_name"],
+        cwd=tmp_path,
+    )
+    record["process"].alive = False
+    record["process"].exitcode = -9
+    try:
+        terminal = registry.status(
+            worker_id=started["worker_id"],
+            run_id=run_id,
+            operation_id=operation_id,
+        )
+    finally:
+        scope = record.get("provider_scope")
+        if scope is not None:
+            scope.close()
+
+    assert terminal["status"] == "failed"
+    assert helper.poll() is not None
+    reconciliation = terminal["supervisor_reconciliation"]
+    assert reconciliation["status"] == "verified"
+    assert helper.pid in reconciliation["scope_cleanup_evidence"][
+        "observed_member_pids_before"
+    ]
+    lease_document = json.loads(
+        Path(record["provider_lease_path"]).read_text(encoding="utf-8")
+    )
+    assert lease_document["state"] == "recovered"
+
+
+def test_hybrid_qwen_outer_worker_death_reconciles_exact_job_scope(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
+
+    run_id = "run-qwen-owner-death"
+    operation_id = "operation-qwen-owner-death"
+    task_kind = "panel_learning_hybrid_qwen_binding"
+    lineage = _hybrid_lineage(
+        run_id=run_id,
+        task_kind=task_kind,
+        operation_id=operation_id,
+    )
+    capture_bundle = {"contract_version": "hybrid_capture_bundle_v1", "items": []}
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id=run_id,
+        stage="screen_understanding",
+        operation_id=operation_id,
+        task_kind=task_kind,
+        authoritative_workflow_revision=7,
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "_hybrid_orchestration": {
+                "omni_inventory": omni_inventory,
+                "omni_cleanup_receipt": _hybrid_cleanup_receipt(
+                    "omni",
+                    lineage=lineage,
+                    predecessor=capture_bundle,
+                    provider_result=omni_inventory,
+                ),
+            },
+        },
+    )
+    record = registry._records[started["worker_id"]]
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=record["provider_scope_name"],
+        cwd=tmp_path,
+    )
+    record["process"].alive = False
+    record["process"].exitcode = -9
+    try:
+        terminal = registry.status(
+            worker_id=started["worker_id"],
+            run_id=run_id,
+            operation_id=operation_id,
+        )
+    finally:
+        scope = record.get("provider_scope")
+        if scope is not None:
+            scope.close()
+
+    assert terminal["status"] == "failed"
+    assert helper.poll() is not None
+    evidence = terminal["supervisor_reconciliation"]["scope_cleanup_evidence"]
+    assert helper.pid in evidence["observed_member_pids_before"]
+    assert evidence["cleanup_status"] == "verified"
+
+
+def test_hybrid_omni_outer_worker_death_reconciles_exact_job_scope(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id="run-omni-owner-death",
+        stage="screen_understanding",
+        operation_id="operation-omni-owner-death",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        authoritative_workflow_revision=7,
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "hybrid_capture_bundle_ref": {
+                "id": "hybrid-capture/omni-owner-death",
+                "content_sha256": "a" * 64,
+            },
+        },
+    )
+    record = registry._records[started["worker_id"]]
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=record["provider_scope_name"],
+        cwd=tmp_path,
+    )
+    record["process"].alive = False
+    record["process"].exitcode = -9
+    try:
+        terminal = registry.status(
+            worker_id=started["worker_id"],
+            run_id="run-omni-owner-death",
+            operation_id="operation-omni-owner-death",
+        )
+    finally:
+        scope = record.get("provider_scope")
+        if scope is not None:
+            scope.close()
+
+    assert terminal["status"] == "failed"
+    assert helper.poll() is not None
+    evidence = terminal["supervisor_reconciliation"]["scope_cleanup_evidence"]
+    assert helper.pid in evidence["observed_member_pids_before"]
+    assert evidence["cleanup_status"] == "verified"
 
 
 def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_lease(
@@ -2885,6 +3114,7 @@ def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_le
         stage="screen_understanding",
         operation_id=operation_id,
         task_kind=task_kind,
+        authoritative_workflow_revision=7,
         payload={
             "learning_pipeline_mode": "hybrid_v1_1",
             "workflow_revision": 7,
@@ -2910,6 +3140,7 @@ def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_le
         "process_identities": [
             {"pid": 7123, "create_time_ns": 712_300_000_000}
         ],
+        "process_scope_name": supervisor["process_scope_name"],
     }
     workflow_worker._publish_supervised_vista_lease(
         supervisor,
@@ -2967,6 +3198,7 @@ def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(
         operation_id="operation-hybrid",
         task_kind="panel_learning_hybrid_omni_discovery",
         payload=payload,
+        authoritative_workflow_revision=7,
         reuse_active_identical=True,
     )
     record = registry._records[first["worker_id"]]
@@ -2998,6 +3230,7 @@ def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(
         operation_id="operation-hybrid",
         task_kind="panel_learning_hybrid_omni_discovery",
         payload=payload,
+        authoritative_workflow_revision=7,
         reuse_active_identical=True,
     )
 

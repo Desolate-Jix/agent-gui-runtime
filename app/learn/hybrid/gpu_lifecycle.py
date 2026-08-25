@@ -198,31 +198,45 @@ def _sha256(value: Any, field: str) -> str:
 def _validate_provider_identity(provider: str, value: Mapping[str, Any]) -> None:
     if provider == "omni":
         if set(value) != {
-            "provider_invocation_id", "provider_receipt_ref", "process_identity"
+            "provider_invocation_id", "provider_receipt_ref", "process_identity",
+            "process_scope_name",
         } or not str(value.get("provider_invocation_id") or "").startswith(
             "invocation/"
         ) or not _immutable_ref(value.get("provider_receipt_ref")) or not _process_identity(
             value.get("process_identity")
-        ):
+        ) or not _process_scope(value.get("process_scope_name"), provider):
             raise ValueError("Hybrid Omni cleanup identity is invalid")
         return
     if provider == "qwen":
         if set(value) != {
-            "lease_id", "incarnation_id", "profile_id", "server_process_identity"
+            "lease_id", "incarnation_id", "profile_id", "server_process_identity",
+            "process_scope_name",
         } or any(
             not str(value.get(field) or "").strip()
             for field in ("lease_id", "incarnation_id", "profile_id")
-        ) or not _process_identity(value.get("server_process_identity")):
+        ) or not _process_identity(value.get("server_process_identity")) or not _process_scope(
+            value.get("process_scope_name"), provider
+        ):
             raise ValueError("Hybrid Qwen cleanup identity is invalid")
         return
     identities = value.get("process_identities")
-    if set(value) != {"incarnation_id", "profile_id", "process_identities"} or any(
+    if set(value) != {
+        "incarnation_id", "profile_id", "process_identities", "process_scope_name"
+    } or any(
         not str(value.get(field) or "").strip()
         for field in ("incarnation_id", "profile_id")
     ) or not isinstance(identities, list) or not identities or any(
         not _process_identity(identity) for identity in identities
-    ):
+    ) or not _process_scope(value.get("process_scope_name"), provider):
         raise ValueError("Hybrid VISTA cleanup identity is invalid")
+
+
+def _process_scope(value: object, provider: str) -> bool:
+    return (
+        isinstance(value, str)
+        and value.startswith(f"Local\\AgentGuiHybrid-{provider}-")
+        and len(value) == len(f"Local\\AgentGuiHybrid-{provider}-") + 64
+    )
 
 
 def _process_identity(value: object) -> bool:
