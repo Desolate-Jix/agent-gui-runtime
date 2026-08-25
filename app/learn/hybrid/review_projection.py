@@ -20,6 +20,7 @@ from app.learn.hybrid.omni_candidates import (
     validate_omni_candidate_ledger,
     validate_current_capture_bundle,
 )
+from app.learn.recognition.roi import build_roi_crop_metadata
 from app.learn.recognition.uei.canonical import (
     canonical_json_bytes,
     content_sha256,
@@ -151,20 +152,7 @@ def _project_full_parent_hybrid_review(
     ):
         raise ValueError("Omni inventory does not match current capture bundle")
     raw_vista = deepcopy(dict(vista_proposals))
-    raw_proposals = raw_vista.get("proposals")
-    if not isinstance(raw_proposals, list):
-        raise ValueError("VISTA proposals must be a list")
-    permitted_rois: dict[str, Mapping[str, Any]] = {}
-    for proposal in raw_proposals:
-        if not isinstance(proposal, Mapping):
-            raise ValueError("VISTA proposal must be an object")
-        candidate_id = proposal.get("candidate_id")
-        roi_ref = proposal.get("roi_ref")
-        if not isinstance(candidate_id, str) or candidate_id in permitted_rois:
-            raise ValueError("VISTA proposal candidate identity is invalid")
-        if not isinstance(roi_ref, Mapping):
-            raise ValueError("VISTA proposal ROI is invalid")
-        permitted_rois[candidate_id] = roi_ref
+    permitted_rois = _trusted_permitted_vista_rois(bundle=bundle, fusion=fusion)
     vista = validate_vista_proposals(
         raw_vista,
         fusion,
@@ -236,6 +224,54 @@ def _project_full_parent_hybrid_review(
         canonical_json_bytes(base)
     ).hexdigest()
     return seal_immutable(base)
+
+
+def _trusted_permitted_vista_rois(
+    *, bundle: Mapping[str, Any], fusion: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """按 Task 7 的确定性裁剪策略重建许可 ROI，不采信 proposal 自述。"""
+
+    image_size = bundle["capture_identity"]["image_size"]
+    lineage_ref = bundle["capture_lineage_ref"]
+    permitted: dict[str, dict[str, Any]] = {}
+    for candidate in fusion["candidates"]:
+        if candidate["state"] != "BOUND":
+            continue
+        candidate_id = candidate["candidate_id"]
+        bbox = candidate["bbox_original"]
+        bbox_dict = {
+            "x": bbox[0],
+            "y": bbox[1],
+            "w": bbox[2] - bbox[0],
+            "h": bbox[3] - bbox[1],
+        }
+        roi_metadata = build_roi_crop_metadata(
+            source_image_size=image_size,
+            candidate_bbox=bbox_dict,
+            crop_size={
+                "width": max(1, bbox_dict["w"] * 2),
+                "height": max(1, bbox_dict["h"] * 2),
+            },
+            expand_scale=2.0,
+        )
+        roi_bbox = roi_metadata["coordinate_transform"]["roi_bbox"]
+        permitted[candidate_id] = seal_immutable(
+            {
+                "contract_version": "hybrid_permitted_roi_v1",
+                "roi_id": f"roi/{candidate_id}",
+                "candidate_id": candidate_id,
+                "capture_lineage_ref": deepcopy(lineage_ref),
+                "coordinate_space": "capture_pixel_xyxy",
+                "xyxy": [
+                    roi_bbox["x"],
+                    roi_bbox["y"],
+                    roi_bbox["x"] + roi_bbox["w"],
+                    roi_bbox["y"] + roi_bbox["h"],
+                ],
+                "permitted_for_refinement": True,
+            }
+        )
+    return permitted
 
 
 def _full_parent_candidate_projection(

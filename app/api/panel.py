@@ -1452,18 +1452,18 @@ def _authoritative_hybrid_workflow_expectations(
     workflow_run_id: str | None,
     *,
     source_path: str,
-) -> tuple[str | None, int | None]:
+) -> tuple[str | None, int | None, dict[str, str] | None]:
     """仅从服务端工作流存储恢复 Hybrid 新鲜度与来源绑定。"""
 
     normalized_run_id = str(workflow_run_id or "").strip()
     if not normalized_run_id:
-        return None, None
+        return None, None, None
     try:
         state = validate_learning_workflow_state(
             learning_workflow_run_store.get(normalized_run_id)
         )
     except (LearningWorkflowTransitionError, TypeError, ValueError):
-        return None, None
+        return None, None, None
     revision = state.get("revision")
     if (
         state.get("run_id") != normalized_run_id
@@ -1471,11 +1471,11 @@ def _authoritative_hybrid_workflow_expectations(
         or not isinstance(revision, int)
         or revision < 0
     ):
-        return None, None
+        return None, None, None
     try:
-        resolved_source = _resolve_panel_artifact_file(source_path)
+        resolved_sources = _authoritative_hybrid_source_binding_paths(source_path)
     except (OSError, TypeError, ValueError):
-        return None, None
+        return None, None, None
     source_keys = {
         "trial_path",
         "source_path",
@@ -1484,6 +1484,7 @@ def _authoritative_hybrid_workflow_expectations(
         "scaffold_path",
     }
     source_bound = False
+    bound_source_path: Path | None = None
     for event in state.get("events", []):
         refs = event.get("evidence_refs") if isinstance(event, dict) else None
         if not isinstance(refs, dict):
@@ -1493,23 +1494,80 @@ def _authoritative_hybrid_workflow_expectations(
             if not isinstance(evidence_path, str) or not evidence_path.strip():
                 continue
             try:
-                source_bound = _resolve_panel_artifact_file(evidence_path) == resolved_source
+                resolved_evidence = _resolve_panel_artifact_file(evidence_path)
+                source_bound = resolved_evidence in resolved_sources
             except (OSError, TypeError, ValueError):
                 continue
             if source_bound:
+                bound_source_path = resolved_evidence
                 break
         if source_bound:
             break
     if not source_bound:
-        return None, None
-    return str(state["run_id"]), revision
+        return None, None, None
+    lineage_ref = _authoritative_hybrid_capture_lineage_from_source(
+        str(bound_source_path)
+    )
+    if lineage_ref is None:
+        return None, None, None
+    return str(state["run_id"]), revision, lineage_ref
+
+
+def _authoritative_hybrid_source_binding_paths(source_path: str) -> set[Path]:
+    """只允许服务端受管审核件回溯到工作流已经记录的原始来源。"""
+
+    resolved = _resolve_panel_artifact_file(source_path)
+    paths = {resolved}
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return paths
+    if not isinstance(payload, dict) or payload.get("contract_version") != "reviewed_template_candidate_v1":
+        return paths
+    source = payload.get("source")
+    original = source.get("original_draft_path") if isinstance(source, dict) else None
+    if isinstance(original, str) and original.strip():
+        paths.add(_resolve_panel_artifact_file(original))
+    return paths
+
+
+def _authoritative_hybrid_capture_lineage_from_source(
+    source_path: str,
+) -> dict[str, str] | None:
+    resolved = _resolve_panel_artifact_file(source_path)
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    candidates = [payload]
+    for key in ("draft", "learning_draft", "best_learning_draft"):
+        child = payload.get(key)
+        if isinstance(child, dict):
+            candidates.append(child)
+    refs: dict[tuple[str, str], dict[str, str]] = {}
+    for candidate in candidates:
+        values = [candidate.get("capture_lineage_ref")]
+        page_details = candidate.get("page_details")
+        if isinstance(page_details, dict):
+            values.append(page_details.get("capture_lineage_ref"))
+        for value in values:
+            if (
+                isinstance(value, dict)
+                and set(value) == {"id", "content_sha256"}
+                and all(isinstance(value.get(field), str) and value[field] for field in ("id", "content_sha256"))
+            ):
+                ref = {"id": value["id"], "content_sha256": value["content_sha256"]}
+                refs[(ref["id"], ref["content_sha256"])] = ref
+    return next(iter(refs.values())) if len(refs) == 1 else None
 
 
 @router.post("/panel/load_learning_draft_review", response_model=APIResponse)
 def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewRequest) -> APIResponse:
     """Load a model learning draft for display-only human review."""
     try:
-        expected_run_id, expected_revision = _authoritative_hybrid_workflow_expectations(
+        expected_run_id, expected_revision, expected_lineage_ref = _authoritative_hybrid_workflow_expectations(
             request.workflow_run_id,
             source_path=request.source_path,
         )
@@ -1521,6 +1579,7 @@ def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewReq
             load_options.update(
                 expected_hybrid_run_id=expected_run_id,
                 expected_hybrid_workflow_revision=expected_revision,
+                expected_current_capture_lineage_ref=expected_lineage_ref,
             )
         result = load_learning_draft_review(request.source_path, **load_options)
         trace_path = write_trace(
@@ -1646,7 +1705,7 @@ def load_interface_workflow_review_endpoint(
             )
             continue
         try:
-            expected_run_id, expected_revision = _authoritative_hybrid_workflow_expectations(
+            expected_run_id, expected_revision, expected_lineage_ref = _authoritative_hybrid_workflow_expectations(
                 request.workflow_run_ids_by_source.get(normalized_path),
                 source_path=normalized_path,
             )
@@ -1658,6 +1717,7 @@ def load_interface_workflow_review_endpoint(
                 load_options.update(
                     expected_hybrid_run_id=expected_run_id,
                     expected_hybrid_workflow_revision=expected_revision,
+                    expected_current_capture_lineage_ref=expected_lineage_ref,
                 )
             loaded_reviews.append(
                 load_learning_draft_review(normalized_path, **load_options)
@@ -2181,9 +2241,28 @@ def list_surface_rule_registry_endpoint() -> APIResponse:
 def save_learning_draft_review_endpoint(request: PanelSaveLearningDraftReviewRequest) -> APIResponse:
     """Save a reviewed template candidate without enabling execution."""
     try:
+        review_patch = deepcopy(request.review_patch)
+        workflow_run_id = review_patch.pop("_hybrid_workflow_run_id", None)
+        expected_run_id, expected_revision, expected_lineage_ref = (
+            _authoritative_hybrid_workflow_expectations(
+                workflow_run_id,
+                source_path=request.source_path,
+            )
+        )
+        review_patch.pop("_server_hybrid_expectations", None)
+        if (
+            expected_run_id is not None
+            and expected_revision is not None
+            and expected_lineage_ref is not None
+        ):
+            review_patch["_server_hybrid_expectations"] = {
+                "run_id": expected_run_id,
+                "workflow_revision": expected_revision,
+                "capture_lineage_ref": expected_lineage_ref,
+            }
         result = build_pathgraph_candidate_from_review(
             request.source_path,
-            request.review_patch,
+            review_patch,
             project_root=ROOT_DIR,
         )
         trace_path = write_trace(

@@ -72,6 +72,7 @@ def load_learning_draft_review(
     discover_related_sidecars: bool = True,
     expected_hybrid_run_id: str | None = None,
     expected_hybrid_workflow_revision: int | None = None,
+    expected_current_capture_lineage_ref: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """加载模型学习草稿，生成只用于展示和人工审核的面板模型。"""
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
@@ -156,6 +157,8 @@ def load_learning_draft_review(
         project_root=root,
         expected_hybrid_run_id=expected_hybrid_run_id,
         expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
+        expected_current_capture_lineage_ref=expected_current_capture_lineage_ref,
+        current_capture_lineage_ref=current_capture_lineage_ref,
         displayed_source_sha256=(
             str(displayed_source_image.get("sha256") or "")
             if isinstance(displayed_source_image, dict)
@@ -363,57 +366,28 @@ def _apply_hybrid_review_decision_patch(
     return updated
 
 
-def _validated_hybrid_expectations_from_source(
-    source_path: str | Path,
-    *,
-    root: Path,
-) -> tuple[str, int] | None:
-    """只从已复验的完整父投影解析当前 run/revision。"""
-    try:
-        resolved = _resolve_source_path(source_path, root)
-        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    candidates = [payload]
-    for key in ("draft", "learning_draft", "best_learning_draft"):
-        child = payload.get(key)
-        if isinstance(child, dict):
-            candidates.append(child)
-    for candidate in candidates:
-        projection = candidate.get("hybrid_review_projection")
-        if not isinstance(projection, dict) or projection.get("contract_version") != "hybrid_review_projection_v2":
-            continue
-        validated = validate_hybrid_review_projection(projection)
-        bundle = validated["parent_evidence"]["capture_bundle"]
-        run_id = bundle.get("run_id")
-        revision = bundle.get("workflow_revision")
-        if (
-            not isinstance(run_id, str)
-            or not run_id
-            or isinstance(revision, bool)
-            or not isinstance(revision, int)
-            or revision < 0
-        ):
-            raise ValueError("Hybrid review current capture expectations are invalid")
-        return run_id, revision
-    return None
-
-
 def save_reviewed_template_candidate(
     source_path: str | Path,
     review_patch: dict[str, Any] | None,
     *,
     project_root: str | Path | None = None,
+    expected_hybrid_run_id: str | None = None,
+    expected_hybrid_workflow_revision: int | None = None,
+    expected_current_capture_lineage_ref: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """保存人工审核后的候选模板；候选件仍不授权执行。"""
     root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
-    review_patch = review_patch if isinstance(review_patch, dict) else {}
-    hybrid_expectations = _validated_hybrid_expectations_from_source(
-        source_path,
-        root=root,
-    )
+    review_patch = deepcopy(review_patch) if isinstance(review_patch, dict) else {}
+    server_expectations = review_patch.pop("_server_hybrid_expectations", None)
+    if isinstance(server_expectations, dict):
+        if expected_hybrid_run_id is None:
+            expected_hybrid_run_id = server_expectations.get("run_id")
+        if expected_hybrid_workflow_revision is None:
+            expected_hybrid_workflow_revision = server_expectations.get("workflow_revision")
+        if expected_current_capture_lineage_ref is None:
+            expected_current_capture_lineage_ref = deepcopy(
+                server_expectations.get("capture_lineage_ref")
+            )
     review = load_learning_draft_review(
         source_path,
         project_root=root,
@@ -421,15 +395,36 @@ def save_reviewed_template_candidate(
             source_path,
             root,
         ),
-        expected_hybrid_run_id=(
-            hybrid_expectations[0] if hybrid_expectations is not None else None
-        ),
-        expected_hybrid_workflow_revision=(
-            hybrid_expectations[1] if hybrid_expectations is not None else None
-        ),
+        expected_hybrid_run_id=expected_hybrid_run_id,
+        expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
+        expected_current_capture_lineage_ref=expected_current_capture_lineage_ref,
     )
+    hybrid_status = review.get("hybrid_review_projection_status")
+    if (
+        isinstance(hybrid_status, dict)
+        and hybrid_status.get("status") == "rejected"
+    ):
+        raise ValueError(
+            "Hybrid review save requires authoritative current workflow evidence: "
+            + str(hybrid_status.get("reason") or "hybrid_projection_rejected")
+        )
     draft = deepcopy(review["draft"])
+    if isinstance(expected_current_capture_lineage_ref, dict):
+        draft["capture_lineage_ref"] = deepcopy(expected_current_capture_lineage_ref)
     source_resolved_for_output = _resolve_source_path(source_path, root)
+    preserved_source = deepcopy(review["source"])
+    try:
+        source_payload = json.loads(
+            source_resolved_for_output.read_text(encoding="utf-8-sig")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        source_payload = None
+    if (
+        isinstance(source_payload, dict)
+        and source_payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT
+        and isinstance(source_payload.get("source"), dict)
+    ):
+        preserved_source = deepcopy(source_payload["source"])
     review_root = (root / "artifacts" / "learning-draft-review").resolve()
     if (
         source_resolved_for_output.name == "reviewed_template_candidate.json"
@@ -563,7 +558,7 @@ def save_reviewed_template_candidate(
 
     candidate = {
         "contract_version": REVIEWED_TEMPLATE_CONTRACT,
-        "source": review["source"],
+        "source": preserved_source,
         "source_after_review": source_after_review,
         "counts_as_pure_model_generated": False,
         "artifact_is_authorization": False,
@@ -577,8 +572,8 @@ def save_reviewed_template_candidate(
         "draft": draft,
         "safety": _review_safety(),
         "audit": {
-            "source_trial_path": review["source"].get("source_trial_path") or review["source"].get("source_path"),
-            "original_draft_path": review["source"].get("original_draft_path"),
+            "source_trial_path": preserved_source.get("source_trial_path") or preserved_source.get("source_path"),
+            "original_draft_path": preserved_source.get("original_draft_path"),
             "reviewed_at": datetime.now().isoformat(),
             "changes_summary": changes,
             "manual_bbox_edit_summary": manual_bbox_edit_summary,

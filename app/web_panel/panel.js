@@ -126,6 +126,7 @@ let imageInspectorEditContext = null;
 let imageInspectorSelection = null;
 let learningDraftEditorState = null;
 let learningHybridReviewState = null;
+let learningDraftEditorBaseItems = [];
 let learningDraftEditorRevision = 0;
 let learningDraftEditorLoadToken = 0;
 let learningDraftEditorSelected = null;
@@ -3721,6 +3722,9 @@ function applyLearningDraftEditorMetadataFromControls() {
       role: String($("imageInspectorRoleSelect")?.value || "review_only"),
       description: String($("imageInspectorDescription")?.value || "").trim(),
     });
+    rebuildLearningDraftEditorHybridMirror();
+    syncLearningDraftReviewFromEditor();
+    return;
   }
   learningDraftEditorState.apply({
     op: "update_metadata",
@@ -3968,14 +3972,16 @@ function startLearningDraftEditorDrag(event, mode) {
         box.x + box.width,
         box.y + box.height,
       ]);
+      rebuildLearningDraftEditorHybridMirror();
+    } else {
+      learningDraftEditorState.apply({
+        op: "update_bbox",
+        target_kind: learningDraftEditorSelected.target_kind,
+        target_id: learningDraftEditorSelected.target_id,
+        after_bbox: imageInspectorSelection.bbox,
+        reason: String($("imageInspectorReason")?.value || "").trim(),
+      });
     }
-    learningDraftEditorState.apply({
-      op: "update_bbox",
-      target_kind: learningDraftEditorSelected.target_kind,
-      target_id: learningDraftEditorSelected.target_id,
-      after_bbox: imageInspectorSelection.bbox,
-      reason: String($("imageInspectorReason")?.value || "").trim(),
-    });
     syncLearningDraftReviewFromEditor();
     renderLearningDraftEditorBoxes();
   };
@@ -4603,6 +4609,7 @@ async function refreshSavedLearningDraftReview({
     discoverRelatedSidecars: false,
     supersedePendingLoad: true,
     skipReviewRender: true,
+    workflowRunId: currentLearningWorkflowRunId,
   });
   if (!refreshedReview) return null;
   if (
@@ -14882,18 +14889,22 @@ function bindImageInspectorEditDrag() {
         { role: "review_only", label: `Human region ${nextIndex}`, description: "" },
       );
       const targetId = addedHybrid?.candidate_id || `manual_region_${nextIndex}`;
-      learningDraftEditorState?.apply({
-        op: "add",
-        target_kind: "region",
-        target_id: targetId,
-        item: {
-          label: `Manual region ${nextIndex}`,
-          role: "review_only",
-          parent_region_id: "",
-          bbox: imageInspectorSelection.bbox,
-        },
-        reason: String($("imageInspectorReason")?.value || "").trim(),
-      });
+      if (addedHybrid) {
+        rebuildLearningDraftEditorHybridMirror();
+      } else {
+        learningDraftEditorState?.apply({
+          op: "add",
+          target_kind: "region",
+          target_id: targetId,
+          item: {
+            label: `Manual region ${nextIndex}`,
+            role: "review_only",
+            parent_region_id: "",
+            bbox: imageInspectorSelection.bbox,
+          },
+          reason: String($("imageInspectorReason")?.value || "").trim(),
+        });
+      }
       learningDraftEditorAddMode = false;
       syncLearningDraftReviewFromEditor();
       selectLearningDraftEditorItem("region", targetId);
@@ -14929,6 +14940,8 @@ function bindImageInspectorEditDrag() {
         learningDraftEditorSelected.target_id,
         String($("imageInspectorReason")?.value || "deleted_by_reviewer").trim(),
       );
+      rebuildLearningDraftEditorHybridMirror();
+      syncLearningDraftReviewFromEditor();
       renderLearningHybridReviewAudit();
       updateLearningDraftEditorControls();
       return;
@@ -14952,12 +14965,18 @@ function bindImageInspectorEditDrag() {
       imageInspectorSelection.point.x,
       imageInspectorSelection.point.y,
     ]);
+    rebuildLearningDraftEditorHybridMirror();
+    syncLearningDraftReviewFromEditor();
     renderLearningHybridReviewAudit();
     updateLearningDraftEditorControls();
   });
   $("imageInspectorUndoBtn")?.addEventListener("click", () => {
-    learningHybridReviewState?.undo();
-    learningDraftEditorState?.undo();
+    if (learningHybridReviewState) {
+      learningHybridReviewState.undo();
+      rebuildLearningDraftEditorHybridMirror();
+    } else {
+      learningDraftEditorState?.undo();
+    }
     learningDraftEditorSelected = null;
     imageInspectorSelection = null;
     syncLearningDraftReviewFromEditor();
@@ -14965,8 +14984,12 @@ function bindImageInspectorEditDrag() {
     renderLearningDraftEditorBoxes();
   });
   $("imageInspectorRedoBtn")?.addEventListener("click", () => {
-    learningHybridReviewState?.redo();
-    learningDraftEditorState?.redo();
+    if (learningHybridReviewState) {
+      learningHybridReviewState.redo();
+      rebuildLearningDraftEditorHybridMirror();
+    } else {
+      learningDraftEditorState?.redo();
+    }
     learningDraftEditorSelected = null;
     imageInspectorSelection = null;
     syncLearningDraftReviewFromEditor();
@@ -14978,6 +15001,10 @@ function bindImageInspectorEditDrag() {
     const nextRole = String(event.target.value || "review_only");
     // 先提交同一表单中尚未落盘的 Agent 语义，避免重绘时清空标签和描述。
     applyLearningDraftEditorMetadataFromControls();
+    if (learningHybridReviewCandidate(learningDraftEditorSelected.target_id)) {
+      renderLearningDraftEditorBoxes();
+      return;
+    }
     learningDraftEditorState?.apply({
       op: "update_role",
       ...learningDraftEditorSelected,
@@ -15588,6 +15615,7 @@ function resetLearningDraftEditorState(review = null) {
       target_id: String(item.action_template_id || item.action_id || "").trim(),
     })),
   ].filter((item) => item.target_id && normalizeBbox(item.bbox));
+  learningDraftEditorBaseItems = structuredClone(items);
   learningDraftEditorState = typeof factory === "function" ? factory(items) : null;
   learningDraftEditorSelected = null;
   learningDraftEditorWorkflowSelection = null;
@@ -15597,6 +15625,41 @@ function resetLearningDraftEditorState(review = null) {
   learningDraftEditorExpandedGroupKey = "";
   renderLearningDraftOwnershipReview(review);
   updateLearningDraftEditorControls();
+}
+
+function rebuildLearningDraftEditorHybridMirror() {
+  const factory = globalThis.LearningDraftEditorState?.createLearningDraftEditorState;
+  if (!learningHybridReviewState || typeof factory !== "function") return;
+  const hybridCandidates = learningHybridReviewState.candidates();
+  const hybridIds = new Set(hybridCandidates.map((candidate) => candidate.candidate_id));
+  const genericOperations = learningDraftEditorState?.exportOperations().filter(
+    (operation) => !hybridIds.has(String(operation?.target_id || "")),
+  ) || [];
+  const itemsById = new Map(learningDraftEditorBaseItems.map(
+    (item) => [String(item.target_id || ""), structuredClone(item)],
+  ));
+  hybridCandidates.forEach((candidate) => {
+    const bbox = candidate.reviewed_geometry?.bbox;
+    if (!Array.isArray(bbox) || bbox.length !== 4) return;
+    const semantics = candidate.reviewed_semantics || {};
+    const current = itemsById.get(candidate.candidate_id) || {
+      target_kind: "region",
+      target_id: candidate.candidate_id,
+      candidate_id: candidate.candidate_id,
+      region_id: candidate.candidate_id,
+      role: "review_only",
+    };
+    itemsById.set(candidate.candidate_id, {
+      ...current,
+      label: String(semantics.label || current.label || ""),
+      description: String(semantics.description || current.description || ""),
+      role: String(semantics.role || current.role || "review_only"),
+      bbox: { x: bbox[0], y: bbox[1], w: bbox[2] - bbox[0], h: bbox[3] - bbox[1] },
+      tombstone: candidate.tombstone ? structuredClone(candidate.tombstone) : null,
+    });
+  });
+  learningDraftEditorState = factory(Array.from(itemsById.values()));
+  genericOperations.forEach((operation) => learningDraftEditorState.apply(operation));
 }
 
 function syncLearningDraftReviewFromEditor() {
@@ -15625,7 +15688,9 @@ function syncLearningDraftReviewFromEditor() {
 function learningDraftEditorOperations() {
   if (!learningDraftEditorState) return [];
   const hybridIds = new Set(
-    learningHybridReviewState?.candidates().map((candidate) => candidate.candidate_id) || [],
+    typeof learningHybridReviewState !== "undefined"
+      ? learningHybridReviewState?.candidates().map((candidate) => candidate.candidate_id) || []
+      : [],
   );
   return learningDraftEditorState.exportOperations().filter(
     (operation) => !hybridIds.has(String(operation?.target_id || "")),
@@ -15762,7 +15827,9 @@ function learningDraftReviewPatch() {
   };
   const ownershipOperations = learningDraftOwnershipOperations();
   const operations = [...learningDraftEditorOperations(), ...ownershipOperations];
-  const hybridPatch = learningHybridReviewState?.reviewPatch() || null;
+  const hybridPatch = typeof learningHybridReviewState !== "undefined"
+    ? learningHybridReviewState?.reviewPatch() || null
+    : null;
   if (ownershipOperations.length) patch.review_status = "needs_human_review";
   if (!operations.length && !hybridPatch) return patch;
   return {
@@ -20724,6 +20791,10 @@ async function loadInterfaceWorkflowReview(sourcePaths = [], options = {}) {
     application_identity: currentInterfaceWorkflowApplicationIdentity(),
     draft_source_paths: paths,
     discover_related_sidecars: options.discoverRelatedSidecars !== false,
+    workflow_run_ids_by_source: Object.fromEntries(
+      paths.map((path) => [path, String(currentLearningWorkflowRunId || "").trim()])
+        .filter((entry) => entry[1]),
+    ),
   }, {
     summary: "POST /panel/load_interface_workflow_review",
     workflowStep: "load_interface_workflow_review",
@@ -21205,6 +21276,9 @@ async function loadLearningDraftReview(options = {}) {
       const response = await api("POST", "/panel/load_learning_draft_review", {
         source_path: sourcePath,
         discover_related_sidecars: options.discoverRelatedSidecars !== false,
+        workflow_run_id: String(
+          options.workflowRunId || currentLearningWorkflowRunId || "",
+        ).trim(),
       }, {
         summary: "POST /panel/load_learning_draft_review",
         workflowStep: "load_learning_draft_review",
@@ -21314,7 +21388,10 @@ async function saveLearningDraftReview(options = {}, workflowSession = null) {
     }
     const response = await api("POST", "/panel/save_learning_draft_review", {
       source_path: sourcePath,
-      review_patch: reviewPatch,
+      review_patch: {
+        ...reviewPatch,
+        _hybrid_workflow_run_id: currentLearningWorkflowRunId,
+      },
     }, { summary: "POST /panel/save_learning_draft_review", workflowStep: "save_learning_draft_review", skipRender: true });
     if (!response?.success) {
       renderResponse(response || { success: false, message: "Learning draft review save failed" }, "Learning draft review");

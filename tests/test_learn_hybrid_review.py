@@ -12,6 +12,8 @@ from app.learn.hybrid.review_projection import (
     project_hybrid_review,
     validate_hybrid_review_projection,
 )
+from app.learn.recognition.roi import build_roi_crop_metadata
+from app.learn.recognition.uei.canonical import seal_immutable
 from tests.test_learn_hybrid_contracts import (
     binding_fixture,
     fusion_fixture,
@@ -30,6 +32,14 @@ NON_AUTHORIZING = {
 }
 
 
+def _server_expectations(bundle: dict) -> dict:
+    return {
+        "run_id": bundle["run_id"],
+        "workflow_revision": bundle["workflow_revision"],
+        "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"]),
+    }
+
+
 def _full_parent_fixture(*, candidate_count: int = 1) -> tuple[dict, dict, dict, dict, dict]:
     bundle = _verified_bundle()
     inventory = _inventory_for_capture(
@@ -46,7 +56,42 @@ def _full_parent_fixture(*, candidate_count: int = 1) -> tuple[dict, dict, dict,
             reason="not_bound",
         )
     vista = vista_fixture(inventory=inventory)
+    _bind_vista_to_trusted_roi_builder(bundle, fusion, vista)
     return bundle, inventory, bindings, fusion, vista
+
+
+def _bind_vista_to_trusted_roi_builder(
+    bundle: dict, fusion: dict, vista: dict,
+) -> None:
+    """Mirror the Task 7 request builder instead of trusting proposal-owned ROI data."""
+
+    proposals = {item["candidate_id"]: item for item in vista["proposals"]}
+    for candidate in fusion["candidates"]:
+        if candidate["state"] != "BOUND":
+            continue
+        bbox = candidate["bbox_original"]
+        metadata = build_roi_crop_metadata(
+            source_image_size=bundle["capture_identity"]["image_size"],
+            candidate_bbox={
+                "x": bbox[0], "y": bbox[1],
+                "w": bbox[2] - bbox[0], "h": bbox[3] - bbox[1],
+            },
+            crop_size={
+                "width": max(1, (bbox[2] - bbox[0]) * 2),
+                "height": max(1, (bbox[3] - bbox[1]) * 2),
+            },
+            expand_scale=2.0,
+        )
+        roi = metadata["coordinate_transform"]["roi_bbox"]
+        proposals[candidate["candidate_id"]]["roi_ref"] = seal_immutable({
+            "contract_version": "hybrid_permitted_roi_v1",
+            "roi_id": f"roi/{candidate['candidate_id']}",
+            "candidate_id": candidate["candidate_id"],
+            "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"]),
+            "coordinate_space": "capture_pixel_xyxy",
+            "xyxy": [roi["x"], roi["y"], roi["x"] + roi["w"], roi["y"] + roi["h"]],
+            "permitted_for_refinement": True,
+        })
 
 
 def _persistent_full_parent_fixture(
@@ -97,6 +142,7 @@ def _persistent_full_parent_fixture(
             reason="not_bound",
         )
     vista = vista_fixture(inventory=inventory)
+    _bind_vista_to_trusted_roi_builder(bundle, fusion, vista)
     return bundle, inventory, bindings, fusion, vista, image
 
 
@@ -139,6 +185,23 @@ def test_full_parent_projection_rejects_any_parent_capture_mismatch() -> None:
             capture_bundle=bundle,
             omni_inventory=inventory,
             qwen_bindings=mismatched,
+            fusion_result=fusion,
+            vista_proposals=vista,
+        )
+
+
+def test_full_parent_projection_rejects_well_formed_but_unpermitted_vista_roi() -> None:
+    bundle, inventory, bindings, fusion, vista = _full_parent_fixture()
+    proposal = vista["proposals"][0]
+    wrong_roi = deepcopy(proposal["roi_ref"])
+    wrong_roi["xyxy"] = [10, 20, 90, 60]
+    proposal["roi_ref"] = seal_immutable(wrong_roi)
+
+    with pytest.raises(ValueError, match="permitted ROI"):
+        project_hybrid_review(
+            capture_bundle=bundle,
+            omni_inventory=inventory,
+            qwen_bindings=bindings,
             fusion_result=fusion,
             vista_proposals=vista,
         )
@@ -344,6 +407,7 @@ def test_embedded_full_parent_projection_loads_every_candidate_into_large_review
         project_root=tmp_path,
         expected_hybrid_run_id="run-review-v2",
         expected_hybrid_workflow_revision=8,
+        expected_current_capture_lineage_ref=bundle["capture_lineage_ref"],
     )
 
     assert loaded["hybrid_review_projection_status"]["status"] == "projected"
@@ -361,9 +425,26 @@ def test_embedded_full_parent_projection_loads_every_candidate_into_large_review
         project_root=tmp_path,
         expected_hybrid_run_id="run-review-v2",
         expected_hybrid_workflow_revision=9,
+        expected_current_capture_lineage_ref=bundle["capture_lineage_ref"],
     )
     assert stale["draft"]["regions"] == []
     assert stale["hybrid_review_projection_status"]["status"] == "rejected"
+
+    wrong_lineage = load_learning_draft_review(
+        source,
+        project_root=tmp_path,
+        expected_hybrid_run_id="run-review-v2",
+        expected_hybrid_workflow_revision=8,
+        expected_current_capture_lineage_ref={
+            "id": "same-image-wrong-capture",
+            "content_sha256": "ef" * 32,
+        },
+    )
+    assert wrong_lineage["draft"]["regions"] == []
+    assert wrong_lineage["hybrid_review_projection_status"]["status"] == "rejected"
+    assert wrong_lineage["hybrid_review_projection_status"]["reason"] == (
+        "hybrid_current_capture_lineage_mismatch"
+    )
 
 
 def test_saved_human_and_vista_proposals_never_authorize_or_surface_runtime_points(
@@ -404,6 +485,7 @@ def test_saved_human_and_vista_proposals_never_authorize_or_surface_runtime_poin
             "review_status": "needs_human_review",
             "source_after_review": "mixed",
             "hybrid_review_decisions": deepcopy(projection["review_decisions"]),
+            "_server_hybrid_expectations": _server_expectations(bundle),
         },
         project_root=tmp_path,
     )
@@ -469,6 +551,7 @@ def test_save_reload_preserves_hybrid_decisions_and_revokes_current_approval(
         project_root=tmp_path,
         expected_hybrid_run_id="run-review-v2",
         expected_hybrid_workflow_revision=8,
+        expected_current_capture_lineage_ref=bundle["capture_lineage_ref"],
     )
     bound_screen = initial_review["draft"]["page_details"]["screen"]
     patch_base = {
@@ -489,6 +572,9 @@ def test_save_reload_preserves_hybrid_decisions_and_revokes_current_approval(
             "hybrid_review_decisions": [decision],
         },
         project_root=tmp_path,
+        expected_hybrid_run_id=bundle["run_id"],
+        expected_hybrid_workflow_revision=bundle["workflow_revision"],
+        expected_current_capture_lineage_ref=bundle["capture_lineage_ref"],
     )
     reviewed_path = tmp_path / saved["reviewed_template_candidate_path"]
     durable = json.loads(reviewed_path.read_text(encoding="utf-8"))
@@ -504,6 +590,7 @@ def test_save_reload_preserves_hybrid_decisions_and_revokes_current_approval(
         project_root=tmp_path,
         expected_hybrid_run_id="run-review-v2",
         expected_hybrid_workflow_revision=8,
+        expected_current_capture_lineage_ref=bundle["capture_lineage_ref"],
     )
     assert reloaded["hybrid_review_projection_status"]["status"] == "projected"
     assert reloaded["draft"]["regions"][0]["reviewed_geometry"]["bbox"] == [20, 24, 100, 64]
@@ -518,6 +605,9 @@ def test_save_reload_preserves_hybrid_decisions_and_revokes_current_approval(
             "hybrid_review_decisions": [decision],
         },
         project_root=tmp_path,
+        expected_hybrid_run_id=bundle["run_id"],
+        expected_hybrid_workflow_revision=bundle["workflow_revision"],
+        expected_current_capture_lineage_ref=bundle["capture_lineage_ref"],
     )
     durable_again = json.loads(
         (tmp_path / saved_again["reviewed_template_candidate_path"]).read_text(encoding="utf-8")
@@ -539,6 +629,7 @@ def test_recognition_attachment_accepts_only_exact_displayed_full_parent_project
     )
     result = {
         "learning_draft": {
+            "capture_lineage_ref": deepcopy(bundle["capture_lineage_ref"]),
             "page_details": {
                 "screen": {
                     "source_image_sha256": bundle["capture_identity"]["screenshot_sha256"],
@@ -560,5 +651,24 @@ def test_recognition_attachment_accepts_only_exact_displayed_full_parent_project
     with pytest.raises(ValueError, match="displayed screenshot"):
         _attach_hybrid_review_projection_to_draft(
             stale,
+            {"hybrid_review_projection": projection},
+        )
+
+    missing_lineage = deepcopy(result)
+    missing_lineage["learning_draft"].pop("capture_lineage_ref", None)
+    with pytest.raises(ValueError, match="capture lineage"):
+        _attach_hybrid_review_projection_to_draft(
+            missing_lineage,
+            {"hybrid_review_projection": projection},
+        )
+
+    wrong_lineage = deepcopy(result)
+    wrong_lineage["learning_draft"]["capture_lineage_ref"] = {
+        "id": "same-image-wrong-capture",
+        "content_sha256": "ef" * 32,
+    }
+    with pytest.raises(ValueError, match="capture lineage"):
+        _attach_hybrid_review_projection_to_draft(
+            wrong_lineage,
             {"hybrid_review_projection": projection},
         )

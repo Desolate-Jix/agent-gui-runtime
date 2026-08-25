@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  createInterfaceWorkflowReviewState,
   createHybridReviewState,
 } = require("../../app/web_panel/learning_workflow_review.js");
 
@@ -50,6 +51,22 @@ test("rebox preserves model bbox, appends a decision, and revokes current approv
   assert.equal(candidate.reviewed_by_human, false);
   assert.deepEqual(state.screenFacts().warnings, ["screen_warning"]);
   assert.deepEqual(candidate.warnings, ["fusion_conflict"]);
+});
+
+test("unchanged canonical semantics are a no-op across repeated save snapshots", () => {
+  const state = createHybridReviewState(fixture());
+  const before = state.snapshot();
+  const candidate = state.currentCandidate();
+
+  state.editSemantics(candidate.candidate_id, {
+    role: ` ${candidate.reviewed_semantics.role} `,
+    label: candidate.reviewed_semantics.label,
+    description: candidate.reviewed_semantics.description,
+  });
+
+  assert.deepEqual(state.snapshot(), before);
+  assert.equal(state.canUndo(), false);
+  assert.equal(state.reviewPatch().hybrid_review_decisions.length, 0);
 });
 
 test("snapshot reload preserves append-only decisions without aliasing model evidence", () => {
@@ -109,6 +126,32 @@ test("undo and redo rebuild derived state without rewriting model evidence", () 
   assert.deepEqual(state.currentCandidate().reviewed_geometry.bbox, [10, 20, 80, 50]);
 });
 
+test("one Hybrid history keeps mixed bbox point semantic and add edits aligned", () => {
+  const state = createHybridReviewState(fixture());
+  state.rebox("candidate/abc", [10, 20, 80, 50]);
+  state.proposeHumanPoint("candidate/abc", [40, 30]);
+  state.editSemantics("candidate/abc", {
+    role: "button", label: "Continue", description: "Advance",
+  });
+  const added = state.add([100, 20, 140, 50], {
+    role: "button", label: "Next", description: "",
+  });
+
+  assert.equal(state.undo(), true);
+  assert.equal(state.candidates().some((candidate) => candidate.candidate_id === added.candidate_id), false);
+  assert.equal(state.undo(), true);
+  assert.equal(state.currentCandidate().reviewed_semantics.label, "Apply");
+  assert.equal(state.undo(), true);
+  assert.equal(state.currentCandidate().human_point_proposal, null);
+  assert.equal(state.undo(), true);
+  assert.deepEqual(state.currentCandidate().reviewed_geometry.bbox, [8, 18, 82, 52]);
+  assert.equal(state.reviewPatch().hybrid_review_decisions.length, 0);
+
+  for (let index = 0; index < 4; index += 1) assert.equal(state.redo(), true);
+  assert.equal(state.currentCandidate().candidate_id, added.candidate_id);
+  assert.equal(state.reviewPatch().hybrid_review_decisions.length, 4);
+});
+
 test("review patch exports append-only Hybrid decisions and remains non-authorizing", () => {
   const state = createHybridReviewState(fixture());
   state.rebox("candidate/abc", [10, 20, 80, 50]);
@@ -120,4 +163,70 @@ test("review patch exports append-only Hybrid decisions and remains non-authoriz
   assert.equal(patch.hybrid_review_decisions.length, 2);
   assert.deepEqual(patch.hybrid_review_decisions[0].bbox, [10, 20, 80, 50]);
   assert.deepEqual(patch.hybrid_review_decisions[1].human_point_proposal.xy, [40, 30]);
+});
+
+test("hybrid source edits revoke only affected granular facts and node approval", () => {
+  const projection = fixture();
+  const candidateId = projection.candidates[0].candidate_id;
+  const source = "artifacts/hybrid/reviewed.json";
+  const state = createInterfaceWorkflowReviewState({
+    contract_version: "single_application_workflow_review_v1",
+    workflow: { workflow_id: "workflow/hybrid", goal: "review", application_identity: {} },
+    nodes: [
+      {
+        node_id: "node/source", source_paths: [source], editable_review_source_path: source,
+        display_name: "Source", surface_type: "page",
+        regions: [{ region_id: candidateId, label: "Apply", bbox: { x: 10, y: 20, width: 100, height: 50 } }],
+        controls: [{ control_id: candidateId, semantic_name: "Apply", purpose: "open", role: "button" }],
+        action_candidates: [{
+          action_template_id: "action/open", semantic_action: "open_detail",
+          target_control_id: candidateId, target_region_id: "", target_interface_id: "node/target",
+        }],
+        blockers: [], content_descriptors: [], verification_rules: [],
+      },
+      {
+        node_id: "node/target", source_paths: [], display_name: "Target", surface_type: "page",
+        regions: [], controls: [], action_candidates: [], blockers: [], content_descriptors: [], verification_rules: [],
+      },
+    ],
+    edges: [{
+      edge_id: "edge/open", source_node_id: "node/source", target_node_id: "node/target",
+      action_template_id: "action/open", action_type: "open_detail",
+      target_control_id: candidateId, target_region_id: "",
+    }],
+  });
+  state.confirmOperationHumanReviewBundle("edge/open");
+  state.confirmNodeHumanReview("node/source");
+
+  const hybrid = createHybridReviewState(projection);
+  hybrid.rebox(candidateId, [20, 24, 100, 64]);
+  state.replaceReviewedNodeEvidenceBySource(source, source, {
+    regions: [{
+      region_id: candidateId,
+      label: "Apply",
+      reviewed_geometry: hybrid.currentCandidate().reviewed_geometry,
+      review_decisions: hybrid.currentCandidate().review_decisions,
+    }],
+  });
+  let status = state.operationGranularReview("edge/open");
+  assert.deepEqual(
+    [status.target_control.current, status.action_candidate.current, status.edge.current],
+    [true, true, true],
+  );
+  assert.equal(state.snapshot().nodes[0].reviewed_by_human, false);
+
+  state.updateNode("node/source", {
+    controls: [{ control_id: candidateId, semantic_name: "Apply revised", purpose: "open", role: "button" }],
+  });
+  status = state.operationGranularReview("edge/open");
+  assert.deepEqual(
+    [status.target_control.current, status.action_candidate.current, status.edge.current],
+    [false, true, true],
+  );
+  assert.throws(() => state.confirmNodeHumanReview("node/source"), /granular human approval/i);
+
+  state.confirmOperationTargetControlHumanReview("edge/open");
+  state.confirmNodeHumanReview("node/source");
+  assert.equal(state.snapshot().nodes[0].reviewed_by_human, true);
+  assert.equal("approved" in state.snapshot().nodes[0], false);
 });

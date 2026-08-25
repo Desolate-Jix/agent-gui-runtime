@@ -2025,6 +2025,14 @@
       return value.map((edge) => Number(edge));
     }
 
+    function canonicalSemantics(value) {
+      return {
+        role: String(value?.role || "").normalize("NFKC").trim().replace(/\s+/g, " "),
+        label: String(value?.label || "").normalize("NFKC").trim().replace(/\s+/g, " "),
+        description: String(value?.description || "").normalize("NFKC").trim().replace(/\s+/g, " "),
+      };
+    }
+
     return {
       select(candidateId) {
         candidateById(candidateId);
@@ -2058,12 +2066,11 @@
       },
       editSemantics(candidateId, semantics) {
         const candidate = candidateById(candidateId);
-        const next = {
-          role: String(semantics?.role || "").trim(),
-          label: String(semantics?.label || "").trim(),
-          description: String(semantics?.description || "").trim(),
-        };
+        const next = canonicalSemantics(semantics);
         if (!next.role || !next.label) throw new Error("Hybrid review role and label are required");
+        const current = canonicalSemantics(candidate.reviewed_semantics);
+        selectedCandidateId = candidateId;
+        if (JSON.stringify(current) === JSON.stringify(next)) return this.currentCandidate();
         recordHistory();
         appendDecision(candidate, "semantic_edit", { semantics: clone(next) });
         candidate.reviewed_semantics = {

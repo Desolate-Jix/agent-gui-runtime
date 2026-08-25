@@ -1098,7 +1098,11 @@ def _attach_hybrid_review_projection_to_draft(
         raise ValueError("Hybrid review projection does not match displayed screenshot")
     draft_lineage = draft.get("capture_lineage_ref")
     projected_lineage = projection["screen_facts"]["capture_lineage_ref"]
-    if draft_lineage is not None and draft_lineage != projected_lineage:
+    if (
+        not isinstance(draft_lineage, dict)
+        or set(draft_lineage) != {"id", "content_sha256"}
+        or draft_lineage != projected_lineage
+    ):
         raise ValueError("Hybrid review projection does not match current capture lineage")
     draft["hybrid_review_projection"] = deepcopy(projection)
 

@@ -31,6 +31,8 @@ def load_hybrid_large_review_projection(
     project_root: Path,
     expected_hybrid_run_id: str | None,
     expected_hybrid_workflow_revision: int | None,
+    expected_current_capture_lineage_ref: dict[str, str] | None,
+    current_capture_lineage_ref: dict[str, str] | None,
     displayed_source_sha256: str | None,
     displayed_source_size: dict[str, int] | None,
     existing_region_ids: set[str],
@@ -56,10 +58,19 @@ def load_hybrid_large_review_projection(
             isinstance(projection_ref, dict)
             and projection_ref.get("contract_version") == "hybrid_review_projection_v2"
         ):
+            if not _is_ref(expected_current_capture_lineage_ref):
+                return _invalid_hybrid_review("hybrid_expectations_missing")
             stored_projection = validate_hybrid_review_projection(projection_ref)
             parent_bundle = stored_projection["parent_evidence"]["capture_bundle"]
             screen = stored_projection["screen_facts"]
             displayed = screen["displayed_image"]
+            projected_lineage = screen["capture_lineage_ref"]
+            if (
+                not _is_ref(current_capture_lineage_ref)
+                or current_capture_lineage_ref != expected_current_capture_lineage_ref
+                or projected_lineage != expected_current_capture_lineage_ref
+            ):
+                return _invalid_hybrid_review("hybrid_current_capture_lineage_mismatch")
             if (
                 parent_bundle.get("run_id") != expected_hybrid_run_id
                 or parent_bundle.get("workflow_revision")

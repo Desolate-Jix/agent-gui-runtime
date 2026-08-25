@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -125,6 +126,150 @@ def test_panel_hybrid_review_uses_authoritative_workflow_state(
             ]
         else:
             assert payload["data"]["hybrid_review_projection_status"]["status"] == "rejected"
+
+
+def test_panel_public_hybrid_requests_carry_current_workflow_expectations_and_one_history() -> None:
+    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8-sig")
+    load_start = panel_js.index("async function loadLearningDraftReview")
+    save_start = panel_js.index("async function saveLearningDraftReview", load_start)
+    load_body = panel_js[load_start:save_start]
+    multi_start = panel_js.index("async function loadInterfaceWorkflowReview")
+    multi_body = panel_js[multi_start:load_start]
+    refresh_start = panel_js.index("async function refreshSavedLearningDraftReview")
+    refresh_end = panel_js.index("async function refreshCurrentInterfaceWorkflowEvidence", refresh_start)
+    refresh_body = panel_js[refresh_start:refresh_end]
+    save_body = panel_js[save_start:panel_js.index(
+        "async function confirmAndStoreCurrentInterfaceWorkflowReview", save_start,
+    )]
+    bind_start = panel_js.index("function bindImageInspectorEditDrag")
+    bind_body = panel_js[bind_start:panel_js.index("function bindLearningDraftPreviewButtons", bind_start)]
+
+    assert "workflow_run_id: String(" in load_body
+    assert "options.workflowRunId || currentLearningWorkflowRunId" in load_body
+    assert "workflow_run_ids_by_source:" in multi_body
+    assert "currentLearningWorkflowRunId" in multi_body
+    assert "workflowRunId: currentLearningWorkflowRunId" in refresh_body
+    assert "_hybrid_workflow_run_id: currentLearningWorkflowRunId" in save_body
+    assert "if (learningHybridReviewState)" in bind_body
+    assert "learningHybridReviewState?.undo();\n    learningDraftEditorState?.undo();" not in bind_body
+    assert "learningHybridReviewState?.redo();\n    learningDraftEditorState?.redo();" not in bind_body
+
+
+def test_panel_public_full_parent_hybrid_load_save_reload_survives(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from app.learn.hybrid.review_projection import project_hybrid_review
+    from tests.test_learn_hybrid_review import _persistent_full_parent_fixture
+    from tests.test_learning_hybrid_vertical_slice import _write_draft
+
+    bundle, inventory, bindings, fusion, vista, image = _persistent_full_parent_fixture(tmp_path)
+    projection = project_hybrid_review(
+        capture_bundle=bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        fusion_result=fusion,
+        vista_proposals=vista,
+    )
+    source = _write_draft(
+        tmp_path,
+        {"bundle": bundle, "image": image},
+        embedded_projection=projection,
+        case="panel-public-v2",
+    )
+    relative_source = source.relative_to(tmp_path).as_posix()
+    state = _hybrid_review_workflow_state(
+        bundle["run_id"],
+        revision=bundle["workflow_revision"],
+        trial_path=relative_source,
+    )
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(panel_api, "write_trace", lambda **_kwargs: "trace.json")
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", _StaticLearningWorkflowStore(state))
+    client = TestClient(app)
+
+    loaded = client.post("/panel/load_learning_draft_review", json={
+        "source_path": relative_source,
+        "workflow_run_id": bundle["run_id"],
+    }).json()
+    assert loaded["success"] is True, loaded
+    assert loaded["data"]["hybrid_review_projection_status"]["status"] == "projected"
+    assert len(loaded["data"]["draft"]["regions"]) == len(projection["candidates"])
+    screen = loaded["data"]["draft"]["page_details"]["screen"]
+    candidate_id = projection["candidates"][0]["candidate_id"]
+
+    saved = client.post("/panel/save_learning_draft_review", json={
+        "source_path": relative_source,
+        "review_patch": {
+            "_hybrid_workflow_run_id": bundle["run_id"],
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": screen["source_image_path"],
+            "screenshot_sha256": screen["source_image_sha256"],
+            "operations": [],
+            "review_status": "needs_human_review",
+            "source_after_review": "mixed",
+            "hybrid_review_decisions": [{
+                "decision_id": "decision/panel-public-rebox",
+                "decision_type": "rebox",
+                "candidate_id": candidate_id,
+                "bbox": [20, 24, 100, 64],
+            }],
+        },
+    }).json()
+    assert saved["success"] is True, saved
+    reviewed_path = saved["data"]["reviewed_template_candidate_path"]
+
+    reloaded = client.post("/panel/load_learning_draft_review", json={
+        "source_path": reviewed_path,
+        "workflow_run_id": bundle["run_id"],
+        "discover_related_sidecars": False,
+    }).json()
+    assert reloaded["success"] is True, reloaded
+    assert reloaded["data"]["hybrid_review_projection_status"]["status"] == "projected"
+    assert reloaded["data"]["draft"]["regions"][0]["reviewed_geometry"]["bbox"] == [20, 24, 100, 64]
+    assert len(reloaded["data"]["hybrid_review_projection"]["review_decisions"]) == 1
+
+    reloaded_screen = reloaded["data"]["draft"]["page_details"]["screen"]
+    saved_again = client.post("/panel/save_learning_draft_review", json={
+        "source_path": reviewed_path,
+        "review_patch": {
+            "_hybrid_workflow_run_id": bundle["run_id"],
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": reloaded_screen["source_image_path"],
+            "screenshot_sha256": reloaded_screen["source_image_sha256"],
+            "operations": [],
+            "review_status": "needs_human_review",
+            "source_after_review": "mixed",
+            "hybrid_review_decisions": reloaded["data"]["hybrid_review_projection"]["review_decisions"],
+        },
+    }).json()
+    assert saved_again["success"] is True, saved_again
+    durable = json.loads(
+        (tmp_path / saved_again["data"]["reviewed_template_candidate_path"]).read_text(
+            encoding="utf-8",
+        )
+    )
+    assert len(durable["draft"]["hybrid_review_projection"]["review_decisions"]) == 1
+
+    reviewed_file = tmp_path / saved_again["data"]["reviewed_template_candidate_path"]
+    wrong_lineage_source = deepcopy(durable)
+    wrong_lineage_source["draft"]["capture_lineage_ref"] = {
+        "id": "same-image-wrong-capture",
+        "content_sha256": "ef" * 32,
+    }
+    reviewed_file.write_text(
+        json.dumps(wrong_lineage_source, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    wrong_lineage = client.post("/panel/load_learning_draft_review", json={
+        "source_path": reviewed_path,
+        "workflow_run_id": bundle["run_id"],
+        "discover_related_sidecars": False,
+    }).json()
+    assert wrong_lineage["success"] is True, wrong_lineage
+    assert wrong_lineage["data"]["draft"]["regions"] == []
+    assert wrong_lineage["data"]["hybrid_review_projection_status"]["reason"] == (
+        "hybrid_current_capture_lineage_mismatch"
+    )
 
 
 def test_web_panel_serves_browser_control_surface() -> None:
