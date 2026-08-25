@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -246,53 +247,51 @@ def test_calibration_sequence_retries_transient_model_busy_without_losing_result
     assert sleeps == []
 
 
-def _hybrid_sequence_payload() -> dict[str, Any]:
-    capture_identity = {
-        "capture_id": "capture/hybrid-calibration",
-        "screenshot_sha256": "a" * 64,
-        "artifact_sha256": "a" * 64,
-        "workflow_revision": "9",
-        "image_size": {"width": 400, "height": 300},
-        "capture_lineage_ref": {
-            "id": "capture-lineage/hybrid-calibration",
-            "content_sha256": "b" * 64,
-        },
-    }
-    fusion = seal_immutable(
-        {
-            "contract_version": "hybrid_fusion_result_v1",
-            "capture_identity": deepcopy(capture_identity),
-            "config_sha256": "c" * 64,
-            "candidates": [
-                {
-                    "candidate_id": candidate_id,
-                    "bbox_original": bbox,
-                    "coordinate_space": "capture_pixel_xyxy",
-                    "state": "BOUND",
-                    "vista_eligible": True,
-                }
-                for candidate_id, bbox in (
-                    ("candidate/one", [40, 50, 100, 90]),
-                    ("candidate/two", [180, 120, 260, 180]),
-                )
-            ],
-        }
-    )
-    bundle = seal_immutable(
-        {
-            "contract_version": "hybrid_capture_bundle_v1",
-            "capture_identity": deepcopy(capture_identity),
-            "workflow_revision": 9,
-        }
-    )
+def _hybrid_sequence_payload(tmp_path) -> dict[str, Any]:
+    from app.core.model_server import build_qwen_cleanup_receipt
+    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle, seal_hybrid_capture_bundle
+    from app.learn.hybrid.contracts import load_hybrid_config
+    from app.learn.hybrid.fusion import fuse_hybrid_candidates
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_capture import _context, _identity, _window
+    from tests.test_learn_hybrid_fusion import _inventory_for_capture
+    from tests.test_learn_hybrid_qwen_binding import _raw_for
+
+    run_id, revision = "run-hybrid-calibration", 9
+    image, identity = _identity(tmp_path, run_id=run_id, revision=revision, name="hybrid.png", size=(400, 300))
+    saved = seal_hybrid_capture_bundle(project_root=tmp_path, image_path=image, run_id=run_id,
+        workflow_revision=revision, window_binding=_window(),
+        ocr_uia_context=_context(tmp_path, identity, run_id=run_id, revision=revision),
+        capture_envelope=identity.capture_envelope)
+    bundle = load_and_verify_hybrid_capture_bundle(project_root=tmp_path, bundle_ref=saved["bundle_ref"],
+        expected_run_id=run_id, expected_workflow_revision=revision)
+    inventory = seal_immutable(_inventory_for_capture(bundle["capture_identity"], candidate_count=2))
+    bindings = seal_immutable(parse_qwen_candidate_bindings(_raw_for(inventory), inventory, context_ref=bundle["context_ref"]))
+    fusion = seal_immutable(fuse_hybrid_candidates(config=load_hybrid_config(Path(__file__).resolve().parents[1]),
+        capture_bundle=bundle, omni_inventory=inventory, qwen_bindings=bindings))
+    process = {"pid": 4123, "create_time": 100.5, "executable": "qwen-server.exe"}
+    lease = {"contract_version": "qwen_model_server_lease_v1", "lease_id": "lease-calibration",
+        "owner_request_id": "request-calibration", "profile_id": "qwen", "incarnation_id": "inc-calibration",
+        "server_base_url": "http://127.0.0.1:12345", "server_model_id": "qwen", "profile_sha256": "1" * 64,
+        "server_process_identity": process}
+    receipt = build_qwen_cleanup_receipt(model_lease=lease, release_result={"status":"released", "lease":lease,
+        "shared_server_retained":False, "server_termination":"verified_exact_process_exited",
+        "release":{"status":"proven_absent", "identity":process}, "process_identity":process})
     payload = _sequence_payload()
     payload.update(
         {
             "learning_pipeline_mode": "hybrid_v1_1",
             "candidate_count": 2,
-            "calibration_source_revision": "c" * 64,
+            "calibration_source_revision": fusion["config_sha256"],
             "hybrid_fusion_result": fusion,
             "capture_bundle": bundle,
+            "omni_inventory": inventory,
+            "qwen_bindings": bindings,
+            "qwen_cleanup_receipt": receipt,
+            "project_root": str(tmp_path),
+            "hybrid_capture_bundle_ref": saved["bundle_ref"],
+            "run_id": run_id,
+            "workflow_revision": revision,
         }
     )
     payload["locate_payload"]["metadata"].pop("two_stage_report_path")
@@ -310,6 +309,16 @@ def _hybrid_locate_response(
     results = []
     for candidate_id in completed_ids:
         request = request_by_id[candidate_id]
+        bbox = request["candidate_bbox_ref"]["xyxy"]
+        raw = {
+            "status": "PROPOSED", "candidate_id": candidate_id, "capture_id": request["capture_id"],
+            "capture_sha256": request["capture_sha256"], "source_revision": request["source_revision"],
+            "affine_transform_ref": deepcopy(request["affine_transform_ref"]),
+            "point_coordinate_space": "capture_pixel_xyxy",
+            "point": [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2],
+            "provenance": {"provider": "fake-vista"},
+        }
+        from app.learn.hybrid.vista_refinement import validate_vista_proposal
         results.append(
             {
                 "contract_version": "learn_vista_target_coordinate_validation_v1",
@@ -317,16 +326,7 @@ def _hybrid_locate_response(
                 "candidate_id": candidate_id,
                 "final_numbering_revision": request["source_revision"],
                 "hybrid_vista_request": deepcopy(request),
-                "hybrid_vista_proposal": {
-                    "candidate_id": candidate_id,
-                    "candidate_bbox_ref": deepcopy(request["candidate_bbox_ref"]),
-                    "roi_ref": deepcopy(request["roi_ref"]),
-                    "affine_transform_ref": deepcopy(request["affine_transform_ref"]),
-                    "source_revision": request["source_revision"],
-                    "capture_sha256": request["capture_sha256"],
-                    "status": "PROPOSED",
-                    "review_status": "REVIEW_REQUIRED",
-                },
+                "hybrid_vista_proposal": validate_vista_proposal(request=request, raw_result=raw),
             }
         )
     return {
@@ -352,28 +352,29 @@ def _hybrid_locate_response(
     }
 
 
-def test_hybrid_calibration_batch_resume_preserves_exact_request_lineage() -> None:
+def test_hybrid_calibration_batch_resume_preserves_exact_request_lineage(tmp_path) -> None:
     submitted_batches: list[list[dict[str, Any]]] = []
 
     def locate(payload: dict[str, Any]) -> dict[str, Any]:
         requests = deepcopy(payload["metadata"]["learn_hybrid_vista_requests"])
         submitted_batches.append(requests)
+        ids = [item["candidate_id"] for item in requests]
         if len(submitted_batches) == 1:
             return _hybrid_locate_response(
                 requests,
-                completed_ids=["candidate/one"],
+                completed_ids=ids[:1],
                 remaining_count=1,
                 resumable=True,
             )
         return _hybrid_locate_response(
             requests,
-            completed_ids=["candidate/one", "candidate/two"],
+            completed_ids=ids,
             remaining_count=0,
             resumable=False,
         )
 
     response = run_learning_calibration_sequence(
-        _hybrid_sequence_payload(),
+        _hybrid_sequence_payload(tmp_path),
         locate_runner=locate,
         profile_loader=lambda _stage, _profile_id: {"profile_id": "vista-test"},
         resource_preflight_builder=_normal_preflight,
@@ -382,13 +383,14 @@ def test_hybrid_calibration_batch_resume_preserves_exact_request_lineage() -> No
     assert response["success"] is True
     first_by_id = {item["candidate_id"]: item for item in submitted_batches[0]}
     second_by_id = {item["candidate_id"]: item for item in submitted_batches[1]}
+    candidate_id = next(iter(first_by_id))
     for field in ("candidate_bbox_ref", "roi_ref", "affine_transform_ref", "source_revision", "capture_sha256"):
-        assert second_by_id["candidate/one"][field] == first_by_id["candidate/one"][field]
+        assert second_by_id[candidate_id][field] == first_by_id[candidate_id][field]
     resume = submitted_batches and response["data"]["result"]["calibration_sequence"]
-    assert resume["hybrid_vista_results"][0]["hybrid_vista_request"] == first_by_id["candidate/one"]
+    assert resume["hybrid_vista_results"][0]["hybrid_vista_request"] == first_by_id[candidate_id]
 
 
-def test_hybrid_calibration_cancellation_stops_before_vista_acquisition() -> None:
+def test_hybrid_calibration_cancellation_stops_before_vista_acquisition(tmp_path) -> None:
     class Cancelled:
         @staticmethod
         def is_set() -> bool:
@@ -402,7 +404,7 @@ def test_hybrid_calibration_cancellation_stops_before_vista_acquisition() -> Non
         return {}
 
     response = run_learning_calibration_sequence(
-        _hybrid_sequence_payload(),
+        _hybrid_sequence_payload(tmp_path),
         locate_runner=locate,
         profile_loader=lambda _stage, _profile_id: {"profile_id": "vista-test"},
         resource_preflight_builder=_normal_preflight,
@@ -413,3 +415,19 @@ def test_hybrid_calibration_cancellation_stops_before_vista_acquisition() -> Non
     assert response["data"]["failure_category"] == "calibration_cancelled"
     assert response["data"]["remaining_count"] == 2
     assert locate_called is False
+
+
+def test_hybrid_terminal_batch_rejects_completed_ids_without_exact_results(tmp_path) -> None:
+    def locate(payload: dict[str, Any]) -> dict[str, Any]:
+        requests = deepcopy(payload["metadata"]["learn_hybrid_vista_requests"])
+        response = _hybrid_locate_response(requests, completed_ids=[requests[0]["candidate_id"]],
+            remaining_count=0, resumable=False)
+        batch = response["data"]["result"]["learn_all_targets"]["vista_coordinate_validation"]["batch"]
+        batch["completed_candidate_ids"] = [item["candidate_id"] for item in requests]
+        batch["completed_count"] = len(requests)
+        return response
+
+    response = run_learning_calibration_sequence(_hybrid_sequence_payload(tmp_path), locate_runner=locate,
+        profile_loader=lambda *_: {"profile_id": "vista-test"}, resource_preflight_builder=_normal_preflight)
+    assert response["success"] is False
+    assert response["data"]["failure_category"] == "calibration_hybrid_batch_coverage_mismatch"

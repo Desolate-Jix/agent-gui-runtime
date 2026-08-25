@@ -13,6 +13,41 @@ from threading import Event, Thread
 import time
 
 import pytest
+
+
+def _cleanup_lease() -> dict:
+    process = {"pid": 4123, "create_time": 100.5, "executable": "qwen-server.exe"}
+    return {"contract_version":"qwen_model_server_lease_v1", "lease_id":"lease-cleanup",
+        "owner_request_id":"owner-cleanup", "profile_id":"qwen", "incarnation_id":"inc-cleanup",
+        "server_base_url":"http://127.0.0.1:12345", "server_model_id":"qwen", "profile_sha256":"1"*64,
+        "server_process_identity":process}
+
+
+def test_qwen_cleanup_receipt_requires_exact_terminal_lifecycle_evidence() -> None:
+    from app.core.model_server import build_qwen_cleanup_receipt, validate_qwen_cleanup_receipt
+    lease = _cleanup_lease()
+    result = {"status":"released", "lease":lease, "shared_server_retained":False,
+        "server_termination":"verified_exact_process_exited",
+        "release":{"status":"proven_absent", "identity":lease["server_process_identity"]},
+        "process_identity":lease["server_process_identity"]}
+    receipt = build_qwen_cleanup_receipt(release_result=result, model_lease=lease)
+    assert validate_qwen_cleanup_receipt(receipt) == receipt
+
+
+@pytest.mark.parametrize("mutation", ["shared", "provider", "process", "indeterminate"])
+def test_qwen_cleanup_receipt_fails_closed_for_non_exact_evidence(mutation: str) -> None:
+    from app.core.model_server import build_qwen_cleanup_receipt
+    lease = _cleanup_lease()
+    result = {"status":"released", "lease":lease, "shared_server_retained":False,
+        "server_termination":"verified_exact_process_exited",
+        "release":{"status":"proven_absent", "identity":lease["server_process_identity"]},
+        "process_identity":lease["server_process_identity"]}
+    if mutation == "shared": result["shared_server_retained"] = True
+    elif mutation == "provider": result["lease"] = {**lease, "server_model_id":"not-qwen"}
+    elif mutation == "process": result["process_identity"] = {"pid":999}
+    else: result["release"] = {"status":"unobservable"}
+    with pytest.raises(ValueError):
+        build_qwen_cleanup_receipt(release_result=result, model_lease=lease)
 import psutil
 
 from app.core import model_server

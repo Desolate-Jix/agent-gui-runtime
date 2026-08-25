@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Mapping
 
+from app.learn.hybrid.contracts import validate_fusion_result, validate_qwen_bindings
+from app.learn.hybrid.omni_candidates import validate_current_capture_bundle
+from app.learn.hybrid.qwen_binding import validate_sealed_omni_inventory
 from app.learn.recognition.roi import build_roi_crop_metadata
 from app.learn.recognition.uei.canonical import (
     canonical_json_bytes,
@@ -13,25 +17,30 @@ from app.learn.recognition.uei.canonical import (
 
 VISTA_REQUEST_CONTRACT = "hybrid_vista_refinement_request_v1"
 VISTA_PROPOSAL_CONTRACT = "hybrid_vista_refinement_proposal_v1"
-QWEN_RELEASE_PREREQUISITE = {
-    "provider": "qwen",
-    "required_status": "cleanup_verified",
-    "purpose": "before_vista_acquisition",
-}
-
-
 def build_vista_requests(
     fusion_result: Mapping[str, Any],
     capture_bundle: Mapping[str, Any],
+    *,
+    omni_inventory: Mapping[str, Any],
+    qwen_bindings: Mapping[str, Any],
+    qwen_cleanup_receipt: Mapping[str, Any],
+    expected_workflow_revision: int,
 ) -> list[dict[str, Any]]:
     """为同一封存截图上的 BOUND candidate 构造确定性 VISTA 请求。"""
 
-    fusion = _sealed_object(fusion_result, "fusion result")
-    bundle = _sealed_capture_bundle(capture_bundle)
-    if fusion.get("contract_version") != "hybrid_fusion_result_v1":
-        raise ValueError("fusion result contract is invalid")
-    if bundle.get("contract_version") != "hybrid_capture_bundle_v1":
-        raise ValueError("capture bundle contract is invalid")
+    inventory = validate_sealed_omni_inventory(omni_inventory)
+    bindings = validate_qwen_bindings(
+        _sealed_payload(qwen_bindings, "Qwen bindings"), inventory
+    )
+    fusion = validate_fusion_result(
+        _sealed_payload(fusion_result, "fusion result"), inventory, bindings
+    )
+    bundle = validate_current_capture_bundle(capture_bundle)
+    from app.core.model_server import validate_qwen_cleanup_receipt
+
+    cleanup_receipt = validate_qwen_cleanup_receipt(qwen_cleanup_receipt)
+    if bundle.get("workflow_revision") != expected_workflow_revision:
+        raise ValueError("capture bundle workflow revision is stale")
     fusion_identity = _object(fusion.get("capture_identity"), "fusion capture identity")
     bundle_identity = _object(bundle.get("capture_identity"), "bundle capture identity")
     if canonical_json_bytes(fusion_identity) != canonical_json_bytes(bundle_identity):
@@ -145,13 +154,18 @@ def build_vista_requests(
                         "capture_id",
                     ),
                     "capture_sha256": capture_sha256,
+                    "capture_image_size": deepcopy(image_size),
                     "capture_lineage_ref": capture_lineage_ref,
                     "candidate_bbox_ref": bbox_ref,
                     "roi_ref": roi_ref,
                     "affine_transform_ref": affine_ref,
-                    "qwen_release_prerequisite": deepcopy(
-                        QWEN_RELEASE_PREREQUISITE
-                    ),
+                    "qwen_cleanup_receipt": deepcopy(cleanup_receipt),
+                    "authoritative_parent_refs": {
+                        "fusion_result": _content_ref(fusion_result, "fusion result"),
+                        "capture_bundle": _content_ref(capture_bundle, "capture bundle"),
+                        "omni_inventory": _content_ref(omni_inventory, "Omni inventory"),
+                        "qwen_bindings": _content_ref(qwen_bindings, "Qwen bindings"),
+                    },
                     "automatic_acceptance": False,
                 }
             )
@@ -233,6 +247,43 @@ def validate_vista_proposal(
         return base
 
 
+def validate_vista_request_pre_acquisition(
+    *, request: Mapping[str, Any], authoritative_context: Mapping[str, Any]
+) -> dict[str, Any]:
+    """在任何裁剪或 provider 获取前，从完整父证据重建并精确匹配请求。"""
+    normalized = _validated_request(request)
+    context = _object(authoritative_context, "VISTA authoritative context")
+    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
+
+    authoritative_bundle = load_and_verify_hybrid_capture_bundle(
+        project_root=Path(_required_text(context.get("project_root"), "project_root")),
+        bundle_ref=context.get("hybrid_capture_bundle_ref"),
+        expected_run_id=_required_text(context.get("run_id"), "run_id"),
+        expected_workflow_revision=context.get("workflow_revision"),
+    )
+    if canonical_json_bytes(authoritative_bundle) != canonical_json_bytes(
+        context.get("capture_bundle")
+    ):
+        raise ValueError("VISTA capture bundle does not match authoritative artifact store")
+    expected = build_vista_requests(
+        context.get("fusion_result"),
+        authoritative_bundle,
+        omni_inventory=context.get("omni_inventory"),
+        qwen_bindings=context.get("qwen_bindings"),
+        qwen_cleanup_receipt=context.get("qwen_cleanup_receipt"),
+        expected_workflow_revision=context.get("workflow_revision"),
+    )
+    match = next(
+        (item for item in expected if item.get("candidate_id") == normalized.get("candidate_id")),
+        None,
+    )
+    if match is None or canonical_json_bytes(match) != canonical_json_bytes(normalized):
+        raise ValueError("VISTA request does not match authoritative current lineage")
+    if normalized.get("submission_status") != "SUBMITTED":
+        raise ValueError("VISTA request was not submitted")
+    return normalized
+
+
 def _validated_request(value: Mapping[str, Any]) -> dict[str, Any]:
     request = _sealed_object(value, "VISTA request")
     if request.get("contract_version") != VISTA_REQUEST_CONTRACT:
@@ -240,6 +291,19 @@ def _validated_request(value: Mapping[str, Any]) -> dict[str, Any]:
     candidate_id = _required_text(request.get("candidate_id"), "candidate_id")
     source_revision = _required_text(request.get("source_revision"), "source_revision")
     capture_sha256 = _required_text(request.get("capture_sha256"), "capture_sha256")
+    _image_size(request.get("capture_image_size"))
+    from app.core.model_server import validate_qwen_cleanup_receipt
+
+    validate_qwen_cleanup_receipt(request.get("qwen_cleanup_receipt"))
+    parents = _object(request.get("authoritative_parent_refs"), "authoritative parent refs")
+    if set(parents) != {"fusion_result", "capture_bundle", "omni_inventory", "qwen_bindings"}:
+        raise ValueError("VISTA authoritative parent refs are incomplete")
+    for ref in parents.values():
+        child = _object(ref, "authoritative parent ref")
+        _required_text(child.get("id"), "authoritative parent ref id")
+        digest = _required_text(child.get("content_sha256"), "authoritative parent ref digest")
+        if len(digest) != 64:
+            raise ValueError("VISTA authoritative parent ref digest is invalid")
     bbox_ref = _sealed_object(request.get("candidate_bbox_ref"), "candidate bbox ref")
     roi_ref = _sealed_object(request.get("roi_ref"), "ROI ref")
     affine_ref = _sealed_object(request.get("affine_transform_ref"), "affine transform ref")
@@ -283,18 +347,26 @@ def _sealed_object(value: Any, name: str) -> dict[str, Any]:
 
 
 def _sealed_capture_bundle(value: Any) -> dict[str, Any]:
-    result = _object(value, "capture bundle")
-    declared = result.get("content_sha256")
-    if isinstance(declared, str) and declared == content_sha256(result):
-        return deepcopy(result)
     try:
-        from app.learn.hybrid.omni_candidates import (
-            validate_current_capture_bundle,
-        )
-
-        return validate_current_capture_bundle(result)
+        return validate_current_capture_bundle(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("capture bundle must be sealed") from exc
+        raise ValueError("capture bundle must satisfy the closed sealed contract") from exc
+
+
+def _sealed_payload(value: Any, name: str) -> dict[str, Any]:
+    result = _sealed_object(value, name)
+    result.pop("content_sha256")
+    return result
+
+
+def _content_ref(value: Any, name: str) -> dict[str, str]:
+    if name == "capture bundle" and isinstance(value, Mapping):
+        bundle_id = str(value.get("bundle_id") or "")
+        digest = bundle_id.rsplit("/", 1)[-1]
+        if bundle_id and len(digest) == 64:
+            return {"id": bundle_id, "content_sha256": digest}
+    sealed = _sealed_object(value, name)
+    return {"id": name.replace(" ", "_").lower(), "content_sha256": sealed["content_sha256"]}
 
 
 def _object(value: Any, name: str) -> dict[str, Any]:
@@ -362,7 +434,7 @@ def _apply_affine(matrix: list[Any], point: list[float]) -> list[float]:
 
 
 def _point_inside(point: list[float], bbox: list[int]) -> bool:
-    return bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3]
+    return bbox[0] < point[0] < bbox[2] and bbox[1] < point[1] < bbox[3]
 
 
 def _compact_number(value: float) -> int | float:
@@ -370,7 +442,7 @@ def _compact_number(value: float) -> int | float:
 
 
 __all__ = [
-    "QWEN_RELEASE_PREREQUISITE",
     "build_vista_requests",
+    "validate_vista_request_pre_acquisition",
     "validate_vista_proposal",
 ]

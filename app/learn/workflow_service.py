@@ -1351,6 +1351,8 @@ def _interpret_hybrid_post_calibration_worker_result(
             or result.get("outcome") != "completed"
             or result.get("review_status") != "REVIEW_REQUIRED"
             or result.get("automatic_acceptance") is not False
+            or result.get("completed_count") != len(result.get("proposals") or [])
+            or result.get("requested_candidate_ids") != result.get("completed_candidate_ids")
         ):
             raise LearningWorkflowStageOperationError(
                 "Hybrid review projection result is invalid"
@@ -1372,6 +1374,7 @@ def _interpret_hybrid_post_calibration_worker_result(
 
     sequence = _hybrid_calibration_sequence_payload(result)
     results = sequence.get("hybrid_vista_results")
+    requests = sequence.get("hybrid_vista_requests")
     if (
         sequence.get("contract_version")
         != "learning_calibration_sequence_result_v1"
@@ -1379,19 +1382,29 @@ def _interpret_hybrid_post_calibration_worker_result(
         or sequence.get("remaining_count") != 0
         or not isinstance(results, list)
         or not results
+        or not isinstance(requests, list)
+        or len(requests) != len(results)
+        or sequence.get("completed_count") != len(results)
     ):
         raise LearningWorkflowStageOperationError(
             "Hybrid calibration completion is incomplete"
         )
-    prerequisite = sequence.get("qwen_release_prerequisite")
-    if not isinstance(prerequisite, dict):
+    requested_ids = [str(item.get("candidate_id") or "") for item in requests if isinstance(item, dict)]
+    result_ids = [str(item.get("candidate_id") or "") for item in results if isinstance(item, dict)]
+    if requested_ids != result_ids or len(set(requested_ids)) != len(requested_ids):
         raise LearningWorkflowStageOperationError(
-            "Hybrid calibration lost Qwen release prerequisite"
+            "Hybrid calibration request/result identity coverage is invalid"
+        )
+    cleanup_receipt = sequence.get("qwen_cleanup_receipt")
+    if not isinstance(cleanup_receipt, dict):
+        raise LearningWorkflowStageOperationError(
+            "Hybrid calibration lost Qwen cleanup receipt"
         )
     payload = {
         "learning_pipeline_mode": "hybrid_v1_1",
         "hybrid_vista_results": deepcopy(results),
-        "qwen_release_prerequisite": deepcopy(prerequisite),
+        "hybrid_vista_requests": deepcopy(requests),
+        "qwen_cleanup_receipt": deepcopy(cleanup_receipt),
         "hybrid_capture_bundle_ref": deepcopy(
             orchestration.get("hybrid_capture_bundle_ref")
         ),

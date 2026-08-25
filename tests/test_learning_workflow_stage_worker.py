@@ -1242,10 +1242,11 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
     monkeypatch.setattr(
         workflow_worker,
         "run_hybrid_qwen_task",
-        lambda payload, cancellation_event=None, model_lease=None: events.append(
-            ("task", payload, cancellation_event, model_lease)
+        lambda payload, cancellation_event=None, model_lease=None, include_cleanup_receipt=False: events.append(
+            ("task", payload, cancellation_event, model_lease, include_cleanup_receipt)
         )
-        or {"contract_version": "hybrid_qwen_bindings_v1"},
+        or {"qwen_bindings": {"contract_version": "hybrid_qwen_bindings_v1"},
+            "qwen_cleanup_receipt": {"contract_version": "hybrid_qwen_cleanup_receipt_v1"}},
     )
 
     response = execute_learning_stage_worker_task(
@@ -1266,7 +1267,7 @@ def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
             },
         ),
         ("preflight", "qwen3_vl_8b_q4_k_m"),
-        ("task", {"run_id": "run-qwen"}, None, lease),
+        ("task", {"run_id": "run-qwen"}, None, lease, True),
     ]
 
 

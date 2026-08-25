@@ -72,7 +72,7 @@ def restore_local_point_to_screen_exact(
     roi, crop, scale_x, scale_y = _validated_exact_transform(transform)
     x = _finite_number(local_point.get("x") if isinstance(local_point, dict) else None, "local_point.x")
     y = _finite_number(local_point.get("y") if isinstance(local_point, dict) else None, "local_point.y")
-    if not (0.0 <= x <= crop["width"] and 0.0 <= y <= crop["height"]):
+    if not (0.0 < x < crop["width"] and 0.0 < y < crop["height"]):
         raise ValueError("local point is outside exact ROI crop")
     return {
         "x": roi["x"] + (x / scale_x),
@@ -90,13 +90,13 @@ def project_screen_point_to_local_exact(
     x = _finite_number(screen_point.get("x") if isinstance(screen_point, dict) else None, "screen_point.x")
     y = _finite_number(screen_point.get("y") if isinstance(screen_point, dict) else None, "screen_point.y")
     if not (
-        roi["x"] <= x <= roi["x"] + roi["w"]
-        and roi["y"] <= y <= roi["y"] + roi["h"]
+        roi["x"] < x < roi["x"] + roi["w"]
+        and roi["y"] < y < roi["y"] + roi["h"]
     ):
         raise ValueError("screen point is outside exact ROI")
     local_x = (x - roi["x"]) * scale_x
     local_y = (y - roi["y"]) * scale_y
-    if not (0.0 <= local_x <= crop["width"] and 0.0 <= local_y <= crop["height"]):
+    if not (0.0 < local_x < crop["width"] and 0.0 < local_y < crop["height"]):
         raise ValueError("screen point cannot be represented by exact ROI transform")
     return {"x": local_x, "y": local_y}
 

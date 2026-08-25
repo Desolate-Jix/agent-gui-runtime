@@ -81,3 +81,14 @@ def test_roi_exact_affine_rejects_out_of_roi_point_instead_of_clipping():
             roi["coordinate_transform"],
             {"x": 79.999, "y": 100.0},
         )
+
+
+@pytest.mark.parametrize("point", [{"x": 0.0, "y": 30.0}, {"x": 80.0, "y": 30.0}, {"x": 40.0, "y": 0.0}, {"x": 40.0, "y": 60.0}])
+def test_roi_exact_affine_rejects_all_local_endpoints(point):
+    roi = build_roi_crop_metadata(
+        source_image_size={"width": 300, "height": 220},
+        candidate_bbox={"x": 100, "y": 100, "w": 40, "h": 30},
+        crop_size={"width": 80, "height": 60}, expand_scale=2.0,
+    )
+    with pytest.raises(ValueError, match="outside exact ROI"):
+        restore_local_point_to_screen_exact(roi["coordinate_transform"], point)

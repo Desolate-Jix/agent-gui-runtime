@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -2661,6 +2662,7 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
     from app.learn.workflow_continuation import interpret_learning_stage_worker_result
     from app.learn.workflow_service import build_learning_pipeline_initial_worker_request
     from app.learn import workflow_worker
+    from tests.test_learn_hybrid_vista_refinement import _cleanup_receipt
 
     bundle_ref = {"id": "hybrid-capture/test", "content_sha256": "1" * 64}
     capture_bundle = {
@@ -2697,7 +2699,10 @@ def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
         "hybrid_capture_bundle_ref": bundle_ref,
         "inventory": omni_inventory,
     })
-    monkeypatch.setattr(workflow_worker, "run_hybrid_qwen_task", lambda payload, **kwargs: qwen_bindings)
+    monkeypatch.setattr(workflow_worker, "run_hybrid_qwen_task", lambda payload, **kwargs: {
+        "qwen_bindings": qwen_bindings,
+        "qwen_cleanup_receipt": _cleanup_receipt(),
+    })
     monkeypatch.setattr(workflow_worker, "run_hybrid_fusion_task", lambda payload, **kwargs: fusion_result)
 
     current = build_learning_pipeline_initial_worker_request(
@@ -2779,6 +2784,13 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     from app.learn.workflow_service import (
         _interpret_hybrid_post_calibration_worker_result,
     )
+    from app.learn.hybrid.vista_refinement import build_vista_requests, validate_vista_proposal
+    from tests.test_learn_hybrid_vista_refinement import _authoritative_inputs
+
+    fusion, bundle, inventory, bindings, receipt = _authoritative_inputs()
+    request = build_vista_requests(fusion, bundle, omni_inventory=inventory,
+        qwen_bindings=bindings, qwen_cleanup_receipt=receipt,
+        expected_workflow_revision=bundle["workflow_revision"])[0]
 
     orchestration = {
         "run_id": "run-hybrid-review",
@@ -2796,20 +2808,14 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
             "content_sha256": "3" * 64,
         },
     }
-    vista_result = {
-        "candidate_id": "candidate/one",
-        "candidate_bbox_ref": {"content_sha256": "4" * 64},
-        "roi_ref": {"content_sha256": "5" * 64},
-        "affine_transform_ref": {"content_sha256": "6" * 64},
-        "source_revision": "2" * 64,
-        "capture_sha256": "7" * 64,
-        "status": "PROPOSED",
-        "review_status": "REVIEW_REQUIRED",
-        "raw_provider_result": {
-            "point": [40, 50],
-            "provenance": {"provider": "fake-vista"},
-        },
-    }
+    bbox = request["candidate_bbox_ref"]["xyxy"]
+    raw = {"status":"PROPOSED", "candidate_id":request["candidate_id"], "capture_id":request["capture_id"],
+        "capture_sha256":request["capture_sha256"], "source_revision":request["source_revision"],
+        "affine_transform_ref":deepcopy(request["affine_transform_ref"]), "point_coordinate_space":"capture_pixel_xyxy",
+        "point":[(bbox[0]+bbox[2])/2,(bbox[1]+bbox[3])/2], "provenance":{"provider":"fake-vista"}}
+    proposal = validate_vista_proposal(request=request, raw_result=raw)
+    vista_result = {"candidate_id": request["candidate_id"], "hybrid_vista_request": deepcopy(request),
+        "hybrid_vista_proposal": proposal}
     response = {
         "contract_version": "learning_hybrid_managed_stage_result_v1",
         "learning_pipeline_mode": "hybrid_v1_1",
@@ -2823,12 +2829,10 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
                         "contract_version": "learning_calibration_sequence_result_v1",
                         "status": "completed",
                         "remaining_count": 0,
+                        "completed_count": 1,
+                        "hybrid_vista_requests": [request],
                         "hybrid_vista_results": [vista_result],
-                        "qwen_release_prerequisite": {
-                            "provider": "qwen",
-                            "required_status": "cleanup_verified",
-                            "purpose": "before_vista_acquisition",
-                        },
+                        "qwen_cleanup_receipt": receipt,
                     }
                 }
             },
@@ -2846,7 +2850,7 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     assert decision["stage_finished"] is False
     assert decision["next_worker"]["task_kind"] == "panel_learning_hybrid_review_projection"
     assert "panel_learning_model_review_repair" not in str(decision)
-    assert decision["next_worker"]["payload"]["qwen_release_prerequisite"]["required_status"] == "cleanup_verified"
+    assert decision["next_worker"]["payload"]["qwen_cleanup_receipt"] == receipt
 
     review_response = workflow_worker.execute_learning_stage_worker_task(
         decision["next_worker"]["task_kind"],
@@ -2865,7 +2869,7 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     assert projection["contract_version"] == "hybrid_review_projection_v1"
     assert projection["review_status"] == "REVIEW_REQUIRED"
     assert projection["automatic_acceptance"] is False
-    assert projection["proposals"][0]["raw_provider_result"] == vista_result["raw_provider_result"]
+    assert projection["proposals"][0]["raw_provider_result"] == raw
 
 
 def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:

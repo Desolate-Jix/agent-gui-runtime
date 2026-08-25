@@ -34,6 +34,7 @@ from app.learn.workflow_tasks.hybrid_qwen import (
 from app.learn.workflow_tasks.hybrid_review import (
     run_hybrid_review_projection_task,
 )
+from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.workflow_tasks.model_review import run_model_review_task
 from app.learn.workflow_tasks.observe import run_observe_task
 from app.learn.workflow_tasks.recognition import run_recognition_task
@@ -157,8 +158,19 @@ def execute_learning_stage_worker_task(
             "capture_bundle",
             deepcopy(orchestration.get("capture_bundle")),
         )
+        for key in (
+            "omni_inventory",
+            "qwen_bindings",
+            "qwen_cleanup_receipt",
+            "hybrid_capture_bundle_ref",
+            "run_id",
+            "workflow_revision",
+        ):
+            execution_payload.setdefault(key, deepcopy(orchestration.get(key)))
+        execution_payload.setdefault("project_root", str(_PROJECT_ROOT))
 
     model_lease: dict[str, Any] | None = None
+    lifecycle_evidence: dict[str, Any] = {}
     try:
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
             validate_hybrid_qwen_task_payload(execution_payload)
@@ -172,12 +184,25 @@ def execute_learning_stage_worker_task(
                 execution_payload,
                 cancellation_event=cancellation_event,
                 model_lease=model_lease,
+                include_cleanup_receipt=True,
             )
+            if not isinstance(response, dict) or not isinstance(
+                response.get("qwen_cleanup_receipt"), dict
+            ):
+                raise LearningStageWorkerError(
+                    "Hybrid Qwen task did not produce exact cleanup receipt"
+                )
+            lifecycle_evidence["qwen_cleanup_receipt"] = deepcopy(
+                response["qwen_cleanup_receipt"]
+            )
+            response = response.get("qwen_bindings")
         elif normalized_kind == "panel_learning_hybrid_fusion":
             response = run_hybrid_fusion_task(
                 execution_payload,
                 cancellation_event=cancellation_event,
             )
+            if learning_pipeline_mode == "hybrid_v1_1":
+                response = seal_immutable(response)
         elif normalized_kind == "panel_learning_hybrid_omni_discovery":
             response = run_hybrid_omni_task(
                 execution_payload,
@@ -308,6 +333,7 @@ def execute_learning_stage_worker_task(
             "outcome": outcome,
             "result": normalized_response,
             "orchestration": deepcopy(orchestration),
+            "lifecycle_evidence": deepcopy(lifecycle_evidence),
         }
     return normalized_response
 

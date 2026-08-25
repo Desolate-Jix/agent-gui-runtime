@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from app.learn.hybrid.contracts import validate_omni_inventory
-from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
+from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256, seal_immutable
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
@@ -550,6 +550,95 @@ def release_qwen_model_server(
 ) -> dict[str, Any]:
     _validate_sealed_qwen_release_artifact(sealed_artifact, omni_inventory)
     return _release_exact_qwen_lease(model_lease, reason="completed")
+
+
+def build_qwen_cleanup_receipt(
+    *,
+    release_result: object,
+    model_lease: object,
+) -> dict[str, Any]:
+    """只在既有生命周期已经证明精确进程退出后签发清理回执。"""
+    lease = _validate_exact_qwen_cleanup_evidence(release_result, model_lease)
+    result = release_result
+    assert isinstance(result, dict)
+    return seal_immutable(
+        {
+            "contract_version": "hybrid_qwen_cleanup_receipt_v1",
+            "provider": "qwen",
+            "cleanup_status": "verified_exact_process_exited",
+            "lease": deepcopy(lease),
+            "process_identity": deepcopy(result["process_identity"]),
+            "termination_proof": deepcopy(result["release"]),
+            "server_termination": result["server_termination"],
+        }
+    )
+
+
+def validate_qwen_cleanup_receipt(receipt: object) -> dict[str, Any]:
+    if not isinstance(receipt, dict):
+        raise ValueError("sealed Qwen cleanup receipt is required")
+    normalized = deepcopy(receipt)
+    digest = normalized.pop("content_sha256", None)
+    if digest != content_sha256(receipt):
+        raise ValueError("sealed Qwen cleanup receipt is required")
+    if set(normalized) != {
+        "contract_version",
+        "provider",
+        "cleanup_status",
+        "lease",
+        "process_identity",
+        "termination_proof",
+        "server_termination",
+    }:
+        raise ValueError("Qwen cleanup receipt contract is invalid")
+    if (
+        normalized.get("contract_version") != "hybrid_qwen_cleanup_receipt_v1"
+        or normalized.get("provider") != "qwen"
+        or normalized.get("cleanup_status") != "verified_exact_process_exited"
+        or normalized.get("server_termination")
+        not in {"verified_exact_process_exited", "verified_exact_process_proven_absent_on_retry"}
+    ):
+        raise ValueError("Qwen cleanup receipt does not prove exact cleanup")
+    lease = normalized.get("lease")
+    if not isinstance(lease, dict) or set(lease) != _QWEN_LEASE_FIELDS:
+        raise ValueError("Qwen cleanup receipt lease is invalid")
+    if canonical_json_bytes(normalized.get("process_identity")) != canonical_json_bytes(
+        lease.get("server_process_identity")
+    ):
+        raise ValueError("Qwen cleanup receipt process identity mismatch")
+    proof = normalized.get("termination_proof")
+    if not isinstance(proof, dict) or proof.get("status") != "proven_absent":
+        raise ValueError("Qwen cleanup receipt termination proof is indeterminate")
+    if proof.get("identity") is not None and canonical_json_bytes(
+        proof.get("identity")
+    ) != canonical_json_bytes(normalized.get("process_identity")):
+        raise ValueError("Qwen cleanup receipt termination identity mismatch")
+    return deepcopy(receipt)
+
+
+def _validate_exact_qwen_cleanup_evidence(
+    release_result: object,
+    model_lease: object,
+) -> dict[str, Any]:
+    if not isinstance(model_lease, dict) or set(model_lease) != _QWEN_LEASE_FIELDS:
+        raise ValueError("exact Qwen model lease is required for cleanup receipt")
+    if not isinstance(release_result, dict):
+        raise ValueError("Qwen release evidence is required")
+    if (
+        release_result.get("status") != "released"
+        or release_result.get("shared_server_retained") is not False
+        or release_result.get("server_termination")
+        not in {"verified_exact_process_exited", "verified_exact_process_proven_absent_on_retry"}
+        or release_result.get("release", {}).get("status") != "proven_absent"
+    ):
+        raise ValueError("Qwen release did not prove exact process cleanup")
+    if canonical_json_bytes(release_result.get("lease")) != canonical_json_bytes(model_lease):
+        raise ValueError("Qwen release lease mismatch")
+    if canonical_json_bytes(release_result.get("process_identity")) != canonical_json_bytes(
+        model_lease.get("server_process_identity")
+    ):
+        raise ValueError("Qwen release process identity mismatch")
+    return deepcopy(model_lease)
 
 
 def release_managed_qwen_model_lease(

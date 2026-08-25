@@ -3,8 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from app.learn.hybrid.vista_refinement import QWEN_RELEASE_PREREQUISITE
-from app.learn.recognition.uei.canonical import seal_immutable
+from app.core.model_server import validate_qwen_cleanup_receipt
+from app.learn.hybrid.vista_refinement import validate_vista_proposal
+from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
 
 
 def run_hybrid_review_projection_task(
@@ -25,8 +26,17 @@ def run_hybrid_review_projection_task(
             "automatic_acceptance": False,
             "proposals": [],
         }
-    if payload.get("qwen_release_prerequisite") != QWEN_RELEASE_PREREQUISITE:
-        raise ValueError("Hybrid review projection lost Qwen release prerequisite")
+    cleanup_receipt = validate_qwen_cleanup_receipt(payload.get("qwen_cleanup_receipt"))
+    requests = payload.get("hybrid_vista_requests")
+    if not isinstance(requests, list) or not requests:
+        raise ValueError("Hybrid review projection requires exact VISTA requests")
+    request_by_id = {
+        str(item.get("candidate_id") or ""): item
+        for item in requests
+        if isinstance(item, dict)
+    }
+    if len(request_by_id) != len(requests) or "" in request_by_id:
+        raise ValueError("Hybrid VISTA request identity set is invalid")
     raw_results = payload.get("hybrid_vista_results")
     if not isinstance(raw_results, list) or not raw_results:
         raise ValueError("Hybrid review projection requires VISTA results")
@@ -42,12 +52,25 @@ def run_hybrid_review_projection_task(
         if not candidate_id or candidate_id in seen_ids:
             raise ValueError("Hybrid review projection candidate identity is invalid")
         seen_ids.add(candidate_id)
+        request = request_by_id.get(candidate_id)
+        submitted = item.get("hybrid_vista_request")
+        if request is None or canonical_json_bytes(submitted) != canonical_json_bytes(request):
+            raise ValueError("Hybrid VISTA result is cross-attached to a request")
+        raw_provider_result = proposal.get("raw_provider_result")
+        revalidated = validate_vista_proposal(
+            request=request,
+            raw_result=raw_provider_result,
+        )
+        if canonical_json_bytes(revalidated) != canonical_json_bytes(proposal):
+            raise ValueError("Hybrid VISTA proposal does not match raw provider evidence")
         if proposal.get("review_status") != "REVIEW_REQUIRED":
             raise ValueError("Hybrid VISTA proposal must remain review required")
         normalized = deepcopy(proposal)
         normalized["automatic_acceptance"] = False
         normalized.pop("canonical_acceptance", None)
         proposals.append(normalized)
+    if seen_ids != set(request_by_id) or len(proposals) != len(requests):
+        raise ValueError("Hybrid review projection request/result coverage mismatch")
     return seal_immutable(
         {
             "contract_version": "hybrid_review_projection_v1",
@@ -58,9 +81,10 @@ def run_hybrid_review_projection_task(
             "hybrid_capture_bundle_ref": deepcopy(
                 payload.get("hybrid_capture_bundle_ref")
             ),
-            "qwen_release_prerequisite": deepcopy(
-                QWEN_RELEASE_PREREQUISITE
-            ),
+            "qwen_cleanup_receipt": deepcopy(cleanup_receipt),
+            "requested_candidate_ids": list(request_by_id),
+            "completed_candidate_ids": [item["candidate_id"] for item in proposals],
+            "completed_count": len(proposals),
             "no_live_click_authorization": True,
             "execute_binding_enabled": False,
         }

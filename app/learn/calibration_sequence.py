@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import time
 from copy import deepcopy
+from pathlib import Path
 from typing import Any, Callable
 
 from app.learn.hybrid.vista_refinement import (
-    QWEN_RELEASE_PREREQUISITE,
     build_vista_requests,
+    validate_vista_proposal,
 )
 from app.learn.recognition.uei.canonical import canonical_json_bytes
 
@@ -56,6 +57,7 @@ def run_learning_calibration_sequence(
     maximum_batches = candidate_count + 2 + maximum_transient_attempts
     base_payload = request["locate_payload"]
     hybrid_vista_requests = request["hybrid_vista_requests"]
+    hybrid_authoritative_context = request.get("hybrid_authoritative_context")
     hybrid_request_by_id = {
         item["candidate_id"]: item for item in hybrid_vista_requests
     }
@@ -111,8 +113,8 @@ def run_learning_calibration_sequence(
             metadata["learn_hybrid_vista_requests"] = deepcopy(
                 hybrid_vista_requests
             )
-            metadata["qwen_release_prerequisite"] = deepcopy(
-                QWEN_RELEASE_PREREQUISITE
+            metadata["learn_hybrid_vista_authoritative_context"] = deepcopy(
+                hybrid_authoritative_context
             )
             metadata["final_numbering_revision"] = source_revision
         locate_payload["metadata"] = metadata
@@ -181,6 +183,18 @@ def run_learning_calibration_sequence(
                     final_numbering_revision=source_revision,
                     remaining_count=max(0, candidate_count - len(resume_results)),
                     lineage_error=lineage_error,
+                )
+            coverage_error = _hybrid_batch_coverage_error(
+                latest_batch,
+                resume_results,
+                request_by_id=hybrid_request_by_id,
+            )
+            if coverage_error:
+                return _failure_response(
+                    "calibration_hybrid_batch_coverage_mismatch",
+                    batch_count=batch_index,
+                    final_numbering_revision=source_revision,
+                    coverage_error=coverage_error,
                 )
         completed_ids = _completed_candidate_ids(latest_batch, resume_results)
         completed_signature = "|".join(completed_ids)
@@ -317,11 +331,37 @@ def _validated_request(payload: dict[str, Any]) -> dict[str, Any]:
             "learning_pipeline_mode must be incumbent or hybrid_v1_1"
         )
     hybrid_vista_requests: list[dict[str, Any]] = []
+    hybrid_authoritative_context: dict[str, Any] | None = None
     if learning_pipeline_mode == "hybrid_v1_1":
         try:
+            from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
+
+            bundle = load_and_verify_hybrid_capture_bundle(
+                project_root=Path(str(payload.get("project_root") or "")),
+                bundle_ref=payload.get("hybrid_capture_bundle_ref"),
+                expected_run_id=str(payload.get("run_id") or ""),
+                expected_workflow_revision=int(payload.get("workflow_revision")),
+            )
+            if canonical_json_bytes(bundle) != canonical_json_bytes(payload.get("capture_bundle")):
+                raise ValueError("capture bundle does not match authoritative artifact store")
+            hybrid_authoritative_context = {
+                "fusion_result": deepcopy(payload.get("hybrid_fusion_result")),
+                "capture_bundle": deepcopy(bundle),
+                "omni_inventory": deepcopy(payload.get("omni_inventory")),
+                "qwen_bindings": deepcopy(payload.get("qwen_bindings")),
+                "qwen_cleanup_receipt": deepcopy(payload.get("qwen_cleanup_receipt")),
+                "workflow_revision": int(payload.get("workflow_revision")),
+                "project_root": str(payload.get("project_root") or ""),
+                "hybrid_capture_bundle_ref": deepcopy(payload.get("hybrid_capture_bundle_ref")),
+                "run_id": str(payload.get("run_id") or ""),
+            }
             hybrid_vista_requests = build_vista_requests(
                 payload.get("hybrid_fusion_result"),
-                payload.get("capture_bundle"),
+                bundle,
+                omni_inventory=payload.get("omni_inventory"),
+                qwen_bindings=payload.get("qwen_bindings"),
+                qwen_cleanup_receipt=payload.get("qwen_cleanup_receipt"),
+                expected_workflow_revision=int(payload.get("workflow_revision")),
             )
         except (TypeError, ValueError) as exc:
             raise LearningCalibrationSequenceError(
@@ -345,6 +385,7 @@ def _validated_request(payload: dict[str, Any]) -> dict[str, Any]:
         "calibration_source_revision": source_revision,
         "locate_payload": deepcopy(locate_payload),
         "hybrid_vista_requests": hybrid_vista_requests,
+        "hybrid_authoritative_context": hybrid_authoritative_context,
         "maximum_batch_size": min(
             32,
             _positive_int(payload.get("maximum_batch_size"), default=8),
@@ -523,8 +564,8 @@ def _attach_sequence_result(
             {
                 "hybrid_vista_requests": deepcopy(hybrid_vista_requests),
                 "hybrid_vista_results": deepcopy(hybrid_vista_results or []),
-                "qwen_release_prerequisite": deepcopy(
-                    QWEN_RELEASE_PREREQUISITE
+                "qwen_cleanup_receipt": deepcopy(
+                    hybrid_vista_requests[0]["qwen_cleanup_receipt"]
                 ),
                 "review_projection_required": True,
             }
@@ -640,6 +681,12 @@ def _hybrid_resume_lineage_error(
         ):
             if proposal.get(field) != expected.get(field):
                 return f"proposal_{field}_mismatch:{candidate_id}"
+        revalidated = validate_vista_proposal(
+            request=expected,
+            raw_result=proposal.get("raw_provider_result"),
+        )
+        if canonical_json_bytes(revalidated) != canonical_json_bytes(proposal):
+            return f"proposal_raw_evidence_mismatch:{candidate_id}"
     return ""
 
 
@@ -667,6 +714,32 @@ def _completed_candidate_ids(
         for item in resume_results
         if str(item.get("candidate_id") or "").strip()
     ]
+
+
+def _hybrid_batch_coverage_error(
+    batch: dict[str, Any],
+    results: list[dict[str, Any]],
+    *,
+    request_by_id: dict[str, dict[str, Any]],
+) -> str:
+    requested = list(request_by_id)
+    result_ids = [str(item.get("candidate_id") or "").strip() for item in results]
+    completed = batch.get("completed_candidate_ids")
+    if not isinstance(completed, list) or completed != result_ids:
+        return "completed_candidate_ids_do_not_equal_result_ids"
+    if batch.get("completed_count") != len(result_ids):
+        return "completed_count_does_not_equal_result_count"
+    if len(set(result_ids)) != len(result_ids) or not set(result_ids).issubset(request_by_id):
+        return "result_id_set_is_invalid"
+    remaining = [candidate_id for candidate_id in requested if candidate_id not in set(result_ids)]
+    if batch.get("remaining_count") != len(remaining):
+        return "remaining_count_does_not_equal_exact_difference"
+    declared_remaining = batch.get("remaining_candidate_ids")
+    if declared_remaining is not None and declared_remaining != remaining:
+        return "remaining_candidate_ids_do_not_equal_exact_difference"
+    if batch.get("resumable") is not True and (remaining or set(result_ids) != set(requested)):
+        return "terminal_result_set_does_not_equal_request_set"
+    return ""
 
 
 def _failure_response(

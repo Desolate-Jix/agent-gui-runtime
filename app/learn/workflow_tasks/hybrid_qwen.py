@@ -30,6 +30,8 @@ def run_hybrid_qwen_task(
     model_releaser: Callable[..., object] | None = None,
     model_lease: dict[str, Any] | None = None,
     model_failure_reconciler: Callable[..., object] | None = None,
+    include_cleanup_receipt: bool = False,
+    cleanup_receipt_builder: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """注入服务端根目录，并在密封 artifact 后释放既有 Qwen 服务。"""
     validate_hybrid_qwen_task_payload(payload)
@@ -37,6 +39,7 @@ def run_hybrid_qwen_task(
         from app.core.model_server import (
             reconcile_qwen_model_lease_failure,
             release_qwen_model_server,
+            build_qwen_cleanup_receipt,
             run_qwen_binding_model,
         )
 
@@ -45,6 +48,7 @@ def run_hybrid_qwen_task(
         model_failure_reconciler = (
             model_failure_reconciler or reconcile_qwen_model_lease_failure
         )
+        cleanup_receipt_builder = cleanup_receipt_builder or build_qwen_cleanup_receipt
     compute_completed = False
 
     def mark_compute_completed() -> None:
@@ -76,7 +80,7 @@ def run_hybrid_qwen_task(
         )
         raise
     try:
-        model_releaser(
+        release_result = model_releaser(
             sealed_artifact=deepcopy(result),
             omni_inventory=deepcopy(payload.get("omni_inventory")),
             model_lease=deepcopy(model_lease),
@@ -90,7 +94,19 @@ def run_hybrid_qwen_task(
             reason="release_failure",
         )
         raise
-    return result
+    if not include_cleanup_receipt:
+        return result
+    if cleanup_receipt_builder is None:
+        from app.core.model_server import build_qwen_cleanup_receipt
+
+        cleanup_receipt_builder = build_qwen_cleanup_receipt
+    return {
+        "qwen_bindings": result,
+        "qwen_cleanup_receipt": cleanup_receipt_builder(
+            release_result=release_result,
+            model_lease=deepcopy(model_lease),
+        ),
+    }
 
 
 def _reconcile_failure_without_masking(

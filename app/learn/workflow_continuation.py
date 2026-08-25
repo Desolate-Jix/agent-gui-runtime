@@ -209,7 +209,22 @@ def _hybrid_managed_stage_decision(
             raise LearningStageWorkerContinuationError(
                 "Hybrid Qwen result contract is invalid"
             )
+        lifecycle_evidence = response.get("lifecycle_evidence")
+        receipt = (
+            lifecycle_evidence.get("qwen_cleanup_receipt")
+            if isinstance(lifecycle_evidence, dict)
+            else None
+        )
+        try:
+            from app.core.model_server import validate_qwen_cleanup_receipt
+
+            receipt = validate_qwen_cleanup_receipt(receipt)
+        except ValueError as error:
+            raise LearningStageWorkerContinuationError(
+                f"Hybrid Qwen cleanup receipt is invalid: {error}"
+            ) from error
         next_orchestration["qwen_bindings"] = deepcopy(result)
+        next_orchestration["qwen_cleanup_receipt"] = deepcopy(receipt)
         payload = {
             "config": deepcopy(next_orchestration.get("hybrid_config")),
             "capture_bundle": deepcopy(next_orchestration.get("capture_bundle")),

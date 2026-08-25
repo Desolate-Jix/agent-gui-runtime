@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import json
 import re
 import time
@@ -4778,6 +4779,10 @@ def _screen_map_calibration_candidate_to_target(candidate: dict[str, Any], index
             candidate["hybrid_vista_request"].get("source_revision") or ""
         )
         normalized["coordinate_source"] = "hybrid_vista_exact_roi_v1"
+        if isinstance(candidate.get("hybrid_vista_authoritative_context"), dict):
+            normalized["hybrid_vista_authoritative_context"] = deepcopy(
+                candidate["hybrid_vista_authoritative_context"]
+            )
     return normalized
 
 
@@ -5901,13 +5906,27 @@ def _run_hybrid_vista_validation(
 ) -> dict[str, Any]:
     """用请求中封存的唯一 ROI 调用 VISTA，并保留未经改写的 provider 结果。"""
 
-    from app.learn.hybrid.vista_refinement import validate_vista_proposal
+    from app.learn.hybrid.vista_refinement import (
+        validate_vista_proposal,
+        validate_vista_request_pre_acquisition,
+    )
 
     request = deepcopy(target.get("hybrid_vista_request"))
     candidate_id = str(target.get("candidate_id") or "").strip()
     raw_result: dict[str, Any]
     model_io: dict[str, Any] = {}
     try:
+        request = validate_vista_request_pre_acquisition(
+            request=request,
+            authoritative_context=target.get("hybrid_vista_authoritative_context"),
+        )
+        capture_bytes = Path(image_path).read_bytes()
+        if hashlib.sha256(capture_bytes).hexdigest() != request.get("capture_sha256"):
+            raise ValueError("Hybrid VISTA actual capture SHA mismatch")
+        with Image.open(BytesIO(capture_bytes)) as actual_image:
+            actual_size = {"width": actual_image.width, "height": actual_image.height}
+        if actual_size != request.get("capture_image_size") or actual_size != image_size:
+            raise ValueError("Hybrid VISTA actual capture dimensions mismatch")
         roi_ref = request.get("roi_ref") if isinstance(request, dict) else None
         roi_xyxy = roi_ref.get("xyxy") if isinstance(roi_ref, dict) else None
         if not isinstance(roi_xyxy, list) or len(roi_xyxy) != 4:
@@ -5922,13 +5941,19 @@ def _run_hybrid_vista_validation(
             width=int(image_size.get("width") or 0),
             height=int(image_size.get("height") or 0),
         )
-        preprocess = _prepare_vista_region_roi_image(
-            Path(image_path),
-            source_size,
-            region_bbox=roi_bbox,
-            padding=0,
-            max_edge=0,
-        )
+        VISTA_DIRECT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+        verified_source = VISTA_DIRECT_IMAGES_DIR / f"hybrid_verified_{request['capture_sha256']}{Path(image_path).suffix or '.png'}"
+        verified_source.write_bytes(capture_bytes)
+        try:
+            preprocess = _prepare_vista_region_roi_image(
+                verified_source,
+                source_size,
+                region_bbox=roi_bbox,
+                padding=0,
+                max_edge=0,
+            )
+        finally:
+            verified_source.unlink(missing_ok=True)
         preprocess["source_bbox"] = deepcopy(roi_bbox)
         processed_size = preprocess["processed_size"]
         provider_payload = _call_vista_point_prompt(
@@ -6714,6 +6739,7 @@ def _attach_hybrid_vista_requests(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     requests = metadata.get("learn_hybrid_vista_requests")
+    authoritative_context = metadata.get("learn_hybrid_vista_authoritative_context")
     if not isinstance(requests, list):
         return observe_reuse
     calibration_candidates: list[dict[str, Any]] = []
@@ -6739,6 +6765,9 @@ def _attach_hybrid_vista_requests(
                 "source": "hybrid_fusion_bound_candidate",
                 "confidence": 0.0,
                 "hybrid_vista_request": deepcopy(request),
+                "hybrid_vista_authoritative_context": deepcopy(
+                    authoritative_context
+                ),
             }
         )
     normalized = deepcopy(observe_reuse)
