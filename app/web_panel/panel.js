@@ -41,6 +41,7 @@ const LEARNING_DRAFT_PATH_SPLIT_STORAGE_KEY = "openclaw.panel.learningDraftPathS
 const LEARNING_WORKFLOW_RUN_STORAGE_KEY = "openclaw.panel.learningWorkflowRunId.v1";
 const CARD_DRAG_START_THRESHOLD_PX = 6;
 const LEARNING_CALIBRATION_BATCH_SIZE = 8;
+const LEARNING_PIPELINE_MODE = "incumbent";
 const DEFAULT_SEEK_GRAPH_PATH = "artifacts/seek/runtime_path_graph_seek_mvp_20260617.json";
 const DEFAULT_WIKIPEDIA_GRAPH_PATH = "artifacts/wikipedia/runtime_path_graph_wikipedia_search_v1.json";
 const DEFAULT_GITHUB_ISSUES_GRAPH_PATH = "artifacts/github/runtime_path_graph_github_issues_v1.json";
@@ -345,6 +346,17 @@ const PAGE_REGISTRY = {
     sideEffectKey: "side_effect_model_only",
   },
 };
+
+function learningPipelineModeStatus(mode = LEARNING_PIPELINE_MODE) {
+  if (mode === "hybrid_v1_1") {
+    return {
+      learning_pipeline_mode: "hybrid_v1_1",
+      rollout: "disabled",
+      reason: "hybrid_rollout_disabled",
+    };
+  }
+  return { learning_pipeline_mode: "incumbent", rollout: "active" };
+}
 
 function pageMetaForStage(stage) {
   return PAGE_REGISTRY[stage] || PAGE_REGISTRY.open_bind;
@@ -13163,6 +13175,7 @@ async function startLearningWorkflowStageOperation(stepId, reason = "", leaseSec
       stage: stepId,
       reason: String(reason || ""),
       lease_seconds: Math.min(1800, Math.max(30, Number(leaseSeconds) || 600)),
+      learning_pipeline_mode: LEARNING_PIPELINE_MODE,
     },
     {
       summary: "POST /panel/start_learning_workflow_stage_operation",

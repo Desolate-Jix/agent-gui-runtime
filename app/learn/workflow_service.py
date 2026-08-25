@@ -18,6 +18,7 @@ from app.learn.workflow_continuation import (
     LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION,
     interpret_learning_stage_worker_result,
 )
+from app.learn.workflow_contracts import normalize_learning_pipeline_mode
 from app.learn.workflow_evidence import verify_learning_workflow_completion_evidence
 from app.learn.workflow_store import LearningWorkflowRunStore
 from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
@@ -56,6 +57,74 @@ _BACKEND_CONTINUATION_LEASE_SECONDS = 1800
 
 class LearningWorkflowStageOperationError(ValueError):
     """学习阶段运行租约无效，拒绝接收过期或越权结果。"""
+
+
+def build_learning_pipeline_initial_worker_request(
+    *,
+    learning_pipeline_mode: str = "incumbent",
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """构造显式流水线模式的首个受管 worker 请求。"""
+
+    mode = normalize_learning_pipeline_mode(learning_pipeline_mode)
+    if not isinstance(payload, dict):
+        raise LearningWorkflowStageOperationError(
+            "learning pipeline payload must be an object"
+        )
+    if mode == "incumbent":
+        return {
+            "task_kind": "vision_observe_screen",
+            "payload": deepcopy(payload),
+        }
+
+    required = {
+        "run_id",
+        "workflow_revision",
+        "hybrid_capture_bundle_ref",
+        "request_ref",
+        "registration_ref",
+        "manifest_ref",
+        "capture_image_path",
+        "hybrid_config",
+        "capture_bundle",
+    }
+    missing = sorted(field for field in required if field not in payload)
+    if missing:
+        raise LearningWorkflowStageOperationError(
+            f"Hybrid pipeline payload missing: {', '.join(missing)}"
+        )
+    orchestration = {
+        "run_id": deepcopy(payload["run_id"]),
+        "workflow_revision": deepcopy(payload["workflow_revision"]),
+        "hybrid_capture_bundle_ref": deepcopy(
+            payload["hybrid_capture_bundle_ref"]
+        ),
+        "capture_image_path": deepcopy(payload["capture_image_path"]),
+        "hybrid_config": deepcopy(payload["hybrid_config"]),
+        "capture_bundle": deepcopy(payload["capture_bundle"]),
+    }
+    omni_payload = {
+        key: deepcopy(payload[key])
+        for key in (
+            "run_id",
+            "workflow_revision",
+            "hybrid_capture_bundle_ref",
+            "request_ref",
+            "registration_ref",
+            "manifest_ref",
+            "capture_image_path",
+        )
+    }
+    omni_payload.update(
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "_hybrid_orchestration": orchestration,
+        }
+    )
+    return {
+        "task_kind": "panel_learning_hybrid_omni_discovery",
+        "payload": omni_payload,
+    }
 
 
 def project_learning_workflow_runtime_attachment(
@@ -191,6 +260,7 @@ def start_learning_workflow_stage_operation(
     lease_seconds: int = 600,
     now: datetime | None = None,
     operation_id: str | None = None,
+    learning_pipeline_mode: str = "incumbent",
 ) -> dict[str, Any]:
     """由服务端签发阶段租约，并将对应阶段推进为 running。"""
 
@@ -203,6 +273,7 @@ def start_learning_workflow_stage_operation(
     if not normalized_operation_id:
         raise LearningWorkflowStageOperationError("operation_id is required")
     lease_expires_at = issued_at + timedelta(seconds=lease_seconds)
+    pipeline_mode = normalize_learning_pipeline_mode(learning_pipeline_mode)
     stage_execution = {
         "contract_version": LEARNING_WORKFLOW_STAGE_OPERATION_CONTRACT_VERSION,
         "operation_id": normalized_operation_id,
@@ -211,6 +282,8 @@ def start_learning_workflow_stage_operation(
         "started_at": issued_at.isoformat(),
         "lease_expires_at": lease_expires_at.isoformat(),
     }
+    if pipeline_mode == "hybrid_v1_1":
+        stage_execution["learning_pipeline_mode"] = pipeline_mode
     state = transition_learning_workflow_run(
         store=store,
         project_root=project_root,
@@ -560,6 +633,9 @@ def continue_learning_stage_worker_result(
 
     response_for_return = deepcopy(response)
     current = store.get(run_id)
+    learning_pipeline_mode = normalize_learning_pipeline_mode(
+        _learning_pipeline_mode_for_stage(current, stage)
+    )
     if task_kind == "vision_observe_screen" and response.get("success") is True:
         response = _verify_hybrid_observe_handoff(
             response=response,
@@ -572,6 +648,7 @@ def continue_learning_stage_worker_result(
         stage=stage,
         task_kind=task_kind,
         response=response,
+        learning_pipeline_mode=learning_pipeline_mode,
     )
     artifact_request = decision.pop("artifact_request", None)
     replay = _matching_worker_continuation_replay(
@@ -1287,6 +1364,23 @@ def recover_expired_learning_workflow_stage_operation(
         recovered=True,
         status="expired_operation_failed",
     )
+
+
+def _learning_pipeline_mode_for_stage(
+    state: dict[str, Any],
+    stage: str,
+) -> object:
+    stages = state.get("stages")
+    record = stages.get(stage) if isinstance(stages, dict) else None
+    evidence_refs = record.get("evidence_refs") if isinstance(record, dict) else None
+    execution = (
+        evidence_refs.get("stage_execution")
+        if isinstance(evidence_refs, dict)
+        else None
+    )
+    if not isinstance(execution, dict):
+        return "incumbent"
+    return execution.get("learning_pipeline_mode", "incumbent")
 
 
 def _managed_stage_execution(

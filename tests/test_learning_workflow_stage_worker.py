@@ -2152,3 +2152,66 @@ while True:
         json.loads(path.read_text(encoding="utf-8"))["state"] == "complete"
         for path in claims
     )
+
+
+def test_duplicate_hybrid_stage_start_reuses_payload_hash_without_inference(
+    tmp_path: Path,
+) -> None:
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    payload = {
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "run_id": "run-hybrid",
+        "workflow_revision": 7,
+        "hybrid_capture_bundle_ref": {
+            "id": "hybrid-capture/test",
+            "content_sha256": "1" * 64,
+        },
+    }
+    first = registry.start(
+        run_id="run-hybrid",
+        stage="screen_understanding",
+        operation_id="operation-hybrid",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        payload=payload,
+        reuse_active_identical=True,
+    )
+    record = registry._records[first["worker_id"]]
+    process = record["process"]
+    process.alive = False
+    process.exitcode = 0
+    Path(record["result_path"]).write_text(
+        json.dumps(
+            {
+                "contract_version": "learning_stage_worker_result_v2",
+                "worker_id": first["worker_id"],
+                "run_id": "run-hybrid",
+                "stage": "screen_understanding",
+                "operation_id": "operation-hybrid",
+                "task_kind": "panel_learning_hybrid_omni_discovery",
+                "model_request_id": first["model_request_id"],
+                "payload_sha256": first["payload_sha256"],
+                "status": "completed",
+                "finished_at": "2026-08-25T00:00:00+00:00",
+                "response": {"artifact_ref": "sealed/result"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    duplicate = registry.start(
+        run_id="run-hybrid",
+        stage="screen_understanding",
+        operation_id="operation-hybrid",
+        task_kind="panel_learning_hybrid_omni_discovery",
+        payload=payload,
+        reuse_active_identical=True,
+    )
+
+    assert duplicate["worker_id"] == first["worker_id"]
+    assert duplicate["payload_sha256"] == first["payload_sha256"]
+    assert duplicate["status"] == "completed"
+    assert duplicate["result_path"] == first["result_path"]
+    assert len(registry._records) == 1

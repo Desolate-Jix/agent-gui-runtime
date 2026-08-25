@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from app.core.model_server import cancel_model_request
 from app.learn.workflow_contracts import (
+    normalize_learning_pipeline_mode,
     ModelReviewTaskInput,
     RecognitionTaskInput,
     TwoStageUnderstandingTaskInput,
@@ -123,60 +124,67 @@ def execute_learning_stage_worker_task(
     if not isinstance(payload, dict):
         raise LearningStageWorkerError("worker payload must be an object")
 
+    learning_pipeline_mode = normalize_learning_pipeline_mode(
+        payload.get("learning_pipeline_mode", "incumbent")
+    )
+    execution_payload = deepcopy(payload)
+    orchestration = execution_payload.pop("_hybrid_orchestration", None)
+    execution_payload.pop("learning_pipeline_mode", None)
+
     if normalized_kind == "panel_learning_hybrid_qwen_binding":
-        validate_hybrid_qwen_task_payload(payload)
+        validate_hybrid_qwen_task_payload(execution_payload)
     model_lease = _ensure_learning_stage_model_ready(
         normalized_kind,
-        payload,
+        execution_payload,
         cancellation_event=cancellation_event,
     )
 
     try:
         if normalized_kind == "panel_learning_hybrid_qwen_binding":
             response = run_hybrid_qwen_task(
-                payload,
+                execution_payload,
                 cancellation_event=cancellation_event,
                 model_lease=model_lease,
             )
         elif normalized_kind == "panel_learning_hybrid_fusion":
             response = run_hybrid_fusion_task(
-                payload,
+                execution_payload,
                 cancellation_event=cancellation_event,
             )
         elif normalized_kind == "panel_learning_hybrid_omni_discovery":
             response = run_hybrid_omni_task(
-                payload,
+                execution_payload,
                 cancellation_event=cancellation_event,
             )
         elif normalized_kind == "panel_learning_recognition_trial":
             response = recognition_result_to_legacy_response(
                 run_recognition_task(
-                    RecognitionTaskInput.model_validate(payload),
+                    RecognitionTaskInput.model_validate(execution_payload),
                     project_root=_PROJECT_ROOT,
                 )
             )
         elif normalized_kind == "panel_learning_two_stage_understanding":
             response = two_stage_result_to_legacy_response(
                 run_two_stage_understanding_task(
-                    TwoStageUnderstandingTaskInput.model_validate(payload),
+                    TwoStageUnderstandingTaskInput.model_validate(execution_payload),
                     project_root=_PROJECT_ROOT,
                 )
             )
         elif normalized_kind == "panel_learning_model_review_repair":
             response = model_review_result_to_legacy_response(
                 run_model_review_task(
-                    ModelReviewTaskInput.model_validate(payload),
+                    ModelReviewTaskInput.model_validate(execution_payload),
                     project_root=_PROJECT_ROOT,
                 )
             )
         elif normalized_kind == "panel_learning_calibration_sequence":
             from app.learn.calibration_sequence import run_learning_calibration_sequence
 
-            response = run_learning_calibration_sequence(payload)
+            response = run_learning_calibration_sequence(execution_payload)
         elif normalized_kind == "vision_observe_screen":
             response = observe_result_to_legacy_response(
                 run_observe_task(
-                    ObserveScreenTaskInput.model_validate(payload),
+                    ObserveScreenTaskInput.model_validate(execution_payload),
                     project_root=_PROJECT_ROOT,
                     screen_reader=partial(
                         read_screen,
@@ -188,7 +196,9 @@ def execute_learning_stage_worker_task(
             from app.api.models.request import VisionLocateTargetRequestModel
             from app.api.vision import locate_target
 
-            response = locate_target(VisionLocateTargetRequestModel.model_validate(payload))
+            response = locate_target(
+                VisionLocateTargetRequestModel.model_validate(execution_payload)
+            )
     except BaseException:
         if model_lease is not None and normalized_kind != "panel_learning_hybrid_qwen_binding":
             from app.core.model_server import reconcile_qwen_model_lease_failure
@@ -209,12 +219,36 @@ def execute_learning_stage_worker_task(
         )
 
     if hasattr(response, "model_dump"):
-        return response.model_dump(mode="json")
-    if isinstance(response, dict):
-        return deepcopy(response)
-    raise LearningStageWorkerError(
-        f"worker task returned unsupported response type: {type(response).__name__}"
-    )
+        normalized_response = response.model_dump(mode="json")
+    elif isinstance(response, dict):
+        normalized_response = deepcopy(response)
+    else:
+        raise LearningStageWorkerError(
+            f"worker task returned unsupported response type: {type(response).__name__}"
+        )
+    if (
+        learning_pipeline_mode == "hybrid_v1_1"
+        and normalized_kind
+        in {
+            "panel_learning_hybrid_omni_discovery",
+            "panel_learning_hybrid_qwen_binding",
+            "panel_learning_hybrid_fusion",
+        }
+    ):
+        if not isinstance(orchestration, dict):
+            raise LearningStageWorkerError(
+                "Hybrid managed worker payload is missing orchestration context"
+            )
+        outcome = str(normalized_response.get("outcome") or "completed").strip()
+        return {
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": normalized_kind,
+            "outcome": outcome,
+            "result": normalized_response,
+            "orchestration": deepcopy(orchestration),
+        }
+    return normalized_response
 
 
 def _ensure_learning_stage_model_ready(

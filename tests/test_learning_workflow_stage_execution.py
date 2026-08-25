@@ -2653,3 +2653,239 @@ def test_panel_production_flow_follows_backend_started_stage_workers() -> None:
     assert "runLearningModelReviewRepair(" not in body
     assert "runLearningDraftTrial(" not in body
     assert "nextLearningStageOperation(" not in body
+
+
+def test_hybrid_managed_worker_order_reaches_calibration_without_pre_omni_qwen(
+    monkeypatch,
+) -> None:
+    from app.learn.workflow_continuation import interpret_learning_stage_worker_result
+    from app.learn.workflow_service import build_learning_pipeline_initial_worker_request
+    from app.learn import workflow_worker
+
+    bundle_ref = {"id": "hybrid-capture/test", "content_sha256": "1" * 64}
+    capture_bundle = {
+        "contract_version": "hybrid_capture_bundle_v1",
+        "bundle_id": bundle_ref["id"],
+        "content_sha256": bundle_ref["content_sha256"],
+    }
+    config = {"contract_version": "hybrid_config_v1", "config_sha256": "2" * 64}
+    omni_inventory = {
+        "contract_version": "hybrid_omni_inventory_v1",
+        "content_sha256": "3" * 64,
+        "candidates": [{"candidate_id": "candidate/one"}],
+    }
+    qwen_bindings = {
+        "contract_version": "hybrid_qwen_bindings_v1",
+        "content_sha256": "4" * 64,
+    }
+    fusion_result = {
+        "contract_version": "hybrid_fusion_result_v1",
+        "config_sha256": config["config_sha256"],
+        "candidates": [
+            {
+                "candidate_id": "candidate/one",
+                "state": "BOUND",
+                "vista_eligible": True,
+            }
+        ],
+    }
+    monkeypatch.setattr(workflow_worker, "_ensure_learning_stage_model_ready", lambda *args, **kwargs: None)
+    monkeypatch.setattr(workflow_worker, "validate_hybrid_qwen_task_payload", lambda payload: None)
+    monkeypatch.setattr(workflow_worker, "run_hybrid_omni_task", lambda payload, **kwargs: {
+        "contract_version": "hybrid_omni_discovery_result_v1",
+        "outcome": "completed",
+        "hybrid_capture_bundle_ref": bundle_ref,
+        "inventory": omni_inventory,
+    })
+    monkeypatch.setattr(workflow_worker, "run_hybrid_qwen_task", lambda payload, **kwargs: qwen_bindings)
+    monkeypatch.setattr(workflow_worker, "run_hybrid_fusion_task", lambda payload, **kwargs: fusion_result)
+
+    current = build_learning_pipeline_initial_worker_request(
+        learning_pipeline_mode="hybrid_v1_1",
+        payload={
+            "run_id": "run-hybrid",
+            "workflow_revision": 7,
+            "hybrid_capture_bundle_ref": bundle_ref,
+            "request_ref": {"id": "request/test", "content_sha256": "5" * 64},
+            "registration_ref": {"id": "registration/test", "content_sha256": "6" * 64},
+            "manifest_ref": {"id": "manifest/test", "content_sha256": "7" * 64},
+            "capture_image_path": "artifacts/capture.png",
+            "hybrid_config": config,
+            "capture_bundle": capture_bundle,
+        },
+    )
+    task_kinds: list[str] = []
+    payload_hashes: list[str] = []
+    for _ in range(3):
+        task_kinds.append(current["task_kind"])
+        response = workflow_worker.execute_learning_stage_worker_task(
+            current["task_kind"], current["payload"]
+        )
+        decision = interpret_learning_stage_worker_result(
+            stage="screen_understanding",
+            task_kind=current["task_kind"],
+            response=response,
+            learning_pipeline_mode="hybrid_v1_1",
+        )
+        assert decision["outcome"] is None
+        current = decision["next_worker"]
+        payload_hashes.append(current["payload_sha256"])
+        assert current["payload"]["hybrid_capture_bundle_ref"] == bundle_ref
+    task_kinds.append(current["task_kind"])
+
+    assert task_kinds == [
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+        "panel_learning_calibration_sequence",
+    ]
+    assert task_kinds[0] != "vision_observe_screen"
+    assert "panel_learning_model_review_repair" not in task_kinds
+    assert len(set(payload_hashes)) == len(payload_hashes)
+
+
+@pytest.mark.parametrize(
+    "task_kind",
+    [
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+    ],
+)
+def test_hybrid_stage_failure_is_explicit_safe_stop(task_kind: str) -> None:
+    from app.learn.workflow_continuation import interpret_learning_stage_worker_result
+
+    decision = interpret_learning_stage_worker_result(
+        stage="screen_understanding",
+        task_kind=task_kind,
+        response={
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": task_kind,
+            "outcome": "failed",
+            "result": {"failure_reason": "controlled_failure"},
+            "orchestration": {},
+        },
+        learning_pipeline_mode="hybrid_v1_1",
+    )
+
+    assert decision["stage_finished"] is True
+    assert decision["outcome"] == "safe_stopped"
+    assert decision["reason"].startswith("SAFE_STOP")
+
+
+def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:
+    from app.learn.workflow_continuation import interpret_learning_stage_worker_result
+
+    response = {
+        "success": True,
+        "data": {
+            "trial_path": "artifacts/trial.json",
+            "summary": {
+                "screen_inventory_count": 1,
+                "draft_section_counts": {"regions": 1},
+            },
+        },
+    }
+    implicit = interpret_learning_stage_worker_result(
+        stage="screen_understanding",
+        task_kind="panel_learning_recognition_trial",
+        response=response,
+    )
+    explicit = interpret_learning_stage_worker_result(
+        stage="screen_understanding",
+        task_kind="panel_learning_recognition_trial",
+        response=response,
+        learning_pipeline_mode="incumbent",
+    )
+
+    assert json.dumps(explicit, sort_keys=True) == json.dumps(implicit, sort_keys=True)
+
+
+def test_duplicate_hybrid_continue_recovers_same_next_worker_without_inference(
+    tmp_path: Path,
+) -> None:
+    from app.learn.workflow_service import continue_learning_stage_worker_result
+
+    store, bind_state = _store_at_completed_bind_capture()
+    bundle_ref = {"id": "hybrid-capture/test", "content_sha256": "1" * 64}
+    orchestration = {
+        "run_id": "run-stage-operation",
+        "workflow_revision": bind_state["revision"],
+        "hybrid_capture_bundle_ref": bundle_ref,
+        "capture_image_path": "artifacts/capture.png",
+        "hybrid_config": {"config_sha256": "2" * 64},
+        "capture_bundle": {"content_sha256": "3" * 64},
+    }
+
+    class _WorkerRegistry:
+        def __init__(self) -> None:
+            self.started: dict[tuple[str, str], dict[str, object]] = {}
+            self.inference_starts = 0
+
+        def read_adopted_result(self, **_kwargs):
+            return {
+                "receipt": {
+                    "worker_id": "worker-hybrid-omni",
+                    "task_kind": "panel_learning_hybrid_omni_discovery",
+                    "result_sha256": "4" * 64,
+                },
+                "response": {
+                    "contract_version": "learning_hybrid_managed_stage_result_v1",
+                    "learning_pipeline_mode": "hybrid_v1_1",
+                    "task_kind": "panel_learning_hybrid_omni_discovery",
+                    "outcome": "completed",
+                    "result": {
+                        "contract_version": "hybrid_omni_discovery_result_v1",
+                        "outcome": "completed",
+                        "hybrid_capture_bundle_ref": bundle_ref,
+                        "inventory": {
+                            "contract_version": "hybrid_omni_inventory_v1",
+                            "content_sha256": "5" * 64,
+                            "candidates": [],
+                        },
+                    },
+                    "orchestration": orchestration,
+                },
+            }
+
+        def start(self, **kwargs):
+            key = (
+                kwargs["task_kind"],
+                json.dumps(kwargs["payload"], sort_keys=True),
+            )
+            if key not in self.started:
+                self.inference_starts += 1
+                self.started[key] = {
+                    "worker_id": "worker-hybrid-qwen",
+                    "payload_sha256": "6" * 64,
+                }
+            return self.started[key]
+
+    registry = _WorkerRegistry()
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-stage-operation",
+        expected_revision=bind_state["revision"],
+        stage="screen_understanding",
+        operation_id="operation-hybrid",
+        learning_pipeline_mode="hybrid_v1_1",
+    )
+    request = {
+        "store": store,
+        "worker_registry": registry,
+        "project_root": tmp_path,
+        "run_id": "run-stage-operation",
+        "expected_revision": started["workflow_state"]["revision"],
+        "stage": "screen_understanding",
+        "operation_id": "operation-hybrid",
+        "worker_id": "worker-hybrid-omni",
+    }
+
+    first = continue_learning_stage_worker_result(**request)
+    duplicate = continue_learning_stage_worker_result(**request)
+
+    assert first["next_worker"] == duplicate["next_worker"]
+    assert first["next_worker"]["worker_id"] == "worker-hybrid-qwen"
+    assert registry.inference_starts == 1

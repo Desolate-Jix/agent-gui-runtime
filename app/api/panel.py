@@ -99,6 +99,7 @@ from app.learn.workflow_state import (
     validate_learning_workflow_state,
 )
 from app.learn.workflow_contracts import (
+    LearningPipelineMode,
     ModelReviewTaskInput,
     RecognitionTaskInput,
     TwoStageUnderstandingTaskInput,
@@ -357,6 +358,7 @@ class PanelStartLearningWorkflowStageOperationRequest(BaseModel):
     )
     reason: str = ""
     lease_seconds: int = Field(default=600, ge=30, le=1800)
+    learning_pipeline_mode: LearningPipelineMode = "incumbent"
 
 
 class PanelFinishLearningWorkflowStageOperationRequest(BaseModel):
@@ -782,6 +784,17 @@ def start_learning_workflow_stage_operation_endpoint(
 ) -> APIResponse:
     """签发服务端阶段租约，防止浏览器超时后遗留无主运行状态。"""
 
+    if request.learning_pipeline_mode == "hybrid_v1_1":
+        return APIResponse(
+            success=False,
+            message="Hybrid learning pipeline rollout is disabled",
+            data=None,
+            error=ErrorModel(
+                code="hybrid_rollout_disabled",
+                details="hybrid_v1_1 is wired for offline verification only",
+            ),
+        )
+
     try:
         result = start_learning_workflow_stage_operation(
             store=learning_workflow_run_store,
@@ -791,6 +804,7 @@ def start_learning_workflow_stage_operation_endpoint(
             stage=request.stage,
             reason=request.reason,
             lease_seconds=request.lease_seconds,
+            learning_pipeline_mode=request.learning_pipeline_mode,
         )
         return APIResponse(
             success=True,
@@ -861,6 +875,20 @@ def start_learning_stage_worker_endpoint(
     request: PanelStartLearningStageWorkerRequest,
 ) -> APIResponse:
     """将当前受管 operation 的白名单任务交给隔离后端进程。"""
+
+    if (
+        request.task_kind.startswith("panel_learning_hybrid_")
+        or request.payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+    ):
+        return APIResponse(
+            success=False,
+            message="Hybrid learning pipeline rollout is disabled",
+            data=None,
+            error=ErrorModel(
+                code="hybrid_rollout_disabled",
+                details="hybrid_v1_1 is wired for offline verification only",
+            ),
+        )
 
     try:
         require_active_learning_workflow_stage_operation(

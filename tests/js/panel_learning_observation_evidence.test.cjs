@@ -138,3 +138,28 @@ test("provider renderer uses readable Chinese state labels and never offers exec
   assert.match(elements.learningDraftProviderSummaryBody.innerHTML, /capture_id_mismatch/);
   assert.doesNotMatch(elements.learningDraftProviderSummaryBody.innerHTML, /<button/i);
 });
+
+
+test("learning pipeline mode surface defaults to incumbent and marks Hybrid disabled", () => {
+  const panelSource = fs.readFileSync("app/web_panel/panel.js", "utf8");
+  assert.match(panelSource, /const LEARNING_PIPELINE_MODE = "incumbent";/);
+  const start = panelSource.indexOf("function learningPipelineModeStatus");
+  const end = panelSource.indexOf("\nfunction ", start + 10);
+  const source = panelSource.slice(start, end);
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(`${source}\nthis.modeStatus = learningPipelineModeStatus;`, context);
+
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.modeStatus("incumbent"))),
+    { learning_pipeline_mode: "incumbent", rollout: "active" },
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.modeStatus("hybrid_v1_1"))),
+    {
+      learning_pipeline_mode: "hybrid_v1_1",
+      rollout: "disabled",
+      reason: "hybrid_rollout_disabled",
+    },
+  );
+});

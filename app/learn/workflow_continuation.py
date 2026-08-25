@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+import json
 import re
 from typing import Any
+
+from app.learn.workflow_contracts import normalize_learning_pipeline_mode
 
 
 LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION = (
@@ -29,14 +33,25 @@ def interpret_learning_stage_worker_result(
     stage: str,
     task_kind: str,
     response: dict[str, Any],
+    learning_pipeline_mode: str = "incumbent",
 ) -> dict[str, Any]:
     """将已接纳结果解释为中间结果或可终结的阶段决策。"""
 
     normalized_stage = _required_text(stage, "stage")
     normalized_task_kind = _required_text(task_kind, "task_kind")
+    normalized_pipeline_mode = normalize_learning_pipeline_mode(
+        learning_pipeline_mode
+    )
     if not isinstance(response, dict):
         raise LearningStageWorkerContinuationError(
             "adopted worker response must be an object"
+        )
+
+    if normalized_pipeline_mode == "hybrid_v1_1":
+        return _hybrid_managed_stage_decision(
+            stage=normalized_stage,
+            task_kind=normalized_task_kind,
+            response=response,
         )
 
     if (
@@ -107,6 +122,197 @@ def interpret_learning_stage_worker_result(
     if normalized_task_kind == "panel_learning_calibration_sequence":
         return _precise_calibration_decision(result)
     return _review_repair_decision(result)
+
+
+def _hybrid_managed_stage_decision(
+    *,
+    stage: str,
+    task_kind: str,
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    supported = {
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+    }
+    if stage != "screen_understanding" or task_kind not in supported:
+        raise LearningStageWorkerContinuationError(
+            "Hybrid worker task does not belong to screen_understanding"
+        )
+    if (
+        response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+        or response.get("task_kind") != task_kind
+    ):
+        raise LearningStageWorkerContinuationError(
+            "Hybrid managed worker result contract is invalid"
+        )
+    result = response.get("result")
+    orchestration = response.get("orchestration")
+    if not isinstance(result, dict) or not isinstance(orchestration, dict):
+        raise LearningStageWorkerContinuationError(
+            "Hybrid managed worker result is missing result or orchestration"
+        )
+    if response.get("outcome") != "completed":
+        failure_reason = _first_text(
+            result.get("failure_reason"),
+            result.get("reason"),
+            result.get("error"),
+            "controlled_failure",
+        )
+        return _decision(
+            stage=stage,
+            task_kind=task_kind,
+            stage_finished=True,
+            continuation_status="terminal_result",
+            outcome="safe_stopped",
+            reason=f"SAFE_STOP · {task_kind} failed · {failure_reason}",
+            evidence_refs={},
+        )
+
+    bundle_ref = _required_hybrid_ref(
+        orchestration.get("hybrid_capture_bundle_ref"),
+        "orchestration.hybrid_capture_bundle_ref",
+    )
+    result_bundle_ref = result.get("hybrid_capture_bundle_ref")
+    if result_bundle_ref is not None and _required_hybrid_ref(
+        result_bundle_ref,
+        "result.hybrid_capture_bundle_ref",
+    ) != bundle_ref:
+        raise LearningStageWorkerContinuationError(
+            "Hybrid worker changed the sealed capture bundle ref"
+        )
+
+    next_orchestration = deepcopy(orchestration)
+    if task_kind == "panel_learning_hybrid_omni_discovery":
+        if result.get("contract_version") != "hybrid_omni_discovery_result_v1":
+            raise LearningStageWorkerContinuationError(
+                "Hybrid Omni result contract is invalid"
+            )
+        inventory = _required_hybrid_artifact(
+            result.get("inventory"),
+            "Hybrid Omni inventory",
+        )
+        next_orchestration["omni_inventory"] = deepcopy(inventory)
+        payload = {
+            "run_id": next_orchestration.get("run_id"),
+            "workflow_revision": next_orchestration.get("workflow_revision"),
+            "hybrid_capture_bundle_ref": deepcopy(bundle_ref),
+            "capture_image_path": next_orchestration.get("capture_image_path"),
+            "omni_inventory": deepcopy(inventory),
+        }
+        next_task_kind = "panel_learning_hybrid_qwen_binding"
+    elif task_kind == "panel_learning_hybrid_qwen_binding":
+        if result.get("contract_version") != "hybrid_qwen_bindings_v1":
+            raise LearningStageWorkerContinuationError(
+                "Hybrid Qwen result contract is invalid"
+            )
+        next_orchestration["qwen_bindings"] = deepcopy(result)
+        payload = {
+            "config": deepcopy(next_orchestration.get("hybrid_config")),
+            "capture_bundle": deepcopy(next_orchestration.get("capture_bundle")),
+            "omni_inventory": deepcopy(next_orchestration.get("omni_inventory")),
+            "qwen_bindings": deepcopy(result),
+            "hybrid_capture_bundle_ref": deepcopy(bundle_ref),
+        }
+        next_task_kind = "panel_learning_hybrid_fusion"
+    else:
+        if result.get("contract_version") != "hybrid_fusion_result_v1":
+            raise LearningStageWorkerContinuationError(
+                "Hybrid fusion result contract is invalid"
+            )
+        eligible = [
+            deepcopy(candidate)
+            for candidate in result.get("candidates", [])
+            if isinstance(candidate, dict)
+            and candidate.get("state") == "BOUND"
+            and candidate.get("vista_eligible") is True
+        ]
+        if not eligible:
+            return _decision(
+                stage=stage,
+                task_kind=task_kind,
+                stage_finished=True,
+                continuation_status="terminal_result",
+                outcome="safe_stopped",
+                reason="SAFE_STOP · Hybrid fusion produced no VISTA-eligible BOUND candidates",
+                evidence_refs={},
+            )
+        next_orchestration["fusion_result"] = deepcopy(result)
+        payload = {
+            "contract_version": "learning_calibration_sequence_request_v1",
+            "profile_id": None,
+            "candidate_count": len(eligible),
+            "calibration_source_revision": str(result.get("config_sha256") or ""),
+            "maximum_batch_size": 8,
+            "locate_payload": {
+                "goal": "learn all visible controls",
+                "provider_mode": "local_grounding",
+                "capture_live": False,
+                "image_path": str(next_orchestration.get("capture_image_path") or ""),
+                "app_name": "unknown",
+                "state_hint": "hybrid_v1_1",
+                "agent_mode": "learn",
+                "learn_depth": "deep",
+                "dry_run": True,
+                "trace": True,
+                "metadata": {
+                    "learn_all_targets": True,
+                    "no_live_click_authorization": True,
+                    "learning_pipeline_mode": "hybrid_v1_1",
+                    "hybrid_capture_bundle_ref": deepcopy(bundle_ref),
+                    "hybrid_fusion_result": deepcopy(result),
+                },
+            },
+            "hybrid_capture_bundle_ref": deepcopy(bundle_ref),
+            "hybrid_fusion_result": deepcopy(result),
+        }
+        next_task_kind = "panel_learning_calibration_sequence"
+
+    payload["learning_pipeline_mode"] = "hybrid_v1_1"
+    payload["_hybrid_orchestration"] = next_orchestration
+    next_worker = _hybrid_next_worker(next_task_kind, payload)
+    return _decision(
+        stage=stage,
+        task_kind=task_kind,
+        stage_finished=False,
+        continuation_status="intermediate_result",
+        outcome=None,
+        reason=f"Hybrid cascade advances to {next_task_kind}",
+        evidence_refs={"hybrid_capture_bundle_ref": deepcopy(bundle_ref)},
+        next_worker=next_worker,
+    )
+
+
+def _hybrid_next_worker(task_kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        "task_kind": task_kind,
+        "payload": deepcopy(payload),
+        "payload_sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def _required_hybrid_ref(value: object, name: str) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != {"id", "content_sha256"}:
+        raise LearningStageWorkerContinuationError(f"{name} must be an exact artifact ref")
+    identifier = str(value.get("id") or "").strip()
+    digest = str(value.get("content_sha256") or "").strip().lower()
+    if not identifier or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise LearningStageWorkerContinuationError(f"{name} is invalid")
+    return {"id": identifier, "content_sha256": digest}
+
+
+def _required_hybrid_artifact(value: object, name: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise LearningStageWorkerContinuationError(f"{name} must be an object")
+    return deepcopy(value)
 
 
 def _screen_observe_decision(result: dict[str, Any]) -> dict[str, Any]:
@@ -505,8 +711,9 @@ def _decision(
     outcome: str | None,
     reason: str,
     evidence_refs: dict[str, Any],
+    next_worker: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    decision = {
         "contract_version": LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION,
         "stage": stage,
         "task_kind": task_kind,
@@ -516,6 +723,9 @@ def _decision(
         "reason": reason,
         "evidence_refs": deepcopy(evidence_refs),
     }
+    if next_worker is not None:
+        decision["next_worker"] = deepcopy(next_worker)
+    return decision
 
 
 def _response_result(response: dict[str, Any]) -> dict[str, Any]:

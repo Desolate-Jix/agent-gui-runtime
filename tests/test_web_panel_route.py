@@ -6497,3 +6497,86 @@ def test_panel_start_worker_request_accepts_hybrid_qwen_task_kind() -> None:
     )
 
     assert request.task_kind == "panel_learning_hybrid_qwen_binding"
+
+
+def test_hybrid_learning_pipeline_start_is_disabled_without_state_mutation(
+    monkeypatch,
+) -> None:
+    from app.api import panel as panel_api
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    store = LearningWorkflowRunStore()
+    state = store.transition(
+        run_id="run-hybrid-disabled",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+    state = store.transition(
+        run_id="run-hybrid-disabled",
+        expected_revision=state["revision"],
+        stage="bind_capture",
+        outcome="completed",
+        evidence_refs={"image_path": "artifacts/capture.png"},
+    )
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    response = TestClient(app).post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-hybrid-disabled",
+            "expected_revision": state["revision"],
+            "stage": "screen_understanding",
+            "reason": "controlled hybrid request",
+            "learning_pipeline_mode": "hybrid_v1_1",
+        },
+    ).json()
+
+    assert response["success"] is False
+    assert response["error"]["code"] == "hybrid_rollout_disabled"
+    assert store.get("run-hybrid-disabled") == state
+
+
+def test_public_worker_route_cannot_bypass_hybrid_rollout_disable(monkeypatch) -> None:
+    from app.api import panel as panel_api
+    from app.learn.workflow_service import start_learning_workflow_stage_operation
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    store = LearningWorkflowRunStore()
+    state = store.transition(
+        run_id="run-hybrid-worker-disabled",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+    state = store.transition(
+        run_id="run-hybrid-worker-disabled",
+        expected_revision=state["revision"],
+        stage="bind_capture",
+        outcome="completed",
+        evidence_refs={"image_path": "artifacts/capture.png"},
+    )
+    operation = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=Path.cwd(),
+        run_id="run-hybrid-worker-disabled",
+        expected_revision=state["revision"],
+        stage="screen_understanding",
+        operation_id="operation-hybrid-disabled",
+    )
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+
+    response = TestClient(app).post(
+        "/panel/start_learning_stage_worker",
+        json={
+            "run_id": "run-hybrid-worker-disabled",
+            "expected_revision": operation["workflow_state"]["revision"],
+            "stage": "screen_understanding",
+            "operation_id": "operation-hybrid-disabled",
+            "task_kind": "panel_learning_hybrid_omni_discovery",
+            "payload": {"learning_pipeline_mode": "hybrid_v1_1"},
+        },
+    ).json()
+
+    assert response["success"] is False
+    assert response["error"]["code"] == "hybrid_rollout_disabled"
