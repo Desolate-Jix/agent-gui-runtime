@@ -1009,9 +1009,11 @@ def _validate_sealed_qwen_release_artifact(
         parsed = parse_qwen_candidate_bindings(
             {
                 "bindings": deepcopy(artifact.get("bindings")),
+                "ambiguity_sets": deepcopy(artifact.get("ambiguity_sets")),
                 "orphan_semantics": deepcopy(artifact.get("orphan_semantics")),
             },
             omni_inventory,
+            context_ref=deepcopy(artifact.get("context_ref")),
         )
         if parsed != artifact:
             raise ValueError("binding artifact does not match canonical parser output")

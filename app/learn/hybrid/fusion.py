@@ -11,11 +11,12 @@ import re
 from typing import Any
 
 from app.learn.hybrid.contracts import (
-    validate_capture_identity,
+    canonical_semantic_target_key,
     validate_fusion_result,
     validate_omni_inventory,
     validate_qwen_bindings,
 )
+from app.learn.hybrid.omni_candidates import validate_current_capture_bundle
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256
 
 
@@ -70,25 +71,28 @@ def fuse_hybrid_candidates(
 ) -> dict[str, Any]:
     """按版本化阈值融合 Omni 几何与 Qwen candidate-ID 语义。"""
     rules, config_sha256 = _validated_config(config)
-    inventory = validate_omni_inventory(
-        _unseal(omni_inventory, name="Omni inventory")
-    )
+    inventory = validate_omni_inventory(_require_sealed(omni_inventory, name="Omni inventory"))
     bindings = validate_qwen_bindings(
-        _unseal(qwen_bindings, name="Qwen bindings"), inventory
+        _require_sealed(qwen_bindings, name="Qwen bindings"),
+        inventory,
+        allow_capture_mismatch=True,
     )
-    capture_identity = _capture_identity(capture_bundle)
-    if canonical_json_bytes(capture_identity) != canonical_json_bytes(
-        inventory["capture_identity"]
-    ):
+    bundle = validate_current_capture_bundle(capture_bundle)
+    capture_identity = bundle["capture_identity"]
+    identities = (
+        canonical_json_bytes(capture_identity),
+        canonical_json_bytes(inventory["capture_identity"]),
+        canonical_json_bytes(bindings["capture_identity"]),
+    )
+    if len(set(identities)) != 1:
         return _capture_mismatch_result(
             config_sha256=config_sha256,
             inventory=inventory,
             bindings=bindings,
         )
-    if canonical_json_bytes(capture_identity) != canonical_json_bytes(
-        bindings["capture_identity"]
-    ):
-        raise ValueError("capture identity mismatch")
+    if bindings["context_ref"] != bundle["context_ref"]:
+        raise ValueError("Qwen context_ref does not match verified capture context")
+    bindings = validate_qwen_bindings(bindings, inventory)
 
     binding_by_id = {
         binding["candidate_id"]: binding for binding in bindings["bindings"]
@@ -116,6 +120,8 @@ def fuse_hybrid_candidates(
                 "candidate_id": candidate_id,
                 "bbox_original": deepcopy(candidate["bbox_original"]),
                 "coordinate_space": candidate["coordinate_space"],
+                "active": candidate["active"],
+                "inactive_reason": deepcopy(candidate["inactive_reason"]),
                 "state": state,
                 **fusion_review_policy(state),
                 "reason": reason,
@@ -198,6 +204,8 @@ def _capture_mismatch_result(
                 "candidate_id": candidate["candidate_id"],
                 "bbox_original": deepcopy(candidate["bbox_original"]),
                 "coordinate_space": candidate["coordinate_space"],
+                "active": candidate["active"],
+                "inactive_reason": deepcopy(candidate["inactive_reason"]),
                 "state": "CAPTURE_MISMATCH",
                 **policy,
                 "reason": "capture_identity_mismatch",
@@ -290,12 +298,10 @@ def _validated_config(value: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
     return deepcopy(dict(fusion)), declared
 
 
-def _unseal(value: Mapping[str, Any], *, name: str) -> dict[str, Any]:
+def _require_sealed(value: Mapping[str, Any], *, name: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{name} must be an object")
     result = deepcopy(dict(value))
-    if "content_sha256" not in result:
-        return result
     declared = result.get("content_sha256")
     if not isinstance(declared, str) or declared != content_sha256(result):
         raise ValueError(f"{name} content_sha256 mismatch")
@@ -303,25 +309,17 @@ def _unseal(value: Mapping[str, Any], *, name: str) -> dict[str, Any]:
     return result
 
 
-def _capture_identity(bundle: Mapping[str, Any]) -> dict[str, Any]:
-    if not isinstance(bundle, Mapping):
-        raise ValueError("capture_bundle must be an object")
-    try:
-        identity = validate_capture_identity(bundle["capture_identity"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("capture identity mismatch") from error
-    return identity
-
-
-def _semantic_relations(bindings: list[dict[str, Any]]) -> dict[tuple[str, str, str], tuple[str, ...]]:
-    grouped: dict[tuple[str, str, str], list[str]] = {}
+def _semantic_relations(
+    bindings: list[dict[str, Any]],
+) -> dict[tuple[str, str, str, str], tuple[str, ...]]:
+    grouped: dict[tuple[str, str, str, str], list[str]] = {}
     for binding in bindings:
         grouped.setdefault(_semantic_target(binding), []).append(binding["candidate_id"])
     return {key: tuple(sorted(candidate_ids)) for key, candidate_ids in grouped.items()}
 
 
-def _semantic_target(binding: Mapping[str, Any]) -> tuple[str, str, str]:
-    return (str(binding["role"]), str(binding["label"]), str(binding["relation"]))
+def _semantic_target(binding: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    return canonical_semantic_target_key(binding)
 
 
 def _contains_conflict_marker(value: str) -> bool:

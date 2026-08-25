@@ -117,9 +117,11 @@ def _valid_binding_artifacts() -> tuple[dict, dict]:
                 "relation": "primary_action",
                 "ambiguity": None,
             }],
+            "ambiguity_sets": [],
             "orphan_semantics": [],
         },
         inventory,
+        context_ref={"id": "hybrid-context/test", "content_sha256": "56" * 32},
     )
     return inventory, seal_immutable(parsed)
 

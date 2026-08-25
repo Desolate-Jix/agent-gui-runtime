@@ -35,12 +35,23 @@ def _binding(candidate_id: str, *, label: str = "申请职位") -> dict[str, obj
     }
 
 
+def _parse(raw: dict[str, object], inventory: dict[str, object]) -> dict[str, object]:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+
+    return parse_qwen_candidate_bindings(
+        raw,
+        inventory,
+        context_ref={"id": "hybrid-context/test", "content_sha256": "56" * 32},
+    )
+
+
 def _raw_for(inventory: dict[str, object]) -> dict[str, object]:
     return {
         "bindings": [
             _binding(candidate["candidate_id"], label=f"申请职位 {index}")
             for index, candidate in enumerate(inventory["candidates"])
         ],
+        "ambiguity_sets": [],
         "orphan_semantics": [],
     }
 
@@ -102,6 +113,8 @@ def test_request_contains_canonical_screenshot_closed_geometry_and_same_capture_
         for candidate in facts["inventory"]["candidates"]
     ]
     assert request["ocr_uia_context"] == facts["bundle"]["context"]
+    assert request["context_ref"] == facts["bundle"]["context_ref"]
+    assert request["semantic_target_identity_version"] == "hybrid_semantic_target_identity_v1"
     assert {
         source["source_kind"] for source in request["ocr_uia_context"]["sources"]
     } == {"ocr", "uia"}
@@ -164,7 +177,7 @@ def test_parser_preserves_exact_utf8_labels_and_covers_every_candidate() -> None
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
     inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
-    parsed = parse_qwen_candidate_bindings(_raw_for(inventory), inventory)
+    parsed = _parse(_raw_for(inventory), inventory)
 
     assert [item["label"] for item in parsed["bindings"]] == ["申请职位 0", "申请职位 1"]
     assert [item["candidate_id"] for item in parsed["bindings"]] == [
@@ -180,17 +193,17 @@ def test_parser_rejects_unknown_duplicate_and_omitted_candidate_ids() -> None:
     raw = _raw_for(inventory)
     raw["bindings"][0]["candidate_id"] = "candidate/foreign"
     with pytest.raises(ValueError, match="unknown candidate_id"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
     raw = _raw_for(inventory)
     raw["bindings"][1]["candidate_id"] = raw["bindings"][0]["candidate_id"]
     with pytest.raises(ValueError, match="duplicate candidate_id"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
     raw = _raw_for(inventory)
     raw["bindings"].pop()
     with pytest.raises(ValueError, match="candidate omission"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
 
 def test_parser_rejects_one_semantic_target_bound_to_multiple_ids() -> None:
@@ -202,8 +215,8 @@ def test_parser_rejects_one_semantic_target_bound_to_multiple_ids() -> None:
     for field in ("role", "label", "description", "relation"):
         raw["bindings"][1][field] = raw["bindings"][0][field]
 
-    with pytest.raises(ValueError, match="semantic target bound to multiple candidate IDs"):
-        parse_qwen_candidate_bindings(raw, inventory)
+    with pytest.raises(ValueError, match="ambiguity sets must cover"):
+        _parse(raw, inventory)
 
 
 @pytest.mark.parametrize(
@@ -228,8 +241,71 @@ def test_parser_rejects_canonical_case_whitespace_and_unicode_duplicates(
     raw["bindings"][1]["role"] = raw["bindings"][0]["role"].upper()
     raw["bindings"][1]["description"] = "  打开申请流程  "
 
-    with pytest.raises(ValueError, match="semantic target bound to multiple candidate IDs"):
-        parse_qwen_candidate_bindings(raw, inventory)
+    with pytest.raises(ValueError, match="ambiguity sets must cover"):
+        _parse(raw, inventory)
+
+
+def test_parser_seals_candidate_id_only_ambiguity_set_for_duplicate_target() -> None:
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    raw = _raw_for(inventory)
+    for field in ("role", "label", "description", "relation"):
+        raw["bindings"][1][field] = raw["bindings"][0][field]
+    candidate_ids = sorted(binding["candidate_id"] for binding in raw["bindings"])
+    raw["ambiguity_sets"] = [
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": candidate_ids,
+        }
+    ]
+
+    parsed = _parse(raw, inventory)
+
+    assert parsed["ambiguity_sets"] == raw["ambiguity_sets"]
+    assert parsed["semantic_target_identity_version"] == "hybrid_semantic_target_identity_v1"
+    assert parsed["context_ref"] == {
+        "id": "hybrid-context/test",
+        "content_sha256": "56" * 32,
+    }
+
+
+def test_ambiguity_set_rejects_unknown_id_and_geometry_and_relation_cannot_split_identity() -> None:
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    raw = _raw_for(inventory)
+    for field in ("role", "label", "description"):
+        raw["bindings"][1][field] = raw["bindings"][0][field]
+    raw["bindings"][1]["relation"] = "secondary_action"
+    candidate_ids = sorted(binding["candidate_id"] for binding in raw["bindings"])
+    raw["ambiguity_sets"] = [
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": candidate_ids,
+        }
+    ]
+    assert _parse(raw, inventory)["ambiguity_sets"][0]["candidate_ids"] == candidate_ids
+
+    unknown = deepcopy(raw)
+    unknown["ambiguity_sets"][0]["candidate_ids"][1] = "candidate/foreign"
+    unknown["ambiguity_sets"][0]["candidate_ids"].sort()
+    with pytest.raises(ValueError, match="candidate_ids"):
+        _parse(unknown, inventory)
+
+    geometry = deepcopy(raw)
+    geometry["ambiguity_sets"][0]["bbox"] = [0, 0, 1, 1]
+    with pytest.raises(ValueError, match="forbidden Qwen field: bbox"):
+        _parse(geometry, inventory)
+
+
+def test_parser_requires_exact_context_ref() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture())
+    with pytest.raises(ValueError, match="context_ref"):
+        parse_qwen_candidate_bindings(_raw_for(inventory), inventory)
 
 
 def test_parser_rejects_same_semantic_target_as_binding_and_orphan() -> None:
@@ -248,7 +324,7 @@ def test_parser_rejects_same_semantic_target_as_binding_and_orphan() -> None:
     }]
 
     with pytest.raises(ValueError, match="semantic target bound and orphaned"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
 
 def test_parser_bounds_depth_orphans_and_every_model_string() -> None:
@@ -262,7 +338,7 @@ def test_parser_bounds_depth_orphans_and_every_model_string() -> None:
         deep = {"nested": deep}
     raw["bindings"][0]["ambiguity"] = deep
     with pytest.raises(ValueError, match="maximum JSON depth"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
     raw = _raw_for(inventory)
     raw["orphan_semantics"] = [
@@ -276,12 +352,12 @@ def test_parser_bounds_depth_orphans_and_every_model_string() -> None:
         for index in range(65)
     ]
     with pytest.raises(ValueError, match="orphan count"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
     raw = _raw_for(inventory)
     raw["bindings"][0]["label"] = "界" * 2000
     with pytest.raises(ValueError, match="UTF-8 byte limit"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
 
 @pytest.mark.parametrize(
@@ -303,7 +379,7 @@ def test_qwen_output_cannot_inject_geometry_authority_or_candidates(injection: d
     raw["bindings"][0].update(injection)
 
     with pytest.raises(ValueError, match="forbidden Qwen field"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
 
 def test_parser_rejects_unbound_prose() -> None:
@@ -314,7 +390,7 @@ def test_parser_rejects_unbound_prose() -> None:
     raw = {**_raw_for(inventory), "summary": "可以点击此按钮"}
 
     with pytest.raises(ValueError, match="unbound Qwen prose"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
 
 def test_important_element_without_candidate_is_orphan_semantic_only() -> None:
@@ -333,7 +409,7 @@ def test_important_element_without_candidate_is_orphan_semantic_only() -> None:
         }
     ]
 
-    parsed = parse_qwen_candidate_bindings(raw, inventory)
+    parsed = _parse(raw, inventory)
 
     orphan = parsed["orphan_semantics"][0]
     assert orphan["reason"] == "ORPHAN_SEMANTIC"
@@ -358,7 +434,7 @@ def test_orphan_semantic_cannot_fabricate_candidate_shaped_identity() -> None:
     ]
 
     with pytest.raises(ValueError, match="fabricated candidate"):
-        parse_qwen_candidate_bindings(raw, inventory)
+        _parse(raw, inventory)
 
 
 def test_run_seals_binding_and_passes_cancellation_token(
@@ -396,6 +472,8 @@ def test_run_seals_binding_and_passes_cancellation_token(
 
     assert result["contract_version"] == "hybrid_qwen_bindings_v1"
     assert result["content_sha256"] == content_sha256(result)
+    assert result["context_ref"] == facts["bundle"]["context_ref"]
+    assert result["semantic_target_identity_version"] == "hybrid_semantic_target_identity_v1"
     assert seen["cancellation_event"] is cancellation
     assert seen["model_lease"] == {"lease_id": "exact-controlled-lease"}
     assert seen["screenshot_bytes"] == expected_bytes

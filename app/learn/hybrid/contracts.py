@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 import re
 from typing import Any
+import unicodedata
 
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256
 from app.learn.recognition.uei.contracts import validate_contract
@@ -21,6 +22,7 @@ QWEN_CONTRACT = "hybrid_qwen_bindings_v1"
 FUSION_CONTRACT = "hybrid_fusion_result_v1"
 VISTA_CONTRACT = "hybrid_vista_proposals_v1"
 COORDINATE_SPACE = "capture_pixel_xyxy"
+SEMANTIC_TARGET_IDENTITY_VERSION = "hybrid_semantic_target_identity_v1"
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _NON_AUTHORIZING = {
@@ -204,6 +206,19 @@ def stable_candidate_id(
     _string(source_item_id, name="source_item_id")
     payload = {"provider_result_ref": reference, "source_item_id": source_item_id}
     return "candidate/" + hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+
+
+def canonical_semantic_target_key(value: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    """返回 Task 4/5 共用且带版本的语义目标身份。"""
+    if not isinstance(value, Mapping):
+        raise ValueError("semantic target must be an object")
+    normalized: list[str] = []
+    for field in ("role", "label", "description"):
+        child = value.get(field)
+        if not isinstance(child, str):
+            raise ValueError("semantic target fields must be strings")
+        normalized.append(" ".join(unicodedata.normalize("NFKC", child).casefold().split()))
+    return (SEMANTIC_TARGET_IDENTITY_VERSION, *normalized)
 
 
 def validate_capture_identity(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -447,20 +462,33 @@ def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def validate_qwen_bindings(
-    value: Mapping[str, Any], omni_inventory: Mapping[str, Any]
+    value: Mapping[str, Any],
+    omni_inventory: Mapping[str, Any],
+    *,
+    allow_capture_mismatch: bool = False,
 ) -> dict[str, Any]:
     inventory = validate_omni_inventory(omni_inventory)
     fields = {
         "contract_version",
         "capture_identity",
+        "context_ref",
+        "semantic_target_identity_version",
         "bindings",
+        "ambiguity_sets",
         "orphan_semantics",
     } | set(_NON_AUTHORIZING_FIELDS)
     result = _object(value, name="Qwen bindings", fields=fields)
     if result["contract_version"] != QWEN_CONTRACT:
         raise ValueError(f"Qwen bindings contract_version must be {QWEN_CONTRACT}")
     result["capture_identity"] = validate_capture_identity(result["capture_identity"])
-    _same_capture(result["capture_identity"], inventory["capture_identity"])
+    captures_match = canonical_json_bytes(result["capture_identity"]) == canonical_json_bytes(
+        inventory["capture_identity"]
+    )
+    if not captures_match and not allow_capture_mismatch:
+        _same_capture(result["capture_identity"], inventory["capture_identity"])
+    result["context_ref"] = _ref(result["context_ref"], name="Qwen context_ref")
+    if result["semantic_target_identity_version"] != SEMANTIC_TARGET_IDENTITY_VERSION:
+        raise ValueError("Qwen semantic target identity version mismatch")
     _non_authorizing(result, name="Qwen bindings")
     if not isinstance(result["bindings"], list):
         raise ValueError("Qwen bindings.bindings must be a list")
@@ -481,8 +509,10 @@ def validate_qwen_bindings(
             raise ValueError("geometry is forbidden in Qwen output")
         binding = _object(child, name=f"binding[{index}]", fields=binding_fields)
         candidate_id = _string(binding["candidate_id"], name=f"binding[{index}].candidate_id")
-        if candidate_id not in known_ids:
+        if captures_match and candidate_id not in known_ids:
             raise ValueError(f"unknown candidate_id: {candidate_id}")
+        if not candidate_id.startswith("candidate/"):
+            raise ValueError("Qwen candidate_id is invalid")
         if candidate_id in seen_ids:
             raise ValueError("duplicate candidate_id in Qwen bindings")
         seen_ids.add(candidate_id)
@@ -496,6 +526,52 @@ def validate_qwen_bindings(
         if binding["ambiguity"] is not None:
             _string(binding["ambiguity"], name=f"binding[{index}].ambiguity")
         result["bindings"][index] = binding
+    binding_ids = {binding["candidate_id"] for binding in result["bindings"]}
+    if not isinstance(result["ambiguity_sets"], list):
+        raise ValueError("Qwen bindings.ambiguity_sets must be a list")
+    ambiguity_fields = {"contract_version", "candidate_ids"}
+    ambiguity_memberships: set[str] = set()
+    declared_sets: set[tuple[str, ...]] = set()
+    for index, child in enumerate(result["ambiguity_sets"]):
+        ambiguity = _object(
+            child,
+            name=f"ambiguity_set[{index}]",
+            fields=ambiguity_fields,
+        )
+        if ambiguity["contract_version"] != "hybrid_semantic_ambiguity_set_v1":
+            raise ValueError("Qwen ambiguity set contract_version is invalid")
+        candidate_ids = ambiguity["candidate_ids"]
+        if (
+            not isinstance(candidate_ids, list)
+            or len(candidate_ids) < 2
+            or candidate_ids != sorted(candidate_ids)
+            or len(set(candidate_ids)) != len(candidate_ids)
+            or any(candidate_id not in binding_ids for candidate_id in candidate_ids)
+        ):
+            raise ValueError("Qwen ambiguity set candidate_ids are invalid")
+        if any(candidate_id in ambiguity_memberships for candidate_id in candidate_ids):
+            raise ValueError("Qwen candidate belongs to multiple ambiguity sets")
+        ambiguity_memberships.update(candidate_ids)
+        declared_sets.add(tuple(candidate_ids))
+        result["ambiguity_sets"][index] = ambiguity
+
+    bindings_by_id = {binding["candidate_id"]: binding for binding in result["bindings"]}
+    semantic_groups: dict[tuple[str, str, str, str], list[str]] = {}
+    for binding in result["bindings"]:
+        semantic_groups.setdefault(canonical_semantic_target_key(binding), []).append(
+            binding["candidate_id"]
+        )
+    expected_sets = {
+        tuple(sorted(candidate_ids))
+        for candidate_ids in semantic_groups.values()
+        if len(candidate_ids) > 1
+    }
+    if declared_sets != expected_sets:
+        raise ValueError("Qwen ambiguity sets must cover exact duplicate semantic targets")
+    for candidate_ids in declared_sets:
+        keys = {canonical_semantic_target_key(bindings_by_id[item]) for item in candidate_ids}
+        if len(keys) != 1:
+            raise ValueError("Qwen ambiguity set semantic target mismatch")
     if not isinstance(result["orphan_semantics"], list):
         raise ValueError("Qwen bindings.orphan_semantics must be a list")
     orphan_fields = {"semantic_id", "role", "label", "description", "reason"}
@@ -521,7 +597,11 @@ def validate_fusion_result(
     qwen_bindings: Mapping[str, Any],
 ) -> dict[str, Any]:
     inventory = validate_omni_inventory(omni_inventory)
-    bindings = validate_qwen_bindings(qwen_bindings, inventory)
+    bindings = validate_qwen_bindings(
+        qwen_bindings,
+        inventory,
+        allow_capture_mismatch=True,
+    )
     fields = {
         "contract_version",
         "capture_identity",
@@ -533,7 +613,11 @@ def validate_fusion_result(
         raise ValueError(f"fusion result contract_version must be {FUSION_CONTRACT}")
     result["capture_identity"] = validate_capture_identity(result["capture_identity"])
     _same_capture(result["capture_identity"], inventory["capture_identity"])
-    _same_capture(result["capture_identity"], bindings["capture_identity"])
+    parent_captures_match = canonical_json_bytes(inventory["capture_identity"]) == canonical_json_bytes(
+        bindings["capture_identity"]
+    )
+    if parent_captures_match:
+        _same_capture(result["capture_identity"], bindings["capture_identity"])
     _sha256(result["config_sha256"], name="fusion result.config_sha256")
     _non_authorizing(result, name="fusion result")
     if not isinstance(result["candidates"], list):
@@ -545,6 +629,8 @@ def validate_fusion_result(
         "candidate_id",
         "bbox_original",
         "coordinate_space",
+        "active",
+        "inactive_reason",
         "state",
         "vista_eligible",
         "review_required",
@@ -570,6 +656,10 @@ def validate_fusion_result(
         _coordinate_space(
             candidate["coordinate_space"], name=f"fusion candidate[{index}].coordinate_space"
         )
+        if candidate["active"] is not omni_candidate["active"]:
+            raise ValueError("fusion filtering active fact must match immutable Omni candidate")
+        if candidate["inactive_reason"] != omni_candidate["inactive_reason"]:
+            raise ValueError("fusion filtering inactive_reason must match immutable Omni candidate")
         state = candidate["state"]
         if state not in _FUSION_STATES:
             raise ValueError(f"unknown fusion state: {state}")
@@ -580,7 +670,9 @@ def validate_fusion_result(
         if state == "BOUND" and not candidate["vista_eligible"]:
             raise ValueError("BOUND candidate must be VISTA eligible")
         if state == "BOUND" and (
-            omni_candidate["active"] is not True or candidate_id not in qwen_by_id
+            not parent_captures_match
+            or omni_candidate["active"] is not True
+            or candidate_id not in qwen_by_id
         ):
             raise ValueError("BOUND requires one valid Qwen binding on an active Omni candidate")
         if not isinstance(candidate["review_required"], bool):
@@ -591,6 +683,10 @@ def validate_fusion_result(
         result["candidates"][index] = candidate
     if seen_ids != known_ids:
         raise ValueError("fusion result must preserve exact Omni candidate coverage")
+    if not parent_captures_match and any(
+        candidate["state"] != "CAPTURE_MISMATCH" for candidate in result["candidates"]
+    ):
+        raise ValueError("conflicting parent captures require CAPTURE_MISMATCH")
     return _canonical_return(result, name="fusion result")
 
 

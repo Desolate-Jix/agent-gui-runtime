@@ -10,12 +10,13 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Callable
-import unicodedata
 
 from PIL import Image, UnidentifiedImageError
 
 from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
 from app.learn.hybrid.contracts import (
+    SEMANTIC_TARGET_IDENTITY_VERSION,
+    canonical_semantic_target_key,
     validate_capture_identity,
     validate_omni_inventory,
     validate_qwen_bindings,
@@ -49,6 +50,7 @@ _BINDING_FIELDS = {
     "ambiguity",
 }
 _ORPHAN_FIELDS = {"semantic_id", "role", "label", "description", "reason"}
+_AMBIGUITY_SET_FIELDS = {"contract_version", "candidate_ids"}
 _FORBIDDEN_FIELDS = {
     "action_authorized",
     "approved_to_click",
@@ -123,7 +125,11 @@ def build_qwen_binding_request(
             for candidate in inventory["candidates"]
         ],
         "ocr_uia_context": context,
-        "allowed_output_fields": sorted(_BINDING_FIELDS | _ORPHAN_FIELDS),
+        "context_ref": deepcopy(bundle.get("context_ref")),
+        "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
+        "allowed_output_fields": sorted(
+            _BINDING_FIELDS | _ORPHAN_FIELDS | _AMBIGUITY_SET_FIELDS | {"ambiguity_sets"}
+        ),
     }
     return seal_immutable(request)
 
@@ -131,10 +137,16 @@ def build_qwen_binding_request(
 def parse_qwen_candidate_bindings(
     raw: Mapping[str, Any],
     omni_inventory: Mapping[str, Any],
+    *,
+    context_ref: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """解析 candidate-ID-closed 模型输出，不接受任何自由几何或执行权限。"""
     inventory = _validated_inventory(omni_inventory)
-    if not isinstance(raw, Mapping) or set(raw) != {"bindings", "orphan_semantics"}:
+    if not isinstance(raw, Mapping) or set(raw) != {
+        "bindings",
+        "ambiguity_sets",
+        "orphan_semantics",
+    }:
         raise ValueError("unbound Qwen prose or non-closed output")
     value = deepcopy(dict(raw))
     _validate_model_json_bounds(value)
@@ -145,6 +157,8 @@ def parse_qwen_candidate_bindings(
         raise ValueError("Qwen bindings must be a list")
     if not isinstance(value["orphan_semantics"], list):
         raise ValueError("Qwen orphan_semantics must be a list")
+    if not isinstance(value["ambiguity_sets"], list):
+        raise ValueError("Qwen ambiguity_sets must be a list")
     if len(value["bindings"]) != len(inventory["candidates"]):
         raise ValueError("candidate omission in Qwen bindings")
     if len(value["orphan_semantics"]) > _MAX_ORPHAN_SEMANTICS:
@@ -160,11 +174,18 @@ def parse_qwen_candidate_bindings(
             raise ValueError("orphan semantic cannot use a fabricated candidate identity")
         if orphan.get("reason") != "ORPHAN_SEMANTIC":
             raise ValueError("orphan semantic reason must be ORPHAN_SEMANTIC")
+    for index, ambiguity in enumerate(value["ambiguity_sets"]):
+        if not isinstance(ambiguity, Mapping) or set(ambiguity) != _AMBIGUITY_SET_FIELDS:
+            raise ValueError(f"ambiguity_set[{index}] is not closed")
+    verified_context_ref = _immutable_context_ref(context_ref)
 
     artifact = {
         "contract_version": "hybrid_qwen_bindings_v1",
         "capture_identity": deepcopy(inventory["capture_identity"]),
+        "context_ref": verified_context_ref,
+        "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
         "bindings": value["bindings"],
+        "ambiguity_sets": value["ambiguity_sets"],
         "orphan_semantics": value["orphan_semantics"],
         **_NON_AUTHORIZING,
     }
@@ -173,16 +194,12 @@ def parse_qwen_candidate_bindings(
     actual_ids = [binding["candidate_id"] for binding in validated["bindings"]]
     if set(actual_ids) != set(expected_ids) or len(actual_ids) != len(expected_ids):
         raise ValueError("candidate omission in Qwen bindings")
-    semantic_targets: dict[tuple[str, str, str], str] = {}
-    for binding in validated["bindings"]:
-        target = _semantic_target_key(binding)
-        previous = semantic_targets.get(target)
-        if previous is not None and previous != binding["candidate_id"]:
-            raise ValueError("semantic target bound to multiple candidate IDs")
-        semantic_targets[target] = binding["candidate_id"]
-    orphan_targets: set[tuple[str, str, str]] = set()
+    semantic_targets = {
+        canonical_semantic_target_key(binding) for binding in validated["bindings"]
+    }
+    orphan_targets: set[tuple[str, str, str, str]] = set()
     for orphan in validated["orphan_semantics"]:
-        target = _semantic_target_key(orphan)
+        target = canonical_semantic_target_key(orphan)
         if target in semantic_targets:
             raise ValueError("semantic target bound and orphaned")
         if target in orphan_targets:
@@ -244,7 +261,11 @@ def run_qwen_candidate_binding(
             raw = json.loads(raw)
         except json.JSONDecodeError as error:
             raise ValueError("unbound Qwen prose or invalid JSON") from error
-    parsed = parse_qwen_candidate_bindings(raw, sealed_inventory)
+    parsed = parse_qwen_candidate_bindings(
+        raw,
+        sealed_inventory,
+        context_ref=model_request["context_ref"],
+    )
     return seal_immutable(parsed)
 
 
@@ -343,17 +364,19 @@ def _read_verified_capture(
     return raw, media_type, digest
 
 
-def _canonical_semantic_text(value: object) -> str:
-    if not isinstance(value, str):
-        raise ValueError("semantic target fields must be strings")
-    return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
-
-
-def _semantic_target_key(value: Mapping[str, Any]) -> tuple[str, str, str]:
-    return tuple(
-        _canonical_semantic_text(value.get(field))
-        for field in ("role", "label", "description")
-    )
+def _immutable_context_ref(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"id", "content_sha256"}:
+        raise ValueError("Qwen context_ref is missing or invalid")
+    identifier = value.get("id")
+    digest = value.get("content_sha256")
+    if (
+        not isinstance(identifier, str)
+        or not identifier
+        or not isinstance(digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+    ):
+        raise ValueError("Qwen context_ref is missing or invalid")
+    return {"id": identifier, "content_sha256": digest}
 
 
 def _validate_model_json_bounds(value: object) -> None:

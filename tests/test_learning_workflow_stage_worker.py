@@ -1161,6 +1161,44 @@ def test_panel_request_contract_accepts_managed_hybrid_fusion() -> None:
     assert request.task_kind == "panel_learning_hybrid_fusion"
 
 
+def test_managed_hybrid_fusion_enforces_sealed_full_producer_boundary() -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from tests.test_learn_hybrid_fusion import _inputs
+
+    config, bundle, inventory, bindings = _inputs()
+    payload = {
+        "config": config,
+        "capture_bundle": bundle,
+        "omni_inventory": seal_immutable(inventory),
+        "qwen_bindings": seal_immutable(bindings),
+    }
+
+    result = execute_learning_stage_worker_task(
+        "panel_learning_hybrid_fusion",
+        payload,
+    )
+
+    assert result["candidates"][0]["state"] == "BOUND"
+    payload["omni_inventory"].pop("content_sha256")
+    with pytest.raises(ValueError, match="content_sha256"):
+        execute_learning_stage_worker_task(
+            "panel_learning_hybrid_fusion",
+            payload,
+        )
+
+    payload["omni_inventory"] = seal_immutable(inventory)
+    bindings["context_ref"] = {
+        "id": "hybrid-context/wrong",
+        "content_sha256": "78" * 32,
+    }
+    payload["qwen_bindings"] = seal_immutable(bindings)
+    with pytest.raises(ValueError, match="context_ref"):
+        execute_learning_stage_worker_task(
+            "panel_learning_hybrid_fusion",
+            payload,
+        )
+
+
 def test_worker_dispatches_managed_hybrid_qwen_through_existing_model_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

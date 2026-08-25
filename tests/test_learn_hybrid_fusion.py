@@ -3,21 +3,103 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
 from app.learn.hybrid.contracts import load_hybrid_config
 from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
-from tests.test_learn_hybrid_contracts import binding_fixture, inventory_fixture
+from tests.test_learn_hybrid_contracts import inventory_fixture
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _inputs(*, candidate_count: int = 1) -> tuple[dict, dict, dict, dict]:
+def _verified_bundle(*, width: int = 1280) -> dict:
+    from app.learn.hybrid.capture import (
+        load_and_verify_hybrid_capture_bundle,
+        seal_hybrid_capture_bundle,
+    )
+    from tests.test_learn_hybrid_capture import _context, _identity, _window
+
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        image, identity = _identity(
+            root,
+            run_id=f"run-fusion-{width}",
+            revision=7,
+            name=f"fusion-{width}.png",
+            size=(width, 720),
+        )
+        saved = seal_hybrid_capture_bundle(
+            project_root=root,
+            image_path=image,
+            run_id=f"run-fusion-{width}",
+            workflow_revision=7,
+            window_binding=_window(),
+            ocr_uia_context=_context(
+                root,
+                identity,
+                run_id=f"run-fusion-{width}",
+                revision=7,
+            ),
+            capture_envelope=identity.capture_envelope,
+        )
+        return load_and_verify_hybrid_capture_bundle(
+            project_root=root,
+            bundle_ref=saved["bundle_ref"],
+            expected_run_id=f"run-fusion-{width}",
+            expected_workflow_revision=7,
+        )
+
+
+def _inventory_for_capture(capture_identity: dict, *, candidate_count: int) -> dict:
+    from app.learn.hybrid.contracts import stable_candidate_id
+
     inventory = inventory_fixture(candidate_count=candidate_count)
-    bindings = binding_fixture(inventory=inventory)
-    bundle = {"capture_identity": deepcopy(inventory["capture_identity"])}
+    inventory["capture_identity"] = deepcopy(capture_identity)
+    provider = {
+        key: deepcopy(value)
+        for key, value in inventory["provider_result"].items()
+        if key != "content_sha256"
+    }
+    provider["capture_lineage_ref"] = deepcopy(capture_identity["capture_lineage_ref"])
+    inventory["provider_result"] = seal_immutable(provider)
+    inventory["provider_result_ref"] = {
+        "id": inventory["provider_result"]["result_id"],
+        "content_sha256": inventory["provider_result"]["content_sha256"],
+    }
+    for candidate in inventory["candidates"]:
+        candidate["provider_result_ref"] = deepcopy(inventory["provider_result_ref"])
+        candidate["candidate_id"] = stable_candidate_id(
+            provider_result_ref=inventory["provider_result_ref"],
+            source_item_id=candidate["source_item_id"],
+        )
+        candidate["provenance"] = seal_immutable(
+            {
+                "contract_version": "hybrid_candidate_provenance_v1",
+                "provider_result_ref": deepcopy(inventory["provider_result_ref"]),
+                "source_item_id": candidate["source_item_id"],
+            }
+        )
+    return inventory
+
+
+def _inputs(*, candidate_count: int = 1, width: int = 1280) -> tuple[dict, dict, dict, dict]:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_qwen_binding import _raw_for
+
+    bundle = _verified_bundle(width=width)
+    inventory = _inventory_for_capture(
+        bundle["capture_identity"],
+        candidate_count=candidate_count,
+    )
+    sealed_inventory = seal_immutable(inventory)
+    bindings = parse_qwen_candidate_bindings(
+        _raw_for(sealed_inventory),
+        sealed_inventory,
+        context_ref=bundle["context_ref"],
+    )
     return load_hybrid_config(PROJECT_ROOT), bundle, inventory, bindings
 
 
@@ -27,8 +109,8 @@ def _fuse(*, config: dict, bundle: dict, inventory: dict, bindings: dict) -> dic
     return fuse_hybrid_candidates(
         config=config,
         capture_bundle=bundle,
-        omni_inventory=inventory,
-        qwen_bindings=bindings,
+        omni_inventory=inventory if "content_sha256" in inventory else seal_immutable(inventory),
+        qwen_bindings=bindings if "content_sha256" in bindings else seal_immutable(bindings),
     )
 
 
@@ -112,7 +194,7 @@ def test_semantic_threshold_is_read_from_the_sealed_config() -> None:
         bindings=bindings,
     )["candidates"][0]
 
-    assert bindings["bindings"][0]["semantic_confidence"] == 0.92
+    assert bindings["bindings"][0]["semantic_confidence"] == 0.94
     assert record["state"] == "LOW_CONFIDENCE"
 
 
@@ -164,18 +246,31 @@ def test_duplicate_overlapping_semantic_relation_uses_configured_tie_delta(
     # 稳定 ID 依赖 provider-result 引用，因此沿用既有生成器重建。
     from app.learn.hybrid.contracts import stable_candidate_id
 
-    for candidate, binding in zip(inventory["candidates"], bindings["bindings"], strict=True):
+    for candidate in inventory["candidates"]:
         candidate["candidate_id"] = stable_candidate_id(
             provider_result_ref=inventory["provider_result_ref"],
             source_item_id=candidate["source_item_id"],
         )
-        binding["candidate_id"] = candidate["candidate_id"]
-        binding["role"] = "button"
-        binding["label"] = "Apply"
-        binding["relation"] = "primary_action"
-    bindings["capture_identity"] = deepcopy(inventory["capture_identity"])
-    bindings["bindings"][0]["semantic_confidence"] = 0.90
-    bindings["bindings"][1]["semantic_confidence"] = 0.90 - confidence_delta
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_qwen_binding import _raw_for
+
+    sealed_inventory = seal_immutable(inventory)
+    raw = _raw_for(sealed_inventory)
+    for binding in raw["bindings"]:
+        binding.update({"role": "button", "label": "Apply", "relation": "primary_action"})
+    raw["bindings"][0]["semantic_confidence"] = 0.90
+    raw["bindings"][1]["semantic_confidence"] = 0.90 - confidence_delta
+    raw["ambiguity_sets"] = [
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": sorted(item["candidate_id"] for item in raw["bindings"]),
+        }
+    ]
+    bindings = parse_qwen_candidate_bindings(
+        raw,
+        sealed_inventory,
+        context_ref=bundle["context_ref"],
+    )
 
     states = [
         item["state"]
@@ -192,8 +287,24 @@ def test_duplicate_overlapping_semantic_relation_uses_configured_tie_delta(
 
 def test_non_overlapping_duplicate_semantic_relation_is_conflict() -> None:
     config, bundle, inventory, bindings = _inputs(candidate_count=2)
-    for binding in bindings["bindings"]:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_qwen_binding import _raw_for
+
+    sealed_inventory = seal_immutable(inventory)
+    raw = _raw_for(sealed_inventory)
+    for binding in raw["bindings"]:
         binding.update({"role": "button", "label": "Apply", "relation": "primary_action"})
+    raw["ambiguity_sets"] = [
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": sorted(item["candidate_id"] for item in raw["bindings"]),
+        }
+    ]
+    bindings = parse_qwen_candidate_bindings(
+        raw,
+        sealed_inventory,
+        context_ref=bundle["context_ref"],
+    )
 
     states = [
         item["state"]
@@ -223,6 +334,8 @@ def test_inactive_filter_and_missing_binding_preserve_candidate_records() -> Non
 
     assert len(result["candidates"]) == len(inventory["candidates"])
     assert result["candidates"][0]["state"] == "UNBOUND"
+    assert result["candidates"][0]["active"] is False
+    assert result["candidates"][0]["inactive_reason"] == "filtered_by_provider_policy"
     assert result["candidates"][0]["reason"] == "inactive:filtered_by_provider_policy"
     assert result["candidates"][1]["state"] == "UNBOUND"
     assert result["candidates"][1]["reason"] == "missing_qwen_binding"
@@ -230,12 +343,6 @@ def test_inactive_filter_and_missing_binding_preserve_candidate_records() -> Non
 
 def test_uia_or_ocr_context_without_qwen_binding_cannot_upgrade_to_bound() -> None:
     config, bundle, inventory, bindings = _inputs()
-    bundle["context"] = {
-        "sources": [
-            {"source_kind": "uia", "candidate_id": inventory["candidates"][0]["candidate_id"]},
-            {"source_kind": "ocr", "candidate_id": inventory["candidates"][0]["candidate_id"]},
-        ]
-    }
     bindings["bindings"] = []
 
     record = _fuse(
@@ -318,12 +425,111 @@ def test_sealed_inventory_and_bindings_are_accepted_but_tampering_is_rejected() 
             bindings=sealed_bindings,
         )
 
+    sealed_inventory = seal_immutable(inventory)
+    sealed_bindings["bindings"][0]["semantic_confidence"] = 1.0
+    with pytest.raises(ValueError, match="content_sha256"):
+        _fuse(
+            config=config,
+            bundle=bundle,
+            inventory=sealed_inventory,
+            bindings=sealed_bindings,
+        )
 
-def test_valid_cross_capture_bundle_becomes_review_required_capture_mismatch() -> None:
-    from tests.test_learn_hybrid_contracts import capture_fixture
+
+@pytest.mark.parametrize("missing", ["inventory", "bindings"])
+def test_fusion_requires_both_top_level_producer_seals(missing: str) -> None:
+    from app.learn.hybrid.fusion import fuse_hybrid_candidates
 
     config, bundle, inventory, bindings = _inputs()
-    bundle["capture_identity"] = capture_fixture(image_sha="cd" * 32)
+    sealed_inventory = seal_immutable(inventory)
+    sealed_bindings = seal_immutable(bindings)
+    if missing == "inventory":
+        sealed_inventory.pop("content_sha256")
+    else:
+        sealed_bindings.pop("content_sha256")
+
+    with pytest.raises(ValueError, match="content_sha256"):
+        fuse_hybrid_candidates(
+            config=config,
+            capture_bundle=bundle,
+            omni_inventory=sealed_inventory,
+            qwen_bindings=sealed_bindings,
+        )
+
+
+def test_fusion_rejects_minimal_bundle_and_tampered_context_seal() -> None:
+    from app.learn.hybrid.fusion import fuse_hybrid_candidates
+
+    config, bundle, inventory, bindings = _inputs()
+    sealed_inventory = seal_immutable(inventory)
+    sealed_bindings = seal_immutable(bindings)
+    with pytest.raises(ValueError, match="closed verified bundle"):
+        fuse_hybrid_candidates(
+            config=config,
+            capture_bundle={"capture_identity": deepcopy(bundle["capture_identity"])},
+            omni_inventory=sealed_inventory,
+            qwen_bindings=sealed_bindings,
+        )
+
+    bundle["context"]["sources"].reverse()
+    with pytest.raises(ValueError, match="context content_sha256"):
+        fuse_hybrid_candidates(
+            config=config,
+            capture_bundle=bundle,
+            omni_inventory=sealed_inventory,
+            qwen_bindings=sealed_bindings,
+        )
+
+
+def test_fusion_rejects_wrong_qwen_context_ref_even_when_resealed() -> None:
+    config, bundle, inventory, bindings = _inputs()
+    bindings["context_ref"] = {
+        "id": "hybrid-context/wrong",
+        "content_sha256": "78" * 32,
+    }
+
+    with pytest.raises(ValueError, match="context_ref"):
+        _fuse(
+            config=config,
+            bundle=bundle,
+            inventory=inventory,
+            bindings=bindings,
+        )
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["bundle_vs_omni_qwen", "qwen_vs_bundle_omni", "omni_vs_bundle_qwen"],
+)
+def test_all_pairwise_valid_cross_capture_inputs_preserve_mismatch_rows(case: str) -> None:
+    config, bundle_a, inventory_a, bindings_a = _inputs(width=1280)
+    _, bundle_b, inventory_b, bindings_b = _inputs(width=1279)
+    if case == "bundle_vs_omni_qwen":
+        bundle, inventory, bindings = bundle_b, inventory_a, bindings_a
+    elif case == "qwen_vs_bundle_omni":
+        bundle, inventory, bindings = bundle_a, inventory_a, bindings_b
+    else:
+        bundle, inventory, bindings = bundle_a, inventory_b, bindings_a
+
+    result = _fuse(
+        config=config,
+        bundle=bundle,
+        inventory=inventory,
+        bindings=bindings,
+    )
+
+    assert len(result["candidates"]) == len(inventory["candidates"])
+    assert {item["state"] for item in result["candidates"]} == {"CAPTURE_MISMATCH"}
+    assert all(item["review_required"] is True for item in result["candidates"])
+    assert all(item["vista_eligible"] is False for item in result["candidates"])
+    assert [item["active"] for item in result["candidates"]] == [
+        item["active"] for item in inventory["candidates"]
+    ]
+
+
+def test_valid_cross_capture_bundle_becomes_review_required_capture_mismatch() -> None:
+    config, bundle, inventory, bindings = _inputs()
+    bundle = _verified_bundle(width=1279)
 
     result = _fuse(
         config=config,
@@ -341,7 +547,20 @@ def test_malformed_capture_identity_is_rejected() -> None:
     config, bundle, inventory, bindings = _inputs()
     bundle["capture_identity"]["capture_id"] = "capture-other"
 
-    with pytest.raises(ValueError, match="capture identity"):
+    with pytest.raises(ValueError, match="capture_id"):
+        _fuse(
+            config=config,
+            bundle=bundle,
+            inventory=inventory,
+            bindings=bindings,
+        )
+
+
+def test_malformed_resealed_qwen_capture_is_rejected_not_mapped_to_mismatch() -> None:
+    config, bundle, inventory, bindings = _inputs()
+    bindings["capture_identity"]["capture_id"] = "capture-malformed"
+
+    with pytest.raises(ValueError, match="capture_id"):
         _fuse(
             config=config,
             bundle=bundle,

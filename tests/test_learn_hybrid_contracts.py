@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from app.learn.hybrid.contracts import (
+    SEMANTIC_TARGET_IDENTITY_VERSION,
+    canonical_semantic_target_key,
     load_hybrid_config,
     stable_candidate_id,
     validate_capture_identity,
@@ -191,7 +193,10 @@ def binding_fixture(
     return {
         "contract_version": "hybrid_qwen_bindings_v1",
         "capture_identity": deepcopy(inventory["capture_identity"]),
+        "context_ref": {"id": "hybrid-context/test", "content_sha256": "56" * 32},
+        "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
         "bindings": bindings,
+        "ambiguity_sets": [],
         "orphan_semantics": [],
         **NON_AUTHORIZING,
     }
@@ -213,6 +218,8 @@ def fusion_fixture(
                 "candidate_id": candidate["candidate_id"],
                 "bbox_original": deepcopy(candidate["bbox_original"]),
                 "coordinate_space": "capture_pixel_xyxy",
+                "active": candidate["active"],
+                "inactive_reason": candidate["inactive_reason"],
                 "state": state,
                 "vista_eligible": state == "BOUND",
                 "review_required": state != "BOUND",
@@ -222,6 +229,39 @@ def fusion_fixture(
         ],
         **NON_AUTHORIZING,
     }
+
+
+def test_semantic_target_identity_is_shared_versioned_and_canonical() -> None:
+    left = {
+        "role": " Button ",
+        "label": "ＡＰＰＬＹ",
+        "description": "  Open   flow ",
+        "relation": " Primary_Action ",
+    }
+    right = {
+        "role": "button",
+        "label": "apply",
+        "description": "open flow",
+        "relation": "primary_action",
+    }
+
+    assert SEMANTIC_TARGET_IDENTITY_VERSION == "hybrid_semantic_target_identity_v1"
+    assert canonical_semantic_target_key(left) == canonical_semantic_target_key(right)
+
+
+def test_fusion_filtering_fact_must_copy_omni_active_and_reason_exactly() -> None:
+    inventory = inventory_fixture()
+    bindings = binding_fixture(inventory=inventory)
+    fusion = fusion_fixture(inventory=inventory)
+    fusion["candidates"][0]["active"] = False
+
+    with pytest.raises(ValueError, match="active fact"):
+        validate_fusion_result(fusion, inventory, bindings)
+
+    fusion = fusion_fixture(inventory=inventory)
+    fusion["candidates"][0]["inactive_reason"] = "invented"
+    with pytest.raises(ValueError, match="inactive_reason"):
+        validate_fusion_result(fusion, inventory, bindings)
 
 
 def permitted_roi_fixture(inventory: dict) -> dict:
