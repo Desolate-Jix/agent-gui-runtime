@@ -3733,6 +3733,83 @@ class LearningStageWorkerRegistry:
                 )
                 return deepcopy(value)
 
+    def inspect_benchmark_worker_launch_owner(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        reservation_ref: Mapping[str, object],
+        expected_operation_anchor: Mapping[str, object],
+        supervision_root: BenchmarkWorkerSupervisionRoot,
+    ) -> Mapping[str, object]:
+        root = self._require_benchmark_root(supervision_root)
+        worker = _required_text(worker_id, "worker_id")
+        run = _required_text(run_id, "run_id")
+        stage_value = _required_text(stage, "stage")
+        operation = _required_text(operation_id, "operation_id")
+        exact_reservation_ref = _benchmark_exact_ref(
+            dict(reservation_ref), "benchmark launch owner reservation ref"
+        )
+        anchor = (
+            deepcopy(dict(expected_operation_anchor))
+            if isinstance(expected_operation_anchor, Mapping)
+            else expected_operation_anchor
+        )
+        key = (run, stage_value, operation)
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id=run,
+            stage=stage_value,
+            operation_id=operation,
+        ):
+            with self._lock:
+                original = self._benchmark_reservations_by_ref.get(
+                    exact_reservation_ref["content_sha256"]
+                )
+                if original is None:
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner reservation ref not found"
+                    )
+                original = self._validate_benchmark_reservation(original)
+                if original.get("reservation_state") != "reserved":
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner reservation ref is not original"
+                    )
+                if any(
+                    original.get(field) != expected
+                    for field, expected in (
+                        ("run_id", run),
+                        ("stage", stage_value),
+                        ("operation_id", operation),
+                        ("worker_id", worker),
+                    )
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner identity does not match"
+                    )
+                validated_anchor = validate_benchmark_worker_operation_anchor_v1(
+                    anchor,
+                    supervision_root=root,
+                    expected_reservation=original,
+                )
+                current = self._benchmark_reservations.get(key)
+                if current is None:
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner current reservation is missing"
+                    )
+                current = self._validate_benchmark_reservation(current)
+                record = self._records.get(worker)
+                return _inspect_benchmark_worker_launch_owner_locked(
+                    result_root=self._result_root,
+                    original_reservation=original,
+                    current_reservation=current,
+                    expected_operation_anchor=validated_anchor,
+                    supervision_root=root,
+                    record=record,
+                )
+
     def _benchmark_by_ref(self, reservation_ref: object) -> dict[str, Any]:
         ref = _benchmark_exact_ref(reservation_ref, "benchmark reservation ref")
         reservation = self._benchmark_reservations_by_ref.get(ref["content_sha256"])
@@ -8618,6 +8695,619 @@ def _validate_exact_benchmark_process_identity(
     ):
         raise LearningStageWorkerError(f"benchmark {label} identity is invalid")
     return {"pid": value["pid"], "create_time_ns": value["create_time_ns"]}
+
+
+def _benchmark_launch_owner_reservation_lineage(
+    original: dict[str, Any],
+    current: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    anchored = _benchmark_transitioned_reservation(original, "anchored")
+    launching = _benchmark_transitioned_reservation(anchored, "launching")
+    launched = _benchmark_transitioned_reservation(launching, "launched")
+    expected = {
+        "anchored": anchored,
+        "launching": launching,
+        "launched": launched,
+    }.get(current.get("reservation_state"))
+    if expected is None or current != expected:
+        raise LearningStageWorkerError(
+            "benchmark launch owner current reservation lineage is invalid"
+        )
+    return anchored, launching, launched
+
+
+def _benchmark_launch_owner_exact_ref_map(
+    value: object,
+    *,
+    label: str,
+    exact_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise LearningStageWorkerError(f"benchmark {label} is invalid")
+    if exact_keys is not None and set(value) != exact_keys:
+        raise LearningStageWorkerError(f"benchmark {label} shape is invalid")
+    return {
+        key: _benchmark_exact_ref(ref, f"benchmark {label} {key}")
+        for key, ref in value.items()
+    }
+
+
+def _validate_benchmark_launch_owner_assignment(
+    *,
+    result_root: Path,
+    worker_id: str,
+    owner: dict[str, Any],
+    acquiring_owner: dict[str, Any],
+    scope_name: str,
+) -> tuple[dict[str, Any], dict[str, int], dict[str, str]]:
+    assignment_ref = _benchmark_exact_ref(
+        owner.get("assignment_observation_ref"),
+        "benchmark launch owner assignment ref",
+    )
+    assignment = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.benchmark-assignment.json",
+        ref=assignment_ref,
+        contract_version="benchmark_worker_scope_assignment_v1",
+    )
+    process_identity = _validate_exact_benchmark_process_identity(
+        owner.get("process_identity"), label="launch owner worker"
+    )
+    exact_job_policy = {
+        "kill_on_job_close": True,
+        "breakaway_ok": False,
+        "silent_breakaway_ok": False,
+        "owner_handle_authority": "registry_parent",
+    }
+    if (
+        set(assignment)
+        != {
+            "contract_version",
+            "scope_name",
+            "process_identity",
+            "observed_member_identities",
+            "job_policy",
+            "temporary_process_handle_close",
+            "temporary_job_handle_close",
+            "predecessor_content_sha256",
+            "content_sha256",
+        }
+        or assignment.get("scope_name") != scope_name
+        or assignment.get("process_identity") != process_identity
+        or assignment.get("observed_member_identities") != [process_identity]
+        or assignment.get("job_policy") != exact_job_policy
+        or assignment.get("temporary_process_handle_close")
+        != {"handle_kind": "temporary_process", "status": "closed"}
+        or assignment.get("temporary_job_handle_close")
+        != {"handle_kind": "temporary_job", "status": "closed"}
+        or assignment.get("predecessor_content_sha256")
+        != acquiring_owner["content_sha256"]
+        or owner.get("job_policy") != exact_job_policy
+    ):
+        raise LearningStageWorkerError(
+            "benchmark launch owner assignment proof is invalid"
+        )
+    beacon_ref = _benchmark_exact_ref(
+        owner.get("beacon_ref"), "benchmark launch owner beacon ref"
+    )
+    return assignment, process_identity, beacon_ref
+
+
+def _validate_benchmark_launch_owner_record(
+    *,
+    record: dict[str, Any] | None,
+    original_reservation: dict[str, Any],
+    current_reservation: dict[str, Any],
+    operation_anchor: dict[str, Any],
+    supervision: dict[str, Any],
+    process_identity: dict[str, int],
+    scope_name: str,
+) -> None:
+    if record is None:
+        return
+    for field in (
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+    ):
+        if record.get(field) != original_reservation[field]:
+            raise LearningStageWorkerError(
+                "benchmark launch owner Registry record identity is invalid"
+            )
+    record_anchor = record.get("benchmark_anchor")
+    if record_anchor is not None and record_anchor != operation_anchor:
+        raise LearningStageWorkerError(
+            "benchmark launch owner Registry anchor is invalid"
+        )
+    record_supervision = record.get("benchmark_supervision")
+    if record_supervision is not None and record_supervision != supervision:
+        raise LearningStageWorkerError(
+            "benchmark launch owner Registry supervision is invalid"
+        )
+    record_reservation = record.get("benchmark_reservation")
+    if record_reservation is not None and record_reservation != current_reservation:
+        raise LearningStageWorkerError(
+            "benchmark launch owner Registry reservation is invalid"
+        )
+    process = record.get("process")
+    process_is_alive = False
+    if process is not None:
+        try:
+            record_pid = getattr(process, "pid", None)
+            process_is_alive = bool(process.is_alive())
+        except ValueError:
+            record_pid = None
+        if record_pid is not None and record_pid != process_identity["pid"]:
+            raise LearningStageWorkerError(
+                "benchmark launch owner Registry process identity is invalid"
+            )
+        if process_is_alive:
+            import psutil
+
+            try:
+                observed_create_time_ns = int(
+                    round(
+                        psutil.Process(process_identity["pid"]).create_time()
+                        * 1_000_000_000
+                    )
+                )
+            except psutil.Error as error:
+                raise LearningStageWorkerError(
+                    "benchmark launch owner live process identity is indeterminate"
+                ) from error
+            if (
+                abs(
+                    observed_create_time_ns
+                    - process_identity["create_time_ns"]
+                )
+                >= 1_000
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark launch owner live process incarnation is invalid"
+                )
+    scope = record.get("benchmark_scope")
+    if scope is not None and getattr(scope, "name", None) != scope_name:
+        raise LearningStageWorkerError(
+            "benchmark launch owner Registry scope identity is invalid"
+        )
+    if scope is not None:
+        member_pids = scope.pids()
+        expected_member_pids = [process_identity["pid"]] if process_is_alive else []
+        if member_pids != expected_member_pids:
+            raise LearningStageWorkerError(
+                "benchmark launch owner Registry scope membership is invalid"
+            )
+
+
+def _validate_benchmark_launch_owner_cleanup_intent(
+    *,
+    result_root: Path,
+    worker_id: str,
+    owner: dict[str, Any],
+    gate_owner: dict[str, Any],
+    supervision: dict[str, Any],
+    process_identity: dict[str, int],
+    assignment_ref: dict[str, str],
+    scope_name: str,
+) -> dict[str, Any]:
+    intent_ref = _benchmark_exact_ref(
+        owner.get("cleanup_finalization_intent"),
+        "benchmark launch owner cleanup intent ref",
+    )
+    intent = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.benchmark-cleanup-intent.json",
+        ref=intent_ref,
+        contract_version="benchmark_worker_cleanup_finalization_intent_v1",
+    )
+    exact_intent_fields = {
+        "contract_version",
+        "supervision_ref",
+        "assignment_proven_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "supervisor_process_identity",
+        "process_identity",
+        "scope_name",
+        "gate_state",
+        "exit_observation_ref",
+        "stable_zero_observation_ref",
+        "exact_owned_handles",
+        "exact_handle_observation_refs",
+        "owner_job_handle_close_planned",
+        "cleanup_receipt_id",
+        "predecessor_content_sha256",
+        "content_sha256",
+    }
+    exact_handles = {
+        "worker_process": "closed_explicitly",
+        "startup_event": "closed_explicitly",
+        "beacon_file": "closed_explicitly",
+        "owner_job": "open",
+    }
+    handle_refs = _benchmark_launch_owner_exact_ref_map(
+        intent.get("exact_handle_observation_refs"),
+        label="launch owner handle refs",
+        exact_keys={"worker_process", "startup_event", "beacon_file"},
+    )
+    if (
+        set(intent) != exact_intent_fields
+        or intent.get("supervision_ref")
+        != {"content_sha256": supervision["content_sha256"]}
+        or intent.get("assignment_proven_ref") != assignment_ref
+        or any(
+            intent.get(field) != gate_owner[field]
+            for field in ("run_id", "stage", "operation_id", "worker_id")
+        )
+        or intent.get("supervisor_process_identity")
+        != gate_owner["supervisor_process_identity"]
+        or intent.get("process_identity") != process_identity
+        or intent.get("scope_name") != scope_name
+        or intent.get("gate_state") != "released"
+        or intent.get("exact_owned_handles") != exact_handles
+        or intent.get("owner_job_handle_close_planned") is not True
+        or intent.get("cleanup_receipt_id")
+        != content_sha256({"worker_id": worker_id, "scope_name": scope_name})
+        or intent.get("predecessor_content_sha256")
+        != gate_owner["content_sha256"]
+    ):
+        raise LearningStageWorkerError(
+            "benchmark launch owner cleanup intent is invalid"
+        )
+    exit_ref = _benchmark_exact_ref(
+        intent.get("exit_observation_ref"),
+        "benchmark launch owner exit observation ref",
+    )
+    stable_zero_ref = _benchmark_exact_ref(
+        intent.get("stable_zero_observation_ref"),
+        "benchmark launch owner stable-zero ref",
+    )
+    expected_owner_body = deepcopy(gate_owner)
+    expected_owner_body.pop("content_sha256")
+    expected_owner_body.update(
+        {
+            "phase": "cleanup_finalization_intent",
+            "exit_observation_ref": exit_ref,
+            "stable_zero_observation_ref": stable_zero_ref,
+            "exact_handle_observation_refs": handle_refs,
+            "cleanup_finalization_intent": intent_ref,
+            "predecessor_content_sha256": gate_owner["content_sha256"],
+        }
+    )
+    if owner != seal_immutable(expected_owner_body):
+        raise LearningStageWorkerError(
+            "benchmark launch owner cleanup journal lineage is invalid"
+        )
+    return intent
+
+
+def _inspect_benchmark_worker_launch_owner_locked(
+    *,
+    result_root: Path,
+    original_reservation: dict[str, Any],
+    current_reservation: dict[str, Any],
+    expected_operation_anchor: dict[str, Any],
+    supervision_root: BenchmarkWorkerSupervisionRoot,
+    record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    anchored, launching, launched = _benchmark_launch_owner_reservation_lineage(
+        original_reservation, current_reservation
+    )
+    worker_id = original_reservation["worker_id"]
+    owner_path = result_root / f"{worker_id}.benchmark-owner.json"
+    assignment_path = result_root / f"{worker_id}.benchmark-assignment.json"
+    launch_anchor_path = (
+        result_root / f"{worker_id}.benchmark-launch-identity-anchor.json"
+    )
+    cleanup_intent_path = (
+        result_root / f"{worker_id}.benchmark-cleanup-intent.json"
+    )
+    cleanup_receipt_path = result_root / f"{worker_id}.benchmark-cleanup.json"
+    supervision_ref = None
+    owner_phase = None
+    assignment_state = "not_proven"
+    process_identity = None
+    scope_name = None
+    assignment_proven_ref = None
+
+    if not owner_path.exists():
+        exact_absence_paths = (
+            assignment_path,
+            launch_anchor_path,
+            cleanup_intent_path,
+            cleanup_receipt_path,
+            result_root / f"{worker_id}.benchmark-beacon.json",
+            result_root / f"{worker_id}.worker.json",
+            result_root / f"{worker_id}.result.json",
+        )
+        if (
+            current_reservation != anchored
+            or record is not None
+            or any(path.exists() for path in exact_absence_paths)
+        ):
+            raise LearningStageWorkerError(
+                "benchmark launch owner absence is ambiguous"
+            )
+    else:
+        owner = _read_json_object(owner_path, label="benchmark launch owner journal")
+        owner_fields = {
+            "contract_version",
+            "authority_kind",
+            "operation_anchor_ref",
+            "reservation_ref",
+            "supervision_ref",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "execution_nonce",
+            "scope_name",
+            "supervisor_process_identity",
+            "phase",
+            "process_identity",
+            "beacon_ref",
+            "assignment_observation_ref",
+            "job_policy",
+            "gate_state",
+            "exit_observation_ref",
+            "stable_zero_observation_ref",
+            "exact_handle_observation_refs",
+            "cleanup_finalization_intent",
+            "cleanup_receipt_ref",
+            "predecessor_content_sha256",
+            "content_sha256",
+        }
+        if (
+            set(owner) != owner_fields
+            or owner.get("contract_version")
+            != "benchmark_worker_owner_journal_v1"
+            or content_sha256(owner) != owner.get("content_sha256")
+            or owner.get("authority_kind")
+            != original_reservation["authority_kind"]
+            or owner.get("operation_anchor_ref")
+            != {
+                "content_sha256": expected_operation_anchor[
+                    "anchor_identity_sha256"
+                ]
+            }
+            or any(
+                owner.get(field) != original_reservation[field]
+                for field in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                    "execution_nonce",
+                )
+            )
+            or owner.get("cleanup_receipt_ref") is not None
+        ):
+            raise LearningStageWorkerError(
+                "benchmark launch owner journal identity is invalid"
+            )
+        supervisor_identity = _validate_exact_benchmark_process_identity(
+            owner.get("supervisor_process_identity"),
+            label="launch owner supervisor",
+        )
+        supervision = compose_benchmark_worker_supervision_v1(
+            supervision_root=supervision_root,
+            reservation=original_reservation,
+            expected_operation_anchor=expected_operation_anchor,
+            supervisor_process_identity=supervisor_identity,
+            startup_gate_timeout_ms=15_000,
+        )
+        supervision_ref = {"content_sha256": supervision["content_sha256"]}
+        internal_scope_name = supervision["scope_name"]
+        if (
+            owner.get("supervision_ref") != supervision_ref
+            or owner.get("scope_name") != internal_scope_name
+        ):
+            raise LearningStageWorkerError(
+                "benchmark launch owner supervision identity is invalid"
+            )
+        acquiring_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+            current=anchored,
+            anchor=expected_operation_anchor,
+            supervision=supervision,
+            scope_name=internal_scope_name,
+            supervisor_identity=supervisor_identity,
+            phase="acquiring",
+            process_identity=None,
+            beacon_ref=None,
+            assignment_ref=None,
+            gate_state="closed",
+            predecessor=None,
+        )
+        owner_phase = owner.get("phase")
+        if owner_phase == "acquiring":
+            if (
+                current_reservation not in (anchored, launching)
+                or owner != acquiring_owner
+                or any(
+                    path.exists()
+                    for path in (
+                        assignment_path,
+                        launch_anchor_path,
+                        cleanup_intent_path,
+                        cleanup_receipt_path,
+                    )
+                )
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark launch owner pre-assignment state is invalid"
+                )
+        elif owner_phase in {
+            "assignment_proven",
+            "gate_released",
+            "cleanup_finalization_intent",
+        }:
+            assignment, process_identity, beacon_ref = (
+                _validate_benchmark_launch_owner_assignment(
+                    result_root=result_root,
+                    worker_id=worker_id,
+                    owner=owner,
+                    acquiring_owner=acquiring_owner,
+                    scope_name=internal_scope_name,
+                )
+            )
+            assignment_proven_ref = {
+                "content_sha256": assignment["content_sha256"]
+            }
+            assigned_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+                current=launching,
+                anchor=expected_operation_anchor,
+                supervision=supervision,
+                scope_name=internal_scope_name,
+                supervisor_identity=supervisor_identity,
+                phase="assignment_proven",
+                process_identity=process_identity,
+                beacon_ref=beacon_ref,
+                assignment_ref=assignment_proven_ref,
+                gate_state="closed",
+                predecessor=acquiring_owner["content_sha256"],
+            )
+            launch_identity_anchor = _read_json_object(
+                launch_anchor_path, label="benchmark launch identity anchor"
+            )
+            expected_launch_identity_anchor = (
+                _compose_benchmark_launch_identity_anchor(
+                    anchored_reservation=anchored,
+                    launching_reservation=launching,
+                    operation_anchor=expected_operation_anchor,
+                    supervision=supervision,
+                    supervisor_process_identity=supervisor_identity,
+                    beacon_ref=beacon_ref,
+                    process_identity=process_identity,
+                    assignment=assignment,
+                )
+            )
+            if launch_identity_anchor != expected_launch_identity_anchor:
+                raise LearningStageWorkerError(
+                    "benchmark launch owner launch identity anchor is invalid"
+                )
+            gate_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+                current=launching,
+                anchor=expected_operation_anchor,
+                supervision=supervision,
+                scope_name=internal_scope_name,
+                supervisor_identity=supervisor_identity,
+                phase="gate_released",
+                process_identity=process_identity,
+                beacon_ref=beacon_ref,
+                assignment_ref=assignment_proven_ref,
+                gate_state="released",
+                predecessor=assigned_owner["content_sha256"],
+            )
+            if owner_phase == "assignment_proven":
+                if (
+                    current_reservation != launching
+                    or owner != assigned_owner
+                    or cleanup_intent_path.exists()
+                    or cleanup_receipt_path.exists()
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner assignment phase is invalid"
+                    )
+            elif owner_phase == "gate_released":
+                if (
+                    current_reservation not in (launching, launched)
+                    or owner != gate_owner
+                    or cleanup_intent_path.exists()
+                    or cleanup_receipt_path.exists()
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner gate phase is invalid"
+                    )
+            else:
+                if current_reservation != launched:
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner cleanup reservation is invalid"
+                    )
+                _validate_benchmark_launch_owner_cleanup_intent(
+                    result_root=result_root,
+                    worker_id=worker_id,
+                    owner=owner,
+                    gate_owner=gate_owner,
+                    supervision=supervision,
+                    process_identity=process_identity,
+                    assignment_ref=assignment_proven_ref,
+                    scope_name=internal_scope_name,
+                )
+                if cleanup_receipt_path.exists():
+                    _validate_benchmark_cleanup_receipt(
+                        _read_json_object(
+                            cleanup_receipt_path,
+                            label="benchmark cleanup receipt",
+                        ),
+                        result_root=result_root,
+                        worker_id=worker_id,
+                        run_id=original_reservation["run_id"],
+                        stage=original_reservation["stage"],
+                        operation_id=original_reservation["operation_id"],
+                        operation_anchor=expected_operation_anchor,
+                        original_reservation=original_reservation,
+                        current_reservation=current_reservation,
+                        supervision_root=supervision_root,
+                    )
+            _validate_benchmark_launch_owner_record(
+                record=record,
+                original_reservation=original_reservation,
+                current_reservation=current_reservation,
+                operation_anchor=expected_operation_anchor,
+                supervision=supervision,
+                process_identity=process_identity,
+                scope_name=internal_scope_name,
+            )
+            assignment_state = "proven"
+            scope_name = internal_scope_name
+        else:
+            raise LearningStageWorkerError(
+                "benchmark launch owner phase is invalid"
+            )
+
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": original_reservation["authority_kind"],
+            "run_id": original_reservation["run_id"],
+            "stage": original_reservation["stage"],
+            "operation_id": original_reservation["operation_id"],
+            "worker_id": original_reservation["worker_id"],
+            "model_request_id": original_reservation["model_request_id"],
+            "payload_sha256": original_reservation["payload_sha256"],
+            "execution_nonce": original_reservation["execution_nonce"],
+            "reservation_ref": {
+                "content_sha256": original_reservation["content_sha256"]
+            },
+            "current_reservation_ref": {
+                "content_sha256": current_reservation["content_sha256"]
+            },
+            "operation_anchor_ref": {
+                "content_sha256": expected_operation_anchor[
+                    "anchor_identity_sha256"
+                ]
+            },
+            "expected_supervision_ref": deepcopy(
+                expected_operation_anchor["expected_supervision_ref"]
+            ),
+            "supervision_ref": supervision_ref,
+            "reservation_state": current_reservation["reservation_state"],
+            "owner_phase": owner_phase,
+            "assignment_state": assignment_state,
+            "process_identity": deepcopy(process_identity),
+            "scope_name": scope_name,
+            "assignment_proven_ref": deepcopy(assignment_proven_ref),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
 
 
 def _validate_benchmark_cleanup_absence_artifact(
