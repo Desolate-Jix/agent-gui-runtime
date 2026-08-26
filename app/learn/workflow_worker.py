@@ -3073,6 +3073,9 @@ class LearningStageWorkerRegistry:
             )
             if key in self._benchmark_reservations:
                 raise LearningStageWorkerError("duplicate benchmark reservation operation")
+            self._validate_benchmark_reservation_identity_reuse(
+                reservation, key=key
+            )
             self._benchmark_reservations[key] = reservation
             self._benchmark_reservations_by_ref[reservation["content_sha256"]] = reservation
             if reservation["reservation_state"] != "reserved":
@@ -3157,6 +3160,24 @@ class LearningStageWorkerRegistry:
 
     def _benchmark_reservation_path(self, operation_id: str) -> Path:
         return self._result_root / f"{operation_id}.benchmark-reservation.json"
+
+    def _validate_benchmark_reservation_identity_reuse(
+        self,
+        reservation: Mapping[str, object],
+        *,
+        key: tuple[str, str, str],
+    ) -> None:
+        for existing_key, existing in self._benchmark_reservations.items():
+            if existing_key == key:
+                continue
+            if (
+                existing.get("worker_id") == reservation.get("worker_id")
+                or existing.get("model_request_id")
+                == reservation.get("model_request_id")
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark worker/model request identity reuse is invalid"
+                )
 
     def _persist_benchmark_reservation(self, reservation: dict[str, Any]) -> None:
         _write_json_atomic(
@@ -3307,6 +3328,7 @@ class LearningStageWorkerRegistry:
                 "acquisition_owner_ref",
                 "acquisition_intent_ref",
                 "runtime_owner_ref",
+                "prepared_materialization_ledger_ref",
                 "materialization_ledger_ref",
                 "materialization_state",
                 "materialization_revision",
@@ -3332,7 +3354,11 @@ class LearningStageWorkerRegistry:
             or (
                 observation.get("materialization_state")
                 == "prepared_never_materialized"
-                and observation.get("materialization_revision") != 0
+                and (
+                    observation.get("materialization_revision") != 0
+                    or observation.get("materialization_ledger_ref")
+                    != observation.get("prepared_materialization_ledger_ref")
+                )
             )
             or (
                 observation.get("materialization_state")
@@ -3363,10 +3389,74 @@ class LearningStageWorkerRegistry:
             "benchmark provider observed acquisition intent ref",
         )
         _benchmark_exact_ref(
+            observation.get("prepared_materialization_ledger_ref"),
+            "benchmark provider prepared materialization ledger ref",
+        )
+        _benchmark_exact_ref(
             observation.get("materialization_ledger_ref"),
             "benchmark provider materialization ledger ref",
         )
         return observation
+
+    @staticmethod
+    def _benchmark_provider_prepared_observation_ref(
+        observation: Mapping[str, object],
+    ) -> dict[str, str]:
+        prepared_body = {
+            field: deepcopy(observation[field])
+            for field in (
+                "contract_version",
+                "model_request_id",
+                "acquisition_owner_ref",
+                "acquisition_intent_ref",
+                "runtime_owner_ref",
+                "prepared_materialization_ledger_ref",
+            )
+        }
+        prepared_body["materialization_ledger_ref"] = deepcopy(
+            observation["prepared_materialization_ledger_ref"]
+        )
+        prepared_body["materialization_state"] = "prepared_never_materialized"
+        prepared_body["materialization_revision"] = 0
+        return {"content_sha256": content_sha256(prepared_body)}
+
+    @classmethod
+    def _validate_benchmark_provider_journal_observation_lineage(
+        cls,
+        journal: Mapping[str, object],
+        observation: Mapping[str, object],
+    ) -> None:
+        prepared_observation_ref = (
+            cls._benchmark_provider_prepared_observation_ref(observation)
+        )
+        prepared_ledger_ref = observation[
+            "prepared_materialization_ledger_ref"
+        ]
+        if (
+            journal.get("prepared_acquisition_observation_ref")
+            != prepared_observation_ref
+            or journal.get("prepared_materialization_ledger_ref")
+            != prepared_ledger_ref
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider prepared acquisition lineage drifted"
+            )
+        stored_is_prepared = (
+            journal.get("acquisition_observation_ref")
+            == prepared_observation_ref
+            and journal.get("materialization_ledger_ref")
+            == prepared_ledger_ref
+        )
+        stored_is_current = (
+            journal.get("acquisition_observation_ref")
+            == {"content_sha256": observation["content_sha256"]}
+            and journal.get("materialization_ledger_ref")
+            == observation["materialization_ledger_ref"]
+        )
+        if not stored_is_prepared and not stored_is_current:
+            raise LearningStageWorkerError(
+                "benchmark provider current acquisition lineage drifted"
+            )
 
     @staticmethod
     def _benchmark_provider_journal_projection(
@@ -3388,6 +3478,8 @@ class LearningStageWorkerRegistry:
                         "reservation_ref",
                         "acquisition_owner_ref",
                         "acquisition_intent_ref",
+                        "prepared_acquisition_observation_ref",
+                        "prepared_materialization_ledger_ref",
                         "acquisition_observation_ref",
                         "materialization_ledger_ref",
                     )
@@ -3432,6 +3524,8 @@ class LearningStageWorkerRegistry:
             "runtime_owner_ref",
             "acquisition_owner_ref",
             "acquisition_intent_ref",
+            "prepared_acquisition_observation_ref",
+            "prepared_materialization_ledger_ref",
             "acquisition_observation_ref",
             "materialization_ledger_ref",
             "content_sha256",
@@ -3485,6 +3579,14 @@ class LearningStageWorkerRegistry:
             "benchmark provider acquisition intent ref",
         )
         _benchmark_exact_ref(
+            journal.get("prepared_acquisition_observation_ref"),
+            "benchmark provider prepared acquisition observation ref",
+        )
+        _benchmark_exact_ref(
+            journal.get("prepared_materialization_ledger_ref"),
+            "benchmark provider prepared materialization ledger ref",
+        )
+        _benchmark_exact_ref(
             journal.get("acquisition_observation_ref"),
             "benchmark provider acquisition observation ref",
         )
@@ -3501,6 +3603,28 @@ class LearningStageWorkerRegistry:
             try:
                 journal = self._validate_benchmark_provider_journal(
                     _read_json_object(path, label="benchmark provider journal")
+                )
+                observation = (
+                    self._validate_benchmark_provider_acquisition_observation(
+                        observe_qwen_model_request_acquisition(
+                            journal["model_request_id"],
+                            acquisition_intent_ref=journal[
+                                "acquisition_intent_ref"
+                            ],
+                            runtime_owner_ref=journal["runtime_owner_ref"],
+                        ),
+                        model_request_id=journal["model_request_id"],
+                        acquisition_owner_ref=journal[
+                            "acquisition_owner_ref"
+                        ],
+                        acquisition_intent_ref=journal[
+                            "acquisition_intent_ref"
+                        ],
+                        runtime_owner_ref=journal["runtime_owner_ref"],
+                    )
+                )
+                self._validate_benchmark_provider_journal_observation_lineage(
+                    journal, observation
                 )
             except LearningStageWorkerError:
                 raise
@@ -3581,6 +3705,9 @@ class LearningStageWorkerRegistry:
                     "predecessor_content_sha256": source["content_sha256"],
                 }
                 reservation = seal_immutable(body)
+                self._validate_benchmark_reservation_identity_reuse(
+                    reservation, key=key
+                )
                 self._persist_benchmark_reservation(reservation)
                 self._benchmark_reservations[key] = reservation
                 self._benchmark_reservations_by_ref[reservation["content_sha256"]] = reservation
@@ -3815,6 +3942,14 @@ class LearningStageWorkerRegistry:
                 "acquisition_owner_ref": owner_ref,
                 "acquisition_intent_ref": deepcopy(
                     production_owner["acquisition_intent_ref"]
+                ),
+                "prepared_acquisition_observation_ref": {
+                    "content_sha256": production_observation["content_sha256"]
+                },
+                "prepared_materialization_ledger_ref": deepcopy(
+                    production_observation[
+                        "prepared_materialization_ledger_ref"
+                    ]
                 ),
                 "acquisition_observation_ref": {
                     "content_sha256": production_observation["content_sha256"]
@@ -4226,25 +4361,15 @@ class LearningStageWorkerRegistry:
                     runtime_owner_ref=provider["runtime_owner_ref"],
                 )
             )
+            self._validate_benchmark_provider_journal_observation_lineage(
+                provider, acquisition_observation
+            )
         except (
             LearningStageWorkerError,
             OSError,
             RuntimeError,
             ValueError,
             UnicodeError,
-        ):
-            return self._benchmark_provider_cleanup_projection(
-                provider, receipt=None
-            )
-        if acquisition_observation["materialization_state"] == (
-            "prepared_never_materialized"
-        ) and (
-            acquisition_observation["materialization_ledger_ref"]
-            != provider["materialization_ledger_ref"]
-            or {
-                "content_sha256": acquisition_observation["content_sha256"]
-            }
-            != provider["acquisition_observation_ref"]
         ):
             return self._benchmark_provider_cleanup_projection(
                 provider, receipt=None
@@ -4334,6 +4459,9 @@ class LearningStageWorkerRegistry:
                         expected_state="aborted_never_materialized",
                         expected_revision=1,
                     )
+                )
+                self._validate_benchmark_provider_journal_observation_lineage(
+                    provider, acquisition_observation
                 )
             except (
                 LearningStageWorkerError,

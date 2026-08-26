@@ -7617,6 +7617,8 @@ def test_benchmark_provider_acquisition_prepares_exact_owner_and_replays_after_r
         "runtime_owner_ref",
         "acquisition_owner_ref",
         "acquisition_intent_ref",
+        "prepared_acquisition_observation_ref",
+        "prepared_materialization_ledger_ref",
         "acquisition_observation_ref",
         "materialization_ledger_ref",
         "content_sha256",
@@ -7631,18 +7633,29 @@ def test_benchmark_provider_acquisition_prepares_exact_owner_and_replays_after_r
         acquisition_intent_ref=journal["acquisition_intent_ref"],
         runtime_owner_ref=journal["runtime_owner_ref"],
     )
+    prepared_observation_ref = {
+        "content_sha256": production_observation["content_sha256"]
+    }
+    assert first["prepared_materialization_ledger_ref"] == (
+        production_observation["prepared_materialization_ledger_ref"]
+    )
+    assert first["prepared_acquisition_observation_ref"] == (
+        prepared_observation_ref
+    )
     assert first["materialization_ledger_ref"] == production_observation[
         "materialization_ledger_ref"
     ]
-    assert first["acquisition_observation_ref"] == {
-        "content_sha256": production_observation["content_sha256"]
-    }
+    assert first["acquisition_observation_ref"] == prepared_observation_ref
+    assert journal["prepared_materialization_ledger_ref"] == (
+        production_observation["prepared_materialization_ledger_ref"]
+    )
+    assert journal["prepared_acquisition_observation_ref"] == (
+        prepared_observation_ref
+    )
     assert journal["materialization_ledger_ref"] == production_observation[
         "materialization_ledger_ref"
     ]
-    assert journal["acquisition_observation_ref"] == {
-        "content_sha256": production_observation["content_sha256"]
-    }
+    assert journal["acquisition_observation_ref"] == prepared_observation_ref
     forbidden_truth = {
         key
         for key in journal
@@ -7724,6 +7737,15 @@ def test_benchmark_provider_cleanup_cancelled_before_launch_uses_production_rece
         reservation_ref={"content_sha256": anchored["content_sha256"]},
         runtime_owner_ref=runtime_owner,
     )
+    provider_path = next(registry_root.glob("*.benchmark-provider.json"))
+    prepared_provider = json.loads(provider_path.read_text(encoding="utf-8"))
+    prepared_lineage = {
+        field: deepcopy(prepared_provider[field])
+        for field in (
+            "prepared_acquisition_observation_ref",
+            "prepared_materialization_ledger_ref",
+        )
+    }
     _install_benchmark_provider_abort_primitive(
         tmp_path, monkeypatch, request_id=anchored["model_request_id"]
     )
@@ -7774,6 +7796,21 @@ def test_benchmark_provider_cleanup_cancelled_before_launch_uses_production_rece
     assert first["status"] == "cleanup_verified"
     assert first["outcome"] == "verified_not_acquired"
     assert first["cleanup_receipt_ref"] is not None
+    current_provider = json.loads(provider_path.read_text(encoding="utf-8"))
+    production_observation = model_server.observe_qwen_model_request_acquisition(
+        anchored["model_request_id"],
+        acquisition_intent_ref=current_provider["acquisition_intent_ref"],
+        runtime_owner_ref=current_provider["runtime_owner_ref"],
+    )
+    assert {
+        field: current_provider[field] for field in prepared_lineage
+    } == prepared_lineage
+    assert current_provider["acquisition_observation_ref"] == {
+        "content_sha256": production_observation["content_sha256"]
+    }
+    assert current_provider["materialization_ledger_ref"] == (
+        production_observation["materialization_ledger_ref"]
+    )
     terminal = json.loads(
         next(registry_root.glob("*.benchmark-provider-cleanup.json")).read_text(
             encoding="utf-8"
@@ -7817,6 +7854,18 @@ def test_benchmark_provider_cleanup_materialization_without_lease_stays_pending(
         reservation_ref={"content_sha256": anchored["content_sha256"]},
         runtime_owner_ref=runtime_owner,
     )
+    prepared_provider = json.loads(
+        next((tmp_path / "registry").glob("*.benchmark-provider.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    prepared_lineage = {
+        field: deepcopy(prepared_provider[field])
+        for field in (
+            "prepared_acquisition_observation_ref",
+            "prepared_materialization_ledger_ref",
+        )
+    }
     model_server._transition_qwen_model_request_materialization(
         anchored["model_request_id"], transition="launch"
     )
@@ -7850,6 +7899,9 @@ def test_benchmark_provider_cleanup_materialization_without_lease_stays_pending(
     assert provider_journal["acquisition_observation_ref"] == {
         "content_sha256": current_observation["content_sha256"]
     }
+    assert {
+        field: provider_journal[field] for field in prepared_lineage
+    } == prepared_lineage
     provider_path = next(
         (tmp_path / "registry").glob("*.benchmark-provider.json")
     )
@@ -8483,6 +8535,206 @@ def test_benchmark_provider_acquisition_cross_root_copy_is_rejected_on_load(
             benchmark_supervision_root=target_supervision,
         )
 
+
+@pytest.mark.parametrize("transition", ["launch", "abort"])
+@pytest.mark.parametrize(
+    "substituted_field",
+    [
+        "prepared_acquisition_observation_ref",
+        "prepared_materialization_ledger_ref",
+        "acquisition_observation_ref",
+        "materialization_ledger_ref",
+    ],
+)
+def test_benchmark_provider_cleanup_resealed_substituted_registry_lineage_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    transition: str,
+    substituted_field: str,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    registry_root = tmp_path / "registry"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    model_server._transition_qwen_model_request_materialization(
+        anchored["model_request_id"], transition=transition
+    )
+    journal_path = next(registry_root.glob("*.benchmark-provider.json"))
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal.pop("content_sha256")
+    journal[substituted_field] = {"content_sha256": "f" * 64}
+    substituted = seal_immutable(journal)
+    journal_path.write_text(
+        json.dumps(substituted, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    substituted_bytes = journal_path.read_bytes()
+    cleanup_calls: list[str] = []
+    abort_calls: list[str] = []
+    monkeypatch.setattr(
+        worker_module,
+        "observe_qwen_model_request_cleanup",
+        lambda request_id: cleanup_calls.append(request_id),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "abort_qwen_model_request_acquisition",
+        lambda request_id, **kwargs: abort_calls.append(request_id),
+    )
+
+    with pytest.raises(LearningStageWorkerError, match="acquisition lineage"):
+        LearningStageWorkerRegistry(
+            result_root=registry_root,
+            process_factory=_fake_process_factory,
+            benchmark_supervision_root=root,
+        )
+
+    assert cleanup_calls == []
+    assert abort_calls == []
+    assert journal_path.read_bytes() == substituted_bytes
+    assert not list(registry_root.glob("*.benchmark-provider-cleanup.json"))
+
+
+def test_benchmark_provider_acquisition_rejects_worker_and_model_request_reuse_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+
+    registry_root = tmp_path / "registry"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    repeated = [anchored["worker_id"]]
+
+    def repeated_uuid() -> SimpleNamespace:
+        return SimpleNamespace(hex=repeated.pop(0) if repeated else "e" * 32)
+
+    monkeypatch.setattr(worker_module, "uuid4", repeated_uuid)
+
+    with pytest.raises(LearningStageWorkerError, match="identity reuse"):
+        registry.prepare_benchmark_worker_identity(
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id="operation-reused-worker",
+            workflow_revision=anchored["workflow_revision"],
+            task_kind=anchored["task_kind"],
+            handler_payload_source=anchored["handler_payload_source"],
+            supervision_root=root,
+        )
+
+    assert len(list(registry_root.glob("*.benchmark-reservation.json"))) == 1
+    assert len(list(registry_root.glob("*.benchmark-provider.json"))) == 1
+
+
+@pytest.mark.parametrize(
+    ("signal", "observation"),
+    [
+        ("worker_exit", {"status": "worker_exited", "exitcode": 0}),
+        (
+            "current_stable_zero",
+            {
+                "status": "cleanup_pending",
+                "scope_stable_zero_ref": {"content_sha256": "a" * 64},
+            },
+        ),
+        (
+            "request_not_active",
+            {
+                "status": "request_not_active",
+                "model_service_compute_termination": "request_not_active",
+            },
+        ),
+        (
+            "missing_pid",
+            {
+                "contract_version": "qwen_model_request_cleanup_receipt_v1",
+                "outcome": "verified_exact_process_exited",
+                "server_process_identity": None,
+            },
+        ),
+        (
+            "missing_lease",
+            {
+                "contract_version": "qwen_model_request_cleanup_receipt_v1",
+                "outcome": "verified_exact_process_exited",
+                "lease_ref": None,
+            },
+        ),
+        (
+            "test_authored_mapping",
+            {
+                "contract_version": "qwen_model_request_cleanup_receipt_v1",
+                "outcome": "verified_not_acquired",
+                "content_sha256": "b" * 64,
+            },
+        ),
+    ],
+)
+def test_benchmark_provider_cleanup_nonproduction_signals_cannot_mint_terminal_truth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    signal: str,
+    observation: dict[str, object],
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+
+    registry_root = tmp_path / "registry"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, _root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    cleanup_calls: list[str] = []
+    abort_calls: list[str] = []
+
+    def observe_pending(request_id: str) -> dict[str, object]:
+        cleanup_calls.append(request_id)
+        return deepcopy(observation)
+
+    monkeypatch.setattr(
+        worker_module, "observe_qwen_model_request_cleanup", observe_pending
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "abort_qwen_model_request_acquisition",
+        lambda request_id, **kwargs: abort_calls.append(request_id),
+    )
+
+    result = registry.reconcile_benchmark_provider_cleanup(
+        worker_id=anchored["worker_id"],
+        run_id=anchored["run_id"],
+        stage=anchored["stage"],
+        operation_id=anchored["operation_id"],
+    )
+
+    assert cleanup_calls == [anchored["model_request_id"]]
+    assert abort_calls == []
+    assert result["status"] == "cleanup_pending", signal
+    assert result["outcome"] == "indeterminate"
+    assert result["cleanup_receipt_ref"] is None
+    assert not list(registry_root.glob("*.benchmark-provider-cleanup.json"))
 
 def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_lease(
     tmp_path: Path,
