@@ -4828,6 +4828,12 @@ def test_qwen_acquisition_observation_prepared_snapshot_has_exact_refs(
         runtime_owner_ref=owner["runtime_owner_ref"],
     )
     ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
+    prepared = model_server._load_optional_qwen_sealed_artifact(
+        model_server._qwen_acquisition_artifact_paths(request_id)[
+            "ledger_revision_zero"
+        ]
+    )
+    assert prepared is not None
 
     assert observation == seal_immutable(
         {
@@ -4836,6 +4842,9 @@ def test_qwen_acquisition_observation_prepared_snapshot_has_exact_refs(
             "acquisition_owner_ref": model_server._qwen_content_ref(owner),
             "acquisition_intent_ref": owner["acquisition_intent_ref"],
             "runtime_owner_ref": owner["runtime_owner_ref"],
+            "prepared_materialization_ledger_ref": model_server._qwen_content_ref(
+                prepared
+            ),
             "materialization_ledger_ref": model_server._qwen_content_ref(ledger),
             "materialization_state": "prepared_never_materialized",
             "materialization_revision": 0,
@@ -4847,6 +4856,7 @@ def test_qwen_acquisition_observation_prepared_snapshot_has_exact_refs(
         "acquisition_owner_ref",
         "acquisition_intent_ref",
         "runtime_owner_ref",
+        "prepared_materialization_ledger_ref",
         "materialization_ledger_ref",
         "materialization_state",
         "materialization_revision",
@@ -4942,6 +4952,18 @@ def test_qwen_acquisition_observation_tracks_exact_current_transition(
     assert after["materialization_revision"] == 1
     assert after["materialization_ledger_ref"] == model_server._qwen_content_ref(head)
     assert after["materialization_ledger_ref"] != before["materialization_ledger_ref"]
+    assert (
+        before["prepared_materialization_ledger_ref"]
+        == before["materialization_ledger_ref"]
+    )
+    assert (
+        after["prepared_materialization_ledger_ref"]
+        == before["prepared_materialization_ledger_ref"]
+    )
+    assert (
+        after["prepared_materialization_ledger_ref"]
+        != after["materialization_ledger_ref"]
+    )
     assert after["acquisition_owner_ref"] == before["acquisition_owner_ref"]
     assert after["acquisition_intent_ref"] == before["acquisition_intent_ref"]
     assert after["runtime_owner_ref"] == before["runtime_owner_ref"]
@@ -4984,7 +5006,9 @@ def test_qwen_acquisition_observation_rejects_identity_substitution(
     [
         "missing_intent",
         "legacy_owner",
+        "missing_history",
         "corrupt_history",
+        "wrong_history",
         "wrong_predecessor",
         "mixed_head",
     ],
@@ -5007,8 +5031,23 @@ def test_qwen_acquisition_observation_rejects_incoherent_persisted_lineage(
             json.dumps(seal_immutable(persisted_owner)),
             encoding="utf-8",
         )
+    elif mutation == "missing_history":
+        paths["ledger_revision_zero"].unlink()
     elif mutation == "corrupt_history":
         paths["ledger_revision_zero"].write_bytes(b"{corrupt")
+    elif mutation == "wrong_history":
+        history = json.loads(
+            paths["ledger_revision_zero"].read_text(encoding="utf-8")
+        )
+        history.pop("content_sha256")
+        changed_runtime_owner = deepcopy(owner["runtime_owner_ref"])
+        changed_runtime_owner.pop("content_sha256")
+        changed_runtime_owner["worker_id"] = f"worker-{request_id}-drifted"
+        history["runtime_owner_ref"] = seal_immutable(changed_runtime_owner)
+        paths["ledger_revision_zero"].write_text(
+            json.dumps(seal_immutable(history)),
+            encoding="utf-8",
+        )
     else:
         model_server._transition_qwen_model_request_materialization(
             request_id,

@@ -627,6 +627,11 @@ def observe_qwen_model_request_acquisition(
             acquisition_intent_ref=supplied_intent_ref,
             runtime_owner_ref=supplied_runtime_owner,
         )
+        prepared_ledger = _load_qwen_prepared_materialization_ledger(
+            normalized_request_id,
+            acquisition_intent_ref=supplied_intent_ref,
+            runtime_owner_ref=supplied_runtime_owner,
+        )
         return seal_immutable(
             {
                 "contract_version": "qwen_model_request_acquisition_observation_v1",
@@ -634,6 +639,9 @@ def observe_qwen_model_request_acquisition(
                 "acquisition_owner_ref": _qwen_content_ref(owner),
                 "acquisition_intent_ref": deepcopy(supplied_intent_ref),
                 "runtime_owner_ref": deepcopy(supplied_runtime_owner),
+                "prepared_materialization_ledger_ref": _qwen_content_ref(
+                    prepared_ledger
+                ),
                 "materialization_ledger_ref": _qwen_content_ref(ledger),
                 "materialization_state": ledger["state"],
                 "materialization_revision": ledger["revision"],
@@ -3725,6 +3733,26 @@ def _validate_qwen_materialization_ledger(
     return deepcopy(value)
 
 
+def _load_qwen_prepared_materialization_ledger(
+    request_id: str,
+    *,
+    acquisition_intent_ref: Mapping[str, object],
+    runtime_owner_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    revision_zero = _load_optional_qwen_sealed_artifact(
+        _qwen_acquisition_artifact_paths(request_id)["ledger_revision_zero"]
+    )
+    prepared = _validate_qwen_materialization_ledger(
+        revision_zero,
+        request_id=request_id,
+        acquisition_intent_ref=acquisition_intent_ref,
+        runtime_owner_ref=runtime_owner_ref,
+    )
+    if prepared.get("revision") != 0:
+        raise RuntimeError("Qwen materialization revision-zero lineage is invalid")
+    return prepared
+
+
 def _load_qwen_model_request_materialization_ledger(
     request_id: str,
     *,
@@ -3744,14 +3772,11 @@ def _load_qwen_model_request_materialization_ledger(
         acquisition_intent_ref=acquisition_intent_ref,
         runtime_owner_ref=runtime_owner_ref,
     )
-    revision_zero = _load_optional_qwen_sealed_artifact(paths["ledger_revision_zero"])
-    prepared = _qwen_prepared_materialization_ledger(
+    prepared = _load_qwen_prepared_materialization_ledger(
         normalized_request_id,
         acquisition_intent_ref=acquisition_intent_ref,
         runtime_owner_ref=runtime_owner_ref,
     )
-    if revision_zero != prepared:
-        raise RuntimeError("Qwen materialization revision-zero lineage is invalid")
     winner = _load_optional_qwen_sealed_artifact(paths["ledger_winner"])
     if head["revision"] == 0:
         if winner is not None:
