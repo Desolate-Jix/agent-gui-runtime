@@ -78,15 +78,18 @@ from app.learn.workflow_continuation import (
 )
 from app.learn.workflow_runner import run_learning_workflow_readonly_tail
 from app.learn.workflow_service import (
+    LearningWorkflowServiceComposition,
     LearningWorkflowStageOperationError,
-    cancel_learning_workflow_stage_operation,
-    continue_learning_stage_worker_result,
-    finish_learning_workflow_stage_operation,
-    heartbeat_learning_workflow_stage_operation,
-    project_learning_workflow_runtime_attachment,
-    require_active_learning_workflow_stage_operation,
-    recover_expired_learning_workflow_stage_operation,
+    adopt_guarded_learning_stage_worker_result,
+    cancel_guarded_learning_workflow_stage_operation,
+    continue_guarded_learning_stage_worker_result,
+    finish_guarded_learning_workflow_stage_operation,
+    heartbeat_guarded_learning_workflow_stage_operation,
+    project_guarded_learning_workflow_runtime_attachment,
+    recover_guarded_learning_workflow_stage_operation,
+    start_guarded_learning_stage_worker,
     start_learning_workflow_stage_operation,
+    status_guarded_learning_stage_worker,
     transition_learning_workflow_run,
 )
 from app.learn.workflow_worker import (
@@ -157,6 +160,18 @@ SCOPED_CAPTURE_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "learning-runs" / "scoped
 continuous_task_memory_store = ReviewedInterfaceMemoryStore(project_root=ROOT_DIR)
 
 router = APIRouter(tags=["panel"])
+
+
+def _panel_learning_workflow_service_composition(
+) -> LearningWorkflowServiceComposition:
+    return LearningWorkflowServiceComposition(
+        store=learning_workflow_run_store,
+        worker_registry=learning_stage_worker_registry,
+        project_root=ROOT_DIR,
+        composition_kind="production",
+        benchmark_supervision_root=None,
+        provider_case_resolver=None,
+    )
 
 
 def _hybrid_experimental_rollout_ready() -> bool:
@@ -895,9 +910,8 @@ def heartbeat_learning_workflow_stage_operation_endpoint(
     """续租当前阶段 operation，并保留可回放的 heartbeat 事件。"""
 
     try:
-        result = heartbeat_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            project_root=ROOT_DIR,
+        result = heartbeat_guarded_learning_workflow_stage_operation(
+            composition=_panel_learning_workflow_service_composition(),
             run_id=request.run_id,
             expected_revision=request.expected_revision,
             stage=request.stage,
@@ -969,13 +983,6 @@ def start_learning_stage_worker_endpoint(
         )
 
     try:
-        require_active_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            run_id=request.run_id,
-            expected_revision=request.expected_revision,
-            stage=request.stage,
-            operation_id=request.operation_id,
-        )
         worker_payload = deepcopy(request.payload)
         worker_payload.pop("_hybrid_supervisor", None)
         if hybrid_requested:
@@ -985,34 +992,15 @@ def start_learning_stage_worker_endpoint(
                     "Hybrid caller workflow revision does not match active revision"
                 )
             worker_payload["workflow_revision"] = request.expected_revision
-        result = learning_stage_worker_registry.start(
+        result = start_guarded_learning_stage_worker(
+            composition=_panel_learning_workflow_service_composition(),
             run_id=request.run_id,
+            expected_revision=request.expected_revision,
             stage=request.stage,
             operation_id=request.operation_id,
             task_kind=request.task_kind,
             payload=worker_payload,
-            authoritative_workflow_revision=(
-                request.expected_revision if hybrid_requested else None
-            ),
         )
-        try:
-            require_active_learning_workflow_stage_operation(
-                store=learning_workflow_run_store,
-                run_id=request.run_id,
-                expected_revision=request.expected_revision,
-                stage=request.stage,
-                operation_id=request.operation_id,
-            )
-        except (
-            LearningWorkflowStageOperationError,
-            LearningWorkflowTransitionError,
-        ):
-            learning_stage_worker_registry.cancel_by_operation(
-                run_id=request.run_id,
-                stage=request.stage,
-                operation_id=request.operation_id,
-            )
-            raise
         return APIResponse(
             success=True,
             message="Learning stage worker started",
@@ -1047,7 +1035,8 @@ def get_learning_stage_worker_endpoint(
     """读取属于同一 run/operation 的 worker 状态和最终 API 响应。"""
 
     try:
-        result = learning_stage_worker_registry.status(
+        result = status_guarded_learning_stage_worker(
+            composition=_panel_learning_workflow_service_composition(),
             worker_id=worker_id,
             run_id=run_id,
             operation_id=operation_id,
@@ -1080,16 +1069,11 @@ def adopt_learning_stage_worker_result_endpoint(
     """接纳当前受管 operation 的完成结果；状态查询本身不暴露响应。"""
 
     try:
-        require_active_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            run_id=request.run_id,
-            expected_revision=request.expected_revision,
-            stage=request.stage,
-            operation_id=request.operation_id,
-        )
-        result = learning_stage_worker_registry.adopt_result(
+        result = adopt_guarded_learning_stage_worker_result(
+            composition=_panel_learning_workflow_service_composition(),
             worker_id=request.worker_id,
             run_id=request.run_id,
+            expected_revision=request.expected_revision,
             stage=request.stage,
             operation_id=request.operation_id,
         )
@@ -1125,10 +1109,8 @@ def continue_learning_stage_worker_result_endpoint(
     """由后端解释已接纳结果，必要时完成对应阶段。"""
 
     try:
-        result = continue_learning_stage_worker_result(
-            store=learning_workflow_run_store,
-            worker_registry=learning_stage_worker_registry,
-            project_root=ROOT_DIR,
+        result = continue_guarded_learning_stage_worker_result(
+            composition=_panel_learning_workflow_service_composition(),
             run_id=request.run_id,
             expected_revision=request.expected_revision,
             stage=request.stage,
@@ -1169,43 +1151,14 @@ def cancel_learning_workflow_stage_operation_endpoint(
     """安全停止当前受管阶段；后端计算终止能力单独报告。"""
 
     try:
-        require_active_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            run_id=request.run_id,
-            expected_revision=request.expected_revision,
-            stage=request.stage,
-            operation_id=request.operation_id,
-        )
-        worker_termination = learning_stage_worker_registry.cancel_by_operation(
-            run_id=request.run_id,
-            stage=request.stage,
-            operation_id=request.operation_id,
-        )
-        result = cancel_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            project_root=ROOT_DIR,
+        result = cancel_guarded_learning_workflow_stage_operation(
+            composition=_panel_learning_workflow_service_composition(),
             run_id=request.run_id,
             expected_revision=request.expected_revision,
             stage=request.stage,
             operation_id=request.operation_id,
             reason=request.reason,
-            backend_compute_termination=str(
-                worker_termination.get("backend_compute_termination")
-                or "not_covered"
-            ),
-            model_service_compute_termination=str(
-                worker_termination.get("model_service_compute_termination")
-                or "not_covered"
-            ),
-            worker_id=str(worker_termination.get("worker_id") or "") or None,
-            model_request_id=str(
-                worker_termination.get("model_request_id") or ""
-            ) or None,
-            model_request_cancellation=worker_termination.get(
-                "model_request_cancellation"
-            ),
         )
-        result["worker_termination"] = worker_termination
         return APIResponse(
             success=True,
             message="Learning workflow stage operation cancelled",
@@ -1238,9 +1191,8 @@ def finish_learning_workflow_stage_operation_endpoint(
     """只接受当前租约持有者提交的阶段完成或失败结果。"""
 
     try:
-        result = finish_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            project_root=ROOT_DIR,
+        result = finish_guarded_learning_workflow_stage_operation(
+            composition=_panel_learning_workflow_service_composition(),
             run_id=request.run_id,
             expected_revision=request.expected_revision,
             stage=request.stage,
@@ -1290,9 +1242,8 @@ def recover_learning_workflow_stage_operation_endpoint(
     """刷新面板时终止已过期租约，不把仍有效或旧版阶段误判为失败。"""
 
     try:
-        result = recover_expired_learning_workflow_stage_operation(
-            store=learning_workflow_run_store,
-            project_root=ROOT_DIR,
+        result = recover_guarded_learning_workflow_stage_operation(
+            composition=_panel_learning_workflow_service_composition(),
             run_id=request.run_id,
             expected_revision=request.expected_revision,
         )
@@ -1400,10 +1351,11 @@ def get_learning_workflow_state_endpoint(run_id: str) -> APIResponse:
     """按 run_id 恢复服务端保存的学习流程状态。"""
 
     try:
-        workflow_state = learning_workflow_run_store.get(run_id)
-        runtime_attachment = project_learning_workflow_runtime_attachment(
+        composition = _panel_learning_workflow_service_composition()
+        workflow_state = composition.store.get(run_id)
+        runtime_attachment = project_guarded_learning_workflow_runtime_attachment(
+            composition=composition,
             workflow_state=workflow_state,
-            worker_registry=learning_stage_worker_registry,
         )
         return APIResponse(
             success=True,

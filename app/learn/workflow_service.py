@@ -27,6 +27,7 @@ from app.learn.workflow_continuation import (
 from app.learn.workflow_contracts import normalize_learning_pipeline_mode
 from app.learn.workflow_evidence import verify_learning_workflow_completion_evidence
 from app.learn.workflow_store import LearningWorkflowRunStore
+from app.learn.workflow_state import LearningWorkflowTransitionError
 from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
 
 
@@ -69,6 +70,33 @@ class LearningWorkflowServiceComposition:
     composition_kind: Literal["production", "test"]
     benchmark_supervision_root: object | None
     provider_case_resolver: object | None
+
+
+class _LearningWorkflowRegistryOwner:
+    """集中持有 Registry 调用，避免组合依赖在调用链中被拆散。"""
+
+    def __init__(self, registry: object) -> None:
+        self._registry = registry
+
+    def start_worker(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.start(**kwargs)
+
+    def worker_status(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.status(**kwargs)
+
+    def adopt_worker_result(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.adopt_result(**kwargs)
+
+    def read_worker_result(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.read_adopted_result(**kwargs)
+
+    def cancel_worker(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.cancel_by_operation(**kwargs)
+
+    def project_worker_attachment(
+        self, **kwargs: Any
+    ) -> dict[str, Any] | None:
+        return self._registry.attachment_by_operation(**kwargs)
 
 
 _LEARNING_WORKFLOW_OPERATION_LOCKS_GUARD = RLock()
@@ -196,6 +224,38 @@ def get_production_learning_workflow_service_composition(
 
 class LearningWorkflowStageOperationError(ValueError):
     """学习阶段运行租约无效，拒绝接收过期或越权结果。"""
+
+
+_BENCHMARK_V2_C2_UNAVAILABLE = (
+    "benchmark_v2 incumbent orchestration is unavailable before C3"
+)
+
+
+def _has_benchmark_v2_incumbent_marker(value: object) -> bool:
+    return isinstance(value, Mapping) and "benchmark_v2_incumbent" in value
+
+
+def _reject_benchmark_v2_incumbent_before_c3(value: object) -> None:
+    if _has_benchmark_v2_incumbent_marker(value):
+        raise LearningWorkflowStageOperationError(_BENCHMARK_V2_C2_UNAVAILABLE)
+
+
+def _stage_execution_document(
+    workflow_state: Mapping[str, object],
+    stage: str,
+) -> object:
+    stages = workflow_state.get("stages")
+    stage_record = stages.get(stage) if isinstance(stages, Mapping) else None
+    evidence_refs = (
+        stage_record.get("evidence_refs")
+        if isinstance(stage_record, Mapping)
+        else None
+    )
+    return (
+        evidence_refs.get("stage_execution")
+        if isinstance(evidence_refs, Mapping)
+        else None
+    )
 
 
 _BENCHMARK_V2_WINDOW_BINDING_FIELD = "_benchmark_v2_window_binding"
@@ -511,6 +571,7 @@ def project_learning_workflow_runtime_attachment(
         if isinstance(evidence_refs, dict)
         else None
     )
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
     if (
         not isinstance(stage_execution, dict)
         or stage_execution.get("contract_version")
@@ -522,7 +583,9 @@ def project_learning_workflow_runtime_attachment(
 
     operation_id = str(stage_execution.get("operation_id") or "")
     result["operation_id"] = operation_id or None
-    attachment = worker_registry.attachment_by_operation(
+    attachment = _LearningWorkflowRegistryOwner(
+        worker_registry
+    ).project_worker_attachment(
         run_id=str(workflow_state.get("run_id") or ""),
         stage=current_stage,
         operation_id=operation_id,
@@ -674,6 +737,7 @@ def heartbeat_learning_workflow_stage_operation(
     current = store.get(run_id)
     _require_revision(current, expected_revision)
     stage_execution = _managed_stage_execution(current, stage)
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
     normalized_operation_id = str(operation_id or "").strip()
     if stage_execution["operation_id"] != normalized_operation_id:
         raise LearningWorkflowStageOperationError(
@@ -745,6 +809,7 @@ def cancel_learning_workflow_stage_operation(
     worker_id: str | None = None,
     model_request_id: str | None = None,
     model_request_cancellation: dict[str, Any] | None = None,
+    _prechecked_stage_execution: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """取消当前受管阶段的状态所有权，不伪装成已终止后端计算。"""
 
@@ -753,15 +818,20 @@ def cancel_learning_workflow_stage_operation(
         raise LearningWorkflowStageOperationError(
             "stage operation cancellation requires a reason"
         )
-    stage_execution = require_active_learning_workflow_stage_operation(
-        store=store,
-        run_id=run_id,
-        expected_revision=expected_revision,
-        stage=stage,
-        operation_id=operation_id,
-        now=now,
-        expiry_action="cancellation",
+    stage_execution = (
+        deepcopy(dict(_prechecked_stage_execution))
+        if isinstance(_prechecked_stage_execution, Mapping)
+        else require_active_learning_workflow_stage_operation(
+            store=store,
+            run_id=run_id,
+            expected_revision=expected_revision,
+            stage=stage,
+            operation_id=operation_id,
+            now=now,
+            expiry_action="cancellation",
+        )
     )
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
     normalized_operation_id = str(operation_id or "").strip()
     cancelled_at = _utc_datetime(now)
     normalized_compute_termination = str(
@@ -876,6 +946,268 @@ def require_active_learning_workflow_stage_operation(
     return deepcopy(stage_execution)
 
 
+def start_guarded_learning_stage_worker(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+    task_kind: str,
+    payload: Mapping[str, object],
+    reuse_active_identical: bool = False,
+) -> dict[str, Any]:
+    require_active_learning_workflow_stage_operation(
+        store=composition.store,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+    )
+    _reject_benchmark_v2_incumbent_before_c3(payload)
+    worker_payload = deepcopy(dict(payload))
+    result = _LearningWorkflowRegistryOwner(
+        composition.worker_registry
+    ).start_worker(
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        task_kind=task_kind,
+        payload=worker_payload,
+        reuse_active_identical=reuse_active_identical,
+        authoritative_workflow_revision=(
+            expected_revision
+            if worker_payload.get("learning_pipeline_mode") == "hybrid_v1_1"
+            else None
+        ),
+    )
+    try:
+        require_active_learning_workflow_stage_operation(
+            store=composition.store,
+            run_id=run_id,
+            expected_revision=expected_revision,
+            stage=stage,
+            operation_id=operation_id,
+        )
+    except (
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ) as original_error:
+        try:
+            _LearningWorkflowRegistryOwner(
+                composition.worker_registry
+            ).cancel_worker(
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
+            )
+        except Exception:
+            raise original_error
+        raise
+    return result
+
+
+def status_guarded_learning_stage_worker(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    worker_id: str,
+    run_id: str,
+    operation_id: str,
+) -> dict[str, Any]:
+    return _LearningWorkflowRegistryOwner(
+        composition.worker_registry
+    ).worker_status(
+        worker_id=worker_id,
+        run_id=run_id,
+        operation_id=operation_id,
+    )
+
+
+def adopt_guarded_learning_stage_worker_result(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    worker_id: str,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+) -> dict[str, Any]:
+    stage_execution = require_active_learning_workflow_stage_operation(
+        store=composition.store,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+    )
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
+    return _LearningWorkflowRegistryOwner(
+        composition.worker_registry
+    ).adopt_worker_result(
+        worker_id=worker_id,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+    )
+
+
+def continue_guarded_learning_stage_worker_result(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+    worker_id: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    return continue_learning_stage_worker_result(
+        store=composition.store,
+        worker_registry=composition.worker_registry,
+        project_root=composition.project_root,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+        worker_id=worker_id,
+        now=now,
+    )
+
+
+def cancel_guarded_learning_workflow_stage_operation(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+    reason: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    stage_execution = require_active_learning_workflow_stage_operation(
+        store=composition.store,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+        now=now,
+        expiry_action="cancellation",
+    )
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
+    worker_termination = _LearningWorkflowRegistryOwner(
+        composition.worker_registry
+    ).cancel_worker(
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+    )
+    result = cancel_learning_workflow_stage_operation(
+        store=composition.store,
+        project_root=composition.project_root,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+        reason=reason,
+        now=now,
+        backend_compute_termination=str(
+            worker_termination.get("backend_compute_termination")
+            or "not_covered"
+        ),
+        model_service_compute_termination=str(
+            worker_termination.get("model_service_compute_termination")
+            or "not_covered"
+        ),
+        worker_id=str(worker_termination.get("worker_id") or "") or None,
+        model_request_id=(
+            str(worker_termination.get("model_request_id") or "") or None
+        ),
+        model_request_cancellation=worker_termination.get(
+            "model_request_cancellation"
+        ),
+        _prechecked_stage_execution=stage_execution,
+    )
+    return {**result, "worker_termination": deepcopy(worker_termination)}
+
+
+def heartbeat_guarded_learning_workflow_stage_operation(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+    lease_seconds: int = 600,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    return heartbeat_learning_workflow_stage_operation(
+        store=composition.store,
+        project_root=composition.project_root,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+        lease_seconds=lease_seconds,
+        now=now,
+    )
+
+
+def finish_guarded_learning_workflow_stage_operation(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+    outcome: str,
+    reason: str = "",
+    evidence_refs: Mapping[str, object] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    return finish_learning_workflow_stage_operation(
+        store=composition.store,
+        project_root=composition.project_root,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+        outcome=outcome,
+        reason=reason,
+        evidence_refs=(
+            deepcopy(dict(evidence_refs))
+            if isinstance(evidence_refs, Mapping)
+            else None
+        ),
+        now=now,
+    )
+
+
+def recover_guarded_learning_workflow_stage_operation(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    return recover_expired_learning_workflow_stage_operation(
+        store=composition.store,
+        project_root=composition.project_root,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        now=now,
+    )
+
+
+def project_guarded_learning_workflow_runtime_attachment(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    workflow_state: Mapping[str, object],
+) -> dict[str, Any]:
+    return project_learning_workflow_runtime_attachment(
+        workflow_state=deepcopy(dict(workflow_state)),
+        worker_registry=composition.worker_registry,
+    )
+
+
 def finish_learning_workflow_stage_operation(
     *,
     store: LearningWorkflowRunStore,
@@ -898,6 +1230,7 @@ def finish_learning_workflow_stage_operation(
     current = store.get(run_id)
     _require_revision(current, expected_revision)
     stage_execution = _managed_stage_execution(current, stage)
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
     normalized_operation_id = str(operation_id or "").strip()
     if stage_execution["operation_id"] != normalized_operation_id:
         raise LearningWorkflowStageOperationError(
@@ -1272,7 +1605,8 @@ def continue_learning_stage_worker_result(
 ) -> dict[str, Any]:
     """解释已接纳结果，并在成功终结后签发唯一下一阶段租约。"""
 
-    adopted = worker_registry.read_adopted_result(
+    registry_owner = _LearningWorkflowRegistryOwner(worker_registry)
+    adopted = registry_owner.read_worker_result(
         worker_id=worker_id,
         run_id=run_id,
         stage=stage,
@@ -1294,6 +1628,9 @@ def continue_learning_stage_worker_result(
 
     response_for_return = deepcopy(response)
     current = store.get(run_id)
+    _reject_benchmark_v2_incumbent_before_c3(
+        _stage_execution_document(current, stage)
+    )
     learning_pipeline_mode = normalize_learning_pipeline_mode(
         _learning_pipeline_mode_for_stage(current, stage)
     )
@@ -1401,7 +1738,7 @@ def continue_learning_stage_worker_result(
                 raise LearningWorkflowStageOperationError(
                     "worker continuation next_worker contract is invalid"
                 )
-            next_worker = worker_registry.start(
+            next_worker = registry_owner.start_worker(
                 run_id=run_id,
                 stage=stage,
                 operation_id=operation_id,
@@ -1657,7 +1994,7 @@ def _start_next_managed_stage_worker(
             raise LearningWorkflowStageOperationError(
                 "backend continuation produced no next-stage worker payload"
             )
-        return worker_registry.start(
+        return _LearningWorkflowRegistryOwner(worker_registry).start_worker(
             run_id=run_id,
             stage=str(next_stage_operation["stage"]),
             operation_id=str(next_stage_operation["operation_id"]),
@@ -2192,6 +2529,7 @@ def recover_expired_learning_workflow_stage_operation(
         if isinstance(evidence_refs, dict)
         else None
     )
+    _reject_benchmark_v2_incumbent_before_c3(stage_execution)
     if (
         not isinstance(stage_execution, dict)
         or stage_execution.get("contract_version")

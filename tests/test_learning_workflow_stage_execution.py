@@ -809,7 +809,7 @@ def test_stage_operation_cancel_api_safe_stops_owned_operation(
     assert cancelled["data"]["backend_compute_termination"] == "not_covered"
 
 
-def test_stage_worker_api_requires_owned_operation_and_returns_status(
+def test_guarded_stage_worker_api_preserves_full_response_bytes(
     monkeypatch,
 ) -> None:
     store, review_state = _store_at_completed_review()
@@ -884,8 +884,24 @@ def test_stage_worker_api_requires_owned_operation_and_returns_status(
             "payload": {"app_name": "test"},
         },
     ).json()
-    assert started_worker["success"] is True
-    assert started_worker["data"]["backend_compute_owner"] == "backend_process_worker"
+    assert json.dumps(started_worker, sort_keys=True) == json.dumps(
+        {
+            "success": True,
+            "message": "Learning stage worker started",
+            "data": {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-1",
+                "run_id": "run-stage-operation",
+                "stage": "fusion",
+                "operation_id": started_operation["operation_id"],
+                "task_kind": "panel_learning_recognition_trial",
+                "status": "running",
+                "backend_compute_owner": "backend_process_worker",
+            },
+            "error": None,
+        },
+        sort_keys=True,
+    )
 
     worker_status = client.get(
         "/panel/learning_stage_worker/worker-1",
@@ -894,10 +910,26 @@ def test_stage_worker_api_requires_owned_operation_and_returns_status(
             "operation_id": started_operation["operation_id"],
         },
     ).json()
-    assert worker_status["success"] is True
-    assert worker_status["data"]["status"] == "completed"
-    assert worker_status["data"]["result_available"] is True
-    assert "response" not in worker_status["data"]
+    assert json.dumps(worker_status, sort_keys=True) == json.dumps(
+        {
+            "success": True,
+            "message": "Learning stage worker status",
+            "data": {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "worker-1",
+                "run_id": "run-stage-operation",
+                "stage": "fusion",
+                "operation_id": started_operation["operation_id"],
+                "task_kind": "panel_learning_recognition_trial",
+                "status": "completed",
+                "backend_compute_owner": "backend_process_worker",
+                "result_available": True,
+                "result_adopted": False,
+            },
+            "error": None,
+        },
+        sort_keys=True,
+    )
 
     adopted = client.post(
         "/panel/adopt_learning_stage_worker_result",
@@ -909,9 +941,27 @@ def test_stage_worker_api_requires_owned_operation_and_returns_status(
             "worker_id": "worker-1",
         },
     ).json()
-    assert adopted["success"] is True
-    assert adopted["data"]["status"] == "adopted"
-    assert adopted["data"]["response"]["data"]["trial_path"] == "trial.json"
+    assert json.dumps(adopted, sort_keys=True) == json.dumps(
+        {
+            "success": True,
+            "message": "Learning stage worker result adopted",
+            "data": {
+                "contract_version": "learning_stage_worker_result_adoption_v1",
+                "status": "adopted",
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "worker-1",
+                    "result_sha256": "a" * 64,
+                },
+                "response": {
+                    "success": True,
+                    "data": {"trial_path": "trial.json"},
+                },
+            },
+            "error": None,
+        },
+        sort_keys=True,
+    )
 
 
 def test_continuation_finishes_numbered_map_from_adopted_worker_result(
@@ -3252,6 +3302,347 @@ def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:
     )
 
     assert json.dumps(explicit, sort_keys=True) == json.dumps(implicit, sort_keys=True)
+
+
+def test_guarded_wrapper_surface_has_exact_single_composition_signatures() -> None:
+    import inspect
+
+    expected = {
+        "start_guarded_learning_stage_worker",
+        "status_guarded_learning_stage_worker",
+        "adopt_guarded_learning_stage_worker_result",
+        "continue_guarded_learning_stage_worker_result",
+        "cancel_guarded_learning_workflow_stage_operation",
+        "heartbeat_guarded_learning_workflow_stage_operation",
+        "finish_guarded_learning_workflow_stage_operation",
+        "recover_guarded_learning_workflow_stage_operation",
+        "project_guarded_learning_workflow_runtime_attachment",
+    }
+    for name in expected:
+        function = getattr(workflow_service, name)
+        parameters = inspect.signature(function).parameters
+        assert "composition" in parameters
+        assert "store" not in parameters
+        assert "worker_registry" not in parameters
+        assert "project_root" not in parameters
+
+
+def test_guarded_start_status_adopt_preserve_order_values_and_compensation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+    active_checks = 0
+
+    class _Registry:
+        def start(self, **kwargs):
+            events.append("start")
+            return {"worker_id": "worker-guarded", "payload": deepcopy(kwargs["payload"])}
+
+        def status(self, **_kwargs):
+            events.append("status")
+            return {"worker_id": "worker-guarded", "status": "completed"}
+
+        def adopt_result(self, **_kwargs):
+            events.append("adopt")
+            return {"status": "adopted", "receipt": {"result_sha256": "a" * 64}}
+
+        def cancel_by_operation(self, **_kwargs):
+            events.append("cancel")
+            return {"status": "cancelled"}
+
+    registry = _Registry()
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(),
+        worker_registry=registry,
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=None,
+        provider_case_resolver=None,
+    )
+
+    def _active(**_kwargs):
+        nonlocal active_checks
+        active_checks += 1
+        events.append("precheck" if active_checks == 1 else "postcheck")
+        return {"operation_id": "operation-guarded"}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "require_active_learning_workflow_stage_operation",
+        _active,
+    )
+    started = workflow_service.start_guarded_learning_stage_worker(
+        composition=composition,
+        run_id="run-guarded",
+        expected_revision=3,
+        stage="fusion",
+        operation_id="operation-guarded",
+        task_kind="panel_learning_recognition_trial",
+        payload={"app_name": "fixture"},
+    )
+    assert started == {
+        "worker_id": "worker-guarded",
+        "payload": {"app_name": "fixture"},
+    }
+    assert events == ["precheck", "start", "postcheck"]
+
+    events.clear()
+    assert workflow_service.status_guarded_learning_stage_worker(
+        composition=composition,
+        worker_id="worker-guarded",
+        run_id="run-guarded",
+        operation_id="operation-guarded",
+    ) == {"worker_id": "worker-guarded", "status": "completed"}
+    assert events == ["status"]
+
+    events.clear()
+    active_checks = 0
+    assert workflow_service.adopt_guarded_learning_stage_worker_result(
+        composition=composition,
+        worker_id="worker-guarded",
+        run_id="run-guarded",
+        expected_revision=3,
+        stage="fusion",
+        operation_id="operation-guarded",
+    ) == {"status": "adopted", "receipt": {"result_sha256": "a" * 64}}
+    assert events == ["precheck", "adopt"]
+
+    events.clear()
+    active_checks = 0
+
+    def _postcheck_failure(**_kwargs):
+        nonlocal active_checks
+        active_checks += 1
+        events.append("precheck" if active_checks == 1 else "postcheck")
+        if active_checks == 2:
+            raise LearningWorkflowStageOperationError("postcheck failed")
+        return {"operation_id": "operation-guarded"}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "require_active_learning_workflow_stage_operation",
+        _postcheck_failure,
+    )
+    with pytest.raises(LearningWorkflowStageOperationError, match="postcheck failed"):
+        workflow_service.start_guarded_learning_stage_worker(
+            composition=composition,
+            run_id="run-guarded",
+            expected_revision=3,
+            stage="fusion",
+            operation_id="operation-guarded",
+            task_kind="panel_learning_recognition_trial",
+            payload={"app_name": "fixture"},
+        )
+    assert events == ["precheck", "start", "postcheck", "cancel"]
+
+
+def test_guarded_benchmark_start_fails_closed_before_registry_start(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    class _Registry:
+        def start(self, **_kwargs):
+            calls.append("start")
+            raise AssertionError("benchmark C2 must not reach generic Registry.start")
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=None,
+        provider_case_resolver=None,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "require_active_learning_workflow_stage_operation",
+        lambda **_kwargs: calls.append("precheck") or {},
+    )
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="benchmark_v2 incumbent orchestration is unavailable before C3",
+    ):
+        workflow_service.start_guarded_learning_stage_worker(
+            composition=composition,
+            run_id="run-guarded",
+            expected_revision=3,
+            stage="screen_understanding",
+            operation_id="operation-guarded",
+            task_kind="vision_observe_screen",
+            payload={
+                "benchmark_v2_incumbent": {
+                    "provider_case_ref": {
+                        "case_id": "case",
+                        "case_content_sha256": "a" * 64,
+                    }
+                }
+            },
+        )
+    assert calls == ["precheck"]
+
+
+def test_guarded_remaining_wrappers_delegate_deep_equal_and_cancel_once(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    events: list[str] = []
+
+    class _Registry:
+        def cancel_by_operation(self, **_kwargs):
+            events.append("registry.cancel")
+            return {
+                "backend_compute_termination": "terminated",
+                "model_service_compute_termination": "request_not_active",
+                "worker_id": "worker-guarded",
+                "model_request_id": "request-guarded",
+                "model_request_cancellation": {"status": "request_not_active"},
+            }
+
+        def attachment_by_operation(self, **_kwargs):
+            events.append("registry.attachment")
+            return None
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=None,
+        provider_case_resolver=None,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "require_active_learning_workflow_stage_operation",
+        lambda **_kwargs: events.append("precheck") or {"operation_id": "operation"},
+    )
+
+    def _delegate(name: str, result: dict[str, object]):
+        def _call(**kwargs):
+            events.append(name)
+            assert kwargs["store"] is composition.store
+            assert Path(kwargs["project_root"]) == tmp_path
+            return deepcopy(result)
+
+        return _call
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_learning_stage_worker_result",
+        _delegate("continue", {"kind": "continue"}),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "heartbeat_learning_workflow_stage_operation",
+        _delegate("heartbeat", {"kind": "heartbeat"}),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "finish_learning_workflow_stage_operation",
+        _delegate("finish", {"kind": "finish"}),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "recover_expired_learning_workflow_stage_operation",
+        _delegate("recover", {"kind": "recover"}),
+    )
+
+    assert workflow_service.continue_guarded_learning_stage_worker_result(
+        composition=composition,
+        run_id="run",
+        expected_revision=1,
+        stage="fusion",
+        operation_id="operation",
+        worker_id="worker",
+    ) == {"kind": "continue"}
+    assert workflow_service.heartbeat_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id="run",
+        expected_revision=1,
+        stage="fusion",
+        operation_id="operation",
+    ) == {"kind": "heartbeat"}
+    assert workflow_service.finish_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id="run",
+        expected_revision=1,
+        stage="fusion",
+        operation_id="operation",
+        outcome="failed",
+    ) == {"kind": "finish"}
+    assert workflow_service.recover_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id="run",
+        expected_revision=1,
+    ) == {"kind": "recover"}
+
+    def _cancel(**kwargs):
+        events.append("stage.cancel")
+        assert kwargs["_prechecked_stage_execution"] == {"operation_id": "operation"}
+        return {"kind": "cancel"}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "cancel_learning_workflow_stage_operation",
+        _cancel,
+    )
+    cancelled = workflow_service.cancel_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id="run",
+        expected_revision=1,
+        stage="fusion",
+        operation_id="operation",
+        reason="cancel",
+    )
+    assert cancelled == {
+        "kind": "cancel",
+        "worker_termination": {
+            "backend_compute_termination": "terminated",
+            "model_service_compute_termination": "request_not_active",
+            "worker_id": "worker-guarded",
+            "model_request_id": "request-guarded",
+            "model_request_cancellation": {"status": "request_not_active"},
+        },
+    }
+    assert events[-3:] == ["precheck", "registry.cancel", "stage.cancel"]
+
+
+def test_guarded_no_direct_registry_calls_outside_composition_owner() -> None:
+    import ast
+
+    allowed_owner = "_LearningWorkflowRegistryOwner"
+    for relative in ("app/api/panel.py", "app/learn/workflow_service.py"):
+        path = Path(__file__).resolve().parents[1] / relative
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        parents: dict[ast.AST, ast.AST] = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        violations: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in {
+                "start",
+                "status",
+                "adopt_result",
+                "read_adopted_result",
+                "cancel_by_operation",
+                "attachment_by_operation",
+            }:
+                continue
+            ancestor = parents.get(node)
+            owner_class = None
+            while ancestor is not None:
+                if isinstance(ancestor, ast.ClassDef):
+                    owner_class = ancestor.name
+                    break
+                ancestor = parents.get(ancestor)
+            if owner_class != allowed_owner:
+                violations.append(node.lineno)
+        assert violations == [], f"direct Registry calls remain in {relative}: {violations}"
 
 
 def test_duplicate_hybrid_continue_recovers_same_next_worker_without_inference(
