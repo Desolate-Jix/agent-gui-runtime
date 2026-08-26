@@ -4622,3 +4622,195 @@ def test_qwen_cleanup_sidecar_resealed_parent_tamper_remains_pending(
     finally:
         helper.close()
         scope.close()
+
+
+@pytest.mark.parametrize("mutation", ["lease_state_ref", "nested_release"])
+def test_qwen_cleanup_sidecar_adversarial_parent_substitution_remains_pending(
+    tmp_path,
+    monkeypatch,
+    mutation,
+) -> None:
+    request_id = f"benchmark-adversarial-parent-{mutation}"
+    _, helper, scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, request_id
+    )
+    try:
+        paths = model_server._qwen_acquisition_artifact_paths(request_id)
+        if mutation == "lease_state_ref":
+            binding = json.loads(paths["lease_binding"].read_text(encoding="utf-8"))
+            binding.pop("content_sha256")
+            binding["lease_state_ref"] = {"content_sha256": "e" * 64}
+            paths["lease_binding"].write_text(
+                json.dumps(
+                    seal_immutable(binding),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                encoding="utf-8",
+            )
+        else:
+            tombstone_path = model_server._qwen_owner_tombstone_path(request_id)
+            tombstone = json.loads(tombstone_path.read_text(encoding="utf-8"))
+            tombstone.pop("content_sha256")
+            tombstone["release_result"]["release"]["forged_parent"] = True
+            tombstone_path.write_text(
+                json.dumps(
+                    seal_immutable(tombstone),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                encoding="utf-8",
+            )
+            release_observation = json.loads(
+                paths["release_observation"].read_text(encoding="utf-8")
+            )
+            release_observation.pop("content_sha256")
+            release_observation["release_result_ref"] = model_server._qwen_content_ref(
+                seal_immutable(tombstone["release_result"])
+            )
+            paths["release_observation"].write_text(
+                json.dumps(
+                    seal_immutable(release_observation),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                encoding="utf-8",
+            )
+
+        observation = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert observation["status"] == "cleanup_pending"
+        assert observation["outcome"] == "indeterminate"
+        assert not paths["cleanup_receipt"].exists()
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_cleanup_observer_concurrent_mixed_acquisition_lease_snapshot_is_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    current_id = "benchmark-concurrent-snapshot-current"
+    other_id = "benchmark-concurrent-snapshot-other"
+    _, current_helper, current_scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, current_id
+    )
+    _, other_helper, other_scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, other_id
+    )
+    gate = Event()
+    proceed = Event()
+    observations = []
+    original_load = model_server._load_qwen_acquisition_lease_binding
+
+    def gated_load(request_id, *, owner):
+        if request_id == current_id:
+            gate.set()
+            assert proceed.wait(timeout=2.0)
+        return original_load(request_id, owner=owner)
+
+    monkeypatch.setattr(
+        model_server,
+        "_load_qwen_acquisition_lease_binding",
+        gated_load,
+    )
+    observer = Thread(
+        target=lambda: observations.append(
+            model_server.observe_qwen_model_request_cleanup(current_id)
+        )
+    )
+    try:
+        observer.start()
+        assert gate.wait(timeout=2.0)
+        current_paths = model_server._qwen_acquisition_artifact_paths(current_id)
+        other_paths = model_server._qwen_acquisition_artifact_paths(other_id)
+        current_binding = json.loads(
+            current_paths["lease_binding"].read_text(encoding="utf-8")
+        )
+        other_binding = json.loads(
+            other_paths["lease_binding"].read_text(encoding="utf-8")
+        )
+        current_binding.pop("content_sha256")
+        current_binding["lease_state_ref"] = other_binding["lease_state_ref"]
+        current_paths["lease_binding"].write_text(
+            json.dumps(
+                seal_immutable(current_binding),
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        proceed.set()
+        observer.join(timeout=3.0)
+        assert not observer.is_alive()
+        assert observations == [
+            {
+                "contract_version": "qwen_model_request_cleanup_observation_v1",
+                "status": "cleanup_pending",
+                "outcome": "indeterminate",
+                "model_request_id": current_id,
+            }
+        ]
+        assert not current_paths["cleanup_receipt"].exists()
+    finally:
+        proceed.set()
+        observer.join(timeout=3.0)
+        current_helper.close()
+        current_scope.close()
+        other_helper.close()
+        other_scope.close()
+
+
+def test_generic_qwen_duplicate_owner_preserves_prior_value_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "generic-duplicate-owner"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    monkeypatch.delenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", raising=False)
+    helper = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    identity = model_server._current_process_identity(helper.pid)
+    assert identity is not None
+    profile = {
+        "profile_id": "generic-duplicate-profile",
+        "endpoint": "http://127.0.0.1:54334/v1/chat/completions",
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=identity["pid"],
+        created_ns=identity["create_time_ns"],
+        base_url="http://127.0.0.1:54334/v1",
+    )
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    lease = None
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+        with pytest.raises(
+            ValueError,
+            match="^Qwen request already owns a server lease$",
+        ):
+            model_server.acquire_qwen_model_lease(
+                profile=profile,
+                request_id=request_id,
+                readiness=readiness,
+            )
+    finally:
+        if lease is not None and model_server.qwen_model_lease_is_active(lease):
+            model_server._release_exact_qwen_lease(
+                lease,
+                reason="generic-duplicate-test-cleanup",
+            )
+        if helper.poll() is None:
+            helper.terminate()
+            helper.wait(timeout=3.0)

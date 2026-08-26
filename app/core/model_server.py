@@ -579,7 +579,9 @@ def prepare_qwen_model_request_acquisition_owner(
             "abort",
             "aborted_tombstone",
             "lease_binding",
+            "lease_state_snapshot",
             "release_observation",
+            "termination_observation",
             "cleanup_receipt",
         }
         if any(paths[key].exists() for key in post_prepare_keys):
@@ -952,6 +954,20 @@ def _acquire_qwen_model_lease_under_acquisition_lock(
                 raise ValueError("Qwen server incarnation mismatch for existing profile lease")
         owner_matches = _find_qwen_owner_leases_locked(owner_request_id)
         if owner_matches:
+            acquisition_paths = _qwen_acquisition_artifact_paths(owner_request_id)
+            if not acquisition_paths["owner"].exists():
+                raise ValueError("Qwen request already owns a server lease")
+            recovery_owner = _load_qwen_acquisition_owner(owner_request_id)
+            recovery_ledger = _load_qwen_model_request_materialization_ledger(
+                owner_request_id,
+                acquisition_intent_ref=recovery_owner["acquisition_intent_ref"],
+                runtime_owner_ref=recovery_owner["runtime_owner_ref"],
+            )
+            if (
+                recovery_ledger.get("state") != "materialization_possible"
+                or acquisition_paths["lease_binding"].exists()
+            ):
+                raise ValueError("Qwen request already owns a server lease")
             state, lease = owner_matches[0]
             persisted_scope = state.get("process_scope_acquisition")
             if (
@@ -1544,6 +1560,14 @@ def observe_qwen_model_request_cleanup(request_id: str) -> dict[str, Any]:
                     if ledger.get("state") == "materialization_possible"
                     else None
                 )
+                lease_state_snapshot = (
+                    _load_qwen_acquisition_lease_state_snapshot(
+                        normalized_request_id,
+                        binding=binding,
+                    )
+                    if binding is not None
+                    else None
+                )
                 candidate = _build_qwen_model_request_cleanup_receipt_locked(
                     normalized_request_id,
                     owner=owner,
@@ -1551,6 +1575,7 @@ def observe_qwen_model_request_cleanup(request_id: str) -> dict[str, Any]:
                     active_matches=active_matches,
                     terminal_owner=terminal_owner,
                     binding=binding,
+                    lease_state_snapshot=lease_state_snapshot,
                 )
                 if candidate is None:
                     return pending
@@ -1575,6 +1600,7 @@ def _build_qwen_model_request_cleanup_receipt_locked(
     active_matches: list[tuple[dict[str, Any], dict[str, Any]]],
     terminal_owner: dict[str, Any] | None,
     binding: dict[str, Any] | None,
+    lease_state_snapshot: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     no_active = seal_immutable(
         {
@@ -1685,6 +1711,7 @@ def _build_qwen_model_request_cleanup_receipt_locked(
         ledger["state"] != "materialization_possible"
         or terminal_owner is None
         or binding is None
+        or lease_state_snapshot is None
     ):
         return None
     release_result = terminal_owner.get("release_result")
@@ -1815,6 +1842,15 @@ def _build_qwen_model_request_cleanup_receipt_locked(
         or not release_observation["release_reason"]
     ):
         return None
+    try:
+        termination_parent = _load_qwen_termination_observation_parent(
+            request_id,
+            model_lease=exact_lease,
+            release_result=release_result,
+            finalization_token=terminal_owner["finalization_token"],
+        )
+    except ValueError:
+        return None
     receipt = {
         "contract_version": "qwen_model_request_cleanup_receipt_v1",
         "outcome": "verified_exact_process_exited",
@@ -1830,9 +1866,7 @@ def _build_qwen_model_request_cleanup_receipt_locked(
         "lease_state_ref": deepcopy(binding["lease_state_ref"]),
         "owner_tombstone_ref": _qwen_content_ref(seal_immutable(terminal_owner)),
         "release_reason": release_observation["release_reason"],
-        "termination_observation_ref": _qwen_content_ref(
-            seal_immutable(release_result["release"])
-        ),
+        "termination_observation_ref": _qwen_content_ref(termination_parent),
         "scope_stable_zero_ref": _qwen_content_ref(seal_immutable(scope_cleanup)),
         "listener_stable_zero_ref": _qwen_content_ref(seal_immutable(scope_cleanup)),
         "no_active_lease_observation_ref": _qwen_content_ref(no_active),
@@ -2504,6 +2538,57 @@ def _finish_qwen_finalization_cleanup(
     return result
 
 
+def _validate_qwen_termination_observation(value: object) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"status", "identity", "reason"}
+        or value.get("status") != "proven_absent"
+        or value.get("identity") is not None
+        or value.get("reason") not in {"no_such_process", "not_running"}
+    ):
+        raise ValueError("Qwen exact termination observation is invalid")
+    return deepcopy(value)
+
+
+def _load_qwen_termination_observation_parent(
+    request_id: str,
+    *,
+    model_lease: Mapping[str, object],
+    release_result: Mapping[str, object],
+    finalization_token: str,
+) -> dict[str, Any]:
+    parent = _load_optional_qwen_sealed_artifact(
+        _qwen_acquisition_artifact_paths(request_id)["termination_observation"]
+    )
+    fields = {
+        "contract_version",
+        "model_request_id",
+        "lease_ref",
+        "finalization_token",
+        "release_result_ref",
+        "termination_observation",
+        "content_sha256",
+    }
+    if (
+        not isinstance(parent, dict)
+        or set(parent) != fields
+        or parent.get("contract_version")
+        != "qwen_model_request_exact_termination_observation_v1"
+        or parent.get("model_request_id") != request_id
+        or parent.get("lease_ref") != _qwen_content_ref(model_lease)
+        or parent.get("finalization_token") != finalization_token
+        or parent.get("release_result_ref")
+        != _qwen_content_ref(seal_immutable(dict(release_result)))
+    ):
+        raise ValueError("Qwen exact termination parent is invalid")
+    termination = _validate_qwen_termination_observation(
+        parent.get("termination_observation")
+    )
+    if termination != release_result.get("release"):
+        raise ValueError("Qwen exact termination parent lineage is invalid")
+    return parent
+
+
 def _write_qwen_benchmark_release_observation(
     model_lease: dict[str, Any],
     *,
@@ -2515,6 +2600,28 @@ def _write_qwen_benchmark_release_observation(
     paths = _qwen_acquisition_artifact_paths(request_id)
     if not paths["owner"].exists():
         return
+    termination = _validate_qwen_termination_observation(result.get("release"))
+    release_result_ref = _qwen_content_ref(seal_immutable(result))
+    termination_parent = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_exact_termination_observation_v1",
+            "model_request_id": request_id,
+            "lease_ref": _qwen_content_ref(model_lease),
+            "finalization_token": finalization_token,
+            "release_result_ref": release_result_ref,
+            "termination_observation": termination,
+        }
+    )
+    existing_termination = _load_optional_qwen_sealed_artifact(
+        paths["termination_observation"]
+    )
+    if existing_termination is None:
+        _write_qwen_acquisition_artifact(
+            paths["termination_observation"],
+            termination_parent,
+        )
+    elif existing_termination != termination_parent:
+        raise RuntimeError("Qwen exact termination observation conflicts")
     observation = seal_immutable(
         {
             "contract_version": "qwen_model_request_exact_release_observation_v1",
@@ -2522,7 +2629,7 @@ def _write_qwen_benchmark_release_observation(
             "lease_ref": _qwen_content_ref(model_lease),
             "finalization_token": finalization_token,
             "release_reason": release_reason,
-            "release_result_ref": _qwen_content_ref(seal_immutable(result)),
+            "release_result_ref": release_result_ref,
         }
     )
     existing = _load_optional_qwen_sealed_artifact(paths["release_observation"])
@@ -3164,7 +3271,9 @@ def _qwen_acquisition_artifact_paths(request_id: str) -> dict[str, Path]:
         "abort": directory / "acquisition-abort.json",
         "aborted_tombstone": directory / "aborted-owner-tombstone.json",
         "lease_binding": directory / "acquisition-lease-binding.json",
+        "lease_state_snapshot": directory / "acquisition-lease-state-snapshot.json",
         "release_observation": directory / "exact-release-observation.json",
+        "termination_observation": directory / "exact-termination-observation.json",
         "cleanup_receipt": directory / "cleanup-receipt.json",
     }
 
@@ -3208,6 +3317,17 @@ def _write_qwen_acquisition_lease_binding_locked(
         raise RuntimeError("Qwen acquisition lease binding inputs are invalid")
     server_socket = incarnation.get("server_socket")
     process_scope_acquisition = state.get("process_scope_acquisition")
+    lease_state_snapshot = seal_immutable(dict(state))
+    existing_snapshot = _load_optional_qwen_sealed_artifact(
+        paths["lease_state_snapshot"]
+    )
+    if existing_snapshot is None:
+        _write_qwen_acquisition_artifact(
+            paths["lease_state_snapshot"],
+            lease_state_snapshot,
+        )
+    elif existing_snapshot != lease_state_snapshot:
+        raise RuntimeError("Qwen acquisition lease-state snapshot conflicts")
     binding = seal_immutable(
         {
             "contract_version": "qwen_model_request_acquisition_lease_binding_v1",
@@ -3223,7 +3343,7 @@ def _write_qwen_acquisition_lease_binding_locked(
                 if isinstance(process_scope_acquisition, Mapping)
                 else None
             ),
-            "lease_state_ref": _qwen_content_ref(seal_immutable(dict(state))),
+            "lease_state_ref": _qwen_content_ref(lease_state_snapshot),
         }
     )
     existing = _load_optional_qwen_sealed_artifact(paths["lease_binding"])
@@ -3275,6 +3395,107 @@ def _load_qwen_acquisition_lease_binding(
     return value
 
 
+def _load_qwen_acquisition_lease_state_snapshot(
+    request_id: str,
+    *,
+    binding: Mapping[str, object],
+) -> dict[str, Any]:
+    snapshot = _load_optional_qwen_sealed_artifact(
+        _qwen_acquisition_artifact_paths(request_id)["lease_state_snapshot"]
+    )
+    if (
+        not isinstance(snapshot, dict)
+        or binding.get("lease_state_ref") != _qwen_content_ref(snapshot)
+    ):
+        raise RuntimeError("Qwen acquisition lease-state parent is invalid")
+    state = deepcopy(snapshot)
+    state.pop("content_sha256")
+    state_fields = {
+        "contract_version",
+        "profile_id",
+        "profile",
+        "incarnation",
+        "server_started_by_runtime",
+        "process_scope_name",
+        "process_scope_acquisition",
+        "revision",
+        "finalization",
+        "leases",
+    }
+    incarnation_fields = {
+        "profile_id",
+        "profile_sha256",
+        "server_endpoint",
+        "server_base_url",
+        "server_model_id",
+        "server_socket",
+        "server_process_identity",
+        "incarnation_id",
+    }
+    incarnation = state.get("incarnation")
+    profile = state.get("profile")
+    leases = state.get("leases")
+    if (
+        set(state) != state_fields
+        or state.get("contract_version") != _QWEN_LEASE_STATE_CONTRACT
+        or not isinstance(state.get("revision"), int)
+        or state["revision"] < 1
+        or state.get("finalization") is not None
+        or not isinstance(profile, dict)
+        or state.get("profile_id") != profile.get("profile_id")
+        or not isinstance(incarnation, dict)
+        or set(incarnation) != incarnation_fields
+        or incarnation.get("profile_id") != state.get("profile_id")
+        or incarnation.get("profile_sha256")
+        != content_sha256(_public_profile(profile))
+        or not _valid_process_identity(incarnation.get("server_process_identity"))
+        or not _valid_qwen_server_socket(incarnation.get("server_socket"))
+        or not isinstance(leases, list)
+    ):
+        raise RuntimeError("Qwen acquisition lease-state snapshot is invalid")
+    exact_matches = []
+    for lease_state in leases:
+        if (
+            not isinstance(lease_state, dict)
+            or set(lease_state) != _QWEN_LEASE_FIELDS | {"lifecycle_state"}
+            or lease_state.get("lifecycle_state") not in _QWEN_LIFECYCLE_STATES
+        ):
+            raise RuntimeError("Qwen acquisition lease-state lease is invalid")
+        lease = {
+            key: deepcopy(lease_state[key]) for key in _QWEN_LEASE_FIELDS
+        }
+        if _qwen_content_ref(lease) == binding.get("lease_ref"):
+            exact_matches.append((lease_state, lease))
+    if len(exact_matches) != 1 or exact_matches[0][0]["lifecycle_state"] != "not_started":
+        raise RuntimeError("Qwen acquisition lease-state lineage is ambiguous")
+    lease = exact_matches[0][1]
+    scope = state.get("process_scope_acquisition")
+    if (
+        lease.get("owner_request_id") != request_id
+        or lease.get("profile_id") != state.get("profile_id")
+        or lease.get("profile_sha256") != incarnation.get("profile_sha256")
+        or lease.get("incarnation_id") != incarnation.get("incarnation_id")
+        or lease.get("server_base_url") != incarnation.get("server_base_url")
+        or lease.get("server_model_id") != incarnation.get("server_model_id")
+        or lease.get("server_process_identity")
+        != incarnation.get("server_process_identity")
+        or binding.get("profile_ref")
+        != {"content_sha256": lease.get("profile_sha256")}
+        or binding.get("server_process_identity")
+        != lease.get("server_process_identity")
+        or binding.get("socket_ref")
+        != _qwen_content_ref(seal_immutable(incarnation["server_socket"]))
+        or binding.get("job_scope_ref")
+        != (
+            _qwen_content_ref(seal_immutable(scope))
+            if isinstance(scope, dict)
+            else None
+        )
+    ):
+        raise RuntimeError("Qwen acquisition lease-state binding is incoherent")
+    return state
+
+
 def _validate_qwen_prepare_owner_collision_locked(
     request_id: str,
     *,
@@ -3289,6 +3510,10 @@ def _validate_qwen_prepare_owner_collision_locked(
     if not allow_matching_binding:
         raise RuntimeError("Qwen request ownership already exists")
     binding = _load_qwen_acquisition_lease_binding(request_id, owner=owner)
+    _load_qwen_acquisition_lease_state_snapshot(
+        request_id,
+        binding=binding,
+    )
     if len(active_matches) > 1:
         raise RuntimeError("Qwen request ownership is ambiguous")
     if active_matches:
