@@ -3214,6 +3214,7 @@ def test_benchmark_worker_process_probe_access_denied_is_indeterminate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import psutil
+    from app.learn import workflow_worker as worker_module
 
     monkeypatch.setattr(
         psutil,
@@ -3225,12 +3226,82 @@ def test_benchmark_worker_process_probe_access_denied_is_indeterminate(
         LearningStageWorkerRegistry._benchmark_process_incarnation_absent(
             {"pid": 43210, "create_time_ns": 123}
         )
+    observation = worker_module._benchmark_cleanup_replay_process_probe(
+        {"pid": 43210, "create_time_ns": 123}
+    )
+    assert observation["outcome"] == "indeterminate"
+    assert observation["observed_process_identity"] is None
+    assert observation["error"]["error_type"] == "AccessDenied"
+    assert worker_module.content_sha256(observation) == (
+        observation["content_sha256"]
+    )
+
+
+def test_benchmark_worker_cleanup_replay_process_probe_exact_incarnation_decisions(
+) -> None:
+    import psutil
+    from app.learn import workflow_worker as worker_module
+
+    identity = {
+        "pid": os.getpid(),
+        "create_time_ns": int(
+            round(psutil.Process().create_time() * 1_000_000_000)
+        ),
+    }
+    present = worker_module._benchmark_cleanup_replay_process_probe(identity)
+    assert present["contract_version"] == (
+        "benchmark_worker_cleanup_replay_process_probe_v1"
+    )
+    assert present["expected_process_identity"] == identity
+    assert present["observed_process_identity"] == identity
+    assert present["outcome"] == "same_incarnation_live"
+    assert present["error"] is None
+    assert worker_module.content_sha256(present) == present["content_sha256"]
+
+    different = worker_module._benchmark_cleanup_replay_process_probe({
+        **identity,
+        "create_time_ns": identity["create_time_ns"] + 2_000_000_000,
+    })
+    assert different["observed_process_identity"] == identity
+    assert different["outcome"] == "different_incarnation"
+    assert different["error"] is None
+    assert worker_module.content_sha256(different) == different["content_sha256"]
+
+
+def test_benchmark_worker_cleanup_replay_job_probe_rejects_live_empty_name(
+) -> None:
+    from app.learn import workflow_worker as worker_module
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    scope_name = "Local\\AgentGuiBenchmarkWorkerTest-" + "c" * 64
+    owner = WindowsProcessScope(scope_name, create=True)
+    try:
+        present = worker_module._benchmark_cleanup_replay_job_probe(scope_name)
+        assert present["contract_version"] == (
+            "benchmark_worker_cleanup_replay_job_probe_v1"
+        )
+        assert present["scope_name"] == scope_name
+        assert present["outcome"] == "job_name_present"
+        assert present["member_pids"] == []
+        assert present["error"] is None
+        assert present["temporary_handle_close"] == "closed"
+        assert worker_module.content_sha256(present) == present["content_sha256"]
+    finally:
+        owner.close()
+
+    absent = worker_module._benchmark_cleanup_replay_job_probe(scope_name)
+    assert absent["outcome"] == "job_name_absent"
+    assert absent["member_pids"] is None
+    assert absent["error"] is None
+    assert absent["temporary_handle_close"] == "not_opened"
+    assert worker_module.content_sha256(absent) == absent["content_sha256"]
 
 
 def test_benchmark_worker_cleanup_job_probe_api_error_is_indeterminate(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.learn import workflow_worker as worker_module
     from app.learn.hybrid import windows_process_scope
 
     registry = LearningStageWorkerRegistry(result_root=tmp_path)
@@ -3252,6 +3323,17 @@ def test_benchmark_worker_cleanup_job_probe_api_error_is_indeterminate(
             predecessor_content_sha256="b" * 64,
         )
     assert not list(tmp_path.glob("*.job-absence.json"))
+    observation = worker_module._benchmark_cleanup_replay_job_probe(
+        "Local\\AgentGuiBenchmarkWorkerTest-" + "a" * 64
+    )
+    assert observation["outcome"] == "indeterminate"
+    assert observation["member_pids"] is None
+    assert observation["temporary_handle_close"] == "not_opened"
+    assert observation["error"]["stage"] == "open"
+    assert observation["error"]["winerror"] == 5
+    assert worker_module.content_sha256(observation) == (
+        observation["content_sha256"]
+    )
 
 
 def test_benchmark_worker_controller_post_launch_release_fault_never_second_spawns(
@@ -3332,6 +3414,7 @@ def test_benchmark_worker_controller_post_launch_release_fault_never_second_spaw
 
 def test_benchmark_worker_real_parent_death_recovers_without_second_spawn(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context = multiprocessing.get_context("spawn")
     queue = context.Queue()
@@ -3384,15 +3467,176 @@ def test_benchmark_worker_real_parent_death_recovers_without_second_spawn(
             )
             assert observation["outcome"] == "absent"
             assert len(observation["predecessor_content_sha256"]) == 64
-        assert registry.observe_benchmark_worker_cleanup(
-            worker_id=started["worker_id"],
-            run_id="run-parent-death",
-            stage="screen_understanding",
-            operation_id="operation-parent-death",
-            terminate=True,
-            expected_operation_anchor=message["anchor"],
-            supervision_root=root,
-        ) == receipt
+        replay_kwargs = {
+            "worker_id": started["worker_id"],
+            "run_id": "run-parent-death",
+            "stage": "screen_understanding",
+            "operation_id": "operation-parent-death",
+            "terminate": True,
+            "expected_operation_anchor": message["anchor"],
+            "supervision_root": root,
+        }
+        receipt_path = (
+            tmp_path / f"{started['worker_id']}.benchmark-cleanup.json"
+        )
+        receipt_bytes = receipt_path.read_bytes()
+        assert registry.observe_benchmark_worker_cleanup(**replay_kwargs) == receipt
+        assert registry.observe_benchmark_worker_cleanup(**replay_kwargs) == receipt
+        assert receipt_path.read_bytes() == receipt_bytes
+
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+        owner = json.loads(
+            (
+                tmp_path / f"{started['worker_id']}.benchmark-owner.json"
+            ).read_text(encoding="utf-8")
+        )
+        collision = WindowsProcessScope(owner["scope_name"], create=True)
+        try:
+            assert collision.pids() == []
+            with pytest.raises(
+                LearningStageWorkerError,
+                match="cleanup replay Job name is present",
+            ):
+                registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        finally:
+            collision.close()
+        assert receipt_path.read_bytes() == receipt_bytes
+
+        import psutil
+
+        real_psutil_process = psutil.Process
+        expected_process_identity = receipt["process_identity"]
+
+        class ObservedProcess:
+            def __init__(self, create_time_ns: int) -> None:
+                self._create_time_ns = create_time_ns
+
+            def create_time(self) -> float:
+                return self._create_time_ns / 1_000_000_000
+
+        monkeypatch.setattr(
+            psutil,
+            "Process",
+            lambda pid: ObservedProcess(
+                expected_process_identity["create_time_ns"]
+            ),
+        )
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="cleanup replay worker incarnation is live",
+        ):
+            registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        assert receipt_path.read_bytes() == receipt_bytes
+
+        monkeypatch.setattr(
+            psutil,
+            "Process",
+            lambda pid: ObservedProcess(
+                expected_process_identity["create_time_ns"]
+                + 2_000_000_000
+            ),
+        )
+        assert registry.observe_benchmark_worker_cleanup(**replay_kwargs) == receipt
+        assert receipt_path.read_bytes() == receipt_bytes
+
+        monkeypatch.setattr(
+            psutil,
+            "Process",
+            lambda pid: (_ for _ in ()).throw(psutil.AccessDenied(pid)),
+        )
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="cleanup replay process probe is indeterminate",
+        ):
+            registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        monkeypatch.setattr(
+            psutil,
+            "Process",
+            lambda pid: (_ for _ in ()).throw(
+                OSError("injected-replay-process-api-error")
+            ),
+        )
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="cleanup replay process probe is indeterminate",
+        ):
+            registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        monkeypatch.setattr(psutil, "Process", real_psutil_process)
+        assert receipt_path.read_bytes() == receipt_bytes
+
+        real_scope_init = WindowsProcessScope.__init__
+
+        class OpenProbeError(OSError):
+            def __init__(self, code: int, message: str) -> None:
+                super().__init__(code, message)
+                self.winerror = code
+
+        monkeypatch.setattr(
+            WindowsProcessScope,
+            "__init__",
+            lambda self, name, create: (_ for _ in ()).throw(
+                OpenProbeError(5, "injected-replay-job-access-denied")
+            ),
+        )
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="cleanup replay Job probe is indeterminate",
+        ):
+            registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        monkeypatch.setattr(
+            WindowsProcessScope,
+            "__init__",
+            lambda self, name, create: (_ for _ in ()).throw(
+                OpenProbeError(87, "injected-replay-job-api-error")
+            ),
+        )
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="cleanup replay Job probe is indeterminate",
+        ):
+            registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        monkeypatch.setattr(WindowsProcessScope, "__init__", real_scope_init)
+
+        collision = WindowsProcessScope(owner["scope_name"], create=True)
+        real_scope_pids = WindowsProcessScope.pids
+        real_scope_close = WindowsProcessScope.close
+        try:
+            monkeypatch.setattr(
+                WindowsProcessScope,
+                "pids",
+                lambda scope: (_ for _ in ()).throw(
+                    OSError("injected-replay-job-query-error")
+                ),
+            )
+            with pytest.raises(
+                LearningStageWorkerError,
+                match="cleanup replay Job probe is indeterminate",
+            ):
+                registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+            monkeypatch.setattr(WindowsProcessScope, "pids", real_scope_pids)
+
+            def close_then_raise(scope: WindowsProcessScope) -> None:
+                real_scope_close(scope)
+                raise OSError("injected-replay-job-close-error")
+
+            monkeypatch.setattr(
+                WindowsProcessScope,
+                "close",
+                close_then_raise,
+            )
+            with pytest.raises(
+                LearningStageWorkerError,
+                match="cleanup replay Job probe is indeterminate",
+            ):
+                registry.observe_benchmark_worker_cleanup(**replay_kwargs)
+        finally:
+            monkeypatch.setattr(WindowsProcessScope, "pids", real_scope_pids)
+            monkeypatch.setattr(WindowsProcessScope, "close", real_scope_close)
+            collision.close()
+        assert receipt_path.read_bytes() == receipt_bytes
+        assert registry.observe_benchmark_worker_cleanup(**replay_kwargs) == receipt
+        assert receipt_path.read_bytes() == receipt_bytes
         assert len(list(tmp_path.glob("*.worker.json"))) == 1
     finally:
         if outer.is_alive():

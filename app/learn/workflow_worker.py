@@ -3246,7 +3246,7 @@ class LearningStageWorkerRegistry:
                 )
                 receipt_path = self._result_root / f"{worker}.benchmark-cleanup.json"
                 if receipt_path.exists():
-                    return _validate_benchmark_cleanup_receipt(
+                    validated_receipt = _validate_benchmark_cleanup_receipt(
                         _read_json_object(
                             receipt_path, label="benchmark cleanup receipt"
                         ),
@@ -3260,6 +3260,19 @@ class LearningStageWorkerRegistry:
                         current_reservation=reservation,
                         supervision_root=root,
                     )
+                    if validated_receipt["outcome"] == (
+                        "verified_exact_worker_exited"
+                    ):
+                        _benchmark_cleanup_replay_live_reattest(
+                            result_root=self._result_root,
+                            worker_id=worker,
+                            run_id=run,
+                            stage=stage_value,
+                            operation_id=operation,
+                            original_reservation=original,
+                            validated_receipt=validated_receipt,
+                        )
+                    return deepcopy(validated_receipt)
                 record = self._records.get(worker)
                 if (
                     reservation["reservation_state"] == "cancelled_before_launch"
@@ -5609,6 +5622,214 @@ def _payload_sha256(payload: dict[str, Any]) -> str:
             f"worker payload is not JSON serializable: {exc}"
         ) from exc
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _benchmark_cleanup_replay_job_probe(scope_name: str) -> dict[str, Any]:
+    """只读检查 unique named Job 当前是否仍存在，并关闭 probe handle。"""
+
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    scope = None
+    members: list[int] | None = None
+    error_value: dict[str, Any] | None = None
+    close_state = "not_opened"
+    try:
+        scope = WindowsProcessScope(
+            _required_text(scope_name, "benchmark cleanup replay scope_name"),
+            create=False,
+        )
+    except Exception as error:
+        code = getattr(error, "winerror", None)
+        if code is None and getattr(error, "args", None):
+            first = error.args[0]
+            code = first if isinstance(first, int) else None
+        if code == 2:
+            outcome = "job_name_absent"
+        else:
+            outcome = "indeterminate"
+            error_value = {
+                "stage": "open",
+                "error_type": type(error).__name__,
+                "message": str(error),
+                "winerror": code,
+            }
+    else:
+        try:
+            members = scope.pids()
+            outcome = "job_name_present"
+        except Exception as error:
+            outcome = "indeterminate"
+            error_value = {
+                "stage": "query",
+                "error_type": type(error).__name__,
+                "message": str(error),
+                "winerror": getattr(error, "winerror", None),
+            }
+        finally:
+            try:
+                scope.close()
+                close_state = "closed"
+            except Exception as error:
+                close_state = "error"
+                close_error = {
+                    "stage": "close",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                    "winerror": getattr(error, "winerror", None),
+                }
+                error_value = (
+                    close_error
+                    if error_value is None
+                    else {
+                        "primary_error": error_value,
+                        "close_error": close_error,
+                    }
+                )
+                outcome = "indeterminate"
+    return seal_immutable({
+        "contract_version": "benchmark_worker_cleanup_replay_job_probe_v1",
+        "scope_name": scope_name,
+        "outcome": outcome,
+        "member_pids": members,
+        "temporary_handle_close": close_state,
+        "error": error_value,
+    })
+
+
+def _benchmark_cleanup_replay_process_probe(
+    identity: object,
+) -> dict[str, Any]:
+    """只读复核历史 cleanup 所绑定的 exact process incarnation。"""
+
+    import psutil
+
+    expected = _validate_exact_benchmark_process_identity(
+        identity,
+        label="benchmark cleanup replay worker",
+    )
+    observed_identity: dict[str, int] | None = None
+    error_value: dict[str, str] | None = None
+    try:
+        process = psutil.Process(expected["pid"])
+        observed_identity = {
+            "pid": expected["pid"],
+            "create_time_ns": int(
+                round(process.create_time() * 1_000_000_000)
+            ),
+        }
+    except psutil.NoSuchProcess:
+        outcome = "no_such_process"
+    except Exception as error:
+        outcome = "indeterminate"
+        error_value = {
+            "error_type": type(error).__name__,
+            "message": str(error),
+        }
+    else:
+        outcome = (
+            "same_incarnation_live"
+            if abs(
+                observed_identity["create_time_ns"]
+                - expected["create_time_ns"]
+            ) < 1_000
+            else "different_incarnation"
+        )
+    return seal_immutable({
+        "contract_version": (
+            "benchmark_worker_cleanup_replay_process_probe_v1"
+        ),
+        "expected_process_identity": expected,
+        "observed_process_identity": observed_identity,
+        "outcome": outcome,
+        "error": error_value,
+    })
+
+
+def _benchmark_cleanup_replay_live_reattest(
+    *,
+    result_root: Path,
+    worker_id: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    original_reservation: dict[str, Any],
+    validated_receipt: dict[str, Any],
+) -> dict[str, Any]:
+    """在返回历史 receipt 前只读复核 unique Job 与 exact worker 当前均缺席。"""
+
+    from app.learn.hybrid.windows_process_scope import (
+        benchmark_worker_scope_name_v1,
+    )
+
+    launch_anchor = _read_json_object(
+        result_root
+        / f"{worker_id}.benchmark-launch-identity-anchor.json",
+        label="benchmark cleanup replay launch identity anchor",
+    )
+    if (
+        launch_anchor.get("contract_version")
+        != "benchmark_worker_launch_identity_anchor_v1"
+        or content_sha256(launch_anchor)
+        != launch_anchor.get("content_sha256")
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup replay launch identity anchor is invalid"
+        )
+    process_identity = _validate_exact_benchmark_process_identity(
+        launch_anchor.get("process_identity"),
+        label="benchmark cleanup replay worker",
+    )
+    if validated_receipt.get("process_identity") != process_identity:
+        raise LearningStageWorkerError(
+            "benchmark cleanup replay process identity is invalid"
+        )
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind=original_reservation["authority_kind"],
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        worker_id=worker_id,
+        payload_sha256=original_reservation["payload_sha256"],
+        execution_nonce=original_reservation["execution_nonce"],
+    )
+    job_probe = _benchmark_cleanup_replay_job_probe(scope_name)
+    if job_probe["outcome"] == "job_name_present":
+        raise LearningStageWorkerError(
+            "benchmark cleanup replay Job name is present"
+        )
+    if job_probe["outcome"] != "job_name_absent":
+        raise LearningStageWorkerError(
+            "benchmark cleanup replay Job probe is indeterminate"
+        )
+    process_probe = _benchmark_cleanup_replay_process_probe(process_identity)
+    if process_probe["outcome"] == "same_incarnation_live":
+        raise LearningStageWorkerError(
+            "benchmark cleanup replay worker incarnation is live"
+        )
+    if process_probe["outcome"] not in {
+        "no_such_process",
+        "different_incarnation",
+    }:
+        raise LearningStageWorkerError(
+            "benchmark cleanup replay process probe is indeterminate"
+        )
+    return seal_immutable({
+        "contract_version": "benchmark_worker_cleanup_replay_revalidation_v1",
+        "cleanup_receipt_ref": {
+            "content_sha256": validated_receipt["content_sha256"]
+        },
+        "launch_identity_anchor_ref": {
+            "content_sha256": launch_anchor["content_sha256"]
+        },
+        "scope_name": scope_name,
+        "process_identity": process_identity,
+        "job_probe_ref": {"content_sha256": job_probe["content_sha256"]},
+        "process_probe_ref": {
+            "content_sha256": process_probe["content_sha256"]
+        },
+        "outcome": "current_live_state_absent",
+        "artifact_is_authorization": False,
+    })
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
