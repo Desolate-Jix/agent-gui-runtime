@@ -12,6 +12,9 @@ from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes, conten
 from app.learn.hybrid.benchmark_v2_provider_corpus import (
     provider_case_resolver_corpus_file_ref,
 )
+from app.learn.recognition.uei.canonical import (
+    content_sha256 as runtime_content_sha256,
+)
 from app.operation.observe.contracts import ObserveScreenTaskInput
 
 
@@ -238,7 +241,10 @@ def _sealed_parent(value: object, name: str) -> dict[str, Any]:
     result = deepcopy(dict(value))
     digest = result.get("content_sha256")
     _sha(digest, f"{name}.content_sha256")
-    if len(result) > 1 and content_sha256(result) != digest:
+    if len(result) > 1 and digest not in {
+        content_sha256(result),
+        runtime_content_sha256(result),
+    }:
         raise ValueError(f"{name} content SHA mismatch")
     return result
 

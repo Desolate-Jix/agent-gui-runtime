@@ -3,9 +3,15 @@ from __future__ import annotations
 import ast
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+import gc
 import hashlib
 import json
+import multiprocessing
+import os
 from pathlib import Path
+import socket
+import sys
+import time
 
 import pytest
 
@@ -19,6 +25,126 @@ PARENT_MANIFEST = (
     / "corpus-manifest.v1.json"
 )
 SHA = "a" * 64
+
+
+def _recorded_qwen_benchmark_worker_entry(
+    target,
+    args,
+    release_event,
+    lease_dir: str,
+    model_request_id: str,
+    recorded_response: dict[str, object],
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker
+
+    model_server.MODEL_SERVER_LEASE_DIR = Path(lease_dir)
+    original_write = workflow_worker._write_worker_result
+
+    def _recorded_task(*_args, **_kwargs):
+        if not release_event.wait(45):
+            raise RuntimeError("recorded Qwen response release timed out")
+        return deepcopy(recorded_response)
+
+    def _write_with_provider_parent(path, payload):
+        receipt = model_server.observe_qwen_model_request_cleanup(model_request_id)
+        if not isinstance(receipt, dict) or receipt.get("outcome") != (
+            "verified_exact_process_exited"
+        ):
+            raise RuntimeError("recorded Qwen cleanup parent is unavailable")
+        exact = deepcopy(payload)
+        exact["provider_cleanup_evidence_ref"] = {
+            "content_sha256": receipt["content_sha256"]
+        }
+        original_write(path, exact)
+
+    workflow_worker.execute_learning_stage_worker_task = _recorded_task
+    workflow_worker._write_worker_result = _write_with_provider_parent
+    target(*args)
+
+
+def _recorded_qwen_incumbent_resume_cut(
+    project_root: str,
+    state_path: str,
+    worker_root: str,
+    lease_dir: str,
+    corpus_raw: bytes,
+    corpus_file_sha: str,
+    corpus_file_ref: dict[str, object],
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    worker_id: str,
+    result_queue,
+) -> None:
+    import traceback
+
+    from app.core import model_server
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        compose_test_provider_case_resolver,
+        validate_preloaded_provider_corpus,
+    )
+    from app.learn.workflow_service import (
+        compose_test_learning_workflow_service,
+        continue_guarded_learning_stage_worker_result,
+    )
+    from app.learn.workflow_store import LearningWorkflowRunStore
+    from app.learn.workflow_worker import (
+        LearningStageWorkerRegistry,
+        compose_test_benchmark_worker_supervision_root,
+    )
+
+    store = None
+    try:
+        model_server.MODEL_SERVER_LEASE_DIR = Path(lease_dir)
+        corpus = validate_preloaded_provider_corpus(
+            raw=corpus_raw, expected_sha256=corpus_file_sha
+        )
+        store = LearningWorkflowRunStore(state_path=Path(state_path))
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=Path(worker_root),
+            test_capability=object(),
+            workflow_store=store,
+            test_store_capability=object(),
+        )
+        registry = LearningStageWorkerRegistry(
+            result_root=Path(worker_root), benchmark_supervision_root=root
+        )
+        resolver = compose_test_provider_case_resolver(
+            validated_corpus=corpus,
+            provider_corpus_file_ref=corpus_file_ref,
+            workflow_store=store,
+            benchmark_supervision_root=root,
+        )
+        composition = compose_test_learning_workflow_service(
+            store=store,
+            worker_registry=registry,
+            project_root=Path(project_root),
+            benchmark_supervision_root=root,
+            provider_case_resolver=resolver,
+        )
+        result = continue_guarded_learning_stage_worker_result(
+            composition=composition,
+            run_id=run_id,
+            expected_revision=store.get(run_id)["revision"],
+            stage=stage,
+            operation_id=operation_id,
+            worker_id=worker_id,
+        )
+        result_queue.put({"status": "ok", "result": result})
+    except BaseException as error:
+        result_queue.put(
+            {
+                "status": "error",
+                "error_type": type(error).__name__,
+                "details": str(error),
+                "traceback": traceback.format_exc(),
+            }
+        )
+        raise
+    finally:
+        if store is not None:
+            store.close()
 
 
 @pytest.fixture(scope="module")
@@ -2373,3 +2499,545 @@ def test_window_adoption_rebuild_uses_only_resolver_and_exact_a_b1_parents(
             "generic_adoption": generic_adoption,
         }
     ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows benchmark ownership required")
+def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
+    tmp_path: Path,
+    validated_provider_snapshot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psutil
+
+    from app.core import model_server
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        compose_test_provider_case_resolver,
+    )
+    from app.learn.hybrid.benchmark_v2_window_owner import (
+        close_owned_window,
+        launch_owned_window,
+    )
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        compose_test_server_worker_window_binding_publisher,
+        publish_server_worker_window_binding,
+    )
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        benchmark_worker_controller_mutex_name_v1,
+        observe_process_scope_cleanup,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+    from app.learn.workflow_service import (
+        compose_test_learning_workflow_service,
+        continue_guarded_learning_stage_worker_result,
+        start_guarded_learning_stage_worker,
+        start_learning_workflow_stage_operation,
+    )
+    from app.learn.workflow_store import LearningWorkflowRunStore
+    from app.learn.workflow_worker import (
+        LearningStageWorkerRegistry,
+        compose_test_benchmark_worker_supervision_root,
+    )
+
+    project_root = tmp_path / "real-c-service"
+    project_root.mkdir()
+    state_path = project_root / "state.json"
+    worker_root = project_root / "workers"
+    lease_dir = project_root / "qwen-leases"
+    from PIL import Image
+
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        validate_preloaded_provider_corpus,
+    )
+    from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
+
+    base_corpus, _base_file_ref = validated_provider_snapshot
+    source_case = base_corpus["cases"][0]
+    source_image = (PROJECT_ROOT / str(source_case["image"]["path"])).resolve()
+    benchmark_bmp = project_root / "recorded-qwen-provider.bmp"
+    with Image.open(source_image) as opened:
+        opened.convert("RGB").save(benchmark_bmp, format="BMP")
+    benchmark_bmp_sha = hashlib.sha256(benchmark_bmp.read_bytes()).hexdigest()
+    corpus_candidate = deepcopy(base_corpus)
+    source_group = source_case["screen_group"]
+    for candidate in corpus_candidate["cases"]:
+        if candidate["screen_group"] == source_group:
+            candidate["image"]["sha256"] = benchmark_bmp_sha
+    corpus_candidate.pop("content_sha256")
+    corpus_candidate["content_sha256"] = content_sha256(corpus_candidate)
+    corpus_raw = canonical_json_bytes(corpus_candidate, pretty=True)
+    corpus_file_sha = hashlib.sha256(corpus_raw).hexdigest()
+    corpus = validate_preloaded_provider_corpus(
+        raw=corpus_raw, expected_sha256=corpus_file_sha
+    )
+    corpus_file_ref = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_provider_corpus_file_ref_v1",
+            "relative_path": "provider-corpus.v2.json",
+            "file_sha256": corpus_file_sha,
+            "source_parent_ref": {
+                "content_sha256": corpus["source_parent_ref"]["content_sha256"]
+            },
+        }
+    )
+    run_id = "run-c-real-recorded"
+    stage = "screen_understanding"
+    operation_id = "operation-c-real-recorded"
+    recorded_response = {
+        "success": True,
+        "recorded_qwen_response": {
+            "model": "recorded-qwen",
+            "content": "harmless observation only",
+        },
+        "action_candidates": [],
+        "execute_binding_enabled": False,
+    }
+    context = multiprocessing.get_context("spawn")
+    release_event = context.Event()
+    provider_scope = None
+    provider_helper = None
+    provider_port = None
+    owner = None
+    owner_journal = project_root / "task5-owner.json"
+    worker_identity = None
+    worker_scope_name = None
+    startup_event_name = None
+    controller_mutex_name = None
+    worker_id = None
+    current_store = None
+    current_registry = None
+    current_root = None
+    current_composition = None
+    cleanup_errors: list[str] = []
+    restart_cut_identities: list[dict[str, int]] = []
+
+    def _fresh_composition(*, process_factory=None):
+        store = current_store or LearningWorkflowRunStore(state_path=state_path)
+        root = current_root or compose_test_benchmark_worker_supervision_root(
+                journal_root=worker_root,
+                test_capability=object(),
+                workflow_store=store,
+                test_store_capability=object(),
+            )
+        registry = LearningStageWorkerRegistry(
+            result_root=worker_root,
+            process_factory=process_factory,
+            benchmark_supervision_root=root,
+        )
+        case_resolver = compose_test_provider_case_resolver(
+            validated_corpus=corpus,
+            provider_corpus_file_ref=corpus_file_ref,
+            workflow_store=store,
+            benchmark_supervision_root=root,
+        )
+        composition = compose_test_learning_workflow_service(
+            store=store,
+            worker_registry=registry,
+            project_root=project_root,
+            benchmark_supervision_root=root,
+            provider_case_resolver=case_resolver,
+        )
+        return store, root, registry, case_resolver, composition
+
+    def _drop_current() -> None:
+        nonlocal current_store, current_registry, current_root, current_composition
+        current_registry = None
+        current_composition = None
+        gc.collect()
+
+    def _fresh_resume_cut() -> dict[str, object]:
+        result_queue = context.Queue()
+        process = context.Process(
+            target=_recorded_qwen_incumbent_resume_cut,
+            args=(
+                str(project_root),
+                str(state_path),
+                str(worker_root),
+                str(lease_dir),
+                corpus_raw,
+                corpus_file_sha,
+                corpus_file_ref,
+                run_id,
+                stage,
+                operation_id,
+                worker_id,
+                result_queue,
+            ),
+            name="benchmark-v2-incumbent-fresh-resume",
+        )
+        process.start()
+        assert process.pid is not None
+        restart_cut_identities.append(
+            {
+                "pid": process.pid,
+                "create_time_ns": int(
+                    round(psutil.Process(process.pid).create_time() * 1_000_000_000)
+                ),
+            }
+        )
+        message = result_queue.get(timeout=45)
+        process.join(10)
+        assert not process.is_alive(), message
+        exitcode = process.exitcode
+        process.close()
+        result_queue.close()
+        result_queue.join_thread()
+        assert exitcode == 0, message
+        assert message["status"] == "ok", message
+        return message["result"]
+
+    try:
+        monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", lease_dir)
+        current_store, current_root, current_registry, case_resolver, current_composition = (
+            _fresh_composition()
+        )
+        case_ref = _case_ref(case_resolver)
+        case = case_resolver.resolve(case_ref)
+        image_path = benchmark_bmp
+        image_sha = hashlib.sha256(image_path.read_bytes()).hexdigest()
+        owner = launch_owned_window(
+            image_path=image_path,
+            expected_sha256=image_sha,
+            operation_id=operation_id,
+            journal_path=owner_journal,
+        )
+        capture_ref = {
+            "id": "capture-c-real-recorded",
+            "content_sha256": image_sha,
+        }
+        authority = publish_server_worker_window_binding(
+            publisher=compose_test_server_worker_window_binding_publisher(
+                authority_root=project_root
+            ),
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        first = current_store.transition(
+            run_id=run_id,
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            evidence_refs={},
+        )
+        bound = current_store.transition(
+            run_id=run_id,
+            expected_revision=first["revision"],
+            stage="bind_capture",
+            outcome="completed",
+            evidence_refs={"image_path": str(benchmark_bmp)},
+        )
+        started_operation = start_learning_workflow_stage_operation(
+            store=current_store,
+            project_root=project_root,
+            run_id=run_id,
+            expected_revision=bound["revision"],
+            stage=stage,
+            operation_id=operation_id,
+        )
+
+        def _recorded_process_factory(*, target, args, name):
+            return context.Process(
+                target=_recorded_qwen_benchmark_worker_entry,
+                args=(
+                    target,
+                    args,
+                    release_event,
+                    str(lease_dir),
+                    str(args[3]),
+                    recorded_response,
+                ),
+                name=name,
+            )
+
+        _drop_current()
+        current_store, current_root, current_registry, case_resolver, current_composition = (
+            _fresh_composition(process_factory=_recorded_process_factory)
+        )
+        started = start_guarded_learning_stage_worker(
+            composition=current_composition,
+            run_id=run_id,
+            expected_revision=started_operation["workflow_state"]["revision"],
+            stage=stage,
+            operation_id=operation_id,
+            task_kind="vision_observe_screen",
+            payload={
+                "benchmark_v2_incumbent": {
+                    "provider_case_ref": case_ref,
+                    "window_binding_ref": authority["window_binding_ref"],
+                    "capture_ref": capture_ref,
+                }
+            },
+        )
+        worker_id = started["worker_id"]
+        operation_state = current_store.get(run_id)
+        stage_execution = operation_state["stages"][stage]["evidence_refs"][
+            "stage_execution"
+        ]
+        operation = stage_execution["benchmark_v2_incumbent"]
+        launch_owner = current_registry.inspect_benchmark_worker_launch_owner(
+            worker_id=worker_id,
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            reservation_ref=operation["reservation_ref"],
+            expected_operation_anchor=stage_execution[
+                "benchmark_v2_operation_anchor"
+            ],
+            supervision_root=current_root,
+        )
+        worker_identity = deepcopy(launch_owner["process_identity"])
+        worker_scope_name = launch_owner["scope_name"]
+        startup_event_name = (
+            "Local\\AgentGuiBenchmarkWorkerGate-"
+            + hashlib.sha256(
+                json.dumps(
+                    {"scope_name": worker_scope_name},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        )
+        controller_mutex_name = benchmark_worker_controller_mutex_name_v1(
+            authority_kind=current_root.authority_kind,
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+        )
+
+        provider_lineage = {
+            "run_id": run_id,
+            "workflow_revision": operation_state["revision"],
+            "operation_id": operation_id,
+            "stage": stage,
+            "stage_execution_id": f"execution-{operation_id}",
+        }
+        provider_scope_name = process_scope_name(provider_lineage, "qwen")
+        provider_scope = WindowsProcessScope(provider_scope_name, create=True)
+        provider_helper = spawn_process_in_scope(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            scope_name=provider_scope_name,
+            cwd=project_root,
+        )
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            provider_port = int(probe.getsockname()[1])
+        endpoint = f"http://127.0.0.1:{provider_port}/v1/chat/completions"
+        base_url = f"http://127.0.0.1:{provider_port}/v1"
+        readiness = {
+            "started": True,
+            "after": {
+                "status": "running",
+                "base_url": base_url,
+                "model_id": "recorded-qwen",
+                "server_process_identity": deepcopy(
+                    provider_helper.process_identity
+                ),
+                "server_socket": {"host": "127.0.0.1", "port": provider_port},
+            },
+        }
+        profile = {
+            "profile_id": "recorded-qwen-benchmark",
+            "endpoint": endpoint,
+            "pid_file": str(project_root / "recorded-qwen.pid"),
+        }
+        monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", provider_scope_name)
+        monkeypatch.setattr(
+            model_server,
+            "_observe_qwen_server_binding",
+            lambda _selected, observed: {
+                "server_process_identity": deepcopy(
+                    observed["after"]["server_process_identity"]
+                ),
+                "server_socket": deepcopy(observed["after"]["server_socket"]),
+            },
+        )
+        monkeypatch.setattr(
+            model_server,
+            "_attest_exact_qwen_socket_owner",
+            lambda _server_socket, process_identity: (
+                model_server._current_process_identity(process_identity["pid"])
+                == process_identity
+            ),
+        )
+        monkeypatch.setattr(
+            model_server,
+            "check_model_server",
+            lambda _selected, timeout=1.0: {"status": "unreachable"},
+        )
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=operation["worker_ref"]["model_request_id"],
+            readiness=readiness,
+        )
+        released = model_server._release_exact_qwen_lease(
+            lease, reason="recorded-qwen-response-complete"
+        )
+        assert released["server_termination"] == "verified_exact_process_exited"
+        release_event.set()
+
+        deadline = time.monotonic() + 30
+        status = None
+        while time.monotonic() < deadline:
+            status = current_registry.status(
+                worker_id=worker_id,
+                run_id=run_id,
+                operation_id=operation_id,
+            )
+            if status["status"] == "completed":
+                break
+            time.sleep(0.05)
+        assert status is not None and status["status"] == "completed"
+        first_a = current_registry.inspect_completed_result_identity(
+            worker_id=worker_id,
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+        )
+        provider_receipt = model_server.observe_qwen_model_request_cleanup(
+            operation["worker_ref"]["model_request_id"]
+        )
+        assert first_a["provider_cleanup_evidence_ref"] == {
+            "content_sha256": provider_receipt["content_sha256"]
+        }
+
+        original_adopt = LearningStageWorkerRegistry.adopt_result
+
+        def _crash_after_terminal_intent(self, **_kwargs):
+            raise RuntimeError("crash after terminal intent")
+
+        monkeypatch.setattr(
+            LearningStageWorkerRegistry, "adopt_result", _crash_after_terminal_intent
+        )
+        with pytest.raises(RuntimeError, match="crash after terminal intent"):
+            continue_guarded_learning_stage_worker_result(
+                composition=current_composition,
+                run_id=run_id,
+                expected_revision=current_store.get(run_id)["revision"],
+                stage=stage,
+                operation_id=operation_id,
+                worker_id=worker_id,
+            )
+        intent_state = current_store.get(run_id)
+        intent_operation = intent_state["stages"][stage]["evidence_refs"][
+            "stage_execution"
+        ]["benchmark_v2_incumbent"]
+        assert intent_operation["phase"] == "terminal_intent"
+        monkeypatch.setattr(LearningStageWorkerRegistry, "adopt_result", original_adopt)
+
+        current_store.close()
+        current_store = None
+        current_registry = None
+        current_root = None
+        current_composition = None
+        gc.collect()
+        completed = _fresh_resume_cut()
+        assert completed["status"] == "complete"
+        assert completed["terminal_receipt"]["provider_cleanup_outcome"] == (
+            "verified_exact_process_exited"
+        )
+        terminal_bytes = json.dumps(
+            completed["terminal_receipt"], sort_keys=True, separators=(",", ":")
+        )
+
+        replay = _fresh_resume_cut()
+        assert replay["status"] == "complete"
+        assert json.dumps(
+            replay["terminal_receipt"], sort_keys=True, separators=(",", ":")
+        ) == terminal_bytes
+    finally:
+        release_event.set()
+        if current_registry is not None and worker_id is not None:
+            try:
+                current_registry.observe_benchmark_worker_cleanup(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
+                    terminate=True,
+                    expected_operation_anchor=stage_execution[
+                        "benchmark_v2_operation_anchor"
+                    ],
+                    supervision_root=current_root,
+                )
+            except BaseException as error:
+                cleanup_errors.append(f"worker cleanup: {error}")
+            try:
+                current_registry.reconcile_benchmark_provider_cleanup(
+                    worker_id=worker_id,
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
+                )
+            except BaseException as error:
+                cleanup_errors.append(f"provider cleanup: {error}")
+        if current_store is not None:
+            current_store.close()
+            current_store = None
+        if provider_helper is not None:
+            provider_helper.close()
+        if provider_scope is not None:
+            provider_scope.close()
+        window_receipt = None
+        if owner_journal.exists():
+            window_receipt = close_owned_window(
+                journal_path=owner_journal, reason="recorded_qwen_test_finally"
+            )
+
+        if worker_identity is not None:
+            try:
+                process = psutil.Process(worker_identity["pid"])
+            except psutil.NoSuchProcess:
+                process = None
+            if process is not None:
+                assert int(round(process.create_time() * 1_000_000_000)) != (
+                    worker_identity["create_time_ns"]
+                )
+        for cut_identity in restart_cut_identities:
+            try:
+                cut_process = psutil.Process(cut_identity["pid"])
+            except psutil.NoSuchProcess:
+                cut_process = None
+            if cut_process is not None:
+                assert int(round(cut_process.create_time() * 1_000_000_000)) != (
+                    cut_identity["create_time_ns"]
+                )
+        if worker_scope_name is not None:
+            worker_zero = observe_process_scope_cleanup(
+                worker_scope_name, terminate=False, stable_zero_observations=3
+            )
+            assert worker_zero["cleanup_status"] == "verified"
+            assert worker_zero["member_pids_after"] == []
+        if provider_scope is not None:
+            provider_zero = observe_process_scope_cleanup(
+                provider_scope.name,
+                terminate=False,
+                listener_ports=(() if provider_port is None else (provider_port,)),
+                stable_zero_observations=3,
+            )
+            assert provider_zero["cleanup_status"] == "verified"
+            assert provider_zero["member_pids_after"] == []
+            assert provider_zero["active_listeners_after"] == []
+        if startup_event_name is not None or controller_mutex_name is not None:
+            import win32api
+            import win32event
+
+            if startup_event_name is not None:
+                with pytest.raises(BaseException) as event_error:
+                    win32event.OpenEvent(0x00100000, False, startup_event_name)
+                assert getattr(event_error.value, "winerror", event_error.value.args[0]) == 2
+            if controller_mutex_name is not None:
+                with pytest.raises(BaseException) as mutex_error:
+                    handle = win32event.OpenMutex(0x00100000, False, controller_mutex_name)
+                    win32api.CloseHandle(handle)
+                assert getattr(mutex_error.value, "winerror", mutex_error.value.args[0]) == 2
+        if window_receipt is not None:
+            assert window_receipt["cleanup_status"] == "verified"
+            assert window_receipt["matching_owned_windows_after"] == []
+            assert window_receipt["member_pids_after"] == []
+            assert window_receipt["active_listeners_after"] == []
+        assert cleanup_errors == []
