@@ -181,25 +181,88 @@ class _BenchmarkStoreAuthority:
 
 
 _BENCHMARK_ROOTS: dict[int, BenchmarkWorkerSupervisionRoot] = {}
+_BENCHMARK_TEST_ROOTS_BY_PATH: dict[str, BenchmarkWorkerSupervisionRoot] = {}
+_BENCHMARK_TEST_STORE_CAPABILITIES: dict[int, BenchmarkWorkerSupervisionRoot] = {}
 _BENCHMARK_CONTROLLER_LOCAL = local()
 _PRODUCTION_BENCHMARK_ROOT: BenchmarkWorkerSupervisionRoot | None = None
 
 
 def _benchmark_root_digest(
-    *, authority_kind: str, journal_root: Path, workflow_store: object
+    *, authority_kind: str, journal_root: Path, workflow_store: object,
+    memory_store_token: str | None = None,
 ) -> str:
     state_path = getattr(workflow_store, "_state_path", None)
-    state_identity = (
-        str(Path(state_path).resolve()).casefold()
-        if state_path is not None
-        else f"memory:{content_sha256({'journal_root': str(journal_root.resolve()).casefold()})}"
-    )
+    if state_path is None:
+        if (
+            not isinstance(memory_store_token, str)
+            or len(memory_store_token) != 64
+            or any(character not in "0123456789abcdef" for character in memory_store_token)
+        ):
+            raise LearningStageWorkerError(
+                "benchmark memory store token is invalid"
+            )
+        state_identity = f"memory:{memory_store_token}"
+    else:
+        state_identity = str(Path(state_path).resolve()).casefold()
     return content_sha256({
         "contract_version": "benchmark_worker_store_identity_v1",
         "authority_kind": authority_kind,
         "store_class": f"{type(workflow_store).__module__}.{type(workflow_store).__qualname__}",
         "canonical_state_path_or_memory_token": state_identity,
     })
+
+
+def _benchmark_paths_overlap(left: Path, right: Path) -> bool:
+    left_value = left.resolve()
+    right_value = right.resolve()
+    return (
+        left_value == right_value
+        or left_value.is_relative_to(right_value)
+        or right_value.is_relative_to(left_value)
+    )
+
+
+def _benchmark_test_memory_store_token(root_path: Path) -> str:
+    import secrets
+
+    token_path = root_path / ".benchmark-test-memory-store-token.json"
+    root_path.mkdir(parents=True, exist_ok=True)
+    if not token_path.exists():
+        token = seal_immutable({
+            "contract_version": "benchmark_worker_test_memory_store_token_v1",
+            "journal_root": str(root_path),
+            "memory_store_token": secrets.token_hex(32),
+        })
+        try:
+            _write_json_create_only(token_path, token)
+        except LearningStageWorkerError:
+            if not token_path.exists():
+                raise
+    persisted = _read_json_object(
+        token_path,
+        label="benchmark test memory store token",
+    )
+    if (
+        set(persisted)
+        != {
+            "contract_version", "journal_root", "memory_store_token",
+            "content_sha256",
+        }
+        or persisted.get("contract_version")
+        != "benchmark_worker_test_memory_store_token_v1"
+        or persisted.get("journal_root") != str(root_path)
+        or content_sha256(persisted) != persisted.get("content_sha256")
+        or not isinstance(persisted.get("memory_store_token"), str)
+        or len(persisted["memory_store_token"]) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in persisted["memory_store_token"]
+        )
+    ):
+        raise LearningStageWorkerError(
+            "benchmark test memory store token is invalid"
+        )
+    return persisted["memory_store_token"]
 
 
 def compose_test_benchmark_worker_supervision_root(
@@ -214,9 +277,53 @@ def compose_test_benchmark_worker_supervision_root(
     if test_capability is None or test_store_capability is None:
         raise LearningStageWorkerError("benchmark supervision capability is required")
     root_path = Path(journal_root).resolve()
+    from app.learn.workflow_store import learning_workflow_run_store
+
+    production_journal_root = (
+        _PROJECT_ROOT / "logs" / "workflow-workers"
+    ).resolve()
+    production_state_path = Path(
+        getattr(learning_workflow_run_store, "_state_path", None)
+        or (_PROJECT_ROOT / "runtime_state" / "learning-workflow-runs.json")
+    ).resolve()
+    candidate_state_path = getattr(workflow_store, "_state_path", None)
+    if (
+        workflow_store is learning_workflow_run_store
+        or _benchmark_paths_overlap(root_path, production_journal_root)
+        or _benchmark_paths_overlap(root_path, production_state_path)
+        or (
+            candidate_state_path is not None
+            and (
+                _benchmark_paths_overlap(
+                    Path(candidate_state_path), production_state_path
+                )
+                or _benchmark_paths_overlap(
+                    Path(candidate_state_path), production_journal_root
+                )
+            )
+        )
+    ):
+        raise LearningStageWorkerError(
+            "benchmark test root overlaps production authority"
+        )
+    root_key = str(root_path).casefold()
+    if (
+        id(test_capability) in _BENCHMARK_ROOTS
+        or id(test_store_capability) in _BENCHMARK_TEST_STORE_CAPABILITIES
+        or root_key in _BENCHMARK_TEST_ROOTS_BY_PATH
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cross-test capability or root reuse is invalid"
+        )
+    memory_token = (
+        _benchmark_test_memory_store_token(root_path)
+        if candidate_state_path is None
+        else None
+    )
     identity_sha256 = _benchmark_root_digest(
         authority_kind="test_only", journal_root=root_path,
         workflow_store=workflow_store,
+        memory_store_token=memory_token,
     )
     authority = _BenchmarkStoreAuthority(
         lambda run_id: workflow_store.get(run_id),
@@ -231,6 +338,8 @@ def compose_test_benchmark_worker_supervision_root(
         store_identity_sha256=identity_sha256,
     )
     _BENCHMARK_ROOTS[id(test_capability)] = root
+    _BENCHMARK_TEST_ROOTS_BY_PATH[root_key] = root
+    _BENCHMARK_TEST_STORE_CAPABILITIES[id(test_store_capability)] = root
     return root
 
 
@@ -248,6 +357,14 @@ def get_production_benchmark_worker_supervision_root(
     identity_sha256 = _benchmark_root_digest(
         authority_kind="production_workflow_service", journal_root=journal_root,
         workflow_store=learning_workflow_run_store,
+        memory_store_token=content_sha256({
+            "authority_kind": "production_workflow_service",
+            "journal_root": str(journal_root).casefold(),
+            "store_class": (
+                f"{type(learning_workflow_run_store).__module__}."
+                f"{type(learning_workflow_run_store).__qualname__}"
+            ),
+        }),
     )
     authority = _BenchmarkStoreAuthority(
         lambda run_id: learning_workflow_run_store.get(run_id),
@@ -285,6 +402,348 @@ def _validate_benchmark_supervision_root(
     return root
 
 
+def _benchmark_controller_abandoned_revalidate(
+    *,
+    root: BenchmarkWorkerSupervisionRoot,
+    controller_name: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+) -> dict[str, Any]:
+    """abandoned admission 前只读重验 store、journal 与可重算 OS identity。"""
+
+    store_state = "indeterminate"
+    store_state_sha256 = None
+    error_value = None
+    try:
+        current = root.read_only_store_authority.get(run_id)
+    except BaseException as error:
+        from app.learn.workflow_state import LearningWorkflowTransitionError
+
+        if (
+            isinstance(error, LearningWorkflowTransitionError)
+            and str(error) == "workflow run not found"
+        ):
+            store_state = "absent"
+        else:
+            error_value = {
+                "stage": "store",
+                "error_type": type(error).__name__,
+                "message": str(error),
+            }
+    else:
+        if isinstance(current, dict):
+            store_state = "present"
+            store_state_sha256 = content_sha256(current)
+        else:
+            error_value = {
+                "stage": "store",
+                "error_type": "TypeError",
+                "message": "benchmark controller store state is invalid",
+            }
+
+    reservation = None
+    reservation_ref = None
+    reservation_path = root.journal_root / (
+        f"{operation_id}.benchmark-reservation.json"
+    )
+    if reservation_path.exists():
+        try:
+            candidate = _read_json_object(
+                reservation_path,
+                label="benchmark controller abandoned reservation",
+            )
+            if (
+                content_sha256(candidate) != candidate.get("content_sha256")
+                or candidate.get("run_id") != run_id
+                or candidate.get("stage") != stage
+                or candidate.get("operation_id") != operation_id
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark controller abandoned reservation is invalid"
+                )
+            reservation = candidate
+            reservation_ref = {"content_sha256": candidate["content_sha256"]}
+        except BaseException as error:
+            if error_value is None:
+                error_value = {
+                    "stage": "reservation",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+
+    owners: list[dict[str, Any]] = []
+    for owner_path in root.journal_root.glob("*.benchmark-owner.json"):
+        try:
+            candidate = _read_json_object(
+                owner_path,
+                label="benchmark controller abandoned owner",
+            )
+        except BaseException as error:
+            if error_value is None:
+                error_value = {
+                    "stage": "owner",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+            continue
+        if (
+            candidate.get("run_id") == run_id
+            and candidate.get("stage") == stage
+            and candidate.get("operation_id") == operation_id
+        ):
+            if content_sha256(candidate) != candidate.get("content_sha256"):
+                error_value = {
+                    "stage": "owner",
+                    "error_type": "LearningStageWorkerError",
+                    "message": "benchmark controller abandoned owner is invalid",
+                }
+            owners.append(candidate)
+    owner = owners[0] if len(owners) == 1 else None
+    if len(owners) > 1 and error_value is None:
+        error_value = {
+            "stage": "owner",
+            "error_type": "LearningStageWorkerError",
+            "message": "benchmark controller abandoned owner is ambiguous",
+        }
+    owner_ref = (
+        {"content_sha256": owner["content_sha256"]}
+        if owner is not None
+        else None
+    )
+    job_probe = None
+    process_probe = None
+    if reservation is not None:
+        from app.learn.hybrid.windows_process_scope import (
+            benchmark_worker_scope_name_v1,
+        )
+
+        try:
+            scope_name = benchmark_worker_scope_name_v1(
+                authority_kind=reservation["authority_kind"],
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
+                worker_id=reservation["worker_id"],
+                payload_sha256=reservation["payload_sha256"],
+                execution_nonce=reservation["execution_nonce"],
+            )
+            job_probe = _benchmark_cleanup_replay_job_probe(scope_name)
+            process_identity = (
+                owner.get("process_identity") if owner is not None else None
+            )
+            if process_identity is not None:
+                process_probe = _benchmark_cleanup_replay_process_probe(
+                    process_identity
+                )
+        except BaseException as error:
+            if error_value is None:
+                error_value = {
+                    "stage": "os",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+    clean = (
+        error_value is None
+        and store_state == "absent"
+        and reservation is None
+        and owner is None
+    )
+    observation = seal_immutable({
+        "contract_version": (
+            "benchmark_worker_controller_abandoned_revalidation_v1"
+        ),
+        "authority_kind": root.authority_kind,
+        "controller_name": controller_name,
+        "run_id": run_id,
+        "stage": stage,
+        "operation_id": operation_id,
+        "store_state": store_state,
+        "store_state_content_sha256": store_state_sha256,
+        "reservation_ref": reservation_ref,
+        "owner_ref": owner_ref,
+        "job_probe": deepcopy(job_probe),
+        "process_probe": deepcopy(process_probe),
+        "error": error_value,
+        "outcome": "verified_clean" if clean else "recovery_required",
+        "artifact_is_authorization": False,
+    })
+    _write_json_atomic(
+        root.journal_root
+        / (
+            f"{operation_id}"
+            ".benchmark-controller-abandoned-revalidation.json"
+        ),
+        observation,
+    )
+    return observation
+
+
+def _benchmark_controller_state_path(
+    root: BenchmarkWorkerSupervisionRoot,
+    controller_name: str,
+) -> Path:
+    return root.journal_root / (
+        f"{content_sha256({'controller_name': controller_name})}"
+        ".benchmark-controller-state.json"
+    )
+
+
+def _persist_benchmark_controller_state(
+    *,
+    root: BenchmarkWorkerSupervisionRoot,
+    controller_name: str,
+    state: str,
+    release_result: dict[str, Any],
+    close_result: dict[str, Any],
+    predecessor_content_sha256: str | None,
+) -> dict[str, Any]:
+    value = seal_immutable({
+        "contract_version": "benchmark_worker_controller_state_v1",
+        "authority_kind": root.authority_kind,
+        "controller_name": controller_name,
+        "state": state,
+        "thread_id": get_ident(),
+        "release_result": deepcopy(release_result),
+        "close_result": deepcopy(close_result),
+        "predecessor_content_sha256": predecessor_content_sha256,
+    })
+    _write_json_atomic(
+        _benchmark_controller_state_path(root, controller_name),
+        value,
+    )
+    return value
+
+
+def _load_benchmark_controller_state(
+    root: BenchmarkWorkerSupervisionRoot,
+    controller_name: str,
+) -> dict[str, Any] | None:
+    path = _benchmark_controller_state_path(root, controller_name)
+    if not path.exists():
+        return None
+    value = _read_json_object(path, label="benchmark controller state")
+    if (
+        value.get("contract_version") != "benchmark_worker_controller_state_v1"
+        or value.get("authority_kind") != root.authority_kind
+        or value.get("controller_name") != controller_name
+        or value.get("state") not in {"recovery_required", "clean"}
+        or content_sha256(value) != value.get("content_sha256")
+    ):
+        raise LearningStageWorkerError("benchmark controller state is invalid")
+    return value
+
+
+def _benchmark_checked_release_mutex(handle: object) -> None:
+    import win32event
+
+    result = win32event.ReleaseMutex(handle)
+    if result is False:
+        raise LearningStageWorkerError(
+            "benchmark worker controller ReleaseMutex returned false"
+        )
+
+
+def _benchmark_checked_close_handle(handle: object) -> None:
+    import win32api
+
+    result = win32api.CloseHandle(handle)
+    if result is False:
+        raise LearningStageWorkerError(
+            "benchmark worker controller CloseHandle returned false"
+        )
+
+
+def _benchmark_controller_error_code(error: BaseException) -> int | None:
+    code = getattr(error, "winerror", None)
+    if code is None and getattr(error, "args", None):
+        first = error.args[0]
+        code = first if isinstance(first, int) else None
+    return code
+
+
+def _recover_benchmark_controller_local_entry(
+    *,
+    root: BenchmarkWorkerSupervisionRoot,
+    controller_name: str,
+    entry: dict[str, Any],
+    held: dict[str, dict[str, Any]],
+) -> None:
+    """同一thread仅清理保留的uncertain ownership；本次绝不进入business body。"""
+
+    import win32event
+
+    predecessor = entry.get("state_ref")
+    if entry["state"] == "release_uncertain":
+        outcome = win32event.WaitForSingleObject(entry["handle"], 0)
+        if outcome not in {win32event.WAIT_OBJECT_0, win32event.WAIT_ABANDONED}:
+            raise LearningStageWorkerError(
+                "benchmark worker controller recovery wait failed"
+            )
+        successful_releases = 0
+        for _ in range(int(entry["depth"]) + 1):
+            try:
+                _benchmark_checked_release_mutex(entry["handle"])
+                successful_releases += 1
+            except BaseException as error:
+                if (
+                    successful_releases > 0
+                    and _benchmark_controller_error_code(error) == 288
+                ):
+                    break
+                raise LearningStageWorkerError(
+                    "benchmark worker controller recovery release failed"
+                ) from error
+        if successful_releases == 0:
+            raise LearningStageWorkerError(
+                "benchmark worker controller recovery release failed"
+            )
+        entry["depth"] = 0
+    try:
+        _benchmark_checked_close_handle(entry["handle"])
+    except BaseException as error:
+        if _benchmark_controller_error_code(error) != 6:
+            raise LearningStageWorkerError(
+                "benchmark worker controller recovery close failed"
+            ) from error
+    clean = _persist_benchmark_controller_state(
+        root=root,
+        controller_name=controller_name,
+        state="clean",
+        release_result={"status": "reconciled"},
+        close_result={"status": "closed_or_already_closed"},
+        predecessor_content_sha256=predecessor,
+    )
+    entry["state_ref"] = clean["content_sha256"]
+    held.pop(controller_name, None)
+
+
+def _join_benchmark_failed_launch_process(process: object | None) -> dict[str, Any]:
+    if process is None:
+        return {"not_applicable": True}
+    process.join(5)
+    alive_after = bool(process.is_alive())
+    result = {
+        "join_timeout_seconds": 5,
+        "alive_after": alive_after,
+        "exitcode": getattr(process, "exitcode", None),
+    }
+    if alive_after:
+        raise LearningStageWorkerError(
+            "benchmark failed launch process remained alive after join"
+        )
+    return result
+
+
+def _unlink_benchmark_failed_launch_beacon(path: Path) -> dict[str, Any]:
+    existed_before = path.exists()
+    path.unlink(missing_ok=True)
+    return {
+        "existed_before": existed_before,
+        "absent_after": not path.exists(),
+    }
+
+
 @contextmanager
 def hold_benchmark_worker_controller(
     *,
@@ -305,11 +764,14 @@ def hold_benchmark_worker_controller(
     import win32api
     import win32event
 
+    run_value = _required_text(run_id, "run_id")
+    stage_value = _required_text(stage, "stage")
+    operation_value = _required_text(operation_id, "operation_id")
     name = benchmark_worker_controller_mutex_name_v1(
         authority_kind=root.authority_kind,
-        run_id=_required_text(run_id, "run_id"),
-        stage=_required_text(stage, "stage"),
-        operation_id=_required_text(operation_id, "operation_id"),
+        run_id=run_value,
+        stage=stage_value,
+        operation_id=operation_value,
     )
     held = getattr(_BENCHMARK_CONTROLLER_LOCAL, "held", None)
     if held is None:
@@ -321,11 +783,43 @@ def hold_benchmark_worker_controller(
             raise LearningStageWorkerError(
                 "benchmark worker controller guard root does not match"
             )
+        if existing.get("state") != "active":
+            _recover_benchmark_controller_local_entry(
+                root=root,
+                controller_name=name,
+                entry=existing,
+                held=held,
+            )
+            raise LearningStageWorkerError(
+                "benchmark worker controller recovery required"
+            )
         outcome = win32event.WaitForSingleObject(existing["handle"], timeout_ms)
         if outcome not in {win32event.WAIT_OBJECT_0, win32event.WAIT_ABANDONED}:
             if outcome == win32event.WAIT_TIMEOUT:
                 raise LearningStageWorkerError("benchmark worker controller mutex timed out")
             raise LearningStageWorkerError("benchmark worker controller mutex wait failed")
+        if outcome == win32event.WAIT_ABANDONED:
+            revalidation = _benchmark_controller_abandoned_revalidate(
+                root=root,
+                controller_name=name,
+                run_id=run_value,
+                stage=stage_value,
+                operation_id=operation_value,
+            )
+            if revalidation["outcome"] != "verified_clean":
+                _persist_benchmark_controller_state(
+                    root=root,
+                    controller_name=name,
+                    state="recovery_required",
+                    release_result={"status": "owned_pending_release"},
+                    close_result={"status": "open_pending_release"},
+                    predecessor_content_sha256=revalidation[
+                        "content_sha256"
+                    ],
+                )
+                raise LearningStageWorkerError(
+                    "benchmark worker controller recovery required"
+                )
         existing["depth"] += 1
         primary: BaseException | None = None
         release_error: BaseException | None = None
@@ -334,17 +828,31 @@ def hold_benchmark_worker_controller(
         except BaseException as error:
             primary = error
         try:
-            win32event.ReleaseMutex(existing["handle"])
+            _benchmark_checked_release_mutex(existing["handle"])
         except BaseException as error:
             release_error = error
-        finally:
+        if release_error is None:
             existing["depth"] -= 1
         if release_error is not None:
+            state = _persist_benchmark_controller_state(
+                root=root,
+                controller_name=name,
+                state="recovery_required",
+                release_result={
+                    "status": "error",
+                    "error_type": type(release_error).__name__,
+                    "message": str(release_error),
+                },
+                close_result={"status": "retained"},
+                predecessor_content_sha256=existing.get("state_ref"),
+            )
+            existing["state"] = "release_uncertain"
+            existing["state_ref"] = state["content_sha256"]
             _record_benchmark_controller_cleanup_failure(
-                root=root, name=name, recursion_level=existing["depth"] + 1,
+                root=root, name=name, recursion_level=existing["depth"],
                 primary=primary,
                 release={"status": "error", "error_type": type(release_error).__name__, "message": str(release_error)},
-                close={"status": "not_outermost"},
+                close={"status": "retained"},
             )
         if primary is not None:
             if release_error is not None:
@@ -356,6 +864,11 @@ def hold_benchmark_worker_controller(
             ) from release_error
         return
 
+    durable_state = _load_benchmark_controller_state(root, name)
+    if durable_state is not None and durable_state["state"] == "recovery_required":
+        raise LearningStageWorkerError(
+            "benchmark worker controller recovery required"
+        )
     handle = win32event.CreateMutex(None, False, name)
     admitted = False
     primary: BaseException | None = None
@@ -379,32 +892,115 @@ def hold_benchmark_worker_controller(
         if outcome not in {win32event.WAIT_OBJECT_0, win32event.WAIT_ABANDONED}:
             raise LearningStageWorkerError("benchmark worker controller mutex wait failed")
         admitted = True
-        guard = object()
-        held[name] = {"guard": guard, "handle": handle, "depth": 1, "root": root}
+        revalidation = None
+        if outcome == win32event.WAIT_ABANDONED:
+            revalidation = _benchmark_controller_abandoned_revalidate(
+                root=root,
+                controller_name=name,
+                run_id=run_value,
+                stage=stage_value,
+                operation_id=operation_value,
+            )
+            if revalidation["outcome"] != "verified_clean":
+                _persist_benchmark_controller_state(
+                    root=root,
+                    controller_name=name,
+                    state="recovery_required",
+                    release_result={"status": "owned_pending_release"},
+                    close_result={"status": "open_pending_release"},
+                    predecessor_content_sha256=revalidation[
+                        "content_sha256"
+                    ],
+                )
+                raise LearningStageWorkerError(
+                    "benchmark worker controller recovery required"
+                )
+        guard = seal_immutable({
+            "contract_version": "benchmark_worker_controller_guard_v1",
+            "controller_name": name,
+            "thread_id": get_ident(),
+            "acquire_outcome": (
+                "abandoned_revalidated_clean"
+                if outcome == win32event.WAIT_ABANDONED
+                else "acquired"
+            ),
+            "abandoned_revalidation_ref": (
+                {"content_sha256": revalidation["content_sha256"]}
+                if revalidation is not None
+                else None
+            ),
+        })
+        held[name] = {
+            "guard": guard,
+            "handle": handle,
+            "depth": 1,
+            "root": root,
+            "state": "active",
+            "state_ref": (
+                durable_state["content_sha256"]
+                if durable_state is not None
+                else None
+            ),
+        }
         try:
             yield guard
         except BaseException as error:
             primary = error
-        held.pop(name, None)
     finally:
         release_error: BaseException | None = None
         close_error: BaseException | None = None
         release_result: dict[str, Any] = {"status": "not_owned"}
         close_result: dict[str, Any] = {"status": "not_open"}
-        if admitted and handle is not None:
+        entry = held.get(name)
+        if (
+            admitted
+            and handle is not None
+            and entry is not None
+            and entry.get("state") == "active"
+        ):
             try:
-                win32event.ReleaseMutex(handle)
+                _benchmark_checked_release_mutex(handle)
                 release_result = {"status": "released"}
             except BaseException as error:
                 release_error = error
                 release_result = {"status": "error", "error_type": type(error).__name__, "message": str(error)}
-        try:
-            if handle is not None:
-                win32api.CloseHandle(handle)
-                close_result = {"status": "closed"}
-        except BaseException as error:
-            close_error = error
-            close_result = {"status": "error", "error_type": type(error).__name__, "message": str(error)}
+                close_result = {"status": "retained"}
+                state = _persist_benchmark_controller_state(
+                    root=root,
+                    controller_name=name,
+                    state="recovery_required",
+                    release_result=release_result,
+                    close_result={"status": "retained"},
+                    predecessor_content_sha256=entry.get("state_ref"),
+                )
+                entry["state"] = "release_uncertain"
+                entry["state_ref"] = state["content_sha256"]
+        if release_error is None and (
+            not admitted
+            or entry is None
+            or entry.get("state") == "active"
+        ):
+            try:
+                if handle is not None:
+                    _benchmark_checked_close_handle(handle)
+                    close_result = {"status": "closed"}
+            except BaseException as error:
+                close_error = error
+                close_result = {"status": "error", "error_type": type(error).__name__, "message": str(error)}
+                if entry is not None:
+                    state = _persist_benchmark_controller_state(
+                        root=root,
+                        controller_name=name,
+                        state="recovery_required",
+                        release_result=release_result,
+                        close_result=close_result,
+                        predecessor_content_sha256=entry.get("state_ref"),
+                    )
+                    entry["state"] = "close_pending"
+                    entry["depth"] = 0
+                    entry["state_ref"] = state["content_sha256"]
+            else:
+                held.pop(name, None)
         if release_error is not None or close_error is not None:
             _record_benchmark_controller_cleanup_failure(
                 root=root, name=name, recursion_level=1, primary=primary,
@@ -725,8 +1321,12 @@ class LearningStageWorkerError(ValueError):
 class LearningStageWorkerCleanupError(LearningStageWorkerError):
     """学习阶段 worker 启动清理无法证明为完成。"""
 
-    def __init__(self, evidence: dict[str, Any]) -> None:
-        super().__init__("Hybrid worker start cleanup is indeterminate")
+    def __init__(
+        self,
+        evidence: dict[str, Any],
+        message: str = "Hybrid worker start cleanup is indeterminate",
+    ) -> None:
+        super().__init__(message)
         self.cleanup_evidence = deepcopy(evidence)
 
 
@@ -2603,6 +3203,12 @@ class LearningStageWorkerRegistry:
         event_handle = None
         scope = None
         process = None
+        process_identity = None
+        beacon_ref = None
+        assignment_ref = None
+        launch_identity_anchor = None
+        owner = None
+        gate_released = False
         operation_key = (current["run_id"], current["stage"], current["operation_id"])
         try:
             event_handle = win32event.CreateEvent(None, True, False, event_name)
@@ -2672,6 +3278,18 @@ class LearningStageWorkerRegistry:
                 assignment,
             )
             beacon_ref = {"content_sha256": beacon["content_sha256"]}
+            assignment_ref = {
+                "content_sha256": assignment["content_sha256"]
+            }
+            owner = self._benchmark_owner_journal(
+                current=launching, anchor=anchor, supervision=supervision,
+                scope_name=scope_name, supervisor_identity=supervisor_identity,
+                phase="assignment_proven", process_identity=process_identity,
+                beacon_ref=beacon_ref,
+                assignment_ref=assignment_ref,
+                gate_state="closed", predecessor=owner["content_sha256"],
+            )
+            _write_json_atomic(owner_path, owner)
             launch_identity_anchor = _compose_benchmark_launch_identity_anchor(
                 anchored_reservation=current,
                 launching_reservation=launching,
@@ -2690,22 +3308,14 @@ class LearningStageWorkerRegistry:
                 ),
                 launch_identity_anchor,
             )
-            owner = self._benchmark_owner_journal(
-                current=launching, anchor=anchor, supervision=supervision,
-                scope_name=scope_name, supervisor_identity=supervisor_identity,
-                phase="assignment_proven", process_identity=process_identity,
-                beacon_ref=beacon_ref,
-                assignment_ref={"content_sha256": assignment["content_sha256"]},
-                gate_state="closed", predecessor=owner["content_sha256"],
-            )
-            _write_json_atomic(owner_path, owner)
             win32event.SetEvent(event_handle)
+            gate_released = True
             owner = self._benchmark_owner_journal(
                 current=launching, anchor=anchor, supervision=supervision,
                 scope_name=scope_name, supervisor_identity=supervisor_identity,
                 phase="gate_released", process_identity=process_identity,
                 beacon_ref=beacon_ref,
-                assignment_ref={"content_sha256": assignment["content_sha256"]},
+                assignment_ref=assignment_ref,
                 gate_state="released", predecessor=owner["content_sha256"],
             )
             _write_json_atomic(owner_path, owner)
@@ -2732,60 +3342,173 @@ class LearningStageWorkerRegistry:
             self._workers_by_operation.setdefault(operation_key, []).append(current["worker_id"])
             self._workers_by_invocation[(*operation_key, current["task_kind"], current["payload_sha256"])] = current["worker_id"]
             return self._public_record(record)
-        except BaseException:
+        except BaseException as primary_error:
             failed_beacon = None
             if beacon_path.exists():
                 try:
                     failed_beacon = json.loads(beacon_path.read_text(encoding="utf-8"))
                 except BaseException:
                     failed_beacon = None
-            failed_process_identity = None
+            failed_process_identity = deepcopy(process_identity)
             if process is not None and isinstance(getattr(process, "pid", None), int):
+                if failed_process_identity is None:
+                    try:
+                        failed_process_identity = {
+                            "pid": process.pid,
+                            "create_time_ns": int(
+                                round(psutil.Process(process.pid).create_time() * 1_000_000_000)
+                            ),
+                        }
+                    except BaseException:
+                        failed_process_identity = None
+
+            cleanup_failures: list[dict[str, str]] = []
+
+            def cleanup_step(name: str, action: Callable[[], object]) -> dict[str, Any]:
                 try:
-                    import psutil
-                    failed_process_identity = {
-                        "pid": process.pid,
-                        "create_time_ns": int(
-                            round(psutil.Process(process.pid).create_time() * 1_000_000_000)
+                    result = action()
+                except BaseException as error:
+                    failure = {
+                        "step": name,
+                        "error_type": type(error).__name__,
+                        "message": str(error),
+                    }
+                    cleanup_failures.append(failure)
+                    return {"status": "error", **failure}
+                return {"status": "completed", "result": deepcopy(result)}
+
+            process_terminate = cleanup_step(
+                "process_terminate",
+                lambda: (
+                    {
+                        "alive_before": bool(process.is_alive()),
+                        "terminate_called": (
+                            bool(process.is_alive()) and not process.terminate()
                         ),
                     }
-                except BaseException:
-                    failed_process_identity = None
-            if process is not None:
-                try:
-                    if process.is_alive(): process.terminate()
-                    process.join(5)
-                except BaseException:
-                    pass
-                try: process.close()
-                except BaseException: pass
-            if event_handle is not None:
-                try: win32api.CloseHandle(event_handle)
-                except BaseException: pass
-            if scope is not None:
-                try: scope.close()
-                except BaseException: pass
-            if isinstance(failed_process_identity, dict) and isinstance(locals().get("owner"), dict):
-                try:
-                    failed_owner = self._benchmark_owner_journal(
-                        current=self._benchmark_reservations.get(operation_key, current),
-                        anchor=anchor, supervision=supervision,
-                        scope_name=scope_name, supervisor_identity=supervisor_identity,
-                        phase="recovery_required",
-                        process_identity=failed_process_identity,
-                        beacon_ref=(
+                    if process is not None
+                    else {"not_applicable": True}
+                ),
+            )
+            job_terminate = cleanup_step(
+                "job_terminate",
+                lambda: (
+                    {"terminate_called": not scope.terminate()}
+                    if scope is not None
+                    else {"not_applicable": True}
+                ),
+            )
+            process_join = cleanup_step(
+                "process_join",
+                lambda: _join_benchmark_failed_launch_process(process),
+            )
+            process_close = cleanup_step(
+                "process_close",
+                lambda: (
+                    {"close_called": not process.close()}
+                    if process is not None
+                    else {"not_applicable": True}
+                ),
+            )
+            event_close = cleanup_step(
+                "event_close",
+                lambda: (
+                    {"close_called": not win32api.CloseHandle(event_handle)}
+                    if event_handle is not None
+                    else {"not_applicable": True}
+                ),
+            )
+            beacon_unlink = cleanup_step(
+                "beacon_unlink",
+                lambda: _unlink_benchmark_failed_launch_beacon(beacon_path),
+            )
+            job_close = cleanup_step(
+                "job_close",
+                lambda: (
+                    {"close_called": not scope.close()}
+                    if scope is not None
+                    else {"not_applicable": True}
+                ),
+            )
+            cleanup_observation = seal_immutable({
+                "contract_version": "benchmark_worker_launch_failure_cleanup_v1",
+                "authority_kind": root.authority_kind,
+                "run_id": current["run_id"],
+                "stage": current["stage"],
+                "operation_id": current["operation_id"],
+                "worker_id": current["worker_id"],
+                "scope_name": scope_name,
+                "process_identity": deepcopy(failed_process_identity),
+                "assignment_observation_ref": deepcopy(assignment_ref),
+                "launch_identity_anchor_ref": (
+                    {"content_sha256": launch_identity_anchor["content_sha256"]}
+                    if isinstance(launch_identity_anchor, dict)
+                    else None
+                ),
+                "primary_error": {
+                    "error_type": type(primary_error).__name__,
+                    "message": str(primary_error),
+                },
+                "process_terminate": process_terminate,
+                "job_terminate": job_terminate,
+                "process_join": process_join,
+                "process_close": process_close,
+                "event_close": event_close,
+                "beacon_unlink": beacon_unlink,
+                "job_close": job_close,
+                "cleanup_failures": deepcopy(cleanup_failures),
+                "cleanup_status": (
+                    "verified" if not cleanup_failures else "indeterminate"
+                ),
+                "predecessor_content_sha256": (
+                    owner["content_sha256"]
+                    if isinstance(owner, dict)
+                    else current["content_sha256"]
+                ),
+                "artifact_is_authorization": False,
+            })
+            cleanup_path = self._result_root / (
+                f"{current['worker_id']}.benchmark-launch-failure-cleanup.json"
+            )
+            _write_json_atomic(cleanup_path, cleanup_observation)
+            if isinstance(owner, dict):
+                failed_owner = self._benchmark_owner_journal(
+                    current=self._benchmark_reservations.get(operation_key, current),
+                    anchor=anchor, supervision=supervision,
+                    scope_name=scope_name, supervisor_identity=supervisor_identity,
+                    phase="recovery_required",
+                    process_identity=failed_process_identity,
+                    beacon_ref=(
+                        deepcopy(beacon_ref)
+                        if isinstance(beacon_ref, dict)
+                        else (
                             {"content_sha256": failed_beacon.get("content_sha256")}
                             if isinstance(failed_beacon, dict)
-                            and failed_beacon.get("process_identity") == failed_process_identity
+                            and failed_beacon.get("process_identity")
+                            == failed_process_identity
                             else None
-                        ),
-                        assignment_ref=None, gate_state="not_released_due_to_failure",
-                        predecessor=owner["content_sha256"],
-                    )
-                    _write_json_atomic(owner_path, failed_owner)
-                    beacon_path.unlink(missing_ok=True)
-                except BaseException:
-                    pass
+                        )
+                    ),
+                    assignment_ref=assignment_ref,
+                    gate_state=(
+                        "released_before_failure"
+                        if gate_released
+                        else "not_released_due_to_failure"
+                    ),
+                    predecessor=owner["content_sha256"],
+                )
+                owner_body = deepcopy(failed_owner)
+                owner_body.pop("content_sha256")
+                owner_body["exit_observation_ref"] = {
+                    "content_sha256": cleanup_observation["content_sha256"]
+                }
+                failed_owner = seal_immutable(owner_body)
+                _write_json_atomic(owner_path, failed_owner)
+            if cleanup_failures:
+                raise LearningStageWorkerCleanupError(
+                    cleanup_observation,
+                    "Benchmark worker launch cleanup is indeterminate",
+                ) from primary_error
             raise
 
     @staticmethod

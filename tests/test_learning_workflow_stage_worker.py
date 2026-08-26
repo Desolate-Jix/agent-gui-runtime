@@ -618,6 +618,31 @@ def _benchmark_controller_owner_helper(root_path: str, ready_queue) -> None:
         time.sleep(60)
 
 
+def _benchmark_controller_contender_helper(
+    root_path: str,
+    ready_queue,
+    run_id: str,
+    operation_id: str,
+) -> None:
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=Path(root_path), test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    try:
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id=run_id,
+            stage="screen_understanding", operation_id=operation_id,
+            timeout_ms=200,
+        ):
+            ready_queue.put({"entered": True})
+    except BaseException as error:
+        ready_queue.put({
+            "entered": False,
+            "error_type": type(error).__name__,
+            "message": str(error),
+        })
+
+
 def test_worker_registry_starts_and_reports_owned_process(tmp_path: Path) -> None:
     registry = LearningStageWorkerRegistry(
         result_root=tmp_path,
@@ -1368,6 +1393,85 @@ def test_benchmark_worker_anchor_and_supervision_reject_substitution(
         )
 
 
+def test_benchmark_worker_test_root_rejects_production_and_cross_test_overlap(
+    tmp_path: Path,
+) -> None:
+    from app.learn.workflow_store import learning_workflow_run_store
+
+    first_root = tmp_path / "first"
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=first_root,
+        test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(),
+        test_store_capability=object(),
+    )
+    token_path = first_root / ".benchmark-test-memory-store-token.json"
+    token = json.loads(token_path.read_text(encoding="utf-8"))
+    assert token["contract_version"] == (
+        "benchmark_worker_test_memory_store_token_v1"
+    )
+    assert token["journal_root"] == str(first_root.resolve())
+    assert len(token["memory_store_token"]) == 64
+    assert root.store_identity_sha256 == root.read_only_store_authority.identity_sha256
+
+    with pytest.raises(LearningStageWorkerError, match="cross-test"):
+        compose_test_benchmark_worker_supervision_root(
+            journal_root=first_root,
+            test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(),
+            test_store_capability=object(),
+        )
+
+    shared_capability = object()
+    compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path / "second",
+        test_capability=shared_capability,
+        workflow_store=LearningWorkflowRunStore(),
+        test_store_capability=object(),
+    )
+    with pytest.raises(LearningStageWorkerError, match="cross-test"):
+        compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path / "third",
+            test_capability=shared_capability,
+            workflow_store=LearningWorkflowRunStore(),
+            test_store_capability=object(),
+        )
+
+    production_root = (
+        Path(__file__).resolve().parents[1] / "logs" / "workflow-workers"
+    ).resolve()
+    with pytest.raises(LearningStageWorkerError, match="production"):
+        compose_test_benchmark_worker_supervision_root(
+            journal_root=production_root,
+            test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(),
+            test_store_capability=object(),
+        )
+    with pytest.raises(LearningStageWorkerError, match="production"):
+        compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path / "production-store-substitution",
+            test_capability=object(),
+            workflow_store=learning_workflow_run_store,
+            test_store_capability=object(),
+        )
+    with pytest.raises(LearningStageWorkerError, match="production"):
+        compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path / "production-state-overlap",
+            test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(
+                state_path=(
+                    getattr(learning_workflow_run_store, "_state_path", None)
+                    or (
+                        Path(__file__).resolve().parents[1]
+                        / "runtime_state"
+                        / "learning-workflow-runs.json"
+                    )
+                )
+            ),
+            test_store_capability=object(),
+        )
+
+
 def test_benchmark_worker_controller_is_recursive_and_times_out_cross_thread(
     tmp_path: Path,
 ) -> None:
@@ -1392,6 +1496,11 @@ def test_benchmark_worker_controller_is_recursive_and_times_out_cross_thread(
             operation_id="operation-controller",
         ) as inner:
             assert inner is outer
+            assert outer["contract_version"] == (
+                "benchmark_worker_controller_guard_v1"
+            )
+            assert outer["acquire_outcome"] == "acquired"
+            assert outer["abandoned_revalidation_ref"] is None
 
         def contend() -> None:
             entered.set()
@@ -1451,9 +1560,26 @@ def test_benchmark_worker_controller_cleanup_sidecar_preserves_primary_precedenc
     )
     assert first_sidecar["primary_exception"]["message"] == "primary-controller-error"
     assert first_sidecar["release_result"]["status"] == "error"
-    assert first_sidecar["close_result"]["status"] == "closed"
+    assert first_sidecar["close_result"]["status"] == "retained"
+
+    state_path = next(tmp_path.glob("*.benchmark-controller-state.json"))
+    assert json.loads(state_path.read_text(encoding="utf-8"))["state"] == (
+        "recovery_required"
+    )
 
     monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+    with pytest.raises(LearningStageWorkerError, match="recovery required"):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-controller-release",
+            stage="screen_understanding", operation_id="operation-controller-release",
+        ):
+            pytest.fail("recovery call entered business body")
+    with hold_benchmark_worker_controller(
+        supervision_root=root, run_id="run-controller-release",
+        stage="screen_understanding", operation_id="operation-controller-release",
+    ):
+        pass
+
     real_close = win32api.CloseHandle
     close_calls = 0
 
@@ -1481,11 +1607,253 @@ def test_benchmark_worker_controller_cleanup_sidecar_preserves_primary_precedenc
         == "error"
         for path in sidecars
     )
+    monkeypatch.setattr(win32api, "CloseHandle", real_close)
+    with pytest.raises(LearningStageWorkerError, match="recovery required"):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-controller-close",
+            stage="screen_understanding", operation_id="operation-controller-close",
+        ):
+            pytest.fail("close recovery call entered business body")
+    with hold_benchmark_worker_controller(
+        supervision_root=root, run_id="run-controller-close",
+        stage="screen_understanding", operation_id="operation-controller-close",
+    ):
+        pass
+
+
+@pytest.mark.parametrize("failure_mode", ["before", "api_false", "success_after"])
+def test_benchmark_worker_controller_release_failure_retains_ownership_until_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    import win32event
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    real_release = win32event.ReleaseMutex
+    injected = {"done": False}
+
+    def faulty_release(handle):
+        if injected["done"]:
+            return real_release(handle)
+        injected["done"] = True
+        if failure_mode == "success_after":
+            real_release(handle)
+        if failure_mode == "api_false":
+            return False
+        raise OSError(f"injected-release-{failure_mode}")
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", faulty_release)
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="benchmark worker controller cleanup failed",
+    ):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id=f"run-release-{failure_mode}",
+            stage="screen_understanding",
+            operation_id=f"operation-release-{failure_mode}",
+        ):
+            pass
+    state_path = next(tmp_path.glob("*.benchmark-controller-state.json"))
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["state"] == "recovery_required"
+    assert state["close_result"] == {"status": "retained"}
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    contender = context.Process(
+        target=_benchmark_controller_contender_helper,
+        args=(
+            str(tmp_path), queue, f"run-release-{failure_mode}",
+            f"operation-release-{failure_mode}",
+        ),
+        name=f"test-owned-controller-contender-{failure_mode}",
+    )
+    contender.start()
+    try:
+        observed = queue.get(timeout=10)
+        contender.join(timeout=10)
+        assert contender.is_alive() is False
+        assert observed["entered"] is False
+        assert observed["message"] == "benchmark worker controller recovery required"
+    finally:
+        if contender.is_alive():
+            contender.terminate(); contender.join(timeout=10)
+        queue.close(); queue.join_thread()
+
+    with pytest.raises(LearningStageWorkerError, match="recovery required"):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id=f"run-release-{failure_mode}",
+            stage="screen_understanding",
+            operation_id=f"operation-release-{failure_mode}",
+        ):
+            pytest.fail("recovery call entered business body")
+    with hold_benchmark_worker_controller(
+        supervision_root=root, run_id=f"run-release-{failure_mode}",
+        stage="screen_understanding",
+        operation_id=f"operation-release-{failure_mode}",
+    ):
+        pass
+
+
+@pytest.mark.parametrize("failure_mode", ["before", "api_false", "success_after"])
+def test_benchmark_worker_controller_close_failure_is_durable_until_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    import win32api
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    real_close = win32api.CloseHandle
+    injected = {"done": False}
+
+    def faulty_close(handle):
+        if injected["done"]:
+            return real_close(handle)
+        injected["done"] = True
+        if failure_mode == "success_after":
+            real_close(handle)
+        if failure_mode == "api_false":
+            return False
+        raise OSError(f"injected-close-{failure_mode}")
+
+    monkeypatch.setattr(win32api, "CloseHandle", faulty_close)
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="benchmark worker controller cleanup failed",
+    ):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id=f"run-close-{failure_mode}",
+            stage="screen_understanding",
+            operation_id=f"operation-close-{failure_mode}",
+        ):
+            pass
+    state = json.loads(
+        next(tmp_path.glob("*.benchmark-controller-state.json"))
+        .read_text(encoding="utf-8")
+    )
+    assert state["state"] == "recovery_required"
+    assert state["release_result"] == {"status": "released"}
+    assert state["close_result"]["status"] == "error"
+
+    monkeypatch.setattr(win32api, "CloseHandle", real_close)
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    contender = context.Process(
+        target=_benchmark_controller_contender_helper,
+        args=(
+            str(tmp_path), queue, f"run-close-{failure_mode}",
+            f"operation-close-{failure_mode}",
+        ),
+        name=f"test-owned-controller-close-contender-{failure_mode}",
+    )
+    contender.start()
+    try:
+        observed = queue.get(timeout=10)
+        contender.join(timeout=10)
+        assert contender.is_alive() is False
+        assert observed["entered"] is False
+        assert observed["message"] == "benchmark worker controller recovery required"
+    finally:
+        if contender.is_alive():
+            contender.terminate(); contender.join(timeout=10)
+        queue.close(); queue.join_thread()
+
+    with pytest.raises(LearningStageWorkerError, match="recovery required"):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id=f"run-close-{failure_mode}",
+            stage="screen_understanding",
+            operation_id=f"operation-close-{failure_mode}",
+        ):
+            pytest.fail("close recovery call entered business body")
+    with hold_benchmark_worker_controller(
+        supervision_root=root, run_id=f"run-close-{failure_mode}",
+        stage="screen_understanding",
+        operation_id=f"operation-close-{failure_mode}",
+    ):
+        pass
+
+
+def test_benchmark_worker_controller_recursive_release_failure_keeps_exact_depth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import win32event
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    real_release = win32event.ReleaseMutex
+    injected = {"done": False}
+
+    def fail_once_before_release(handle):
+        if not injected["done"]:
+            injected["done"] = True
+            raise OSError("injected-recursive-release-before-call")
+        return real_release(handle)
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", fail_once_before_release)
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="benchmark worker controller cleanup failed",
+    ):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-recursive-release",
+            stage="screen_understanding",
+            operation_id="operation-recursive-release",
+        ):
+            with hold_benchmark_worker_controller(
+                supervision_root=root, run_id="run-recursive-release",
+                stage="screen_understanding",
+                operation_id="operation-recursive-release",
+            ):
+                pass
+    sidecar = json.loads(
+        next(tmp_path.glob("*.benchmark-controller-cleanup-failure.json"))
+        .read_text(encoding="utf-8")
+    )
+    assert sidecar["recursion_level"] == 2
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+    with pytest.raises(LearningStageWorkerError, match="recovery required"):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-recursive-release",
+            stage="screen_understanding",
+            operation_id="operation-recursive-release",
+        ):
+            pytest.fail("recursive recovery call entered business body")
+    with hold_benchmark_worker_controller(
+        supervision_root=root, run_id="run-recursive-release",
+        stage="screen_understanding",
+        operation_id="operation-recursive-release",
+    ) as outer:
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-recursive-release",
+            stage="screen_understanding",
+            operation_id="operation-recursive-release",
+        ) as inner:
+            assert inner is outer
 
 
 def test_benchmark_worker_controller_real_process_timeout_then_abandoned_revalidation(
     tmp_path: Path,
 ) -> None:
+    import win32api
+    import win32con
+    import win32event
+    from app.learn.hybrid.windows_process_scope import (
+        benchmark_worker_controller_mutex_name_v1,
+    )
+
     context = multiprocessing.get_context("spawn")
     queue = context.Queue()
     owner = context.Process(
@@ -1494,6 +1862,7 @@ def test_benchmark_worker_controller_real_process_timeout_then_abandoned_revalid
         name="test-owned-benchmark-controller-owner",
     )
     owner.start()
+    witness = None
     try:
         assert queue.get(timeout=10) == {"owned": True}
         root = compose_test_benchmark_worker_supervision_root(
@@ -1511,14 +1880,125 @@ def test_benchmark_worker_controller_real_process_timeout_then_abandoned_revalid
             ):
                 pytest.fail("live owner admitted a second controller")
         assert not list(tmp_path.glob("*.benchmark-reservation.json"))
+        controller_name = benchmark_worker_controller_mutex_name_v1(
+            authority_kind=root.authority_kind,
+            run_id="run-controller-process",
+            stage="screen_understanding",
+            operation_id="operation-controller-process",
+        )
+        witness = win32event.OpenMutex(
+            win32con.SYNCHRONIZE,
+            False,
+            controller_name,
+        )
         owner.terminate(); owner.join(timeout=10)
         assert owner.is_alive() is False
         with hold_benchmark_worker_controller(
             supervision_root=root, run_id="run-controller-process",
             stage="screen_understanding", operation_id="operation-controller-process",
-        ):
+        ) as guard:
+            assert guard["acquire_outcome"] == "abandoned_revalidated_clean"
+            assert guard["abandoned_revalidation_ref"] is not None
             assert not list(tmp_path.glob("*.benchmark-owner.json"))
+        revalidation = json.loads(
+            (
+                tmp_path
+                / "operation-controller-process.benchmark-controller-abandoned-revalidation.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert revalidation["outcome"] == "verified_clean"
+        assert revalidation["store_state"] == "absent"
+        assert revalidation["reservation_ref"] is None
+        assert revalidation["owner_ref"] is None
     finally:
+        if witness is not None:
+            win32api.CloseHandle(witness)
+        if owner.is_alive():
+            owner.terminate(); owner.join(timeout=10)
+        queue.close(); queue.join_thread()
+
+
+def test_benchmark_worker_controller_abandoned_dirty_revalidation_stays_durable(
+    tmp_path: Path,
+) -> None:
+    import win32api
+    import win32con
+    import win32event
+    from app.learn.hybrid.windows_process_scope import (
+        benchmark_worker_controller_mutex_name_v1,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    owner = context.Process(
+        target=_benchmark_controller_owner_helper,
+        args=(str(tmp_path), queue),
+        name="test-owned-controller-abandoned-dirty",
+    )
+    witness = None
+    owner.start()
+    try:
+        assert queue.get(timeout=10) == {"owned": True}
+        controller_name = benchmark_worker_controller_mutex_name_v1(
+            authority_kind=root.authority_kind,
+            run_id="run-controller-process",
+            stage="screen_understanding",
+            operation_id="operation-controller-process",
+        )
+        witness = win32event.OpenMutex(
+            win32con.SYNCHRONIZE, False, controller_name,
+        )
+        dirty_reservation = seal_immutable({
+            "run_id": "run-controller-process",
+            "stage": "screen_understanding",
+            "operation_id": "operation-controller-process",
+        })
+        (
+            tmp_path
+            / "operation-controller-process.benchmark-reservation.json"
+        ).write_text(json.dumps(dirty_reservation), encoding="utf-8")
+        owner.terminate(); owner.join(timeout=10)
+        assert owner.is_alive() is False
+        with pytest.raises(LearningStageWorkerError, match="recovery required"):
+            with hold_benchmark_worker_controller(
+                supervision_root=root, run_id="run-controller-process",
+                stage="screen_understanding",
+                operation_id="operation-controller-process",
+            ):
+                pytest.fail("dirty abandoned controller entered business body")
+        revalidation = json.loads(
+            (
+                tmp_path
+                / "operation-controller-process.benchmark-controller-abandoned-revalidation.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert revalidation["outcome"] == "recovery_required"
+        assert revalidation["reservation_ref"] == {
+            "content_sha256": dirty_reservation["content_sha256"]
+        }
+        state = json.loads(
+            next(tmp_path.glob("*.benchmark-controller-state.json"))
+            .read_text(encoding="utf-8")
+        )
+        assert state["state"] == "recovery_required"
+        assert state["predecessor_content_sha256"] == revalidation[
+            "content_sha256"
+        ]
+        with pytest.raises(LearningStageWorkerError, match="recovery required"):
+            with hold_benchmark_worker_controller(
+                supervision_root=root, run_id="run-controller-process",
+                stage="screen_understanding",
+                operation_id="operation-controller-process",
+            ):
+                pytest.fail("durable recovery state admitted business body")
+    finally:
+        if witness is not None:
+            win32api.CloseHandle(witness)
         if owner.is_alive():
             owner.terminate(); owner.join(timeout=10)
         queue.close(); queue.join_thread()
@@ -3388,6 +3868,11 @@ def test_benchmark_worker_controller_post_launch_release_fault_never_second_spaw
                 supervision_root=root,
             )
         monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+        with pytest.raises(LearningStageWorkerError, match="recovery required"):
+            registry.inspect_prepared_benchmark_worker_identity(
+                run_id=reservation["run_id"], stage=reservation["stage"],
+                operation_id=reservation["operation_id"], supervision_root=root,
+            )
         current = registry.inspect_prepared_benchmark_worker_identity(
             run_id=reservation["run_id"], stage=reservation["stage"],
             operation_id=reservation["operation_id"], supervision_root=root,
@@ -3410,6 +3895,150 @@ def test_benchmark_worker_controller_post_launch_release_fault_never_second_spaw
                 terminate=True, expected_operation_anchor=anchor,
                 supervision_root=root,
             )
+
+
+@pytest.mark.parametrize("job_close_fault", [False, True])
+def test_benchmark_worker_launch_exception_seals_assignment_and_cleanup_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    job_close_fault: bool,
+) -> None:
+    import psutil
+    import win32event
+    from app.learn import workflow_worker as worker_module
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    registry._process_factory = multiprocessing.get_context("spawn").Process
+    real_write_json = worker_module._write_json_atomic
+    real_scope_close = WindowsProcessScope.close
+    injected_owner = {"done": False}
+
+    def fail_after_assignment_owner(path, payload):
+        result = real_write_json(path, payload)
+        if (
+            not injected_owner["done"]
+            and str(path).endswith(".benchmark-owner.json")
+            and payload.get("phase") == "assignment_proven"
+        ):
+            injected_owner["done"] = True
+            raise OSError("injected-after-assignment-owner")
+        return result
+
+    def close_after_success(scope):
+        result = real_scope_close(scope)
+        if injected_owner["done"]:
+            raise OSError("injected-job-close-success-after")
+        return result
+
+    monkeypatch.setattr(worker_module, "_write_json_atomic", fail_after_assignment_owner)
+    if job_close_fault:
+        monkeypatch.setattr(WindowsProcessScope, "close", close_after_success)
+    expected_error = (
+        worker_module.LearningStageWorkerCleanupError
+        if job_close_fault
+        else OSError
+    )
+    try:
+        with pytest.raises(expected_error) as captured:
+            registry.launch_prepared_benchmark_worker(
+                reservation_ref=confirmation["anchored_reservation_ref"],
+                expected_operation_anchor=anchor,
+                authoritative_payload={"capture_live": False},
+                supervision_root=root,
+            )
+        cleanup = json.loads(
+            next(tmp_path.glob("*.benchmark-launch-failure-cleanup.json"))
+            .read_text(encoding="utf-8")
+        )
+        assert worker_module.content_sha256(cleanup) == cleanup["content_sha256"]
+        assert cleanup["assignment_observation_ref"] is not None
+        assert cleanup["process_identity"] is not None
+        assert cleanup["scope_name"].startswith(
+            "Local\\AgentGuiBenchmarkWorkerTest-"
+        )
+        assert cleanup["process_terminate"]["status"] == "completed"
+        assert cleanup["job_terminate"]["status"] == "completed"
+        assert cleanup["process_join"]["status"] == "completed"
+        assert cleanup["process_join"]["result"]["alive_after"] is False
+        assert cleanup["process_close"]["status"] == "completed"
+        assert cleanup["event_close"]["status"] == "completed"
+        assert cleanup["beacon_unlink"]["status"] == "completed"
+        assert cleanup["job_close"]["status"] == (
+            "error" if job_close_fault else "completed"
+        )
+        assert cleanup["cleanup_status"] == (
+            "indeterminate" if job_close_fault else "verified"
+        )
+        if job_close_fault:
+            assert captured.value.cleanup_evidence == cleanup
+
+        owner = json.loads(
+            next(tmp_path.glob("*.benchmark-owner.json")).read_text(encoding="utf-8")
+        )
+        assignment = json.loads(
+            next(tmp_path.glob("*.benchmark-assignment.json"))
+            .read_text(encoding="utf-8")
+        )
+        assert owner["phase"] == "recovery_required"
+        assert owner["assignment_observation_ref"] == {
+            "content_sha256": assignment["content_sha256"]
+        }
+        assert owner["process_identity"] == cleanup["process_identity"]
+        assert owner["scope_name"] == cleanup["scope_name"]
+        assert owner["exit_observation_ref"] == {
+            "content_sha256": cleanup["content_sha256"]
+        }
+        current = registry.inspect_prepared_benchmark_worker_identity(
+            run_id=reservation["run_id"], stage=reservation["stage"],
+            operation_id=reservation["operation_id"], supervision_root=root,
+        )
+        assert current["reservation_state"] == "launching"
+        with pytest.raises(LearningStageWorkerError, match="anchored"):
+            registry.launch_prepared_benchmark_worker(
+                reservation_ref={"content_sha256": current["content_sha256"]},
+                expected_operation_anchor=anchor,
+                authoritative_payload={"capture_live": False},
+                supervision_root=root,
+            )
+        process_identity = cleanup["process_identity"]
+        try:
+            process = psutil.Process(process_identity["pid"])
+            assert int(round(process.create_time() * 1_000_000_000)) != (
+                process_identity["create_time_ns"]
+            )
+        except psutil.NoSuchProcess:
+            pass
+        with pytest.raises(Exception):
+            WindowsProcessScope(cleanup["scope_name"], create=False)
+
+        restarted = LearningStageWorkerRegistry(
+            result_root=tmp_path, benchmark_supervision_root=root,
+        )
+        recovery = restarted.observe_benchmark_worker_cleanup(
+            worker_id=reservation["worker_id"], run_id=reservation["run_id"],
+            stage=reservation["stage"], operation_id=reservation["operation_id"],
+            terminate=True, expected_operation_anchor=anchor,
+            supervision_root=root,
+        )
+        assert recovery["status"] == "recovery_required"
+        assert recovery["process_identity"] == cleanup["process_identity"]
+    finally:
+        monkeypatch.setattr(worker_module, "_write_json_atomic", real_write_json)
+        monkeypatch.setattr(WindowsProcessScope, "close", real_scope_close)
+        for process in psutil.process_iter(["pid", "cmdline"]):
+            cmdline = " ".join(process.info.get("cmdline") or [])
+            if reservation["worker_id"] in cmdline:
+                process.kill()
+                process.wait(timeout=10)
 
 
 def test_benchmark_worker_real_parent_death_recovers_without_second_spawn(
