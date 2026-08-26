@@ -466,6 +466,23 @@ def _benchmark_registry_fixture(
     return registry, root, store, source, reservation, anchor
 
 
+def _read_benchmark_artifact_by_ref(
+    root: Path,
+    ref: dict[str, object],
+) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    expected = ref["content_sha256"]
+    matches: list[dict[str, object]] = []
+    for path in root.glob("*.json"):
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and value.get("content_sha256") == expected:
+            assert content_sha256(value) == value["content_sha256"]
+            matches.append(value)
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _benchmark_parent_death_helper(
     root_path: str, ready_queue, cut: str = "gate_released"
 ) -> None:
@@ -1238,6 +1255,63 @@ def test_benchmark_worker_handler_payload_source_rejects_each_closed_fault(
     assert not list(tmp_path.glob("*.benchmark-reservation.json"))
 
 
+@pytest.mark.parametrize(
+    "field_path",
+    [
+        ("provider_corpus_file_ref", "file_sha256"),
+        ("provider_corpus_file_ref", "source_parent_ref", "content_sha256"),
+        ("provider_case_ref", "case_content_sha256"),
+        ("projection_rules_content_sha256",),
+        ("window_binding_ref", "content_sha256"),
+        ("capture_ref", "content_sha256"),
+        ("handler_payload_sha256",),
+    ],
+)
+def test_benchmark_worker_source_rejects_non_lowerhex_sha_fields(
+    tmp_path: Path,
+    field_path: tuple[str, ...],
+) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path,
+        test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(),
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        benchmark_supervision_root=root,
+    )
+    broken = deepcopy(_benchmark_handler_payload_source())
+    target = broken
+    for key in field_path[:-1]:
+        target = target[key]
+    target[field_path[-1]] = "Z" * 64
+    if field_path[:1] == ("provider_corpus_file_ref",):
+        corpus = broken["provider_corpus_file_ref"]
+        corpus_raw = deepcopy(corpus)
+        corpus_raw.pop("content_sha256")
+        broken["provider_corpus_file_ref"] = seal_immutable(corpus_raw)
+        broken["predecessor_content_sha256"] = broken[
+            "provider_corpus_file_ref"
+        ]["content_sha256"]
+    raw = deepcopy(broken)
+    raw.pop("content_sha256")
+    broken = seal_immutable(raw)
+
+    with pytest.raises(LearningStageWorkerError, match="invalid|exact content ref"):
+        registry.prepare_benchmark_worker_identity(
+            run_id="run-invalid-sha",
+            stage="screen_understanding",
+            operation_id="operation-invalid-sha",
+            workflow_revision=1,
+            task_kind="vision_observe_screen",
+            handler_payload_source=broken,
+            supervision_root=root,
+        )
+
+
 def test_benchmark_worker_anchor_and_supervision_reject_substitution(
     tmp_path: Path,
 ) -> None:
@@ -1480,6 +1554,51 @@ def test_benchmark_worker_confirm_requires_anchor_before_launch_and_payload_exac
     assert confirmation["outcome"] == "verified_anchor_confirmed"
     assert confirmation["prior_state"] == "reserved"
     assert confirmation["new_state"] == "anchored"
+    assert set(confirmation) == {
+        "contract_version",
+        "outcome",
+        "reservation_ref",
+        "anchored_reservation_ref",
+        "operation_anchor_ref",
+        "expected_supervision_ref",
+        "handler_payload_source_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "workflow_revision",
+        "worker_id",
+        "payload_sha256",
+        "execution_nonce",
+        "prior_state",
+        "new_state",
+        "predecessor_content_sha256",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    confirmation_path = (
+        tmp_path
+        / f"{reservation['operation_id']}.benchmark-anchor-confirmation.json"
+    )
+    confirmation_path.unlink()
+    repaired = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref=reservation_ref,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    assert repaired == confirmation
+    assert json.loads(confirmation_path.read_text(encoding="utf-8")) == confirmation
+    confirmation_path.write_text(
+        json.dumps({**confirmation, "worker_id": "tampered-worker"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(LearningStageWorkerError, match="confirmation"):
+        registry.confirm_prepared_benchmark_worker_anchor(
+            reservation_ref=reservation_ref,
+            expected_operation_anchor=anchor,
+            supervision_root=root,
+        )
+    confirmation_path.write_text(json.dumps(confirmation), encoding="utf-8")
 
     with pytest.raises(LearningStageWorkerError, match="payload"):
         registry.launch_prepared_benchmark_worker(
@@ -1490,6 +1609,46 @@ def test_benchmark_worker_confirm_requires_anchor_before_launch_and_payload_exac
         )
     assert registry._records == {}
     assert not list(tmp_path.glob("*.benchmark-owner.json"))
+
+
+def test_benchmark_worker_anchor_confirmation_crash_cut_is_idempotently_repaired(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker as worker_module
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    real_write = worker_module._write_json_atomic
+
+    def fail_confirmation(path, payload):
+        if str(path).endswith(".benchmark-anchor-confirmation.json"):
+            raise OSError("injected-anchor-confirmation-cut")
+        return real_write(path, payload)
+
+    monkeypatch.setattr(worker_module, "_write_json_atomic", fail_confirmation)
+    with pytest.raises(OSError, match="injected-anchor-confirmation-cut"):
+        registry.confirm_prepared_benchmark_worker_anchor(
+            reservation_ref={"content_sha256": reservation["content_sha256"]},
+            expected_operation_anchor=anchor,
+            supervision_root=root,
+        )
+    monkeypatch.setattr(worker_module, "_write_json_atomic", real_write)
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        benchmark_supervision_root=root,
+    )
+    repaired = restarted.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    assert repaired["outcome"] == "verified_anchor_confirmed"
+    assert repaired["reservation_ref"] == {
+        "content_sha256": reservation["content_sha256"]
+    }
 
 
 def test_benchmark_worker_preexisting_exact_job_is_collision_without_spawn(
@@ -1539,6 +1698,58 @@ def test_benchmark_worker_preexisting_exact_job_is_collision_without_spawn(
         foreign.wait(timeout=10)
         foreign.close()
         collision.close()
+
+
+def test_benchmark_worker_anchored_without_record_requires_closed_no_launch_observation(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    receipt = registry.observe_benchmark_worker_cleanup(
+        worker_id=reservation["worker_id"],
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        terminate=True,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    assert receipt["outcome"] == "verified_not_launched"
+    assert registry.observe_benchmark_worker_cleanup(
+        worker_id=reservation["worker_id"],
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        terminate=True,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    ) == receipt
+    observation = _read_benchmark_artifact_by_ref(
+        tmp_path, receipt["reservation_abort_ref"]
+    )
+    assert observation["contract_version"] == (
+        "benchmark_worker_not_launched_observation_v1"
+    )
+    assert observation["reservation_ref"] == confirmation[
+        "anchored_reservation_ref"
+    ]
+    predecessor = confirmation["anchored_reservation_ref"]["content_sha256"]
+    for field in (
+        "owner_absence_observation_ref",
+        "process_event_job_beacon_absence_observation_ref",
+        "result_absence_observation_ref",
+        "provider_absence_observation_ref",
+    ):
+        artifact = _read_benchmark_artifact_by_ref(tmp_path, observation[field])
+        assert artifact["predecessor_content_sha256"] == predecessor
+        predecessor = artifact["content_sha256"]
 
 
 def test_benchmark_worker_real_gate_timeout_never_runs_handler_and_stays_recovery_required(
@@ -1731,7 +1942,84 @@ def test_benchmark_worker_pre_anchor_abort_uses_fresh_store_and_replays_receipt(
     second = registry.abort_prepared_benchmark_worker_before_anchor(**kwargs)
     assert first == second
     assert first["outcome"] == "verified_aborted_before_anchor"
+    assert set(first) == {
+        "contract_version",
+        "outcome",
+        "authority_kind",
+        "reservation_ref",
+        "store_anchor_decision_ref",
+        "abort_observation_ref",
+        "aborted_reservation_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "workflow_revision",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "handler_payload_source_ref",
+        "execution_nonce",
+        "reason",
+        "prior_state",
+        "owner_absence_observation_ref",
+        "process_event_job_beacon_absence_observation_ref",
+        "result_absence_observation_ref",
+        "provider_absence_observation_ref",
+        "predecessor_content_sha256",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    predecessor = reservation["content_sha256"]
+    for field in (
+        "owner_absence_observation_ref",
+        "process_event_job_beacon_absence_observation_ref",
+        "result_absence_observation_ref",
+        "provider_absence_observation_ref",
+    ):
+        artifact = _read_benchmark_artifact_by_ref(tmp_path, first[field])
+        assert artifact["predecessor_content_sha256"] == predecessor
+        predecessor = artifact["content_sha256"]
+    decision = _read_benchmark_artifact_by_ref(
+        tmp_path, first["store_anchor_decision_ref"]
+    )
+    assert set(decision) == {
+        "contract_version",
+        "authority_kind",
+        "store_identity_sha256",
+        "store_state_found",
+        "current_state_content_sha256",
+        "current_revision",
+        "current_stage",
+        "current_operation_id",
+        "current_operation_outcome",
+        "current_incumbent_document_ref",
+        "current_operation_anchor_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "workflow_revision",
+        "reservation_ref",
+        "expected_operation_anchor_ref",
+        "reason",
+        "outcome",
+        "predicate",
+        "content_sha256",
+    }
+    assert decision["reason"] == "store_cas_lost"
+    assert decision["outcome"] == "matching_anchor_absent_store_cas_lost"
     assert calls == [reservation["run_id"], reservation["run_id"]]
+    receipt_path = (
+        tmp_path
+        / f"{reservation['operation_id']}.benchmark-pre-anchor-abort-receipt.json"
+    )
+    receipt_path.write_text(
+        json.dumps({**first, "worker_id": "tampered-worker"}),
+        encoding="utf-8",
+    )
+    with pytest.raises(LearningStageWorkerError, match="abort receipt"):
+        registry.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    receipt_path.write_text(json.dumps(first), encoding="utf-8")
     inspected = registry.inspect_prepared_benchmark_worker_identity(
         run_id=reservation["run_id"], stage=reservation["stage"],
         operation_id=reservation["operation_id"], supervision_root=root,
@@ -1800,21 +2088,30 @@ def test_benchmark_worker_pre_anchor_abort_rejects_matching_store_anchor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
     registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
         tmp_path
     )
     del source
+    incumbent = seal_immutable({
+        "contract_version": "benchmark_v2_incumbent_operation_v1",
+        "operation_anchor_ref": {"content_sha256": anchor["content_sha256"]},
+    })
     monkeypatch.setattr(
         store, "get",
         lambda run_id: {
             "run_id": run_id, "revision": reservation["workflow_revision"],
             "current_stage": reservation["stage"], "terminal": False,
-            "evidence_refs": {
-                "benchmark_worker_operation_anchor": deepcopy(anchor)
+            "current_evidence_refs": {
+                "stage_execution": {
+                    "operation_id": reservation["operation_id"],
+                    "benchmark_v2_incumbent": incumbent,
+                }
             },
         },
     )
-    with pytest.raises(LearningStageWorkerError, match="matching store anchor"):
+    with pytest.raises(LearningStageWorkerError, match="operation anchor already exists"):
         registry.abort_prepared_benchmark_worker_before_anchor(
             reservation_ref={"content_sha256": reservation["content_sha256"]},
             run_id=reservation["run_id"], stage=reservation["stage"],
@@ -1827,6 +2124,225 @@ def test_benchmark_worker_pre_anchor_abort_rejects_matching_store_anchor(
         run_id=reservation["run_id"], stage=reservation["stage"],
         operation_id=reservation["operation_id"], supervision_root=root,
     ) == reservation
+
+
+@pytest.mark.parametrize(
+    ("reason", "store_fields", "expected_outcome"),
+    [
+        (
+            "cancelled",
+            {
+                "revision": 7,
+                "current_stage": "screen_understanding",
+                "terminal": True,
+                "current_evidence_refs": {
+                    "stage_execution": {
+                        "operation_id": "operation-benchmark-worker"
+                    }
+                },
+            },
+            "matching_anchor_absent_cancelled",
+        ),
+        (
+            "stale",
+            {
+                "revision": 7,
+                "current_stage": "numbered_map",
+                "terminal": False,
+                "current_evidence_refs": {
+                    "stage_execution": {
+                        "operation_id": "replacement-operation"
+                    }
+                },
+            },
+            "matching_anchor_absent_stale",
+        ),
+    ],
+)
+def test_benchmark_worker_pre_anchor_abort_reason_matches_store_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+    store_fields: dict[str, object],
+    expected_outcome: str,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store,
+        "get",
+        lambda run_id: {"run_id": run_id, **deepcopy(store_fields)},
+    )
+    receipt = registry.abort_prepared_benchmark_worker_before_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        workflow_revision=reservation["workflow_revision"],
+        expected_operation_anchor=anchor,
+        reason=reason,
+        supervision_root=root,
+    )
+    decision = _read_benchmark_artifact_by_ref(
+        tmp_path, receipt["store_anchor_decision_ref"]
+    )
+    assert decision["reason"] == reason
+    assert decision["outcome"] == expected_outcome
+
+
+def test_benchmark_worker_pre_anchor_abort_missing_run_is_closed_stale_decision(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    receipt = registry.abort_prepared_benchmark_worker_before_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        workflow_revision=reservation["workflow_revision"],
+        expected_operation_anchor=anchor,
+        reason="stale",
+        supervision_root=root,
+    )
+    decision = _read_benchmark_artifact_by_ref(
+        tmp_path, receipt["store_anchor_decision_ref"]
+    )
+    assert decision["store_state_found"] is False
+    for field in (
+        "current_state_content_sha256",
+        "current_revision",
+        "current_stage",
+        "current_operation_id",
+        "current_operation_outcome",
+        "current_incumbent_document_ref",
+        "current_operation_anchor_ref",
+    ):
+        assert decision[field] is None
+    assert decision["outcome"] == "matching_anchor_absent_stale"
+
+
+@pytest.mark.parametrize("existing_kind", ["owner_job", "startup_event", "provider_owner"])
+def test_benchmark_worker_pre_anchor_abort_fresh_probes_exact_launch_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_kind: str,
+) -> None:
+    import win32api
+    import win32event
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        benchmark_worker_scope_name_v1,
+    )
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store,
+        "get",
+        lambda run_id: {
+            "run_id": run_id,
+            "revision": 8,
+            "current_stage": "screen_understanding",
+            "terminal": False,
+            "evidence_refs": {},
+        },
+    )
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind=root.authority_kind,
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        worker_id=reservation["worker_id"],
+        payload_sha256=reservation["payload_sha256"],
+        execution_nonce=reservation["execution_nonce"],
+    )
+    event_name = (
+        "Local\\AgentGuiBenchmarkWorkerGate-"
+        + hashlib.sha256(
+            json.dumps(
+                {"scope_name": scope_name},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    scope = None
+    event_handle = None
+    provider_path = tmp_path / f"{reservation['worker_id']}.provider-owner.json"
+    try:
+        if existing_kind == "owner_job":
+            scope = WindowsProcessScope(scope_name, create=True)
+        elif existing_kind == "startup_event":
+            event_handle = win32event.CreateEvent(None, True, False, event_name)
+        else:
+            provider_path.write_text("{}", encoding="utf-8")
+        with pytest.raises(LearningStageWorkerError, match="launch artifacts|present"):
+            registry.abort_prepared_benchmark_worker_before_anchor(
+                reservation_ref={"content_sha256": reservation["content_sha256"]},
+                run_id=reservation["run_id"],
+                stage=reservation["stage"],
+                operation_id=reservation["operation_id"],
+                workflow_revision=reservation["workflow_revision"],
+                expected_operation_anchor=anchor,
+                reason="store_cas_lost",
+                supervision_root=root,
+            )
+    finally:
+        if event_handle is not None:
+            win32api.CloseHandle(event_handle)
+        if scope is not None:
+            scope.close()
+        provider_path.unlink(missing_ok=True)
+
+
+def test_benchmark_worker_pre_anchor_abort_job_api_error_is_indeterminate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import windows_process_scope
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store,
+        "get",
+        lambda run_id: {
+            "run_id": run_id,
+            "revision": 8,
+            "current_stage": "screen_understanding",
+            "terminal": False,
+            "evidence_refs": {},
+        },
+    )
+
+    class ProbeError(OSError):
+        winerror = 5
+
+    monkeypatch.setattr(
+        windows_process_scope,
+        "WindowsProcessScope",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ProbeError("denied")),
+    )
+    with pytest.raises(LearningStageWorkerError, match="indeterminate"):
+        registry.abort_prepared_benchmark_worker_before_anchor(
+            reservation_ref={"content_sha256": reservation["content_sha256"]},
+            run_id=reservation["run_id"],
+            stage=reservation["stage"],
+            operation_id=reservation["operation_id"],
+            workflow_revision=reservation["workflow_revision"],
+            expected_operation_anchor=anchor,
+            reason="store_cas_lost",
+            supervision_root=root,
+        )
 
 
 def test_benchmark_worker_generic_start_rejects_private_markers(
@@ -2071,9 +2587,105 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
                 supervision_root=root,
             )
             assert receipt["outcome"] == "verified_exact_worker_exited"
+            intent = _read_benchmark_artifact_by_ref(
+                tmp_path, receipt["finalization_intent_ref"]
+            )
+            assignment = _read_benchmark_artifact_by_ref(
+                tmp_path, receipt["assignment_proven_ref"]
+            )
+            assert assignment["contract_version"] == (
+                "benchmark_worker_scope_assignment_v1"
+            )
+            stable_zero = _read_benchmark_artifact_by_ref(
+                tmp_path, intent["stable_zero_observation_ref"]
+            )
+            assert stable_zero["samples"] == [[], [], []]
+            predecessor = None
+            for kind in ("worker_process", "startup_event", "beacon_file"):
+                observation = _read_benchmark_artifact_by_ref(
+                    tmp_path, receipt["exact_handle_observation_refs"][kind]
+                )
+                if predecessor is None:
+                    assert len(observation["predecessor_content_sha256"]) == 64
+                else:
+                    assert observation["predecessor_content_sha256"] == predecessor
+                predecessor = observation["content_sha256"]
+            job_absence = _read_benchmark_artifact_by_ref(
+                tmp_path, receipt["job_absence_observation_ref"]
+            )
+            worker_absence = _read_benchmark_artifact_by_ref(
+                tmp_path, receipt["worker_absence_observation_ref"]
+            )
+            assert job_absence["outcome"] == "absent"
+            assert worker_absence["outcome"] == "absent"
+            assert worker_absence["predecessor_content_sha256"] == (
+                job_absence["content_sha256"]
+            )
+            receipt_path = (
+                tmp_path / f"{started['worker_id']}.benchmark-cleanup.json"
+            )
+            receipt_path.write_text(
+                json.dumps({**receipt, "outcome": "tampered"}),
+                encoding="utf-8",
+            )
+            with pytest.raises(LearningStageWorkerError, match="receipt"):
+                registry.observe_benchmark_worker_cleanup(
+                    worker_id=started["worker_id"],
+                    run_id="run-real-gate",
+                    stage="screen_understanding",
+                    operation_id="operation-real-gate",
+                    terminate=True,
+                    expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             assert not Path(
                 registry._records[started["worker_id"]]["benchmark_beacon_path"]
             ).exists()
+
+
+def test_benchmark_worker_process_probe_access_denied_is_indeterminate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psutil
+
+    monkeypatch.setattr(
+        psutil,
+        "Process",
+        lambda pid: (_ for _ in ()).throw(psutil.AccessDenied(pid)),
+    )
+
+    with pytest.raises(LearningStageWorkerError, match="indeterminate"):
+        LearningStageWorkerRegistry._benchmark_process_incarnation_absent(
+            {"pid": 43210, "create_time_ns": 123}
+        )
+
+
+def test_benchmark_worker_cleanup_job_probe_api_error_is_indeterminate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import windows_process_scope
+
+    registry = LearningStageWorkerRegistry(result_root=tmp_path)
+
+    class ProbeError(OSError):
+        winerror = 5
+
+    monkeypatch.setattr(
+        windows_process_scope,
+        "WindowsProcessScope",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ProbeError("denied")),
+    )
+    with pytest.raises(LearningStageWorkerError, match="indeterminate"):
+        registry._persist_benchmark_absence_observation(
+            worker_id="worker-probe-error",
+            observation_kind="job",
+            scope_name="Local\\AgentGuiBenchmarkWorkerTest-" + "a" * 64,
+            process_identity=None,
+            predecessor_content_sha256="b" * 64,
+        )
+    assert not list(tmp_path.glob("*.job-absence.json"))
 
 
 def test_benchmark_worker_controller_post_launch_release_fault_never_second_spawns(
@@ -2188,6 +2800,33 @@ def test_benchmark_worker_real_parent_death_recovers_without_second_spawn(
         )
         assert receipt["outcome"] == "verified_exact_worker_exited"
         assert receipt["supervisor_absence_observation_ref"] is not None
+        intent = _read_benchmark_artifact_by_ref(
+            tmp_path, receipt["finalization_intent_ref"]
+        )
+        stable_zero = _read_benchmark_artifact_by_ref(
+            tmp_path, intent["stable_zero_observation_ref"]
+        )
+        assert len(stable_zero["samples"]) == 3
+        predecessor = intent["predecessor_content_sha256"]
+        for field in (
+            "job_absence_observation_ref",
+            "worker_absence_observation_ref",
+            "supervisor_absence_observation_ref",
+        ):
+            observation = _read_benchmark_artifact_by_ref(
+                tmp_path, receipt[field]
+            )
+            assert observation["outcome"] == "absent"
+            assert len(observation["predecessor_content_sha256"]) == 64
+        assert registry.observe_benchmark_worker_cleanup(
+            worker_id=started["worker_id"],
+            run_id="run-parent-death",
+            stage="screen_understanding",
+            operation_id="operation-parent-death",
+            terminate=True,
+            expected_operation_anchor=message["anchor"],
+            supervision_root=root,
+        ) == receipt
         assert len(list(tmp_path.glob("*.worker.json"))) == 1
     finally:
         if outer.is_alive():
