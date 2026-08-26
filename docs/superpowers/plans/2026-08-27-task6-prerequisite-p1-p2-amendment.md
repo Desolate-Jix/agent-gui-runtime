@@ -113,7 +113,7 @@ Prelaunch resolution requires `worker_process_identity` and `normal_binding_evid
 
 - [ ] **Step 4: Add substitution, corruption, provenance, and zero-side-effect negatives**
 
-Cover wrong run/stage/operation/root/authority kind/ref id/ref SHA/capture/owner-ready parent; deleted, corrupt, and resealed authority documents; wrong PID/create-time; wrong A normal evidence ref; production/test capability substitution; and two-root composition substitution. Each negative must assert zero B1 prepare, workflow-store CAS, spawn, provider, and action calls.
+Cover wrong run/stage/operation/root/authority kind/ref id/ref SHA/capture/owner-ready parent; deleted, corrupt, and resealed authority documents; wrong spawned-worker PID; wrong A normal evidence ref; production/test capability substitution; and two-root composition substitution. Task 5 does not own the spawned B1 worker create-time: preserve the supplied `{pid, create_time_ns}` in the sealed resolution, then require Task 3 to compare it byte-exactly with Task 2's B1 launch-owner inspection before intent/adoption. Each negative must assert zero B1 prepare, workflow-store CAS, spawn, provider, and action calls.
 
 - [ ] **Step 5: Prove no raw Task 5 authority enters workflow-store/C durable JSON**
 
