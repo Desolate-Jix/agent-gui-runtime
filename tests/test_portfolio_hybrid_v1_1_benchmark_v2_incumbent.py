@@ -1203,3 +1203,112 @@ def test_resume_rejects_wrong_operation_identity_before_sidecar_or_registry(
             stage="screen_understanding", operation_id="operation-wrong",
             worker_id="worker",
         )
+
+
+@pytest.mark.parametrize(
+    ("reservation_state", "expected_launches"),
+    [("anchored", 1), ("launched", 0)],
+)
+def test_worker_starting_restart_reuses_the_same_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+    reservation_state: str,
+    expected_launches: int,
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        transition_benchmark_v2_incumbent_operation,
+    )
+
+    operation = _prepared_document(source_bundle)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="provider_owner_prepared",
+        changes={
+            "acquisition_intent_ref": {"content_sha256": "7" * 64},
+            "runtime_owner_ref": {"content_sha256": "8" * 64},
+        },
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="worker_starting", changes={}
+    )
+    run_id = operation["run_id"]
+    stage = operation["stage"]
+    operation_id = operation["operation_id"]
+    launches: list[dict[str, object]] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": 9}
+
+    class _Registry:
+        def inspect_prepared_benchmark_worker_identity(self, **_kwargs):
+            return {
+                "reservation_state": reservation_state,
+                "worker_id": operation["worker_ref"]["worker_id"],
+                "content_sha256": "9" * 64,
+            }
+
+        def confirm_prepared_benchmark_worker_anchor(self, **_kwargs):
+            return {"anchored_reservation_ref": {"content_sha256": "9" * 64}}
+
+        def launch_prepared_benchmark_worker(self, **kwargs):
+            launches.append(kwargs)
+            return {"worker_id": operation["worker_ref"]["worker_id"], "status": "running"}
+
+        def status(self, **_kwargs):
+            assert reservation_state == "launched"
+            return {"worker_id": operation["worker_ref"]["worker_id"], "status": "running"}
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "require_active_learning_workflow_stage_operation",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: operation,
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_sidecars",
+        lambda *_args: ({"serialized_window_binding": {}}, {"anchor": True}),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_source_projection",
+        lambda **_kwargs: source_bundle,
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_incumbent_operation.validate_benchmark_v2_incumbent_payload_projection",
+        lambda **kwargs: kwargs["payload"],
+    )
+    persisted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        workflow_service, "_persist_benchmark_v2_incumbent_operation",
+        lambda **kwargs: persisted.append(deepcopy(kwargs["operation"])) or {"revision": 10},
+    )
+
+    result = workflow_service._start_benchmark_v2_incumbent_operation(
+        composition=composition, run_id=run_id, expected_revision=9,
+        stage=stage, operation_id=operation_id, task_kind="vision_observe_screen",
+        request={
+            "provider_case_ref": {}, "window_binding_ref": {}, "capture_ref": {},
+            "serialized_window_binding": {},
+        },
+    )
+    assert result["worker_id"] == operation["worker_ref"]["worker_id"]
+    assert len(launches) == expected_launches
+    assert persisted[-1]["phase"] == "worker_bound"

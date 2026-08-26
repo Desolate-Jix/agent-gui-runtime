@@ -1460,11 +1460,48 @@ def _start_benchmark_v2_incumbent_operation(
                     supervision_root=root,
                 )
             elif operation["phase"] == "worker_starting":
-                started = registry.worker_status(
-                    worker_id=operation["worker_ref"]["worker_id"],
-                    run_id=run_id,
-                    operation_id=operation_id,
-                )
+                reservation_state = anchored.get("reservation_state")
+                if reservation_state == "anchored":
+                    fresh_projection = _benchmark_v2_source_projection(
+                        composition=composition,
+                        request=closed_request,
+                    )
+                    try:
+                        authoritative_payload = (
+                            validate_benchmark_v2_incumbent_payload_projection(
+                                payload=fresh_projection["authoritative_payload"],
+                                handler_payload_source=operation[
+                                    "handler_payload_source"
+                                ],
+                                provider_case_resolver=(
+                                    composition.provider_case_resolver
+                                ),
+                                serialized_window_binding=closed_request[
+                                    "serialized_window_binding"
+                                ],
+                            )
+                        )
+                    except (TypeError, ValueError) as error:
+                        raise LearningWorkflowStageOperationError(
+                            "benchmark_v2 incumbent authoritative payload is "
+                            f"invalid: {error}"
+                        ) from error
+                    started = registry.launch_benchmark_worker(
+                        reservation_ref=confirmation["anchored_reservation_ref"],
+                        expected_operation_anchor=anchor,
+                        authoritative_payload=authoritative_payload,
+                        supervision_root=root,
+                    )
+                elif reservation_state in {"launching", "launched"}:
+                    started = registry.worker_status(
+                        worker_id=operation["worker_ref"]["worker_id"],
+                        run_id=run_id,
+                        operation_id=operation_id,
+                    )
+                else:
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent worker launch state is indeterminate"
+                    )
             elif operation["phase"] in {
                 "worker_bound",
                 "result_ready",
