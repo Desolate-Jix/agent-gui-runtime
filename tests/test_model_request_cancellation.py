@@ -3546,6 +3546,51 @@ def _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id: str) -> dic
     )
 
 
+def _install_benchmark_qwen_abort_primitive(
+    tmp_path,
+    monkeypatch,
+    request_id: str,
+) -> Path:
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    lineage = {**_HYBRID_LINEAGE, "operation_id": f"operation-{request_id}"}
+    scope_name = process_scope_name(lineage, "qwen")
+    runtime_path = tmp_path / f"{request_id}-qwen-runtime.json"
+    profile = {
+        "profile_id": f"profile-{request_id}",
+        "endpoint": "http://127.0.0.1:54990/v1/chat/completions",
+        "pid_file": str(tmp_path / f"{request_id}.pid"),
+    }
+    model_server._write_hybrid_qwen_runtime(
+        runtime_path,
+        seal_immutable(
+            {
+                "contract_version": "hybrid_qwen_acquisition_intent_v1",
+                "state": "starting",
+                "worker_id": f"worker-{request_id}",
+                "model_request_id": request_id,
+                "provider": "qwen",
+                "lineage": lineage,
+                "process_scope_name": scope_name,
+                "profile": profile,
+                "profile_sha256": model_server.content_sha256(
+                    model_server._public_profile(profile)
+                ),
+                "listener_port": 54990,
+                "pid_file": profile["pid_file"],
+                "aborted_tombstone_sha256": None,
+            }
+        ),
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(runtime_path))
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv(
+        "AGENT_GUI_HYBRID_LINEAGE_JSON",
+        json.dumps(lineage, sort_keys=True, separators=(",", ":")),
+    )
+    return runtime_path
+
+
 def test_materialization_ledger_prepare_is_deterministic_and_has_zero_provider_side_effect(
     tmp_path,
     monkeypatch,
@@ -3608,6 +3653,9 @@ def test_qwen_cleanup_sidecar_abort_replays_byte_identically_and_blocks_launch(
 ) -> None:
     request_id = "benchmark-abort-replay"
     owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    runtime_path = _install_benchmark_qwen_abort_primitive(
+        tmp_path, monkeypatch, request_id
+    )
     arguments = {
         "acquisition_intent_ref": owner["acquisition_intent_ref"],
         "runtime_owner_ref": owner["runtime_owner_ref"],
@@ -3615,11 +3663,19 @@ def test_qwen_cleanup_sidecar_abort_replays_byte_identically_and_blocks_launch(
     }
 
     first_abort = model_server.abort_qwen_model_request_acquisition(request_id, **arguments)
+    production_tombstone_path = runtime_path.with_name(
+        f"{runtime_path.stem}.aborted.json"
+    )
+    production_tombstone_bytes = production_tombstone_path.read_bytes()
     first_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
     second_abort = model_server.abort_qwen_model_request_acquisition(request_id, **arguments)
     second_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
 
     assert first_abort == second_abort
+    assert production_tombstone_path.read_bytes() == production_tombstone_bytes
+    assert json.loads(production_tombstone_bytes)["contract_version"] == (
+        "hybrid_qwen_aborted_acquisition_tombstone_v1"
+    )
     assert first_receipt == second_receipt
     assert first_receipt["contract_version"] == "qwen_model_request_cleanup_receipt_v1"
     assert first_receipt["outcome"] == "verified_not_acquired"
@@ -3872,6 +3928,7 @@ def test_qwen_cleanup_sidecar_observer_uses_acquisition_then_lease_lock_order(
 
     request_id = "benchmark-observer-lock-order"
     owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    _install_benchmark_qwen_abort_primitive(tmp_path, monkeypatch, request_id)
     model_server.abort_qwen_model_request_acquisition(
         request_id,
         acquisition_intent_ref=owner["acquisition_intent_ref"],
@@ -3979,6 +4036,7 @@ def test_qwen_cleanup_sidecar_edited_receipt_fails_closed_to_pending(
 ) -> None:
     request_id = "benchmark-edited-cleanup-sidecar"
     owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    _install_benchmark_qwen_abort_primitive(tmp_path, monkeypatch, request_id)
     model_server.abort_qwen_model_request_acquisition(
         request_id,
         acquisition_intent_ref=owner["acquisition_intent_ref"],
@@ -3998,3 +4056,569 @@ def test_qwen_cleanup_sidecar_edited_receipt_fails_closed_to_pending(
         "outcome": "indeterminate",
         "model_request_id": request_id,
     }
+
+
+def _released_benchmark_qwen_owner(tmp_path, monkeypatch, request_id: str):
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    scope_name = process_scope_name(
+        {**_HYBRID_LINEAGE, "operation_id": f"operation-{request_id}"},
+        "qwen",
+    )
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    profile = {
+        "profile_id": f"profile-{request_id}",
+        "endpoint": "http://127.0.0.1:54330/v1/chat/completions",
+        "pid_file": str(tmp_path / f"{request_id}.pid"),
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=helper.process_identity["pid"],
+        created_ns=helper.process_identity["create_time_ns"],
+        base_url="http://127.0.0.1:54330/v1",
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+        model_server._release_exact_qwen_lease(
+            lease,
+            reason="review-fix-release",
+        )
+        return lease, helper, scope
+    except BaseException:
+        helper.close()
+        scope.close()
+        raise
+
+
+def test_materialization_ledger_prepare_rejects_reused_finalized_request_id(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-reused-finalized-owner"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    old_lease = {
+        **_cleanup_lease(),
+        "owner_request_id": request_id,
+        "contract_version": "qwen_model_server_lease_v2",
+        "server_process_identity": {"pid": 987654, "create_time_ns": 123456789},
+    }
+    old_result = {
+        "status": "released",
+        "lease": old_lease,
+        "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": {"status": "proven_absent", "identity": None},
+        "process_identity": old_lease["server_process_identity"],
+    }
+    model_server._write_qwen_owner_tombstone(
+        old_lease,
+        result=old_result,
+        finalization_token="old-finalization",
+    )
+
+    with pytest.raises(RuntimeError, match="finalized|ownership|request"):
+        model_server.prepare_qwen_model_request_acquisition_owner(
+            request_id,
+            runtime_owner_ref=_benchmark_qwen_runtime_owner(request_id),
+        )
+
+
+def test_qwen_cleanup_sidecar_old_finalized_owner_cannot_terminalize_new_launch_cut(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-old-owner-new-launch-cut"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    owner = _benchmark_qwen_runtime_owner(request_id)
+    prepared = model_server.prepare_qwen_model_request_acquisition_owner(
+        request_id,
+        runtime_owner_ref=owner,
+    )
+    model_server._transition_qwen_model_request_materialization(
+        request_id, transition="launch"
+    )
+    old_lease = {
+        **_cleanup_lease(),
+        "owner_request_id": request_id,
+        "contract_version": "qwen_model_server_lease_v2",
+        "server_process_identity": {"pid": 987655, "create_time_ns": 123456790},
+    }
+    old_result = {
+        "status": "released",
+        "lease": old_lease,
+        "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": {"status": "proven_absent", "identity": None},
+        "process_identity": old_lease["server_process_identity"],
+        "hybrid_process_scope_acquisition": {
+            "scope_name": "old-scope",
+            "member_pids": [old_lease["server_process_identity"]["pid"]],
+        },
+        "hybrid_process_scope_cleanup": {
+            "scope_name": "old-scope",
+            "authority": "windows_job_object",
+            "cleanup_status": "verified",
+            "member_pids_after": [],
+            "member_identities_after": [],
+            "active_listeners_after": [],
+            "pid_file_after": None,
+            "stable_zero_observations": 3,
+        },
+    }
+    model_server._write_qwen_owner_tombstone(
+        old_lease,
+        result=old_result,
+        finalization_token="old-finalization",
+    )
+    release_observation = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_exact_release_observation_v1",
+            "model_request_id": request_id,
+            "lease_ref": model_server._qwen_content_ref(old_lease),
+            "finalization_token": "old-finalization",
+            "release_reason": "old-release",
+            "release_result_ref": model_server._qwen_content_ref(
+                seal_immutable(old_result)
+            ),
+        }
+    )
+    model_server._write_qwen_acquisition_artifact(
+        model_server._qwen_acquisition_artifact_paths(request_id)["release_observation"],
+        release_observation,
+    )
+
+    observation = model_server.observe_qwen_model_request_cleanup(request_id)
+    assert prepared["runtime_owner_ref"] == owner
+    assert observation["status"] == "cleanup_pending"
+    assert observation["outcome"] == "indeterminate"
+
+
+def test_qwen_cleanup_sidecar_not_acquired_requires_production_abort_primitive(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-abort-without-production-primitive"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    monkeypatch.delenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", raising=False)
+    model_server.abort_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+        reason="cancelled",
+    )
+
+    observation = model_server.observe_qwen_model_request_cleanup(request_id)
+    assert observation["status"] == "cleanup_pending"
+    assert observation["outcome"] == "indeterminate"
+
+
+@pytest.mark.parametrize("completed_writes", [1, 2, 3, 4])
+def test_materialization_ledger_prepare_recovers_exact_deterministic_write_prefix(
+    tmp_path,
+    monkeypatch,
+    completed_writes,
+) -> None:
+    request_id = f"benchmark-prepare-write-cut-{completed_writes}"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    runtime_owner = _benchmark_qwen_runtime_owner(request_id)
+    original_write = model_server._write_qwen_acquisition_artifact
+    writes = []
+
+    def fail_after_write(path, document):
+        original_write(path, document)
+        writes.append((path.name, path.read_bytes()))
+        if len(writes) == completed_writes:
+            raise OSError(f"injected-after-write-{completed_writes}")
+
+    monkeypatch.setattr(
+        model_server,
+        "_write_qwen_acquisition_artifact",
+        fail_after_write,
+    )
+    with pytest.raises(OSError, match=f"injected-after-write-{completed_writes}"):
+        model_server.prepare_qwen_model_request_acquisition_owner(
+            request_id,
+            runtime_owner_ref=runtime_owner,
+        )
+    persisted_prefix = {name: raw for name, raw in writes}
+    monkeypatch.setattr(
+        model_server,
+        "_write_qwen_acquisition_artifact",
+        original_write,
+    )
+
+    code = (
+        "import json,sys; from pathlib import Path; "
+        "from app.core import model_server; "
+        "model_server.MODEL_SERVER_LEASE_DIR=Path(sys.argv[1]); "
+        "owner=json.loads(sys.argv[2]); "
+        "model_server.prepare_qwen_model_request_acquisition_owner("
+        "sys.argv[3],runtime_owner_ref=owner)"
+    )
+    arguments = [
+        sys.executable,
+        "-c",
+        code,
+        str(tmp_path / "qwen-leases"),
+        json.dumps(runtime_owner, sort_keys=True, separators=(",", ":")),
+        request_id,
+    ]
+    recovered = subprocess.run(
+        arguments,
+        cwd=model_server.ROOT_DIR,
+        env=os.environ.copy(),
+        text=True,
+        capture_output=True,
+        timeout=15,
+    )
+    assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+    paths = model_server._qwen_acquisition_artifact_paths(request_id)
+    assert all(paths[key].exists() for key in ("intent", "owner", "ledger_revision_zero", "ledger"))
+    for name, raw in persisted_prefix.items():
+        matching = [path for path in paths.values() if path.name == name]
+        assert len(matching) == 1
+        assert matching[0].read_bytes() == raw
+    first_snapshot = {
+        path.relative_to(tmp_path / "qwen-leases").as_posix(): path.read_bytes()
+        for path in (tmp_path / "qwen-leases").rglob("*")
+        if path.is_file() and not path.name.endswith(".lock")
+    }
+    replay = subprocess.run(
+        arguments,
+        cwd=model_server.ROOT_DIR,
+        env=os.environ.copy(),
+        text=True,
+        capture_output=True,
+        timeout=15,
+    )
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    second_snapshot = {
+        path.relative_to(tmp_path / "qwen-leases").as_posix(): path.read_bytes()
+        for path in (tmp_path / "qwen-leases").rglob("*")
+        if path.is_file() and not path.name.endswith(".lock")
+    }
+    assert second_snapshot == first_snapshot
+
+
+def test_materialization_ledger_direct_acquire_dominates_materialization_probe(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-direct-acquire-dominance"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+
+    def inspect_then_stop(profile, readiness):
+        del profile, readiness
+        ledger = model_server._load_qwen_model_request_materialization_ledger(
+            request_id
+        )
+        assert ledger["state"] == "materialization_possible"
+        raise RuntimeError("direct-materialization-sentinel")
+
+    monkeypatch.setattr(model_server, "_qwen_server_incarnation", inspect_then_stop)
+    with pytest.raises(RuntimeError, match="direct-materialization-sentinel"):
+        model_server.acquire_qwen_model_lease(
+            profile={"profile_id": "direct-profile"},
+            request_id=request_id,
+            readiness={},
+        )
+
+
+def test_qwen_cleanup_sidecar_missing_release_observation_remains_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-missing-release-observation"
+    _, helper, scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, request_id
+    )
+    try:
+        model_server._qwen_acquisition_artifact_paths(request_id)[
+            "release_observation"
+        ].unlink()
+        observation = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert observation["status"] == "cleanup_pending"
+        assert observation["outcome"] == "indeterminate"
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_cleanup_sidecar_pid_reuse_observation_remains_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-pid-reuse-observation"
+    lease, helper, scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, request_id
+    )
+    try:
+        monkeypatch.setattr(
+            model_server,
+            "_probe_exact_qwen_process",
+            lambda identity: {
+                "status": "proven_absent",
+                "identity": {
+                    "pid": identity["pid"],
+                    "create_time_ns": lease["server_process_identity"]["create_time_ns"]
+                    + 1,
+                },
+                "reason": "pid_reused",
+            },
+        )
+        observation = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert observation["status"] == "cleanup_pending"
+        assert observation["outcome"] == "indeterminate"
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_cleanup_sidecar_real_scope_listener_cleanup_without_lease_stays_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        observe_process_scope_cleanup,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    request_id = "benchmark-real-scope-listener-no-lease"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    model_server._transition_qwen_model_request_materialization(
+        request_id, transition="launch"
+    )
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = int(reservation.getsockname()[1])
+    lineage = {**_HYBRID_LINEAGE, "operation_id": f"operation-{request_id}"}
+    scope_name = process_scope_name(lineage, "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    script = (
+        "import socket,time; s=socket.socket(); "
+        f"s.bind(('127.0.0.1',{port})); s.listen(); time.sleep(30)"
+    )
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", script],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    try:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if model_server._listening_pids_for_port(port):
+                break
+            time.sleep(0.02)
+        assert model_server._listening_pids_for_port(port)
+        cleanup = observe_process_scope_cleanup(
+            scope_name,
+            terminate=True,
+            listener_ports=[port],
+            stable_zero_observations=3,
+        )
+        assert cleanup["cleanup_status"] == "verified"
+        observation = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert observation["status"] == "cleanup_pending"
+        assert observation["outcome"] == "indeterminate"
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_cleanup_sidecar_requires_current_acquisition_lease_binding(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-missing-current-lease-binding"
+    lease, helper, scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, request_id
+    )
+    try:
+        binding_path = (
+            model_server._qwen_acquisition_artifact_directory(request_id)
+            / "acquisition-lease-binding.json"
+        )
+        binding_path.unlink(missing_ok=True)
+        observation = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert lease["owner_request_id"] == request_id
+        assert observation["status"] == "cleanup_pending"
+        assert observation["outcome"] == "indeterminate"
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_acquire_recovers_lease_state_to_binding_write_cut_without_duplication(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    request_id = "benchmark-binding-write-cut"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    scope_name = process_scope_name(
+        {**_HYBRID_LINEAGE, "operation_id": f"operation-{request_id}"},
+        "qwen",
+    )
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    profile = {
+        "profile_id": "profile-binding-write-cut",
+        "endpoint": "http://127.0.0.1:54333/v1/chat/completions",
+        "pid_file": str(tmp_path / "binding-write-cut.pid"),
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=helper.process_identity["pid"],
+        created_ns=helper.process_identity["create_time_ns"],
+        base_url="http://127.0.0.1:54333/v1",
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    original_binding_write = model_server._write_qwen_acquisition_lease_binding_locked
+    monkeypatch.setattr(
+        model_server,
+        "_write_qwen_acquisition_lease_binding_locked",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            OSError("injected-binding-write-cut")
+        ),
+    )
+    try:
+        with pytest.raises(OSError, match="injected-binding-write-cut"):
+            model_server.acquire_qwen_model_lease(
+                profile=profile,
+                request_id=request_id,
+                readiness=readiness,
+            )
+        active = model_server._find_qwen_lease_by_owner(request_id)
+        assert active is not None
+        first_lease = active[1]
+        monkeypatch.setattr(
+            model_server,
+            "_write_qwen_acquisition_lease_binding_locked",
+            original_binding_write,
+        )
+        recovered = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+        assert recovered == first_lease
+        with model_server._qwen_lease_lock():
+            assert len(model_server._find_qwen_owner_leases_locked(request_id)) == 1
+        model_server._release_exact_qwen_lease(
+            recovered,
+            reason="binding-write-cut-recovered",
+        )
+        receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert receipt["outcome"] == "verified_exact_process_exited"
+    finally:
+        helper.close()
+        scope.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["outer_profile", "embedded_profile", "incarnation", "socket", "job", "process"],
+)
+def test_qwen_cleanup_sidecar_resealed_parent_tamper_remains_pending(
+    tmp_path,
+    monkeypatch,
+    mutation,
+) -> None:
+    request_id = f"benchmark-resealed-parent-{mutation}"
+    lease, helper, scope = _released_benchmark_qwen_owner(
+        tmp_path, monkeypatch, request_id
+    )
+    try:
+        tombstone_path = model_server._qwen_owner_tombstone_path(request_id)
+        tombstone = json.loads(tombstone_path.read_text(encoding="utf-8"))
+        tombstone.pop("content_sha256")
+        release_result = tombstone["release_result"]
+        embedded_lease = release_result["lease"]
+        if mutation == "outer_profile":
+            tombstone["profile_id"] = "wrong-profile"
+        elif mutation == "embedded_profile":
+            embedded_lease["profile_id"] = "wrong-profile"
+            embedded_lease["profile_sha256"] = "d" * 64
+            tombstone["profile_id"] = "wrong-profile"
+        elif mutation == "incarnation":
+            embedded_lease["incarnation_id"] = "wrong-incarnation"
+            tombstone["incarnation_id"] = "wrong-incarnation"
+        elif mutation == "socket":
+            embedded_lease["server_base_url"] = "http://127.0.0.1:54331/v1"
+        elif mutation == "job":
+            release_result["hybrid_process_scope_acquisition"]["scope_name"] = "wrong-job"
+            release_result["hybrid_process_scope_cleanup"]["scope_name"] = "wrong-job"
+        else:
+            replacement = {"pid": 987656, "create_time_ns": 123456791}
+            embedded_lease["server_process_identity"] = replacement
+            release_result["process_identity"] = replacement
+            release_result["hybrid_process_scope_acquisition"]["member_pids"] = [
+                replacement["pid"]
+            ]
+        tombstone_path.write_text(
+            json.dumps(seal_immutable(tombstone), sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        release_path = model_server._qwen_acquisition_artifact_paths(request_id)[
+            "release_observation"
+        ]
+        release_observation = json.loads(release_path.read_text(encoding="utf-8"))
+        release_observation.pop("content_sha256")
+        release_observation["lease_ref"] = model_server._qwen_content_ref(
+            embedded_lease
+        )
+        release_observation["release_result_ref"] = model_server._qwen_content_ref(
+            seal_immutable(release_result)
+        )
+        release_path.write_text(
+            json.dumps(
+                seal_immutable(release_observation),
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+
+        observation = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert lease["owner_request_id"] == request_id
+        assert observation["status"] == "cleanup_pending"
+        assert observation["outcome"] == "indeterminate"
+    finally:
+        helper.close()
+        scope.close()
