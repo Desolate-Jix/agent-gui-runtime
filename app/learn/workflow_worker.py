@@ -18,6 +18,7 @@ from uuid import uuid4
 from app.core.model_server import (
     abort_qwen_model_request_acquisition,
     cancel_model_request,
+    observe_qwen_model_request_acquisition,
     observe_qwen_model_request_cleanup,
     prepare_qwen_model_request_acquisition_owner,
 )
@@ -409,6 +410,41 @@ def _validate_benchmark_supervision_root(
     if expected_journal_root is not None and root.journal_root != expected_journal_root:
         raise LearningStageWorkerError("benchmark supervision journal root does not match")
     return root
+
+
+def _benchmark_supervision_inputs_ref(
+    root: BenchmarkWorkerSupervisionRoot,
+) -> dict[str, str]:
+    validated = _validate_benchmark_supervision_root(root)
+    return {
+        "content_sha256": content_sha256(
+            {
+                "authority_kind": validated.authority_kind,
+                "store_identity_sha256": validated.store_identity_sha256,
+                "journal_root": str(validated.journal_root.resolve()),
+            }
+        )
+    }
+
+
+def _validate_benchmark_reservation_supervision(
+    reservation: Mapping[str, object],
+    *,
+    supervision_root: BenchmarkWorkerSupervisionRoot | None,
+    expected_journal_root: Path,
+) -> None:
+    root = _validate_benchmark_supervision_root(
+        supervision_root,
+        expected_journal_root=expected_journal_root.resolve(),
+    )
+    if (
+        reservation.get("authority_kind") != root.authority_kind
+        or reservation.get("supervision_inputs_ref")
+        != _benchmark_supervision_inputs_ref(root)
+    ):
+        raise LearningStageWorkerError(
+            "benchmark reservation supervision identity does not match"
+        )
 
 
 def _benchmark_controller_abandoned_revalidate(
@@ -3112,6 +3148,11 @@ class LearningStageWorkerRegistry:
             "cancelled_before_launch", "aborted_before_anchor",
         }:
             raise LearningStageWorkerError("benchmark reservation state is invalid")
+        _validate_benchmark_reservation_supervision(
+            value,
+            supervision_root=self._benchmark_supervision_root,
+            expected_journal_root=self._result_root,
+        )
         return deepcopy(value)
 
     def _benchmark_reservation_path(self, operation_id: str) -> Path:
@@ -3126,6 +3167,11 @@ class LearningStageWorkerRegistry:
         self, current: Mapping[str, object]
     ) -> dict[str, Any]:
         value = deepcopy(dict(current))
+        _validate_benchmark_reservation_supervision(
+            value,
+            supervision_root=self._benchmark_supervision_root,
+            expected_journal_root=self._result_root,
+        )
         if value.get("reservation_state") == "anchored":
             return value
         original_body = deepcopy(value)
@@ -3238,6 +3284,91 @@ class LearningStageWorkerRegistry:
         return owner
 
     @staticmethod
+    def _validate_benchmark_provider_acquisition_observation(
+        value: object,
+        *,
+        model_request_id: str,
+        acquisition_owner_ref: Mapping[str, object],
+        acquisition_intent_ref: Mapping[str, object],
+        runtime_owner_ref: Mapping[str, object],
+        expected_state: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise LearningStageWorkerError(
+                "benchmark provider acquisition observation is missing"
+            )
+        observation = deepcopy(dict(value))
+        if (
+            set(observation)
+            != {
+                "contract_version",
+                "model_request_id",
+                "acquisition_owner_ref",
+                "acquisition_intent_ref",
+                "runtime_owner_ref",
+                "materialization_ledger_ref",
+                "materialization_state",
+                "materialization_revision",
+                "content_sha256",
+            }
+            or observation.get("contract_version")
+            != "qwen_model_request_acquisition_observation_v1"
+            or observation.get("model_request_id")
+            != model_request_id
+            or observation.get("acquisition_owner_ref")
+            != acquisition_owner_ref
+            or observation.get("acquisition_intent_ref")
+            != acquisition_intent_ref
+            or observation.get("runtime_owner_ref")
+            != runtime_owner_ref
+            or observation.get("materialization_state")
+            not in {
+                "prepared_never_materialized",
+                "materialization_possible",
+                "aborted_never_materialized",
+            }
+            or observation.get("materialization_revision") not in {0, 1}
+            or (
+                observation.get("materialization_state")
+                == "prepared_never_materialized"
+                and observation.get("materialization_revision") != 0
+            )
+            or (
+                observation.get("materialization_state")
+                != "prepared_never_materialized"
+                and observation.get("materialization_revision") != 1
+            )
+            or (
+                expected_state is not None
+                and observation.get("materialization_state") != expected_state
+            )
+            or (
+                expected_revision is not None
+                and observation.get("materialization_revision")
+                != expected_revision
+            )
+            or content_sha256(observation)
+            != observation.get("content_sha256")
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider acquisition observation is invalid"
+            )
+        _benchmark_exact_ref(
+            observation.get("acquisition_owner_ref"),
+            "benchmark provider observed acquisition owner ref",
+        )
+        _benchmark_exact_ref(
+            observation.get("acquisition_intent_ref"),
+            "benchmark provider observed acquisition intent ref",
+        )
+        _benchmark_exact_ref(
+            observation.get("materialization_ledger_ref"),
+            "benchmark provider materialization ledger ref",
+        )
+        return observation
+
+    @staticmethod
     def _benchmark_provider_journal_projection(
         journal: Mapping[str, object],
     ) -> dict[str, Any]:
@@ -3257,6 +3388,7 @@ class LearningStageWorkerRegistry:
                         "reservation_ref",
                         "acquisition_owner_ref",
                         "acquisition_intent_ref",
+                        "acquisition_observation_ref",
                         "materialization_ledger_ref",
                     )
                 },
@@ -3265,6 +3397,21 @@ class LearningStageWorkerRegistry:
                 },
             }
         )
+
+    @staticmethod
+    def _benchmark_provider_journal_with_observation(
+        journal: Mapping[str, object],
+        observation: Mapping[str, object],
+    ) -> dict[str, Any]:
+        body = deepcopy(dict(journal))
+        body.pop("content_sha256")
+        body["acquisition_observation_ref"] = {
+            "content_sha256": observation["content_sha256"]
+        }
+        body["materialization_ledger_ref"] = deepcopy(
+            observation["materialization_ledger_ref"]
+        )
+        return seal_immutable(body)
 
     def _validate_benchmark_provider_journal(
         self, value: object
@@ -3285,6 +3432,7 @@ class LearningStageWorkerRegistry:
             "runtime_owner_ref",
             "acquisition_owner_ref",
             "acquisition_intent_ref",
+            "acquisition_observation_ref",
             "materialization_ledger_ref",
             "content_sha256",
         } or journal.get("contract_version") != _BENCHMARK_PROVIDER_JOURNAL_VERSION:
@@ -3324,7 +3472,6 @@ class LearningStageWorkerRegistry:
             )
             or journal.get("reservation_ref")
             != {"content_sha256": anchored["content_sha256"]}
-            or journal.get("materialization_ledger_ref") is not None
         ):
             raise LearningStageWorkerError(
                 "benchmark provider journal identity does not match"
@@ -3336,6 +3483,14 @@ class LearningStageWorkerRegistry:
         _benchmark_exact_ref(
             journal.get("acquisition_intent_ref"),
             "benchmark provider acquisition intent ref",
+        )
+        _benchmark_exact_ref(
+            journal.get("acquisition_observation_ref"),
+            "benchmark provider acquisition observation ref",
+        )
+        _benchmark_exact_ref(
+            journal.get("materialization_ledger_ref"),
+            "benchmark provider materialization ledger ref",
         )
         if journal["runtime_owner_ref"] != runtime_owner:
             raise LearningStageWorkerError("benchmark provider runtime owner drifted")
@@ -3421,13 +3576,7 @@ class LearningStageWorkerRegistry:
                     "worker_id": worker_id,
                     "model_request_id": f"learn-worker-{worker_id}",
                     "execution_nonce": uuid4().hex,
-                    "supervision_inputs_ref": {
-                        "content_sha256": content_sha256({
-                            "authority_kind": root.authority_kind,
-                            "store_identity_sha256": root.store_identity_sha256,
-                            "journal_root": str(root.journal_root),
-                        })
-                    },
+                    "supervision_inputs_ref": _benchmark_supervision_inputs_ref(root),
                     "reservation_state": "reserved", "abort_observation_ref": None,
                     "predecessor_content_sha256": source["content_sha256"],
                 }
@@ -3450,6 +3599,11 @@ class LearningStageWorkerRegistry:
                 value = self._benchmark_reservations.get(key)
                 if value is None:
                     raise LearningStageWorkerError("benchmark reservation not found")
+                _validate_benchmark_reservation_supervision(
+                    value,
+                    supervision_root=root,
+                    expected_journal_root=self._result_root,
+                )
                 return deepcopy(value)
 
     def _benchmark_by_ref(self, reservation_ref: object) -> dict[str, Any]:
@@ -3457,6 +3611,11 @@ class LearningStageWorkerRegistry:
         reservation = self._benchmark_reservations_by_ref.get(ref["content_sha256"])
         if reservation is None:
             raise LearningStageWorkerError("benchmark reservation ref not found")
+        _validate_benchmark_reservation_supervision(
+            reservation,
+            supervision_root=self._benchmark_supervision_root,
+            expected_journal_root=self._result_root,
+        )
         return reservation
 
     def confirm_prepared_benchmark_worker_anchor(
@@ -3538,6 +3697,11 @@ class LearningStageWorkerRegistry:
                 raise LearningStageWorkerError(
                     "benchmark provider supervision root is missing"
                 )
+            _validate_benchmark_reservation_supervision(
+                reservation,
+                supervision_root=root,
+                expected_journal_root=self._result_root,
+            )
             key = (
                 reservation["run_id"],
                 reservation["stage"],
@@ -3602,6 +3766,27 @@ class LearningStageWorkerRegistry:
                 model_request_id=current["model_request_id"],
                 runtime_owner=runtime_owner,
             )
+            production_observation = (
+                self._validate_benchmark_provider_acquisition_observation(
+                    observe_qwen_model_request_acquisition(
+                        current["model_request_id"],
+                        acquisition_intent_ref=production_owner[
+                            "acquisition_intent_ref"
+                        ],
+                        runtime_owner_ref=runtime_owner,
+                    ),
+                    model_request_id=production_owner["model_request_id"],
+                    acquisition_owner_ref={
+                        "content_sha256": production_owner["content_sha256"]
+                    },
+                    acquisition_intent_ref=production_owner[
+                        "acquisition_intent_ref"
+                    ],
+                    runtime_owner_ref=production_owner["runtime_owner_ref"],
+                    expected_state="prepared_never_materialized",
+                    expected_revision=0,
+                )
+            )
         except LearningStageWorkerError:
             raise
         except (OSError, RuntimeError, ValueError, UnicodeError) as error:
@@ -3631,7 +3816,12 @@ class LearningStageWorkerRegistry:
                 "acquisition_intent_ref": deepcopy(
                     production_owner["acquisition_intent_ref"]
                 ),
-                "materialization_ledger_ref": None,
+                "acquisition_observation_ref": {
+                    "content_sha256": production_observation["content_sha256"]
+                },
+                "materialization_ledger_ref": deepcopy(
+                    production_observation["materialization_ledger_ref"]
+                ),
             }
         )
         if existing is not None and existing != candidate:
@@ -3857,6 +4047,86 @@ class LearningStageWorkerRegistry:
         )
         return journal
 
+    def _validate_benchmark_provider_cancelled_before_launch(
+        self,
+        *,
+        current: Mapping[str, object],
+        provider_journal: Mapping[str, object],
+    ) -> dict[str, Any]:
+        reservation = self._validate_benchmark_reservation(dict(current))
+        root = self._benchmark_supervision_root
+        if root is None or reservation.get("reservation_state") != "cancelled_before_launch":
+            raise LearningStageWorkerError(
+                "benchmark provider cancellation authority is missing"
+            )
+        persisted = self._validate_benchmark_reservation(
+            _read_json_object(
+                self._benchmark_reservation_path(reservation["operation_id"]),
+                label="benchmark provider cancelled reservation",
+            )
+        )
+        if persisted != reservation:
+            raise LearningStageWorkerError(
+                "benchmark provider cancelled reservation is not durable"
+            )
+        original_body = deepcopy(reservation)
+        original_body.pop("content_sha256")
+        original_body["reservation_state"] = "reserved"
+        original_body["abort_observation_ref"] = None
+        original_body["predecessor_content_sha256"] = reservation[
+            "handler_payload_source"
+        ]["content_sha256"]
+        original = seal_immutable(original_body)
+        if self._benchmark_reservations_by_ref.get(
+            original["content_sha256"]
+        ) != original:
+            raise LearningStageWorkerError(
+                "benchmark provider original reservation lineage is missing"
+            )
+        anchored = _benchmark_transitioned_reservation(original, "anchored")
+        if provider_journal.get("reservation_ref") != {
+            "content_sha256": anchored["content_sha256"]
+        }:
+            raise LearningStageWorkerError(
+                "benchmark provider anchored reservation lineage does not match"
+            )
+        source = original["handler_payload_source"]
+        operation_anchor = compose_benchmark_worker_operation_anchor_v1(
+            supervision_root=root,
+            reservation=original,
+            handler_payload_source=source,
+            window_binding_ref=source["window_binding_ref"],
+            capture_ref=source["capture_ref"],
+            predecessor_content_sha256=None,
+        )
+        receipt_path = self._result_root / (
+            f"{reservation['worker_id']}.benchmark-cleanup.json"
+        )
+        receipt = _validate_benchmark_cleanup_receipt(
+            _read_json_object(
+                receipt_path,
+                label="benchmark provider B1 cleanup receipt",
+            ),
+            result_root=self._result_root,
+            worker_id=reservation["worker_id"],
+            run_id=reservation["run_id"],
+            stage=reservation["stage"],
+            operation_id=reservation["operation_id"],
+            operation_anchor=operation_anchor,
+            original_reservation=original,
+            current_reservation=reservation,
+            supervision_root=root,
+        )
+        if (
+            receipt.get("outcome") != "verified_not_launched"
+            or receipt.get("reservation_abort_ref")
+            != reservation.get("abort_observation_ref")
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider B1 cancellation receipt is invalid"
+            )
+        return receipt
+
     def reconcile_benchmark_provider_cleanup(
         self,
         *,
@@ -3873,6 +4143,19 @@ class LearningStageWorkerRegistry:
         if root is None:
             raise LearningStageWorkerError(
                 "benchmark provider supervision root is missing"
+            )
+        with self._lock:
+            current = self._benchmark_reservations.get(
+                (run, stage_value, operation)
+            )
+            if current is None:
+                raise LearningStageWorkerError(
+                    "benchmark provider cleanup identity does not match"
+                )
+            _validate_benchmark_reservation_supervision(
+                current,
+                supervision_root=root,
+                expected_journal_root=self._result_root,
             )
         with hold_benchmark_worker_controller(
             supervision_root=root,
@@ -3923,8 +4206,82 @@ class LearningStageWorkerRegistry:
                 )
             provider = self._validate_benchmark_provider_journal(provider)
             snapshot_ref = current["content_sha256"]
-            abort_allowed = current.get("reservation_state") == "cancelled_before_launch"
+            cancellation_candidate = (
+                current.get("reservation_state") == "cancelled_before_launch"
+            )
 
+        try:
+            acquisition_observation = (
+                self._validate_benchmark_provider_acquisition_observation(
+                    observe_qwen_model_request_acquisition(
+                        provider["model_request_id"],
+                        acquisition_intent_ref=provider[
+                            "acquisition_intent_ref"
+                        ],
+                        runtime_owner_ref=provider["runtime_owner_ref"],
+                    ),
+                    model_request_id=provider["model_request_id"],
+                    acquisition_owner_ref=provider["acquisition_owner_ref"],
+                    acquisition_intent_ref=provider["acquisition_intent_ref"],
+                    runtime_owner_ref=provider["runtime_owner_ref"],
+                )
+            )
+        except (
+            LearningStageWorkerError,
+            OSError,
+            RuntimeError,
+            ValueError,
+            UnicodeError,
+        ):
+            return self._benchmark_provider_cleanup_projection(
+                provider, receipt=None
+            )
+        if acquisition_observation["materialization_state"] == (
+            "prepared_never_materialized"
+        ) and (
+            acquisition_observation["materialization_ledger_ref"]
+            != provider["materialization_ledger_ref"]
+            or {
+                "content_sha256": acquisition_observation["content_sha256"]
+            }
+            != provider["acquisition_observation_ref"]
+        ):
+            return self._benchmark_provider_cleanup_projection(
+                provider, receipt=None
+            )
+        cancellation_valid = False
+        if cancellation_candidate:
+            try:
+                self._validate_benchmark_provider_cancelled_before_launch(
+                    current=current,
+                    provider_journal=provider,
+                )
+                cancellation_valid = True
+            except LearningStageWorkerError:
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+        with self._lock:
+            current_before_side_effect = self._benchmark_reservations.get(key)
+            if (
+                current_before_side_effect is None
+                or current_before_side_effect.get("content_sha256")
+                != snapshot_ref
+            ):
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+            _validate_benchmark_reservation_supervision(
+                current_before_side_effect,
+                supervision_root=self._benchmark_supervision_root,
+                expected_journal_root=self._result_root,
+            )
+        abort_allowed = (
+            cancellation_valid
+            and acquisition_observation["materialization_state"]
+            == "prepared_never_materialized"
+            and acquisition_observation["materialization_revision"] == 0
+        )
         if abort_allowed:
             try:
                 abort_result = abort_qwen_model_request_acquisition(
@@ -3953,7 +4310,70 @@ class LearningStageWorkerRegistry:
             except LearningStageWorkerError:
                 raise
             except (OSError, RuntimeError, ValueError, UnicodeError):
-                pass
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+            try:
+                acquisition_observation = (
+                    self._validate_benchmark_provider_acquisition_observation(
+                        observe_qwen_model_request_acquisition(
+                            provider["model_request_id"],
+                            acquisition_intent_ref=provider[
+                                "acquisition_intent_ref"
+                            ],
+                            runtime_owner_ref=provider["runtime_owner_ref"],
+                        ),
+                        model_request_id=provider["model_request_id"],
+                        acquisition_owner_ref=provider[
+                            "acquisition_owner_ref"
+                        ],
+                        acquisition_intent_ref=provider[
+                            "acquisition_intent_ref"
+                        ],
+                        runtime_owner_ref=provider["runtime_owner_ref"],
+                        expected_state="aborted_never_materialized",
+                        expected_revision=1,
+                    )
+                )
+            except (
+                LearningStageWorkerError,
+                OSError,
+                RuntimeError,
+                ValueError,
+                UnicodeError,
+            ):
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+        current_provider = self._benchmark_provider_journal_with_observation(
+            provider,
+            acquisition_observation,
+        )
+        with self._lock:
+            current_after_observation = self._benchmark_reservations.get(key)
+            if (
+                current_after_observation is None
+                or current_after_observation.get("content_sha256")
+                != snapshot_ref
+            ):
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+            durable_provider = self._benchmark_provider_journals.get(key)
+            if durable_provider != provider:
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+            if current_provider != provider:
+                _write_json_atomic(
+                    self._result_root
+                    / f"{operation}.benchmark-provider.json",
+                    current_provider,
+                )
+                self._benchmark_provider_journals[key] = deepcopy(
+                    current_provider
+                )
+                provider = current_provider
         try:
             observed = observe_qwen_model_request_cleanup(
                 provider["model_request_id"]
@@ -3963,6 +4383,19 @@ class LearningStageWorkerRegistry:
         receipt = self._validate_benchmark_provider_cleanup_receipt(
             observed, provider_journal=provider
         )
+        if receipt is not None and (
+            (
+                receipt["outcome"] == "verified_not_acquired"
+                and acquisition_observation["materialization_state"]
+                != "aborted_never_materialized"
+            )
+            or (
+                receipt["outcome"] == "verified_exact_process_exited"
+                and acquisition_observation["materialization_state"]
+                != "materialization_possible"
+            )
+        ):
+            receipt = None
 
         with self._lock:
             current_after = self._benchmark_reservations.get(key)
