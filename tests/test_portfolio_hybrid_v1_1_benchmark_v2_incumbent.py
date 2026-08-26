@@ -306,6 +306,15 @@ def _prepared_document(source_bundle: dict[str, object]) -> dict[str, object]:
     )
 
 
+def _provider_owner_changes() -> dict[str, object]:
+    return {
+        "provider_reservation_ref": {"content_sha256": "6" * 64},
+        "acquisition_owner_ref": {"content_sha256": "f" * 64},
+        "acquisition_intent_ref": {"content_sha256": "7" * 64},
+        "runtime_owner_ref": {"content_sha256": "8" * 64},
+    }
+
+
 def _result_ready_document(
     source_bundle: dict[str, object], *, result_identity: dict[str, object]
 ) -> dict[str, object]:
@@ -317,10 +326,7 @@ def _result_ready_document(
     operation = transition_benchmark_v2_incumbent_operation(
         operation,
         to_phase="provider_owner_prepared",
-        changes={
-            "acquisition_intent_ref": {"content_sha256": "7" * 64},
-            "runtime_owner_ref": {"content_sha256": "8" * 64},
-        },
+        changes=_provider_owner_changes(),
     )
     operation = transition_benchmark_v2_incumbent_operation(
         operation, to_phase="worker_starting", changes={}
@@ -340,6 +346,59 @@ def _result_ready_document(
         to_phase="result_ready",
         changes={"result_identity_ref": result_identity},
     )
+
+
+def test_parent_seal_dispatch_rejects_the_wrong_canonical_form() -> None:
+    from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    parent_body = {
+        "contract_version": "benchmark_worker_cleanup_receipt_v1",
+        "process_identity": {
+            "pid": 321,
+            "create_time_ns": 1_787_780_587_306_627_584,
+        },
+    }
+    runtime_parent = seal_immutable(parent_body)
+    assert (
+        incumbent._runtime_sealed_parent(runtime_parent, "runtime parent")
+        == runtime_parent
+    )
+
+    wrong_parent = deepcopy(parent_body)
+    wrong_parent["content_sha256"] = content_sha256(wrong_parent)
+    assert wrong_parent["content_sha256"] != runtime_parent["content_sha256"]
+    with pytest.raises(ValueError, match="content SHA mismatch"):
+        incumbent._runtime_sealed_parent(wrong_parent, "runtime parent")
+
+
+def test_incumbent_intent_rejects_runtime_jcs_seal() -> None:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        validate_benchmark_v2_incumbent_terminal_intent,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    wrong_intent = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_incumbent_terminal_intent_v1",
+            "run_id": "run-seal",
+            "stage": "screen_understanding",
+            "operation_id": "operation-seal",
+            "worker_id": "worker-seal",
+            "model_request_id": "request-seal",
+            "payload_sha256": "1" * 64,
+            "result_sha256": "2" * 64,
+            "normal_binding_evidence_ref": {"content_sha256": "5" * 64},
+            "provider_cleanup_evidence_ref": {"content_sha256": "6" * 64},
+            "worker_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+            "intent_revision": 1_787_780_587_306_627_584,
+            "intent_at": "2026-08-27T00:00:00+00:00",
+            "predecessor_content_sha256": "d" * 64,
+        }
+    )
+    with pytest.raises(ValueError, match="terminal intent content SHA mismatch"):
+        validate_benchmark_v2_incumbent_terminal_intent(wrong_intent)
 
 @pytest.fixture
 def source_bundle(tmp_path: Path, validated_provider_snapshot):
@@ -716,8 +775,29 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             self.provider = seal_immutable(
                 {
                     "contract_version": "benchmark_provider_acquisition_ref_v1",
+                    "authority_kind": root.authority_kind,
+                    "run_id": "run-c3-start",
+                    "stage": "screen_understanding",
+                    "operation_id": operation_id,
+                    "worker_id": "1" * 32,
+                    "model_request_id": "request-c3-start",
+                    "payload_sha256": self.reservation["payload_sha256"],
+                    "reservation_ref": deepcopy(kwargs["reservation_ref"]),
+                    "acquisition_owner_ref": {"content_sha256": "f" * 64},
                     "acquisition_intent_ref": {"content_sha256": "3" * 64},
-                    "runtime_owner_ref": deepcopy(kwargs["runtime_owner_ref"]),
+                    "prepared_acquisition_observation_ref": {
+                        "content_sha256": "7" * 64
+                    },
+                    "prepared_materialization_ledger_ref": {
+                        "content_sha256": "8" * 64
+                    },
+                    "acquisition_observation_ref": {"content_sha256": "7" * 64},
+                    "materialization_ledger_ref": {"content_sha256": "8" * 64},
+                    "runtime_owner_ref": {
+                        "content_sha256": kwargs["runtime_owner_ref"][
+                            "content_sha256"
+                        ]
+                    },
                 }
             )
             return deepcopy(self.provider)
@@ -772,6 +852,11 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
                         "execute_binding_enabled": False,
                     }
                 )
+            if "worker_cleanup" in events:
+                after = deepcopy(self.launch_owner)
+                after.pop("content_sha256")
+                after["owner_phase"] = "cleanup_finalization_intent"
+                return seal_immutable(after)
             return deepcopy(self.launch_owner)
 
         def inspect_completed_result_identity(self, **_kwargs):
@@ -860,8 +945,10 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
                     "worker_id": "1" * 32,
                     "model_request_id": "request-c3-start",
                     "payload_sha256": self.reservation["payload_sha256"],
-                    "reservation_ref": {"content_sha256": "e" * 64},
-                    "acquisition_owner_ref": {"content_sha256": "f" * 64},
+                    "reservation_ref": self.provider["reservation_ref"],
+                    "acquisition_owner_ref": self.provider[
+                        "acquisition_owner_ref"
+                    ],
                     "acquisition_intent_ref": self.provider[
                         "acquisition_intent_ref"
                     ],
@@ -1010,6 +1097,7 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             "inspect_result",
             "launch_owner",
             "worker_cleanup",
+            "launch_owner",
             "provider_cleanup",
             "adopt",
         ]
@@ -1087,10 +1175,7 @@ def test_document_closed_hash_and_legal_transition_chain(
     owner_prepared = transition_benchmark_v2_incumbent_operation(
         validated,
         to_phase="provider_owner_prepared",
-        changes={
-            "acquisition_intent_ref": {"content_sha256": "7" * 64},
-            "runtime_owner_ref": {"content_sha256": "8" * 64},
-        },
+        changes=_provider_owner_changes(),
     )
     assert owner_prepared["predecessor_content_sha256"] == prepared["content_sha256"]
     assert owner_prepared["current_document_revision"] == 8
@@ -1118,10 +1203,7 @@ def test_intent_race_has_one_winner_and_forbidden_edge_has_zero_mutation(
     for phase, changes in (
         (
             "provider_owner_prepared",
-            {
-                "acquisition_intent_ref": {"content_sha256": "7" * 64},
-                "runtime_owner_ref": {"content_sha256": "8" * 64},
-            },
+            _provider_owner_changes(),
         ),
         ("worker_starting", {}),
         (
@@ -1219,10 +1301,7 @@ def test_terminal_receipt_document_complete_and_cancel_replay_are_byte_identical
     from app.learn.recognition.uei.canonical import seal_immutable
 
     prepared = _prepared_document(source_bundle)
-    owner_changes = {
-        "acquisition_intent_ref": {"content_sha256": "7" * 64},
-        "runtime_owner_ref": {"content_sha256": "8" * 64},
-    }
+    owner_changes = _provider_owner_changes()
     complete = transition_benchmark_v2_incumbent_operation(
         prepared, to_phase="provider_owner_prepared", changes=owner_changes
     )
@@ -1328,10 +1407,7 @@ def test_cancel_intent_replay_materialization_without_lease_remains_cleanup_pend
     document = transition_benchmark_v2_incumbent_operation(
         document,
         to_phase="provider_owner_prepared",
-        changes={
-            "acquisition_intent_ref": {"content_sha256": "7" * 64},
-            "runtime_owner_ref": {"content_sha256": "8" * 64},
-        },
+        changes=_provider_owner_changes(),
     )
     intent = compose_benchmark_v2_incumbent_cancel_intent(
         operation=document,
@@ -1446,7 +1522,10 @@ def test_resume_rejects_wrong_operation_identity_before_sidecar_or_registry(
 
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=object(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        composition_kind="test",
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
         provider_case_resolver=object(),
     )
     monkeypatch.setattr(
@@ -1499,10 +1578,7 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     operation = transition_benchmark_v2_incumbent_operation(
         operation,
         to_phase="provider_owner_prepared",
-        changes={
-            "acquisition_intent_ref": {"content_sha256": "7" * 64},
-            "runtime_owner_ref": {"content_sha256": "8" * 64},
-        },
+        changes=_provider_owner_changes(),
     )
     operation = transition_benchmark_v2_incumbent_operation(
         operation, to_phase="worker_starting", changes={}
@@ -1574,7 +1650,10 @@ def test_worker_starting_restart_reuses_the_same_reservation(
 
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        composition_kind="test",
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
         provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
     )
     monkeypatch.setattr(
@@ -1940,7 +2019,10 @@ def test_completion_rejects_task5_b1_create_time_cross_pair_before_intent(
     )
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        composition_kind="test",
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
         provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
     )
     monkeypatch.setattr(
@@ -2002,10 +2084,7 @@ def test_post_launch_cancel_intent_copies_exact_b1_identity_before_cas(
     operation = transition_benchmark_v2_incumbent_operation(
         prepared,
         to_phase="provider_owner_prepared",
-        changes={
-            "acquisition_intent_ref": {"content_sha256": "7" * 64},
-            "runtime_owner_ref": {"content_sha256": "8" * 64},
-        },
+        changes=_provider_owner_changes(),
     )
     operation = transition_benchmark_v2_incumbent_operation(
         operation, to_phase="worker_starting", changes={}
@@ -2062,7 +2141,10 @@ def test_post_launch_cancel_intent_copies_exact_b1_identity_before_cas(
 
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        composition_kind="test",
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
         provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
     )
     monkeypatch.setattr(
@@ -2102,6 +2184,258 @@ def test_post_launch_cancel_intent_copies_exact_b1_identity_before_cas(
     assert intent["process_identity"] == expected_process
     assert intent["scope_name"] == expected_scope
     assert intent["assignment_proven_ref"] == expected_assignment
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "extra",
+        "missing",
+        "wrong_authority",
+        "cross_reservation",
+        "cross_runtime_owner",
+    ],
+)
+def test_provider_preparation_projection_rejects_resealed_schema_and_lineage_drift(
+    mutation: str,
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _prepared_document(source_bundle)
+    reservation_ref = {"content_sha256": "6" * 64}
+    runtime_owner = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_runtime_owner_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "model_request_id": operation["worker_ref"]["model_request_id"],
+            "payload_sha256": operation["worker_ref"]["payload_sha256"],
+            "reservation_ref": reservation_ref,
+        }
+    )
+    projection = {
+        "contract_version": "benchmark_provider_acquisition_ref_v1",
+        "authority_kind": "test",
+        "run_id": operation["run_id"],
+        "stage": operation["stage"],
+        "operation_id": operation["operation_id"],
+        "worker_id": operation["worker_ref"]["worker_id"],
+        "model_request_id": operation["worker_ref"]["model_request_id"],
+        "payload_sha256": operation["worker_ref"]["payload_sha256"],
+        "reservation_ref": reservation_ref,
+        "acquisition_owner_ref": {"content_sha256": "f" * 64},
+        "acquisition_intent_ref": {"content_sha256": "7" * 64},
+        "prepared_acquisition_observation_ref": {"content_sha256": "a" * 64},
+        "prepared_materialization_ledger_ref": {"content_sha256": "b" * 64},
+        "acquisition_observation_ref": {"content_sha256": "a" * 64},
+        "materialization_ledger_ref": {"content_sha256": "b" * 64},
+        "runtime_owner_ref": {"content_sha256": runtime_owner["content_sha256"]},
+    }
+    if mutation == "extra":
+        projection["unexpected"] = False
+    elif mutation == "missing":
+        projection.pop("prepared_acquisition_observation_ref")
+    elif mutation == "wrong_authority":
+        projection["authority_kind"] = "cross-pair"
+    elif mutation == "cross_reservation":
+        projection["reservation_ref"] = {"content_sha256": "d" * 64}
+    elif mutation == "cross_runtime_owner":
+        projection["runtime_owner_ref"] = {"content_sha256": "d" * 64}
+    with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+        workflow_service._validate_benchmark_v2_provider_preparation_parent(
+            provider=seal_immutable(projection),
+            operation=operation,
+            reservation_ref=reservation_ref,
+            runtime_owner=runtime_owner,
+            authority_kind="test",
+        )
+
+
+def test_b1_launch_owner_rejects_cross_authority_before_parent_use(
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _result_ready_document(
+        source_bundle, result_identity={"content_sha256": "a" * 64}
+    )
+    worker = operation["worker_ref"]
+    owner = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "cross-pair",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": worker["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": {"pid": 321, "create_time_ns": 654},
+            "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+            "assignment_proven_ref": {"content_sha256": "5" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+    class _Registry:
+        def inspect_benchmark_launch_owner(self, **_kwargs):
+            return owner
+
+    root = type("_Root", (), {"authority_kind": "test"})()
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="launch owner lineage differs",
+    ):
+        workflow_service._inspect_benchmark_v2_launch_owner(
+            registry=_Registry(),
+            operation=operation,
+            anchor={"anchor": True},
+            root=root,
+            require_assignment=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("parent_kind", "mutation"),
+    [
+        ("b1", "extra"),
+        ("b1", "missing"),
+        ("b1", "cross_parent"),
+        ("b2", "extra"),
+        ("b2", "missing"),
+        ("b2", "cross_reservation"),
+        ("b2", "cross_acquisition_owner"),
+        ("b2", "wrong_authority"),
+    ],
+)
+def test_cleanup_parent_projection_rejects_resealed_schema_and_lineage_drift_before_mutation(
+    parent_kind: str,
+    mutation: str,
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _result_ready_document(
+        source_bundle,
+        result_identity={"content_sha256": "a" * 64},
+    )
+    original = deepcopy(operation)
+    worker = operation["worker_ref"]
+    launch_owner = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": worker["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "cleanup_finalization_intent",
+            "assignment_state": "proven",
+            "process_identity": {"pid": 321, "create_time_ns": 654},
+            "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+            "assignment_proven_ref": {"content_sha256": "5" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    b1 = {
+        "contract_version": "benchmark_worker_cleanup_receipt_v1",
+        "outcome": "verified_exact_worker_exited",
+        "operation_anchor_ref": operation["operation_anchor_ref"],
+        "reservation_ref": launch_owner["current_reservation_ref"],
+        "supervision_ref": launch_owner["supervision_ref"],
+        "run_id": operation["run_id"],
+        "stage": operation["stage"],
+        "operation_id": operation["operation_id"],
+        "worker_id": worker["worker_id"],
+        "process_identity": launch_owner["process_identity"],
+        "assignment_proven_ref": launch_owner["assignment_proven_ref"],
+        "finalization_intent_ref": {"content_sha256": "6" * 64},
+        "exact_handle_observation_refs": {"process": {"content_sha256": "7" * 64}},
+        "job_absence_observation_ref": {"content_sha256": "8" * 64},
+        "worker_absence_observation_ref": {"content_sha256": "9" * 64},
+        "supervisor_absence_observation_ref": None,
+        "reservation_abort_ref": None,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    b2 = {
+        "contract_version": "benchmark_provider_cleanup_ref_v1",
+        "status": "cleanup_verified",
+        "outcome": "verified_exact_process_exited",
+        "authority_kind": "test",
+        "run_id": operation["run_id"],
+        "stage": operation["stage"],
+        "operation_id": operation["operation_id"],
+        "worker_id": worker["worker_id"],
+        "model_request_id": worker["model_request_id"],
+        "payload_sha256": worker["payload_sha256"],
+        "reservation_ref": operation["provider_reservation_ref"],
+        "acquisition_owner_ref": operation["acquisition_owner_ref"],
+        "acquisition_intent_ref": operation["acquisition_intent_ref"],
+        "runtime_owner_ref": operation["runtime_owner_ref"],
+        "cleanup_receipt_ref": {"content_sha256": "c" * 64},
+    }
+    target = b1 if parent_kind == "b1" else b2
+    if mutation == "extra":
+        target["unexpected"] = False
+    elif mutation == "missing":
+        target.pop("status" if parent_kind == "b2" else "finalization_intent_ref")
+    elif mutation == "cross_parent":
+        target["supervision_ref"] = {"content_sha256": "d" * 64}
+    elif mutation == "cross_reservation":
+        target["reservation_ref"] = {"content_sha256": "d" * 64}
+    elif mutation == "cross_acquisition_owner":
+        target["acquisition_owner_ref"] = {"content_sha256": "d" * 64}
+    elif mutation == "wrong_authority":
+        target["authority_kind"] = "cross-pair"
+    sealed = seal_immutable(target)
+    persisted: list[dict[str, object]] = []
+    with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+        if parent_kind == "b1":
+            workflow_service._validate_benchmark_v2_worker_cleanup_parent(
+                cleanup=sealed,
+                operation=operation,
+                launch_owner=launch_owner,
+                allowed_outcomes={"verified_exact_worker_exited"},
+            )
+        else:
+            workflow_service._validate_benchmark_v2_provider_cleanup_parent(
+                cleanup=sealed,
+                operation=operation,
+                result_identity=None,
+                authority_kind="test",
+                allowed_outcomes={"verified_exact_process_exited"},
+            )
+        persisted.append(deepcopy(operation))
+    assert persisted == []
+    assert operation == original
 
 
 def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
@@ -2195,8 +2529,8 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
             "worker_id": worker["worker_id"],
             "model_request_id": worker["model_request_id"],
             "payload_sha256": worker["payload_sha256"],
-            "reservation_ref": {"content_sha256": "1" * 64},
-            "acquisition_owner_ref": {"content_sha256": "2" * 64},
+            "reservation_ref": operation["provider_reservation_ref"],
+            "acquisition_owner_ref": operation["acquisition_owner_ref"],
             "acquisition_intent_ref": operation["acquisition_intent_ref"],
             "runtime_owner_ref": operation["runtime_owner_ref"],
             "cleanup_receipt_ref": snapshot["provider_cleanup_evidence_ref"],
@@ -2215,7 +2549,12 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
 
         def inspect_benchmark_worker_launch_owner(self, **_kwargs):
             events.append("inspect_b1")
-            return deepcopy(launch_owner)
+            if "worker_cleanup" not in events:
+                return deepcopy(launch_owner)
+            after = deepcopy(launch_owner)
+            after.pop("content_sha256")
+            after["owner_phase"] = "cleanup_finalization_intent"
+            return seal_immutable(after)
 
         def observe_benchmark_worker_cleanup(self, **_kwargs):
             events.append("worker_cleanup")
@@ -2240,7 +2579,10 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
     )
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        composition_kind="test",
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
         provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
     )
     monkeypatch.setattr(
@@ -2279,6 +2621,7 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
         "inspect_b1",
         "resolve_task5",
         "worker_cleanup",
+        "inspect_b1",
         "provider_cleanup",
         "persist_intent",
     ]
@@ -2302,10 +2645,7 @@ def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
     operation = transition_benchmark_v2_incumbent_operation(
         operation,
         to_phase="provider_owner_prepared",
-        changes={
-            "acquisition_intent_ref": {"content_sha256": "7" * 64},
-            "runtime_owner_ref": {"content_sha256": "8" * 64},
-        },
+        changes=_provider_owner_changes(),
     )
     operation = transition_benchmark_v2_incumbent_operation(
         operation, to_phase="worker_starting", changes={}
@@ -2377,7 +2717,10 @@ def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
 
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        composition_kind="test",
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
         provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
     )
     monkeypatch.setattr(

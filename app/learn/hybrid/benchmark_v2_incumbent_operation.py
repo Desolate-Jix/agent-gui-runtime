@@ -97,6 +97,8 @@ _OPERATION_FIELDS = {
     "reservation_ref",
     "supervision_inputs_ref",
     "expected_supervision_ref",
+    "provider_reservation_ref",
+    "acquisition_owner_ref",
     "acquisition_intent_ref",
     "runtime_owner_ref",
     "prepared_revision",
@@ -122,6 +124,8 @@ _OPERATION_FIELDS = {
     "content_sha256",
 }
 _MUTABLE_FIELDS = {
+    "provider_reservation_ref",
+    "acquisition_owner_ref",
     "acquisition_intent_ref",
     "runtime_owner_ref",
     "worker_ref",
@@ -235,16 +239,13 @@ def _identity_ref(value: object, name: str) -> dict[str, str]:
     return ref
 
 
-def _sealed_parent(value: object, name: str) -> dict[str, Any]:
+def _runtime_sealed_parent(value: object, name: str) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not value:
         raise ValueError(f"{name} must be a sealed mapping")
     result = deepcopy(dict(value))
     digest = result.get("content_sha256")
     _sha(digest, f"{name}.content_sha256")
-    if len(result) > 1 and digest not in {
-        content_sha256(result),
-        runtime_content_sha256(result),
-    }:
+    if len(result) > 1 and runtime_content_sha256(result) != digest:
         raise ValueError(f"{name} content SHA mismatch")
     return result
 
@@ -573,6 +574,8 @@ def compose_benchmark_v2_incumbent_operation(
         "reservation_ref": deepcopy(dict(reservation_ref)),
         "supervision_inputs_ref": deepcopy(dict(supervision_inputs_ref)),
         "expected_supervision_ref": deepcopy(dict(expected_supervision_ref)),
+        "provider_reservation_ref": None,
+        "acquisition_owner_ref": None,
         "acquisition_intent_ref": None,
         "runtime_owner_ref": None,
         "prepared_revision": prepared_revision,
@@ -612,7 +615,7 @@ def validate_benchmark_v2_incumbent_terminal_intent(value: object) -> dict[str, 
         "provider_cleanup_evidence_ref",
         "worker_cleanup_evidence_ref",
     ):
-        intent[name] = _sealed_parent(intent[name], f"benchmark terminal intent {name}")
+        intent[name] = _runtime_sealed_parent(intent[name], f"benchmark terminal intent {name}")
     _revision(intent["intent_revision"], "benchmark terminal intent revision")
     if intent["content_sha256"] != content_sha256(intent):
         raise ValueError("benchmark terminal intent content SHA mismatch")
@@ -643,7 +646,7 @@ def validate_benchmark_v2_incumbent_cancel_intent(value: object) -> dict[str, An
         intent[name] = _content_ref(intent[name], f"benchmark cancel intent {name}")
     for name in ("acquisition_intent_ref", "runtime_owner_ref"):
         if intent[name] is not None:
-            intent[name] = _sealed_parent(intent[name], f"benchmark cancel intent {name}")
+            intent[name] = _runtime_sealed_parent(intent[name], f"benchmark cancel intent {name}")
     if intent["process_identity"] is not None:
         process = _closed(
             intent["process_identity"],
@@ -656,7 +659,7 @@ def validate_benchmark_v2_incumbent_cancel_intent(value: object) -> dict[str, An
     if intent["scope_name"] is not None:
         _text(intent["scope_name"], "benchmark cancel scope name")
     if intent["assignment_proven_ref"] is not None:
-        intent["assignment_proven_ref"] = _sealed_parent(
+        intent["assignment_proven_ref"] = _runtime_sealed_parent(
             intent["assignment_proven_ref"],
             "benchmark cancel assignment ref",
         )
@@ -694,7 +697,7 @@ def validate_benchmark_v2_incumbent_terminal_receipt(value: object) -> dict[str,
         "provider_cleanup_ref",
     ):
         if receipt[name] is not None:
-            receipt[name] = _sealed_parent(receipt[name], f"benchmark terminal receipt {name}")
+            receipt[name] = _runtime_sealed_parent(receipt[name], f"benchmark terminal receipt {name}")
     if receipt["artifact_is_authorization"] is not False or receipt["execute_binding_enabled"] is not False:
         raise ValueError("benchmark terminal receipt cannot authorize actions")
     if receipt["outcome"] == "benchmark_v2_incumbent_observe_complete":
@@ -747,11 +750,20 @@ def validate_benchmark_v2_incumbent_operation(value: object) -> dict[str, Any]:
         "expected_supervision_ref",
     ):
         operation[name] = _content_ref(operation[name], f"benchmark operation {name}")
-    if (operation["acquisition_intent_ref"] is None) != (operation["runtime_owner_ref"] is None):
-        raise ValueError("benchmark provider owner refs must be both null or both present")
-    for name in ("acquisition_intent_ref", "runtime_owner_ref"):
+    provider_parent_names = (
+        "provider_reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+    )
+    provider_parent_presence = {
+        operation[name] is not None for name in provider_parent_names
+    }
+    if len(provider_parent_presence) != 1:
+        raise ValueError("benchmark provider owner refs must be all null or all present")
+    for name in provider_parent_names:
         if operation[name] is not None:
-            operation[name] = _sealed_parent(operation[name], f"benchmark operation {name}")
+            operation[name] = _runtime_sealed_parent(operation[name], f"benchmark operation {name}")
     prepared_revision = _revision(operation["prepared_revision"], "benchmark prepared revision")
     current_revision = _revision(
         operation["current_document_revision"], "benchmark current document revision"
@@ -796,9 +808,8 @@ def validate_benchmark_v2_incumbent_operation(value: object) -> dict[str, Any]:
         "supervision_ref"
     ] is None:
         raise ValueError("benchmark bound operation requires supervision ref")
-    if phase == "prepared" and (
-        operation["acquisition_intent_ref"] is not None
-        or operation["runtime_owner_ref"] is not None
+    if phase == "prepared" and any(
+        operation[name] is not None for name in provider_parent_names
     ):
         raise ValueError("benchmark prepared operation cannot have provider owner refs")
     if phase in {
@@ -809,10 +820,10 @@ def validate_benchmark_v2_incumbent_operation(value: object) -> dict[str, Any]:
         "terminal_intent",
         "adopted",
         "complete",
-    } and operation["acquisition_intent_ref"] is None:
+    } and any(operation[name] is None for name in provider_parent_names):
         raise ValueError("benchmark operation requires provider owner refs")
     if operation["result_identity_ref"] is not None:
-        operation["result_identity_ref"] = _sealed_parent(
+        operation["result_identity_ref"] = _runtime_sealed_parent(
             operation["result_identity_ref"], "benchmark result identity ref"
         )
     for name in (
@@ -822,7 +833,7 @@ def validate_benchmark_v2_incumbent_operation(value: object) -> dict[str, Any]:
         "generic_adoption_ref",
     ):
         if operation[name] is not None:
-            operation[name] = _sealed_parent(operation[name], f"benchmark operation {name}")
+            operation[name] = _runtime_sealed_parent(operation[name], f"benchmark operation {name}")
     if operation["terminal_intent"] is not None:
         operation["terminal_intent"] = validate_benchmark_v2_incumbent_terminal_intent(
             operation["terminal_intent"]
@@ -1031,7 +1042,7 @@ def compose_benchmark_v2_incumbent_terminal_receipt(
 ) -> dict[str, Any]:
     current = validate_benchmark_v2_incumbent_operation(operation)
     worker = current["worker_ref"]
-    provider_cleanup = _sealed_parent(
+    provider_cleanup = _runtime_sealed_parent(
         provider_cleanup_ref, "benchmark terminal provider cleanup ref"
     )
     provider_outcome = provider_cleanup.get("outcome")
@@ -1160,7 +1171,7 @@ def advance_benchmark_v2_incumbent_cancel_cleanup(
             to_phase="cleanup_pending",
             changes=changes,
         )
-    provider_cleanup = _sealed_parent(
+    provider_cleanup = _runtime_sealed_parent(
         provider_cleanup_ref, "benchmark cancel provider cleanup ref"
     )
     provider_outcome = provider_cleanup.get("outcome")

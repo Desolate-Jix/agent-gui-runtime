@@ -1363,6 +1363,7 @@ def _inspect_benchmark_v2_launch_owner(
         set(owner) != exact_fields
         or owner.get("contract_version")
         != "benchmark_worker_launch_owner_inspection_v1"
+        or owner.get("authority_kind") != root.authority_kind
         or owner.get("artifact_is_authorization") is not False
         or owner.get("execute_binding_enabled") is not False
         or any(
@@ -1457,6 +1458,80 @@ def _resolve_benchmark_v2_result_binding(
     return deepcopy(dict(resolution))
 
 
+def _validate_benchmark_v2_provider_preparation_parent(
+    *,
+    provider: object,
+    operation: Mapping[str, object],
+    reservation_ref: Mapping[str, object],
+    runtime_owner: Mapping[str, object],
+    authority_kind: str,
+) -> dict[str, Any]:
+    projection = _benchmark_v2_sealed_mapping(
+        provider, "benchmark_v2 incumbent B2 preparation"
+    )
+    exact_fields = {
+        "contract_version",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "prepared_acquisition_observation_ref",
+        "prepared_materialization_ledger_ref",
+        "acquisition_observation_ref",
+        "materialization_ledger_ref",
+        "runtime_owner_ref",
+        "content_sha256",
+    }
+    worker = operation["worker_ref"]
+    if (
+        set(projection) != exact_fields
+        or projection.get("contract_version")
+        != "benchmark_provider_acquisition_ref_v1"
+        or projection.get("authority_kind") != authority_kind
+        or any(
+            projection.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or any(
+            projection.get(name) != worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        or projection.get("reservation_ref") != reservation_ref
+        or projection.get("runtime_owner_ref")
+        != {"content_sha256": runtime_owner.get("content_sha256")}
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B2 preparation lineage differs"
+        )
+    for name in (
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "prepared_acquisition_observation_ref",
+        "prepared_materialization_ledger_ref",
+        "acquisition_observation_ref",
+        "materialization_ledger_ref",
+        "runtime_owner_ref",
+    ):
+        ref = projection.get(name)
+        if (
+            not isinstance(ref, Mapping)
+            or set(ref) != {"content_sha256"}
+            or not isinstance(ref.get("content_sha256"), str)
+            or len(ref["content_sha256"]) != 64
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B2 preparation refs differ"
+            )
+    return projection
+
+
 def _validate_benchmark_v2_worker_cleanup_parent(
     *,
     cleanup: object,
@@ -1467,9 +1542,32 @@ def _validate_benchmark_v2_worker_cleanup_parent(
     receipt = _benchmark_v2_sealed_mapping(
         cleanup, "benchmark_v2 incumbent B1 cleanup"
     )
+    exact_fields = {
+        "contract_version",
+        "outcome",
+        "operation_anchor_ref",
+        "reservation_ref",
+        "supervision_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "process_identity",
+        "assignment_proven_ref",
+        "finalization_intent_ref",
+        "exact_handle_observation_refs",
+        "job_absence_observation_ref",
+        "worker_absence_observation_ref",
+        "supervisor_absence_observation_ref",
+        "reservation_abort_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
     worker = operation["worker_ref"]
     if (
-        receipt.get("contract_version") != "benchmark_worker_cleanup_receipt_v1"
+        set(receipt) != exact_fields
+        or receipt.get("contract_version") != "benchmark_worker_cleanup_receipt_v1"
         or receipt.get("outcome") not in allowed_outcomes
         or receipt.get("operation_anchor_ref") != operation["operation_anchor_ref"]
         or any(
@@ -1509,21 +1607,92 @@ def _validate_benchmark_v2_worker_cleanup_parent(
     return receipt
 
 
+def _validate_benchmark_v2_post_cleanup_launch_owner(
+    *,
+    before: Mapping[str, object],
+    after: Mapping[str, object],
+) -> dict[str, Any]:
+    stable_fields = {
+        "contract_version",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "execution_nonce",
+        "reservation_ref",
+        "operation_anchor_ref",
+        "expected_supervision_ref",
+        "supervision_ref",
+        "assignment_state",
+        "process_identity",
+        "scope_name",
+        "assignment_proven_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+    }
+    if any(after.get(name) != before.get(name) for name in stable_fields):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 cleanup reinspection lineage differs"
+        )
+    if before.get("assignment_state") == "proven":
+        if (
+            after.get("owner_phase") != "cleanup_finalization_intent"
+            or after.get("reservation_state") != "launched"
+            or after.get("current_reservation_ref")
+            != before.get("current_reservation_ref")
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 cleanup reinspection phase differs"
+            )
+    elif any(
+        after.get(name) != before.get(name)
+        for name in ("owner_phase", "reservation_state", "current_reservation_ref")
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 no-launch reinspection differs"
+        )
+    return deepcopy(dict(after))
+
+
 def _validate_benchmark_v2_provider_cleanup_parent(
     *,
     cleanup: object,
     operation: Mapping[str, object],
     result_identity: Mapping[str, object] | None,
+    authority_kind: str,
     allowed_outcomes: set[str],
 ) -> dict[str, Any]:
     projection = _benchmark_v2_sealed_mapping(
         cleanup, "benchmark_v2 incumbent B2 cleanup"
     )
+    exact_fields = {
+        "contract_version",
+        "status",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "cleanup_receipt_ref",
+        "content_sha256",
+    }
     worker = operation["worker_ref"]
     if (
-        projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
+        set(projection) != exact_fields
+        or projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
         or projection.get("status") != "cleanup_verified"
         or projection.get("outcome") not in allowed_outcomes
+        or projection.get("authority_kind") != authority_kind
         or any(
             projection.get(name) != operation[name]
             for name in ("run_id", "stage", "operation_id")
@@ -1534,6 +1703,10 @@ def _validate_benchmark_v2_provider_cleanup_parent(
         )
         or projection.get("acquisition_intent_ref")
         != operation["acquisition_intent_ref"]
+        or projection.get("reservation_ref")
+        != operation["provider_reservation_ref"]
+        or projection.get("acquisition_owner_ref")
+        != operation["acquisition_owner_ref"]
         or projection.get("runtime_owner_ref")
         != {
             "content_sha256": operation["runtime_owner_ref"]["content_sha256"]
@@ -1791,14 +1964,25 @@ def _start_benchmark_v2_incumbent_operation(
                 runtime_owner = _benchmark_v2_runtime_owner(
                     anchored_reservation=anchored
                 )
-                provider = registry.prepare_benchmark_provider(
-                    reservation_ref=confirmation["anchored_reservation_ref"],
-                    runtime_owner_ref=runtime_owner,
+                provider_reservation_ref = confirmation["anchored_reservation_ref"]
+                provider = _validate_benchmark_v2_provider_preparation_parent(
+                    provider=registry.prepare_benchmark_provider(
+                        reservation_ref=provider_reservation_ref,
+                        runtime_owner_ref=runtime_owner,
+                    ),
+                    operation=operation,
+                    reservation_ref=provider_reservation_ref,
+                    runtime_owner=runtime_owner,
+                    authority_kind=root.authority_kind,
                 )
                 operation = transition_benchmark_v2_incumbent_operation(
                     operation,
                     to_phase="provider_owner_prepared",
                     changes={
+                        "provider_reservation_ref": provider["reservation_ref"],
+                        "acquisition_owner_ref": provider[
+                            "acquisition_owner_ref"
+                        ],
                         "acquisition_intent_ref": provider[
                             "acquisition_intent_ref"
                         ],
@@ -2118,8 +2302,7 @@ def _resume_benchmark_v2_incumbent_operation(
                     result_identity=result_identity,
                     launch_owner=launch_owner,
                 )
-                worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
-                    cleanup=registry.observe_benchmark_cleanup(
+                observed_worker_cleanup = registry.observe_benchmark_cleanup(
                         worker_id=expected_worker_id,
                         run_id=run_id,
                         stage=stage,
@@ -2127,9 +2310,21 @@ def _resume_benchmark_v2_incumbent_operation(
                         terminate=True,
                         expected_operation_anchor=anchor,
                         supervision_root=root,
+                    )
+                post_cleanup_owner = _validate_benchmark_v2_post_cleanup_launch_owner(
+                    before=launch_owner,
+                    after=_inspect_benchmark_v2_launch_owner(
+                        registry=registry,
+                        operation=operation,
+                        anchor=anchor,
+                        root=root,
+                        require_assignment=True,
                     ),
+                )
+                worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
+                    cleanup=observed_worker_cleanup,
                     operation=operation,
-                    launch_owner=launch_owner,
+                    launch_owner=post_cleanup_owner,
                     allowed_outcomes={"verified_exact_worker_exited"},
                 )
                 provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
@@ -2141,6 +2336,7 @@ def _resume_benchmark_v2_incumbent_operation(
                     ),
                     operation=operation,
                     result_identity=result_identity,
+                    authority_kind=root.authority_kind,
                     allowed_outcomes={"verified_exact_process_exited"},
                 )
                 existing_intent = operation.get("terminal_intent")
@@ -2348,16 +2544,28 @@ def _cancel_benchmark_v2_incumbent_operation(
                     operation_id=operation_id,
                     supervision_root=root,
                 )
-                provider = registry.prepare_benchmark_provider(
-                    reservation_ref=confirmation["anchored_reservation_ref"],
-                    runtime_owner_ref=_benchmark_v2_runtime_owner(
-                        anchored_reservation=anchored
+                provider_reservation_ref = confirmation["anchored_reservation_ref"]
+                runtime_owner = _benchmark_v2_runtime_owner(
+                    anchored_reservation=anchored
+                )
+                provider = _validate_benchmark_v2_provider_preparation_parent(
+                    provider=registry.prepare_benchmark_provider(
+                        reservation_ref=provider_reservation_ref,
+                        runtime_owner_ref=runtime_owner,
                     ),
+                    operation=operation,
+                    reservation_ref=provider_reservation_ref,
+                    runtime_owner=runtime_owner,
+                    authority_kind=root.authority_kind,
                 )
                 operation = transition_benchmark_v2_incumbent_operation(
                     operation,
                     to_phase="provider_owner_prepared",
                     changes={
+                        "provider_reservation_ref": provider["reservation_ref"],
+                        "acquisition_owner_ref": provider[
+                            "acquisition_owner_ref"
+                        ],
                         "acquisition_intent_ref": provider[
                             "acquisition_intent_ref"
                         ],
@@ -2412,8 +2620,7 @@ def _cancel_benchmark_v2_incumbent_operation(
                     raise LearningWorkflowStageOperationError(
                         "benchmark_v2 incumbent cancel intent B1 identity differs"
                     )
-            worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
-                cleanup=registry.observe_benchmark_cleanup(
+            observed_worker_cleanup = registry.observe_benchmark_cleanup(
                     worker_id=operation["worker_ref"]["worker_id"],
                     run_id=run_id,
                     stage=stage,
@@ -2421,9 +2628,23 @@ def _cancel_benchmark_v2_incumbent_operation(
                     terminate=True,
                     expected_operation_anchor=anchor,
                     supervision_root=root,
+                )
+            replay_owner = _validate_benchmark_v2_post_cleanup_launch_owner(
+                before=launch_owner,
+                after=_inspect_benchmark_v2_launch_owner(
+                    registry=registry,
+                    operation=operation,
+                    anchor=anchor,
+                    root=root,
+                    require_assignment=(
+                        launch_owner["assignment_state"] == "proven"
+                    ),
                 ),
+            )
+            worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
+                cleanup=observed_worker_cleanup,
                 operation=operation,
-                launch_owner=launch_owner,
+                launch_owner=replay_owner,
                 allowed_outcomes={
                     "verified_not_launched",
                     "verified_exact_worker_exited",
@@ -2438,19 +2659,13 @@ def _cancel_benchmark_v2_incumbent_operation(
                 ),
                 operation=operation,
                 result_identity=None,
+                authority_kind=root.authority_kind,
                 allowed_outcomes={
                     "verified_not_acquired",
                     "verified_exact_process_exited",
                 },
             )
             if launch_owner["assignment_state"] == "proven":
-                replay_owner = _inspect_benchmark_v2_launch_owner(
-                    registry=registry,
-                    operation=operation,
-                    anchor=anchor,
-                    root=root,
-                    require_assignment=True,
-                )
                 if any(
                     replay_owner.get(name) != operation["cancel_intent"].get(name)
                     for name in (
