@@ -598,6 +598,49 @@ def prepare_qwen_model_request_acquisition_owner(
         return deepcopy(owner)
 
 
+def observe_qwen_model_request_acquisition(
+    request_id: str,
+    *,
+    acquisition_intent_ref: Mapping[str, object],
+    runtime_owner_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    """只读观察精确 acquisition owner 与当前 materialization head。"""
+    normalized_request_id = _normalized_qwen_request_id(request_id)
+    with _qwen_acquisition_lock():
+        supplied_intent_ref = _validate_qwen_content_ref(acquisition_intent_ref)
+        supplied_runtime_owner = _validate_qwen_runtime_owner(
+            runtime_owner_ref,
+            request_id=normalized_request_id,
+        )
+        intent = _load_qwen_acquisition_intent(normalized_request_id)
+        owner = _load_qwen_acquisition_owner(normalized_request_id)
+        exact_intent_ref = _qwen_content_ref(intent)
+        if (
+            exact_intent_ref != supplied_intent_ref
+            or owner.get("acquisition_intent_ref") != supplied_intent_ref
+            or intent.get("runtime_owner_ref") != supplied_runtime_owner
+            or owner.get("runtime_owner_ref") != supplied_runtime_owner
+        ):
+            raise RuntimeError("Qwen acquisition observation owner substitution rejected")
+        ledger = _load_qwen_model_request_materialization_ledger(
+            normalized_request_id,
+            acquisition_intent_ref=supplied_intent_ref,
+            runtime_owner_ref=supplied_runtime_owner,
+        )
+        return seal_immutable(
+            {
+                "contract_version": "qwen_model_request_acquisition_observation_v1",
+                "model_request_id": normalized_request_id,
+                "acquisition_owner_ref": _qwen_content_ref(owner),
+                "acquisition_intent_ref": deepcopy(supplied_intent_ref),
+                "runtime_owner_ref": deepcopy(supplied_runtime_owner),
+                "materialization_ledger_ref": _qwen_content_ref(ledger),
+                "materialization_state": ledger["state"],
+                "materialization_revision": ledger["revision"],
+            }
+        )
+
+
 def abort_qwen_model_request_acquisition(
     request_id: str,
     *,

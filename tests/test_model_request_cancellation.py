@@ -4814,3 +4814,264 @@ def test_generic_qwen_duplicate_owner_preserves_prior_value_error(
         if helper.poll() is None:
             helper.terminate()
             helper.wait(timeout=3.0)
+
+
+def test_qwen_acquisition_observation_prepared_snapshot_has_exact_refs(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-acquisition-observation-prepared"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    observation = model_server.observe_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+    )
+    ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
+
+    assert observation == seal_immutable(
+        {
+            "contract_version": "qwen_model_request_acquisition_observation_v1",
+            "model_request_id": request_id,
+            "acquisition_owner_ref": model_server._qwen_content_ref(owner),
+            "acquisition_intent_ref": owner["acquisition_intent_ref"],
+            "runtime_owner_ref": owner["runtime_owner_ref"],
+            "materialization_ledger_ref": model_server._qwen_content_ref(ledger),
+            "materialization_state": "prepared_never_materialized",
+            "materialization_revision": 0,
+        }
+    )
+    assert set(observation) == {
+        "contract_version",
+        "model_request_id",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "materialization_ledger_ref",
+        "materialization_state",
+        "materialization_revision",
+        "content_sha256",
+    }
+
+
+def test_qwen_acquisition_observation_is_byte_identical_after_fresh_process_reload(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-acquisition-observation-reload"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    expected = model_server.observe_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+    )
+    code = (
+        "import json,sys; from pathlib import Path; "
+        "from app.core import model_server; "
+        "model_server.MODEL_SERVER_LEASE_DIR=Path(sys.argv[1]); "
+        "intent=json.loads(sys.argv[3]); owner=json.loads(sys.argv[4]); "
+        "value=model_server.observe_qwen_model_request_acquisition("
+        "sys.argv[2],acquisition_intent_ref=intent,runtime_owner_ref=owner); "
+        "sys.stdout.write(json.dumps(value,sort_keys=True,separators=(',',':')))"
+    )
+    arguments = [
+        sys.executable,
+        "-c",
+        code,
+        str(tmp_path / "qwen-leases"),
+        request_id,
+        json.dumps(owner["acquisition_intent_ref"], separators=(",", ":")),
+        json.dumps(owner["runtime_owner_ref"], separators=(",", ":")),
+    ]
+    first = subprocess.run(
+        arguments,
+        cwd=model_server.ROOT_DIR,
+        env=os.environ.copy(),
+        capture_output=True,
+        timeout=15,
+    )
+    second = subprocess.run(
+        arguments,
+        cwd=model_server.ROOT_DIR,
+        env=os.environ.copy(),
+        capture_output=True,
+        timeout=15,
+    )
+    expected_bytes = json.dumps(
+        expected,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert first.stdout == second.stdout == expected_bytes
+
+
+@pytest.mark.parametrize(
+    ("transition", "expected_state"),
+    [
+        ("launch", "materialization_possible"),
+        ("abort", "aborted_never_materialized"),
+    ],
+)
+def test_qwen_acquisition_observation_tracks_exact_current_transition(
+    tmp_path,
+    monkeypatch,
+    transition,
+    expected_state,
+) -> None:
+    request_id = f"benchmark-acquisition-observation-{transition}"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    before = model_server.observe_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+    )
+    head = model_server._transition_qwen_model_request_materialization(
+        request_id,
+        transition=transition,
+    )
+    after = model_server.observe_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+    )
+
+    assert head is not None
+    assert after["materialization_state"] == expected_state
+    assert after["materialization_revision"] == 1
+    assert after["materialization_ledger_ref"] == model_server._qwen_content_ref(head)
+    assert after["materialization_ledger_ref"] != before["materialization_ledger_ref"]
+    assert after["acquisition_owner_ref"] == before["acquisition_owner_ref"]
+    assert after["acquisition_intent_ref"] == before["acquisition_intent_ref"]
+    assert after["runtime_owner_ref"] == before["runtime_owner_ref"]
+
+
+@pytest.mark.parametrize(
+    "substitution",
+    ["request", "intent", "owner"],
+)
+def test_qwen_acquisition_observation_rejects_identity_substitution(
+    tmp_path,
+    monkeypatch,
+    substitution,
+) -> None:
+    request_id = f"benchmark-acquisition-substitution-{substitution}"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    observed_request_id = request_id
+    intent_ref = owner["acquisition_intent_ref"]
+    runtime_owner = owner["runtime_owner_ref"]
+    if substitution == "request":
+        observed_request_id = f"{request_id}-other"
+    elif substitution == "intent":
+        intent_ref = {"content_sha256": "f" * 64}
+    else:
+        changed_owner = deepcopy(runtime_owner)
+        changed_owner.pop("content_sha256")
+        changed_owner["worker_id"] = f"worker-{request_id}-substituted"
+        runtime_owner = seal_immutable(changed_owner)
+
+    with pytest.raises((RuntimeError, ValueError)):
+        model_server.observe_qwen_model_request_acquisition(
+            observed_request_id,
+            acquisition_intent_ref=intent_ref,
+            runtime_owner_ref=runtime_owner,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_intent",
+        "legacy_owner",
+        "corrupt_history",
+        "wrong_predecessor",
+        "mixed_head",
+    ],
+)
+def test_qwen_acquisition_observation_rejects_incoherent_persisted_lineage(
+    tmp_path,
+    monkeypatch,
+    mutation,
+) -> None:
+    request_id = f"benchmark-acquisition-lineage-{mutation}"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    paths = model_server._qwen_acquisition_artifact_paths(request_id)
+    if mutation == "missing_intent":
+        paths["intent"].unlink()
+    elif mutation == "legacy_owner":
+        persisted_owner = json.loads(paths["owner"].read_text(encoding="utf-8"))
+        persisted_owner.pop("content_sha256")
+        persisted_owner["contract_version"] = "benchmark_provider_acquisition_owner_v0"
+        paths["owner"].write_text(
+            json.dumps(seal_immutable(persisted_owner)),
+            encoding="utf-8",
+        )
+    elif mutation == "corrupt_history":
+        paths["ledger_revision_zero"].write_bytes(b"{corrupt")
+    else:
+        model_server._transition_qwen_model_request_materialization(
+            request_id,
+            transition="launch",
+        )
+        if mutation == "wrong_predecessor":
+            head = json.loads(paths["ledger"].read_text(encoding="utf-8"))
+            head.pop("content_sha256")
+            head["predecessor_content_sha256"] = "e" * 64
+            head = seal_immutable(head)
+            paths["ledger"].write_text(json.dumps(head), encoding="utf-8")
+            paths["ledger_winner"].write_text(json.dumps(head), encoding="utf-8")
+        else:
+            paths["ledger"].write_bytes(paths["ledger_revision_zero"].read_bytes())
+
+    with pytest.raises((RuntimeError, ValueError)):
+        model_server.observe_qwen_model_request_acquisition(
+            request_id,
+            acquisition_intent_ref=owner["acquisition_intent_ref"],
+            runtime_owner_ref=owner["runtime_owner_ref"],
+        )
+
+
+def test_qwen_acquisition_observation_has_zero_provider_or_resource_side_effect(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-acquisition-observation-zero-side-effect"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    root = tmp_path / "qwen-leases"
+    before = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    forbidden = []
+
+    def reject(name):
+        def fail(*args, **kwargs):
+            forbidden.append((name, args, kwargs))
+            raise AssertionError(f"observation reached side effect: {name}")
+
+        return fail
+
+    for name in (
+        "profile_for_stage",
+        "_ensure_model_server_for_profile",
+        "_qwen_server_incarnation",
+        "_write_qwen_acquisition_artifact",
+        "_qwen_lease_lock",
+    ):
+        monkeypatch.setattr(model_server, name, reject(name))
+
+    observation = model_server.observe_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+    )
+    after = {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+    assert observation["materialization_state"] == "prepared_never_materialized"
+    assert before == after
+    assert forbidden == []
