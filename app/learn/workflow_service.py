@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import hashlib
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from threading import RLock
+from typing import Any, Literal, Mapping
 from uuid import uuid4
 
 from app.learn.calibration_artifact import (
@@ -57,6 +59,139 @@ _NEXT_MANAGED_STAGE: dict[str, tuple[str, str, str]] = {
     ),
 }
 _BACKEND_CONTINUATION_LEASE_SECONDS = 1800
+
+
+@dataclass(frozen=True)
+class LearningWorkflowServiceComposition:
+    store: LearningWorkflowRunStore
+    worker_registry: object
+    project_root: Path
+    composition_kind: Literal["production", "test"]
+    benchmark_supervision_root: object | None
+    provider_case_resolver: object | None
+
+
+_LEARNING_WORKFLOW_OPERATION_LOCKS_GUARD = RLock()
+_LEARNING_WORKFLOW_OPERATION_LOCKS: dict[tuple[int, str, str], RLock] = {}
+_PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION: (
+    LearningWorkflowServiceComposition | None
+) = None
+
+
+def get_learning_workflow_operation_lock(
+    *,
+    store: LearningWorkflowRunStore,
+    run_id: str,
+    operation_id: str,
+) -> RLock:
+    if not isinstance(store, LearningWorkflowRunStore):
+        raise ValueError("workflow operation lock requires LearningWorkflowRunStore")
+    normalized_run_id = str(run_id or "").strip()
+    normalized_operation_id = str(operation_id or "").strip()
+    if not normalized_run_id or not normalized_operation_id:
+        raise ValueError("workflow operation lock identity is required")
+    key = (id(store), normalized_run_id, normalized_operation_id)
+    with _LEARNING_WORKFLOW_OPERATION_LOCKS_GUARD:
+        lock = _LEARNING_WORKFLOW_OPERATION_LOCKS.get(key)
+        if lock is None:
+            lock = RLock()
+            _LEARNING_WORKFLOW_OPERATION_LOCKS[key] = lock
+        return lock
+
+
+def _validate_learning_workflow_service_composition(
+    *,
+    store: LearningWorkflowRunStore,
+    worker_registry: object,
+    project_root: str | Path,
+    composition_kind: Literal["production", "test"],
+    benchmark_supervision_root: object | None,
+    provider_case_resolver: object | None,
+) -> LearningWorkflowServiceComposition:
+    from app.learn.workflow_worker import LearningStageWorkerRegistry
+
+    if not isinstance(store, LearningWorkflowRunStore):
+        raise ValueError("composition store must be LearningWorkflowRunStore")
+    if not isinstance(worker_registry, LearningStageWorkerRegistry):
+        raise ValueError("composition Registry must be LearningStageWorkerRegistry")
+    root = Path(project_root).resolve()
+    if (benchmark_supervision_root is None) != (provider_case_resolver is None):
+        raise ValueError(
+            "benchmark composition requires both supervision root and case resolver"
+        )
+    if benchmark_supervision_root is not None:
+        journal_root = Path(
+            getattr(benchmark_supervision_root, "journal_root", "")
+        ).resolve()
+        if not journal_root.is_relative_to(root):
+            raise ValueError(
+                "benchmark supervision root must be inside the composition project root"
+            )
+        registry_root = getattr(worker_registry, "_benchmark_supervision_root", None)
+        if registry_root is not benchmark_supervision_root:
+            raise ValueError("composition Registry and supervision root do not match")
+        from app.learn.hybrid.benchmark_v2_provider_corpus import (
+            validate_provider_case_resolver_binding,
+        )
+
+        validate_provider_case_resolver_binding(
+            provider_case_resolver,
+            workflow_store=store,
+            benchmark_supervision_root=benchmark_supervision_root,
+            composition_kind=composition_kind,
+        )
+    return LearningWorkflowServiceComposition(
+        store=store,
+        worker_registry=worker_registry,
+        project_root=root,
+        composition_kind=composition_kind,
+        benchmark_supervision_root=benchmark_supervision_root,
+        provider_case_resolver=provider_case_resolver,
+    )
+
+
+def compose_test_learning_workflow_service(
+    *,
+    store: LearningWorkflowRunStore,
+    worker_registry: object,
+    project_root: str | Path,
+    benchmark_supervision_root: object | None = None,
+    provider_case_resolver: object | None = None,
+) -> LearningWorkflowServiceComposition:
+    return _validate_learning_workflow_service_composition(
+        store=store,
+        worker_registry=worker_registry,
+        project_root=project_root,
+        composition_kind="test",
+        benchmark_supervision_root=benchmark_supervision_root,
+        provider_case_resolver=provider_case_resolver,
+    )
+
+
+def get_production_learning_workflow_service_composition(
+) -> LearningWorkflowServiceComposition:
+    global _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION
+    if _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION is not None:
+        return _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        get_production_provider_case_resolver,
+    )
+    from app.learn.workflow_store import learning_workflow_run_store
+    from app.learn.workflow_worker import (
+        get_production_benchmark_worker_supervision_root,
+        learning_stage_worker_registry,
+    )
+
+    composition = _validate_learning_workflow_service_composition(
+        store=learning_workflow_run_store,
+        worker_registry=learning_stage_worker_registry,
+        project_root=Path(__file__).resolve().parents[2],
+        composition_kind="production",
+        benchmark_supervision_root=get_production_benchmark_worker_supervision_root(),
+        provider_case_resolver=get_production_provider_case_resolver(),
+    )
+    _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION = composition
+    return composition
 
 
 class LearningWorkflowStageOperationError(ValueError):

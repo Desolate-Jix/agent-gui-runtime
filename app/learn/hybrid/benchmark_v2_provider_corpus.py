@@ -56,6 +56,10 @@ _FORBIDDEN_PATH_PARTS = (
     "benchmark_scorer",
 )
 
+_PROVIDER_CORPUS_FILE_REF_CONTRACT = "benchmark_v2_provider_corpus_file_ref_v1"
+_PRODUCTION_PROVIDER_CASE_RESOLVER: _OpaqueProviderCaseResolver | None = None
+_VALIDATED_PROVIDER_CORPUS_FILE_SHA256: dict[str, set[str]] = {}
+
 
 def _reject_private_content(value: object) -> None:
     if isinstance(value, Mapping):
@@ -227,7 +231,11 @@ def validate_preloaded_provider_corpus(
         raise ValueError("provider child is not UTF-8 JSON") from exc
     if raw != canonical_json_bytes(value, pretty=True):
         raise ValueError("provider child bytes are not canonical")
-    return _validate_provider_corpus(value)
+    validated = _validate_provider_corpus(value)
+    _VALIDATED_PROVIDER_CORPUS_FILE_SHA256.setdefault(
+        str(validated["content_sha256"]), set()
+    ).add(expected_sha256)
+    return validated
 
 
 def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]:
@@ -340,3 +348,250 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
     manifest["sealed_runtime"] = runtime
     manifest["workload"] = workload
     return manifest
+
+
+class _OpaqueProviderCaseResolver:
+    """绑定一份已验证快照；对象本身不能序列化或替代closed case ref。"""
+
+    __slots__ = (
+        "__cases",
+        "__case_refs",
+        "__corpus_file_ref",
+        "__workflow_store",
+        "__benchmark_supervision_root",
+        "__composition_kind",
+    )
+
+    def __init__(
+        self,
+        *,
+        validated_corpus: Mapping[str, object],
+        provider_corpus_file_ref: Mapping[str, object],
+        workflow_store: object,
+        benchmark_supervision_root: object,
+        composition_kind: str,
+    ) -> None:
+        corpus = _validate_provider_corpus(validated_corpus)
+        corpus_file_ref = _validate_provider_corpus_file_ref(
+            provider_corpus_file_ref,
+            validated_corpus=corpus,
+        )
+        _validate_resolver_pair(
+            workflow_store=workflow_store,
+            benchmark_supervision_root=benchmark_supervision_root,
+            composition_kind=composition_kind,
+        )
+        cases: dict[str, tuple[str, dict[str, Any]]] = {}
+        refs: list[dict[str, str]] = []
+        for raw_case in corpus["cases"]:
+            case = deepcopy(raw_case)
+            case_sha256 = content_sha256(case)
+            case_id = str(case["case_id"])
+            cases[case_id] = (case_sha256, case)
+            refs.append(
+                {
+                    "case_id": case_id,
+                    "case_content_sha256": case_sha256,
+                }
+            )
+        self.__cases = cases
+        self.__case_refs = tuple(refs)
+        self.__corpus_file_ref = corpus_file_ref
+        self.__workflow_store = workflow_store
+        self.__benchmark_supervision_root = benchmark_supervision_root
+        self.__composition_kind = composition_kind
+
+    def resolve(self, case_ref: Mapping[str, object]) -> dict[str, Any]:
+        if not isinstance(case_ref, Mapping) or set(case_ref) != {
+            "case_id",
+            "case_content_sha256",
+        }:
+            raise ValueError("provider resolver requires one closed case ref")
+        case_id = case_ref.get("case_id")
+        case_sha256 = case_ref.get("case_content_sha256")
+        if not isinstance(case_id, str) or not case_id:
+            raise ValueError("provider case identity is invalid")
+        require_sha256(case_sha256, "provider case content SHA")
+        entry = self.__cases.get(case_id)
+        if entry is None or entry[0] != case_sha256:
+            raise ValueError("provider case identity does not match validated corpus")
+        return deepcopy(entry[1])
+
+    def __repr__(self) -> str:
+        return (
+            "<opaque benchmark provider case resolver "
+            f"kind={self.__composition_kind}>"
+        )
+
+
+def _validate_provider_corpus_file_ref(
+    value: Mapping[str, object],
+    *,
+    validated_corpus: Mapping[str, object],
+) -> dict[str, Any]:
+    ref = closed_mapping(
+        value,
+        {
+            "contract_version",
+            "relative_path",
+            "file_sha256",
+            "source_parent_ref",
+            "content_sha256",
+        },
+        "provider corpus file ref",
+    )
+    if ref["contract_version"] != _PROVIDER_CORPUS_FILE_REF_CONTRACT:
+        raise ValueError("provider corpus file ref contract is invalid")
+    if ref["relative_path"] != "provider-corpus.v2.json":
+        raise ValueError("provider corpus file ref path is invalid")
+    require_sha256(ref["file_sha256"], "provider corpus file SHA")
+    validated_file_shas = _VALIDATED_PROVIDER_CORPUS_FILE_SHA256.get(
+        str(validated_corpus.get("content_sha256")), set()
+    )
+    if ref["file_sha256"] not in validated_file_shas:
+        raise ValueError(
+            "provider corpus file SHA does not match an already validated snapshot"
+        )
+    parent_ref = closed_mapping(
+        ref["source_parent_ref"],
+        {"content_sha256"},
+        "provider corpus parent ref",
+    )
+    require_sha256(parent_ref["content_sha256"], "provider corpus parent SHA")
+    validated_parent = validated_corpus.get("source_parent_ref")
+    if (
+        not isinstance(validated_parent, Mapping)
+        or parent_ref["content_sha256"]
+        != validated_parent.get("content_sha256")
+    ):
+        raise ValueError("provider corpus parent identity does not match snapshot")
+    require_sha256(ref["content_sha256"], "provider corpus file ref content SHA")
+    if ref["content_sha256"] != content_sha256(ref):
+        raise ValueError("provider corpus file ref content SHA mismatch")
+    ref["source_parent_ref"] = parent_ref
+    return ref
+
+
+def _root_binds_exact_store(
+    benchmark_supervision_root: object,
+    workflow_store: object,
+) -> bool:
+    authority = getattr(
+        benchmark_supervision_root,
+        "read_only_store_authority",
+        None,
+    )
+    getter = getattr(authority, "getter", None)
+    if getattr(getter, "__self__", None) is workflow_store:
+        return True
+    closure = getattr(getter, "__closure__", None) or ()
+    return any(cell.cell_contents is workflow_store for cell in closure)
+
+
+def _validate_resolver_pair(
+    *,
+    workflow_store: object,
+    benchmark_supervision_root: object,
+    composition_kind: str,
+) -> None:
+    authority_kind = getattr(benchmark_supervision_root, "authority_kind", None)
+    expected_authority = (
+        "production_workflow_service" if composition_kind == "production" else "test_only"
+    )
+    if composition_kind not in {"production", "test"}:
+        raise ValueError("provider resolver composition kind is invalid")
+    if authority_kind != expected_authority:
+        raise ValueError("provider resolver production/test capability is invalid")
+    if not _root_binds_exact_store(benchmark_supervision_root, workflow_store):
+        raise ValueError("provider resolver root must bind the same workflow store")
+
+
+def compose_test_provider_case_resolver(
+    *,
+    validated_corpus: Mapping[str, object],
+    provider_corpus_file_ref: Mapping[str, object],
+    workflow_store: object,
+    benchmark_supervision_root: object,
+) -> object:
+    return _OpaqueProviderCaseResolver(
+        validated_corpus=validated_corpus,
+        provider_corpus_file_ref=provider_corpus_file_ref,
+        workflow_store=workflow_store,
+        benchmark_supervision_root=benchmark_supervision_root,
+        composition_kind="test",
+    )
+
+
+def initialize_production_provider_case_resolver(
+    *,
+    validated_corpus: Mapping[str, object],
+    provider_corpus_file_ref: Mapping[str, object],
+) -> object:
+    """仅用启动时已验证的bytes结果绑定production singleton，不接收path。"""
+
+    global _PRODUCTION_PROVIDER_CASE_RESOLVER
+    from app.learn.workflow_store import learning_workflow_run_store
+    from app.learn.workflow_worker import (
+        get_production_benchmark_worker_supervision_root,
+    )
+
+    root = get_production_benchmark_worker_supervision_root()
+    candidate = _OpaqueProviderCaseResolver(
+        validated_corpus=validated_corpus,
+        provider_corpus_file_ref=provider_corpus_file_ref,
+        workflow_store=learning_workflow_run_store,
+        benchmark_supervision_root=root,
+        composition_kind="production",
+    )
+    if _PRODUCTION_PROVIDER_CASE_RESOLVER is None:
+        _PRODUCTION_PROVIDER_CASE_RESOLVER = candidate
+    else:
+        existing_ref = provider_case_resolver_corpus_file_ref(
+            _PRODUCTION_PROVIDER_CASE_RESOLVER
+        )
+        if existing_ref != provider_case_resolver_corpus_file_ref(candidate):
+            raise ValueError("production provider corpus singleton is already bound")
+    return _PRODUCTION_PROVIDER_CASE_RESOLVER
+
+
+def get_production_provider_case_resolver() -> object:
+    if _PRODUCTION_PROVIDER_CASE_RESOLVER is None:
+        raise ValueError("production validated provider corpus is unavailable")
+    return _PRODUCTION_PROVIDER_CASE_RESOLVER
+
+
+def validate_provider_case_resolver_binding(
+    resolver: object,
+    *,
+    workflow_store: object,
+    benchmark_supervision_root: object,
+    composition_kind: str,
+) -> None:
+    if not isinstance(resolver, _OpaqueProviderCaseResolver):
+        raise ValueError("provider case resolver must be opaque")
+    if resolver._OpaqueProviderCaseResolver__workflow_store is not workflow_store:
+        raise ValueError("provider case resolver must bind the same test store")
+    if (
+        resolver._OpaqueProviderCaseResolver__benchmark_supervision_root
+        is not benchmark_supervision_root
+    ):
+        raise ValueError("provider case resolver must bind the same supervision root")
+    if resolver._OpaqueProviderCaseResolver__composition_kind != composition_kind:
+        raise ValueError("provider case resolver production/test capability is invalid")
+    _validate_resolver_pair(
+        workflow_store=workflow_store,
+        benchmark_supervision_root=benchmark_supervision_root,
+        composition_kind=composition_kind,
+    )
+
+
+def provider_case_resolver_case_refs(resolver: object) -> list[dict[str, str]]:
+    if not isinstance(resolver, _OpaqueProviderCaseResolver):
+        raise ValueError("provider case resolver must be opaque")
+    return deepcopy(list(resolver._OpaqueProviderCaseResolver__case_refs))
+
+
+def provider_case_resolver_corpus_file_ref(resolver: object) -> dict[str, Any]:
+    if not isinstance(resolver, _OpaqueProviderCaseResolver):
+        raise ValueError("provider case resolver must be opaque")
+    return deepcopy(resolver._OpaqueProviderCaseResolver__corpus_file_ref)
