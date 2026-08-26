@@ -2140,6 +2140,68 @@ class LearningStageWorkerRegistry:
             self._refresh_record(record)
             return self._public_record(record)
 
+    def inspect_completed_result_identity(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """在 Registry 锁内只读返回当前已验证完成结果的封闭身份。"""
+
+        normalized_worker_id = _required_text(worker_id, "worker_id")
+        normalized_run_id = _required_text(run_id, "run_id")
+        normalized_stage = _required_text(stage, "stage")
+        normalized_operation_id = _required_text(operation_id, "operation_id")
+        with self._lock:
+            record = self._records.get(normalized_worker_id)
+            if not record:
+                raise LearningStageWorkerError("learning stage worker not found")
+            if (
+                record["run_id"] != normalized_run_id
+                or record["stage"] != normalized_stage
+                or record["operation_id"] != normalized_operation_id
+            ):
+                raise LearningStageWorkerError(
+                    "learning stage worker result identity ownership does not match"
+                )
+            self._refresh_record(record)
+            worker_result = record.get("worker_result")
+            if (
+                record.get("status") != "completed"
+                or not isinstance(worker_result, dict)
+                or worker_result.get("status") != "completed"
+            ):
+                raise LearningStageWorkerError(
+                    "learning stage worker has no completed result to inspect"
+                )
+            normal_binding_evidence_ref = _closed_content_sha256_ref(
+                worker_result.get("normal_binding_evidence_ref"),
+                label="normal binding evidence ref",
+            )
+            provider_cleanup_evidence_ref = _closed_content_sha256_ref(
+                worker_result.get("provider_cleanup_evidence_ref"),
+                label="provider cleanup evidence ref",
+            )
+            return {
+                "contract_version": (
+                    "learning_stage_worker_completed_result_identity_v1"
+                ),
+                "status": "completed",
+                "worker_id": record["worker_id"],
+                "run_id": record["run_id"],
+                "stage": record["stage"],
+                "operation_id": record["operation_id"],
+                "task_kind": record["task_kind"],
+                "model_request_id": record["model_request_id"],
+                "payload_sha256": record["payload_sha256"],
+                "result_sha256": _payload_sha256(worker_result),
+                "result_available": True,
+                "normal_binding_evidence_ref": normal_binding_evidence_ref,
+                "provider_cleanup_evidence_ref": provider_cleanup_evidence_ref,
+            }
+
     def adopt_result(
         self,
         *,
@@ -3294,6 +3356,29 @@ def _validated_result_adoption(
         )
     _required_text(value.get("adopted_at"), "adopted_at")
     return deepcopy(value)
+
+
+def _closed_content_sha256_ref(
+    value: Any,
+    *,
+    label: str,
+) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"content_sha256"}:
+        raise LearningStageWorkerError(
+            f"worker result {label} must be a closed content SHA-256 object"
+        )
+    content_sha256 = value.get("content_sha256")
+    if (
+        not isinstance(content_sha256, str)
+        or len(content_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in content_sha256)
+    ):
+        raise LearningStageWorkerError(
+            f"worker result {label} must contain lowercase SHA-256"
+        )
+    return {"content_sha256": content_sha256}
 
 
 def _load_worker_result(

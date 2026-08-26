@@ -324,6 +324,63 @@ def _finish_fake_worker(
     )
 
 
+def _write_completed_result_for_identity_inspection(
+    registry: LearningStageWorkerRegistry,
+    started: dict[str, object],
+    *,
+    response: object = None,
+    overrides: dict[str, object] | None = None,
+) -> dict[str, object]:
+    record = registry._records[str(started["worker_id"])]
+    process = record["process"]
+    process.alive = False
+    process.exitcode = 0
+    envelope: dict[str, object] = {
+        "contract_version": "learning_stage_worker_result_v2",
+        "worker_id": started["worker_id"],
+        "run_id": record["run_id"],
+        "stage": record["stage"],
+        "operation_id": record["operation_id"],
+        "task_kind": record["task_kind"],
+        "model_request_id": record["model_request_id"],
+        "payload_sha256": record["payload_sha256"],
+        "status": "completed",
+        "response": (
+            response
+            if response is not None
+            else {"success": True, "data": {"value": 1}}
+        ),
+        "normal_binding_evidence_ref": {"content_sha256": "a" * 64},
+        "provider_cleanup_evidence_ref": None,
+    }
+    if overrides:
+        envelope.update(overrides)
+    Path(record["result_path"]).write_text(
+        json.dumps(envelope, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return envelope
+
+
+def _identity_inspection_registry(
+    root: Path,
+    *,
+    suffix: str,
+) -> tuple[LearningStageWorkerRegistry, dict[str, object]]:
+    registry = LearningStageWorkerRegistry(
+        result_root=root,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id=f"run-inspect-{suffix}",
+        stage="fusion",
+        operation_id=f"operation-inspect-{suffix}",
+        task_kind="panel_learning_recognition_trial",
+        payload={"image_path": f"{suffix}.png"},
+    )
+    return registry, started
+
+
 def test_worker_registry_starts_and_reports_owned_process(tmp_path: Path) -> None:
     registry = LearningStageWorkerRegistry(
         result_root=tmp_path,
@@ -846,6 +903,335 @@ def test_worker_registry_cancel_terminates_process_and_preserves_audit(tmp_path:
     assert process.terminated is True
     assert process.is_alive() is False
     assert process.args[3] == started["model_request_id"]
+
+
+def test_completed_result_identity_is_pre_adopt_read_only_and_closed(
+    tmp_path: Path,
+) -> None:
+    registry, started = _identity_inspection_registry(tmp_path, suffix="closed")
+    envelope = _write_completed_result_for_identity_inspection(registry, started)
+    record = registry._records[str(started["worker_id"])]
+
+    inspected = registry.inspect_completed_result_identity(
+        worker_id=str(started["worker_id"]),
+        run_id=str(record["run_id"]),
+        stage=str(record["stage"]),
+        operation_id=str(record["operation_id"]),
+    )
+
+    expected_keys = {
+        "contract_version",
+        "status",
+        "worker_id",
+        "run_id",
+        "stage",
+        "operation_id",
+        "task_kind",
+        "model_request_id",
+        "payload_sha256",
+        "result_sha256",
+        "result_available",
+        "normal_binding_evidence_ref",
+        "provider_cleanup_evidence_ref",
+    }
+    assert set(inspected) == expected_keys
+    assert inspected == {
+        "contract_version": "learning_stage_worker_completed_result_identity_v1",
+        "status": "completed",
+        "worker_id": started["worker_id"],
+        "run_id": record["run_id"],
+        "stage": record["stage"],
+        "operation_id": record["operation_id"],
+        "task_kind": record["task_kind"],
+        "model_request_id": record["model_request_id"],
+        "payload_sha256": record["payload_sha256"],
+        "result_sha256": hashlib.sha256(
+            json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+        ).hexdigest(),
+        "result_available": True,
+        "normal_binding_evidence_ref": {"content_sha256": "a" * 64},
+        "provider_cleanup_evidence_ref": None,
+    }
+    assert record.get("result_adoption") is None
+    journal_path = Path(record["journal_path"])
+    journal_after_first_inspection = journal_path.read_text(encoding="utf-8")
+    assert "result_adoption" not in json.loads(journal_after_first_inspection)
+
+    inspected_again = registry.inspect_completed_result_identity(
+        worker_id=str(started["worker_id"]),
+        run_id=str(record["run_id"]),
+        stage=str(record["stage"]),
+        operation_id=str(record["operation_id"]),
+    )
+    assert inspected_again == inspected
+    assert journal_path.read_text(encoding="utf-8") == journal_after_first_inspection
+
+
+@pytest.mark.parametrize(
+    ("identity_key", "wrong_value"),
+    [
+        ("worker_id", "wrong-worker"),
+        ("run_id", "wrong-run"),
+        ("stage", "wrong-stage"),
+        ("operation_id", "wrong-operation"),
+        ("task_kind", "vision_locate_target"),
+        ("model_request_id", "wrong-model-request"),
+        ("payload_sha256", "b" * 64),
+    ],
+)
+def test_completed_result_identity_rejects_mismatched_envelope_identity(
+    tmp_path: Path,
+    identity_key: str,
+    wrong_value: str,
+) -> None:
+    registry, started = _identity_inspection_registry(
+        tmp_path / identity_key,
+        suffix=identity_key,
+    )
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(
+        registry,
+        started,
+        overrides={identity_key: wrong_value},
+    )
+
+    with pytest.raises(LearningStageWorkerError, match="completed result"):
+        registry.inspect_completed_result_identity(
+            worker_id=str(started["worker_id"]),
+            run_id=str(record["run_id"]),
+            stage=str(record["stage"]),
+            operation_id=str(record["operation_id"]),
+        )
+
+
+@pytest.mark.parametrize(
+    ("argument_name", "wrong_value"),
+    [
+        ("worker_id", "wrong-worker"),
+        ("run_id", "wrong-run"),
+        ("stage", "wrong-stage"),
+        ("operation_id", "wrong-operation"),
+    ],
+)
+def test_completed_result_identity_rejects_wrong_lookup_identity(
+    tmp_path: Path,
+    argument_name: str,
+    wrong_value: str,
+) -> None:
+    registry, started = _identity_inspection_registry(tmp_path, suffix=argument_name)
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(registry, started)
+    arguments = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": str(record["run_id"]),
+        "stage": str(record["stage"]),
+        "operation_id": str(record["operation_id"]),
+    }
+    arguments[argument_name] = wrong_value
+
+    with pytest.raises(LearningStageWorkerError):
+        registry.inspect_completed_result_identity(**arguments)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "running"},
+        {"status": "failed", "error": {"type": "ExpectedFailure"}},
+        {"response": ["not", "an", "object"]},
+    ],
+)
+def test_completed_result_identity_rejects_noncompleted_or_invalid_response(
+    tmp_path: Path,
+    overrides: dict[str, object],
+) -> None:
+    suffix = str(len(list(tmp_path.parent.iterdir())))
+    registry, started = _identity_inspection_registry(tmp_path, suffix=suffix)
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(
+        registry,
+        started,
+        overrides=overrides,
+    )
+
+    with pytest.raises(LearningStageWorkerError, match="completed result"):
+        registry.inspect_completed_result_identity(
+            worker_id=str(started["worker_id"]),
+            run_id=str(record["run_id"]),
+            stage=str(record["stage"]),
+            operation_id=str(record["operation_id"]),
+        )
+
+
+def test_completed_result_identity_rejects_broken_result_json(tmp_path: Path) -> None:
+    registry, started = _identity_inspection_registry(tmp_path, suffix="broken-json")
+    record = registry._records[str(started["worker_id"])]
+    process = record["process"]
+    process.alive = False
+    process.exitcode = 0
+    Path(record["result_path"]).write_text("{broken", encoding="utf-8")
+
+    with pytest.raises(LearningStageWorkerError, match="completed result"):
+        registry.inspect_completed_result_identity(
+            worker_id=str(started["worker_id"]),
+            run_id=str(record["run_id"]),
+            stage=str(record["stage"]),
+            operation_id=str(record["operation_id"]),
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_ref",
+    [
+        {},
+        {"content_sha256": "a" * 64, "extra": "forbidden"},
+        {"content_sha256": "A" * 64},
+        {"content_sha256": "a" * 63},
+        {"content_sha256": 7},
+        ["a" * 64],
+    ],
+)
+@pytest.mark.parametrize(
+    "ref_name",
+    ["normal_binding_evidence_ref", "provider_cleanup_evidence_ref"],
+)
+def test_completed_result_identity_rejects_nonclosed_evidence_ref(
+    tmp_path: Path,
+    ref_name: str,
+    invalid_ref: object,
+) -> None:
+    suffix = f"{ref_name}-{len(list(tmp_path.parent.iterdir()))}"
+    registry, started = _identity_inspection_registry(tmp_path, suffix=suffix)
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(
+        registry,
+        started,
+        overrides={ref_name: invalid_ref},
+    )
+
+    with pytest.raises(LearningStageWorkerError, match="evidence ref"):
+        registry.inspect_completed_result_identity(
+            worker_id=str(started["worker_id"]),
+            run_id=str(record["run_id"]),
+            stage=str(record["stage"]),
+            operation_id=str(record["operation_id"]),
+        )
+
+
+def test_completed_result_identity_digest_is_exact_adoption_handoff(
+    tmp_path: Path,
+) -> None:
+    registry, started = _identity_inspection_registry(tmp_path, suffix="handoff")
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(registry, started)
+    arguments = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": str(record["run_id"]),
+        "stage": str(record["stage"]),
+        "operation_id": str(record["operation_id"]),
+    }
+
+    inspected = registry.inspect_completed_result_identity(**arguments)
+    result_path = Path(record["result_path"])
+    reminted = json.loads(result_path.read_text(encoding="utf-8"))
+    reminted["response"]["data"]["value"] = 2
+    result_path.write_text(
+        json.dumps(reminted, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    adopted = registry.adopt_result(**arguments)
+
+    assert adopted["receipt"]["result_sha256"] == inspected["result_sha256"]
+    assert adopted["response"]["data"]["value"] == 1
+
+
+def test_completed_result_identity_is_stable_during_concurrent_adoption(
+    tmp_path: Path,
+) -> None:
+    registry, started = _identity_inspection_registry(tmp_path, suffix="concurrent")
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(registry, started)
+    arguments = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": str(record["run_id"]),
+        "stage": str(record["stage"]),
+        "operation_id": str(record["operation_id"]),
+    }
+    start_gate = Event()
+    inspections: list[dict[str, object]] = []
+    adoptions: list[dict[str, object]] = []
+    errors: list[BaseException] = []
+    result_lock = Lock()
+
+    def inspect() -> None:
+        start_gate.wait()
+        try:
+            result = registry.inspect_completed_result_identity(**arguments)
+            with result_lock:
+                inspections.append(result)
+        except BaseException as error:
+            with result_lock:
+                errors.append(error)
+
+    def adopt() -> None:
+        start_gate.wait()
+        try:
+            result = registry.adopt_result(**arguments)
+            with result_lock:
+                adoptions.append(result)
+        except BaseException as error:
+            with result_lock:
+                errors.append(error)
+
+    threads = [Thread(target=inspect), Thread(target=adopt), Thread(target=adopt)]
+    for thread in threads:
+        thread.start()
+    start_gate.set()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    assert len(inspections) == 1
+    assert len(adoptions) == 2
+    assert {
+        adoption["receipt"]["result_sha256"] for adoption in adoptions
+    } == {inspections[0]["result_sha256"]}
+    assert adoptions[0]["receipt"] == adoptions[1]["receipt"]
+    assert registry.adopt_result(**arguments)["receipt"] == adoptions[0]["receipt"]
+
+
+def test_completed_result_identity_reload_snapshots_current_same_identity_remint(
+    tmp_path: Path,
+) -> None:
+    registry, started = _identity_inspection_registry(tmp_path, suffix="remint")
+    record = registry._records[str(started["worker_id"])]
+    _write_completed_result_for_identity_inspection(registry, started)
+    arguments = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": str(record["run_id"]),
+        "stage": str(record["stage"]),
+        "operation_id": str(record["operation_id"]),
+    }
+    original = registry.inspect_completed_result_identity(**arguments)
+
+    _write_completed_result_for_identity_inspection(
+        registry,
+        started,
+        response={"success": True, "data": {"value": "reminted"}},
+    )
+    assert registry.inspect_completed_result_identity(**arguments) == original
+
+    reloaded = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    current = reloaded.inspect_completed_result_identity(**arguments)
+    assert current["result_sha256"] != original["result_sha256"]
+    assert current["status"] == "completed"
+    assert not any("tamper" in key for key in current)
 
 
 def test_worker_registry_requires_explicit_adoption_for_completed_response(
