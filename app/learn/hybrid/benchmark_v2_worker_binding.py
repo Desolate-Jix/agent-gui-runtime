@@ -906,7 +906,7 @@ def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
         validate_benchmark_v2_worker_window_binding_adoption,
     )
 
-    return validate_benchmark_v2_worker_window_binding_adoption(
+    adoption = validate_benchmark_v2_worker_window_binding_adoption(
         worker_payload=worker_payload,
         generic_adoption=generic_adoption,
         operation_ref={"operation_id": operation_id},
@@ -916,6 +916,14 @@ def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
             "capture_image_path": serialized["capture_image_path"],
         },
     )
+    normal_parent = resolution["normal_binding_evidence_ref"]
+    if (
+        not isinstance(normal_parent, Mapping)
+        or adoption.get("normal_clear_receipt_ref")
+        != normal_parent.get("content_sha256")
+    ):
+        raise ValueError("worker binding adoption normal clear parent differs")
+    return adoption
 
 
 def _snapshot_sha256(snapshot: Mapping[str, object]) -> str:

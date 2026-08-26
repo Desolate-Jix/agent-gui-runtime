@@ -3329,14 +3329,19 @@ def test_guarded_wrapper_surface_has_exact_single_composition_signatures() -> No
 
 def test_task5_binding_resolver_composition_is_exact_root_bound_and_fail_closed(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn.hybrid.benchmark_v2_worker_binding import (
+        compose_test_server_worker_window_binding_publisher,
         compose_test_server_worker_window_binding_resolver,
         get_production_server_worker_window_binding_resolver,
         validate_server_worker_window_binding_resolver_binding,
     )
 
     resolver = compose_test_server_worker_window_binding_resolver(
+        authority_root=tmp_path.resolve(),
+    )
+    publisher = compose_test_server_worker_window_binding_publisher(
         authority_root=tmp_path.resolve(),
     )
     with pytest.raises(TypeError):
@@ -3360,6 +3365,12 @@ def test_task5_binding_resolver_composition_is_exact_root_bound_and_fail_closed(
             project_root=tmp_path.resolve(),
             composition_kind="test",
         )
+    with pytest.raises(ValueError, match="production/test"):
+        validate_server_worker_window_binding_resolver_binding(
+            resolver,
+            project_root=Path(__file__).resolve().parents[1],
+            composition_kind="production",
+        )
 
     composition = workflow_service.compose_test_learning_workflow_service(
         store=object(),
@@ -3379,6 +3390,100 @@ def test_task5_binding_resolver_composition_is_exact_root_bound_and_fail_closed(
             provider_case_resolver=None,
             benchmark_v2_worker_binding_resolver=resolver,
         )
+
+    from app.learn.hybrid import benchmark_v2_provider_corpus as corpus_module
+    from app.learn.workflow_worker import (
+        LearningStageWorkerRegistry,
+        compose_test_benchmark_worker_supervision_root,
+    )
+
+    store = LearningWorkflowRunStore(state_path=tmp_path / "composition-store.json")
+    worker_root = tmp_path / "workers"
+    supervision_root = compose_test_benchmark_worker_supervision_root(
+        journal_root=worker_root,
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=worker_root,
+        benchmark_supervision_root=supervision_root,
+    )
+    monkeypatch.setattr(
+        corpus_module,
+        "validate_provider_case_resolver_binding",
+        lambda *_args, **_kwargs: None,
+    )
+    try:
+        paired = workflow_service.compose_test_learning_workflow_service(
+            store=store,
+            worker_registry=registry,
+            project_root=tmp_path,
+            benchmark_supervision_root=supervision_root,
+            provider_case_resolver=object(),
+            benchmark_v2_worker_binding_resolver=resolver,
+        )
+        assert paired.benchmark_v2_worker_binding_resolver is resolver
+        with pytest.raises(ValueError, match="resolver must be opaque"):
+            workflow_service.compose_test_learning_workflow_service(
+                store=store,
+                worker_registry=registry,
+                project_root=tmp_path,
+                benchmark_supervision_root=supervision_root,
+                provider_case_resolver=object(),
+                benchmark_v2_worker_binding_resolver=publisher,
+            )
+        with pytest.raises(ValueError, match="Task 5 composition root"):
+            workflow_service.compose_test_learning_workflow_service(
+                store=store,
+                worker_registry=registry,
+                project_root=tmp_path,
+                benchmark_supervision_root=supervision_root,
+                provider_case_resolver=object(),
+                benchmark_v2_worker_binding_resolver=(
+                    compose_test_server_worker_window_binding_resolver(
+                        authority_root=(tmp_path / "other-root").resolve(),
+                    )
+                ),
+            )
+    finally:
+        store.close()
+
+
+def test_task5_new_cut_has_no_workflow_store_or_c_persistence_calls() -> None:
+    import ast
+    import inspect
+    import textwrap
+
+    from app.learn.hybrid import benchmark_v2_worker_binding as binding_module
+
+    new_cut_functions = (
+        workflow_service.inject_benchmark_v2_worker_window_binding,
+        binding_module.publish_server_worker_window_binding,
+        binding_module.resolve_server_worker_window_binding,
+        binding_module.validate_benchmark_v2_worker_window_binding_adoption_from_resolver,
+    )
+    forbidden_calls = {
+        "_persist_benchmark_v2_incumbent_operation",
+        "transition_learning_workflow_run",
+        "transition",
+    }
+    for function in new_cut_functions:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+        calls = {
+            (
+                node.func.id
+                if isinstance(node.func, ast.Name)
+                else node.func.attr
+            )
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, (ast.Name, ast.Attribute))
+        }
+        assert calls.isdisjoint(forbidden_calls)
+    assert "store" not in inspect.signature(
+        workflow_service.inject_benchmark_v2_worker_window_binding
+    ).parameters
 
 
 def test_guarded_start_status_adopt_preserve_order_values_and_compensation(

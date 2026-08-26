@@ -192,6 +192,73 @@ def _join_or_kill(process, *, timeout: float = 30.0) -> None:
     assert not process.is_alive()
 
 
+def _install_downstream_zero_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, int]:
+    from app.api import action as action_api
+    from app.learn import workflow_service as workflow_service_module
+    from app.learn import workflow_worker as workflow_worker_module
+
+    downstream_calls = {
+        "b1_prepare": 0,
+        "workflow_store_cas": 0,
+        "spawn": 0,
+        "provider": 0,
+        "model": 0,
+        "action": 0,
+    }
+
+    def _forbid_downstream(name: str):
+        def _forbidden(*_args, **_kwargs):
+            downstream_calls[name] += 1
+            raise AssertionError(f"Task 5 negative reached {name}")
+
+        return _forbidden
+
+    monkeypatch.setattr(
+        workflow_service_module._LearningWorkflowRegistryOwner,
+        "prepare_benchmark_identity",
+        _forbid_downstream("b1_prepare"),
+    )
+    monkeypatch.setattr(
+        workflow_service_module,
+        "transition_learning_workflow_run",
+        _forbid_downstream("workflow_store_cas"),
+    )
+    monkeypatch.setattr(
+        workflow_service_module._LearningWorkflowRegistryOwner,
+        "launch_benchmark_worker",
+        _forbid_downstream("spawn"),
+    )
+    monkeypatch.setattr(
+        workflow_service_module._LearningWorkflowRegistryOwner,
+        "prepare_benchmark_provider",
+        _forbid_downstream("provider"),
+    )
+    monkeypatch.setattr(
+        workflow_worker_module,
+        "prepare_qwen_model_request_acquisition_owner",
+        _forbid_downstream("model"),
+    )
+    monkeypatch.setattr(
+        action_api,
+        "execute_recognition_plan",
+        _forbid_downstream("action"),
+    )
+    return downstream_calls
+
+
+def _assert_downstream_calls_zero(downstream_calls: dict[str, int]) -> None:
+    assert downstream_calls == {
+        "b1_prepare": 0,
+        "workflow_store_cas": 0,
+        "spawn": 0,
+        "provider": 0,
+        "model": 0,
+        "action": 0,
+    }
+
+
 def test_server_binding_publication_and_fresh_resolution_use_only_closed_exact_refs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -206,28 +273,42 @@ def test_server_binding_publication_and_fresh_resolution_use_only_closed_exact_r
             authority_root=authority_root,
         )
         expected_serialized = _serialized(owner)
-        c_durable_path = authority_root / "c-durable-closed-refs.json"
-        c_durable_bytes = canonical_json_bytes(
-            {
-                "window_binding_ref": {
-                    "id": owner["owner_id"],
-                    "content_sha256": expected_serialized["payload_sha256"],
-                },
-                "capture_ref": capture_ref,
-            }
-        )
-        c_durable_path.write_bytes(c_durable_bytes)
-        files_before_publication = {
-            path.resolve() for path in authority_root.glob("*.json")
+        from app.learn.workflow_store import LearningWorkflowRunStore
+
+        store_path = authority_root / "workflow-store.json"
+        store = LearningWorkflowRunStore(state_path=store_path)
+        closed_window_ref = {
+            "id": owner["owner_id"],
+            "content_sha256": expected_serialized["payload_sha256"],
         }
-        authority = publish_server_worker_window_binding(
-            publisher=publisher,
-            run_id="run-exact-ref",
-            stage="screen_understanding",
-            operation_id=str(owner["operation_id"]),
-            owner=owner,
-            capture_ref=capture_ref,
-        )
+        try:
+            store.transition(
+                run_id="run-exact-ref",
+                expected_revision=0,
+                stage="bind_capture",
+                outcome="running",
+                evidence_refs={
+                    "benchmark_v2_task5_closed_refs": {
+                        "window_binding_ref": closed_window_ref,
+                        "capture_ref": capture_ref,
+                    }
+                },
+            )
+            store_bytes_before_publication = store_path.read_bytes()
+            files_before_publication = {
+                path.resolve() for path in authority_root.glob("*.json")
+            }
+            authority = publish_server_worker_window_binding(
+                publisher=publisher,
+                run_id="run-exact-ref",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                owner=owner,
+                capture_ref=capture_ref,
+            )
+            store_bytes_after_publication = store_path.read_bytes()
+        finally:
+            store.close()
         window_binding_ref = deepcopy(authority["window_binding_ref"])
         assert set(authority) == {
             "contract_version",
@@ -262,13 +343,13 @@ def test_server_binding_publication_and_fresh_resolution_use_only_closed_exact_r
         files_after_publication = {
             path.resolve() for path in authority_root.glob("*.json")
         }
-        assert files_after_publication - files_before_publication == {
+        assert files_after_publication == files_before_publication | {
             authority_path.resolve()
         }
         assert b"serialized_window_binding" in authority_path.read_bytes()
-        assert c_durable_path.read_bytes() == c_durable_bytes
+        assert store_bytes_after_publication == store_bytes_before_publication
         assert all(
-            forbidden not in c_durable_bytes
+            forbidden not in store_bytes_after_publication
             for forbidden in (
                 b"serialized_window_binding",
                 b"capture_image_path",
@@ -327,6 +408,7 @@ def test_server_binding_publication_and_fresh_resolution_use_only_closed_exact_r
 
 def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     authority_root = tmp_path.resolve()
     with _owned(tmp_path, "authority-negative") as (owner, _journal):
@@ -348,6 +430,8 @@ def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
             owner=owner,
             capture_ref=capture_ref,
         )
+        downstream_calls = _install_downstream_zero_guard(monkeypatch)
+
         binding_ref = deepcopy(authority["window_binding_ref"])
         arguments = {
             "resolver": resolver,
@@ -378,6 +462,7 @@ def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
         ):
             with pytest.raises(ValueError):
                 resolve_server_worker_window_binding(**{**arguments, **changes})
+            _assert_downstream_calls_zero(downstream_calls)
 
         with pytest.raises(ValueError, match="publisher must be opaque"):
             publish_server_worker_window_binding(
@@ -388,8 +473,10 @@ def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
                 owner=owner,
                 capture_ref=capture_ref,
             )
+        _assert_downstream_calls_zero(downstream_calls)
         with pytest.raises(ValueError, match="resolver must be opaque"):
             resolve_server_worker_window_binding(**{**arguments, "resolver": publisher})
+        _assert_downstream_calls_zero(downstream_calls)
         with pytest.raises(ValueError, match="already occupied"):
             publish_server_worker_window_binding(
                 publisher=publisher,
@@ -399,6 +486,7 @@ def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
                 owner=owner,
                 capture_ref=capture_ref,
             )
+        _assert_downstream_calls_zero(downstream_calls)
 
         authority_path = authority_root / (
             "benchmark-v2-worker-window-binding-authority-"
@@ -418,19 +506,23 @@ def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
             authority_path.write_bytes(canonical_json_bytes(reminted))
             with pytest.raises(ValueError):
                 resolve_server_worker_window_binding(**arguments)
+            _assert_downstream_calls_zero(downstream_calls)
             authority_path.write_bytes(original)
 
         authority_path.write_bytes(b"{corrupt")
         with pytest.raises(ValueError, match="corrupt"):
             resolve_server_worker_window_binding(**arguments)
+        _assert_downstream_calls_zero(downstream_calls)
         authority_path.write_bytes(original)
         authority_path.unlink()
         with pytest.raises(ValueError, match="unavailable"):
             resolve_server_worker_window_binding(**arguments)
+        _assert_downstream_calls_zero(downstream_calls)
 
 
 def test_server_binding_result_parent_resolution_validates_normal_clear_ref(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with _owned(tmp_path, "result-parent") as (owner, _journal):
         capture_ref = {
@@ -476,7 +568,9 @@ def test_server_binding_result_parent_resolution_validates_normal_clear_ref(
                 "content_sha256": normal["content_sha256"]
             },
         }
+        downstream_calls = _install_downstream_zero_guard(monkeypatch)
         resolution = resolve_server_worker_window_binding(**arguments)
+        _assert_downstream_calls_zero(downstream_calls)
         assert resolution["worker_process_identity"] == worker_process_identity
         assert resolution["normal_binding_evidence_ref"] == {
             "content_sha256": normal["content_sha256"]
@@ -485,6 +579,7 @@ def test_server_binding_result_parent_resolution_validates_normal_clear_ref(
         alternate = resolve_server_worker_window_binding(
             **{**arguments, "worker_process_identity": alternate_identity}
         )
+        _assert_downstream_calls_zero(downstream_calls)
         assert alternate["worker_process_identity"] == alternate_identity
         assert alternate["content_sha256"] != resolution["content_sha256"]
         for changes in (
@@ -500,6 +595,7 @@ def test_server_binding_result_parent_resolution_validates_normal_clear_ref(
         ):
             with pytest.raises(ValueError):
                 resolve_server_worker_window_binding(**{**arguments, **changes})
+            _assert_downstream_calls_zero(downstream_calls)
 
 
 def test_contracts_and_service_cut_point_are_closed_and_server_owned(tmp_path: Path) -> None:
@@ -703,6 +799,7 @@ def test_python_exception_and_baseexception_unwind_mint_normal_clear(
 
 def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with _owned(tmp_path, "adoption") as (owner, _journal):
         operation_ref = {"operation_id": owner["operation_id"]}
@@ -803,6 +900,35 @@ def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest
             )
         )
         assert canonical_json_bytes(from_resolver) == canonical_json_bytes(receipt)
+
+        split_parent = deepcopy(generic)
+        split_normal = deepcopy(lifecycle["normal_clear_receipt"])
+        split_normal["worker_pid"] = os.getpid() + 1
+        split_normal["content_sha256"] = content_sha256(split_normal)
+        split_parent["response"]["_benchmark_v2_window_binding_evidence"][
+            "normal_clear_receipt"
+        ] = split_normal
+        downstream_calls = _install_downstream_zero_guard(monkeypatch)
+        with pytest.raises(ValueError, match="normal clear parent differs"):
+            validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
+                resolver=compose_test_server_worker_window_binding_resolver(
+                    authority_root=tmp_path.resolve(),
+                ),
+                run_id="run-adoption",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                window_binding_ref=authority["window_binding_ref"],
+                capture_ref=closed_capture_ref,
+                worker_process_identity={"pid": os.getpid(), "create_time_ns": 1},
+                normal_binding_evidence_ref={
+                    "content_sha256": lifecycle["normal_clear_receipt"][
+                        "content_sha256"
+                    ]
+                },
+                worker_payload=worker_payload,
+                generic_adoption=split_parent,
+            )
+        _assert_downstream_calls_zero(downstream_calls)
 
         tampered = deepcopy(generic)
         tampered["response"]["_benchmark_v2_window_binding_evidence"][
