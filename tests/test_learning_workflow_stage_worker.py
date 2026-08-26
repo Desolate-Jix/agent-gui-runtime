@@ -2558,6 +2558,40 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
             "silent_breakaway_ok": False,
             "owner_handle_authority": "registry_parent",
         }
+        launch_anchor_path = (
+            tmp_path
+            / f"{started['worker_id']}.benchmark-launch-identity-anchor.json"
+        )
+        launch_identity_anchor = json.loads(
+            launch_anchor_path.read_text(encoding="utf-8")
+        )
+        launch_anchor_bytes = launch_anchor_path.read_bytes()
+        assert launch_identity_anchor["contract_version"] == (
+            "benchmark_worker_launch_identity_anchor_v1"
+        )
+        from app.learn import workflow_worker as worker_module
+
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="launch identity anchor already exists",
+        ):
+            worker_module._write_json_create_only(
+                launch_anchor_path,
+                launch_identity_anchor,
+            )
+        assert launch_anchor_path.read_bytes() == launch_anchor_bytes
+        assignment_path = (
+            tmp_path / f"{started['worker_id']}.benchmark-assignment.json"
+        )
+        launch_assignment = json.loads(
+            assignment_path.read_text(encoding="utf-8")
+        )
+        assert launch_assignment["predecessor_content_sha256"] == (
+            launch_identity_anchor["assignment_predecessor_content_sha256"]
+        )
+        assert launch_identity_anchor["assignment_observation_ref"] == {
+            "content_sha256": launch_assignment["content_sha256"]
+        }
     finally:
         if started is not None:
             from app.learn import workflow_worker as worker_module
@@ -2619,6 +2653,50 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
                         terminate=True, expected_operation_anchor=anchor,
                         supervision_root=root,
                     )
+                record = registry._records[started["worker_id"]]
+                error_suffix = {
+                    "worker_process": "worker-process-close-error.json",
+                    "startup_event": "startup-event-close-error.json",
+                    "beacon_file": "beacon-file-close-error.json",
+                }[kind]
+                error_observation = json.loads(
+                    (tmp_path / f"{started['worker_id']}.{error_suffix}")
+                    .read_text(encoding="utf-8")
+                )
+                assert worker_module.content_sha256(error_observation) == (
+                    error_observation["content_sha256"]
+                )
+                assert error_observation["handle_kind"] == kind
+                assert error_observation["handle_identity"] == (
+                    worker_module._benchmark_handle_identity(
+                        handle_kind=kind,
+                        launch_identity_anchor=launch_identity_anchor,
+                        scope_name=owner["scope_name"],
+                    )
+                )
+                assert error_observation["call_result"] is None
+                assert error_observation["call_error"] == {
+                    "error_type": "OSError",
+                    "message": (
+                        f"injected-{kind.replace('_', '-')}-api-error"
+                    ),
+                }
+                assert error_observation["observed_at"]
+                if kind == "worker_process":
+                    expected_error_predecessor = record[
+                        "benchmark_exit_observation_ref"
+                    ]["content_sha256"]
+                else:
+                    predecessor_kind = {
+                        "startup_event": "worker_process",
+                        "beacon_file": "startup_event",
+                    }[kind]
+                    expected_error_predecessor = record[
+                        "benchmark_handle_refs"
+                    ][predecessor_kind]["content_sha256"]
+                assert error_observation[
+                    "predecessor_content_sha256"
+                ] == expected_error_predecessor
                 if kind == "worker_process":
                     monkeypatch.setattr(owned, "close", real_api)
                 elif kind == "startup_event":
@@ -2690,6 +2768,34 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
                     terminate=True, expected_operation_anchor=anchor,
                     supervision_root=root,
                 )
+            owner_job_error = json.loads(
+                (
+                    tmp_path
+                    / f"{started['worker_id']}.owner-job-close-error.json"
+                ).read_text(encoding="utf-8")
+            )
+            assert worker_module.content_sha256(owner_job_error) == (
+                owner_job_error["content_sha256"]
+            )
+            assert owner_job_error["handle_kind"] == "owner_job"
+            assert owner_job_error["handle_identity"] == {
+                "scope_name": owner["scope_name"]
+            }
+            assert owner_job_error["call_result"] is None
+            assert owner_job_error["call_error"] == {
+                "error_type": "OSError",
+                "message": "injected-owner-job-api-error",
+            }
+            assert owner_job_error["observed_at"]
+            pending_intent = json.loads(
+                (
+                    tmp_path
+                    / f"{started['worker_id']}.benchmark-cleanup-intent.json"
+                ).read_text(encoding="utf-8")
+            )
+            assert owner_job_error["predecessor_content_sha256"] == (
+                pending_intent["content_sha256"]
+            )
             monkeypatch.setattr(WindowsProcessScope, "close", real_close)
             injected = {"done": False}
 
@@ -2734,11 +2840,23 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
                 tmp_path, intent["stable_zero_observation_ref"]
             )
             assert stable_zero["samples"] == [[], [], []]
+            exit_observation = _read_benchmark_artifact_by_ref(
+                tmp_path, intent["exit_observation_ref"]
+            )
+            assert exit_observation["contract_version"] == (
+                "benchmark_worker_exit_join_observation_v1"
+            )
+            assert exit_observation["join_result"] == "joined"
+            assert exit_observation["join_error"] is None
             predecessor = None
             for kind in ("worker_process", "startup_event", "beacon_file"):
                 observation = _read_benchmark_artifact_by_ref(
                     tmp_path, receipt["exact_handle_observation_refs"][kind]
                 )
+                assert observation["handle_identity"]
+                assert observation["call_result"] == "success"
+                assert observation["call_error"] is None
+                assert observation["observed_at"]
                 if predecessor is None:
                     assert len(observation["predecessor_content_sha256"]) == 64
                 else:
@@ -2776,78 +2894,317 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
 
             from app.learn.recognition.uei.canonical import seal_immutable
 
-            stable_body = dict(stable_zero)
-            stable_body.pop("content_sha256")
-            stable_body["samples"] = [[], [], [{"forged_member": 999999}]]
-            forged_stable = seal_immutable(stable_body)
-            stable_path = tmp_path / f"{started['worker_id']}.stable-zero.json"
-            stable_path.write_text(json.dumps(forged_stable), encoding="utf-8")
-
-            intent_body = dict(intent)
-            intent_body.pop("content_sha256")
-            intent_body["stable_zero_observation_ref"] = {
-                "content_sha256": forged_stable["content_sha256"]
+            cleanup_kwargs = {
+                "worker_id": started["worker_id"],
+                "run_id": "run-real-gate",
+                "stage": "screen_understanding",
+                "operation_id": "operation-real-gate",
+                "terminate": True,
+                "expected_operation_anchor": anchor,
+                "supervision_root": root,
             }
-            forged_intent = seal_immutable(intent_body)
-            intent_path = (
-                tmp_path / f"{started['worker_id']}.benchmark-cleanup-intent.json"
+            exit_path = tmp_path / f"{started['worker_id']}.exit-join.json"
+            original_exit_bytes = exit_path.read_bytes()
+            for damage in ("missing", "corrupt", "rehashed"):
+                if damage == "missing":
+                    exit_path.unlink()
+                elif damage == "corrupt":
+                    exit_path.write_text("{", encoding="utf-8")
+                else:
+                    exit_body = dict(exit_observation)
+                    exit_body.pop("content_sha256")
+                    exit_body["exitcode"] = int(exit_body["exitcode"]) + 1
+                    exit_path.write_text(
+                        json.dumps(seal_immutable(exit_body)), encoding="utf-8"
+                    )
+                with pytest.raises(LearningStageWorkerError):
+                    registry.observe_benchmark_worker_cleanup(**cleanup_kwargs)
+                exit_path.write_bytes(original_exit_bytes)
+
+            worker_handle_path = (
+                tmp_path / f"{started['worker_id']}.worker-process-close.json"
             )
-            intent_path.write_text(json.dumps(forged_intent), encoding="utf-8")
+            worker_handle = json.loads(
+                worker_handle_path.read_text(encoding="utf-8")
+            )
+            original_handle_bytes = worker_handle_path.read_bytes()
+            for field, replacement_value in (
+                ("handle_identity", {"process_identity": {"pid": 999999, "create_time_ns": 1}}),
+                ("call_result", "forged_success"),
+                ("predecessor_content_sha256", "f" * 64),
+            ):
+                handle_body = dict(worker_handle)
+                handle_body.pop("content_sha256")
+                handle_body[field] = replacement_value
+                worker_handle_path.write_text(
+                    json.dumps(seal_immutable(handle_body)), encoding="utf-8"
+                )
+                with pytest.raises(LearningStageWorkerError):
+                    registry.observe_benchmark_worker_cleanup(**cleanup_kwargs)
+                worker_handle_path.write_bytes(original_handle_bytes)
 
             owner_path = tmp_path / f"{started['worker_id']}.benchmark-owner.json"
             current_owner = json.loads(owner_path.read_text(encoding="utf-8"))
-            owner_body = dict(current_owner)
+            original_owner_bytes = owner_path.read_bytes()
+            for field, replacement_value in (
+                (
+                    "supervisor_process_identity",
+                    {
+                        "pid": int(
+                            launch_identity_anchor[
+                                "supervisor_process_identity"
+                            ]["pid"]
+                        ) + 100000,
+                        "create_time_ns": int(
+                            launch_identity_anchor[
+                                "supervisor_process_identity"
+                            ]["create_time_ns"]
+                        ) + 256,
+                    },
+                ),
+                ("beacon_ref", {"content_sha256": "e" * 64}),
+            ):
+                owner_body = dict(current_owner)
+                owner_body.pop("content_sha256")
+                owner_body[field] = replacement_value
+                owner_path.write_text(
+                    json.dumps(seal_immutable(owner_body)),
+                    encoding="utf-8",
+                )
+                with pytest.raises(LearningStageWorkerError):
+                    registry.observe_benchmark_worker_cleanup(**cleanup_kwargs)
+                owner_path.write_bytes(original_owner_bytes)
+
+            alternate_process = {
+                "pid": int(launch_identity_anchor["process_identity"]["pid"]) + 100000,
+                "create_time_ns": int(
+                    launch_identity_anchor["process_identity"]["create_time_ns"]
+                ) + 256,
+            }
+            alternate_supervisor = {
+                "pid": int(
+                    launch_identity_anchor["supervisor_process_identity"]["pid"]
+                ) + 100000,
+                "create_time_ns": int(
+                    launch_identity_anchor["supervisor_process_identity"][
+                        "create_time_ns"
+                    ]
+                ) + 256,
+            }
+            alternate_beacon_ref = {"content_sha256": "e" * 64}
+            anchored = worker_module._benchmark_transitioned_reservation(
+                reservation, "anchored"
+            )
+            launching = worker_module._benchmark_transitioned_reservation(
+                anchored, "launching"
+            )
+            alternate_supervision = compose_benchmark_worker_supervision_v1(
+                supervision_root=root,
+                reservation=reservation,
+                expected_operation_anchor=anchor,
+                supervisor_process_identity=alternate_supervisor,
+                startup_gate_timeout_ms=15_000,
+            )
+            alternate_acquiring = (
+                LearningStageWorkerRegistry._benchmark_owner_journal(
+                    current=anchored,
+                    anchor=anchor,
+                    supervision=alternate_supervision,
+                    scope_name=current_owner["scope_name"],
+                    supervisor_identity=alternate_supervisor,
+                    phase="acquiring",
+                    process_identity=None,
+                    beacon_ref=None,
+                    assignment_ref=None,
+                    gate_state="closed",
+                    predecessor=None,
+                )
+            )
+            assignment_body = dict(assignment)
+            assignment_body.pop("content_sha256")
+            assignment_body["process_identity"] = alternate_process
+            assignment_body["observed_member_identities"] = [alternate_process]
+            assignment_body["predecessor_content_sha256"] = alternate_acquiring[
+                "content_sha256"
+            ]
+            alternate_assignment = seal_immutable(assignment_body)
+            assignment_path.write_text(
+                json.dumps(alternate_assignment), encoding="utf-8"
+            )
+            alternate_assignment_ref = {
+                "content_sha256": alternate_assignment["content_sha256"]
+            }
+            alternate_assigned_owner = (
+                LearningStageWorkerRegistry._benchmark_owner_journal(
+                    current=launching,
+                    anchor=anchor,
+                    supervision=alternate_supervision,
+                    scope_name=current_owner["scope_name"],
+                    supervisor_identity=alternate_supervisor,
+                    phase="assignment_proven",
+                    process_identity=alternate_process,
+                    beacon_ref=alternate_beacon_ref,
+                    assignment_ref=alternate_assignment_ref,
+                    gate_state="closed",
+                    predecessor=alternate_acquiring["content_sha256"],
+                )
+            )
+            alternate_gate_owner = (
+                LearningStageWorkerRegistry._benchmark_owner_journal(
+                    current=launching,
+                    anchor=anchor,
+                    supervision=alternate_supervision,
+                    scope_name=current_owner["scope_name"],
+                    supervisor_identity=alternate_supervisor,
+                    phase="gate_released",
+                    process_identity=alternate_process,
+                    beacon_ref=alternate_beacon_ref,
+                    assignment_ref=alternate_assignment_ref,
+                    gate_state="released",
+                    predecessor=alternate_assigned_owner["content_sha256"],
+                )
+            )
+
+            alternate_exit_body = dict(exit_observation)
+            alternate_exit_body.pop("content_sha256")
+            alternate_exit_body["process_identity"] = alternate_process
+            alternate_exit_body["predecessor_content_sha256"] = (
+                alternate_gate_owner["content_sha256"]
+            )
+            alternate_exit = seal_immutable(alternate_exit_body)
+            exit_path.write_text(json.dumps(alternate_exit), encoding="utf-8")
+
+            alternate_handle_refs = {}
+            predecessor = alternate_exit["content_sha256"]
+            handle_paths = {
+                "worker_process": "worker-process-close.json",
+                "startup_event": "startup-event-close.json",
+                "beacon_file": "beacon-file-close.json",
+            }
+            original_handle_refs = intent["exact_handle_observation_refs"]
+            for kind in ("worker_process", "startup_event", "beacon_file"):
+                observation = _read_benchmark_artifact_by_ref(
+                    tmp_path, original_handle_refs[kind]
+                )
+                body = dict(observation)
+                body.pop("content_sha256")
+                if kind == "worker_process":
+                    body["handle_identity"] = {
+                        "process_identity": alternate_process
+                    }
+                elif kind == "beacon_file":
+                    body["handle_identity"] = {
+                        "beacon_ref": alternate_beacon_ref
+                    }
+                body["predecessor_content_sha256"] = predecessor
+                reminted = seal_immutable(body)
+                (tmp_path / f"{started['worker_id']}.{handle_paths[kind]}").write_text(
+                    json.dumps(reminted), encoding="utf-8"
+                )
+                alternate_handle_refs[kind] = {
+                    "content_sha256": reminted["content_sha256"]
+                }
+                predecessor = reminted["content_sha256"]
+
+            stable_body = dict(stable_zero)
+            stable_body.pop("content_sha256")
+            stable_body["samples"] = [[], [], []]
+            stable_body["predecessor_content_sha256"] = predecessor
+            alternate_stable = seal_immutable(stable_body)
+            stable_path = tmp_path / f"{started['worker_id']}.stable-zero.json"
+            stable_path.write_text(json.dumps(alternate_stable), encoding="utf-8")
+
+            intent_body = dict(intent)
+            intent_body.pop("content_sha256")
+            intent_body.update({
+                "supervision_ref": {
+                    "content_sha256": alternate_supervision["content_sha256"]
+                },
+                "assignment_proven_ref": alternate_assignment_ref,
+                "supervisor_process_identity": alternate_supervisor,
+                "process_identity": alternate_process,
+                "exit_observation_ref": {
+                    "content_sha256": alternate_exit["content_sha256"]
+                },
+                "stable_zero_observation_ref": {
+                    "content_sha256": alternate_stable["content_sha256"]
+                },
+                "exact_handle_observation_refs": alternate_handle_refs,
+                "predecessor_content_sha256": alternate_gate_owner[
+                    "content_sha256"
+                ],
+            })
+            alternate_intent = seal_immutable(intent_body)
+            intent_path = (
+                tmp_path / f"{started['worker_id']}.benchmark-cleanup-intent.json"
+            )
+            intent_path.write_text(json.dumps(alternate_intent), encoding="utf-8")
+
+            owner_body = dict(alternate_gate_owner)
             owner_body.pop("content_sha256")
-            owner_body["stable_zero_observation_ref"] = {
-                "content_sha256": forged_stable["content_sha256"]
-            }
-            owner_body["cleanup_finalization_intent"] = {
-                "content_sha256": forged_intent["content_sha256"]
-            }
-            forged_owner = seal_immutable(owner_body)
-            owner_path.write_text(json.dumps(forged_owner), encoding="utf-8")
+            owner_body.update({
+                "phase": "cleanup_finalization_intent",
+                "exit_observation_ref": {
+                    "content_sha256": alternate_exit["content_sha256"]
+                },
+                "stable_zero_observation_ref": {
+                    "content_sha256": alternate_stable["content_sha256"]
+                },
+                "exact_handle_observation_refs": alternate_handle_refs,
+                "cleanup_finalization_intent": {
+                    "content_sha256": alternate_intent["content_sha256"]
+                },
+                "predecessor_content_sha256": alternate_gate_owner[
+                    "content_sha256"
+                ],
+            })
+            alternate_owner = seal_immutable(owner_body)
+            owner_path.write_text(json.dumps(alternate_owner), encoding="utf-8")
 
             job_body = dict(job_absence)
             job_body.pop("content_sha256")
-            job_body["predecessor_content_sha256"] = forged_intent[
+            job_body["predecessor_content_sha256"] = alternate_intent[
                 "content_sha256"
             ]
-            forged_job = seal_immutable(job_body)
+            alternate_job = seal_immutable(job_body)
             job_path = tmp_path / f"{started['worker_id']}.job-absence.json"
-            job_path.write_text(json.dumps(forged_job), encoding="utf-8")
-
+            job_path.write_text(json.dumps(alternate_job), encoding="utf-8")
             worker_body = dict(worker_absence)
             worker_body.pop("content_sha256")
-            worker_body["predecessor_content_sha256"] = forged_job[
+            worker_body["process_identity"] = alternate_process
+            worker_body["predecessor_content_sha256"] = alternate_job[
                 "content_sha256"
             ]
-            forged_worker = seal_immutable(worker_body)
+            alternate_worker = seal_immutable(worker_body)
             worker_path = tmp_path / f"{started['worker_id']}.worker-absence.json"
-            worker_path.write_text(json.dumps(forged_worker), encoding="utf-8")
+            worker_path.write_text(json.dumps(alternate_worker), encoding="utf-8")
 
             receipt_body = dict(receipt)
             receipt_body.pop("content_sha256")
-            receipt_body["finalization_intent_ref"] = {
-                "content_sha256": forged_intent["content_sha256"]
-            }
-            receipt_body["job_absence_observation_ref"] = {
-                "content_sha256": forged_job["content_sha256"]
-            }
-            receipt_body["worker_absence_observation_ref"] = {
-                "content_sha256": forged_worker["content_sha256"]
-            }
-            forged_receipt = seal_immutable(receipt_body)
-            receipt_path.write_text(json.dumps(forged_receipt), encoding="utf-8")
-            with pytest.raises(LearningStageWorkerError):
-                registry.observe_benchmark_worker_cleanup(
-                    worker_id=started["worker_id"],
-                    run_id="run-real-gate",
-                    stage="screen_understanding",
-                    operation_id="operation-real-gate",
-                    terminate=True,
-                    expected_operation_anchor=anchor,
-                    supervision_root=root,
-                )
+            receipt_body.update({
+                "supervision_ref": {
+                    "content_sha256": alternate_supervision["content_sha256"]
+                },
+                "process_identity": alternate_process,
+                "assignment_proven_ref": alternate_assignment_ref,
+                "finalization_intent_ref": {
+                    "content_sha256": alternate_intent["content_sha256"]
+                },
+                "exact_handle_observation_refs": alternate_handle_refs,
+                "job_absence_observation_ref": {
+                    "content_sha256": alternate_job["content_sha256"]
+                },
+                "worker_absence_observation_ref": {
+                    "content_sha256": alternate_worker["content_sha256"]
+                },
+            })
+            alternate_receipt = seal_immutable(receipt_body)
+            receipt_path.write_text(json.dumps(alternate_receipt), encoding="utf-8")
+            with pytest.raises(
+                LearningStageWorkerError,
+                match="assignment|launch identity anchor",
+            ):
+                registry.observe_benchmark_worker_cleanup(**cleanup_kwargs)
             assert not Path(
                 registry._records[started["worker_id"]]["benchmark_beacon_path"]
             ).exists()

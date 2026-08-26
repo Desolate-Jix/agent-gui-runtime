@@ -2662,17 +2662,39 @@ class LearningStageWorkerRegistry:
             )
             assignment_body = deepcopy(assignment)
             assignment_body.pop("content_sha256", None)
+            assignment_body["predecessor_content_sha256"] = owner[
+                "content_sha256"
+            ]
             assignment = seal_immutable(assignment_body)
             _write_json_atomic(
                 self._result_root
                 / f"{current['worker_id']}.benchmark-assignment.json",
                 assignment,
             )
+            beacon_ref = {"content_sha256": beacon["content_sha256"]}
+            launch_identity_anchor = _compose_benchmark_launch_identity_anchor(
+                anchored_reservation=current,
+                launching_reservation=launching,
+                operation_anchor=anchor,
+                supervision=supervision,
+                supervisor_process_identity=supervisor_identity,
+                beacon_ref=beacon_ref,
+                process_identity=process_identity,
+                assignment=assignment,
+            )
+            _write_json_create_only(
+                self._result_root
+                / (
+                    f"{current['worker_id']}"
+                    ".benchmark-launch-identity-anchor.json"
+                ),
+                launch_identity_anchor,
+            )
             owner = self._benchmark_owner_journal(
                 current=launching, anchor=anchor, supervision=supervision,
                 scope_name=scope_name, supervisor_identity=supervisor_identity,
                 phase="assignment_proven", process_identity=process_identity,
-                beacon_ref={"content_sha256": beacon["content_sha256"]},
+                beacon_ref=beacon_ref,
                 assignment_ref={"content_sha256": assignment["content_sha256"]},
                 gate_state="closed", predecessor=owner["content_sha256"],
             )
@@ -2682,7 +2704,7 @@ class LearningStageWorkerRegistry:
                 current=launching, anchor=anchor, supervision=supervision,
                 scope_name=scope_name, supervisor_identity=supervisor_identity,
                 phase="gate_released", process_identity=process_identity,
-                beacon_ref={"content_sha256": beacon["content_sha256"]},
+                beacon_ref=beacon_ref,
                 assignment_ref={"content_sha256": assignment["content_sha256"]},
                 gate_state="released", predecessor=owner["content_sha256"],
             )
@@ -3558,30 +3580,124 @@ class LearningStageWorkerRegistry:
                     _write_benchmark_cleanup_receipt_atomic(receipt_path, receipt)
                     return receipt
                 process = record.get("process")
-                process_identity = None
                 owner_path = Path(record["benchmark_owner_path"])
                 owner = json.loads(owner_path.read_text(encoding="utf-8"))
-                process_identity = owner.get("process_identity")
+                launch_identity_anchor = _read_json_object(
+                    self._result_root
+                    / f"{worker}.benchmark-launch-identity-anchor.json",
+                    label="benchmark launch identity anchor",
+                )
+                if content_sha256(launch_identity_anchor) != (
+                    launch_identity_anchor.get("content_sha256")
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark launch identity anchor is invalid"
+                    )
+                process_identity = deepcopy(
+                    launch_identity_anchor.get("process_identity")
+                )
+                if process_identity != owner.get("process_identity"):
+                    raise LearningStageWorkerError(
+                        "benchmark launch process identity does not match owner"
+                    )
                 handle_refs: dict[str, Any] = deepcopy(
                     record.get("benchmark_handle_refs") or {}
                 )
-                process_exitcode = record.get("benchmark_process_exitcode")
-                if "worker_process" not in handle_refs:
+                exit_ref = record.get("benchmark_exit_observation_ref")
+                exit_path = self._result_root / f"{worker}.exit-join.json"
+                if exit_ref is None:
                     if terminate and process is not None and process.is_alive():
                         process.terminate()
-                    if process is not None:
-                        process.join(15)
-                        if process.is_alive():
-                            raise LearningStageWorkerError("benchmark worker did not exit")
-                    process_exitcode = getattr(process, "exitcode", None)
+                    try:
+                        if process is not None:
+                            process.join(15)
+                            if process.is_alive():
+                                raise LearningStageWorkerError(
+                                    "benchmark worker did not exit"
+                                )
+                        process_exitcode = getattr(process, "exitcode", None)
+                        if isinstance(process_exitcode, bool) or not isinstance(
+                            process_exitcode, int
+                        ):
+                            raise LearningStageWorkerError(
+                                "benchmark worker exitcode is unavailable"
+                            )
+                    except BaseException as error:
+                        failure = _compose_benchmark_exit_join_observation(
+                            worker_id=worker,
+                            process_identity=process_identity,
+                            exitcode=getattr(process, "exitcode", None),
+                            join_result=None,
+                            join_error={
+                                "error_type": type(error).__name__,
+                                "message": str(error),
+                            },
+                            predecessor_content_sha256=owner["content_sha256"],
+                        )
+                        _write_json_atomic(
+                            self._result_root / f"{worker}.exit-join-error.json",
+                            failure,
+                        )
+                        raise
+                    exit_observation = _compose_benchmark_exit_join_observation(
+                        worker_id=worker,
+                        process_identity=process_identity,
+                        exitcode=process_exitcode,
+                        join_result="joined",
+                        join_error=None,
+                        predecessor_content_sha256=owner["content_sha256"],
+                    )
+                    _write_json_atomic(exit_path, exit_observation)
+                    exit_ref = {
+                        "content_sha256": exit_observation["content_sha256"]
+                    }
+                    record["benchmark_exit_observation_ref"] = deepcopy(exit_ref)
+                    record["benchmark_process_exitcode"] = process_exitcode
+                else:
+                    exit_observation = _validate_benchmark_artifact_ref(
+                        path=exit_path,
+                        ref=exit_ref,
+                        contract_version=(
+                            "benchmark_worker_exit_join_observation_v1"
+                        ),
+                    )
+                    process_exitcode = exit_observation.get("exitcode")
+                if "worker_process" not in handle_refs:
                     _benchmark_handle_fault_hook("worker_process", "before_call")
-                    if process is not None:
-                        process.close()
-                    observation = seal_immutable({
-                        "contract_version": "benchmark_worker_handle_close_observation_v1",
-                        "handle_kind": "worker_process", "result": "closed",
-                        "worker_id": worker, "predecessor_content_sha256": owner["content_sha256"],
-                    })
+                    process_handle_identity = _benchmark_handle_identity(
+                        handle_kind="worker_process",
+                        launch_identity_anchor=launch_identity_anchor,
+                        scope_name=owner["scope_name"],
+                    )
+                    try:
+                        if process is not None:
+                            process.close()
+                    except BaseException as error:
+                        failure = _compose_benchmark_handle_observation(
+                            worker_id=worker,
+                            handle_kind="worker_process",
+                            handle_identity=process_handle_identity,
+                            call_result=None,
+                            call_error={
+                                "error_type": type(error).__name__,
+                                "message": str(error),
+                            },
+                            predecessor_content_sha256=exit_ref["content_sha256"],
+                        )
+                        _write_json_atomic(
+                            self._result_root
+                            / f"{worker}.worker-process-close-error.json",
+                            failure,
+                        )
+                        raise
+                    observation = _compose_benchmark_handle_observation(
+                        worker_id=worker,
+                        handle_kind="worker_process",
+                        handle_identity=process_handle_identity,
+                        call_result="success",
+                        call_error=None,
+                        predecessor_content_sha256=exit_ref["content_sha256"],
+                    )
                     _write_json_atomic(
                         self._result_root / f"{worker}.worker-process-close.json",
                         observation,
@@ -3593,14 +3709,45 @@ class LearningStageWorkerRegistry:
                 event_handle = record.get("benchmark_event_handle")
                 if "startup_event" not in handle_refs:
                     _benchmark_handle_fault_hook("startup_event", "before_call")
-                    if event_handle is not None:
-                        win32api.CloseHandle(event_handle)
+                    event_identity = _benchmark_handle_identity(
+                        handle_kind="startup_event",
+                        launch_identity_anchor=launch_identity_anchor,
+                        scope_name=owner["scope_name"],
+                    )
+                    try:
+                        if event_handle is not None:
+                            win32api.CloseHandle(event_handle)
+                    except BaseException as error:
+                        failure = _compose_benchmark_handle_observation(
+                            worker_id=worker,
+                            handle_kind="startup_event",
+                            handle_identity=event_identity,
+                            call_result=None,
+                            call_error={
+                                "error_type": type(error).__name__,
+                                "message": str(error),
+                            },
+                            predecessor_content_sha256=handle_refs[
+                                "worker_process"
+                            ]["content_sha256"],
+                        )
+                        _write_json_atomic(
+                            self._result_root
+                            / f"{worker}.startup-event-close-error.json",
+                            failure,
+                        )
+                        raise
                     record["benchmark_event_handle"] = None
-                    observation = seal_immutable({
-                        "contract_version": "benchmark_worker_handle_close_observation_v1",
-                        "handle_kind": "startup_event", "result": "closed",
-                        "worker_id": worker, "predecessor_content_sha256": handle_refs["worker_process"]["content_sha256"],
-                    })
+                    observation = _compose_benchmark_handle_observation(
+                        worker_id=worker,
+                        handle_kind="startup_event",
+                        handle_identity=event_identity,
+                        call_result="success",
+                        call_error=None,
+                        predecessor_content_sha256=handle_refs[
+                            "worker_process"
+                        ]["content_sha256"],
+                    )
                     _write_json_atomic(
                         self._result_root / f"{worker}.startup-event-close.json",
                         observation,
@@ -3611,13 +3758,44 @@ class LearningStageWorkerRegistry:
                 beacon_path = Path(record["benchmark_beacon_path"])
                 if "beacon_file" not in handle_refs:
                     _benchmark_handle_fault_hook("beacon_file", "before_call")
-                    if beacon_path.exists():
-                        beacon_path.unlink()
-                    observation = seal_immutable({
-                        "contract_version": "benchmark_worker_handle_close_observation_v1",
-                        "handle_kind": "beacon_file", "result": "closed",
-                        "worker_id": worker, "predecessor_content_sha256": handle_refs["startup_event"]["content_sha256"],
-                    })
+                    beacon_identity = _benchmark_handle_identity(
+                        handle_kind="beacon_file",
+                        launch_identity_anchor=launch_identity_anchor,
+                        scope_name=owner["scope_name"],
+                    )
+                    try:
+                        if beacon_path.exists():
+                            beacon_path.unlink()
+                    except BaseException as error:
+                        failure = _compose_benchmark_handle_observation(
+                            worker_id=worker,
+                            handle_kind="beacon_file",
+                            handle_identity=beacon_identity,
+                            call_result=None,
+                            call_error={
+                                "error_type": type(error).__name__,
+                                "message": str(error),
+                            },
+                            predecessor_content_sha256=handle_refs[
+                                "startup_event"
+                            ]["content_sha256"],
+                        )
+                        _write_json_atomic(
+                            self._result_root
+                            / f"{worker}.beacon-file-close-error.json",
+                            failure,
+                        )
+                        raise
+                    observation = _compose_benchmark_handle_observation(
+                        worker_id=worker,
+                        handle_kind="beacon_file",
+                        handle_identity=beacon_identity,
+                        call_result="success",
+                        call_error=None,
+                        predecessor_content_sha256=handle_refs[
+                            "startup_event"
+                        ]["content_sha256"],
+                    )
                     _write_json_atomic(
                         self._result_root / f"{worker}.beacon-file-close.json",
                         observation,
@@ -3663,7 +3841,7 @@ class LearningStageWorkerRegistry:
                     "supervisor_process_identity": owner["supervisor_process_identity"],
                     "process_identity": process_identity, "scope_name": owner["scope_name"],
                     "gate_state": owner["gate_state"],
-                    "exit_observation_ref": {"content_sha256": content_sha256({"exitcode": process_exitcode})},
+                    "exit_observation_ref": deepcopy(exit_ref),
                     "stable_zero_observation_ref": stable_zero_ref,
                     "exact_owned_handles": {"worker_process": "closed_explicitly",
                         "startup_event": "closed_explicitly", "beacon_file": "closed_explicitly",
@@ -3689,16 +3867,41 @@ class LearningStageWorkerRegistry:
                 owner = seal_immutable(owner_body)
                 _write_json_atomic(owner_path, owner)
                 _benchmark_handle_fault_hook("owner_job", "before_call")
-                scope.close()
+                owner_job_identity = _benchmark_handle_identity(
+                    handle_kind="owner_job",
+                    launch_identity_anchor=launch_identity_anchor,
+                    scope_name=owner["scope_name"],
+                )
+                try:
+                    scope.close()
+                except BaseException as error:
+                    failure = _compose_benchmark_handle_observation(
+                        worker_id=worker,
+                        handle_kind="owner_job",
+                        handle_identity=owner_job_identity,
+                        call_result=None,
+                        call_error={
+                            "error_type": type(error).__name__,
+                            "message": str(error),
+                        },
+                        predecessor_content_sha256=intent["content_sha256"],
+                    )
+                    _write_json_atomic(
+                        self._result_root
+                        / f"{worker}.owner-job-close-error.json",
+                        failure,
+                    )
+                    raise
                 record["benchmark_scope"] = None
                 _benchmark_handle_fault_hook("owner_job", "after_success")
-                owner_job_observation = seal_immutable({
-                    "contract_version": "benchmark_worker_handle_close_observation_v1",
-                    "handle_kind": "owner_job",
-                    "result": "closed",
-                    "worker_id": worker,
-                    "predecessor_content_sha256": intent["content_sha256"],
-                })
+                owner_job_observation = _compose_benchmark_handle_observation(
+                    worker_id=worker,
+                    handle_kind="owner_job",
+                    handle_identity=owner_job_identity,
+                    call_result="success",
+                    call_error=None,
+                    predecessor_content_sha256=intent["content_sha256"],
+                )
                 _write_json_atomic(
                     self._result_root / f"{worker}.owner-job-close.json",
                     owner_job_observation,
@@ -5436,6 +5639,29 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
         ) from exc
 
 
+def _write_json_create_only(path: Path, payload: dict[str, Any]) -> None:
+    """以 deterministic create-only bytes 发布不可覆盖的 launch anchor。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8", newline="\n") as handle:
+            json.dump(
+                payload,
+                handle,
+                ensure_ascii=False,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        _flush_windows_directory(path.parent)
+    except FileExistsError as error:
+        raise LearningStageWorkerError(
+            "benchmark launch identity anchor already exists"
+        ) from error
+
+
 def _compose_benchmark_anchor_confirmation(
     *,
     reservation: dict[str, Any],
@@ -5720,6 +5946,111 @@ def _benchmark_transitioned_reservation(
     return seal_immutable(body)
 
 
+def _compose_benchmark_launch_identity_anchor(
+    *,
+    anchored_reservation: dict[str, Any],
+    launching_reservation: dict[str, Any],
+    operation_anchor: dict[str, Any],
+    supervision: dict[str, Any],
+    supervisor_process_identity: dict[str, int],
+    beacon_ref: dict[str, Any],
+    process_identity: dict[str, int],
+    assignment: dict[str, Any],
+) -> dict[str, Any]:
+    return seal_immutable({
+        "contract_version": "benchmark_worker_launch_identity_anchor_v1",
+        "authority_kind": anchored_reservation["authority_kind"],
+        "anchored_reservation_ref": {
+            "content_sha256": anchored_reservation["content_sha256"]
+        },
+        "launching_reservation_ref": {
+            "content_sha256": launching_reservation["content_sha256"]
+        },
+        "operation_anchor_ref": {
+            "content_sha256": operation_anchor["anchor_identity_sha256"]
+        },
+        "actual_supervision_ref": {
+            "content_sha256": supervision["content_sha256"]
+        },
+        "supervisor_process_identity": deepcopy(supervisor_process_identity),
+        "beacon_ref": deepcopy(beacon_ref),
+        "process_identity": deepcopy(process_identity),
+        "assignment_observation_ref": {
+            "content_sha256": assignment["content_sha256"]
+        },
+        "assignment_predecessor_content_sha256": assignment[
+            "predecessor_content_sha256"
+        ],
+        "predecessor_content_sha256": assignment["content_sha256"],
+    })
+
+
+def _benchmark_handle_identity(
+    *,
+    handle_kind: str,
+    launch_identity_anchor: dict[str, Any],
+    scope_name: str,
+) -> dict[str, Any]:
+    if handle_kind == "worker_process":
+        return {"process_identity": deepcopy(
+            launch_identity_anchor["process_identity"]
+        )}
+    if handle_kind == "startup_event":
+        return {
+            "event_name": (
+                "Local\\AgentGuiBenchmarkWorkerGate-"
+                + content_sha256({"scope_name": scope_name})
+            )
+        }
+    if handle_kind == "beacon_file":
+        return {"beacon_ref": deepcopy(launch_identity_anchor["beacon_ref"])}
+    if handle_kind == "owner_job":
+        return {"scope_name": scope_name}
+    raise LearningStageWorkerError("benchmark handle kind is invalid")
+
+
+def _compose_benchmark_handle_observation(
+    *,
+    worker_id: str,
+    handle_kind: str,
+    handle_identity: dict[str, Any],
+    call_result: str | None,
+    call_error: dict[str, str] | None,
+    predecessor_content_sha256: str,
+) -> dict[str, Any]:
+    return seal_immutable({
+        "contract_version": "benchmark_worker_handle_close_observation_v1",
+        "handle_kind": handle_kind,
+        "handle_identity": deepcopy(handle_identity),
+        "call_result": call_result,
+        "call_error": deepcopy(call_error),
+        "observed_at": _utc_now_iso(),
+        "worker_id": worker_id,
+        "predecessor_content_sha256": predecessor_content_sha256,
+    })
+
+
+def _compose_benchmark_exit_join_observation(
+    *,
+    worker_id: str,
+    process_identity: dict[str, int],
+    exitcode: int | None,
+    join_result: str | None,
+    join_error: dict[str, str] | None,
+    predecessor_content_sha256: str,
+) -> dict[str, Any]:
+    return seal_immutable({
+        "contract_version": "benchmark_worker_exit_join_observation_v1",
+        "worker_id": worker_id,
+        "process_identity": deepcopy(process_identity),
+        "exitcode": exitcode,
+        "join_result": join_result,
+        "join_error": deepcopy(join_error),
+        "observed_at": _utc_now_iso(),
+        "predecessor_content_sha256": predecessor_content_sha256,
+    })
+
+
 def _validate_exact_benchmark_process_identity(
     value: object, *, label: str
 ) -> dict[str, int]:
@@ -5780,6 +6111,7 @@ def _validate_benchmark_cleanup_handle_artifact(
     suffix: str,
     ref: object,
     predecessor: str,
+    handle_identity: dict[str, Any],
 ) -> dict[str, Any]:
     artifact = _validate_benchmark_artifact_ref(
         path=result_root / f"{worker_id}.{suffix}",
@@ -5789,11 +6121,16 @@ def _validate_benchmark_cleanup_handle_artifact(
     if (
         set(artifact)
         != {
-            "contract_version", "handle_kind", "result", "worker_id",
+            "contract_version", "handle_kind", "handle_identity",
+            "call_result", "call_error", "observed_at", "worker_id",
             "predecessor_content_sha256", "content_sha256",
         }
         or artifact.get("handle_kind") != kind
-        or artifact.get("result") != "closed"
+        or artifact.get("handle_identity") != handle_identity
+        or artifact.get("call_result") != "success"
+        or artifact.get("call_error") is not None
+        or not isinstance(artifact.get("observed_at"), str)
+        or not artifact["observed_at"]
         or artifact.get("worker_id") != worker_id
         or artifact.get("predecessor_content_sha256") != predecessor
     ):
@@ -5836,13 +6173,72 @@ def _validate_benchmark_launched_cleanup_receipt(
         payload_sha256=original_reservation["payload_sha256"],
         execution_nonce=original_reservation["execution_nonce"],
     )
+    launch_identity_anchor = _read_json_object(
+        result_root
+        / f"{worker_id}.benchmark-launch-identity-anchor.json",
+        label="benchmark launch identity anchor",
+    )
+    launch_anchor_fields = {
+        "contract_version", "authority_kind", "anchored_reservation_ref",
+        "launching_reservation_ref", "operation_anchor_ref",
+        "actual_supervision_ref", "supervisor_process_identity",
+        "beacon_ref", "process_identity", "assignment_observation_ref",
+        "assignment_predecessor_content_sha256",
+        "predecessor_content_sha256", "content_sha256",
+    }
+    if (
+        set(launch_identity_anchor) != launch_anchor_fields
+        or launch_identity_anchor.get("contract_version")
+        != "benchmark_worker_launch_identity_anchor_v1"
+        or content_sha256(launch_identity_anchor)
+        != launch_identity_anchor.get("content_sha256")
+        or launch_identity_anchor.get("authority_kind")
+        != original_reservation["authority_kind"]
+        or launch_identity_anchor.get("anchored_reservation_ref")
+        != {"content_sha256": anchored["content_sha256"]}
+        or launch_identity_anchor.get("launching_reservation_ref")
+        != {"content_sha256": launching["content_sha256"]}
+        or launch_identity_anchor.get("operation_anchor_ref")
+        != {"content_sha256": operation_anchor["anchor_identity_sha256"]}
+    ):
+        raise LearningStageWorkerError(
+            "benchmark launch identity anchor is invalid"
+        )
+    process_identity = _validate_exact_benchmark_process_identity(
+        launch_identity_anchor.get("process_identity"), label="worker"
+    )
+    supervisor_identity = _validate_exact_benchmark_process_identity(
+        launch_identity_anchor.get("supervisor_process_identity"),
+        label="supervisor",
+    )
+    beacon_ref = _benchmark_exact_ref(
+        launch_identity_anchor.get("beacon_ref"),
+        "benchmark launch beacon ref",
+    )
+    supervision = compose_benchmark_worker_supervision_v1(
+        supervision_root=supervision_root,
+        reservation=original_reservation,
+        expected_operation_anchor=operation_anchor,
+        supervisor_process_identity=supervisor_identity,
+        startup_gate_timeout_ms=15_000,
+    )
+    acquiring_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+        current=anchored,
+        anchor=operation_anchor,
+        supervision=supervision,
+        scope_name=scope_name,
+        supervisor_identity=supervisor_identity,
+        phase="acquiring",
+        process_identity=None,
+        beacon_ref=None,
+        assignment_ref=None,
+        gate_state="closed",
+        predecessor=None,
+    )
     assignment = _validate_benchmark_artifact_ref(
         path=result_root / f"{worker_id}.benchmark-assignment.json",
-        ref=value.get("assignment_proven_ref"),
+        ref=launch_identity_anchor.get("assignment_observation_ref"),
         contract_version="benchmark_worker_scope_assignment_v1",
-    )
-    process_identity = _validate_exact_benchmark_process_identity(
-        assignment.get("process_identity"), label="worker"
     )
     exact_job_policy = {
         "kill_on_job_close": True,
@@ -5856,15 +6252,19 @@ def _validate_benchmark_launched_cleanup_receipt(
             "contract_version", "scope_name", "process_identity",
             "observed_member_identities", "job_policy",
             "temporary_process_handle_close", "temporary_job_handle_close",
+            "predecessor_content_sha256",
             "content_sha256",
         }
         or assignment.get("scope_name") != scope_name
+        or assignment.get("process_identity") != process_identity
         or assignment.get("observed_member_identities") != [process_identity]
         or assignment.get("job_policy") != exact_job_policy
         or assignment.get("temporary_process_handle_close")
         != {"handle_kind": "temporary_process", "status": "closed"}
         or assignment.get("temporary_job_handle_close")
         != {"handle_kind": "temporary_job", "status": "closed"}
+        or assignment.get("predecessor_content_sha256")
+        != acquiring_owner["content_sha256"]
     ):
         raise LearningStageWorkerError(
             "benchmark cleanup assignment observation is invalid"
@@ -5890,33 +6290,21 @@ def _validate_benchmark_launched_cleanup_receipt(
         "content_sha256"
     ):
         raise LearningStageWorkerError("benchmark owner journal shape is invalid")
-    supervisor_identity = _validate_exact_benchmark_process_identity(
-        owner.get("supervisor_process_identity"), label="supervisor"
-    )
-    supervision = compose_benchmark_worker_supervision_v1(
-        supervision_root=supervision_root,
-        reservation=original_reservation,
-        expected_operation_anchor=operation_anchor,
-        supervisor_process_identity=supervisor_identity,
-        startup_gate_timeout_ms=15_000,
-    )
     assignment_ref = {"content_sha256": assignment["content_sha256"]}
-    beacon_ref = _benchmark_exact_ref(
-        owner.get("beacon_ref"), "benchmark owner beacon ref"
-    )
-    acquiring_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
-        current=anchored,
-        anchor=operation_anchor,
+    expected_launch_identity_anchor = _compose_benchmark_launch_identity_anchor(
+        anchored_reservation=anchored,
+        launching_reservation=launching,
+        operation_anchor=operation_anchor,
         supervision=supervision,
-        scope_name=scope_name,
-        supervisor_identity=supervisor_identity,
-        phase="acquiring",
-        process_identity=None,
-        beacon_ref=None,
-        assignment_ref=None,
-        gate_state="closed",
-        predecessor=None,
+        supervisor_process_identity=supervisor_identity,
+        beacon_ref=beacon_ref,
+        process_identity=process_identity,
+        assignment=assignment,
     )
+    if launch_identity_anchor != expected_launch_identity_anchor:
+        raise LearningStageWorkerError(
+            "benchmark launch identity anchor lineage is invalid"
+        )
     assigned_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
         current=launching,
         anchor=operation_anchor,
@@ -6013,10 +6401,6 @@ def _validate_benchmark_launched_cleanup_receipt(
         raise LearningStageWorkerError(
             "benchmark cleanup finalization intent lineage is invalid"
         )
-    _benchmark_exact_ref(
-        intent.get("exit_observation_ref"), "benchmark exit observation ref"
-    )
-
     stable_zero = _validate_benchmark_artifact_ref(
         path=result_root / f"{worker_id}.stable-zero.json",
         ref=intent.get("stable_zero_observation_ref"),
@@ -6039,6 +6423,32 @@ def _validate_benchmark_launched_cleanup_receipt(
     intent_handle_refs = intent.get("exact_handle_observation_refs")
     supervisor_ref = value.get("supervisor_absence_observation_ref")
     if supervisor_ref is None:
+        exit_observation = _validate_benchmark_artifact_ref(
+            path=result_root / f"{worker_id}.exit-join.json",
+            ref=intent.get("exit_observation_ref"),
+            contract_version="benchmark_worker_exit_join_observation_v1",
+        )
+        if (
+            set(exit_observation)
+            != {
+                "contract_version", "worker_id", "process_identity",
+                "exitcode", "join_result", "join_error", "observed_at",
+                "predecessor_content_sha256", "content_sha256",
+            }
+            or exit_observation.get("worker_id") != worker_id
+            or exit_observation.get("process_identity") != process_identity
+            or isinstance(exit_observation.get("exitcode"), bool)
+            or not isinstance(exit_observation.get("exitcode"), int)
+            or exit_observation.get("join_result") != "joined"
+            or exit_observation.get("join_error") is not None
+            or not isinstance(exit_observation.get("observed_at"), str)
+            or not exit_observation["observed_at"]
+            or exit_observation.get("predecessor_content_sha256")
+            != gate_owner["content_sha256"]
+        ):
+            raise LearningStageWorkerError(
+                "benchmark exit/join observation is invalid"
+            )
         expected_owned = {
             "worker_process": "closed_explicitly",
             "startup_event": "closed_explicitly",
@@ -6064,7 +6474,7 @@ def _validate_benchmark_launched_cleanup_receipt(
             raise LearningStageWorkerError(
                 "benchmark cleanup receipt handle refs are invalid"
             )
-        predecessor = gate_owner["content_sha256"]
+        predecessor = exit_observation["content_sha256"]
         for kind, suffix in (
             ("worker_process", "worker-process-close.json"),
             ("startup_event", "startup-event-close.json"),
@@ -6077,6 +6487,11 @@ def _validate_benchmark_launched_cleanup_receipt(
                 suffix=suffix,
                 ref=intent_handle_refs[kind],
                 predecessor=predecessor,
+                handle_identity=_benchmark_handle_identity(
+                    handle_kind=kind,
+                    launch_identity_anchor=launch_identity_anchor,
+                    scope_name=scope_name,
+                ),
             )
             predecessor = artifact["content_sha256"]
         if (
@@ -6095,6 +6510,11 @@ def _validate_benchmark_launched_cleanup_receipt(
                 suffix="owner-job-close.json",
                 ref=receipt_handle_refs["owner_job"],
                 predecessor=intent["content_sha256"],
+                handle_identity=_benchmark_handle_identity(
+                    handle_kind="owner_job",
+                    launch_identity_anchor=launch_identity_anchor,
+                    scope_name=scope_name,
+                ),
             )
             job_predecessor = owner_job["content_sha256"]
     else:
