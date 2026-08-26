@@ -288,6 +288,463 @@ def test_operation_lock_key_is_exact_and_shared(tmp_path: Path) -> None:
     )
 
 
+def test_benchmark_v2_c3_specialized_spine_surface_and_no_cascade() -> None:
+    import app.learn.workflow_service as workflow_service
+
+    expected = {
+        "_start_benchmark_v2_incumbent_operation",
+        "_resume_benchmark_v2_incumbent_operation",
+        "_cancel_benchmark_v2_incumbent_operation",
+    }
+    for name in expected:
+        assert callable(getattr(workflow_service, name))
+
+    tree = ast.parse(
+        (PROJECT_ROOT / "app/learn/workflow_service.py").read_text(encoding="utf-8")
+    )
+    forbidden = {
+        "interpret_learning_stage_worker_result",
+        "_ensure_next_managed_stage_operation",
+        "_start_next_managed_stage_worker",
+    }
+    violations: list[tuple[str, int]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name not in expected:
+            continue
+        for child in ast.walk(node):
+            if isinstance(child, ast.Call):
+                called = (
+                    child.func.id
+                    if isinstance(child.func, ast.Name)
+                    else child.func.attr
+                    if isinstance(child.func, ast.Attribute)
+                    else ""
+                )
+                if called in forbidden:
+                    violations.append((called, child.lineno))
+    assert violations == []
+
+
+def test_benchmark_v2_c3_start_routes_before_generic_registry(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    events: list[str] = []
+
+    class _Registry:
+        def start(self, **_kwargs):
+            events.append("generic.start")
+            raise AssertionError("benchmark start reached generic Registry.start")
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_start_benchmark_v2_incumbent_operation",
+        lambda **kwargs: events.append("benchmark.start")
+        or {
+            "worker_id": "worker-c3",
+            "request": deepcopy(kwargs["request"]),
+        },
+    )
+    result = workflow_service.start_guarded_learning_stage_worker(
+        composition=composition,
+        run_id="run-c3",
+        expected_revision=3,
+        stage="screen_understanding",
+        operation_id="operation-c3",
+        task_kind="vision_observe_screen",
+        payload={
+            "benchmark_v2_incumbent": {
+                "provider_case_ref": {
+                    "case_id": "case-c3",
+                    "case_content_sha256": "1" * 64,
+                },
+                "window_binding_ref": {"id": "binding-c3", "content_sha256": "2" * 64},
+                "capture_ref": {"id": "capture-c3", "content_sha256": "3" * 64},
+                "serialized_window_binding": {"contract_version": "fixture"},
+            }
+        },
+    )
+    assert result["worker_id"] == "worker-c3"
+    assert events == ["benchmark.start"]
+
+
+def test_benchmark_v2_c3_continue_cancel_and_recover_route_one_resume_path(
+    monkeypatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    operation = _prepared_document(source_bundle)
+    state = {
+        "run_id": "run-c3",
+        "revision": 7,
+        "current_stage": "screen_understanding",
+        "stages": {
+            "screen_understanding": {
+                "status": "running",
+                "evidence_refs": {
+                    "stage_execution": {
+                        "contract_version": "learning_workflow_stage_operation_v1",
+                        "owner": "backend_lease",
+                        "operation_id": "operation-c3",
+                        "benchmark_v2_incumbent": operation,
+                    }
+                },
+            }
+        },
+    }
+
+    class _Store:
+        def get(self, _run_id):
+            return deepcopy(state)
+
+    class _Registry:
+        def read_adopted_result(self, **_kwargs):
+            raise AssertionError("benchmark continue reached generic adopted-result reader")
+
+        def cancel_by_operation(self, **_kwargs):
+            raise AssertionError("benchmark cancel reached generic Registry.cancel")
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+    )
+    events: list[str] = []
+    monkeypatch.setattr(
+        workflow_service,
+        "_resume_benchmark_v2_incumbent_operation",
+        lambda **_kwargs: events.append("resume") or {"status": "complete"},
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_cancel_benchmark_v2_incumbent_operation",
+        lambda **_kwargs: events.append("cancel") or {"status": "cancelled"},
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "require_active_learning_workflow_stage_operation",
+        lambda **_kwargs: state["stages"]["screen_understanding"]["evidence_refs"]["stage_execution"],
+    )
+    assert workflow_service.continue_guarded_learning_stage_worker_result(
+        composition=composition,
+        run_id="run-c3",
+        expected_revision=7,
+        stage="screen_understanding",
+        operation_id="operation-c3",
+        worker_id="worker-c1",
+    ) == {"status": "complete"}
+    assert workflow_service.cancel_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id="run-c3",
+        expected_revision=7,
+        stage="screen_understanding",
+        operation_id="operation-c3",
+        reason="operator cancel",
+    ) == {"status": "cancelled"}
+    assert workflow_service.recover_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id="run-c3",
+        expected_revision=7,
+    ) == {"status": "complete"}
+    assert events == ["resume", "cancel", "resume"]
+
+
+def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
+    tmp_path: Path,
+    validated_provider_snapshot,
+    monkeypatch,
+) -> None:
+    from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
+    from app.learn.workflow_service import (
+        LearningWorkflowServiceComposition,
+        start_guarded_learning_stage_worker,
+        start_learning_workflow_stage_operation,
+    )
+
+    store, _real_registry, root, resolver = _test_pair(
+        tmp_path / "pair", validated_provider_snapshot
+    )
+    events: list[str] = []
+    operation_id = "operation-c3-start"
+    case_ref = _case_ref(resolver)
+    case = resolver.resolve(case_ref)
+    binding, image_sha = _binding_for_case(tmp_path, case, operation_id)
+
+    class _Registry:
+        def __init__(self) -> None:
+            self.reservation = None
+            self.anchored = None
+
+        def prepare_benchmark_worker_identity(self, **kwargs):
+            events.append("prepare")
+            source = deepcopy(kwargs["handler_payload_source"])
+            reservation = seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_identity_reservation_v1",
+                    "authority_kind": root.authority_kind,
+                    "run_id": kwargs["run_id"],
+                    "stage": kwargs["stage"],
+                    "operation_id": kwargs["operation_id"],
+                    "workflow_revision": kwargs["workflow_revision"],
+                    "task_kind": kwargs["task_kind"],
+                    "payload_sha256": source["handler_payload_sha256"],
+                    "handler_payload_source": source,
+                    "handler_payload_source_ref": {
+                        "contract_version": "benchmark_v2_incumbent_handler_payload_source_ref_v1",
+                        "content_sha256": source["content_sha256"]
+                    },
+                    "worker_id": "1" * 32,
+                    "model_request_id": "request-c3-start",
+                    "execution_nonce": "2" * 32,
+                    "supervision_inputs_ref": {
+                        "content_sha256": content_sha256(
+                            {
+                                "authority_kind": root.authority_kind,
+                                "store_identity_sha256": root.store_identity_sha256,
+                                "journal_root": str(root.journal_root.resolve()),
+                            }
+                        )
+                    },
+                    "reservation_state": "reserved",
+                    "abort_observation_ref": None,
+                    "predecessor_content_sha256": source["content_sha256"],
+                }
+            )
+            self.reservation = reservation
+            return deepcopy(reservation)
+
+        def confirm_prepared_benchmark_worker_anchor(self, **_kwargs):
+            events.append("confirm")
+            anchored_body = deepcopy(self.reservation)
+            anchored_body.pop("content_sha256")
+            anchored_body["reservation_state"] = "anchored"
+            anchored_body["predecessor_content_sha256"] = self.reservation[
+                "content_sha256"
+            ]
+            self.anchored = seal_immutable(anchored_body)
+            return {
+                "anchored_reservation_ref": {
+                    "content_sha256": self.anchored["content_sha256"]
+                }
+            }
+
+        def inspect_prepared_benchmark_worker_identity(self, **_kwargs):
+            events.append("inspect")
+            return deepcopy(self.anchored)
+
+        def prepare_benchmark_provider_acquisition(self, **kwargs):
+            events.append("provider")
+            return seal_immutable(
+                {
+                    "contract_version": "benchmark_provider_acquisition_ref_v1",
+                    "acquisition_intent_ref": {"content_sha256": "3" * 64},
+                    "runtime_owner_ref": deepcopy(kwargs["runtime_owner_ref"]),
+                }
+            )
+
+        def launch_prepared_benchmark_worker(self, **kwargs):
+            events.append("launch")
+            assert kwargs["authoritative_payload"]["provider_mode"] == "local_understanding"
+            return {
+                "contract_version": "learning_stage_worker_v1",
+                "worker_id": "1" * 32,
+                "run_id": "run-c3-start",
+                "stage": "screen_understanding",
+                "operation_id": operation_id,
+                "task_kind": "vision_observe_screen",
+                "status": "running",
+            }
+
+        def inspect_completed_result_identity(self, **_kwargs):
+            events.append("inspect_result")
+            return {
+                "contract_version": "learning_stage_worker_completed_result_identity_v1",
+                "status": "completed",
+                "worker_id": "1" * 32,
+                "run_id": "run-c3-start",
+                "stage": "screen_understanding",
+                "operation_id": operation_id,
+                "task_kind": "vision_observe_screen",
+                "model_request_id": "request-c3-start",
+                "payload_sha256": self.reservation["payload_sha256"],
+                "result_sha256": "a" * 64,
+                "result_available": True,
+                "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
+                "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+            }
+
+        def adopt_result(self, **_kwargs):
+            events.append("adopt")
+            return {
+                "contract_version": "learning_stage_worker_result_adoption_v1",
+                "status": "adopted",
+                "receipt": {
+                    "contract_version": "learning_stage_worker_result_adoption_v1",
+                    "worker_id": "1" * 32,
+                    "run_id": "run-c3-start",
+                    "stage": "screen_understanding",
+                    "operation_id": operation_id,
+                    "task_kind": "vision_observe_screen",
+                    "model_request_id": "request-c3-start",
+                    "payload_sha256": self.reservation["payload_sha256"],
+                    "result_sha256": "a" * 64,
+                    "adopted_at": "2026-08-27T00:00:00+00:00",
+                },
+                "response": {"success": True},
+            }
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("worker_cleanup")
+            return seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_cleanup_ref_v1",
+                    "outcome": "verified_exact_worker_exited",
+                }
+            )
+
+        def reconcile_benchmark_provider_cleanup(self, **_kwargs):
+            events.append("provider_cleanup")
+            return seal_immutable(
+                {
+                    "contract_version": "benchmark_provider_cleanup_ref_v1",
+                    "outcome": "verified_exact_process_exited",
+                }
+            )
+
+    registry = _Registry()
+    try:
+        binding_started = store.transition(
+            run_id="run-c3-start",
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            evidence_refs={},
+        )
+        initial = store.transition(
+            run_id="run-c3-start",
+            expected_revision=binding_started["revision"],
+            stage="bind_capture",
+            outcome="completed",
+            evidence_refs={"image_path": str((PROJECT_ROOT / str(case["image"]["path"])).resolve())},
+        )
+        started_operation = start_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-c3-start",
+            expected_revision=initial["revision"],
+            stage="screen_understanding",
+            operation_id=operation_id,
+        )
+        composition = LearningWorkflowServiceComposition(
+            store=store,
+            worker_registry=registry,
+            project_root=tmp_path,
+            composition_kind="test",
+            benchmark_supervision_root=root,
+            provider_case_resolver=resolver,
+        )
+        monkeypatch.setattr(
+            "app.learn.workflow_service._validate_benchmark_v2_current_window_binding",
+            lambda _serialized: {},
+        )
+        result = start_guarded_learning_stage_worker(
+            composition=composition,
+            run_id="run-c3-start",
+            expected_revision=started_operation["workflow_state"]["revision"],
+            stage="screen_understanding",
+            operation_id=operation_id,
+            task_kind="vision_observe_screen",
+            payload={
+                "benchmark_v2_incumbent": {
+                    "provider_case_ref": case_ref,
+                    "window_binding_ref": {
+                        "id": "binding-c3-start",
+                        "content_sha256": binding["payload_sha256"],
+                    },
+                    "capture_ref": {
+                        "id": "capture-c3-start",
+                        "content_sha256": image_sha,
+                    },
+                    "serialized_window_binding": binding,
+                }
+            },
+        )
+        assert result["worker_id"] == "1" * 32
+        assert events == ["prepare", "confirm", "inspect", "provider", "launch"]
+        current = store.get("run-c3-start")
+        operation = current["stages"]["screen_understanding"]["evidence_refs"][
+            "stage_execution"
+        ]["benchmark_v2_incumbent"]
+        assert operation["phase"] == "worker_bound"
+        assert operation["current_document_revision"] == current["revision"]
+        monkeypatch.setattr(
+            "app.learn.workflow_service._rebuild_benchmark_v2_window_adoption",
+            lambda **_kwargs: seal_immutable(
+                {
+                    "contract_version": "portfolio_hybrid_benchmark_v2_worker_window_binding_adoption_v1",
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            ),
+        )
+        from app.learn.workflow_service import continue_guarded_learning_stage_worker_result
+
+        completed = continue_guarded_learning_stage_worker_result(
+            composition=composition,
+            run_id="run-c3-start",
+            expected_revision=current["revision"],
+            stage="screen_understanding",
+            operation_id=operation_id,
+            worker_id="1" * 32,
+        )
+        terminal_bytes = json.dumps(
+            completed["terminal_receipt"], sort_keys=True, separators=(",", ":")
+        )
+        replay_state = store.get("run-c3-start")
+        replay = continue_guarded_learning_stage_worker_result(
+            composition=composition,
+            run_id="run-c3-start",
+            expected_revision=replay_state["revision"],
+            stage="screen_understanding",
+            operation_id=operation_id,
+            worker_id="1" * 32,
+        )
+        assert replay["status"] == "complete"
+        assert json.dumps(
+            replay["terminal_receipt"], sort_keys=True, separators=(",", ":")
+        ) == terminal_bytes
+        assert events == [
+            "prepare",
+            "confirm",
+            "inspect",
+            "provider",
+            "launch",
+            "inspect_result",
+            "adopt",
+            "worker_cleanup",
+            "provider_cleanup",
+        ]
+    finally:
+        store.close()
+
+
 def test_payload_projection_is_literal_and_source_contains_no_raw_case(
     source_bundle: dict[str, object]
 ) -> None:

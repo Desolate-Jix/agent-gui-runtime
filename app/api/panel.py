@@ -84,6 +84,7 @@ from app.learn.workflow_service import (
     cancel_guarded_learning_workflow_stage_operation,
     continue_guarded_learning_stage_worker_result,
     finish_guarded_learning_workflow_stage_operation,
+    get_production_learning_workflow_service_composition,
     heartbeat_guarded_learning_workflow_stage_operation,
     project_guarded_learning_workflow_runtime_attachment,
     recover_guarded_learning_workflow_stage_operation,
@@ -160,10 +161,21 @@ SCOPED_CAPTURE_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "learning-runs" / "scoped
 continuous_task_memory_store = ReviewedInterfaceMemoryStore(project_root=ROOT_DIR)
 
 router = APIRouter(tags=["panel"])
+_PRODUCTION_PANEL_WORKFLOW_STORE = learning_workflow_run_store
+_PRODUCTION_PANEL_WORKER_REGISTRY = learning_stage_worker_registry
 
 
 def _panel_learning_workflow_service_composition(
 ) -> LearningWorkflowServiceComposition:
+    if (
+        learning_workflow_run_store is _PRODUCTION_PANEL_WORKFLOW_STORE
+        and learning_stage_worker_registry is _PRODUCTION_PANEL_WORKER_REGISTRY
+    ):
+        try:
+            return get_production_learning_workflow_service_composition()
+        except ValueError as error:
+            if str(error) != "production validated provider corpus is unavailable":
+                raise
     return LearningWorkflowServiceComposition(
         store=learning_workflow_run_store,
         worker_registry=learning_stage_worker_registry,

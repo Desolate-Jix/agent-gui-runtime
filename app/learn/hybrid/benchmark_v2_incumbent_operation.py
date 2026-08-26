@@ -1198,7 +1198,7 @@ def replay_benchmark_v2_incumbent_terminal(
 
 
 class BenchmarkV2IncumbentWorkflowService:
-    """C1 façade仅暴露pair lock、closed validation和纯重放。"""
+    """以同一composition暴露closed文档、运行恢复和终态重放。"""
 
     def __init__(self, composition: object) -> None:
         self._composition = composition
@@ -1221,6 +1221,36 @@ class BenchmarkV2IncumbentWorkflowService:
 
     def replay_terminal(self, value: Mapping[str, object]) -> dict[str, Any]:
         return replay_benchmark_v2_incumbent_terminal(value)
+
+    def start(self, **kwargs: Any) -> dict[str, Any]:
+        from app.learn.workflow_service import (
+            _start_benchmark_v2_incumbent_operation,
+        )
+
+        return _start_benchmark_v2_incumbent_operation(
+            composition=self._composition,
+            **kwargs,
+        )
+
+    def resume(self, **kwargs: Any) -> dict[str, Any]:
+        from app.learn.workflow_service import (
+            _resume_benchmark_v2_incumbent_operation,
+        )
+
+        return _resume_benchmark_v2_incumbent_operation(
+            composition=self._composition,
+            **kwargs,
+        )
+
+    def cancel(self, **kwargs: Any) -> dict[str, Any]:
+        from app.learn.workflow_service import (
+            _cancel_benchmark_v2_incumbent_operation,
+        )
+
+        return _cancel_benchmark_v2_incumbent_operation(
+            composition=self._composition,
+            **kwargs,
+        )
 
 
 _PRODUCTION_BENCHMARK_V2_WORKFLOW_SERVICE: BenchmarkV2IncumbentWorkflowService | None = None
