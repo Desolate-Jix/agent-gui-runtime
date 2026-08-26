@@ -1083,7 +1083,6 @@ def _benchmark_v2_request(value: object) -> dict[str, Any]:
         "provider_case_ref",
         "window_binding_ref",
         "capture_ref",
-        "serialized_window_binding",
     }:
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent request is not closed"
@@ -1094,10 +1093,6 @@ def _benchmark_v2_request(value: object) -> dict[str, Any]:
             raise LearningWorkflowStageOperationError(
                 f"benchmark_v2 incumbent {name} is invalid"
             )
-    if not isinstance(request["serialized_window_binding"], Mapping):
-        raise LearningWorkflowStageOperationError(
-            "benchmark_v2 incumbent serialized window binding is invalid"
-        )
     return request
 
 
@@ -1182,6 +1177,9 @@ def _benchmark_v2_runtime_owner(
 def _benchmark_v2_source_projection(
     *,
     composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    stage: str,
+    operation_id: str,
     request: Mapping[str, object],
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
@@ -1192,58 +1190,57 @@ def _benchmark_v2_source_projection(
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent provider case resolver is unavailable"
         )
-    _validate_benchmark_v2_current_window_binding(
-        request["serialized_window_binding"]
-    )
+    if composition.benchmark_v2_worker_binding_resolver is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent Task5 resolver is unavailable"
+        )
     try:
-        return compose_benchmark_v2_incumbent_payload_projection(
+        from app.learn.hybrid.benchmark_v2_worker_binding import (
+            resolve_server_worker_window_binding,
+        )
+
+        resolution = resolve_server_worker_window_binding(
+            resolver=composition.benchmark_v2_worker_binding_resolver,
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            window_binding_ref=request["window_binding_ref"],
+            capture_ref=request["capture_ref"],
+        )
+        projection = compose_benchmark_v2_incumbent_payload_projection(
             provider_case_resolver=composition.provider_case_resolver,
             provider_case_ref=request["provider_case_ref"],
             window_binding_ref=request["window_binding_ref"],
             capture_ref=request["capture_ref"],
-            serialized_window_binding=request["serialized_window_binding"],
+            serialized_window_binding=resolution["serialized_window_binding"],
         )
+        projection["worker_binding_resolution"] = deepcopy(dict(resolution))
+        return projection
     except (TypeError, ValueError) as error:
         raise LearningWorkflowStageOperationError(
             f"benchmark_v2 incumbent source projection is invalid: {error}"
         ) from error
 
-
-def _validate_benchmark_v2_current_window_binding(
-    serialized_window_binding: object,
-) -> dict[str, object]:
-    from app.learn.hybrid.benchmark_v2_worker_binding import (
-        _assert_owner_matches_serialized,
-        _owner_from_journal,
-    )
-
-    if not isinstance(serialized_window_binding, Mapping):
-        raise LearningWorkflowStageOperationError(
-            "benchmark_v2 incumbent window binding is invalid"
-        )
-    try:
-        owner = _owner_from_journal(serialized_window_binding)
-        _assert_owner_matches_serialized(
-            serialized=serialized_window_binding,
-            owner=owner,
-        )
-        return owner
-    except (OSError, TypeError, ValueError, UnicodeError) as error:
-        raise LearningWorkflowStageOperationError(
-            f"benchmark_v2 incumbent Task5 window binding is invalid: {error}"
-        ) from error
-
-
 def _benchmark_v2_sidecars(
     workflow_state: Mapping[str, object], stage: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     stage_execution = _benchmark_v2_stage_execution(workflow_state, stage)
-    request = stage_execution.get("benchmark_v2_incumbent_request")
+    operation = stage_execution.get("benchmark_v2_incumbent")
     anchor = stage_execution.get("benchmark_v2_operation_anchor")
-    if not isinstance(request, Mapping) or not isinstance(anchor, Mapping):
+    if not isinstance(operation, Mapping) or not isinstance(anchor, Mapping):
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent durable sidecars are missing"
         )
+    source = operation.get("handler_payload_source")
+    if not isinstance(source, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent closed source is missing"
+        )
+    request = {
+        "provider_case_ref": deepcopy(source.get("provider_case_ref")),
+        "window_binding_ref": deepcopy(operation.get("window_binding_ref")),
+        "capture_ref": deepcopy(operation.get("capture_ref")),
+    }
     return _benchmark_v2_request(request), deepcopy(dict(anchor))
 
 
@@ -1304,6 +1301,9 @@ def _start_benchmark_v2_incumbent_operation(
             if operation is None:
                 projection = _benchmark_v2_source_projection(
                     composition=composition,
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
                     request=closed_request,
                 )
                 reservation = registry.prepare_benchmark_identity(
@@ -1365,7 +1365,6 @@ def _start_benchmark_v2_incumbent_operation(
                         stage=stage,
                         operation=operation,
                         sidecars={
-                            "benchmark_v2_incumbent_request": closed_request,
                             "benchmark_v2_operation_anchor": anchor,
                         },
                     )
@@ -1393,7 +1392,6 @@ def _start_benchmark_v2_incumbent_operation(
                             stage=stage,
                             operation=operation,
                             sidecars={
-                                "benchmark_v2_incumbent_request": closed_request,
                                 "benchmark_v2_operation_anchor": anchor,
                             },
                         )
@@ -1412,7 +1410,12 @@ def _start_benchmark_v2_incumbent_operation(
                         )
                         raise original_error
             else:
-                closed_request, anchor = _benchmark_v2_sidecars(current, stage)
+                persisted_request, anchor = _benchmark_v2_sidecars(current, stage)
+                if closed_request != persisted_request:
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent request differs from current source"
+                    )
+                closed_request = persisted_request
 
             if operation["phase"] == "prepared":
                 confirmation = registry.confirm_benchmark_anchor(
@@ -1465,6 +1468,9 @@ def _start_benchmark_v2_incumbent_operation(
             if operation["phase"] == "provider_owner_prepared":
                 fresh_projection = _benchmark_v2_source_projection(
                     composition=composition,
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
                     request=closed_request,
                 )
                 try:
@@ -1475,9 +1481,9 @@ def _start_benchmark_v2_incumbent_operation(
                                 "handler_payload_source"
                             ],
                             provider_case_resolver=composition.provider_case_resolver,
-                            serialized_window_binding=closed_request[
-                                "serialized_window_binding"
-                            ],
+                            serialized_window_binding=fresh_projection[
+                                "worker_binding_resolution"
+                            ]["serialized_window_binding"],
                         )
                     )
                 except (TypeError, ValueError) as error:
@@ -1506,6 +1512,9 @@ def _start_benchmark_v2_incumbent_operation(
                 if reservation_state == "anchored":
                     fresh_projection = _benchmark_v2_source_projection(
                         composition=composition,
+                        run_id=run_id,
+                        stage=stage,
+                        operation_id=operation_id,
                         request=closed_request,
                     )
                     try:
@@ -1518,9 +1527,9 @@ def _start_benchmark_v2_incumbent_operation(
                                 provider_case_resolver=(
                                     composition.provider_case_resolver
                                 ),
-                                serialized_window_binding=closed_request[
-                                    "serialized_window_binding"
-                                ],
+                                serialized_window_binding=fresh_projection[
+                                    "worker_binding_resolution"
+                                ]["serialized_window_binding"],
                             )
                         )
                     except (TypeError, ValueError) as error:
@@ -1794,6 +1803,9 @@ def _resume_benchmark_v2_incumbent_operation(
                 )
             projection = _benchmark_v2_source_projection(
                 composition=composition,
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
                 request=request,
             )
             window_adoption = _rebuild_benchmark_v2_window_adoption(

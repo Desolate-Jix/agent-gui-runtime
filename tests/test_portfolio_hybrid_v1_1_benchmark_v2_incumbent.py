@@ -372,7 +372,6 @@ def test_benchmark_v2_c3_start_routes_before_generic_registry(
                 },
                 "window_binding_ref": {"id": "binding-c3", "content_sha256": "2" * 64},
                 "capture_ref": {"id": "capture-c3", "content_sha256": "3" * 64},
-                "serialized_window_binding": {"contract_version": "fixture"},
             }
         },
     )
@@ -659,10 +658,13 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             composition_kind="test",
             benchmark_supervision_root=root,
             provider_case_resolver=resolver,
+            benchmark_v2_worker_binding_resolver=object(),
         )
         monkeypatch.setattr(
-            "app.learn.workflow_service._validate_benchmark_v2_current_window_binding",
-            lambda _serialized: {},
+            "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+            lambda **_kwargs: {
+                "serialized_window_binding": deepcopy(binding),
+            },
         )
         result = start_guarded_learning_stage_worker(
             composition=composition,
@@ -682,7 +684,6 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
                         "id": "capture-c3-start",
                         "content_sha256": image_sha,
                     },
-                    "serialized_window_binding": binding,
                 }
             },
         )
@@ -692,6 +693,14 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
         operation = current["stages"]["screen_understanding"]["evidence_refs"][
             "stage_execution"
         ]["benchmark_v2_incumbent"]
+        durable_bytes = json.dumps(current, ensure_ascii=False, sort_keys=True)
+        for forbidden_name in (
+            "benchmark_v2_incumbent_request",
+            "serialized_window_binding",
+            "capture_image_path",
+            "owner_journal_path",
+        ):
+            assert forbidden_name not in durable_bytes
         assert operation["phase"] == "worker_bound"
         assert operation["current_document_revision"] == current["revision"]
         monkeypatch.setattr(
@@ -1238,6 +1247,13 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     stage = operation["stage"]
     operation_id = operation["operation_id"]
     launches: list[dict[str, object]] = []
+    closed_request = {
+        "provider_case_ref": deepcopy(
+            operation["handler_payload_source"]["provider_case_ref"]
+        ),
+        "window_binding_ref": deepcopy(operation["window_binding_ref"]),
+        "capture_ref": deepcopy(operation["capture_ref"]),
+    }
 
     class _Store:
         def get(self, _run_id):
@@ -1265,7 +1281,7 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
         composition_kind="test", benchmark_supervision_root=object(),
-        provider_case_resolver=object(),
+        provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
     )
     monkeypatch.setattr(
         workflow_service, "get_learning_workflow_operation_lock",
@@ -1285,11 +1301,18 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     )
     monkeypatch.setattr(
         workflow_service, "_benchmark_v2_sidecars",
-        lambda *_args: ({"serialized_window_binding": {}}, {"anchor": True}),
+        lambda *_args: (deepcopy(closed_request), {"anchor": True}),
     )
     monkeypatch.setattr(
         workflow_service, "_benchmark_v2_source_projection",
-        lambda **_kwargs: source_bundle,
+        lambda **_kwargs: {
+            **source_bundle,
+            "worker_binding_resolution": {
+                "serialized_window_binding": source_bundle[
+                    "authoritative_payload"
+                ]["_benchmark_v2_window_binding"]
+            },
+        },
     )
     monkeypatch.setattr(
         "app.learn.hybrid.benchmark_v2_incumbent_operation.validate_benchmark_v2_incumbent_payload_projection",
@@ -1304,11 +1327,127 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     result = workflow_service._start_benchmark_v2_incumbent_operation(
         composition=composition, run_id=run_id, expected_revision=9,
         stage=stage, operation_id=operation_id, task_kind="vision_observe_screen",
-        request={
-            "provider_case_ref": {}, "window_binding_ref": {}, "capture_ref": {},
-            "serialized_window_binding": {},
-        },
+        request=closed_request,
     )
     assert result["worker_id"] == operation["worker_ref"]["worker_id"]
     assert len(launches) == expected_launches
     assert persisted[-1]["phase"] == "worker_bound"
+
+
+def test_incumbent_request_accepts_only_closed_selectors_and_uses_task5_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    validated_provider_snapshot,
+) -> None:
+    from app.learn import workflow_service
+
+    store, registry, root, provider_resolver = _test_pair(
+        tmp_path / "closed-request", validated_provider_snapshot
+    )
+    case_ref = _case_ref(provider_resolver)
+    case = provider_resolver.resolve(case_ref)
+    binding, image_sha = _binding_for_case(tmp_path, case, "operation-closed")
+    request = {
+        "provider_case_ref": case_ref,
+        "window_binding_ref": {
+            "id": "binding-closed",
+            "content_sha256": binding["payload_sha256"],
+        },
+        "capture_ref": {"id": "capture-closed", "content_sha256": image_sha},
+    }
+    resolution_calls: list[dict[str, object]] = []
+
+    def resolve_binding(**kwargs):
+        resolution_calls.append(kwargs)
+        return {
+            "contract_version": "benchmark_v2_worker_window_binding_resolution_v1",
+            "authority_kind": root.authority_kind,
+            "run_id": "run-closed",
+            "stage": "screen_understanding",
+            "operation_id": "operation-closed",
+            "window_binding_ref": deepcopy(request["window_binding_ref"]),
+            "capture_ref": deepcopy(request["capture_ref"]),
+            "binding_authority_ref": {"content_sha256": "9" * 64},
+            "serialized_window_binding": binding,
+            "worker_process_identity": None,
+            "normal_binding_evidence_ref": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "content_sha256": "8" * 64,
+        }
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        resolve_binding,
+    )
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=store,
+        worker_registry=registry,
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=root,
+        provider_case_resolver=provider_resolver,
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    try:
+        assert workflow_service._benchmark_v2_request(request) == request
+        for forbidden_name, forbidden_value in (
+            ("serialized_window_binding", binding),
+            ("capture_image_path", binding["capture_image_path"]),
+            ("owner_journal_path", binding["owner_journal_path"]),
+        ):
+            with pytest.raises(
+                workflow_service.LearningWorkflowStageOperationError,
+                match="request is not closed",
+            ):
+                workflow_service._benchmark_v2_request(
+                    {**request, forbidden_name: forbidden_value}
+                )
+
+        projection = workflow_service._benchmark_v2_source_projection(
+            composition=composition,
+            run_id="run-closed",
+            stage="screen_understanding",
+            operation_id="operation-closed",
+            request=request,
+        )
+        assert projection["authoritative_payload"][
+            "_benchmark_v2_window_binding"
+        ] == binding
+        assert len(resolution_calls) == 1
+        assert resolution_calls[0] == {
+            "resolver": composition.benchmark_v2_worker_binding_resolver,
+            "run_id": "run-closed",
+            "stage": "screen_understanding",
+            "operation_id": "operation-closed",
+            "window_binding_ref": request["window_binding_ref"],
+            "capture_ref": request["capture_ref"],
+        }
+    finally:
+        store.close()
+
+
+def test_incumbent_c_source_has_no_private_task5_journal_or_raw_sidecar() -> None:
+    import app.learn.workflow_service as workflow_service
+
+    tree = ast.parse(
+        (PROJECT_ROOT / "app/learn/workflow_service.py").read_text(encoding="utf-8")
+    )
+    target_names = {
+        "_benchmark_v2_request",
+        "_benchmark_v2_source_projection",
+        "_benchmark_v2_sidecars",
+        "_start_benchmark_v2_incumbent_operation",
+        "_resume_benchmark_v2_incumbent_operation",
+    }
+    target_nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in target_names
+    ]
+    target_source = "\n".join(ast.unparse(node) for node in target_nodes)
+    assert len(target_nodes) == len(target_names)
+    assert "_owner_from_journal" not in target_source
+    assert "_assert_owner_matches_serialized" not in target_source
+    assert "benchmark_v2_incumbent_request" not in target_source
+    assert not hasattr(workflow_service, "_validate_benchmark_v2_current_window_binding")
