@@ -466,6 +466,100 @@ def _benchmark_registry_fixture(
     return registry, root, store, source, reservation, anchor
 
 
+def _anchored_benchmark_provider_fixture(
+    tmp_path: Path,
+) -> tuple[
+    LearningStageWorkerRegistry,
+    BenchmarkWorkerSupervisionRoot,
+    dict[str, object],
+    dict[str, object],
+]:
+    registry, root, _store, _source, reservation, anchor = (
+        _benchmark_registry_fixture(tmp_path)
+    )
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    anchored = registry.inspect_prepared_benchmark_worker_identity(
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        supervision_root=root,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    runtime_owner = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_runtime_owner_v1",
+            "authority_kind": anchored["authority_kind"],
+            "run_id": anchored["run_id"],
+            "stage": anchored["stage"],
+            "operation_id": anchored["operation_id"],
+            "worker_id": anchored["worker_id"],
+            "model_request_id": anchored["model_request_id"],
+            "reservation_ref": deepcopy(confirmation["anchored_reservation_ref"]),
+            "payload_sha256": anchored["payload_sha256"],
+        }
+    )
+    return registry, root, anchored, runtime_owner
+
+
+def _install_benchmark_provider_abort_primitive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    request_id: str,
+) -> Path:
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    lineage = {
+        "run_id": "run-benchmark-provider-abort",
+        "workflow_revision": 7,
+        "operation_id": f"operation-{request_id}",
+        "stage": "screen_understanding",
+        "stage_execution_id": f"execution-{request_id}",
+    }
+    scope_name = process_scope_name(lineage, "qwen")
+    runtime_path = tmp_path / f"{request_id}-qwen-runtime.json"
+    profile = {
+        "profile_id": f"profile-{request_id}",
+        "endpoint": "http://127.0.0.1:54990/v1/chat/completions",
+        "pid_file": str(tmp_path / f"{request_id}.pid"),
+    }
+    model_server._write_hybrid_qwen_runtime(
+        runtime_path,
+        seal_immutable(
+            {
+                "contract_version": "hybrid_qwen_acquisition_intent_v1",
+                "state": "starting",
+                "worker_id": f"worker-{request_id}",
+                "model_request_id": request_id,
+                "provider": "qwen",
+                "lineage": lineage,
+                "process_scope_name": scope_name,
+                "profile": profile,
+                "profile_sha256": model_server.content_sha256(
+                    model_server._public_profile(profile)
+                ),
+                "listener_port": 54990,
+                "pid_file": profile["pid_file"],
+                "aborted_tombstone_sha256": None,
+            }
+        ),
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(runtime_path))
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv(
+        "AGENT_GUI_HYBRID_LINEAGE_JSON",
+        json.dumps(lineage, sort_keys=True, separators=(",", ":")),
+    )
+    return runtime_path
+
+
 def _read_benchmark_artifact_by_ref(
     root: Path,
     ref: dict[str, object],
@@ -7433,6 +7527,521 @@ def test_recovered_hybrid_journal_scope_substitution_never_opens_unrelated_job(
         unrelated.wait(10)
         unrelated.close()
         unrelated_scope.close()
+
+
+def test_benchmark_provider_acquisition_prepares_exact_owner_and_replays_after_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+
+    registry_root = tmp_path / "registry"
+    lease_root = tmp_path / "qwen-leases"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", lease_root)
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+
+    first = registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    second = registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    restarted = LearningStageWorkerRegistry(
+        result_root=registry_root,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    replay = restarted.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+
+    assert first == second == replay
+    assert first["contract_version"] == "benchmark_provider_acquisition_ref_v1"
+    assert first["reservation_ref"] == {
+        "content_sha256": anchored["content_sha256"]
+    }
+    assert first["runtime_owner_ref"] == {
+        "content_sha256": runtime_owner["content_sha256"]
+    }
+    assert set(first) == {
+        "contract_version",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "reservation_ref",
+        "runtime_owner_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "materialization_ledger_ref",
+        "content_sha256",
+    }
+    journal = json.loads(
+        next(registry_root.glob("*.benchmark-provider.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    forbidden_truth = {
+        key
+        for key in journal
+        if key.startswith("verified_") or "stable_zero" in key or "absence" in key
+    }
+    assert forbidden_truth == set()
+    assert not list(lease_root.glob("*.lease.json"))
+    assert not list(lease_root.glob("*.pid"))
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "reservation_ref",
+        "payload_sha256",
+    ],
+)
+def test_benchmark_provider_acquisition_rejects_owner_substitution_before_prepare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, _root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        tmp_path / "registry"
+    )
+    calls: list[str] = []
+    production_prepare = model_server.prepare_qwen_model_request_acquisition_owner
+
+    def counted_prepare(request_id, *, runtime_owner_ref):
+        calls.append(request_id)
+        return production_prepare(request_id, runtime_owner_ref=runtime_owner_ref)
+
+    monkeypatch.setattr(
+        worker_module,
+        "prepare_qwen_model_request_acquisition_owner",
+        counted_prepare,
+        raising=False,
+    )
+    altered = deepcopy(runtime_owner)
+    altered.pop("content_sha256")
+    altered[field] = (
+        {"content_sha256": "f" * 64}
+        if field == "reservation_ref"
+        else ("f" * 64 if field == "payload_sha256" else f"wrong-{field}")
+    )
+    altered = seal_immutable(altered)
+
+    with pytest.raises(LearningStageWorkerError):
+        registry.prepare_benchmark_provider_acquisition(
+            reservation_ref={"content_sha256": anchored["content_sha256"]},
+            runtime_owner_ref=altered,
+        )
+    assert calls == []
+
+
+def test_benchmark_provider_cleanup_cancelled_before_launch_uses_production_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+
+    registry_root = tmp_path / "registry"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    _install_benchmark_provider_abort_primitive(
+        tmp_path, monkeypatch, request_id=anchored["model_request_id"]
+    )
+    source = anchored["handler_payload_source"]
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root,
+        reservation={
+            **anchored,
+            "reservation_state": "reserved",
+            "abort_observation_ref": None,
+            "predecessor_content_sha256": source["content_sha256"],
+            "content_sha256": anchored["predecessor_content_sha256"],
+        },
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"],
+        predecessor_content_sha256=None,
+    )
+    registry.observe_benchmark_worker_cleanup(
+        worker_id=anchored["worker_id"],
+        run_id=anchored["run_id"],
+        stage=anchored["stage"],
+        operation_id=anchored["operation_id"],
+        terminate=True,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+
+    first = registry.reconcile_benchmark_provider_cleanup(
+        worker_id=anchored["worker_id"],
+        run_id=anchored["run_id"],
+        stage=anchored["stage"],
+        operation_id=anchored["operation_id"],
+    )
+    restarted = LearningStageWorkerRegistry(
+        result_root=registry_root,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    replay = restarted.reconcile_benchmark_provider_cleanup(
+        worker_id=anchored["worker_id"],
+        run_id=anchored["run_id"],
+        stage=anchored["stage"],
+        operation_id=anchored["operation_id"],
+    )
+
+    assert first == replay
+    assert first["status"] == "cleanup_verified"
+    assert first["outcome"] == "verified_not_acquired"
+    assert first["cleanup_receipt_ref"] is not None
+    terminal = json.loads(
+        next(registry_root.glob("*.benchmark-provider-cleanup.json")).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "receipt" not in terminal
+    assert terminal["cleanup_receipt_ref"] == first["cleanup_receipt_ref"]
+    terminal_bytes = next(
+        registry_root.glob("*.benchmark-provider-cleanup.json")
+    ).read_bytes()
+    production_receipt_path = model_server._qwen_acquisition_artifact_paths(
+        anchored["model_request_id"]
+    )["cleanup_receipt"]
+    drifted = json.loads(production_receipt_path.read_text(encoding="utf-8"))
+    drifted["release_reason"] = "edited"
+    production_receipt_path.write_text(json.dumps(drifted), encoding="utf-8")
+    pending = restarted.reconcile_benchmark_provider_cleanup(
+        worker_id=anchored["worker_id"],
+        run_id=anchored["run_id"],
+        stage=anchored["stage"],
+        operation_id=anchored["operation_id"],
+    )
+    assert pending["status"] == "cleanup_pending"
+    assert pending["cleanup_receipt_ref"] is None
+    assert next(
+        registry_root.glob("*.benchmark-provider-cleanup.json")
+    ).read_bytes() == terminal_bytes
+
+
+def test_benchmark_provider_cleanup_materialization_without_lease_stays_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, _root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        tmp_path / "registry"
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    model_server._transition_qwen_model_request_materialization(
+        anchored["model_request_id"], transition="launch"
+    )
+
+    pending = registry.reconcile_benchmark_provider_cleanup(
+        worker_id=anchored["worker_id"],
+        run_id=anchored["run_id"],
+        stage=anchored["stage"],
+        operation_id=anchored["operation_id"],
+    )
+
+    assert pending["status"] == "cleanup_pending"
+    assert pending["outcome"] == "indeterminate"
+    assert pending["cleanup_receipt_ref"] is None
+    assert not list(
+        (tmp_path / "registry").glob("*.benchmark-provider-cleanup.json")
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong"),
+    [
+        ("worker_id", "wrong-worker"),
+        ("run_id", "wrong-run"),
+        ("stage", "wrong-stage"),
+        ("operation_id", "wrong-operation"),
+    ],
+)
+def test_benchmark_provider_cleanup_rejects_caller_identity_substitution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    wrong: str,
+) -> None:
+    from app.core import model_server
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, _root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        tmp_path / "registry"
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    identity = {
+        "worker_id": anchored["worker_id"],
+        "run_id": anchored["run_id"],
+        "stage": anchored["stage"],
+        "operation_id": anchored["operation_id"],
+    }
+    identity[field] = wrong
+    with pytest.raises(LearningStageWorkerError):
+        registry.reconcile_benchmark_provider_cleanup(**identity)
+
+
+def test_benchmark_provider_acquisition_rejects_reserved_and_stale_refs_before_production(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, root, _store, _source, reserved, anchor = _benchmark_registry_fixture(
+        tmp_path / "registry"
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        worker_module,
+        "prepare_qwen_model_request_acquisition_owner",
+        lambda request_id, *, runtime_owner_ref: calls.append(request_id),
+    )
+
+    def owner_for(reservation_ref):
+        return seal_immutable(
+            {
+                "contract_version": "benchmark_provider_runtime_owner_v1",
+                "authority_kind": reserved["authority_kind"],
+                "run_id": reserved["run_id"],
+                "stage": reserved["stage"],
+                "operation_id": reserved["operation_id"],
+                "worker_id": reserved["worker_id"],
+                "model_request_id": reserved["model_request_id"],
+                "reservation_ref": reservation_ref,
+                "payload_sha256": reserved["payload_sha256"],
+            }
+        )
+
+    reserved_ref = {"content_sha256": reserved["content_sha256"]}
+    with pytest.raises(LearningStageWorkerError, match="anchored"):
+        registry.prepare_benchmark_provider_acquisition(
+            reservation_ref=reserved_ref,
+            runtime_owner_ref=owner_for(reserved_ref),
+        )
+    registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref=reserved_ref,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    with pytest.raises(LearningStageWorkerError, match="anchored"):
+        registry.prepare_benchmark_provider_acquisition(
+            reservation_ref=reserved_ref,
+            runtime_owner_ref=owner_for(reserved_ref),
+        )
+    assert calls == []
+
+
+def test_benchmark_provider_acquisition_recovers_registry_write_cut_from_production_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry_root = tmp_path / "registry"
+    registry, _root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    real_create = worker_module._write_json_create_only
+
+    def fail_provider_journal(path, payload):
+        if Path(path).name.endswith(".benchmark-provider.json"):
+            raise OSError("injected-provider-journal-cut")
+        return real_create(path, payload)
+
+    monkeypatch.setattr(worker_module, "_write_json_create_only", fail_provider_journal)
+    with pytest.raises(OSError, match="injected-provider-journal-cut"):
+        registry.prepare_benchmark_provider_acquisition(
+            reservation_ref={"content_sha256": anchored["content_sha256"]},
+            runtime_owner_ref=runtime_owner,
+        )
+    monkeypatch.setattr(worker_module, "_write_json_create_only", real_create)
+
+    recovered = registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    assert recovered["acquisition_owner_ref"] is not None
+    assert len(list(registry_root.glob("*.benchmark-provider.json"))) == 1
+    assert len(
+        list((tmp_path / "qwen" / "benchmark_acquisitions").glob("*/acquisition-owner.json"))
+    ) == 1
+
+
+def test_benchmark_provider_acquisition_restart_rejects_partial_registry_journal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry_root = tmp_path / "registry"
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    journal_path = next(registry_root.glob("*.benchmark-provider.json"))
+    partial = json.loads(journal_path.read_text(encoding="utf-8"))
+    partial.pop("acquisition_owner_ref")
+    journal_path.write_text(json.dumps(partial), encoding="utf-8")
+
+    with pytest.raises(LearningStageWorkerError, match="provider journal"):
+        LearningStageWorkerRegistry(
+            result_root=registry_root,
+            process_factory=_fake_process_factory,
+            benchmark_supervision_root=root,
+        )
+
+
+def test_benchmark_provider_cleanup_acquired_release_projects_only_production_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from urllib.parse import urlsplit
+
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, _root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        tmp_path / "registry"
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    lineage = {
+        "run_id": anchored["run_id"],
+        "workflow_revision": anchored["workflow_revision"],
+        "operation_id": anchored["operation_id"],
+        "stage": anchored["stage"],
+        "stage_execution_id": f"execution-{anchored['operation_id']}",
+    }
+    scope_name = process_scope_name(lineage, "qwen")
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    endpoint = "http://127.0.0.1:54329/v1/chat/completions"
+    base_url = "http://127.0.0.1:54329/v1"
+    parsed = urlsplit(base_url)
+    readiness = {
+        "started": True,
+        "after": {
+            "status": "running",
+            "base_url": base_url,
+            "model_id": "qwen",
+            "server_process_identity": deepcopy(helper.process_identity),
+            "server_socket": {"host": parsed.hostname, "port": parsed.port},
+        },
+    }
+    profile = {
+        "profile_id": "qwen-benchmark-registry",
+        "endpoint": endpoint,
+        "pid_file": str(tmp_path / "qwen-benchmark-registry.pid"),
+    }
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setattr(
+        model_server,
+        "_observe_qwen_server_binding",
+        lambda selected, observed: {
+            "server_process_identity": deepcopy(
+                observed["after"]["server_process_identity"]
+            ),
+            "server_socket": deepcopy(observed["after"]["server_socket"]),
+        },
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_attest_exact_qwen_socket_owner",
+        lambda server_socket, process_identity: (
+            model_server._current_process_identity(process_identity["pid"])
+            == process_identity
+        ),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=anchored["model_request_id"],
+            readiness=readiness,
+        )
+        released = model_server._release_exact_qwen_lease(
+            lease, reason="controlled-benchmark-registry-release"
+        )
+        projected = registry.reconcile_benchmark_provider_cleanup(
+            worker_id=anchored["worker_id"],
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id=anchored["operation_id"],
+        )
+        assert released["server_termination"] == "verified_exact_process_exited"
+        assert projected["status"] == "cleanup_verified"
+        assert projected["outcome"] == "verified_exact_process_exited"
+        receipt = model_server.observe_qwen_model_request_cleanup(
+            anchored["model_request_id"]
+        )
+        assert projected["cleanup_receipt_ref"] == {
+            "content_sha256": receipt["content_sha256"]
+        }
+        assert "server_process_identity" not in projected
+    finally:
+        helper.close()
+        scope.close()
 
 
 def test_hybrid_vista_cancel_handshake_timeout_reconciles_acquired_supervised_lease(

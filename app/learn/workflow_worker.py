@@ -12,10 +12,15 @@ from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from threading import RLock, get_ident, local
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterator, Mapping
 from uuid import uuid4
 
-from app.core.model_server import cancel_model_request
+from app.core.model_server import (
+    abort_qwen_model_request_acquisition,
+    cancel_model_request,
+    observe_qwen_model_request_cleanup,
+    prepare_qwen_model_request_acquisition_owner,
+)
 from app.learn.workflow_contracts import (
     normalize_learning_pipeline_mode,
     ModelReviewTaskInput,
@@ -152,6 +157,10 @@ _BENCHMARK_SUPERVISION_VERSION = "benchmark_worker_supervision_v1"
 _BENCHMARK_EXPECTED_SUPERVISION_VERSION = "benchmark_worker_expected_supervision_v1"
 _BENCHMARK_CONFIRMATION_VERSION = "benchmark_worker_anchor_confirmation_v1"
 _BENCHMARK_SOURCE_VERSION = "benchmark_v2_incumbent_handler_payload_source_v1"
+_BENCHMARK_PROVIDER_JOURNAL_VERSION = "benchmark_provider_registry_journal_v1"
+_BENCHMARK_PROVIDER_CLEANUP_JOURNAL_VERSION = (
+    "benchmark_provider_cleanup_registry_journal_v1"
+)
 _BENCHMARK_PRIVATE_MARKERS = frozenset({
     "_benchmark_worker_supervision",
     "_benchmark_worker_bootstrap",
@@ -2989,6 +2998,12 @@ class LearningStageWorkerRegistry:
         self._lock = RLock()
         self._benchmark_reservations: dict[tuple[str, str, str], dict[str, Any]] = {}
         self._benchmark_reservations_by_ref: dict[str, dict[str, Any]] = {}
+        self._benchmark_provider_journals: dict[
+            tuple[str, str, str], dict[str, Any]
+        ] = {}
+        self._benchmark_provider_cleanup_journals: dict[
+            tuple[str, str, str], dict[str, Any]
+        ] = {}
         self._records: dict[str, dict[str, Any]] = {}
         self._active_by_operation: dict[tuple[str, str, str], str] = {}
         self._workers_by_operation: dict[
@@ -3003,6 +3018,7 @@ class LearningStageWorkerRegistry:
             tuple[str, str, str], dict[str, Any]
         ] = {}
         self._load_benchmark_reservations()
+        self._load_benchmark_provider_journals()
         self._load_journals()
         self._load_unattached_benchmark_owners()
 
@@ -3105,6 +3121,254 @@ class LearningStageWorkerRegistry:
         _write_json_atomic(
             self._benchmark_reservation_path(reservation["operation_id"]), reservation
         )
+
+    def _benchmark_anchored_reservation(
+        self, current: Mapping[str, object]
+    ) -> dict[str, Any]:
+        value = deepcopy(dict(current))
+        if value.get("reservation_state") == "anchored":
+            return value
+        original_body = deepcopy(value)
+        original_body.pop("content_sha256", None)
+        original_body["reservation_state"] = "reserved"
+        original_body["abort_observation_ref"] = None
+        original_body["predecessor_content_sha256"] = value[
+            "handler_payload_source"
+        ]["content_sha256"]
+        original = seal_immutable(original_body)
+        if value.get("reservation_state") not in {
+            "launching",
+            "launched",
+            "cancelled_before_launch",
+        }:
+            raise LearningStageWorkerError(
+                "benchmark provider reservation has no anchored lineage"
+            )
+        return self._transition_benchmark_reservation(original, "anchored")
+
+    @staticmethod
+    def _validate_benchmark_provider_runtime_owner(
+        value: object, *, anchored: Mapping[str, object]
+    ) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise LearningStageWorkerError(
+                "benchmark provider runtime owner is required"
+            )
+        owner = deepcopy(dict(value))
+        expected_fields = {
+            "contract_version",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "reservation_ref",
+            "payload_sha256",
+            "content_sha256",
+        }
+        expected_identity = {
+            field: anchored[field]
+            for field in (
+                "authority_kind",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+        }
+        if (
+            set(owner) != expected_fields
+            or owner.get("contract_version")
+            != "benchmark_provider_runtime_owner_v1"
+            or content_sha256(owner) != owner.get("content_sha256")
+            or any(
+                owner.get(field) != expected
+                for field, expected in expected_identity.items()
+            )
+            or owner.get("reservation_ref")
+            != {"content_sha256": anchored["content_sha256"]}
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider runtime owner identity does not match"
+            )
+        _benchmark_exact_ref(
+            owner["reservation_ref"], "benchmark provider owner reservation ref"
+        )
+        return owner
+
+    @staticmethod
+    def _validate_benchmark_provider_owner(
+        value: object,
+        *,
+        model_request_id: str,
+        runtime_owner: Mapping[str, object],
+    ) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise LearningStageWorkerError(
+                "benchmark provider acquisition owner is missing"
+            )
+        owner = deepcopy(dict(value))
+        if (
+            set(owner)
+            != {
+                "contract_version",
+                "model_request_id",
+                "runtime_owner_ref",
+                "acquisition_intent_ref",
+                "owner_state",
+                "content_sha256",
+            }
+            or owner.get("contract_version")
+            != "benchmark_provider_acquisition_owner_v1"
+            or owner.get("model_request_id") != model_request_id
+            or owner.get("runtime_owner_ref") != runtime_owner
+            or owner.get("owner_state") != "acquisition_prepared"
+            or content_sha256(owner) != owner.get("content_sha256")
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider acquisition owner is invalid"
+            )
+        _benchmark_exact_ref(
+            owner.get("acquisition_intent_ref"),
+            "benchmark provider acquisition intent ref",
+        )
+        return owner
+
+    @staticmethod
+    def _benchmark_provider_journal_projection(
+        journal: Mapping[str, object],
+    ) -> dict[str, Any]:
+        return seal_immutable(
+            {
+                "contract_version": "benchmark_provider_acquisition_ref_v1",
+                **{
+                    field: deepcopy(journal[field])
+                    for field in (
+                        "authority_kind",
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                        "reservation_ref",
+                        "acquisition_owner_ref",
+                        "acquisition_intent_ref",
+                        "materialization_ledger_ref",
+                    )
+                },
+                "runtime_owner_ref": {
+                    "content_sha256": journal["runtime_owner_ref"]["content_sha256"]
+                },
+            }
+        )
+
+    def _validate_benchmark_provider_journal(
+        self, value: object
+    ) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise LearningStageWorkerError("benchmark provider journal is invalid")
+        journal = deepcopy(dict(value))
+        if set(journal) != {
+            "contract_version",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "reservation_ref",
+            "runtime_owner_ref",
+            "acquisition_owner_ref",
+            "acquisition_intent_ref",
+            "materialization_ledger_ref",
+            "content_sha256",
+        } or journal.get("contract_version") != _BENCHMARK_PROVIDER_JOURNAL_VERSION:
+            raise LearningStageWorkerError("benchmark provider journal is invalid")
+        if content_sha256(journal) != journal.get("content_sha256"):
+            raise LearningStageWorkerError("benchmark provider journal seal is invalid")
+        key = (
+            journal.get("run_id"),
+            journal.get("stage"),
+            journal.get("operation_id"),
+        )
+        current = self._benchmark_reservations.get(key)
+        if current is None:
+            raise LearningStageWorkerError(
+                "benchmark provider reservation identity is missing"
+            )
+        anchored = self._benchmark_anchored_reservation(current)
+        runtime_owner = self._validate_benchmark_provider_runtime_owner(
+            journal.get("runtime_owner_ref"), anchored=anchored
+        )
+        expected_identity = {
+            field: anchored[field]
+            for field in (
+                "authority_kind",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+        }
+        if (
+            any(
+                journal.get(field) != expected
+                for field, expected in expected_identity.items()
+            )
+            or journal.get("reservation_ref")
+            != {"content_sha256": anchored["content_sha256"]}
+            or journal.get("materialization_ledger_ref") is not None
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider journal identity does not match"
+            )
+        _benchmark_exact_ref(
+            journal.get("acquisition_owner_ref"),
+            "benchmark provider acquisition owner ref",
+        )
+        _benchmark_exact_ref(
+            journal.get("acquisition_intent_ref"),
+            "benchmark provider acquisition intent ref",
+        )
+        if journal["runtime_owner_ref"] != runtime_owner:
+            raise LearningStageWorkerError("benchmark provider runtime owner drifted")
+        return journal
+
+    def _load_benchmark_provider_journals(self) -> None:
+        for path in sorted(self._result_root.glob("*.benchmark-provider.json")):
+            try:
+                journal = self._validate_benchmark_provider_journal(
+                    _read_json_object(path, label="benchmark provider journal")
+                )
+            except LearningStageWorkerError:
+                raise
+            except (OSError, RuntimeError, ValueError, UnicodeError) as error:
+                raise LearningStageWorkerError(
+                    f"benchmark provider journal is unreadable: {path.name}"
+                ) from error
+            key = (journal["run_id"], journal["stage"], journal["operation_id"])
+            if key in self._benchmark_provider_journals:
+                raise LearningStageWorkerError("duplicate benchmark provider journal")
+            self._benchmark_provider_journals[key] = journal
+        for path in sorted(
+            self._result_root.glob("*.benchmark-provider-cleanup.json")
+        ):
+            journal = self._validate_benchmark_provider_cleanup_journal(
+                _read_json_object(path, label="benchmark provider cleanup journal")
+            )
+            key = (journal["run_id"], journal["stage"], journal["operation_id"])
+            if key in self._benchmark_provider_cleanup_journals:
+                raise LearningStageWorkerError(
+                    "duplicate benchmark provider cleanup journal"
+                )
+            self._benchmark_provider_cleanup_journals[key] = journal
 
     def _require_benchmark_root(
         self, supplied: BenchmarkWorkerSupervisionRoot
@@ -3251,6 +3515,525 @@ class LearningStageWorkerRegistry:
                 self._benchmark_reservations[key] = anchored
                 self._benchmark_reservations_by_ref[anchored["content_sha256"]] = anchored
                 return deepcopy(receipt)
+
+    def prepare_benchmark_provider_acquisition(
+        self,
+        *,
+        reservation_ref: Mapping[str, object],
+        runtime_owner_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        supplied_ref = _benchmark_exact_ref(
+            reservation_ref, "benchmark provider reservation ref"
+        )
+        with self._lock:
+            reservation = self._benchmark_reservations_by_ref.get(
+                supplied_ref["content_sha256"]
+            )
+            root = self._benchmark_supervision_root
+            if reservation is None:
+                raise LearningStageWorkerError(
+                    "benchmark provider reservation ref not found"
+                )
+            if root is None:
+                raise LearningStageWorkerError(
+                    "benchmark provider supervision root is missing"
+                )
+            key = (
+                reservation["run_id"],
+                reservation["stage"],
+                reservation["operation_id"],
+            )
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id=key[0],
+            stage=key[1],
+            operation_id=key[2],
+        ):
+            return self._prepare_benchmark_provider_acquisition_under_controller(
+                reservation_ref=reservation_ref,
+                runtime_owner_ref=runtime_owner_ref,
+            )
+
+    def _prepare_benchmark_provider_acquisition_under_controller(
+        self,
+        *,
+        reservation_ref: Mapping[str, object],
+        runtime_owner_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        supplied_ref = _benchmark_exact_ref(
+            reservation_ref, "benchmark provider reservation ref"
+        )
+        with self._lock:
+            reservation = self._benchmark_reservations_by_ref.get(
+                supplied_ref["content_sha256"]
+            )
+            if reservation is None:
+                raise LearningStageWorkerError(
+                    "benchmark provider reservation ref not found"
+                )
+            key = (
+                reservation["run_id"],
+                reservation["stage"],
+                reservation["operation_id"],
+            )
+            current = self._benchmark_reservations.get(key)
+            if (
+                current != reservation
+                or current.get("reservation_state") != "anchored"
+                or self._benchmark_supervision_root is None
+                or current.get("authority_kind")
+                != self._benchmark_supervision_root.authority_kind
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark provider reservation must be the current anchored reservation"
+                )
+            runtime_owner = self._validate_benchmark_provider_runtime_owner(
+                runtime_owner_ref, anchored=current
+            )
+            snapshot_ref = current["content_sha256"]
+            existing = deepcopy(self._benchmark_provider_journals.get(key))
+
+        try:
+            production_owner = self._validate_benchmark_provider_owner(
+                prepare_qwen_model_request_acquisition_owner(
+                    current["model_request_id"],
+                    runtime_owner_ref=runtime_owner,
+                ),
+                model_request_id=current["model_request_id"],
+                runtime_owner=runtime_owner,
+            )
+        except LearningStageWorkerError:
+            raise
+        except (OSError, RuntimeError, ValueError, UnicodeError) as error:
+            raise LearningStageWorkerError(
+                "benchmark provider production acquisition preparation failed"
+            ) from error
+
+        owner_ref = {"content_sha256": production_owner["content_sha256"]}
+        candidate = seal_immutable(
+            {
+                "contract_version": _BENCHMARK_PROVIDER_JOURNAL_VERSION,
+                **{
+                    field: deepcopy(current[field])
+                    for field in (
+                        "authority_kind",
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                    )
+                },
+                "reservation_ref": {"content_sha256": snapshot_ref},
+                "runtime_owner_ref": deepcopy(runtime_owner),
+                "acquisition_owner_ref": owner_ref,
+                "acquisition_intent_ref": deepcopy(
+                    production_owner["acquisition_intent_ref"]
+                ),
+                "materialization_ledger_ref": None,
+            }
+        )
+        if existing is not None and existing != candidate:
+            raise LearningStageWorkerError(
+                "benchmark provider acquisition replay conflicts with Registry journal"
+            )
+        with self._lock:
+            current_after = self._benchmark_reservations.get(key)
+            if (
+                current_after is None
+                or current_after.get("content_sha256") != snapshot_ref
+                or current_after.get("reservation_state") != "anchored"
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark provider acquisition Registry snapshot changed"
+                )
+            persisted = self._benchmark_provider_journals.get(key)
+            if persisted is not None:
+                if persisted != candidate:
+                    raise LearningStageWorkerError(
+                        "benchmark provider acquisition Registry journal changed"
+                    )
+                return self._benchmark_provider_journal_projection(persisted)
+            path = self._result_root / (
+                f"{current['operation_id']}.benchmark-provider.json"
+            )
+            if path.exists():
+                persisted = self._validate_benchmark_provider_journal(
+                    _read_json_object(path, label="benchmark provider journal")
+                )
+                if persisted != candidate:
+                    raise LearningStageWorkerError(
+                        "benchmark provider acquisition Registry journal conflicts"
+                    )
+            else:
+                _write_json_create_only(path, candidate)
+                persisted = candidate
+            self._benchmark_provider_journals[key] = deepcopy(persisted)
+            return self._benchmark_provider_journal_projection(persisted)
+
+    @staticmethod
+    def _validate_benchmark_provider_cleanup_receipt(
+        value: object, *, provider_journal: Mapping[str, object]
+    ) -> dict[str, Any] | None:
+        if not isinstance(value, Mapping):
+            return None
+        receipt = deepcopy(dict(value))
+        if receipt.get("status") == "cleanup_pending":
+            return None
+        receipt_fields = {
+            "contract_version",
+            "outcome",
+            "model_request_id",
+            "acquisition_intent_ref",
+            "runtime_owner_ref",
+            "lease_ref",
+            "profile_ref",
+            "server_process_identity",
+            "socket_ref",
+            "job_scope_ref",
+            "finalization_token",
+            "lease_state_ref",
+            "owner_tombstone_ref",
+            "release_reason",
+            "termination_observation_ref",
+            "scope_stable_zero_ref",
+            "listener_stable_zero_ref",
+            "no_active_lease_observation_ref",
+            "no_owned_runtime_observation_ref",
+            "content_sha256",
+        }
+        if (
+            set(receipt) != receipt_fields
+            or receipt.get("contract_version")
+            != "qwen_model_request_cleanup_receipt_v1"
+            or receipt.get("outcome")
+            not in {"verified_not_acquired", "verified_exact_process_exited"}
+            or receipt.get("model_request_id")
+            != provider_journal["model_request_id"]
+            or receipt.get("acquisition_intent_ref")
+            != provider_journal["acquisition_intent_ref"]
+            or receipt.get("runtime_owner_ref")
+            != provider_journal["runtime_owner_ref"]
+            or content_sha256(receipt) != receipt.get("content_sha256")
+        ):
+            return None
+        for field in (
+            "acquisition_intent_ref",
+            "lease_ref",
+            "profile_ref",
+            "socket_ref",
+            "job_scope_ref",
+            "lease_state_ref",
+            "owner_tombstone_ref",
+            "termination_observation_ref",
+            "scope_stable_zero_ref",
+            "listener_stable_zero_ref",
+            "no_active_lease_observation_ref",
+            "no_owned_runtime_observation_ref",
+        ):
+            ref = receipt.get(field)
+            if ref is not None:
+                try:
+                    _benchmark_exact_ref(ref, f"benchmark provider receipt {field}")
+                except LearningStageWorkerError:
+                    return None
+        return receipt
+
+    @staticmethod
+    def _benchmark_provider_cleanup_projection(
+        provider_journal: Mapping[str, object],
+        *,
+        receipt: Mapping[str, object] | None,
+    ) -> dict[str, Any]:
+        return seal_immutable(
+            {
+                "contract_version": "benchmark_provider_cleanup_ref_v1",
+                "status": (
+                    "cleanup_verified" if receipt is not None else "cleanup_pending"
+                ),
+                "outcome": (
+                    receipt["outcome"] if receipt is not None else "indeterminate"
+                ),
+                **{
+                    field: deepcopy(provider_journal[field])
+                    for field in (
+                        "authority_kind",
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                        "reservation_ref",
+                        "acquisition_owner_ref",
+                        "acquisition_intent_ref",
+                    )
+                },
+                "runtime_owner_ref": {
+                    "content_sha256": provider_journal["runtime_owner_ref"][
+                        "content_sha256"
+                    ]
+                },
+                "cleanup_receipt_ref": (
+                    {"content_sha256": receipt["content_sha256"]}
+                    if receipt is not None
+                    else None
+                ),
+            }
+        )
+
+    def _validate_benchmark_provider_cleanup_journal(
+        self, value: object
+    ) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise LearningStageWorkerError(
+                "benchmark provider cleanup journal is invalid"
+            )
+        journal = deepcopy(dict(value))
+        if set(journal) != {
+            "contract_version",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "reservation_ref",
+            "runtime_owner_ref",
+            "acquisition_owner_ref",
+            "acquisition_intent_ref",
+            "cleanup_receipt_ref",
+            "content_sha256",
+        } or journal.get("contract_version") != _BENCHMARK_PROVIDER_CLEANUP_JOURNAL_VERSION:
+            raise LearningStageWorkerError(
+                "benchmark provider cleanup journal is invalid"
+            )
+        if content_sha256(journal) != journal.get("content_sha256"):
+            raise LearningStageWorkerError(
+                "benchmark provider cleanup journal seal is invalid"
+            )
+        key = (
+            journal.get("run_id"),
+            journal.get("stage"),
+            journal.get("operation_id"),
+        )
+        provider = self._benchmark_provider_journals.get(key)
+        if provider is None:
+            raise LearningStageWorkerError(
+                "benchmark provider cleanup owner journal is missing"
+            )
+        expected = {
+            field: deepcopy(provider[field])
+            for field in (
+                "authority_kind",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+                "reservation_ref",
+                "acquisition_owner_ref",
+                "acquisition_intent_ref",
+            )
+        }
+        expected["runtime_owner_ref"] = {
+            "content_sha256": provider["runtime_owner_ref"]["content_sha256"]
+        }
+        if (
+            any(
+                journal.get(field) != expected_value
+                for field, expected_value in expected.items()
+            )
+        ):
+            raise LearningStageWorkerError(
+                "benchmark provider cleanup journal identity does not match"
+            )
+        _benchmark_exact_ref(
+            journal.get("cleanup_receipt_ref"),
+            "benchmark provider cleanup receipt ref",
+        )
+        return journal
+
+    def reconcile_benchmark_provider_cleanup(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        worker = _required_text(worker_id, "worker_id")
+        run = _required_text(run_id, "run_id")
+        stage_value = _required_text(stage, "stage")
+        operation = _required_text(operation_id, "operation_id")
+        root = self._benchmark_supervision_root
+        if root is None:
+            raise LearningStageWorkerError(
+                "benchmark provider supervision root is missing"
+            )
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id=run,
+            stage=stage_value,
+            operation_id=operation,
+        ):
+            return self._reconcile_benchmark_provider_cleanup_under_controller(
+                worker_id=worker,
+                run_id=run,
+                stage=stage_value,
+                operation_id=operation,
+            )
+
+    def _reconcile_benchmark_provider_cleanup_under_controller(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        worker = _required_text(worker_id, "worker_id")
+        run = _required_text(run_id, "run_id")
+        stage_value = _required_text(stage, "stage")
+        operation = _required_text(operation_id, "operation_id")
+        key = (run, stage_value, operation)
+        with self._lock:
+            current = self._benchmark_reservations.get(key)
+            provider = self._benchmark_provider_journals.get(key)
+            if (
+                current is None
+                or provider is None
+                or current.get("worker_id") != worker
+                or provider.get("worker_id") != worker
+                or provider.get("model_request_id")
+                != current.get("model_request_id")
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark provider cleanup identity does not match"
+                )
+            anchored = self._benchmark_anchored_reservation(current)
+            if provider.get("reservation_ref") != {
+                "content_sha256": anchored["content_sha256"]
+            }:
+                raise LearningStageWorkerError(
+                    "benchmark provider cleanup reservation lineage does not match"
+                )
+            provider = self._validate_benchmark_provider_journal(provider)
+            snapshot_ref = current["content_sha256"]
+            abort_allowed = current.get("reservation_state") == "cancelled_before_launch"
+
+        if abort_allowed:
+            try:
+                abort_result = abort_qwen_model_request_acquisition(
+                    provider["model_request_id"],
+                    acquisition_intent_ref=provider["acquisition_intent_ref"],
+                    runtime_owner_ref=provider["runtime_owner_ref"],
+                    reason="benchmark_operation_cancelled_before_launch",
+                )
+                if (
+                    not isinstance(abort_result, Mapping)
+                    or abort_result.get("contract_version")
+                    != "benchmark_provider_acquisition_abort_v1"
+                    or abort_result.get("model_request_id")
+                    != provider["model_request_id"]
+                    or abort_result.get("acquisition_intent_ref")
+                    != provider["acquisition_intent_ref"]
+                    or abort_result.get("runtime_owner_ref")
+                    != provider["runtime_owner_ref"]
+                    or abort_result.get("owner_state") != "acquisition_aborted"
+                    or content_sha256(abort_result)
+                    != abort_result.get("content_sha256")
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark provider production abort is invalid"
+                    )
+            except LearningStageWorkerError:
+                raise
+            except (OSError, RuntimeError, ValueError, UnicodeError):
+                pass
+        try:
+            observed = observe_qwen_model_request_cleanup(
+                provider["model_request_id"]
+            )
+        except (OSError, RuntimeError, ValueError, UnicodeError):
+            observed = None
+        receipt = self._validate_benchmark_provider_cleanup_receipt(
+            observed, provider_journal=provider
+        )
+
+        with self._lock:
+            current_after = self._benchmark_reservations.get(key)
+            if (
+                current_after is None
+                or current_after.get("content_sha256") != snapshot_ref
+            ):
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+            if receipt is None:
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=None
+                )
+            candidate = seal_immutable(
+                {
+                    "contract_version": _BENCHMARK_PROVIDER_CLEANUP_JOURNAL_VERSION,
+                    **{
+                        field: deepcopy(provider[field])
+                        for field in (
+                            "authority_kind",
+                            "run_id",
+                            "stage",
+                            "operation_id",
+                            "worker_id",
+                            "model_request_id",
+                            "payload_sha256",
+                            "reservation_ref",
+                            "acquisition_owner_ref",
+                            "acquisition_intent_ref",
+                        )
+                    },
+                    "runtime_owner_ref": {
+                        "content_sha256": provider["runtime_owner_ref"][
+                            "content_sha256"
+                        ]
+                    },
+                    "cleanup_receipt_ref": {
+                        "content_sha256": receipt["content_sha256"]
+                    },
+                }
+            )
+            existing = self._benchmark_provider_cleanup_journals.get(key)
+            if existing is not None:
+                if existing != candidate:
+                    return self._benchmark_provider_cleanup_projection(
+                        provider, receipt=None
+                    )
+                return self._benchmark_provider_cleanup_projection(
+                    provider, receipt=receipt
+                )
+            path = self._result_root / (
+                f"{operation}.benchmark-provider-cleanup.json"
+            )
+            if path.exists():
+                persisted = self._validate_benchmark_provider_cleanup_journal(
+                    _read_json_object(
+                        path, label="benchmark provider cleanup journal"
+                    )
+                )
+                if persisted != candidate:
+                    return self._benchmark_provider_cleanup_projection(
+                        provider, receipt=None
+                    )
+            else:
+                _write_json_create_only(path, candidate)
+                persisted = candidate
+            self._benchmark_provider_cleanup_journals[key] = deepcopy(persisted)
+            return self._benchmark_provider_cleanup_projection(
+                provider, receipt=receipt
+            )
 
     def launch_prepared_benchmark_worker(
         self, *, reservation_ref: dict[str, Any], expected_operation_anchor: dict[str, Any],
