@@ -8320,6 +8320,7 @@ def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_sto
     import win32api
     import win32con
     import win32event
+    from app.learn import workflow_worker as worker_module
     from app.learn.hybrid.windows_process_scope import (
         benchmark_worker_controller_mutex_name_v1,
     )
@@ -8336,6 +8337,9 @@ def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_sto
         "termination": 0,
         "cleanup": 0,
         "gate_release": 0,
+        "controller_release": 0,
+        "controller_close": 0,
+        "ordinary_business": 0,
     }
 
     def fail_spawn(**_kwargs):
@@ -8373,6 +8377,8 @@ def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_sto
     )
     real_glob = Path.glob
     real_set_event = win32event.SetEvent
+    real_release_mutex = worker_module._benchmark_checked_release_mutex
+    real_close_handle = worker_module._benchmark_checked_close_handle
 
     def sentinel_store(_authority, _run_id):
         counts["store"] += 1
@@ -8404,6 +8410,14 @@ def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_sto
         counts["gate_release"] += 1
         pytest.fail(f"abandoned inspection must not release gate {handle}")
 
+    def counted_controller_release(handle):
+        counts["controller_release"] += 1
+        return real_release_mutex(handle)
+
+    def counted_controller_close(handle):
+        counts["controller_close"] += 1
+        return real_close_handle(handle)
+
     witness = None
     owner.start()
     try:
@@ -8426,10 +8440,48 @@ def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_sto
             registry, "observe_benchmark_worker_cleanup", sentinel_cleanup
         )
         monkeypatch.setattr(win32event, "SetEvent", sentinel_gate_release)
+        monkeypatch.setattr(
+            worker_module,
+            "_benchmark_checked_release_mutex",
+            counted_controller_release,
+        )
+        monkeypatch.setattr(
+            worker_module,
+            "_benchmark_checked_close_handle",
+            counted_controller_close,
+        )
 
         with pytest.raises(LearningStageWorkerError):
             _inspect_benchmark_launch_owner(registry, root, reservation, anchor)
 
+        second_error = None
+        try:
+            _inspect_benchmark_launch_owner(registry, root, reservation, anchor)
+        except BaseException as error:
+            second_error = error
+
+        ordinary_error = None
+        try:
+            with hold_benchmark_worker_controller(
+                supervision_root=root,
+                run_id=str(reservation["run_id"]),
+                stage=str(reservation["stage"]),
+                operation_id=str(reservation["operation_id"]),
+            ):
+                counts["ordinary_business"] += 1
+        except BaseException as error:
+            ordinary_error = error
+
+        state = json.loads(
+            worker_module._benchmark_controller_state_path(
+                root, controller_name
+            ).read_text(encoding="utf-8")
+        )
+        assert isinstance(second_error, LearningStageWorkerError)
+        assert isinstance(ordinary_error, LearningStageWorkerError)
+        assert state["state"] == "recovery_required"
+        assert state["release_result"] == {"status": "owned_pending_release"}
+        assert state["close_result"] == {"status": "open_pending_release"}
         assert counts == {
             "store": 0,
             "glob": 0,
@@ -8439,6 +8491,9 @@ def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_sto
             "termination": 0,
             "cleanup": 0,
             "gate_release": 0,
+            "controller_release": 1,
+            "controller_close": 1,
+            "ordinary_business": 0,
         }
     finally:
         monkeypatch.setattr(win32event, "SetEvent", real_set_event)

@@ -1023,6 +1023,18 @@ def hold_benchmark_worker_controller(
         revalidation = None
         if outcome == win32event.WAIT_ABANDONED:
             if inspection_fail_closed:
+                _persist_benchmark_controller_state(
+                    root=root,
+                    controller_name=name,
+                    state="recovery_required",
+                    release_result={"status": "owned_pending_release"},
+                    close_result={"status": "open_pending_release"},
+                    predecessor_content_sha256=(
+                        durable_state["content_sha256"]
+                        if durable_state is not None
+                        else None
+                    ),
+                )
                 raise LearningStageWorkerError(
                     "benchmark worker controller abandoned during read-only inspection"
                 )
