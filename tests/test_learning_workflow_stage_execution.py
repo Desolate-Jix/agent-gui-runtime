@@ -3609,6 +3609,74 @@ def test_guarded_remaining_wrappers_delegate_deep_equal_and_cancel_once(
     assert events[-3:] == ["precheck", "registry.cancel", "stage.cancel"]
 
 
+def test_guarded_nonbenchmark_probe_reuses_the_only_store_read(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    current = {"run_id": "run", "revision": 1, "current_stage": "fusion"}
+
+    class _Store:
+        def get(self, run_id):
+            assert run_id == "run"
+            calls.append("store.get")
+            return current
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=object(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=None,
+        provider_case_resolver=None,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: None,
+    )
+
+    def delegated(**kwargs):
+        calls.append("continue")
+        assert kwargs["_preloaded_current"] is current
+        return {"status": "continued"}
+
+    monkeypatch.setattr(
+        workflow_service, "continue_learning_stage_worker_result", delegated
+    )
+    assert workflow_service.continue_guarded_learning_stage_worker_result(
+        composition=composition, run_id="run", expected_revision=1,
+        stage="fusion", operation_id="operation", worker_id="worker",
+    ) == {"status": "continued"}
+    assert calls == ["store.get", "continue"]
+
+
+def test_guarded_benchmark_internal_value_error_maps_to_stage_operation_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(), worker_registry=object(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_resume_benchmark_v2_incumbent_operation",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("invalid closed parent")),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "require_active_learning_workflow_stage_operation",
+        lambda **_kwargs: {"benchmark_v2_incumbent": {}},
+    )
+    with pytest.raises(
+        LearningWorkflowStageOperationError, match="invalid closed parent"
+    ):
+        workflow_service.adopt_guarded_learning_stage_worker_result(
+            composition=composition, worker_id="worker", run_id="run",
+            expected_revision=1, stage="screen_understanding",
+            operation_id="operation",
+        )
+
+
 def test_guarded_no_direct_registry_calls_outside_composition_owner() -> None:
     import ast
 

@@ -1151,3 +1151,55 @@ def test_panel_production_composition_never_falls_back_to_an_unvalidated_pair(
         ValueError, match="production validated provider corpus is unavailable"
     ):
         panel_api._panel_learning_workflow_service_composition()
+
+
+def test_resume_rejects_wrong_operation_identity_before_sidecar_or_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+
+    operation = {
+        "run_id": "run",
+        "stage": "screen_understanding",
+        "operation_id": "operation-current",
+        "phase": "result_ready",
+        "worker_ref": {"worker_id": "worker"},
+    }
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": 7}
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=object(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: operation,
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_sidecars",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("sidecar read")),
+    )
+
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="operation identity differs",
+    ):
+        workflow_service._resume_benchmark_v2_incumbent_operation(
+            composition=composition, run_id="run", expected_revision=7,
+            stage="screen_understanding", operation_id="operation-wrong",
+            worker_id="worker",
+        )

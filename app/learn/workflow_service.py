@@ -757,6 +757,7 @@ def heartbeat_learning_workflow_stage_operation(
     operation_id: str,
     lease_seconds: int = 600,
     now: datetime | None = None,
+    _preloaded_current: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """续租当前受管阶段，并将续租记录写入可回放事件历史。"""
 
@@ -764,7 +765,11 @@ def heartbeat_learning_workflow_stage_operation(
         raise LearningWorkflowStageOperationError(
             "lease_seconds must be a positive integer"
         )
-    current = store.get(run_id)
+    current = (
+        _preloaded_current
+        if isinstance(_preloaded_current, Mapping)
+        else store.get(run_id)
+    )
     _require_revision(current, expected_revision)
     stage_execution = _managed_stage_execution(current, stage)
     _reject_benchmark_v2_incumbent_before_c3(stage_execution)
@@ -997,6 +1002,37 @@ def _benchmark_v2_incumbent_operation_from_state(
     except (TypeError, ValueError) as error:
         raise LearningWorkflowStageOperationError(
             f"benchmark_v2 incumbent operation is invalid: {error}"
+        ) from error
+
+
+def _require_benchmark_v2_operation_identity(
+    operation: Mapping[str, object],
+    *,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+) -> None:
+    if (
+        operation.get("run_id") != run_id
+        or operation.get("stage") != stage
+        or operation.get("operation_id") != operation_id
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent operation identity differs"
+        )
+
+
+def _call_benchmark_v2_operation(callback):
+    try:
+        return callback()
+    except (
+        LearningWorkflowStageOperationError,
+        LearningWorkflowTransitionError,
+    ):
+        raise
+    except (TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark_v2 incumbent closed state is invalid: {error}"
         ) from error
 
 
@@ -1559,6 +1595,12 @@ def _resume_benchmark_v2_incumbent_operation(
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 incumbent operation is missing"
                 )
+            _require_benchmark_v2_operation_identity(
+                operation,
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
+            )
             if operation["phase"] in {"complete", "cancelled", "safe_stopped"}:
                 terminal = replay_benchmark_v2_incumbent_terminal(operation)
                 return {
@@ -1779,6 +1821,12 @@ def _cancel_benchmark_v2_incumbent_operation(
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 incumbent operation is missing"
                 )
+            _require_benchmark_v2_operation_identity(
+                operation,
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
+            )
             if operation["phase"] in {"complete", "cancelled", "safe_stopped"}:
                 terminal = replay_benchmark_v2_incumbent_terminal(operation)
                 return {
@@ -1934,14 +1982,16 @@ def start_guarded_learning_stage_worker(
             raise LearningWorkflowStageOperationError(
                 _BENCHMARK_V2_C2_UNAVAILABLE
             )
-        return _start_benchmark_v2_incumbent_operation(
-            composition=composition,
-            run_id=run_id,
-            expected_revision=expected_revision,
-            stage=stage,
-            operation_id=operation_id,
-            task_kind=task_kind,
-            request=payload["benchmark_v2_incumbent"],
+        return _call_benchmark_v2_operation(
+            lambda: _start_benchmark_v2_incumbent_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=expected_revision,
+                stage=stage,
+                operation_id=operation_id,
+                task_kind=task_kind,
+                request=payload["benchmark_v2_incumbent"],
+            )
         )
     require_active_learning_workflow_stage_operation(
         store=composition.store,
@@ -2025,13 +2075,15 @@ def adopt_guarded_learning_stage_worker_result(
         operation_id=operation_id,
     )
     if _has_benchmark_v2_incumbent_marker(stage_execution):
-        return _resume_benchmark_v2_incumbent_operation(
-            composition=composition,
-            run_id=run_id,
-            expected_revision=expected_revision,
-            stage=stage,
-            operation_id=operation_id,
-            worker_id=worker_id,
+        return _call_benchmark_v2_operation(
+            lambda: _resume_benchmark_v2_incumbent_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=expected_revision,
+                stage=stage,
+                operation_id=operation_id,
+                worker_id=worker_id,
+            )
         )
     return _LearningWorkflowRegistryOwner(
         composition.worker_registry
@@ -2058,13 +2110,15 @@ def continue_guarded_learning_stage_worker_result(
     if isinstance(current, Mapping) and (
         _benchmark_v2_incumbent_operation_from_state(current, stage) is not None
     ):
-        return _resume_benchmark_v2_incumbent_operation(
-            composition=composition,
-            run_id=run_id,
-            expected_revision=expected_revision,
-            stage=stage,
-            operation_id=operation_id,
-            worker_id=worker_id,
+        return _call_benchmark_v2_operation(
+            lambda: _resume_benchmark_v2_incumbent_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=expected_revision,
+                stage=stage,
+                operation_id=operation_id,
+                worker_id=worker_id,
+            )
         )
     return continue_learning_stage_worker_result(
         store=composition.store,
@@ -2076,6 +2130,7 @@ def continue_guarded_learning_stage_worker_result(
         operation_id=operation_id,
         worker_id=worker_id,
         now=now,
+        _preloaded_current=current if isinstance(current, Mapping) else None,
     )
 
 
@@ -2099,13 +2154,15 @@ def cancel_guarded_learning_workflow_stage_operation(
         expiry_action="cancellation",
     )
     if _has_benchmark_v2_incumbent_marker(stage_execution):
-        return _cancel_benchmark_v2_incumbent_operation(
-            composition=composition,
-            run_id=run_id,
-            expected_revision=expected_revision,
-            stage=stage,
-            operation_id=operation_id,
-            reason=reason,
+        return _call_benchmark_v2_operation(
+            lambda: _cancel_benchmark_v2_incumbent_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=expected_revision,
+                stage=stage,
+                operation_id=operation_id,
+                reason=reason,
+            )
         )
     worker_termination = _LearningWorkflowRegistryOwner(
         composition.worker_registry
@@ -2170,6 +2227,7 @@ def heartbeat_guarded_learning_workflow_stage_operation(
         operation_id=operation_id,
         lease_seconds=lease_seconds,
         now=now,
+        _preloaded_current=current if isinstance(current, Mapping) else None,
     )
 
 
@@ -2191,20 +2249,24 @@ def finish_guarded_learning_workflow_stage_operation(
         _benchmark_v2_incumbent_operation_from_state(current, stage) is not None
     ):
         if outcome == "completed":
-            return _resume_benchmark_v2_incumbent_operation(
+            return _call_benchmark_v2_operation(
+                lambda: _resume_benchmark_v2_incumbent_operation(
+                    composition=composition,
+                    run_id=run_id,
+                    expected_revision=expected_revision,
+                    stage=stage,
+                    operation_id=operation_id,
+                )
+            )
+        return _call_benchmark_v2_operation(
+            lambda: _cancel_benchmark_v2_incumbent_operation(
                 composition=composition,
                 run_id=run_id,
                 expected_revision=expected_revision,
                 stage=stage,
                 operation_id=operation_id,
+                reason=reason or f"benchmark finish requested {outcome}",
             )
-        return _cancel_benchmark_v2_incumbent_operation(
-            composition=composition,
-            run_id=run_id,
-            expected_revision=expected_revision,
-            stage=stage,
-            operation_id=operation_id,
-            reason=reason or f"benchmark finish requested {outcome}",
         )
     return finish_learning_workflow_stage_operation(
         store=composition.store,
@@ -2221,6 +2283,7 @@ def finish_guarded_learning_workflow_stage_operation(
             else None
         ),
         now=now,
+        _preloaded_current=current if isinstance(current, Mapping) else None,
     )
 
 
@@ -2240,13 +2303,15 @@ def recover_guarded_learning_workflow_stage_operation(
         else None
     )
     if operation is not None:
-        return _resume_benchmark_v2_incumbent_operation(
-            composition=composition,
-            run_id=run_id,
-            expected_revision=expected_revision,
-            stage=stage,
-            operation_id=operation["operation_id"],
-            worker_id=operation["worker_ref"]["worker_id"],
+        return _call_benchmark_v2_operation(
+            lambda: _resume_benchmark_v2_incumbent_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=expected_revision,
+                stage=stage,
+                operation_id=operation["operation_id"],
+                worker_id=operation["worker_ref"]["worker_id"],
+            )
         )
     return recover_expired_learning_workflow_stage_operation(
         store=composition.store,
@@ -2254,6 +2319,7 @@ def recover_guarded_learning_workflow_stage_operation(
         run_id=run_id,
         expected_revision=expected_revision,
         now=now,
+        _preloaded_current=current if isinstance(current, Mapping) else None,
     )
 
 
@@ -2280,6 +2346,7 @@ def finish_learning_workflow_stage_operation(
     reason: str = "",
     evidence_refs: dict[str, Any] | None = None,
     now: datetime | None = None,
+    _preloaded_current: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """仅接收当前未过期租约持有者提交的阶段结果。"""
 
@@ -2287,7 +2354,11 @@ def finish_learning_workflow_stage_operation(
         raise LearningWorkflowStageOperationError(
             "stage operation outcome must complete, fail, or safe stop"
         )
-    current = store.get(run_id)
+    current = (
+        _preloaded_current
+        if isinstance(_preloaded_current, Mapping)
+        else store.get(run_id)
+    )
     _require_revision(current, expected_revision)
     stage_execution = _managed_stage_execution(current, stage)
     _reject_benchmark_v2_incumbent_before_c3(stage_execution)
@@ -2662,6 +2733,7 @@ def continue_learning_stage_worker_result(
     operation_id: str,
     worker_id: str,
     now: datetime | None = None,
+    _preloaded_current: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """解释已接纳结果，并在成功终结后签发唯一下一阶段租约。"""
 
@@ -2687,7 +2759,11 @@ def continue_learning_stage_worker_result(
         )
 
     response_for_return = deepcopy(response)
-    current = store.get(run_id)
+    current = (
+        _preloaded_current
+        if isinstance(_preloaded_current, Mapping)
+        else store.get(run_id)
+    )
     _reject_benchmark_v2_incumbent_before_c3(
         _stage_execution_document(current, stage)
     )
@@ -3566,10 +3642,15 @@ def recover_expired_learning_workflow_stage_operation(
     run_id: str,
     expected_revision: int,
     now: datetime | None = None,
+    _preloaded_current: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """将已过期的服务端托管阶段明确终止，避免刷新后永久 running。"""
 
-    current = store.get(run_id)
+    current = (
+        _preloaded_current
+        if isinstance(_preloaded_current, Mapping)
+        else store.get(run_id)
+    )
     _require_revision(current, expected_revision)
     stage = str(current.get("current_stage") or "")
     stage_record = (
