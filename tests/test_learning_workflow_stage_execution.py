@@ -3327,6 +3327,60 @@ def test_guarded_wrapper_surface_has_exact_single_composition_signatures() -> No
         assert "project_root" not in parameters
 
 
+def test_task5_binding_resolver_composition_is_exact_root_bound_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        compose_test_server_worker_window_binding_resolver,
+        get_production_server_worker_window_binding_resolver,
+        validate_server_worker_window_binding_resolver_binding,
+    )
+
+    resolver = compose_test_server_worker_window_binding_resolver(
+        authority_root=tmp_path.resolve(),
+    )
+    with pytest.raises(TypeError):
+        json.dumps(resolver)
+    validate_server_worker_window_binding_resolver_binding(
+        resolver,
+        project_root=tmp_path.resolve(),
+        composition_kind="test",
+    )
+    with pytest.raises(ValueError, match="Task 5 composition root"):
+        validate_server_worker_window_binding_resolver_binding(
+            compose_test_server_worker_window_binding_resolver(
+                authority_root=(tmp_path / "other-root").resolve(),
+            ),
+            project_root=tmp_path.resolve(),
+            composition_kind="test",
+        )
+    with pytest.raises(ValueError, match="production/test"):
+        validate_server_worker_window_binding_resolver_binding(
+            get_production_server_worker_window_binding_resolver(),
+            project_root=tmp_path.resolve(),
+            composition_kind="test",
+        )
+
+    composition = workflow_service.compose_test_learning_workflow_service(
+        store=object(),
+        worker_registry=object(),
+        project_root=tmp_path,
+        benchmark_supervision_root=None,
+        provider_case_resolver=None,
+        benchmark_v2_worker_binding_resolver=None,
+    )
+    assert composition.benchmark_v2_worker_binding_resolver is None
+    with pytest.raises(ValueError, match="benchmark composition"):
+        workflow_service.compose_test_learning_workflow_service(
+            store=object(),
+            worker_registry=object(),
+            project_root=tmp_path,
+            benchmark_supervision_root=None,
+            provider_case_resolver=None,
+            benchmark_v2_worker_binding_resolver=resolver,
+        )
+
+
 def test_guarded_start_status_adopt_preserve_order_values_and_compensation(
     monkeypatch,
     tmp_path: Path,

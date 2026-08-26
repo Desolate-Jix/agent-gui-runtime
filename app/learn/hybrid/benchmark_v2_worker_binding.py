@@ -7,6 +7,7 @@ from copy import deepcopy
 import ctypes
 from ctypes import wintypes
 import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -42,7 +43,19 @@ ADOPTED_RECEIPT_CONTRACT = (
 NORMAL_CLEAR_RECEIPT_CONTRACT = (
     "portfolio_hybrid_benchmark_v2_worker_window_binding_normal_clear_v1"
 )
+SERVER_BINDING_AUTHORITY_CONTRACT = (
+    "benchmark_v2_worker_window_binding_authority_v1"
+)
+SERVER_BINDING_RESOLUTION_CONTRACT = (
+    "benchmark_v2_worker_window_binding_resolution_v1"
+)
 _INSTALL_LOCK = RLock()
+_SERVER_BINDING_AUTHORITY_FILE_PREFIX = "benchmark-v2-worker-window-binding-authority-"
+_PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT = (
+    Path(__file__).resolve().parents[3]
+    / "runtime_state"
+    / "benchmark-v2-worker-window-binding-authority"
+).resolve()
 _SERIALIZED_FIELDS = {
     "contract_version",
     "operation_id",
@@ -72,6 +85,48 @@ _SERIALIZED_FIELDS = {
     "display_only",
     "payload_sha256",
 }
+
+
+class _ServerWorkerWindowBindingPublisher:
+    """只持有Task 5 exact-ref authority写入能力。"""
+
+    __slots__ = ("__authority_root", "__authority_kind")
+
+    def __init__(self, *, authority_root: Path, authority_kind: str) -> None:
+        self.__authority_root = authority_root
+        self.__authority_kind = authority_kind
+
+    def __repr__(self) -> str:
+        return (
+            "<opaque server worker window binding publisher "
+            f"kind={self.__authority_kind}>"
+        )
+
+
+class _ServerWorkerWindowBindingResolver:
+    """只持有Task 5 exact-ref authority读取能力。"""
+
+    __slots__ = ("__authority_root", "__authority_kind")
+
+    def __init__(self, *, authority_root: Path, authority_kind: str) -> None:
+        self.__authority_root = authority_root
+        self.__authority_kind = authority_kind
+
+    def __repr__(self) -> str:
+        return (
+            "<opaque server worker window binding resolver "
+            f"kind={self.__authority_kind}>"
+        )
+
+
+_PRODUCTION_SERVER_BINDING_PUBLISHER = _ServerWorkerWindowBindingPublisher(
+    authority_root=_PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT,
+    authority_kind="production_workflow_service",
+)
+_PRODUCTION_SERVER_BINDING_RESOLVER = _ServerWorkerWindowBindingResolver(
+    authority_root=_PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT,
+    authority_kind="production_workflow_service",
+)
 
 
 def _payload_sha256(value: Mapping[str, object]) -> str:
@@ -132,6 +187,92 @@ def _job_membership_ref(
     }
     value["content_sha256"] = content_sha256(value)
     return value
+
+
+def _authority_root(value: str | Path) -> Path:
+    root = Path(value)
+    if not root.is_absolute() or root != root.resolve():
+        raise ValueError("worker binding authority root must be canonical and absolute")
+    return root
+
+
+def compose_test_server_worker_window_binding_publisher(
+    *, authority_root: str | Path
+) -> object:
+    return _ServerWorkerWindowBindingPublisher(
+        authority_root=_authority_root(authority_root),
+        authority_kind="test_only",
+    )
+
+
+def compose_test_server_worker_window_binding_resolver(
+    *, authority_root: str | Path
+) -> object:
+    return _ServerWorkerWindowBindingResolver(
+        authority_root=_authority_root(authority_root),
+        authority_kind="test_only",
+    )
+
+
+def get_production_server_worker_window_binding_publisher() -> object:
+    return _PRODUCTION_SERVER_BINDING_PUBLISHER
+
+
+def get_production_server_worker_window_binding_resolver() -> object:
+    return _PRODUCTION_SERVER_BINDING_RESOLVER
+
+
+def validate_server_worker_window_binding_resolver_binding(
+    resolver: object,
+    *,
+    project_root: str | Path,
+    composition_kind: str,
+) -> None:
+    if not isinstance(resolver, _ServerWorkerWindowBindingResolver):
+        raise ValueError("worker binding resolver must be opaque")
+    root = resolver._ServerWorkerWindowBindingResolver__authority_root
+    authority_kind = resolver._ServerWorkerWindowBindingResolver__authority_kind
+    expected_kind = (
+        "production_workflow_service" if composition_kind == "production" else "test_only"
+    )
+    if composition_kind not in {"production", "test"} or authority_kind != expected_kind:
+        raise ValueError("worker binding resolver production/test capability is invalid")
+    composition_root = _authority_root(project_root)
+    if composition_kind == "production":
+        if root != _PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT:
+            raise ValueError("production worker binding resolver root is invalid")
+        if not root.is_relative_to(composition_root):
+            raise ValueError("production worker binding resolver root is outside project")
+    elif root != composition_root:
+        raise ValueError(
+            "test worker binding resolver must bind the Task 5 composition root"
+        )
+
+
+def _closed_identity_ref(value: object, name: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"id", "content_sha256"}:
+        raise ValueError(f"{name} must be a closed identity ref")
+    identity = _required_text(value.get("id"), f"{name} id")
+    digest = require_sha256(value.get("content_sha256"), f"{name} content SHA")
+    return {"id": identity, "content_sha256": digest}
+
+
+def _closed_content_ref(value: object, name: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"content_sha256"}:
+        raise ValueError(f"{name} must be an exact content ref")
+    return {
+        "content_sha256": require_sha256(
+            value.get("content_sha256"), f"{name} content SHA"
+        )
+    }
+
+
+def _authority_file(root: Path, window_binding_sha256: str) -> Path:
+    digest = require_sha256(window_binding_sha256, "window binding content SHA")
+    path = root / f"{_SERVER_BINDING_AUTHORITY_FILE_PREFIX}{digest}.json"
+    if path.parent != root or path != path.resolve():
+        raise ValueError("worker binding authority filename is invalid")
+    return path
 
 
 def serialize_worker_window_binding(
@@ -408,6 +549,373 @@ def _assert_owner_matches_serialized(
     ):
         raise ValueError("worker binding child attestation differs")
     return attestation
+
+
+def _publisher_binding(publisher: object) -> tuple[Path, str]:
+    if not isinstance(publisher, _ServerWorkerWindowBindingPublisher):
+        raise ValueError("worker binding publisher must be opaque")
+    return (
+        publisher._ServerWorkerWindowBindingPublisher__authority_root,
+        publisher._ServerWorkerWindowBindingPublisher__authority_kind,
+    )
+
+
+def _resolver_binding(resolver: object) -> tuple[Path, str]:
+    if not isinstance(resolver, _ServerWorkerWindowBindingResolver):
+        raise ValueError("worker binding resolver must be opaque")
+    return (
+        resolver._ServerWorkerWindowBindingResolver__authority_root,
+        resolver._ServerWorkerWindowBindingResolver__authority_kind,
+    )
+
+
+def _server_binding_authority(
+    *,
+    authority_kind: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    serialized: Mapping[str, object],
+) -> dict[str, object]:
+    value: dict[str, object] = {
+        "contract_version": SERVER_BINDING_AUTHORITY_CONTRACT,
+        "authority_kind": authority_kind,
+        "run_id": run_id,
+        "stage": stage,
+        "operation_id": operation_id,
+        "window_binding_ref": deepcopy(dict(window_binding_ref)),
+        "capture_ref": deepcopy(dict(capture_ref)),
+        "serialized_window_binding": deepcopy(dict(serialized)),
+        "owner_binding_ref": {
+            "content_sha256": serialized["owner_binding_content_sha256"]
+        },
+        "owner_journal_ref": {
+            "content_sha256": serialized["owner_journal_content_sha256"]
+        },
+        "owner_ready_event_ref": {
+            "content_sha256": serialized["owner_ready_event_sha256"]
+        },
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "predecessor_content_sha256": None,
+    }
+    value["content_sha256"] = content_sha256(value)
+    return value
+
+
+def publish_server_worker_window_binding(
+    *,
+    publisher: object,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    owner: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+) -> Mapping[str, object]:
+    """在Task 5 root按binding SHA create-only发布server-owned authority。"""
+
+    root, authority_kind = _publisher_binding(publisher)
+    normalized_run_id = _required_text(run_id, "run_id")
+    normalized_stage = _required_text(stage, "stage")
+    normalized_operation_id = _required_text(operation_id, "operation_id")
+    closed_capture = _closed_identity_ref(capture_ref, "capture ref")
+    if not isinstance(owner, Mapping):
+        raise ValueError("worker binding owner must be an object")
+    journal_path = Path(_required_text(owner.get("journal_path"), "owner journal path"))
+    if journal_path.parent.resolve() != root:
+        raise ValueError("worker binding publisher root differs from owner journal root")
+    serialized = serialize_worker_window_binding(
+        operation_ref={"operation_id": normalized_operation_id},
+        owner=owner,
+        capture_ref={
+            **closed_capture,
+            "capture_image_path": owner.get("screenshot_path"),
+        },
+    )
+    window_binding_ref = {
+        "id": _required_text(serialized.get("owner_id"), "window binding id"),
+        "content_sha256": require_sha256(
+            serialized.get("payload_sha256"), "window binding content SHA"
+        ),
+    }
+    authority = _server_binding_authority(
+        authority_kind=authority_kind,
+        run_id=normalized_run_id,
+        stage=normalized_stage,
+        operation_id=normalized_operation_id,
+        window_binding_ref=window_binding_ref,
+        capture_ref=closed_capture,
+        serialized=serialized,
+    )
+    raw = canonical_json_bytes(authority)
+    root.mkdir(parents=True, exist_ok=True)
+    path = _authority_file(root, window_binding_ref["content_sha256"])
+    try:
+        with path.open("xb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        if path.read_bytes() != raw:
+            raise ValueError("worker binding authority filename is already occupied")
+    return deepcopy(authority)
+
+
+def _load_server_binding_authority(
+    *,
+    resolver: object,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    root, authority_kind = _resolver_binding(resolver)
+    normalized_run_id = _required_text(run_id, "run_id")
+    normalized_stage = _required_text(stage, "stage")
+    normalized_operation_id = _required_text(operation_id, "operation_id")
+    closed_window = _closed_identity_ref(window_binding_ref, "window binding ref")
+    closed_capture = _closed_identity_ref(capture_ref, "capture ref")
+    path = _authority_file(root, closed_window["content_sha256"])
+    try:
+        raw = path.read_bytes()
+        decoded = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("worker binding authority document is unavailable or corrupt") from error
+    exact_fields = {
+        "contract_version",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "window_binding_ref",
+        "capture_ref",
+        "serialized_window_binding",
+        "owner_binding_ref",
+        "owner_journal_ref",
+        "owner_ready_event_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "predecessor_content_sha256",
+        "content_sha256",
+    }
+    if not isinstance(decoded, Mapping) or set(decoded) != exact_fields:
+        raise ValueError("worker binding authority document is not closed")
+    authority = deepcopy(dict(decoded))
+    serialized_value = authority.get("serialized_window_binding")
+    if not isinstance(serialized_value, Mapping):
+        raise ValueError("worker binding authority serialized binding is invalid")
+    serialized = _validate_serialized(serialized_value)
+    owner_journal_path = Path(str(serialized["owner_journal_path"]))
+    if owner_journal_path.parent.resolve() != root:
+        raise ValueError("worker binding authority root differs from owner journal root")
+    owner = _owner_from_journal(serialized)
+    _assert_owner_matches_serialized(serialized=serialized, owner=owner)
+    rebuilt_serialized = serialize_worker_window_binding(
+        operation_ref={"operation_id": normalized_operation_id},
+        owner=owner,
+        capture_ref={
+            **closed_capture,
+            "capture_image_path": serialized["capture_image_path"],
+        },
+    )
+    if rebuilt_serialized != serialized:
+        raise ValueError("worker binding authority no longer matches Task 5 owner")
+    expected_window = {
+        "id": serialized["owner_id"],
+        "content_sha256": serialized["payload_sha256"],
+    }
+    expected = _server_binding_authority(
+        authority_kind=authority_kind,
+        run_id=normalized_run_id,
+        stage=normalized_stage,
+        operation_id=normalized_operation_id,
+        window_binding_ref=expected_window,
+        capture_ref=closed_capture,
+        serialized=serialized,
+    )
+    if (
+        closed_window != expected_window
+        or authority != expected
+        or raw != canonical_json_bytes(expected)
+    ):
+        raise ValueError("worker binding authority identity or provenance differs")
+    return authority, owner
+
+
+def _validate_normal_clear_receipt(
+    *,
+    receipt: object,
+    serialized: Mapping[str, object],
+    worker_process_identity: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    exact = {
+        "contract_version",
+        "operation_id",
+        "binding_payload_sha256",
+        "worker_pid",
+        "cleared",
+        "prior_binding_restored",
+        "restored_hwnd",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if not isinstance(receipt, Mapping) or set(receipt) != exact:
+        raise ValueError("worker binding normal clear receipt differs")
+    normal = deepcopy(dict(receipt))
+    pid = normal.get("worker_pid")
+    if worker_process_identity is not None:
+        identity = _process_identity(worker_process_identity)
+        if pid != identity["pid"]:
+            raise ValueError("worker binding normal clear worker PID differs")
+    if (
+        normal.get("contract_version") != NORMAL_CLEAR_RECEIPT_CONTRACT
+        or normal.get("operation_id") != serialized["operation_id"]
+        or normal.get("binding_payload_sha256") != serialized["payload_sha256"]
+        or isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+        or normal.get("cleared") is not True
+        or normal.get("prior_binding_restored") is not False
+        or normal.get("restored_hwnd") is not None
+        or normal.get("artifact_is_authorization") is not False
+        or normal.get("execute_binding_enabled") is not False
+        or normal.get("content_sha256") != content_sha256(normal)
+    ):
+        raise ValueError("worker binding normal clear receipt differs")
+    return normal
+
+
+def resolve_server_worker_window_binding(
+    *,
+    resolver: object,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    worker_process_identity: Mapping[str, object] | None = None,
+    normal_binding_evidence_ref: Mapping[str, object] | None = None,
+) -> Mapping[str, object]:
+    """从closed refs按exact filename解析并重验Task 5 binding authority。"""
+
+    if (worker_process_identity is None) != (normal_binding_evidence_ref is None):
+        raise ValueError(
+            "worker process identity and normal binding evidence ref must be paired"
+        )
+    authority, _owner = _load_server_binding_authority(
+        resolver=resolver,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        window_binding_ref=window_binding_ref,
+        capture_ref=capture_ref,
+    )
+    serialized = deepcopy(dict(authority["serialized_window_binding"]))
+    normalized_process_identity = None
+    normalized_normal_ref = None
+    if worker_process_identity is not None and normal_binding_evidence_ref is not None:
+        normalized_process_identity = _process_identity(worker_process_identity)
+        normalized_normal_ref = _closed_content_ref(
+            normal_binding_evidence_ref, "normal binding evidence ref"
+        )
+        expected_normal: dict[str, object] = {
+            "contract_version": NORMAL_CLEAR_RECEIPT_CONTRACT,
+            "operation_id": serialized["operation_id"],
+            "binding_payload_sha256": serialized["payload_sha256"],
+            "worker_pid": normalized_process_identity["pid"],
+            "cleared": True,
+            "prior_binding_restored": False,
+            "restored_hwnd": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        expected_normal["content_sha256"] = content_sha256(expected_normal)
+        _validate_normal_clear_receipt(
+            receipt=expected_normal,
+            serialized=serialized,
+            worker_process_identity=normalized_process_identity,
+        )
+        if normalized_normal_ref != {
+            "content_sha256": expected_normal["content_sha256"]
+        }:
+            raise ValueError("normal binding evidence does not match Task 5 binding")
+    resolution: dict[str, object] = {
+        "contract_version": SERVER_BINDING_RESOLUTION_CONTRACT,
+        "authority_kind": authority["authority_kind"],
+        "run_id": authority["run_id"],
+        "stage": authority["stage"],
+        "operation_id": authority["operation_id"],
+        "window_binding_ref": deepcopy(dict(authority["window_binding_ref"])),
+        "capture_ref": deepcopy(dict(authority["capture_ref"])),
+        "binding_authority_ref": {
+            "content_sha256": authority["content_sha256"]
+        },
+        "serialized_window_binding": serialized,
+        "worker_process_identity": normalized_process_identity,
+        "normal_binding_evidence_ref": normalized_normal_ref,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    resolution["content_sha256"] = content_sha256(resolution)
+    return resolution
+
+
+def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
+    *,
+    resolver: object,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    worker_process_identity: Mapping[str, object],
+    normal_binding_evidence_ref: Mapping[str, object],
+    worker_payload: Mapping[str, object],
+    generic_adoption: Mapping[str, object],
+) -> dict[str, object]:
+    """重新打开exact authority后复用既有Task 5 adoption validator。"""
+
+    resolution = resolve_server_worker_window_binding(
+        resolver=resolver,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        window_binding_ref=window_binding_ref,
+        capture_ref=capture_ref,
+        worker_process_identity=worker_process_identity,
+        normal_binding_evidence_ref=normal_binding_evidence_ref,
+    )
+    authority, owner = _load_server_binding_authority(
+        resolver=resolver,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        window_binding_ref=window_binding_ref,
+        capture_ref=capture_ref,
+    )
+    if resolution["binding_authority_ref"] != {
+        "content_sha256": authority["content_sha256"]
+    }:
+        raise ValueError("worker binding adoption authority changed during validation")
+    serialized = deepcopy(dict(authority["serialized_window_binding"]))
+    from app.learn.workflow_service import (
+        validate_benchmark_v2_worker_window_binding_adoption,
+    )
+
+    return validate_benchmark_v2_worker_window_binding_adoption(
+        worker_payload=worker_payload,
+        generic_adoption=generic_adoption,
+        operation_ref={"operation_id": operation_id},
+        owner=owner,
+        capture_ref={
+            **_closed_identity_ref(capture_ref, "capture ref"),
+            "capture_image_path": serialized["capture_image_path"],
+        },
+    )
 
 
 def _snapshot_sha256(snapshot: Mapping[str, object]) -> str:

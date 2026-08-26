@@ -28,8 +28,13 @@ from app.learn.hybrid.benchmark_v2_worker_binding import (
     ADOPTED_RECEIPT_CONTRACT,
     NORMAL_CLEAR_RECEIPT_CONTRACT,
     WORKER_BINDING_CONTRACT,
+    compose_test_server_worker_window_binding_publisher,
+    compose_test_server_worker_window_binding_resolver,
     install_spawned_worker_window_binding,
+    publish_server_worker_window_binding,
+    resolve_server_worker_window_binding,
     serialize_worker_window_binding,
+    validate_benchmark_v2_worker_window_binding_adoption_from_resolver,
     validate_spawned_worker_observation_payload,
 )
 from app.learn.workflow_service import (
@@ -71,6 +76,7 @@ def _assert_window_cleanup(receipt: dict[str, object]) -> None:
     assert receipt["member_pids_after"] == []
     assert receipt["stable_zero_observations"] >= 3
     assert receipt["scope_absent_after_owner_close"] is True
+    assert receipt["shutdown_event_handle_closed"] is True
     assert receipt["process_handle_closed"] is True
     assert receipt["job_handle_closed"] is True
     assert receipt["active_listeners_after"] == []
@@ -186,9 +192,326 @@ def _join_or_kill(process, *, timeout: float = 30.0) -> None:
     assert not process.is_alive()
 
 
+def test_server_binding_publication_and_fresh_resolution_use_only_closed_exact_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority_root = tmp_path.resolve()
+    with _owned(tmp_path, "exact-ref") as (owner, _journal):
+        capture_ref = {
+            "id": "capture-exact-ref",
+            "content_sha256": owner["screenshot_sha256"],
+        }
+        publisher = compose_test_server_worker_window_binding_publisher(
+            authority_root=authority_root,
+        )
+        expected_serialized = _serialized(owner)
+        c_durable_path = authority_root / "c-durable-closed-refs.json"
+        c_durable_bytes = canonical_json_bytes(
+            {
+                "window_binding_ref": {
+                    "id": owner["owner_id"],
+                    "content_sha256": expected_serialized["payload_sha256"],
+                },
+                "capture_ref": capture_ref,
+            }
+        )
+        c_durable_path.write_bytes(c_durable_bytes)
+        files_before_publication = {
+            path.resolve() for path in authority_root.glob("*.json")
+        }
+        authority = publish_server_worker_window_binding(
+            publisher=publisher,
+            run_id="run-exact-ref",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        window_binding_ref = deepcopy(authority["window_binding_ref"])
+        assert set(authority) == {
+            "contract_version",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "window_binding_ref",
+            "capture_ref",
+            "serialized_window_binding",
+            "owner_binding_ref",
+            "owner_journal_ref",
+            "owner_ready_event_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "predecessor_content_sha256",
+            "content_sha256",
+        }
+        assert authority["contract_version"] == (
+            "benchmark_v2_worker_window_binding_authority_v1"
+        )
+        assert window_binding_ref == {
+            "id": owner["owner_id"],
+            "content_sha256": expected_serialized["payload_sha256"],
+        }
+        assert authority["capture_ref"] == capture_ref
+        assert authority["content_sha256"] == content_sha256(authority)
+        authority_path = authority_root / (
+            "benchmark-v2-worker-window-binding-authority-"
+            f"{window_binding_ref['content_sha256']}.json"
+        )
+        files_after_publication = {
+            path.resolve() for path in authority_root.glob("*.json")
+        }
+        assert files_after_publication - files_before_publication == {
+            authority_path.resolve()
+        }
+        assert b"serialized_window_binding" in authority_path.read_bytes()
+        assert c_durable_path.read_bytes() == c_durable_bytes
+        assert all(
+            forbidden not in c_durable_bytes
+            for forbidden in (
+                b"serialized_window_binding",
+                b"capture_image_path",
+                b"owner_journal_path",
+            )
+        )
+
+        del authority, publisher, owner
+        resolver = compose_test_server_worker_window_binding_resolver(
+            authority_root=authority_root,
+        )
+
+        def _deny_scan(*_args, **_kwargs):
+            raise AssertionError("Task 5 exact-ref resolution must not scan directories")
+
+        with monkeypatch.context() as scan_guard:
+            scan_guard.setattr(Path, "glob", _deny_scan)
+            scan_guard.setattr(Path, "rglob", _deny_scan)
+            scan_guard.setattr(Path, "iterdir", _deny_scan)
+            scan_guard.setattr(os, "scandir", _deny_scan)
+            resolution = resolve_server_worker_window_binding(
+                resolver=resolver,
+                run_id="run-exact-ref",
+                stage="screen_understanding",
+                operation_id="operation-exact-ref",
+                window_binding_ref=window_binding_ref,
+                capture_ref=capture_ref,
+            )
+
+        assert set(resolution) == {
+            "contract_version",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "window_binding_ref",
+            "capture_ref",
+            "binding_authority_ref",
+            "serialized_window_binding",
+            "worker_process_identity",
+            "normal_binding_evidence_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        assert resolution["contract_version"] == (
+            "benchmark_v2_worker_window_binding_resolution_v1"
+        )
+        assert resolution["worker_process_identity"] is None
+        assert resolution["normal_binding_evidence_ref"] is None
+        assert canonical_json_bytes(resolution["serialized_window_binding"]) == (
+            canonical_json_bytes(expected_serialized)
+        )
+        assert resolution["content_sha256"] == content_sha256(resolution)
+
+
+def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path.resolve()
+    with _owned(tmp_path, "authority-negative") as (owner, _journal):
+        capture_ref = {
+            "id": "capture-authority-negative",
+            "content_sha256": owner["screenshot_sha256"],
+        }
+        publisher = compose_test_server_worker_window_binding_publisher(
+            authority_root=authority_root,
+        )
+        resolver = compose_test_server_worker_window_binding_resolver(
+            authority_root=authority_root,
+        )
+        authority = publish_server_worker_window_binding(
+            publisher=publisher,
+            run_id="run-authority-negative",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        binding_ref = deepcopy(authority["window_binding_ref"])
+        arguments = {
+            "resolver": resolver,
+            "run_id": "run-authority-negative",
+            "stage": "screen_understanding",
+            "operation_id": str(owner["operation_id"]),
+            "window_binding_ref": binding_ref,
+            "capture_ref": capture_ref,
+        }
+        for changes in (
+            {"run_id": "run-other"},
+            {"stage": "fusion"},
+            {"operation_id": "operation-other"},
+            {"window_binding_ref": {**binding_ref, "id": "owner-other"}},
+            {
+                "window_binding_ref": {
+                    **binding_ref,
+                    "content_sha256": "f" * 64,
+                }
+            },
+            {"capture_ref": {**capture_ref, "id": "capture-other"}},
+            {
+                "capture_ref": {
+                    **capture_ref,
+                    "content_sha256": "e" * 64,
+                }
+            },
+        ):
+            with pytest.raises(ValueError):
+                resolve_server_worker_window_binding(**{**arguments, **changes})
+
+        with pytest.raises(ValueError, match="publisher must be opaque"):
+            publish_server_worker_window_binding(
+                publisher=resolver,
+                run_id="run-authority-negative",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                owner=owner,
+                capture_ref=capture_ref,
+            )
+        with pytest.raises(ValueError, match="resolver must be opaque"):
+            resolve_server_worker_window_binding(**{**arguments, "resolver": publisher})
+        with pytest.raises(ValueError, match="already occupied"):
+            publish_server_worker_window_binding(
+                publisher=publisher,
+                run_id="run-other",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                owner=owner,
+                capture_ref=capture_ref,
+            )
+
+        authority_path = authority_root / (
+            "benchmark-v2-worker-window-binding-authority-"
+            f"{binding_ref['content_sha256']}.json"
+        )
+        original = authority_path.read_bytes()
+        for mutate in (
+            lambda value: value.__setitem__("authority_kind", "production_workflow_service"),
+            lambda value: value.__setitem__(
+                "owner_ready_event_ref", {"content_sha256": "d" * 64}
+            ),
+            lambda value: value.__setitem__("predecessor_content_sha256", "c" * 64),
+        ):
+            reminted = deepcopy(authority)
+            mutate(reminted)
+            reminted["content_sha256"] = content_sha256(reminted)
+            authority_path.write_bytes(canonical_json_bytes(reminted))
+            with pytest.raises(ValueError):
+                resolve_server_worker_window_binding(**arguments)
+            authority_path.write_bytes(original)
+
+        authority_path.write_bytes(b"{corrupt")
+        with pytest.raises(ValueError, match="corrupt"):
+            resolve_server_worker_window_binding(**arguments)
+        authority_path.write_bytes(original)
+        authority_path.unlink()
+        with pytest.raises(ValueError, match="unavailable"):
+            resolve_server_worker_window_binding(**arguments)
+
+
+def test_server_binding_result_parent_resolution_validates_normal_clear_ref(
+    tmp_path: Path,
+) -> None:
+    with _owned(tmp_path, "result-parent") as (owner, _journal):
+        capture_ref = {
+            "id": "capture-result-parent",
+            "content_sha256": owner["screenshot_sha256"],
+        }
+        authority = publish_server_worker_window_binding(
+            publisher=compose_test_server_worker_window_binding_publisher(
+                authority_root=tmp_path.resolve(),
+            ),
+            run_id="run-result-parent",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        worker_process_identity = {"pid": os.getpid(), "create_time_ns": 1}
+        normal = {
+            "contract_version": NORMAL_CLEAR_RECEIPT_CONTRACT,
+            "operation_id": owner["operation_id"],
+            "binding_payload_sha256": authority["window_binding_ref"][
+                "content_sha256"
+            ],
+            "worker_pid": os.getpid(),
+            "cleared": True,
+            "prior_binding_restored": False,
+            "restored_hwnd": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        normal["content_sha256"] = content_sha256(normal)
+        arguments = {
+            "resolver": compose_test_server_worker_window_binding_resolver(
+                authority_root=tmp_path.resolve(),
+            ),
+            "run_id": "run-result-parent",
+            "stage": "screen_understanding",
+            "operation_id": str(owner["operation_id"]),
+            "window_binding_ref": authority["window_binding_ref"],
+            "capture_ref": capture_ref,
+            "worker_process_identity": worker_process_identity,
+            "normal_binding_evidence_ref": {
+                "content_sha256": normal["content_sha256"]
+            },
+        }
+        resolution = resolve_server_worker_window_binding(**arguments)
+        assert resolution["worker_process_identity"] == worker_process_identity
+        assert resolution["normal_binding_evidence_ref"] == {
+            "content_sha256": normal["content_sha256"]
+        }
+        alternate_identity = {"pid": os.getpid(), "create_time_ns": 2}
+        alternate = resolve_server_worker_window_binding(
+            **{**arguments, "worker_process_identity": alternate_identity}
+        )
+        assert alternate["worker_process_identity"] == alternate_identity
+        assert alternate["content_sha256"] != resolution["content_sha256"]
+        for changes in (
+            {"worker_process_identity": None},
+            {"normal_binding_evidence_ref": None},
+            {
+                "worker_process_identity": {
+                    "pid": os.getpid() + 1,
+                    "create_time_ns": 1,
+                }
+            },
+            {"normal_binding_evidence_ref": {"content_sha256": "f" * 64}},
+        ):
+            with pytest.raises(ValueError):
+                resolve_server_worker_window_binding(**{**arguments, **changes})
+
+
 def test_contracts_and_service_cut_point_are_closed_and_server_owned(tmp_path: Path) -> None:
     with _owned(tmp_path, "service") as (owner, _journal):
         serialized = _serialized(owner)
+        closed_capture_ref = {
+            "id": "capture-service",
+            "content_sha256": owner["screenshot_sha256"],
+        }
+        publisher = compose_test_server_worker_window_binding_publisher(
+            authority_root=tmp_path.resolve(),
+        )
         assert serialized["contract_version"] == WORKER_BINDING_CONTRACT
         assert serialized["payload_sha256"] == _payload_sha(serialized)
         assert serialized["exact_hwnd"] == owner["hwnd"]
@@ -213,17 +536,31 @@ def test_contracts_and_service_cut_point_are_closed_and_server_owned(tmp_path: P
                 "image_path": owner["screenshot_path"],
             },
             operation_ref={"operation_id": owner["operation_id"]},
+            publisher=publisher,
+            run_id="run-service",
+            stage="screen_understanding",
             owner=owner,
-            capture_ref={
-                "capture_sha256": owner["screenshot_sha256"],
-                "capture_image_path": owner["screenshot_path"],
-            },
+            capture_ref=closed_capture_ref,
         )
         assert child == {
             "capture_live": False,
             "image_path": owner["screenshot_path"],
             "_benchmark_v2_window_binding": serialized,
         }
+        resolved = resolve_server_worker_window_binding(
+            resolver=compose_test_server_worker_window_binding_resolver(
+                authority_root=tmp_path.resolve(),
+            ),
+            run_id="run-service",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            window_binding_ref={
+                "id": owner["owner_id"],
+                "content_sha256": serialized["payload_sha256"],
+            },
+            capture_ref=closed_capture_ref,
+        )
+        assert resolved["serialized_window_binding"] == serialized
         with pytest.raises(
             LearningWorkflowStageOperationError,
             match="server-owned",
@@ -369,10 +706,24 @@ def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest
 ) -> None:
     with _owned(tmp_path, "adoption") as (owner, _journal):
         operation_ref = {"operation_id": owner["operation_id"]}
+        closed_capture_ref = {
+            "id": "capture-adoption",
+            "content_sha256": owner["screenshot_sha256"],
+        }
         capture_ref = {
             "capture_sha256": owner["screenshot_sha256"],
             "capture_image_path": owner["screenshot_path"],
         }
+        authority = publish_server_worker_window_binding(
+            publisher=compose_test_server_worker_window_binding_publisher(
+                authority_root=tmp_path.resolve(),
+            ),
+            run_id="run-adoption",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            owner=owner,
+            capture_ref=closed_capture_ref,
+        )
         worker_payload = inject_benchmark_v2_worker_window_binding(
             payload={
                 "capture_live": False,
@@ -431,6 +782,27 @@ def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest
             "normal_clear_receipt"
         ]["content_sha256"]
         assert receipt["content_sha256"] == content_sha256(receipt)
+        from_resolver = (
+            validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
+                resolver=compose_test_server_worker_window_binding_resolver(
+                    authority_root=tmp_path.resolve(),
+                ),
+                run_id="run-adoption",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                window_binding_ref=authority["window_binding_ref"],
+                capture_ref=closed_capture_ref,
+                worker_process_identity={"pid": os.getpid(), "create_time_ns": 1},
+                normal_binding_evidence_ref={
+                    "content_sha256": lifecycle["normal_clear_receipt"][
+                        "content_sha256"
+                    ]
+                },
+                worker_payload=worker_payload,
+                generic_adoption=generic,
+            )
+        )
+        assert canonical_json_bytes(from_resolver) == canonical_json_bytes(receipt)
 
         tampered = deepcopy(generic)
         tampered["response"]["_benchmark_v2_window_binding_evidence"][

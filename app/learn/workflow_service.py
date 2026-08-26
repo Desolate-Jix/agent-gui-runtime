@@ -70,6 +70,7 @@ class LearningWorkflowServiceComposition:
     composition_kind: Literal["production", "test"]
     benchmark_supervision_root: object | None
     provider_case_resolver: object | None
+    benchmark_v2_worker_binding_resolver: object | None = None
 
 
 class _LearningWorkflowRegistryOwner:
@@ -133,6 +134,7 @@ _LEARNING_WORKFLOW_OPERATION_LOCKS: dict[tuple[int, str, str], RLock] = {}
 _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION: (
     LearningWorkflowServiceComposition | None
 ) = None
+_DEFAULT_TEST_WORKER_BINDING_RESOLVER = object()
 
 
 def get_learning_workflow_operation_lock(
@@ -164,6 +166,7 @@ def _validate_learning_workflow_service_composition(
     composition_kind: Literal["production", "test"],
     benchmark_supervision_root: object | None,
     provider_case_resolver: object | None,
+    benchmark_v2_worker_binding_resolver: object | None,
 ) -> LearningWorkflowServiceComposition:
     from app.learn.workflow_worker import LearningStageWorkerRegistry
 
@@ -174,9 +177,16 @@ def _validate_learning_workflow_service_composition(
         if not isinstance(worker_registry, LearningStageWorkerRegistry):
             raise ValueError("composition Registry must be LearningStageWorkerRegistry")
     root = Path(project_root).resolve()
-    if (benchmark_supervision_root is None) != (provider_case_resolver is None):
+    benchmark_capabilities = (
+        benchmark_supervision_root,
+        provider_case_resolver,
+        benchmark_v2_worker_binding_resolver,
+    )
+    if any(value is None for value in benchmark_capabilities) and any(
+        value is not None for value in benchmark_capabilities
+    ):
         raise ValueError(
-            "benchmark composition requires both supervision root and case resolver"
+            "benchmark composition requires supervision, case resolver, and Task 5 resolver"
         )
     if benchmark_enabled:
         journal_root = Path(
@@ -199,6 +209,15 @@ def _validate_learning_workflow_service_composition(
             benchmark_supervision_root=benchmark_supervision_root,
             composition_kind=composition_kind,
         )
+        from app.learn.hybrid.benchmark_v2_worker_binding import (
+            validate_server_worker_window_binding_resolver_binding,
+        )
+
+        validate_server_worker_window_binding_resolver_binding(
+            benchmark_v2_worker_binding_resolver,
+            project_root=root,
+            composition_kind=composition_kind,
+        )
     return LearningWorkflowServiceComposition(
         store=store,
         worker_registry=worker_registry,
@@ -206,6 +225,7 @@ def _validate_learning_workflow_service_composition(
         composition_kind=composition_kind,
         benchmark_supervision_root=benchmark_supervision_root,
         provider_case_resolver=provider_case_resolver,
+        benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
     )
 
 
@@ -216,7 +236,23 @@ def compose_test_learning_workflow_service(
     project_root: str | Path,
     benchmark_supervision_root: object | None = None,
     provider_case_resolver: object | None = None,
+    benchmark_v2_worker_binding_resolver: object | None = (
+        _DEFAULT_TEST_WORKER_BINDING_RESOLVER
+    ),
 ) -> LearningWorkflowServiceComposition:
+    if benchmark_v2_worker_binding_resolver is _DEFAULT_TEST_WORKER_BINDING_RESOLVER:
+        if benchmark_supervision_root is None:
+            benchmark_v2_worker_binding_resolver = None
+        else:
+            from app.learn.hybrid.benchmark_v2_worker_binding import (
+                compose_test_server_worker_window_binding_resolver,
+            )
+
+            benchmark_v2_worker_binding_resolver = (
+                compose_test_server_worker_window_binding_resolver(
+                    authority_root=Path(project_root).resolve(),
+                )
+            )
     return _validate_learning_workflow_service_composition(
         store=store,
         worker_registry=worker_registry,
@@ -224,6 +260,7 @@ def compose_test_learning_workflow_service(
         composition_kind="test",
         benchmark_supervision_root=benchmark_supervision_root,
         provider_case_resolver=provider_case_resolver,
+        benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
     )
 
 
@@ -234,6 +271,9 @@ def get_production_learning_workflow_service_composition(
         return _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION
     from app.learn.hybrid.benchmark_v2_provider_corpus import (
         get_production_provider_case_resolver,
+    )
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        get_production_server_worker_window_binding_resolver,
     )
     from app.learn.workflow_store import learning_workflow_run_store
     from app.learn.workflow_worker import (
@@ -248,6 +288,9 @@ def get_production_learning_workflow_service_composition(
         composition_kind="production",
         benchmark_supervision_root=get_production_benchmark_worker_supervision_root(),
         provider_case_resolver=get_production_provider_case_resolver(),
+        benchmark_v2_worker_binding_resolver=(
+            get_production_server_worker_window_binding_resolver()
+        ),
     )
     _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION = composition
     return composition
@@ -308,6 +351,9 @@ def inject_benchmark_v2_worker_window_binding(
     operation_ref: Mapping[str, object],
     owner: Mapping[str, object],
     capture_ref: Mapping[str, object],
+    publisher: object | None = None,
+    run_id: str | None = None,
+    stage: str | None = None,
 ) -> dict[str, Any]:
     """在server-owned worker payload cut-point注入sealed窗口绑定。"""
 
@@ -315,15 +361,36 @@ def inject_benchmark_v2_worker_window_binding(
         raise LearningWorkflowStageOperationError("worker payload must be an object")
     _reject_client_benchmark_v2_window_binding(payload)
     from app.learn.hybrid.benchmark_v2_worker_binding import (
+        publish_server_worker_window_binding,
         serialize_worker_window_binding,
     )
 
     child = deepcopy(payload)
-    child[_BENCHMARK_V2_WINDOW_BINDING_FIELD] = serialize_worker_window_binding(
-        operation_ref=operation_ref,
-        owner=owner,
-        capture_ref=capture_ref,
-    )
+    if publisher is None:
+        if run_id is not None or stage is not None:
+            raise LearningWorkflowStageOperationError(
+                "worker binding publication requires an opaque publisher"
+            )
+        serialized = serialize_worker_window_binding(
+            operation_ref=operation_ref,
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+    else:
+        if not isinstance(run_id, str) or not isinstance(stage, str):
+            raise LearningWorkflowStageOperationError(
+                "worker binding publication requires run and stage"
+            )
+        authority = publish_server_worker_window_binding(
+            publisher=publisher,
+            run_id=run_id,
+            stage=stage,
+            operation_id=str(operation_ref.get("operation_id") or ""),
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        serialized = authority["serialized_window_binding"]
+    child[_BENCHMARK_V2_WINDOW_BINDING_FIELD] = deepcopy(dict(serialized))
     return child
 
 
@@ -340,7 +407,7 @@ def validate_benchmark_v2_worker_window_binding_adoption(
     from app.learn.hybrid.benchmark_v2_contracts import require_sha256
     from app.learn.hybrid.benchmark_v2_worker_binding import (
         ADOPTED_RECEIPT_CONTRACT,
-        NORMAL_CLEAR_RECEIPT_CONTRACT,
+        _validate_normal_clear_receipt,
         serialize_worker_window_binding,
         validate_spawned_worker_observation_payload,
         validate_spawned_worker_uia_snapshot,
@@ -443,35 +510,10 @@ def validate_benchmark_v2_worker_window_binding_adoption(
         if adopted != expected_adopted:
             raise ValueError("worker binding adopted receipt differs")
         normal = evidence["normal_clear_receipt"]
-        if (
-            not isinstance(normal, Mapping)
-            or set(normal)
-            != {
-                "contract_version",
-                "operation_id",
-                "binding_payload_sha256",
-                "worker_pid",
-                "cleared",
-                "prior_binding_restored",
-                "restored_hwnd",
-                "artifact_is_authorization",
-                "execute_binding_enabled",
-                "content_sha256",
-            }
-            or normal.get("contract_version") != NORMAL_CLEAR_RECEIPT_CONTRACT
-            or normal.get("operation_id") != serialized["operation_id"]
-            or normal.get("binding_payload_sha256") != serialized["payload_sha256"]
-            or isinstance(normal.get("worker_pid"), bool)
-            or not isinstance(normal.get("worker_pid"), int)
-            or int(normal["worker_pid"]) <= 0
-            or normal.get("cleared") is not True
-            or normal.get("prior_binding_restored") is not False
-            or normal.get("restored_hwnd") is not None
-            or normal.get("artifact_is_authorization") is not False
-            or normal.get("execute_binding_enabled") is not False
-            or normal.get("content_sha256") != content_sha256(normal)
-        ):
-            raise ValueError("worker binding normal clear receipt differs")
+        normal = _validate_normal_clear_receipt(
+            receipt=normal,
+            serialized=serialized,
+        )
         rebuilt: dict[str, object] = {
             "contract_version": _BENCHMARK_V2_WINDOW_ADOPTION_CONTRACT,
             "worker_id": generic_receipt["worker_id"],
