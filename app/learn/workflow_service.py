@@ -117,6 +117,9 @@ class _LearningWorkflowRegistryOwner:
     def inspect_benchmark_result(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.inspect_completed_result_identity(**kwargs)
 
+    def inspect_benchmark_launch_owner(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.inspect_benchmark_worker_launch_owner(**kwargs)
+
     def observe_benchmark_cleanup(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.observe_benchmark_worker_cleanup(**kwargs)
 
@@ -1244,6 +1247,362 @@ def _benchmark_v2_sidecars(
     return _benchmark_v2_request(request), deepcopy(dict(anchor))
 
 
+def _benchmark_v2_sealed_mapping(value: object, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise LearningWorkflowStageOperationError(f"{label} is invalid")
+    sealed = deepcopy(dict(value))
+    digest = sealed.get("content_sha256")
+    if not isinstance(digest, str) or content_sha256(sealed) != digest:
+        raise LearningWorkflowStageOperationError(f"{label} seal is invalid")
+    return sealed
+
+
+def _inspect_benchmark_v2_result_snapshot(
+    *,
+    registry: _LearningWorkflowRegistryOwner,
+    operation: Mapping[str, object],
+) -> dict[str, Any]:
+    inspected = registry.inspect_benchmark_result(
+        worker_id=operation["worker_ref"]["worker_id"],
+        run_id=operation["run_id"],
+        stage=operation["stage"],
+        operation_id=operation["operation_id"],
+    )
+    expected_fields = {
+        "contract_version",
+        "status",
+        "worker_id",
+        "run_id",
+        "stage",
+        "operation_id",
+        "task_kind",
+        "model_request_id",
+        "payload_sha256",
+        "result_sha256",
+        "result_available",
+        "normal_binding_evidence_ref",
+        "provider_cleanup_evidence_ref",
+    }
+    worker = operation["worker_ref"]
+    if (
+        not isinstance(inspected, Mapping)
+        or set(inspected) != expected_fields
+        or inspected.get("contract_version")
+        != "learning_stage_worker_completed_result_identity_v1"
+        or inspected.get("status") != "completed"
+        or inspected.get("result_available") is not True
+        or inspected.get("task_kind") != "vision_observe_screen"
+        or any(
+            inspected.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or any(
+            inspected.get(name) != worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent A inspection identity differs"
+        )
+    sealed = seal_immutable(dict(inspected))
+    anchored = operation.get("result_identity_ref")
+    if anchored is not None and sealed != anchored:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent A inspection changed after first snapshot"
+        )
+    return sealed
+
+
+def _inspect_benchmark_v2_launch_owner(
+    *,
+    registry: _LearningWorkflowRegistryOwner,
+    operation: Mapping[str, object],
+    anchor: Mapping[str, object],
+    root: object,
+    require_assignment: bool,
+) -> dict[str, Any]:
+    inspected = registry.inspect_benchmark_launch_owner(
+        worker_id=operation["worker_ref"]["worker_id"],
+        run_id=operation["run_id"],
+        stage=operation["stage"],
+        operation_id=operation["operation_id"],
+        reservation_ref=operation["reservation_ref"],
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    owner = _benchmark_v2_sealed_mapping(
+        inspected, "benchmark_v2 incumbent B1 launch owner inspection"
+    )
+    exact_fields = {
+        "contract_version",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "execution_nonce",
+        "reservation_ref",
+        "current_reservation_ref",
+        "operation_anchor_ref",
+        "expected_supervision_ref",
+        "supervision_ref",
+        "reservation_state",
+        "owner_phase",
+        "assignment_state",
+        "process_identity",
+        "scope_name",
+        "assignment_proven_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    worker = operation["worker_ref"]
+    if (
+        set(owner) != exact_fields
+        or owner.get("contract_version")
+        != "benchmark_worker_launch_owner_inspection_v1"
+        or owner.get("artifact_is_authorization") is not False
+        or owner.get("execute_binding_enabled") is not False
+        or any(
+            owner.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id", "execution_nonce")
+        )
+        or any(
+            owner.get(name) != worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        or owner.get("reservation_ref") != operation["reservation_ref"]
+        or owner.get("operation_anchor_ref") != operation["operation_anchor_ref"]
+        or owner.get("expected_supervision_ref")
+        != operation["expected_supervision_ref"]
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 launch owner lineage differs"
+        )
+    process_fields = (
+        owner.get("process_identity"),
+        owner.get("scope_name"),
+        owner.get("assignment_proven_ref"),
+    )
+    if owner.get("assignment_state") == "not_proven":
+        if any(value is not None for value in process_fields):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 pre-assignment identity is ambiguous"
+            )
+        if require_assignment:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 assignment is not proven"
+            )
+    elif owner.get("assignment_state") == "proven":
+        if any(value is None for value in process_fields):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 assignment identity is incomplete"
+            )
+        supervision_ref = worker.get("supervision_ref")
+        if supervision_ref is not None and owner.get("supervision_ref") != supervision_ref:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 actual supervision differs"
+            )
+    else:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 assignment state is invalid"
+        )
+    return owner
+
+
+def _resolve_benchmark_v2_result_binding(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation: Mapping[str, object],
+    result_identity: Mapping[str, object],
+    launch_owner: Mapping[str, object],
+) -> dict[str, Any]:
+    if composition.benchmark_v2_worker_binding_resolver is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent Task5 resolver is unavailable"
+        )
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        resolve_server_worker_window_binding,
+    )
+
+    try:
+        resolution = resolve_server_worker_window_binding(
+            resolver=composition.benchmark_v2_worker_binding_resolver,
+            run_id=operation["run_id"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+            window_binding_ref=operation["window_binding_ref"],
+            capture_ref=operation["capture_ref"],
+            worker_process_identity=launch_owner["process_identity"],
+            normal_binding_evidence_ref=result_identity[
+                "normal_binding_evidence_ref"
+            ],
+        )
+    except (OSError, TypeError, ValueError, UnicodeError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark_v2 incumbent Task5 result binding is invalid: {error}"
+        ) from error
+    if resolution.get("worker_process_identity") != launch_owner["process_identity"]:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent Task5 and B1 process identity differ"
+        )
+    if resolution.get("normal_binding_evidence_ref") != result_identity[
+        "normal_binding_evidence_ref"
+    ]:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent Task5 and A normal parent differ"
+        )
+    return deepcopy(dict(resolution))
+
+
+def _validate_benchmark_v2_worker_cleanup_parent(
+    *,
+    cleanup: object,
+    operation: Mapping[str, object],
+    launch_owner: Mapping[str, object],
+    allowed_outcomes: set[str],
+) -> dict[str, Any]:
+    receipt = _benchmark_v2_sealed_mapping(
+        cleanup, "benchmark_v2 incumbent B1 cleanup"
+    )
+    worker = operation["worker_ref"]
+    if (
+        receipt.get("contract_version") != "benchmark_worker_cleanup_receipt_v1"
+        or receipt.get("outcome") not in allowed_outcomes
+        or receipt.get("operation_anchor_ref") != operation["operation_anchor_ref"]
+        or any(
+            receipt.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or receipt.get("worker_id") != worker["worker_id"]
+        or receipt.get("artifact_is_authorization") is not False
+        or receipt.get("execute_binding_enabled") is not False
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 cleanup lineage differs"
+        )
+    if receipt["outcome"] == "verified_exact_worker_exited":
+        if (
+            receipt.get("reservation_ref")
+            != launch_owner["current_reservation_ref"]
+            or receipt.get("supervision_ref") != launch_owner["supervision_ref"]
+            or receipt.get("process_identity") != launch_owner["process_identity"]
+            or receipt.get("assignment_proven_ref")
+            != launch_owner["assignment_proven_ref"]
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 cleanup owner differs"
+            )
+    elif any(
+        receipt.get(name) is not None
+        for name in (
+            "supervision_ref",
+            "process_identity",
+            "assignment_proven_ref",
+        )
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 no-launch cleanup is ambiguous"
+        )
+    return receipt
+
+
+def _validate_benchmark_v2_provider_cleanup_parent(
+    *,
+    cleanup: object,
+    operation: Mapping[str, object],
+    result_identity: Mapping[str, object] | None,
+    allowed_outcomes: set[str],
+) -> dict[str, Any]:
+    projection = _benchmark_v2_sealed_mapping(
+        cleanup, "benchmark_v2 incumbent B2 cleanup"
+    )
+    worker = operation["worker_ref"]
+    if (
+        projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
+        or projection.get("status") != "cleanup_verified"
+        or projection.get("outcome") not in allowed_outcomes
+        or any(
+            projection.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or any(
+            projection.get(name) != worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        or projection.get("acquisition_intent_ref")
+        != operation["acquisition_intent_ref"]
+        or projection.get("runtime_owner_ref")
+        != {
+            "content_sha256": operation["runtime_owner_ref"]["content_sha256"]
+        }
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B2 cleanup lineage differs"
+        )
+    if result_identity is not None and projection.get(
+        "cleanup_receipt_ref"
+    ) != result_identity.get("provider_cleanup_evidence_ref"):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B2 and A cleanup parent differ"
+        )
+    return projection
+
+
+def _validate_benchmark_v2_generic_adoption(
+    *,
+    adoption: object,
+    operation: Mapping[str, object],
+    result_identity: Mapping[str, object],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    if not isinstance(adoption, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent generic adoption is invalid"
+        )
+    envelope = deepcopy(dict(adoption))
+    receipt = envelope.get("receipt")
+    response = envelope.get("response")
+    expected_receipt_fields = {
+        "contract_version",
+        "worker_id",
+        "run_id",
+        "stage",
+        "operation_id",
+        "task_kind",
+        "model_request_id",
+        "payload_sha256",
+        "result_sha256",
+        "adopted_at",
+    }
+    worker = operation["worker_ref"]
+    if (
+        envelope.get("contract_version")
+        != "learning_stage_worker_result_adoption_v1"
+        or envelope.get("status") != "adopted"
+        or not isinstance(receipt, Mapping)
+        or set(receipt) != expected_receipt_fields
+        or not isinstance(response, Mapping)
+        or receipt.get("contract_version")
+        != "learning_stage_worker_result_adoption_v1"
+        or receipt.get("task_kind") != "vision_observe_screen"
+        or any(
+            receipt.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or any(
+            receipt.get(name) != worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        or receipt.get("result_sha256") != result_identity["result_sha256"]
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent generic adoption lineage differs"
+        )
+    return envelope, {"content_sha256": content_sha256(dict(receipt))}
+
+
 def _start_benchmark_v2_incumbent_operation(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -1576,9 +1935,16 @@ def _start_benchmark_v2_incumbent_operation(
                     "benchmark_v2 incumbent start cannot resume current phase"
                 )
 
+            launch_owner = _inspect_benchmark_v2_launch_owner(
+                registry=registry,
+                operation=operation,
+                anchor=anchor,
+                root=root,
+                require_assignment=True,
+            )
             worker_ref = deepcopy(operation["worker_ref"])
             worker_ref["supervision_ref"] = deepcopy(
-                operation["expected_supervision_ref"]
+                launch_owner["supervision_ref"]
             )
             operation = transition_benchmark_v2_incumbent_operation(
                 operation,
@@ -1620,24 +1986,41 @@ def _start_benchmark_v2_incumbent_operation(
 
 def _rebuild_benchmark_v2_window_adoption(
     *,
+    composition: LearningWorkflowServiceComposition,
     operation: Mapping[str, object],
-    request: Mapping[str, object],
     generic_adoption: Mapping[str, object],
     authoritative_payload: Mapping[str, object],
+    launch_owner: Mapping[str, object],
+    result_identity: Mapping[str, object],
 ) -> dict[str, object]:
-    serialized = request["serialized_window_binding"]
-    owner = _validate_benchmark_v2_current_window_binding(serialized)
-    return validate_benchmark_v2_worker_window_binding_adoption(
-        worker_payload=authoritative_payload,
-        generic_adoption=generic_adoption,
-        operation_ref={"operation_id": operation["operation_id"]},
-        owner=owner,
-        capture_ref={
-            "id": operation["capture_ref"]["id"],
-            "content_sha256": operation["capture_ref"]["content_sha256"],
-            "image_path": serialized["capture_image_path"],
-        },
+    resolver = composition.benchmark_v2_worker_binding_resolver
+    if resolver is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent Task5 resolver is unavailable"
+        )
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        validate_benchmark_v2_worker_window_binding_adoption_from_resolver,
     )
+
+    try:
+        return validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
+            resolver=resolver,
+            run_id=operation["run_id"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+            window_binding_ref=operation["window_binding_ref"],
+            capture_ref=operation["capture_ref"],
+            worker_process_identity=launch_owner["process_identity"],
+            normal_binding_evidence_ref=result_identity[
+                "normal_binding_evidence_ref"
+            ],
+            worker_payload=authoritative_payload,
+            generic_adoption=generic_adoption,
+        )
+    except (OSError, TypeError, ValueError, UnicodeError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark_v2 incumbent Task5 adoption is invalid: {error}"
+        ) from error
 
 
 def _resume_benchmark_v2_incumbent_operation(
@@ -1655,7 +2038,6 @@ def _resume_benchmark_v2_incumbent_operation(
         replay_benchmark_v2_incumbent_terminal,
         transition_benchmark_v2_incumbent_operation,
     )
-    from app.learn.recognition.uei.canonical import seal_immutable
     from app.learn.workflow_worker import hold_benchmark_worker_controller
 
     root = composition.benchmark_supervision_root
@@ -1703,24 +2085,11 @@ def _resume_benchmark_v2_incumbent_operation(
                     "benchmark_v2 incumbent worker identity differs"
                 )
             request, anchor = _benchmark_v2_sidecars(current, stage)
+            result_identity = _inspect_benchmark_v2_result_snapshot(
+                registry=registry,
+                operation=operation,
+            )
             if operation["phase"] == "worker_bound":
-                inspected = registry.inspect_benchmark_result(
-                    worker_id=expected_worker_id,
-                    run_id=run_id,
-                    stage=stage,
-                    operation_id=operation_id,
-                )
-                for name, expected in (
-                    ("worker_id", expected_worker_id),
-                    ("model_request_id", operation["worker_ref"]["model_request_id"]),
-                    ("payload_sha256", operation["worker_ref"]["payload_sha256"]),
-                    ("task_kind", "vision_observe_screen"),
-                ):
-                    if inspected.get(name) != expected:
-                        raise LearningWorkflowStageOperationError(
-                            f"benchmark_v2 incumbent A inspection {name} differs"
-                        )
-                result_identity = seal_immutable(inspected)
                 operation = transition_benchmark_v2_incumbent_operation(
                     operation,
                     to_phase="result_ready",
@@ -1732,8 +2101,64 @@ def _resume_benchmark_v2_incumbent_operation(
                     stage=stage,
                     operation=operation,
                 )
+            launch_owner: dict[str, Any] | None = None
+            worker_cleanup: dict[str, Any] | None = None
+            provider_cleanup: dict[str, Any] | None = None
+            if operation["phase"] in {"result_ready", "terminal_intent", "adopted"}:
+                launch_owner = _inspect_benchmark_v2_launch_owner(
+                    registry=registry,
+                    operation=operation,
+                    anchor=anchor,
+                    root=root,
+                    require_assignment=True,
+                )
+                _resolve_benchmark_v2_result_binding(
+                    composition=composition,
+                    operation=operation,
+                    result_identity=result_identity,
+                    launch_owner=launch_owner,
+                )
+                worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
+                    cleanup=registry.observe_benchmark_cleanup(
+                        worker_id=expected_worker_id,
+                        run_id=run_id,
+                        stage=stage,
+                        operation_id=operation_id,
+                        terminate=True,
+                        expected_operation_anchor=anchor,
+                        supervision_root=root,
+                    ),
+                    operation=operation,
+                    launch_owner=launch_owner,
+                    allowed_outcomes={"verified_exact_worker_exited"},
+                )
+                provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
+                    cleanup=registry.reconcile_benchmark_provider(
+                        worker_id=expected_worker_id,
+                        run_id=run_id,
+                        stage=stage,
+                        operation_id=operation_id,
+                    ),
+                    operation=operation,
+                    result_identity=result_identity,
+                    allowed_outcomes={"verified_exact_process_exited"},
+                )
+                existing_intent = operation.get("terminal_intent")
+                if existing_intent is not None and (
+                    existing_intent.get("result_sha256")
+                    != result_identity["result_sha256"]
+                    or existing_intent.get("normal_binding_evidence_ref")
+                    != result_identity["normal_binding_evidence_ref"]
+                    or existing_intent.get("provider_cleanup_evidence_ref")
+                    != result_identity["provider_cleanup_evidence_ref"]
+                    or existing_intent.get("worker_cleanup_evidence_ref")
+                    != worker_cleanup
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent terminal intent parents differ"
+                    )
             if operation["phase"] == "result_ready":
-                result_identity = operation["result_identity_ref"]
+                assert worker_cleanup is not None
                 intent = compose_benchmark_v2_incumbent_terminal_intent(
                     operation=operation,
                     result_sha256=result_identity["result_sha256"],
@@ -1743,9 +2168,7 @@ def _resume_benchmark_v2_incumbent_operation(
                     provider_cleanup_evidence_ref=result_identity[
                         "provider_cleanup_evidence_ref"
                     ],
-                    worker_cleanup_evidence_ref=result_identity[
-                        "normal_binding_evidence_ref"
-                    ],
+                    worker_cleanup_evidence_ref=worker_cleanup,
                     intent_at=_utc_datetime(None).isoformat(),
                 )
                 operation = transition_benchmark_v2_incumbent_operation(
@@ -1761,24 +2184,16 @@ def _resume_benchmark_v2_incumbent_operation(
                 )
             generic_adoption: dict[str, Any] | None = None
             if operation["phase"] == "terminal_intent":
-                generic_adoption = registry.adopt_worker_result(
-                    worker_id=expected_worker_id,
-                    run_id=run_id,
-                    stage=stage,
-                    operation_id=operation_id,
+                generic_adoption, generic_ref = _validate_benchmark_v2_generic_adoption(
+                    adoption=registry.adopt_worker_result(
+                        worker_id=expected_worker_id,
+                        run_id=run_id,
+                        stage=stage,
+                        operation_id=operation_id,
+                    ),
+                    operation=operation,
+                    result_identity=result_identity,
                 )
-                receipt = generic_adoption.get("receipt")
-                if (
-                    not isinstance(receipt, Mapping)
-                    or receipt.get("result_sha256")
-                    != operation["terminal_intent"]["result_sha256"]
-                ):
-                    raise LearningWorkflowStageOperationError(
-                        "benchmark_v2 incumbent generic adoption SHA differs"
-                    )
-                generic_ref = {
-                    "content_sha256": content_sha256(dict(receipt))
-                }
                 operation = transition_benchmark_v2_incumbent_operation(
                     operation,
                     to_phase="adopted",
@@ -1795,12 +2210,22 @@ def _resume_benchmark_v2_incumbent_operation(
                     "benchmark_v2 incumbent completion is pending"
                 )
             if generic_adoption is None:
-                generic_adoption = registry.adopt_worker_result(
-                    worker_id=expected_worker_id,
-                    run_id=run_id,
-                    stage=stage,
-                    operation_id=operation_id,
+                generic_adoption, replay_generic_ref = (
+                    _validate_benchmark_v2_generic_adoption(
+                        adoption=registry.adopt_worker_result(
+                            worker_id=expected_worker_id,
+                            run_id=run_id,
+                            stage=stage,
+                            operation_id=operation_id,
+                        ),
+                        operation=operation,
+                        result_identity=result_identity,
+                    )
                 )
+                if replay_generic_ref != operation["generic_adoption_ref"]:
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent generic adoption replay differs"
+                    )
             projection = _benchmark_v2_source_projection(
                 composition=composition,
                 run_id=run_id,
@@ -1809,35 +2234,14 @@ def _resume_benchmark_v2_incumbent_operation(
                 request=request,
             )
             window_adoption = _rebuild_benchmark_v2_window_adoption(
+                composition=composition,
                 operation=operation,
-                request=request,
                 generic_adoption=generic_adoption,
                 authoritative_payload=projection["authoritative_payload"],
+                launch_owner=launch_owner,
+                result_identity=result_identity,
             )
-            worker_cleanup = registry.observe_benchmark_cleanup(
-                worker_id=expected_worker_id,
-                run_id=run_id,
-                stage=stage,
-                operation_id=operation_id,
-                terminate=True,
-                expected_operation_anchor=anchor,
-                supervision_root=root,
-            )
-            provider_cleanup = registry.reconcile_benchmark_provider(
-                worker_id=expected_worker_id,
-                run_id=run_id,
-                stage=stage,
-                operation_id=operation_id,
-            )
-            if (
-                worker_cleanup.get("outcome")
-                != "verified_exact_worker_exited"
-                or provider_cleanup.get("outcome")
-                != "verified_exact_process_exited"
-            ):
-                raise LearningWorkflowStageOperationError(
-                    "benchmark_v2 incumbent cleanup is pending"
-                )
+            assert worker_cleanup is not None and provider_cleanup is not None
             receipt = compose_benchmark_v2_incumbent_terminal_receipt(
                 operation=operation,
                 outcome="benchmark_v2_incumbent_observe_complete",
@@ -1966,14 +2370,23 @@ def _cancel_benchmark_v2_incumbent_operation(
                     stage=stage,
                     operation=operation,
                 )
+            launch_owner = _inspect_benchmark_v2_launch_owner(
+                registry=registry,
+                operation=operation,
+                anchor=anchor,
+                root=root,
+                require_assignment=False,
+            )
             if operation["phase"] not in {"cancel_intent", "cleanup_pending"}:
                 intent = compose_benchmark_v2_incumbent_cancel_intent(
                     operation=operation,
                     reason=str(reason or "benchmark operation cancelled"),
                     intent_at=_utc_datetime(None).isoformat(),
-                    process_identity=None,
-                    scope_name=None,
-                    assignment_proven_ref=None,
+                    process_identity=launch_owner["process_identity"],
+                    scope_name=launch_owner["scope_name"],
+                    assignment_proven_ref=launch_owner[
+                        "assignment_proven_ref"
+                    ],
                 )
                 operation = transition_benchmark_v2_incumbent_operation(
                     operation,
@@ -1986,21 +2399,69 @@ def _cancel_benchmark_v2_incumbent_operation(
                     stage=stage,
                     operation=operation,
                 )
-            worker_cleanup = registry.observe_benchmark_cleanup(
-                worker_id=operation["worker_ref"]["worker_id"],
-                run_id=run_id,
-                stage=stage,
-                operation_id=operation_id,
-                terminate=True,
-                expected_operation_anchor=anchor,
-                supervision_root=root,
+            else:
+                intent = operation["cancel_intent"]
+                if any(
+                    intent.get(name) != launch_owner.get(name)
+                    for name in (
+                        "process_identity",
+                        "scope_name",
+                        "assignment_proven_ref",
+                    )
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent cancel intent B1 identity differs"
+                    )
+            worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
+                cleanup=registry.observe_benchmark_cleanup(
+                    worker_id=operation["worker_ref"]["worker_id"],
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
+                    terminate=True,
+                    expected_operation_anchor=anchor,
+                    supervision_root=root,
+                ),
+                operation=operation,
+                launch_owner=launch_owner,
+                allowed_outcomes={
+                    "verified_not_launched",
+                    "verified_exact_worker_exited",
+                },
             )
-            provider_cleanup = registry.reconcile_benchmark_provider(
-                worker_id=operation["worker_ref"]["worker_id"],
-                run_id=run_id,
-                stage=stage,
-                operation_id=operation_id,
+            provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
+                cleanup=registry.reconcile_benchmark_provider(
+                    worker_id=operation["worker_ref"]["worker_id"],
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
+                ),
+                operation=operation,
+                result_identity=None,
+                allowed_outcomes={
+                    "verified_not_acquired",
+                    "verified_exact_process_exited",
+                },
             )
+            if launch_owner["assignment_state"] == "proven":
+                replay_owner = _inspect_benchmark_v2_launch_owner(
+                    registry=registry,
+                    operation=operation,
+                    anchor=anchor,
+                    root=root,
+                    require_assignment=True,
+                )
+                if any(
+                    replay_owner.get(name) != operation["cancel_intent"].get(name)
+                    for name in (
+                        "process_identity",
+                        "scope_name",
+                        "assignment_proven_ref",
+                    )
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent B1 cleanup replay identity differs"
+                    )
             provider_outcome = provider_cleanup.get("outcome")
             worker_verified = worker_cleanup.get("outcome") in {
                 "verified_not_launched",

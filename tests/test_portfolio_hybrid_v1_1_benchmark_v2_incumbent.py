@@ -180,6 +180,41 @@ def _prepared_document(source_bundle: dict[str, object]) -> dict[str, object]:
     )
 
 
+def _result_ready_document(
+    source_bundle: dict[str, object], *, result_identity: dict[str, object]
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        transition_benchmark_v2_incumbent_operation,
+    )
+
+    operation = _prepared_document(source_bundle)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="provider_owner_prepared",
+        changes={
+            "acquisition_intent_ref": {"content_sha256": "7" * 64},
+            "runtime_owner_ref": {"content_sha256": "8" * 64},
+        },
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="worker_starting", changes={}
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="worker_bound",
+        changes={
+            "worker_ref": {
+                **operation["worker_ref"],
+                "supervision_ref": {"content_sha256": "9" * 64},
+            }
+        },
+    )
+    return transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="result_ready",
+        changes={"result_identity_ref": result_identity},
+    )
+
 @pytest.fixture
 def source_bundle(tmp_path: Path, validated_provider_snapshot):
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
@@ -490,6 +525,8 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
         def __init__(self) -> None:
             self.reservation = None
             self.anchored = None
+            self.provider = None
+            self.launch_owner = None
 
         def prepare_benchmark_worker_identity(self, **kwargs):
             events.append("prepare")
@@ -550,13 +587,14 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
 
         def prepare_benchmark_provider_acquisition(self, **kwargs):
             events.append("provider")
-            return seal_immutable(
+            self.provider = seal_immutable(
                 {
                     "contract_version": "benchmark_provider_acquisition_ref_v1",
                     "acquisition_intent_ref": {"content_sha256": "3" * 64},
                     "runtime_owner_ref": deepcopy(kwargs["runtime_owner_ref"]),
                 }
             )
+            return deepcopy(self.provider)
 
         def launch_prepared_benchmark_worker(self, **kwargs):
             events.append("launch")
@@ -570,6 +608,45 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
                 "task_kind": "vision_observe_screen",
                 "status": "running",
             }
+
+        def inspect_benchmark_worker_launch_owner(self, **kwargs):
+            events.append("launch_owner")
+            if self.launch_owner is None:
+                self.launch_owner = seal_immutable(
+                    {
+                        "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+                        "authority_kind": root.authority_kind,
+                        "run_id": "run-c3-start",
+                        "stage": "screen_understanding",
+                        "operation_id": operation_id,
+                        "worker_id": "1" * 32,
+                        "model_request_id": "request-c3-start",
+                        "payload_sha256": self.reservation["payload_sha256"],
+                        "execution_nonce": self.reservation["execution_nonce"],
+                        "reservation_ref": deepcopy(kwargs["reservation_ref"]),
+                        "current_reservation_ref": {"content_sha256": "4" * 64},
+                        "operation_anchor_ref": {
+                            "content_sha256": kwargs["expected_operation_anchor"][
+                                "anchor_identity_sha256"
+                            ]
+                        },
+                        "expected_supervision_ref": deepcopy(
+                            kwargs["expected_operation_anchor"][
+                                "expected_supervision_ref"
+                            ]
+                        ),
+                        "supervision_ref": {"content_sha256": "6" * 64},
+                        "reservation_state": "launched",
+                        "owner_phase": "gate_released",
+                        "assignment_state": "proven",
+                        "process_identity": {"pid": 321, "create_time_ns": 654},
+                        "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+                        "assignment_proven_ref": {"content_sha256": "5" * 64},
+                        "artifact_is_authorization": False,
+                        "execute_binding_enabled": False,
+                    }
+                )
+            return deepcopy(self.launch_owner)
 
         def inspect_completed_result_identity(self, **_kwargs):
             events.append("inspect_result")
@@ -613,8 +690,33 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             events.append("worker_cleanup")
             return seal_immutable(
                 {
-                    "contract_version": "benchmark_worker_cleanup_ref_v1",
+                    "contract_version": "benchmark_worker_cleanup_receipt_v1",
                     "outcome": "verified_exact_worker_exited",
+                    "operation_anchor_ref": self.launch_owner[
+                        "operation_anchor_ref"
+                    ],
+                    "reservation_ref": self.launch_owner[
+                        "current_reservation_ref"
+                    ],
+                    "supervision_ref": self.launch_owner["supervision_ref"],
+                    "run_id": "run-c3-start",
+                    "stage": "screen_understanding",
+                    "operation_id": operation_id,
+                    "worker_id": "1" * 32,
+                    "process_identity": self.launch_owner["process_identity"],
+                    "assignment_proven_ref": self.launch_owner[
+                        "assignment_proven_ref"
+                    ],
+                    "finalization_intent_ref": {"content_sha256": "7" * 64},
+                    "exact_handle_observation_refs": {
+                        "process": {"content_sha256": "8" * 64}
+                    },
+                    "job_absence_observation_ref": {"content_sha256": "9" * 64},
+                    "worker_absence_observation_ref": {"content_sha256": "d" * 64},
+                    "supervisor_absence_observation_ref": None,
+                    "reservation_abort_ref": None,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
                 }
             )
 
@@ -623,7 +725,26 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             return seal_immutable(
                 {
                     "contract_version": "benchmark_provider_cleanup_ref_v1",
+                    "status": "cleanup_verified",
                     "outcome": "verified_exact_process_exited",
+                    "authority_kind": root.authority_kind,
+                    "run_id": "run-c3-start",
+                    "stage": "screen_understanding",
+                    "operation_id": operation_id,
+                    "worker_id": "1" * 32,
+                    "model_request_id": "request-c3-start",
+                    "payload_sha256": self.reservation["payload_sha256"],
+                    "reservation_ref": {"content_sha256": "e" * 64},
+                    "acquisition_owner_ref": {"content_sha256": "f" * 64},
+                    "acquisition_intent_ref": self.provider[
+                        "acquisition_intent_ref"
+                    ],
+                    "runtime_owner_ref": {
+                        "content_sha256": self.provider["runtime_owner_ref"][
+                            "content_sha256"
+                        ]
+                    },
+                    "cleanup_receipt_ref": {"content_sha256": "c" * 64},
                 }
             )
 
@@ -662,8 +783,14 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
         )
         monkeypatch.setattr(
             "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
-            lambda **_kwargs: {
+            lambda **kwargs: {
                 "serialized_window_binding": deepcopy(binding),
+                "worker_process_identity": deepcopy(
+                    kwargs.get("worker_process_identity")
+                ),
+                "normal_binding_evidence_ref": deepcopy(
+                    kwargs.get("normal_binding_evidence_ref")
+                ),
             },
         )
         result = start_guarded_learning_stage_worker(
@@ -688,7 +815,14 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             },
         )
         assert result["worker_id"] == "1" * 32
-        assert events == ["prepare", "confirm", "inspect", "provider", "launch"]
+        assert events == [
+            "prepare",
+            "confirm",
+            "inspect",
+            "provider",
+            "launch",
+            "launch_owner",
+        ]
         current = store.get("run-c3-start")
         operation = current["stages"]["screen_understanding"]["evidence_refs"][
             "stage_execution"
@@ -704,10 +838,11 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
         assert operation["phase"] == "worker_bound"
         assert operation["current_document_revision"] == current["revision"]
         monkeypatch.setattr(
-            "app.learn.workflow_service._rebuild_benchmark_v2_window_adoption",
+            "app.learn.hybrid.benchmark_v2_worker_binding.validate_benchmark_v2_worker_window_binding_adoption_from_resolver",
             lambda **_kwargs: seal_immutable(
                 {
                     "contract_version": "portfolio_hybrid_benchmark_v2_worker_window_binding_adoption_v1",
+                    "normal_clear_receipt_ref": "b" * 64,
                     "artifact_is_authorization": False,
                     "execute_binding_enabled": False,
                 }
@@ -745,10 +880,12 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             "inspect",
             "provider",
             "launch",
+            "launch_owner",
             "inspect_result",
-            "adopt",
+            "launch_owner",
             "worker_cleanup",
             "provider_cleanup",
+            "adopt",
         ]
     finally:
         store.close()
@@ -1230,6 +1367,7 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         transition_benchmark_v2_incumbent_operation,
     )
+    from app.learn.recognition.uei.canonical import seal_immutable
 
     operation = _prepared_document(source_bundle)
     operation = transition_benchmark_v2_incumbent_operation(
@@ -1277,6 +1415,36 @@ def test_worker_starting_restart_reuses_the_same_reservation(
         def status(self, **_kwargs):
             assert reservation_state == "launched"
             return {"worker_id": operation["worker_ref"]["worker_id"], "status": "running"}
+
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            return seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+                    "authority_kind": "test",
+                    "run_id": run_id,
+                    "stage": stage,
+                    "operation_id": operation_id,
+                    "worker_id": operation["worker_ref"]["worker_id"],
+                    "model_request_id": operation["worker_ref"]["model_request_id"],
+                    "payload_sha256": operation["worker_ref"]["payload_sha256"],
+                    "execution_nonce": operation["execution_nonce"],
+                    "reservation_ref": operation["reservation_ref"],
+                    "current_reservation_ref": {"content_sha256": "9" * 64},
+                    "operation_anchor_ref": operation["operation_anchor_ref"],
+                    "expected_supervision_ref": operation[
+                        "expected_supervision_ref"
+                    ],
+                    "supervision_ref": {"content_sha256": "6" * 64},
+                    "reservation_state": "launched",
+                    "owner_phase": "gate_released",
+                    "assignment_state": "proven",
+                    "process_identity": {"pid": 101, "create_time_ns": 202},
+                    "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+                    "assignment_proven_ref": {"content_sha256": "5" * 64},
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
 
     composition = workflow_service.LearningWorkflowServiceComposition(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
@@ -1451,3 +1619,757 @@ def test_incumbent_c_source_has_no_private_task5_journal_or_raw_sidecar() -> Non
     assert "_assert_owner_matches_serialized" not in target_source
     assert "benchmark_v2_incumbent_request" not in target_source
     assert not hasattr(workflow_service, "_validate_benchmark_v2_current_window_binding")
+
+
+def test_result_ready_rejects_same_identity_a_remint_before_intent_or_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    base = _prepared_document(source_bundle)
+    worker = base["worker_ref"]
+    snapshot = {
+        "contract_version": "learning_stage_worker_completed_result_identity_v1",
+        "status": "completed",
+        "worker_id": worker["worker_id"],
+        "run_id": base["run_id"],
+        "stage": base["stage"],
+        "operation_id": base["operation_id"],
+        "task_kind": "vision_observe_screen",
+        "model_request_id": worker["model_request_id"],
+        "payload_sha256": worker["payload_sha256"],
+        "result_sha256": "a" * 64,
+        "result_available": True,
+        "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
+        "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+    }
+    operation = _result_ready_document(
+        source_bundle, result_identity=seal_immutable(snapshot)
+    )
+    reminted = {**snapshot, "result_sha256": "d" * 64}
+    events: list[str] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": operation["current_document_revision"]}
+
+    class _Registry:
+        def inspect_completed_result_identity(self, **_kwargs):
+            events.append("inspect_a")
+            return deepcopy(reminted)
+
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            raise AssertionError("B1 inspection follows exact A replay")
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("cleanup")
+            raise AssertionError("cleanup is forbidden after A remint")
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock", lambda **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: deepcopy(operation),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_sidecars",
+        lambda *_args: ({}, {"anchor": True}),
+    )
+    persisted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        workflow_service,
+        "_persist_benchmark_v2_incumbent_operation",
+        lambda **kwargs: persisted.append(deepcopy(kwargs["operation"]))
+        or {"revision": kwargs["operation"]["current_document_revision"]},
+    )
+
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="A inspection changed after first snapshot",
+    ):
+        workflow_service._resume_benchmark_v2_incumbent_operation(
+            composition=composition,
+            run_id=operation["run_id"],
+            expected_revision=operation["current_document_revision"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+            worker_id=worker["worker_id"],
+        )
+    assert events == ["inspect_a"]
+    assert persisted == []
+
+
+def test_completion_rejects_task5_b1_create_time_cross_pair_before_intent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    base = _prepared_document(source_bundle)
+    worker = base["worker_ref"]
+    snapshot = {
+        "contract_version": "learning_stage_worker_completed_result_identity_v1",
+        "status": "completed",
+        "worker_id": worker["worker_id"],
+        "run_id": base["run_id"],
+        "stage": base["stage"],
+        "operation_id": base["operation_id"],
+        "task_kind": "vision_observe_screen",
+        "model_request_id": worker["model_request_id"],
+        "payload_sha256": worker["payload_sha256"],
+        "result_sha256": "a" * 64,
+        "result_available": True,
+        "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
+        "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+    }
+    sealed_snapshot = seal_immutable(snapshot)
+    operation = _result_ready_document(
+        source_bundle, result_identity=sealed_snapshot
+    )
+    process_identity = {"pid": 321, "create_time_ns": 654}
+    inspection = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": operation["worker_ref"]["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": process_identity,
+            "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+            "assignment_proven_ref": {"content_sha256": "5" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    events: list[str] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": operation["current_document_revision"]}
+
+    class _Registry:
+        def inspect_completed_result_identity(self, **_kwargs):
+            events.append("inspect_a")
+            return deepcopy(snapshot)
+
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            return deepcopy(inspection)
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("cleanup")
+            raise AssertionError("cleanup is forbidden after cross-pair rejection")
+
+    def resolve_binding(**_kwargs):
+        events.append("resolve_task5")
+        return {
+            "worker_process_identity": {
+                "pid": process_identity["pid"],
+                "create_time_ns": process_identity["create_time_ns"] + 1,
+            },
+            "normal_binding_evidence_ref": deepcopy(
+                snapshot["normal_binding_evidence_ref"]
+            ),
+        }
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        resolve_binding,
+    )
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock", lambda **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: deepcopy(operation),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_sidecars",
+        lambda *_args: (
+            {
+                "provider_case_ref": operation["handler_payload_source"]["provider_case_ref"],
+                "window_binding_ref": operation["window_binding_ref"],
+                "capture_ref": operation["capture_ref"],
+            },
+            {"anchor": True},
+        ),
+    )
+    persisted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        workflow_service, "_persist_benchmark_v2_incumbent_operation",
+        lambda **kwargs: persisted.append(deepcopy(kwargs["operation"]))
+        or {"revision": kwargs["operation"]["current_document_revision"]},
+    )
+
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="Task5 and B1 process identity differ",
+    ):
+        workflow_service._resume_benchmark_v2_incumbent_operation(
+            composition=composition, run_id=operation["run_id"],
+            expected_revision=operation["current_document_revision"],
+            stage=operation["stage"], operation_id=operation["operation_id"],
+            worker_id=worker["worker_id"],
+        )
+    assert events == ["inspect_a", "inspect_b1", "resolve_task5"]
+    assert persisted == []
+
+
+def test_post_launch_cancel_intent_copies_exact_b1_identity_before_cas(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        transition_benchmark_v2_incumbent_operation,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    prepared = _prepared_document(source_bundle)
+    operation = transition_benchmark_v2_incumbent_operation(
+        prepared,
+        to_phase="provider_owner_prepared",
+        changes={
+            "acquisition_intent_ref": {"content_sha256": "7" * 64},
+            "runtime_owner_ref": {"content_sha256": "8" * 64},
+        },
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="worker_starting", changes={}
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="worker_bound",
+        changes={
+            "worker_ref": {
+                **operation["worker_ref"],
+                "supervision_ref": {"content_sha256": "9" * 64},
+            }
+        },
+    )
+    expected_process = {"pid": 456, "create_time_ns": 789}
+    expected_scope = "Local\\AgentGuiBenchmarkWorker-" + "2" * 64
+    expected_assignment = {"content_sha256": "3" * 64}
+    inspection = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "model_request_id": operation["worker_ref"]["model_request_id"],
+            "payload_sha256": operation["worker_ref"]["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": operation["worker_ref"]["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": expected_process,
+            "scope_name": expected_scope,
+            "assignment_proven_ref": expected_assignment,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    events: list[str] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": operation["current_document_revision"]}
+
+    class _Registry:
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            return deepcopy(inspection)
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock", lambda **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: deepcopy(operation),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_sidecars",
+        lambda *_args: ({}, {"anchor": True}),
+    )
+    persisted: list[dict[str, object]] = []
+
+    def crash_after_intent(**kwargs):
+        persisted.append(deepcopy(kwargs["operation"]))
+        raise RuntimeError("crash after intent")
+
+    monkeypatch.setattr(
+        workflow_service, "_persist_benchmark_v2_incumbent_operation", crash_after_intent
+    )
+    with pytest.raises(RuntimeError, match="crash after intent"):
+        workflow_service._cancel_benchmark_v2_incumbent_operation(
+            composition=composition, run_id=operation["run_id"],
+            expected_revision=operation["current_document_revision"],
+            stage=operation["stage"], operation_id=operation["operation_id"],
+            reason="operator cancel",
+        )
+    assert events == ["inspect_b1"]
+    assert len(persisted) == 1
+    intent = persisted[0]["cancel_intent"]
+    assert intent["process_identity"] == expected_process
+    assert intent["scope_name"] == expected_scope
+    assert intent["assignment_proven_ref"] == expected_assignment
+
+
+def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    base = _prepared_document(source_bundle)
+    worker = base["worker_ref"]
+    snapshot = {
+        "contract_version": "learning_stage_worker_completed_result_identity_v1",
+        "status": "completed",
+        "worker_id": worker["worker_id"],
+        "run_id": base["run_id"],
+        "stage": base["stage"],
+        "operation_id": base["operation_id"],
+        "task_kind": "vision_observe_screen",
+        "model_request_id": worker["model_request_id"],
+        "payload_sha256": worker["payload_sha256"],
+        "result_sha256": "a" * 64,
+        "result_available": True,
+        "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
+        "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+    }
+    operation = _result_ready_document(
+        source_bundle, result_identity=seal_immutable(snapshot)
+    )
+    process_identity = {"pid": 321, "create_time_ns": 654}
+    launch_owner = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": operation["worker_ref"]["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": process_identity,
+            "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+            "assignment_proven_ref": {"content_sha256": "5" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    worker_cleanup = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_cleanup_receipt_v1",
+            "outcome": "verified_exact_worker_exited",
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "reservation_ref": launch_owner["current_reservation_ref"],
+            "supervision_ref": launch_owner["supervision_ref"],
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "process_identity": process_identity,
+            "assignment_proven_ref": launch_owner["assignment_proven_ref"],
+            "finalization_intent_ref": {"content_sha256": "6" * 64},
+            "exact_handle_observation_refs": {"process": {"content_sha256": "d" * 64}},
+            "job_absence_observation_ref": {"content_sha256": "e" * 64},
+            "worker_absence_observation_ref": {"content_sha256": "f" * 64},
+            "supervisor_absence_observation_ref": None,
+            "reservation_abort_ref": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    provider_cleanup = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_exact_process_exited",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "reservation_ref": {"content_sha256": "1" * 64},
+            "acquisition_owner_ref": {"content_sha256": "2" * 64},
+            "acquisition_intent_ref": operation["acquisition_intent_ref"],
+            "runtime_owner_ref": operation["runtime_owner_ref"],
+            "cleanup_receipt_ref": snapshot["provider_cleanup_evidence_ref"],
+        }
+    )
+    events: list[str] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": operation["current_document_revision"]}
+
+    class _Registry:
+        def inspect_completed_result_identity(self, **_kwargs):
+            events.append("inspect_a")
+            return deepcopy(snapshot)
+
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            return deepcopy(launch_owner)
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("worker_cleanup")
+            return deepcopy(worker_cleanup)
+
+        def reconcile_benchmark_provider_cleanup(self, **_kwargs):
+            events.append("provider_cleanup")
+            return deepcopy(provider_cleanup)
+
+    def resolve_binding(**_kwargs):
+        events.append("resolve_task5")
+        return {
+            "worker_process_identity": deepcopy(process_identity),
+            "normal_binding_evidence_ref": deepcopy(
+                snapshot["normal_binding_evidence_ref"]
+            ),
+        }
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        resolve_binding,
+    )
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock", lambda **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: deepcopy(operation),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_sidecars", lambda *_args: ({}, {"anchor": True})
+    )
+    persisted: list[dict[str, object]] = []
+
+    def crash_after_intent(**kwargs):
+        events.append("persist_intent")
+        persisted.append(deepcopy(kwargs["operation"]))
+        raise RuntimeError("crash after intent")
+
+    monkeypatch.setattr(
+        workflow_service, "_persist_benchmark_v2_incumbent_operation", crash_after_intent
+    )
+    with pytest.raises(RuntimeError, match="crash after intent"):
+        workflow_service._resume_benchmark_v2_incumbent_operation(
+            composition=composition, run_id=operation["run_id"],
+            expected_revision=operation["current_document_revision"],
+            stage=operation["stage"], operation_id=operation["operation_id"],
+            worker_id=worker["worker_id"],
+        )
+    assert events == [
+        "inspect_a",
+        "inspect_b1",
+        "resolve_task5",
+        "worker_cleanup",
+        "provider_cleanup",
+        "persist_intent",
+    ]
+    assert persisted[0]["terminal_intent"]["worker_cleanup_evidence_ref"] == worker_cleanup
+
+
+def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_incumbent_cancel_intent,
+        transition_benchmark_v2_incumbent_operation,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _prepared_document(source_bundle)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="provider_owner_prepared",
+        changes={
+            "acquisition_intent_ref": {"content_sha256": "7" * 64},
+            "runtime_owner_ref": {"content_sha256": "8" * 64},
+        },
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="worker_starting", changes={}
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="worker_bound",
+        changes={
+            "worker_ref": {
+                **operation["worker_ref"],
+                "supervision_ref": {"content_sha256": "9" * 64},
+            }
+        },
+    )
+    process_identity = {"pid": 456, "create_time_ns": 789}
+    scope_name = "Local\\AgentGuiBenchmarkWorker-" + "2" * 64
+    assignment_ref = {"content_sha256": "3" * 64}
+    intent = compose_benchmark_v2_incumbent_cancel_intent(
+        operation=operation,
+        reason="cancel",
+        intent_at="2026-08-27T00:00:00+00:00",
+        process_identity=process_identity,
+        scope_name=scope_name,
+        assignment_proven_ref=assignment_ref,
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="cancel_intent", changes={"cancel_intent": intent}
+    )
+    inspection = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "model_request_id": operation["worker_ref"]["model_request_id"],
+            "payload_sha256": operation["worker_ref"]["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": operation["worker_ref"]["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": process_identity,
+            "scope_name": scope_name + "-drift",
+            "assignment_proven_ref": assignment_ref,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    events: list[str] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": operation["current_document_revision"]}
+
+    class _Registry:
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            return deepcopy(inspection)
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("cleanup")
+            raise AssertionError("cleanup is forbidden after identity drift")
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "get_learning_workflow_operation_lock", lambda **_kwargs: nullcontext()
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: deepcopy(operation),
+    )
+    monkeypatch.setattr(
+        workflow_service, "_benchmark_v2_sidecars", lambda *_args: ({}, {"anchor": True})
+    )
+    persisted: list[object] = []
+    monkeypatch.setattr(
+        workflow_service, "_persist_benchmark_v2_incumbent_operation",
+        lambda **kwargs: persisted.append(kwargs) or {},
+    )
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="cancel intent B1 identity differs",
+    ):
+        workflow_service._cancel_benchmark_v2_incumbent_operation(
+            composition=composition, run_id=operation["run_id"],
+            expected_revision=operation["current_document_revision"],
+            stage=operation["stage"], operation_id=operation["operation_id"],
+            reason="cancel replay",
+        )
+    assert events == ["inspect_b1"]
+    assert persisted == []
+
+
+def test_window_adoption_rebuild_uses_only_resolver_and_exact_a_b1_parents(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _prepared_document(source_bundle)
+    result_identity = seal_immutable(
+        {
+            "contract_version": "learning_stage_worker_completed_result_identity_v1",
+            "status": "completed",
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "task_kind": "vision_observe_screen",
+            "model_request_id": operation["worker_ref"]["model_request_id"],
+            "payload_sha256": operation["worker_ref"]["payload_sha256"],
+            "result_sha256": "a" * 64,
+            "result_available": True,
+            "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
+            "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+        }
+    )
+    launch_owner = {
+        "process_identity": {"pid": 123, "create_time_ns": 456},
+    }
+    resolver = object()
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(), worker_registry=object(), project_root=tmp_path,
+        composition_kind="test", benchmark_supervision_root=object(),
+        provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=resolver,
+    )
+    generic_adoption = {
+        "contract_version": "learning_stage_worker_result_adoption_v1",
+        "status": "adopted",
+        "receipt": {"result_sha256": result_identity["result_sha256"]},
+        "response": {"success": True},
+    }
+    calls: list[dict[str, object]] = []
+    expected = seal_immutable(
+        {
+            "contract_version": "portfolio_hybrid_benchmark_v2_worker_window_binding_adoption_v1",
+            "normal_clear_receipt_ref": result_identity[
+                "normal_binding_evidence_ref"
+            ]["content_sha256"],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+    def adopt_from_resolver(**kwargs):
+        calls.append(kwargs)
+        return deepcopy(expected)
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.validate_benchmark_v2_worker_window_binding_adoption_from_resolver",
+        adopt_from_resolver,
+    )
+    rebuilt = workflow_service._rebuild_benchmark_v2_window_adoption(
+        composition=composition,
+        operation=operation,
+        generic_adoption=generic_adoption,
+        authoritative_payload=source_bundle["authoritative_payload"],
+        launch_owner=launch_owner,
+        result_identity=result_identity,
+    )
+    assert rebuilt == expected
+    assert calls == [
+        {
+            "resolver": resolver,
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "window_binding_ref": operation["window_binding_ref"],
+            "capture_ref": operation["capture_ref"],
+            "worker_process_identity": launch_owner["process_identity"],
+            "normal_binding_evidence_ref": result_identity[
+                "normal_binding_evidence_ref"
+            ],
+            "worker_payload": source_bundle["authoritative_payload"],
+            "generic_adoption": generic_adoption,
+        }
+    ]
