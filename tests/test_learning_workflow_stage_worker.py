@@ -745,6 +745,27 @@ def _benchmark_controller_owner_helper(root_path: str, ready_queue) -> None:
         time.sleep(60)
 
 
+def _benchmark_inspection_controller_owner_helper(
+    root_path: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    ready_queue,
+) -> None:
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=Path(root_path), test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    with hold_benchmark_worker_controller(
+        supervision_root=root,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+    ):
+        ready_queue.put({"owned": True})
+        time.sleep(60)
+
+
 def _benchmark_controller_contender_helper(
     root_path: str,
     ready_queue,
@@ -7811,6 +7832,52 @@ def _inspect_benchmark_launch_owner(
     )
 
 
+def _damage_benchmark_inspection_authority(
+    path: Path,
+    *,
+    mode: str,
+    resealed_field: str,
+) -> bytes:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    original = path.read_bytes()
+    if mode == "deleted":
+        path.unlink()
+    elif mode == "malformed":
+        path.write_bytes(b"{")
+    elif mode == "non_object":
+        path.write_bytes(b"[]")
+    elif mode == "raw_corruption":
+        body = json.loads(original.decode("utf-8"))
+        digest = str(body["content_sha256"])
+        body["content_sha256"] = (
+            ("0" if digest[0] != "0" else "1") + digest[1:]
+        )
+        path.write_bytes(
+            json.dumps(
+                body,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+    elif mode == "resealed":
+        body = json.loads(original.decode("utf-8"))
+        body.pop("content_sha256")
+        body[resealed_field] = f"resealed-wrong-{resealed_field}"
+        path.write_bytes(
+            json.dumps(
+                seal_immutable(body),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+    else:
+        raise AssertionError(f"unsupported authority damage mode: {mode}")
+    return original
+
+
 @pytest.mark.parametrize(
     ("phase", "owner_phase", "reservation_state", "assignment_state"),
     [
@@ -8029,6 +8096,143 @@ def test_benchmark_worker_launch_owner_inspection_rejects_identity_and_lineage_f
             path.write_bytes(original_bytes)
 
 
+@pytest.mark.parametrize(
+    ("authority", "phase", "suffix", "resealed_field"),
+    [
+        ("owner", "gate_released", "benchmark-owner.json", "execution_nonce"),
+        (
+            "assignment",
+            "gate_released",
+            "benchmark-assignment.json",
+            "scope_name",
+        ),
+        (
+            "launch_anchor",
+            "gate_released",
+            "benchmark-launch-identity-anchor.json",
+            "actual_supervision_ref",
+        ),
+        (
+            "cleanup_intent",
+            "cleanup_finalization_intent",
+            "benchmark-cleanup-intent.json",
+            "scope_name",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "damage",
+    ["deleted", "malformed", "non_object", "raw_corruption", "resealed"],
+)
+def test_benchmark_worker_launch_owner_inspection_rejects_corrupt_authority_store_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    authority: str,
+    phase: str,
+    suffix: str,
+    resealed_field: str,
+    damage: str,
+) -> None:
+    import win32event
+    from app.learn import workflow_worker as worker_module
+
+    authority_root = tmp_path / authority
+    _registry, root, store, reservation, anchor = _benchmark_launch_owner_state(
+        authority_root, phase=phase
+    )
+    calls = {
+        "spawn": 0,
+        "store": 0,
+        "provider": 0,
+        "termination": 0,
+        "cleanup": 0,
+        "gate_release": 0,
+        "write": 0,
+    }
+
+    def fail_spawn(**_kwargs):
+        calls["spawn"] += 1
+        pytest.fail("corrupt inspection must not spawn")
+
+    def fail_store(_authority, _run_id):
+        calls["store"] += 1
+        pytest.fail("corrupt inspection must not read workflow store")
+
+    def fail_provider(*_args, **_kwargs):
+        calls["provider"] += 1
+        pytest.fail("corrupt inspection must not call provider")
+
+    def fail_termination(_identity):
+        calls["termination"] += 1
+        pytest.fail("corrupt inspection must not terminate")
+
+    def fail_cleanup(**_kwargs):
+        calls["cleanup"] += 1
+        pytest.fail("corrupt inspection must not clean up")
+
+    def fail_gate_release(_handle):
+        calls["gate_release"] += 1
+        pytest.fail("corrupt inspection must not release startup gate")
+
+    def fail_write(*_args, **_kwargs):
+        calls["write"] += 1
+        pytest.fail("corrupt inspection must not mutate B1 authority")
+
+    registry = LearningStageWorkerRegistry(
+        result_root=authority_root,
+        process_factory=fail_spawn,
+        model_request_cancel=fail_provider,
+        benchmark_supervision_root=root,
+    )
+    monkeypatch.setattr(type(root.read_only_store_authority), "get", fail_store)
+    monkeypatch.setattr(
+        LearningStageWorkerRegistry,
+        "_terminate_exact_benchmark_process",
+        staticmethod(fail_termination),
+    )
+    monkeypatch.setattr(
+        registry, "observe_benchmark_worker_cleanup", fail_cleanup
+    )
+    monkeypatch.setattr(win32event, "SetEvent", fail_gate_release)
+    monkeypatch.setattr(registry, "_persist_benchmark_reservation", fail_write)
+    monkeypatch.setattr(worker_module, "_write_json_create_only", fail_write)
+    monkeypatch.setattr(
+        worker_module, "_write_benchmark_cleanup_receipt_atomic", fail_write
+    )
+    authority_path = authority_root / f"{reservation['worker_id']}.{suffix}"
+    before_store = deepcopy(store._states)
+    original = _damage_benchmark_inspection_authority(
+        authority_path,
+        mode=damage,
+        resealed_field=resealed_field,
+    )
+    damaged_files = {
+        path.name: path.read_bytes()
+        for path in authority_root.glob("*.json")
+        if "benchmark-controller" not in path.name
+    }
+    try:
+        with pytest.raises(LearningStageWorkerError):
+            _inspect_benchmark_launch_owner(registry, root, reservation, anchor)
+        assert {
+            path.name: path.read_bytes()
+            for path in authority_root.glob("*.json")
+            if "benchmark-controller" not in path.name
+        } == damaged_files
+        assert store._states == before_store
+        assert calls == {
+            "spawn": 0,
+            "store": 0,
+            "provider": 0,
+            "termination": 0,
+            "cleanup": 0,
+            "gate_release": 0,
+            "write": 0,
+        }
+    finally:
+        authority_path.write_bytes(original)
+
+
 def test_benchmark_worker_launch_owner_inspection_is_read_only(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -8109,10 +8313,155 @@ def test_benchmark_worker_launch_owner_inspection_is_read_only(
     assert store._states == before_store
 
 
+def test_benchmark_worker_launch_owner_inspection_abandoned_controller_fails_store_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import win32api
+    import win32con
+    import win32event
+    from app.learn.hybrid.windows_process_scope import (
+        benchmark_worker_controller_mutex_name_v1,
+    )
+
+    _registry, root, _store, reservation, anchor = _benchmark_launch_owner_state(
+        tmp_path, phase="anchored"
+    )
+    counts = {
+        "store": 0,
+        "glob": 0,
+        "registry": 0,
+        "spawn": 0,
+        "provider": 0,
+        "termination": 0,
+        "cleanup": 0,
+        "gate_release": 0,
+    }
+
+    def fail_spawn(**_kwargs):
+        counts["spawn"] += 1
+        pytest.fail("abandoned inspection must not spawn")
+
+    def fail_provider(*_args, **_kwargs):
+        counts["provider"] += 1
+        pytest.fail("abandoned inspection must not call provider")
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=fail_spawn,
+        model_request_cancel=fail_provider,
+        benchmark_supervision_root=root,
+    )
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    owner = context.Process(
+        target=_benchmark_inspection_controller_owner_helper,
+        args=(
+            str(tmp_path),
+            str(reservation["run_id"]),
+            str(reservation["stage"]),
+            str(reservation["operation_id"]),
+            queue,
+        ),
+        name="test-owned-benchmark-inspection-controller",
+    )
+    controller_name = benchmark_worker_controller_mutex_name_v1(
+        authority_kind=root.authority_kind,
+        run_id=str(reservation["run_id"]),
+        stage=str(reservation["stage"]),
+        operation_id=str(reservation["operation_id"]),
+    )
+    real_glob = Path.glob
+    real_set_event = win32event.SetEvent
+
+    def sentinel_store(_authority, _run_id):
+        counts["store"] += 1
+        raise AssertionError("workflow store callback is forbidden")
+
+    def sentinel_glob(path: Path, pattern: str):
+        if path.resolve() == tmp_path.resolve() and pattern == "*.benchmark-owner.json":
+            counts["glob"] += 1
+            return iter(())
+        return real_glob(path, pattern)
+
+    class ForbiddenRegistryLock:
+        def __enter__(self):
+            counts["registry"] += 1
+            raise AssertionError("Registry business body is forbidden")
+
+        def __exit__(self, *_args):
+            return False
+
+    def sentinel_termination(_identity):
+        counts["termination"] += 1
+        pytest.fail("abandoned inspection must not terminate")
+
+    def sentinel_cleanup(**_kwargs):
+        counts["cleanup"] += 1
+        pytest.fail("abandoned inspection must not clean up")
+
+    def sentinel_gate_release(handle):
+        counts["gate_release"] += 1
+        pytest.fail(f"abandoned inspection must not release gate {handle}")
+
+    witness = None
+    owner.start()
+    try:
+        assert queue.get(timeout=10) == {"owned": True}
+        witness = win32event.OpenMutex(win32con.SYNCHRONIZE, False, controller_name)
+        owner.terminate()
+        owner.join(timeout=10)
+        assert owner.is_alive() is False
+        monkeypatch.setattr(
+            type(root.read_only_store_authority), "get", sentinel_store
+        )
+        monkeypatch.setattr(Path, "glob", sentinel_glob)
+        monkeypatch.setattr(registry, "_lock", ForbiddenRegistryLock())
+        monkeypatch.setattr(
+            LearningStageWorkerRegistry,
+            "_terminate_exact_benchmark_process",
+            staticmethod(sentinel_termination),
+        )
+        monkeypatch.setattr(
+            registry, "observe_benchmark_worker_cleanup", sentinel_cleanup
+        )
+        monkeypatch.setattr(win32event, "SetEvent", sentinel_gate_release)
+
+        with pytest.raises(LearningStageWorkerError):
+            _inspect_benchmark_launch_owner(registry, root, reservation, anchor)
+
+        assert counts == {
+            "store": 0,
+            "glob": 0,
+            "registry": 0,
+            "spawn": 0,
+            "provider": 0,
+            "termination": 0,
+            "cleanup": 0,
+            "gate_release": 0,
+        }
+    finally:
+        monkeypatch.setattr(win32event, "SetEvent", real_set_event)
+        if owner.is_alive():
+            owner.terminate()
+            owner.join(timeout=10)
+        owner.close()
+        queue.close()
+        queue.join_thread()
+        if witness is not None:
+            win32api.CloseHandle(witness)
+        with pytest.raises(Exception):
+            win32event.OpenMutex(win32con.SYNCHRONIZE, False, controller_name)
+        with pytest.raises(ValueError):
+            owner.is_alive()
+
+
 def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_residue(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import psutil
+    import win32api
     import win32con
     import win32event
     import win32gui
@@ -8121,6 +8470,7 @@ def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_resi
     from app.learn.hybrid.windows_process_scope import (
         WindowsProcessScope,
         benchmark_worker_controller_mutex_name_v1,
+        benchmark_worker_scope_name_v1,
     )
 
     registry, root, _store, _source, reservation, anchor = (
@@ -8135,17 +8485,92 @@ def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_resi
         result_root=tmp_path,
         benchmark_supervision_root=root,
     )
-    started = None
+    worker_id = str(reservation["worker_id"])
+    run_id = str(reservation["run_id"])
+    stage = str(reservation["stage"])
+    operation_id = str(reservation["operation_id"])
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind=root.authority_kind,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        worker_id=worker_id,
+        payload_sha256=str(reservation["payload_sha256"]),
+        execution_nonce=str(reservation["execution_nonce"]),
+    )
+    event_name = (
+        "Local\\AgentGuiBenchmarkWorkerGate-"
+        + worker_module.content_sha256({"scope_name": scope_name})
+    )
+    mutex_name = benchmark_worker_controller_mutex_name_v1(
+        authority_kind=root.authority_kind,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+    )
+    launch_anchor_path = (
+        tmp_path / f"{worker_id}.benchmark-launch-identity-anchor.json"
+    )
+    owner_path = tmp_path / f"{worker_id}.benchmark-owner.json"
+    receipt_path = tmp_path / f"{worker_id}.benchmark-cleanup.json"
+    cleanup_kwargs = {
+        "worker_id": worker_id,
+        "run_id": run_id,
+        "stage": stage,
+        "operation_id": operation_id,
+        "terminate": True,
+        "expected_operation_anchor": anchor,
+        "supervision_root": root,
+    }
+    real_fault_hook = worker_module._benchmark_handle_fault_hook
+    observed_identity = None
     receipt = None
     projection = None
+    cleanup_errors: list[str] = []
+    probe_failures: list[str] = []
+
+    def discover_process_identity() -> dict[str, int] | None:
+        record = registry._records.get(worker_id)
+        if isinstance(record, dict):
+            process = record.get("process")
+            pid = getattr(process, "pid", None)
+            if isinstance(pid, int):
+                try:
+                    create_time_ns = int(
+                        round(psutil.Process(pid).create_time() * 1_000_000_000)
+                    )
+                except psutil.Error:
+                    pass
+                else:
+                    return {"pid": pid, "create_time_ns": create_time_ns}
+        for path in (launch_anchor_path, owner_path):
+            if not path.exists():
+                continue
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            identity = document.get("process_identity")
+            if (
+                isinstance(identity, dict)
+                and isinstance(identity.get("pid"), int)
+                and isinstance(identity.get("create_time_ns"), int)
+            ):
+                return {
+                    "pid": int(identity["pid"]),
+                    "create_time_ns": int(identity["create_time_ns"]),
+                }
+        return None
 
     try:
-        started = registry.launch_prepared_benchmark_worker(
+        registry.launch_prepared_benchmark_worker(
             reservation_ref=confirmation["anchored_reservation_ref"],
             expected_operation_anchor=anchor,
             authoritative_payload={"capture_live": False},
             supervision_root=root,
         )
+        observed_identity = discover_process_identity()
+        assert observed_identity is not None
         gate_projection = _inspect_benchmark_launch_owner(
             registry, root, reservation, anchor
         )
@@ -8154,9 +8579,9 @@ def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_resi
         status = {"status": "running"}
         while time.monotonic() < deadline:
             status = registry.status(
-                worker_id=str(started["worker_id"]),
-                run_id=str(reservation["run_id"]),
-                operation_id=str(reservation["operation_id"]),
+                worker_id=worker_id,
+                run_id=run_id,
+                operation_id=operation_id,
             )
             if status["status"] == "completed":
                 break
@@ -8167,22 +8592,163 @@ def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_resi
         )
         assert completed_projection == gate_projection
 
-        receipt = registry.observe_benchmark_worker_cleanup(
-            worker_id=str(started["worker_id"]),
-            run_id=str(reservation["run_id"]),
-            stage=str(reservation["stage"]),
-            operation_id=str(reservation["operation_id"]),
-            terminate=False,
-            expected_operation_anchor=anchor,
-            supervision_root=root,
+        injected = False
+
+        def fail_after_owner_job_close(handle_kind: str, hook_stage: str) -> None:
+            nonlocal injected
+            if (
+                not injected
+                and handle_kind == "owner_job"
+                and hook_stage == "after_success"
+            ):
+                injected = True
+                raise RuntimeError("injected-owner-job-after-success")
+            real_fault_hook(handle_kind, hook_stage)
+
+        monkeypatch.setattr(
+            worker_module,
+            "_benchmark_handle_fault_hook",
+            fail_after_owner_job_close,
         )
-        receipt_path = (
-            tmp_path / f"{started['worker_id']}.benchmark-cleanup.json"
+        with pytest.raises(
+            RuntimeError, match="injected-owner-job-after-success"
+        ):
+            registry.observe_benchmark_worker_cleanup(
+                **{**cleanup_kwargs, "terminate": False}
+            )
+        intent_projection = _inspect_benchmark_launch_owner(
+            registry, root, reservation, anchor
+        )
+        assert intent_projection["owner_phase"] == "cleanup_finalization_intent"
+        assert not receipt_path.exists()
+        monkeypatch.setattr(
+            worker_module, "_benchmark_handle_fault_hook", real_fault_hook
+        )
+
+        receipt = registry.observe_benchmark_worker_cleanup(
+            **{**cleanup_kwargs, "terminate": False}
         )
         receipt_bytes = receipt_path.read_bytes()
         projection = _inspect_benchmark_launch_owner(
             registry, root, reservation, anchor
         )
+        assert projection == intent_projection
+
+        corruption_calls = {
+            "spawn": 0,
+            "store": 0,
+            "provider": 0,
+            "termination": 0,
+            "cleanup": 0,
+            "gate_release": 0,
+            "write": 0,
+        }
+
+        def fail_corrupt_spawn(**_kwargs):
+            corruption_calls["spawn"] += 1
+            pytest.fail("corrupt receipt inspection must not spawn")
+
+        def fail_corrupt_store(_authority, _run_id):
+            corruption_calls["store"] += 1
+            pytest.fail("corrupt receipt inspection must not read store")
+
+        def fail_corrupt_provider(*_args, **_kwargs):
+            corruption_calls["provider"] += 1
+            pytest.fail("corrupt receipt inspection must not call provider")
+
+        def fail_corrupt_termination(_identity):
+            corruption_calls["termination"] += 1
+            pytest.fail("corrupt receipt inspection must not terminate")
+
+        def fail_corrupt_cleanup(**_kwargs):
+            corruption_calls["cleanup"] += 1
+            pytest.fail("corrupt receipt inspection must not clean up")
+
+        def fail_corrupt_gate_release(_handle):
+            corruption_calls["gate_release"] += 1
+            pytest.fail("corrupt receipt inspection must not release gate")
+
+        def fail_corrupt_write(*_args, **_kwargs):
+            corruption_calls["write"] += 1
+            pytest.fail("corrupt receipt inspection must not mutate authority")
+
+        corrupt_registry = LearningStageWorkerRegistry(
+            result_root=tmp_path,
+            process_factory=fail_corrupt_spawn,
+            model_request_cancel=fail_corrupt_provider,
+            benchmark_supervision_root=root,
+        )
+        with monkeypatch.context() as inspection_patch:
+            inspection_patch.setattr(
+                type(root.read_only_store_authority),
+                "get",
+                fail_corrupt_store,
+            )
+            inspection_patch.setattr(
+                LearningStageWorkerRegistry,
+                "_terminate_exact_benchmark_process",
+                staticmethod(fail_corrupt_termination),
+            )
+            inspection_patch.setattr(
+                corrupt_registry,
+                "observe_benchmark_worker_cleanup",
+                fail_corrupt_cleanup,
+            )
+            inspection_patch.setattr(
+                win32event, "SetEvent", fail_corrupt_gate_release
+            )
+            inspection_patch.setattr(
+                corrupt_registry,
+                "_persist_benchmark_reservation",
+                fail_corrupt_write,
+            )
+            inspection_patch.setattr(
+                worker_module, "_write_json_create_only", fail_corrupt_write
+            )
+            inspection_patch.setattr(
+                worker_module,
+                "_write_benchmark_cleanup_receipt_atomic",
+                fail_corrupt_write,
+            )
+            for damage in (
+                "deleted",
+                "malformed",
+                "non_object",
+                "raw_corruption",
+                "resealed",
+            ):
+                original = _damage_benchmark_inspection_authority(
+                    receipt_path,
+                    mode=damage,
+                    resealed_field="outcome",
+                )
+                damaged_files = {
+                    path.name: path.read_bytes()
+                    for path in tmp_path.glob("*.json")
+                    if "benchmark-controller" not in path.name
+                }
+                try:
+                    with pytest.raises(LearningStageWorkerError):
+                        _inspect_benchmark_launch_owner(
+                            corrupt_registry, root, reservation, anchor
+                        )
+                    assert {
+                        path.name: path.read_bytes()
+                        for path in tmp_path.glob("*.json")
+                        if "benchmark-controller" not in path.name
+                    } == damaged_files
+                finally:
+                    receipt_path.write_bytes(original)
+            assert corruption_calls == {
+                "spawn": 0,
+                "store": 0,
+                "provider": 0,
+                "termination": 0,
+                "cleanup": 0,
+                "gate_release": 0,
+                "write": 0,
+            }
+
         fresh = LearningStageWorkerRegistry(
             result_root=tmp_path,
             benchmark_supervision_root=root,
@@ -8191,13 +8757,7 @@ def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_resi
             fresh, root, reservation, anchor
         )
         replay_receipt = fresh.observe_benchmark_worker_cleanup(
-            worker_id=str(started["worker_id"]),
-            run_id=str(reservation["run_id"]),
-            stage=str(reservation["stage"]),
-            operation_id=str(reservation["operation_id"]),
-            terminate=False,
-            expected_operation_anchor=anchor,
-            supervision_root=root,
+            **{**cleanup_kwargs, "terminate": False}
         )
         after_replay = _inspect_benchmark_launch_owner(
             fresh, root, reservation, anchor
@@ -8206,93 +8766,173 @@ def test_benchmark_worker_launch_owner_inspection_cleanup_verified_and_zero_resi
         assert replay_receipt == receipt
         assert receipt_path.read_bytes() == receipt_bytes
     finally:
-        if started is not None and receipt is None:
+        monkeypatch.setattr(
+            worker_module, "_benchmark_handle_fault_hook", real_fault_hook
+        )
+        if observed_identity is None:
+            observed_identity = discover_process_identity()
+
+        cleanup_succeeded = False
+        cleanup_registries = [registry]
+        try:
+            cleanup_registries.append(
+                LearningStageWorkerRegistry(
+                    result_root=tmp_path,
+                    benchmark_supervision_root=root,
+                )
+            )
+        except BaseException as error:
+            cleanup_errors.append(
+                f"cleanup registry recovery {type(error).__name__}: {error}"
+            )
+        for cleanup_index, cleanup_registry in enumerate(cleanup_registries):
             try:
-                receipt = registry.observe_benchmark_worker_cleanup(
-                    worker_id=str(started["worker_id"]),
-                    run_id=str(reservation["run_id"]),
-                    stage=str(reservation["stage"]),
-                    operation_id=str(reservation["operation_id"]),
-                    terminate=True,
-                    expected_operation_anchor=anchor,
-                    supervision_root=root,
+                cleanup_registry.observe_benchmark_worker_cleanup(**cleanup_kwargs)
+            except BaseException as error:
+                cleanup_errors.append(
+                    f"cleanup[{cleanup_index}] {type(error).__name__}: {error}"
                 )
-            except BaseException:
-                record = registry._records.get(str(started["worker_id"]))
-                if isinstance(record, dict):
-                    process = record.get("process")
-                    if process is not None:
-                        try:
-                            if process.is_alive():
-                                process.terminate()
-                            process.join(timeout=10)
-                        except BaseException:
-                            pass
-                    scope = record.get("benchmark_scope")
-                    if scope is not None:
-                        try:
-                            scope.terminate()
-                        except BaseException:
-                            pass
-                        try:
-                            scope.close()
-                        except BaseException:
-                            pass
-        if projection is not None:
-            identity = projection["process_identity"]
-            process_probe = worker_module._benchmark_cleanup_replay_process_probe(
-                identity
-            )
-            assert process_probe["outcome"] in {
-                "no_such_process",
-                "pid_absent",
-                "different_incarnation",
-            }
+            else:
+                cleanup_succeeded = True
+                break
+        if not cleanup_succeeded:
+            cleanup_errors.append("no cleanup attempt completed")
+
+        if observed_identity is None:
+            probe_failures.append("PID identity was not recoverable")
+        else:
+            try:
+                process_probe = (
+                    worker_module._benchmark_cleanup_replay_process_probe(
+                        observed_identity
+                    )
+                )
+            except BaseException as error:
+                probe_failures.append(
+                    f"PID probe {type(error).__name__}: {error}"
+                )
+            else:
+                if process_probe["outcome"] not in {
+                    "no_such_process",
+                    "pid_absent",
+                    "different_incarnation",
+                }:
+                    probe_failures.append(
+                        f"PID probe outcome {process_probe['outcome']}"
+                    )
+
+        try:
             job_probe = worker_module._benchmark_cleanup_replay_job_probe(
-                str(projection["scope_name"])
+                scope_name
             )
-            assert job_probe["outcome"] == "job_name_absent"
-            with pytest.raises(Exception):
-                WindowsProcessScope(str(projection["scope_name"]), create=False)
-            event_name = (
-                "Local\\AgentGuiBenchmarkWorkerGate-"
-                + worker_module.content_sha256(
-                    {"scope_name": projection["scope_name"]}
+        except BaseException as error:
+            probe_failures.append(f"Job probe {type(error).__name__}: {error}")
+        else:
+            if job_probe["outcome"] != "job_name_absent":
+                probe_failures.append(f"Job probe outcome {job_probe['outcome']}")
+
+        try:
+            scope_probe = WindowsProcessScope(scope_name, create=False)
+        except BaseException:
+            pass
+        else:
+            try:
+                scope_probe.close()
+            except BaseException as error:
+                probe_failures.append(
+                    f"Job probe handle close {type(error).__name__}: {error}"
                 )
+            else:
+                probe_failures.append("Job name remained openable")
+
+        try:
+            event_probe = win32event.OpenEvent(
+                win32event.EVENT_MODIFY_STATE | 0x00100000,
+                False,
+                event_name,
             )
-            with pytest.raises(Exception):
-                win32event.OpenEvent(
-                    win32event.EVENT_MODIFY_STATE | 0x00100000,
-                    False,
-                    event_name,
+        except BaseException:
+            pass
+        else:
+            try:
+                win32api.CloseHandle(event_probe)
+            except BaseException as error:
+                probe_failures.append(
+                    f"Event probe handle close {type(error).__name__}: {error}"
                 )
-            mutex_name = benchmark_worker_controller_mutex_name_v1(
-                authority_kind=str(projection["authority_kind"]),
-                run_id=str(projection["run_id"]),
-                stage=str(projection["stage"]),
-                operation_id=str(projection["operation_id"]),
+            else:
+                probe_failures.append("startup Event remained openable")
+
+        try:
+            mutex_probe = win32event.OpenMutex(
+                win32con.SYNCHRONIZE, False, mutex_name
             )
-            with pytest.raises(Exception):
-                win32event.OpenMutex(
-                    win32con.SYNCHRONIZE, False, mutex_name
+        except BaseException:
+            pass
+        else:
+            try:
+                win32api.CloseHandle(mutex_probe)
+            except BaseException as error:
+                probe_failures.append(
+                    f"mutex probe handle close {type(error).__name__}: {error}"
                 )
-            pid = int(identity["pid"])
-            assert not any(
-                connection.pid == pid
-                and connection.status == psutil.CONN_LISTEN
-                for connection in psutil.net_connections(kind="tcp")
-            )
+            else:
+                probe_failures.append("controller mutex remained openable")
+
+        if observed_identity is not None:
+            pid = int(observed_identity["pid"])
+            try:
+                listeners = [
+                    connection
+                    for connection in psutil.net_connections(kind="tcp")
+                    if connection.pid == pid
+                    and connection.status == psutil.CONN_LISTEN
+                ]
+            except BaseException as error:
+                probe_failures.append(
+                    f"listener probe {type(error).__name__}: {error}"
+                )
+            else:
+                if listeners:
+                    probe_failures.append(f"listeners remained: {listeners!r}")
+
             windows: list[int] = []
 
             def collect_window(hwnd: int, _extra: object) -> bool:
-                _thread_id, window_pid = win32process.GetWindowThreadProcessId(hwnd)
+                _thread_id, window_pid = win32process.GetWindowThreadProcessId(
+                    hwnd
+                )
                 if window_pid == pid and win32gui.IsWindow(hwnd):
                     windows.append(hwnd)
                 return True
 
-            win32gui.EnumWindows(collect_window, None)
-            assert windows == []
+            try:
+                win32gui.EnumWindows(collect_window, None)
+            except BaseException as error:
+                probe_failures.append(
+                    f"HWND probe {type(error).__name__}: {error}"
+                )
+            else:
+                if windows:
+                    probe_failures.append(f"HWNDs remained: {windows!r}")
 
+        record = registry._records.get(worker_id)
+        if isinstance(record, dict) and record.get("process") is not None:
+            try:
+                record["process"].is_alive()
+            except ValueError:
+                pass
+            except BaseException as error:
+                probe_failures.append(
+                    f"process handle probe {type(error).__name__}: {error}"
+                )
+            else:
+                probe_failures.append("multiprocessing process handle remained open")
+
+        assert not cleanup_errors and not probe_failures, (
+            f"cleanup_errors={cleanup_errors!r}; "
+            f"probe_failures={probe_failures!r}"
+        )
 
 def test_benchmark_provider_acquisition_prepares_exact_owner_and_replays_after_restart(
     tmp_path: Path,

@@ -194,6 +194,7 @@ _BENCHMARK_ROOTS: dict[int, BenchmarkWorkerSupervisionRoot] = {}
 _BENCHMARK_TEST_ROOTS_BY_PATH: dict[str, BenchmarkWorkerSupervisionRoot] = {}
 _BENCHMARK_TEST_STORE_CAPABILITIES: dict[int, BenchmarkWorkerSupervisionRoot] = {}
 _BENCHMARK_CONTROLLER_LOCAL = local()
+_BENCHMARK_INSPECTION_ABANDONED_POLICY = object()
 _PRODUCTION_BENCHMARK_ROOT: BenchmarkWorkerSupervisionRoot | None = None
 
 
@@ -843,10 +844,21 @@ def hold_benchmark_worker_controller(
     stage: str,
     operation_id: str,
     timeout_ms: int = BENCHMARK_WORKER_CONTROLLER_DEFAULT_TIMEOUT_MS,
+    _abandoned_policy: object | None = None,
 ) -> Iterator[object]:
     """持有 operation 级命名 Mutex；同线程递归共享一个 guard。"""
 
     root = _validate_benchmark_supervision_root(supervision_root)
+    if (
+        _abandoned_policy is not None
+        and _abandoned_policy is not _BENCHMARK_INSPECTION_ABANDONED_POLICY
+    ):
+        raise LearningStageWorkerError(
+            "benchmark controller abandoned policy is invalid"
+        )
+    inspection_fail_closed = (
+        _abandoned_policy is _BENCHMARK_INSPECTION_ABANDONED_POLICY
+    )
     if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, int) or not 0 < timeout_ms <= 0xFFFFFFFE:
         raise LearningStageWorkerError("benchmark controller timeout is invalid")
     from app.learn.hybrid.windows_process_scope import (
@@ -890,6 +902,30 @@ def hold_benchmark_worker_controller(
                 raise LearningStageWorkerError("benchmark worker controller mutex timed out")
             raise LearningStageWorkerError("benchmark worker controller mutex wait failed")
         if outcome == win32event.WAIT_ABANDONED:
+            if inspection_fail_closed:
+                try:
+                    _benchmark_checked_release_mutex(existing["handle"])
+                except BaseException as release_error:
+                    state = _persist_benchmark_controller_state(
+                        root=root,
+                        controller_name=name,
+                        state="recovery_required",
+                        release_result={
+                            "status": "error",
+                            "error_type": type(release_error).__name__,
+                            "message": str(release_error),
+                        },
+                        close_result={"status": "retained"},
+                        predecessor_content_sha256=existing.get("state_ref"),
+                    )
+                    existing["state"] = "release_uncertain"
+                    existing["state_ref"] = state["content_sha256"]
+                    raise LearningStageWorkerError(
+                        "benchmark worker controller cleanup failed"
+                    ) from release_error
+                raise LearningStageWorkerError(
+                    "benchmark worker controller abandoned during read-only inspection"
+                )
             revalidation = _benchmark_controller_abandoned_revalidate(
                 root=root,
                 controller_name=name,
@@ -986,6 +1022,10 @@ def hold_benchmark_worker_controller(
         admitted = True
         revalidation = None
         if outcome == win32event.WAIT_ABANDONED:
+            if inspection_fail_closed:
+                raise LearningStageWorkerError(
+                    "benchmark worker controller abandoned during read-only inspection"
+                )
             revalidation = _benchmark_controller_abandoned_revalidate(
                 root=root,
                 controller_name=name,
@@ -3763,6 +3803,7 @@ class LearningStageWorkerRegistry:
             run_id=run,
             stage=stage_value,
             operation_id=operation,
+            _abandoned_policy=_BENCHMARK_INSPECTION_ABANDONED_POLICY,
         ):
             with self._lock:
                 original = self._benchmark_reservations_by_ref.get(
@@ -9240,6 +9281,22 @@ def _inspect_benchmark_worker_launch_owner_locked(
                     assignment_ref=assignment_proven_ref,
                     scope_name=internal_scope_name,
                 )
+                owner_job_close_path = (
+                    result_root / f"{worker_id}.owner-job-close.json"
+                )
+                job_absence_path = (
+                    result_root / f"{worker_id}.job-absence.json"
+                )
+                if (
+                    (
+                        owner_job_close_path.exists()
+                        or job_absence_path.exists()
+                    )
+                    and not cleanup_receipt_path.exists()
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark launch owner cleanup receipt is missing"
+                    )
                 if cleanup_receipt_path.exists():
                     _validate_benchmark_cleanup_receipt(
                         _read_json_object(
