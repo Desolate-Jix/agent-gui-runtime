@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import sys
 from threading import RLock
@@ -23,6 +24,10 @@ from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes,
     content_sha256,
     require_sha256,
+)
+from app.learn.hybrid.benchmark_v2_durable_claim import (
+    _file_anchor_exact,
+    _write_secure_new_file,
 )
 from app.learn.hybrid.windows_process_scope import (
     ScopedProcess,
@@ -44,8 +49,50 @@ _WINDOWS = os.name == "nt"
 
 @dataclass
 class _LiveOwner:
-    scope: WindowsProcessScope
-    process: ScopedProcess
+    scope: WindowsProcessScope | None
+    process: ScopedProcess | None
+    shutdown_event: "_ShutdownEvent | None"
+
+
+class _ShutdownEvent:
+    def __init__(self, name: str, *, create: bool) -> None:
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateEventW.argtypes = (
+            ctypes.c_void_p,
+            wintypes.BOOL,
+            wintypes.BOOL,
+            wintypes.LPCWSTR,
+        )
+        kernel.CreateEventW.restype = wintypes.HANDLE
+        kernel.OpenEventW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel.OpenEventW.restype = wintypes.HANDLE
+        kernel.SetEvent.argtypes = (wintypes.HANDLE,)
+        kernel.SetEvent.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel.CloseHandle.restype = wintypes.BOOL
+        self._kernel = kernel
+        if create:
+            self._handle = kernel.CreateEventW(None, True, False, name)
+            create_error = ctypes.get_last_error()
+            if self._handle and create_error == 183:
+                kernel.CloseHandle(self._handle)
+                self._handle = None
+                raise ValueError("window shutdown event identity already exists")
+        else:
+            self._handle = kernel.OpenEventW(0x0002 | 0x00100000, False, name)
+        if not self._handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._closed = False
+
+    def signal(self) -> None:
+        if self._closed or not self._kernel.SetEvent(self._handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def close(self) -> None:
+        if not self._closed:
+            if not self._kernel.CloseHandle(self._handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._closed = True
 
 
 _LIVE_OWNERS: dict[str, _LiveOwner] = {}
@@ -89,6 +136,13 @@ def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _native_handle_value(value: object) -> int:
+    pointer = ctypes.cast(value, ctypes.c_void_p).value if not isinstance(value, int) else value
+    if pointer is None or pointer < 0 or pointer > (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1:
+        raise ValueError("native handle is outside pointer width")
+    return int(pointer)
+
+
 def _helper_path() -> Path:
     return (
         Path(__file__).resolve().parents[3]
@@ -97,7 +151,9 @@ def _helper_path() -> Path:
     ).resolve()
 
 
-def _identity(operation_id: str, screenshot_sha256: str) -> dict[str, str]:
+def _identity(
+    operation_id: str, screenshot_sha256: str, journal_path: Path
+) -> dict[str, str]:
     if _OPERATION.fullmatch(operation_id) is None:
         raise ValueError("window operation_id is invalid")
     require_sha256(screenshot_sha256, "screenshot_sha256")
@@ -107,6 +163,7 @@ def _identity(operation_id: str, screenshot_sha256: str) -> dict[str, str]:
                 "contract_version": OWNER_JOURNAL_CONTRACT,
                 "operation_id": operation_id,
                 "screenshot_sha256": screenshot_sha256,
+                "journal_path": str(Path(journal_path)),
             }
         )
     )
@@ -115,17 +172,61 @@ def _identity(operation_id: str, screenshot_sha256: str) -> dict[str, str]:
         "scope_name": f"Local\\AgentGuiHybrid-vista-{digest}",
         "window_class": f"AgentGuiBenchmarkV2_{digest[:32]}",
         "window_title": f"AgentGui Benchmark v2 {digest[:24]}",
+        "shutdown_event_name": f"Local\\AgentGuiBenchmarkV2-window-shutdown-{digest}",
+        "shutdown_nonce": _sha(f"shutdown\0{digest}".encode("utf-8")),
+    }
+
+
+def _root_anchor_path(journal_path: Path) -> Path:
+    journal = Path(journal_path)
+    digest = _sha(str(journal).casefold().encode("utf-8"))
+    return journal.with_name(f".{journal.name}.{digest}.root-anchor.json")
+
+
+def _parse_bmp(raw: bytes) -> dict[str, object]:
+    if len(raw) < 54 or raw[:2] != b"BM":
+        raise ValueError("benchmark screenshot must be an exact BMP fixture")
+    file_size = struct.unpack_from("<I", raw, 2)[0]
+    pixel_offset = struct.unpack_from("<I", raw, 10)[0]
+    (
+        header_size,
+        width,
+        signed_height,
+        planes,
+        bit_count,
+        compression,
+        size_image,
+    ) = struct.unpack_from("<IiiHHII", raw, 14)
+    if (
+        file_size != len(raw)
+        or header_size != 40
+        or width <= 0
+        or signed_height == 0
+        or planes != 1
+        or bit_count not in {24, 32}
+        or compression != 0
+        or pixel_offset < 54
+    ):
+        raise ValueError("benchmark screenshot dimensions are invalid")
+    height = abs(signed_height)
+    stride = ((width * bit_count + 31) // 32) * 4
+    pixel_bytes = stride * height
+    if size_image not in {0, pixel_bytes} or pixel_offset + pixel_bytes != len(raw):
+        raise ValueError("benchmark screenshot pixel layout is invalid")
+    pixels = raw[pixel_offset : pixel_offset + pixel_bytes]
+    return {
+        "dimensions": {"width": width, "height": height},
+        "signed_height": signed_height,
+        "bit_count": bit_count,
+        "stride": stride,
+        "pixel_offset": pixel_offset,
+        "pixel_bytes": pixel_bytes,
+        "bitmap_pixel_sha256": _sha(pixels),
     }
 
 
 def _bmp_dimensions(raw: bytes) -> dict[str, int]:
-    if len(raw) < 26 or raw[:2] != b"BM":
-        raise ValueError("benchmark screenshot must be an exact BMP fixture")
-    width = int.from_bytes(raw[18:22], "little", signed=True)
-    height = abs(int.from_bytes(raw[22:26], "little", signed=True))
-    if width <= 0 or height <= 0:
-        raise ValueError("benchmark screenshot dimensions are invalid")
-    return {"width": width, "height": height}
+    return dict(_parse_bmp(raw)["dimensions"])
 
 
 def _atomic_create_json(path: Path, value: Mapping[str, object]) -> None:
@@ -203,16 +304,82 @@ class _EventLock:
         self._stream.close()
 
 
+_EVENT_TRANSITIONS = {
+    None: {"launch_intent"},
+    "launch_intent": {"job_created", "finalization_intent"},
+    "job_created": {"process_created", "finalization_intent"},
+    "process_created": {"hwnd_published", "finalization_intent"},
+    "hwnd_published": {"ready", "finalization_intent"},
+    "ready": {"finalization_intent"},
+    "finalization_intent": {"cleanup_verified"},
+    "cleanup_verified": set(),
+}
+_EVENT_PAYLOAD_FIELDS = {
+    "launch_intent": {"journal_root_sha256"},
+    "job_created": {"scope_name"},
+    "process_created": {"process_identity"},
+    "hwnd_published": {"publication"},
+    "ready": {
+        "binding",
+        "pre_raw_identity_sha256",
+        "post_raw_identity_sha256",
+    },
+    "finalization_intent": {"reason"},
+}
+_CLEANUP_FIELDS = {
+    "contract_version", "owner_id", "reason", "exact_hwnd", "process_identity",
+    "cleanup_status", "shutdown_event_name", "shutdown_event_signaled",
+    "shutdown_event_error_code", "shutdown_event_handle_closed",
+    "enum_windows_exact_hwnd_absent", "matching_owned_windows_after",
+    "member_pids_after", "stable_zero_observations", "scope_absent_after_owner_close",
+    "process_handle_closed", "job_handle_closed", "active_listeners_after",
+    "listener_or_lease_residue", "outer_owner_python_finally_observed",
+    "artifact_is_authorization", "execute_binding_enabled", "content_sha256",
+}
+
+
+def _validate_event_payload(event_type: str, payload: object) -> None:
+    if not isinstance(payload, Mapping):
+        raise ValueError("window owner journal event payload is invalid")
+    if event_type == "cleanup_verified":
+        if (
+            set(payload) != _CLEANUP_FIELDS
+            or payload.get("contract_version") != CLEANUP_CONTRACT
+            or payload.get("cleanup_status") != "verified"
+            or payload.get("artifact_is_authorization") is not False
+            or payload.get("execute_binding_enabled") is not False
+        ):
+            raise ValueError("window owner cleanup receipt contract is invalid")
+        if payload.get("content_sha256") != content_sha256(payload):
+            raise ValueError("window owner cleanup receipt hash is invalid")
+        return
+    expected = _EVENT_PAYLOAD_FIELDS.get(event_type)
+    if expected is None or set(payload) != expected:
+        raise ValueError("window owner journal event payload schema is invalid")
+    if event_type == "process_created":
+        identity = payload["process_identity"]
+        if (
+            not isinstance(identity, Mapping)
+            or set(identity) != {"pid", "create_time_ns"}
+            or not all(isinstance(identity[key], int) and identity[key] > 0 for key in identity)
+        ):
+            raise ValueError("window owner process identity payload is invalid")
+
+
 def _load_events(journal_path: Path, *, owner_id: str) -> list[dict[str, object]]:
     path = _events_path(journal_path)
     if not path.exists():
         return []
     try:
-        lines = path.read_bytes().splitlines()
-        events = [json.loads(line.decode("utf-8")) for line in lines if line]
+        journal_raw = path.read_bytes()
+        lines = journal_raw.splitlines()
+        events = [json.loads(line.decode("utf-8")) for line in lines]
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("window owner journal event bytes are invalid") from error
     previous = "0" * 64
+    root = _load_root(Path(journal_path))
+    root_anchor_sha256 = _sha(canonical_json_bytes(root))
+    previous_type = None
     for sequence, event in enumerate(events):
         required = {
             "contract_version",
@@ -220,20 +387,43 @@ def _load_events(journal_path: Path, *, owner_id: str) -> list[dict[str, object]
             "event_type",
             "owner_id",
             "previous_event_sha256",
+            "root_anchor_sha256",
             "payload",
             "content_sha256",
         }
         if not isinstance(event, dict) or set(event) != required:
             raise ValueError("window owner journal event schema is invalid")
+        raw_line = lines[sequence]
+        if raw_line != canonical_json_bytes(event):
+            raise ValueError("window owner journal event bytes are not canonical")
+        event_type = str(event["event_type"])
         if (
             event["contract_version"] != EVENT_CONTRACT
             or event["sequence"] != sequence
             or event["owner_id"] != owner_id
             or event["previous_event_sha256"] != previous
+            or event["root_anchor_sha256"] != root_anchor_sha256
             or event["content_sha256"] != content_sha256(event)
+            or event_type not in _EVENT_TRANSITIONS.get(previous_type, set())
         ):
             raise ValueError("window owner journal event chain is invalid")
+        _validate_event_payload(event_type, event["payload"])
+        if event_type == "cleanup_verified":
+            cleanup_payload = event["payload"]
+            process_identity = cleanup_payload["process_identity"]
+            if (
+                cleanup_payload["owner_id"] != root["owner_id"]
+                or cleanup_payload["shutdown_event_name"] != root["shutdown_event_name"]
+                or not isinstance(cleanup_payload["exact_hwnd"], int)
+                or not isinstance(process_identity, Mapping)
+                or set(process_identity) != {"pid", "create_time_ns"}
+                or not all(isinstance(value, int) and value >= 0 for value in process_identity.values())
+            ):
+                raise ValueError("window owner cleanup receipt lineage is invalid")
         previous = str(event["content_sha256"])
+        previous_type = event_type
+    if journal_raw != b"".join(canonical_json_bytes(event) + b"\n" for event in events):
+        raise ValueError("window owner journal event stream is not canonical")
     return events
 
 
@@ -245,6 +435,7 @@ def _append_event(
     payload: Mapping[str, object],
 ) -> dict[str, object]:
     with _EventLock(_event_lock_path(journal_path)):
+        root = _load_root(Path(journal_path))
         events = _load_events(journal_path, owner_id=owner_id)
         previous = str(events[-1]["content_sha256"]) if events else "0" * 64
         event: dict[str, object] = {
@@ -253,6 +444,7 @@ def _append_event(
             "event_type": event_type,
             "owner_id": owner_id,
             "previous_event_sha256": previous,
+            "root_anchor_sha256": _sha(canonical_json_bytes(root)),
             "payload": dict(payload),
         }
         event["content_sha256"] = content_sha256(event)
@@ -271,7 +463,8 @@ def _load_root(journal_path: Path) -> dict[str, object]:
     if not path.is_absolute() or str(path) != str(path.resolve()):
         raise ValueError("window owner journal path must be canonical and absolute")
     try:
-        root = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        root = json.loads(raw.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("window owner journal is unreadable") from error
     fields = {
@@ -281,14 +474,18 @@ def _load_root(journal_path: Path) -> dict[str, object]:
         "screenshot_path",
         "screenshot_sha256",
         "image_dimensions",
+        "bitmap_pixel_sha256",
         "scope_name",
         "window_class",
         "window_title",
+        "shutdown_event_name",
+        "shutdown_nonce",
         "journal_path",
         "events_path",
         "publication_path",
         "publication_permit_path",
         "helper_path",
+        "root_anchor_path",
         "artifact_is_authorization",
         "execute_binding_enabled",
         "display_only",
@@ -296,11 +493,15 @@ def _load_root(journal_path: Path) -> dict[str, object]:
     }
     if not isinstance(root, dict) or set(root) != fields:
         raise ValueError("window owner journal schema is invalid")
+    if raw != canonical_json_bytes(root):
+        raise ValueError("window owner journal bytes are not canonical")
     if root["contract_version"] != OWNER_JOURNAL_CONTRACT:
         raise ValueError("window owner journal contract is invalid")
     if root["content_sha256"] != content_sha256(root):
         raise ValueError("window owner journal content hash is invalid")
-    identity = _identity(str(root["operation_id"]), str(root["screenshot_sha256"]))
+    identity = _identity(
+        str(root["operation_id"]), str(root["screenshot_sha256"]), path
+    )
     if any(root[key] != value for key, value in identity.items()):
         raise ValueError("window owner journal derived identity is invalid")
     expected_paths = {
@@ -309,6 +510,7 @@ def _load_root(journal_path: Path) -> dict[str, object]:
         "publication_path": str(_publication_path(path)),
         "publication_permit_path": str(_publication_permit_path(path)),
         "helper_path": str(_helper_path()),
+        "root_anchor_path": str(_root_anchor_path(path)),
     }
     if any(root[key] != value for key, value in expected_paths.items()):
         raise ValueError("window owner journal paths are invalid")
@@ -321,7 +523,9 @@ def _load_root(journal_path: Path) -> dict[str, object]:
         or root["display_only"] is not True
     ):
         raise ValueError("window owner journal safety fields are invalid")
-    _load_events(path, owner_id=str(root["owner_id"]))
+    anchor = _root_anchor_path(path)
+    if not _file_anchor_exact(anchor, size=len(raw), raw=raw):
+        raise ValueError("window owner immutable root anchor differs")
     return root
 
 
@@ -350,7 +554,7 @@ def _enum_matching_windows(pid: int, window_class: str, title: str) -> list[int]
         user32.GetClassNameW(hwnd, class_buffer, len(class_buffer))
         user32.GetWindowTextW(hwnd, title_buffer, len(title_buffer))
         if class_buffer.value == window_class and title_buffer.value == title:
-            found.append(int(hwnd))
+            found.append(_native_handle_value(hwnd))
         return True
 
     user32.EnumWindows.argtypes = (callback_type, wintypes.LPARAM)
@@ -362,6 +566,12 @@ def _enum_matching_windows(pid: int, window_class: str, title: str) -> list[int]
 
 def _window_geometry(hwnd: int) -> tuple[dict[str, int], dict[str, int], int]:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.GetClientRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+    user32.GetClientRect.restype = wintypes.BOOL
+    user32.ClientToScreen.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.POINT))
+    user32.ClientToScreen.restype = wintypes.BOOL
     user32.GetDpiForWindow.argtypes = (wintypes.HWND,)
     user32.GetDpiForWindow.restype = wintypes.UINT
     window = wintypes.RECT()
@@ -489,6 +699,7 @@ def _raw_hwnd_attestation(owner: Mapping[str, object]) -> dict[str, object]:
         "client_rect": client_rect,
         "dpi": dpi,
         "screenshot_sha256": owner["screenshot_sha256"],
+        "bitmap_pixel_sha256": owner["bitmap_pixel_sha256"],
     }
     result["identity_sha256"] = _sha(canonical_json_bytes(result))
     return result
@@ -555,50 +766,122 @@ def _run_uia_probe(owner: Mapping[str, object]) -> dict[str, object]:
             raise ValueError("window binding UIA probe result is invalid")
         return probe
     finally:
+        cleanup_errors: list[BaseException] = []
         if process is not None:
             try:
                 if process.poll() is None:
                     process.kill()
-            finally:
+            except BaseException as error:
+                cleanup_errors.append(error)
+            try:
+                process.wait(5)
+            except BaseException as error:
+                cleanup_errors.append(error)
+            try:
                 process.close()
-        scope.close()
-        cleanup = observe_process_scope_cleanup(
-            probe_scope_name, terminate=True, stable_zero_observations=3
-        )
+            except BaseException as error:
+                cleanup_errors.append(error)
+        try:
+            scope.close()
+        except BaseException as error:
+            cleanup_errors.append(error)
+        try:
+            cleanup = observe_process_scope_cleanup(
+                probe_scope_name, terminate=True, stable_zero_observations=3
+            )
+            if cleanup["cleanup_status"] != "verified":
+                cleanup_errors.append(
+                    RuntimeError("window binding UIA probe cleanup is indeterminate")
+                )
+        except BaseException as error:
+            cleanup_errors.append(error)
         for path in (request, result, stderr_path):
             try:
                 path.unlink()
             except FileNotFoundError:
                 pass
-        if cleanup["cleanup_status"] != "verified":
-            raise RuntimeError("window binding UIA probe cleanup is indeterminate")
+            except BaseException as error:
+                cleanup_errors.append(error)
+        if cleanup_errors:
+            raise BaseExceptionGroup("window UIA probe cleanup failed", cleanup_errors)
 
 
 def _uia_identity(probe: Mapping[str, object], owner: Mapping[str, object]) -> dict[str, object]:
+    if set(probe) != {
+        "contract_version", "owner_id", "probe_nonce", "binding_bytes_sha256",
+        "pre", "post", "bound", "snapshot", "content_sha256",
+    } or probe.get("content_sha256") != content_sha256(probe):
+        raise ValueError("window binding UIA probe schema or seal is invalid")
     if probe.get("contract_version") != "portfolio_hybrid_benchmark_v2_uia_probe_v1":
         raise ValueError("window binding UIA probe contract is invalid")
     if probe.get("owner_id") != owner["owner_id"]:
         raise ValueError("window binding UIA probe lineage differs")
     pre = dict(probe["pre"])
     post = dict(probe["post"])
-    if pre != post:
+    if pre != post or pre != _raw_hwnd_attestation(owner):
         raise ValueError("window binding changed during UIA probe")
     bound = dict(probe["bound"])
     snapshot = dict(probe["snapshot"])
     window = dict(snapshot.get("window") or {})
     controls = snapshot.get("controls")
     if (
-        snapshot.get("status") != "ok"
+        set(bound) != {"handle", "process_id", "title"}
+        or set(snapshot) != {
+            "control_count", "controls", "provider", "provider_version", "status", "window"
+        }
+        or set(window) != {"handle", "process_id", "process_name", "title", "bbox"}
+        or snapshot.get("status") != "ok"
+        or snapshot.get("provider") != "windows_uia"
+        or snapshot.get("provider_version") != "windows_uia_provider_v1"
         or bound.get("handle") != owner["hwnd"]
         or bound.get("process_id") != owner["process_identity"]["pid"]
+        or bound.get("title") != owner["window_title"]
         or window.get("handle") != owner["hwnd"]
         or window.get("process_id") != owner["process_identity"]["pid"]
+        or window.get("title") != owner["window_title"]
+        or window.get("process_name") != Path(sys._base_executable).name
         or not isinstance(controls, list)
         or not controls
+        or snapshot.get("control_count") != len(controls)
         or not isinstance(controls[0], dict)
     ):
-        raise ValueError("window binding UIA root is not exact")
+        raise ValueError(
+            "window binding UIA root is not exact: "
+            f"bound={bound!r}, window={window!r}, control_count={snapshot.get('control_count')!r}, "
+            f"controls={len(controls) if isinstance(controls, list) else None!r}"
+        )
     root = controls[0]
+    window_rect = dict(owner["window_rect"])
+    expected_outer = {
+        "x": window_rect["left"],
+        "y": window_rect["top"],
+        "w": window_rect["right"] - window_rect["left"],
+        "h": window_rect["bottom"] - window_rect["top"],
+    }
+    expected_local = {"x": 0, "y": 0, "w": expected_outer["w"], "h": expected_outer["h"]}
+    expected_control_id = "uia_0_" + re.sub(
+        r"[^a-z0-9]+", "_", str(owner["window_title"]).lower()
+    ).strip("_")
+    if (
+        window.get("bbox") != expected_local
+        or set(root) != {
+            "automation_id", "bbox", "class_name", "control_id", "control_type",
+            "enabled", "name", "patterns", "provider", "screen_bbox", "visible",
+        }
+        or root.get("control_id") != expected_control_id
+        or root.get("name") != owner["window_title"]
+        or root.get("class_name") != owner["window_class"]
+        or root.get("control_type") != "Window"
+        or root.get("automation_id") is not None
+        or root.get("bbox") != expected_local
+        or root.get("screen_bbox") != expected_outer
+        or root.get("provider") != "windows_uia"
+        or root.get("enabled") is not True
+        or root.get("visible") is not True
+        or root.get("patterns")
+        != ["Invoke", "Value", "Text", "Selection", "ExpandCollapse", "Toggle"]
+    ):
+        raise ValueError("window binding UIA projection differs from exact owner")
     identity = {
         "provider": snapshot["provider"],
         "provider_version": snapshot["provider_version"],
@@ -630,6 +913,7 @@ def _binding_from_publication(
         "operation_id": root["operation_id"],
         "screenshot_path": root["screenshot_path"],
         "screenshot_sha256": root["screenshot_sha256"],
+        "bitmap_pixel_sha256": root["bitmap_pixel_sha256"],
         "scope_name": root["scope_name"],
         "process_identity": publication["process_identity"],
         "job_member_pids": [publication["process_identity"]["pid"]],
@@ -662,6 +946,9 @@ def _validate_publication(
         "contract_version",
         "owner_id",
         "screenshot_sha256",
+        "raw_file_sha256",
+        "bitmap_pixel_sha256",
+        "shutdown_nonce_sha256",
         "process_identity",
         "hwnd",
         "hwnds",
@@ -685,6 +972,10 @@ def _validate_publication(
         != "portfolio_hybrid_benchmark_v2_hwnd_publication_v1"
         or publication["owner_id"] != root["owner_id"]
         or publication["screenshot_sha256"] != root["screenshot_sha256"]
+        or publication["raw_file_sha256"] != root["screenshot_sha256"]
+        or publication["bitmap_pixel_sha256"] != root["bitmap_pixel_sha256"]
+        or publication["shutdown_nonce_sha256"]
+        != _sha(str(root["shutdown_nonce"]).encode("utf-8"))
         or publication["window_class"] != root["window_class"]
         or publication["window_title"] != root["window_title"]
         or publication["image_dimensions"] != root["image_dimensions"]
@@ -727,6 +1018,7 @@ def _launch_owned_window_for_test(
     duplicate_window: bool,
     fail_after_job_created: bool = False,
     pause_after_process_created: Mapping[str, object] | None = None,
+    bmp_read_barrier: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return _launch_owned_window(
         image_path=image_path,
@@ -736,6 +1028,7 @@ def _launch_owned_window_for_test(
         duplicate_window=duplicate_window,
         fail_after_job_created=fail_after_job_created,
         pause_after_process_created=pause_after_process_created,
+        bmp_read_barrier=bmp_read_barrier,
     )
 
 
@@ -748,6 +1041,7 @@ def _launch_owned_window(
     duplicate_window: bool,
     fail_after_job_created: bool = False,
     pause_after_process_created: Mapping[str, object] | None = None,
+    bmp_read_barrier: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     image = Path(image_path)
     journal = Path(journal_path)
@@ -761,8 +1055,9 @@ def _launch_owned_window(
     digest = _sha(raw)
     if digest != require_sha256(expected_sha256, "expected_sha256"):
         raise ValueError("window screenshot SHA-256 differs")
-    dimensions = _bmp_dimensions(raw)
-    derived = _identity(operation_id, digest)
+    bmp = _parse_bmp(raw)
+    dimensions = dict(bmp["dimensions"])
+    derived = _identity(operation_id, digest, journal)
     root: dict[str, object] = {
         "contract_version": OWNER_JOURNAL_CONTRACT,
         **derived,
@@ -770,17 +1065,25 @@ def _launch_owned_window(
         "screenshot_path": str(image),
         "screenshot_sha256": digest,
         "image_dimensions": dimensions,
+        "bitmap_pixel_sha256": bmp["bitmap_pixel_sha256"],
         "journal_path": str(journal),
         "events_path": str(_events_path(journal)),
         "publication_path": str(_publication_path(journal)),
         "publication_permit_path": str(_publication_permit_path(journal)),
         "helper_path": str(_helper_path()),
+        "root_anchor_path": str(_root_anchor_path(journal)),
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
         "display_only": True,
     }
     root["content_sha256"] = content_sha256(root)
     _atomic_create_json(journal, root)
+    root_raw = canonical_json_bytes(root)
+    anchor_path = _root_anchor_path(journal)
+    if not _write_secure_new_file(anchor_path, root_raw):
+        raise ValueError("window owner immutable root anchor already exists")
+    if not _file_anchor_exact(anchor_path, size=len(root_raw), raw=root_raw):
+        raise ValueError("window owner immutable root anchor publication failed")
     _append_event(
         journal,
         owner_id=str(root["owner_id"]),
@@ -791,6 +1094,7 @@ def _launch_owned_window(
     lifecycle.enter_context(_reconcile_mutex(str(root["owner_id"])))
     scope = None
     process = None
+    shutdown_event = None
     scope_transferred = False
     try:
         current_events = _load_events(journal, owner_id=str(root["owner_id"]))
@@ -799,6 +1103,7 @@ def _launch_owned_window(
             for event in current_events
         ):
             raise ValueError("window launch was already finalized")
+        shutdown_event = _ShutdownEvent(str(root["shutdown_event_name"]), create=True)
         scope = WindowsProcessScope(str(root["scope_name"]), create=True)
         with _LIVE_LOCK:
             if str(journal) in _LIVE_OWNERS:
@@ -820,6 +1125,8 @@ def _launch_owned_window(
             str(image),
             "--sha256",
             digest,
+            "--pixel-sha256",
+            str(root["bitmap_pixel_sha256"]),
             "--owner-id",
             str(root["owner_id"]),
             "--window-class",
@@ -830,7 +1137,20 @@ def _launch_owned_window(
             str(_publication_path(journal)),
             "--publication-permit",
             str(_publication_permit_path(journal)),
+            "--shutdown-event-name",
+            str(root["shutdown_event_name"]),
+            "--shutdown-nonce",
+            str(root["shutdown_nonce"]),
         ]
+        if bmp_read_barrier is not None:
+            command.extend(
+                [
+                    "--read-ready",
+                    str(Path(str(bmp_read_barrier["ready_path"]))),
+                    "--read-release",
+                    str(Path(str(bmp_read_barrier["release_path"]))),
+                ]
+            )
         if duplicate_window:
             command.append("--duplicate-window")
         with _helper_stderr_path(journal).open("wb") as stderr_stream:
@@ -843,7 +1163,9 @@ def _launch_owned_window(
                 creationflags=0x08000008,
             )
         with _LIVE_LOCK:
-            _LIVE_OWNERS[str(journal)] = _LiveOwner(scope=scope, process=process)
+            _LIVE_OWNERS[str(journal)] = _LiveOwner(
+                scope=scope, process=process, shutdown_event=shutdown_event
+            )
             scope_transferred = True
         process_event = _append_event(
             journal,
@@ -938,6 +1260,11 @@ def _launch_owned_window(
                     scope.close()
                 except BaseException as error:
                     local_cleanup.append(error)
+            if shutdown_event is not None:
+                try:
+                    shutdown_event.close()
+                except BaseException as error:
+                    local_cleanup.append(error)
         try:
             close_owned_window(journal_path=journal, reason="launch_failure")
         except BaseException as cleanup:
@@ -965,6 +1292,8 @@ def _validate_binding(owner: Mapping[str, object]) -> dict[str, object]:
     if (
         _sha(screenshot_bytes) != root["screenshot_sha256"]
         or _bmp_dimensions(screenshot_bytes) != root["image_dimensions"]
+        or _parse_bmp(screenshot_bytes)["bitmap_pixel_sha256"]
+        != root["bitmap_pixel_sha256"]
     ):
         raise ValueError("window binding screenshot bytes are stale")
     if (
@@ -972,6 +1301,7 @@ def _validate_binding(owner: Mapping[str, object]) -> dict[str, object]:
         or binding.get("operation_id") != root["operation_id"]
         or binding.get("screenshot_sha256") != root["screenshot_sha256"]
         or binding.get("screenshot_path") != root["screenshot_path"]
+        or binding.get("bitmap_pixel_sha256") != root["bitmap_pixel_sha256"]
         or binding.get("scope_name") != root["scope_name"]
         or binding.get("window_class") != root["window_class"]
         or binding.get("window_title") != root["window_title"]
@@ -1037,72 +1367,193 @@ def close_owned_window(*, journal_path: Path, reason: str) -> dict[str, object]:
         journal = journal.resolve()
     root = _load_root(journal)
     with _reconcile_mutex(str(root["owner_id"])):
-        return _close_owned_window_locked(journal=journal, root=root, reason=reason)
+        return _close_owned_window_locked(
+            journal=journal, root=root, reason=reason, failure_stage=None
+        )
+
+
+def _close_owned_window_for_test(
+    *, journal_path: Path, reason: str, failure_stage: str
+) -> dict[str, object]:
+    allowed = {"kill", "wait", "process_close", "scope_close", "observe", "unlink"}
+    if failure_stage not in allowed:
+        raise ValueError("window cleanup failure stage is invalid")
+    journal = Path(journal_path).resolve()
+    root = _load_root(journal)
+    with _reconcile_mutex(str(root["owner_id"])):
+        return _close_owned_window_locked(
+            journal=journal, root=root, reason=reason, failure_stage=failure_stage
+        )
 
 
 def _close_owned_window_locked(
-    *, journal: Path, root: Mapping[str, object], reason: str
+    *, journal: Path, root: Mapping[str, object], reason: str,
+    failure_stage: str | None,
 ) -> dict[str, object]:
     events = _load_events(journal, owner_id=str(root["owner_id"]))
     terminal = [event for event in events if event["event_type"] == "cleanup_verified"]
     if terminal:
-        return dict(terminal[-1]["payload"])
+        receipt = dict(terminal[-1]["payload"])
+        observed = observe_process_scope_cleanup(
+            str(root["scope_name"]), terminate=False, stable_zero_observations=3
+        )
+        exact_hwnd = int(receipt["exact_hwnd"])
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.IsWindow.argtypes = (wintypes.HWND,)
+        user32.IsWindow.restype = wintypes.BOOL
+        matching = _enum_matching_windows(
+            int(receipt["process_identity"]["pid"]),
+            str(root["window_class"]),
+            str(root["window_title"]),
+        )
+        residue_present = bool(
+            observed["member_pids_after"]
+            or matching
+            or (exact_hwnd and bool(user32.IsWindow(exact_hwnd)))
+        )
+        terminal_invalid = bool(
+            residue_present
+            or observed["cleanup_status"] != "verified"
+            or observed["active_listeners_after"]
+            or observed["scope_absent_after_owner_close"] is not True
+        )
+        if terminal_invalid:
+            live = _LIVE_OWNERS.get(str(journal))
+            if live is not None and live.shutdown_event is not None:
+                try:
+                    live.shutdown_event.signal()
+                except OSError:
+                    pass
+            observe_process_scope_cleanup(
+                str(root["scope_name"]), terminate=True, stable_zero_observations=3
+            )
+            if live is not None:
+                for item in (live.process, live.scope, live.shutdown_event):
+                    if item is not None:
+                        try:
+                            item.close()
+                        except BaseException:
+                            pass
+                with _LIVE_LOCK:
+                    _LIVE_OWNERS.pop(str(journal), None)
+            for path in (
+                _publication_path(journal), _publication_permit_path(journal),
+                _event_lock_path(journal), _helper_stderr_path(journal),
+            ):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            raise ValueError("window cleanup terminal receipt preceded OS cleanup")
+        for path in (
+            _publication_path(journal), _publication_permit_path(journal),
+            _event_lock_path(journal), _helper_stderr_path(journal),
+        ):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        return receipt
     if not isinstance(reason, str) or not reason or len(reason) > 128:
         raise ValueError("window cleanup reason is invalid")
-    _append_event(
-        journal,
-        owner_id=str(root["owner_id"]),
-        event_type="finalization_intent",
-        payload={"reason": reason},
-    )
+    if not events or events[-1]["event_type"] != "finalization_intent":
+        _append_event(
+            journal,
+            owner_id=str(root["owner_id"]),
+            event_type="finalization_intent",
+            payload={"reason": reason},
+        )
     events = _load_events(journal, owner_id=str(root["owner_id"]))
     owner = _owner_for_cleanup(root, events)
     live = None
     with _LIVE_LOCK:
-        live = _LIVE_OWNERS.pop(str(journal), None)
+        live = _LIVE_OWNERS.get(str(journal))
     exact_hwnd = int(owner["hwnd"]) if owner is not None else 0
     pid = int(owner["process_identity"]["pid"]) if owner is not None else 0
     matching_before: list[int] = []
-    wm_close_queued = False
-    wm_close_error_code = 0
+    shutdown_event_signaled = False
+    shutdown_event_error_code = 0
     if owner is not None:
         try:
             _raw_hwnd_attestation(owner)
             matching_before = _enum_matching_windows(
                 pid, str(owner["window_class"]), str(owner["window_title"])
             )
-            user32 = ctypes.WinDLL("user32", use_last_error=True)
-            user32.PostMessageW.argtypes = (
-                wintypes.HWND,
-                wintypes.UINT,
-                wintypes.WPARAM,
-                wintypes.LPARAM,
-            )
-            user32.PostMessageW.restype = wintypes.BOOL
-            wm_close_queued = bool(user32.PostMessageW(exact_hwnd, 0x0010, 0, 0))
-            if not wm_close_queued:
-                wm_close_error_code = ctypes.get_last_error()
         except (ValueError, OSError):
             matching_before = []
+    signal_handle = None
+    try:
+        signal_handle = (
+            live.shutdown_event
+            if live is not None and live.shutdown_event is not None
+            else _ShutdownEvent(str(root["shutdown_event_name"]), create=False)
+        )
+        signal_handle.signal()
+        shutdown_event_signaled = True
+    except OSError:
+        shutdown_event_error_code = ctypes.get_last_error()
     deadline = time.monotonic() + 1.0
-    while live is not None and live.process.poll() is None and time.monotonic() < deadline:
+    while (
+        live is not None
+        and live.process is not None
+        and live.process.poll() is None
+        and time.monotonic() < deadline
+    ):
         time.sleep(0.02)
     first_cleanup = observe_process_scope_cleanup(
         str(root["scope_name"]), terminate=True, stable_zero_observations=3
     )
-    process_handle_closed = live is None
-    job_handle_closed = live is None
+    process_handle_closed = live is None or live.process is None
+    job_handle_closed = live is None or live.scope is None
+    shutdown_event_handle_closed = live is None or live.shutdown_event is None
+    cleanup_errors: list[BaseException] = []
+    if failure_stage == "observe":
+        cleanup_errors.append(RuntimeError("injected cleanup observe failure"))
     if live is not None:
         try:
-            if live.process.poll() is None:
-                live.process.kill()
-            else:
-                live.process.wait(5)
+            if live.process is not None:
+                try:
+                    if live.process.poll() is None:
+                        live.process.kill()
+                    if failure_stage == "kill":
+                        raise RuntimeError("injected cleanup kill failure")
+                    live.process.wait(5)
+                    if failure_stage == "wait":
+                        raise RuntimeError("injected cleanup wait failure")
+                except BaseException as error:
+                    cleanup_errors.append(error)
+                try:
+                    live.process.close()
+                    live.process = None
+                    process_handle_closed = True
+                    if failure_stage == "process_close":
+                        raise RuntimeError("injected cleanup process-close failure")
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            if live.scope is not None:
+                try:
+                    live.scope.close()
+                    live.scope = None
+                    job_handle_closed = True
+                    if failure_stage == "scope_close":
+                        raise RuntimeError("injected cleanup scope-close failure")
+                except BaseException as error:
+                    cleanup_errors.append(error)
+            if live.shutdown_event is not None:
+                try:
+                    live.shutdown_event.close()
+                    live.shutdown_event = None
+                    shutdown_event_handle_closed = True
+                except BaseException as error:
+                    cleanup_errors.append(error)
         finally:
-            live.process.close()
-            process_handle_closed = True
-        live.scope.close()
-        job_handle_closed = True
+            pass
+    elif signal_handle is not None:
+        try:
+            signal_handle.close()
+            shutdown_event_handle_closed = True
+        except BaseException as error:
+            cleanup_errors.append(error)
     final_cleanup = observe_process_scope_cleanup(
         str(root["scope_name"]), terminate=True, stable_zero_observations=3
     )
@@ -1115,6 +1566,20 @@ def _close_owned_window_locked(
     user32.IsWindow.argtypes = (wintypes.HWND,)
     user32.IsWindow.restype = wintypes.BOOL
     hwnd_absent = exact_hwnd == 0 or not bool(user32.IsWindow(exact_hwnd))
+    for path in (
+        _publication_path(journal),
+        _publication_permit_path(journal),
+        _event_lock_path(journal),
+        _helper_stderr_path(journal),
+    ):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except BaseException as error:
+            cleanup_errors.append(error)
+    if failure_stage == "unlink":
+        cleanup_errors.append(RuntimeError("injected cleanup sidecar-unlink failure"))
     verified = (
         first_cleanup["cleanup_status"] == "verified"
         and final_cleanup["cleanup_status"] == "verified"
@@ -1125,15 +1590,24 @@ def _close_owned_window_locked(
         and hwnd_absent
         and process_handle_closed
         and job_handle_closed
+        and shutdown_event_handle_closed
+        and not cleanup_errors
     )
     receipt: dict[str, object] = {
         "contract_version": CLEANUP_CONTRACT,
         "owner_id": root["owner_id"],
         "reason": reason,
+        "exact_hwnd": exact_hwnd,
+        "process_identity": (
+            dict(owner["process_identity"])
+            if owner is not None
+            else {"pid": 0, "create_time_ns": 0}
+        ),
         "cleanup_status": "verified" if verified else "indeterminate",
-        "wm_close_exact_hwnd_attempted": bool(matching_before),
-        "wm_close_exact_hwnd_queued": wm_close_queued,
-        "wm_close_error_code": wm_close_error_code,
+        "shutdown_event_name": root["shutdown_event_name"],
+        "shutdown_event_signaled": shutdown_event_signaled,
+        "shutdown_event_error_code": shutdown_event_error_code,
+        "shutdown_event_handle_closed": shutdown_event_handle_closed,
         "enum_windows_exact_hwnd_absent": hwnd_absent,
         "matching_owned_windows_after": matching_after,
         "member_pids_after": final_cleanup["member_pids_after"],
@@ -1151,23 +1625,22 @@ def _close_owned_window_locked(
     }
     receipt["content_sha256"] = content_sha256(receipt)
     if not verified:
-        raise RuntimeError(f"window cleanup is indeterminate: {receipt}")
+        raise BaseExceptionGroup(
+            f"window cleanup is indeterminate: {receipt}",
+            cleanup_errors or [RuntimeError("window cleanup absence was not verified")],
+        )
     _append_event(
         journal,
         owner_id=str(root["owner_id"]),
         event_type="cleanup_verified",
         payload=receipt,
     )
-    for path in (
-        _publication_path(journal),
-        _publication_permit_path(journal),
-        _event_lock_path(journal),
-        _helper_stderr_path(journal),
-    ):
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+    try:
+        _event_lock_path(journal).unlink()
+    except FileNotFoundError:
+        pass
+    with _LIVE_LOCK:
+        _LIVE_OWNERS.pop(str(journal), None)
     return receipt
 
 

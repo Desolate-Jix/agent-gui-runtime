@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import site
+import struct
 import sys
 import time
 
@@ -49,6 +50,14 @@ def _atomic_json(path: Path, value: object) -> None:
 
 
 def _rect(user32: object, hwnd: int) -> tuple[dict[str, int], dict[str, int], int]:
+    user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+    user32.GetWindowRect.restype = wintypes.BOOL
+    user32.GetClientRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+    user32.GetClientRect.restype = wintypes.BOOL
+    user32.ClientToScreen.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.POINT))
+    user32.ClientToScreen.restype = wintypes.BOOL
+    user32.GetDpiForWindow.argtypes = (wintypes.HWND,)
+    user32.GetDpiForWindow.restype = wintypes.UINT
     window = wintypes.RECT()
     client = wintypes.RECT()
     if not user32.GetWindowRect(hwnd, ctypes.byref(window)):
@@ -83,12 +92,99 @@ def _rect(user32: object, hwnd: int) -> tuple[dict[str, int], dict[str, int], in
     )
 
 
+def _parse_bmp(raw: bytes) -> dict[str, int | str]:
+    if len(raw) < 54 or raw[:2] != b"BM":
+        raise ValueError("screenshot is not a sealed BMP")
+    file_size = struct.unpack_from("<I", raw, 2)[0]
+    pixel_offset = struct.unpack_from("<I", raw, 10)[0]
+    header_size, width, signed_height, planes, bit_count, compression, size_image = (
+        struct.unpack_from("<IiiHHII", raw, 14)
+    )
+    height = abs(signed_height)
+    stride = ((width * bit_count + 31) // 32) * 4 if width > 0 else 0
+    pixel_bytes = stride * height
+    if (
+        file_size != len(raw)
+        or header_size != 40
+        or width <= 0
+        or signed_height == 0
+        or planes != 1
+        or bit_count not in {24, 32}
+        or compression != 0
+        or pixel_offset < 54
+        or size_image not in {0, pixel_bytes}
+        or pixel_offset + pixel_bytes != len(raw)
+    ):
+        raise ValueError("screenshot BMP layout is invalid")
+    return {
+        "width": width,
+        "height": height,
+        "signed_height": signed_height,
+        "bit_count": bit_count,
+        "pixel_offset": pixel_offset,
+        "pixel_bytes": pixel_bytes,
+        "bitmap_pixel_sha256": hashlib.sha256(
+            raw[pixel_offset : pixel_offset + pixel_bytes]
+        ).hexdigest(),
+    }
+
+
+def _read_sealed_bmp(kernel32: object, path: Path) -> tuple[int, bytes]:
+    kernel32.CreateFileW.argtypes = (
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    )
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetFileSizeEx.argtypes = (wintypes.HANDLE, ctypes.POINTER(ctypes.c_longlong))
+    kernel32.GetFileSizeEx.restype = wintypes.BOOL
+    kernel32.ReadFile.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.c_void_p,
+    )
+    kernel32.ReadFile.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateFileW(str(path), 0x80000000, 0x00000001, None, 3, 0x80, None)
+    if not handle or int(handle) == int(ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        size = ctypes.c_longlong()
+        if not kernel32.GetFileSizeEx(handle, ctypes.byref(size)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if size.value < 54 or size.value > 64 * 1024 * 1024:
+            raise ValueError("sealed BMP file length is invalid")
+        buffer = ctypes.create_string_buffer(size.value)
+        offset = 0
+        while offset < size.value:
+            count = wintypes.DWORD()
+            remaining = size.value - offset
+            if not kernel32.ReadFile(
+                handle,
+                ctypes.byref(buffer, offset),
+                remaining,
+                ctypes.byref(count),
+                None,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if count.value == 0:
+                raise ValueError("sealed BMP read ended early")
+            offset += int(count.value)
+        return int(handle), bytes(buffer.raw[: size.value])
+    except BaseException:
+        kernel32.CloseHandle(handle)
+        raise
+
+
 def _serve_bitmap(args: argparse.Namespace) -> int:
     image = Path(args.image).resolve()
-    raw = image.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != args.sha256:
-        raise ValueError("screenshot SHA-256 mismatch")
-
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
@@ -97,37 +193,53 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
     if not user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
         raise ctypes.WinError(ctypes.get_last_error())
 
-    IMAGE_BITMAP = 0
-    LR_LOADFROMFILE = 0x10
-    LR_CREATEDIBSECTION = 0x2000
-    user32.LoadImageW.argtypes = (
-        wintypes.HINSTANCE,
-        wintypes.LPCWSTR,
-        wintypes.UINT,
-        ctypes.c_int,
-        ctypes.c_int,
-        wintypes.UINT,
-    )
-    user32.LoadImageW.restype = wintypes.HANDLE
-    bitmap = user32.LoadImageW(
-        None, str(image), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION
-    )
-    if not bitmap:
-        raise ctypes.WinError(ctypes.get_last_error())
+    file_handle, raw = _read_sealed_bmp(kernel32, image)
+    if hashlib.sha256(raw).hexdigest() != args.sha256:
+        kernel32.CloseHandle(file_handle)
+        raise ValueError("screenshot SHA-256 mismatch")
+    bmp = _parse_bmp(raw)
+    if bmp["bitmap_pixel_sha256"] != args.pixel_sha256:
+        kernel32.CloseHandle(file_handle)
+        raise ValueError("screenshot pixel digest mismatch")
+    if args.read_ready:
+        Path(args.read_ready).write_text("sealed", encoding="utf-8")
+        deadline = time.monotonic() + 20
+        while not Path(args.read_release).exists():
+            if time.monotonic() >= deadline:
+                kernel32.CloseHandle(file_handle)
+                raise TimeoutError("sealed BMP read barrier timed out")
+            time.sleep(0.01)
 
-    class BITMAP(ctypes.Structure):
+    class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [
-            ("bmType", wintypes.LONG),
-            ("bmWidth", wintypes.LONG),
-            ("bmHeight", wintypes.LONG),
-            ("bmWidthBytes", wintypes.LONG),
-            ("bmPlanes", wintypes.WORD),
-            ("bmBitsPixel", wintypes.WORD),
-            ("bmBits", ctypes.c_void_p),
+            ("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG),
+            ("biHeight", wintypes.LONG), ("biPlanes", wintypes.WORD),
+            ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+            ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
+            ("biClrImportant", wintypes.DWORD),
         ]
 
-    gdi32.GetObjectW.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p)
-    gdi32.GetObjectW.restype = ctypes.c_int
+    class RGBQUAD(ctypes.Structure):
+        _fields_ = [("rgbBlue", wintypes.BYTE), ("rgbGreen", wintypes.BYTE),
+                    ("rgbRed", wintypes.BYTE), ("rgbReserved", wintypes.BYTE)]
+
+    class BITMAPINFO(ctypes.Structure):
+        _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", RGBQUAD * 1)]
+
+    info = BITMAPINFO()
+    ctypes.memmove(ctypes.byref(info.bmiHeader), raw[14:54], 40)
+    bits = ctypes.c_void_p()
+    gdi32.CreateDIBSection.argtypes = (
+        wintypes.HDC, ctypes.POINTER(BITMAPINFO), wintypes.UINT,
+        ctypes.POINTER(ctypes.c_void_p), wintypes.HANDLE, wintypes.DWORD,
+    )
+    gdi32.CreateDIBSection.restype = wintypes.HBITMAP
+    gdi32.SetDIBits.argtypes = (
+        wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
+        ctypes.c_void_p, ctypes.POINTER(BITMAPINFO), wintypes.UINT,
+    )
+    gdi32.SetDIBits.restype = ctypes.c_int
     gdi32.DeleteObject.argtypes = (wintypes.HANDLE,)
     gdi32.DeleteObject.restype = wintypes.BOOL
     gdi32.CreateCompatibleDC.argtypes = (wintypes.HDC,)
@@ -148,11 +260,31 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
     gdi32.BitBlt.restype = wintypes.BOOL
     gdi32.DeleteDC.argtypes = (wintypes.HDC,)
     gdi32.DeleteDC.restype = wintypes.BOOL
-    bitmap_info = BITMAP()
-    if not gdi32.GetObjectW(bitmap, ctypes.sizeof(bitmap_info), ctypes.byref(bitmap_info)):
-        gdi32.DeleteObject(bitmap)
+    bitmap = gdi32.CreateDIBSection(None, ctypes.byref(info), 0, ctypes.byref(bits), None, 0)
+    if not bitmap or not bits:
+        kernel32.CloseHandle(file_handle)
         raise ctypes.WinError(ctypes.get_last_error())
-    width, height = int(bitmap_info.bmWidth), int(bitmap_info.bmHeight)
+    transfer_dc = gdi32.CreateCompatibleDC(None)
+    try:
+        source = ctypes.create_string_buffer(raw)
+        copied = gdi32.SetDIBits(
+            transfer_dc, bitmap, 0, int(bmp["height"]),
+            ctypes.c_void_p(ctypes.addressof(source) + int(bmp["pixel_offset"])),
+            ctypes.byref(info), 0,
+        )
+        if copied != int(bmp["height"]):
+            raise ctypes.WinError(ctypes.get_last_error())
+        actual_pixel_sha256 = hashlib.sha256(
+            ctypes.string_at(bits, int(bmp["pixel_bytes"]))
+        ).hexdigest()
+        if actual_pixel_sha256 != args.pixel_sha256:
+            raise ValueError("created DIB pixel digest differs")
+    finally:
+        if transfer_dc:
+            gdi32.DeleteDC(transfer_dc)
+        if not kernel32.CloseHandle(file_handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+    width, height = int(bmp["width"]), int(bmp["height"])
 
     WNDPROC = ctypes.WINFUNCTYPE(
         ctypes.c_ssize_t,
@@ -190,6 +322,47 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
     user32.BeginPaint.restype = wintypes.HDC
     user32.EndPaint.argtypes = (wintypes.HWND, ctypes.POINTER(PAINTSTRUCT))
     user32.EndPaint.restype = wintypes.BOOL
+    user32.RegisterClassW.argtypes = (ctypes.POINTER(WNDCLASSW),)
+    user32.RegisterClassW.restype = wintypes.ATOM
+    user32.AdjustWindowRectEx.argtypes = (
+        ctypes.POINTER(wintypes.RECT), wintypes.DWORD, wintypes.BOOL, wintypes.DWORD
+    )
+    user32.AdjustWindowRectEx.restype = wintypes.BOOL
+    user32.SetWindowPos.argtypes = (
+        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    )
+    user32.SetWindowPos.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.UpdateWindow.argtypes = (wintypes.HWND,)
+    user32.UpdateWindow.restype = wintypes.BOOL
+    user32.DestroyWindow.argtypes = (wintypes.HWND,)
+    user32.DestroyWindow.restype = wintypes.BOOL
+    user32.PostQuitMessage.argtypes = (ctypes.c_int,)
+    user32.PostQuitMessage.restype = None
+    user32.DefWindowProcW.argtypes = (
+        wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t
+    )
+    user32.DefWindowProcW.restype = ctypes.c_ssize_t
+    user32.IsWindow.argtypes = (wintypes.HWND,)
+    user32.IsWindow.restype = wintypes.BOOL
+    user32.UnregisterClassW.argtypes = (wintypes.LPCWSTR, wintypes.HINSTANCE)
+    user32.UnregisterClassW.restype = wintypes.BOOL
+    user32.PeekMessageW.argtypes = (
+        ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT,
+        wintypes.UINT,
+    )
+    user32.PeekMessageW.restype = wintypes.BOOL
+    user32.TranslateMessage.argtypes = (ctypes.POINTER(wintypes.MSG),)
+    user32.TranslateMessage.restype = wintypes.BOOL
+    user32.DispatchMessageW.argtypes = (ctypes.POINTER(wintypes.MSG),)
+    user32.DispatchMessageW.restype = ctypes.c_ssize_t
+    user32.MsgWaitForMultipleObjects.argtypes = (
+        wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE), wintypes.BOOL,
+        wintypes.DWORD, wintypes.DWORD,
+    )
+    user32.MsgWaitForMultipleObjects.restype = wintypes.DWORD
 
     WM_PAINT, WM_CLOSE, WM_DESTROY = 0x000F, 0x0010, 0x0002
     SRCCOPY = 0x00CC0020
@@ -207,7 +380,7 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
             user32.EndPaint(hwnd, ctypes.byref(paint))
             return 0
         if message == WM_CLOSE:
-            user32.DestroyWindow(hwnd)
+            # 通用关闭消息不具备 owner 身份；仅命名事件可以结束窗口。
             return 0
         if message == WM_DESTROY:
             user32.PostQuitMessage(0)
@@ -332,6 +505,11 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
                 "contract_version": "portfolio_hybrid_benchmark_v2_hwnd_publication_v1",
                 "owner_id": args.owner_id,
                 "screenshot_sha256": args.sha256,
+                "raw_file_sha256": args.sha256,
+                "bitmap_pixel_sha256": actual_pixel_sha256,
+                "shutdown_nonce_sha256": hashlib.sha256(
+                    args.shutdown_nonce.encode("utf-8")
+                ).hexdigest(),
                 "process_identity": identity,
                 "hwnd": hwnds[0],
                 "hwnds": hwnds,
@@ -351,10 +529,32 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
         }
         publication["content_sha256"] = _content_sha256(publication)
         _atomic_json(Path(args.publication), publication)
-        message = wintypes.MSG()
-        while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
-            user32.TranslateMessage(ctypes.byref(message))
-            user32.DispatchMessageW(ctypes.byref(message))
+        kernel32.OpenEventW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.OpenEventW.restype = wintypes.HANDLE
+        shutdown = kernel32.OpenEventW(0x00100000, False, args.shutdown_event_name)
+        if not shutdown:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            handles = (wintypes.HANDLE * 1)(shutdown)
+            message = wintypes.MSG()
+            while True:
+                status = int(
+                    user32.MsgWaitForMultipleObjects(1, handles, False, 0xFFFFFFFF, 0x04FF)
+                )
+                if status == 0:
+                    for hwnd in list(hwnds):
+                        if user32.IsWindow(hwnd):
+                            user32.DestroyWindow(hwnd)
+                    break
+                if status != 1:
+                    raise OSError(status, "shutdown event/message wait failed")
+                while user32.PeekMessageW(ctypes.byref(message), None, 0, 0, 0x0001):
+                    if message.message == 0x0012:
+                        return 0
+                    user32.TranslateMessage(ctypes.byref(message))
+                    user32.DispatchMessageW(ctypes.byref(message))
+        finally:
+            kernel32.CloseHandle(shutdown)
         return 0
     finally:
         for hwnd in hwnds:
@@ -409,11 +609,16 @@ def main(argv: list[str] | None = None) -> int:
     serve = subparsers.add_parser("serve-bitmap")
     serve.add_argument("--image", required=True)
     serve.add_argument("--sha256", required=True)
+    serve.add_argument("--pixel-sha256", required=True)
     serve.add_argument("--owner-id", required=True)
     serve.add_argument("--window-class", required=True)
     serve.add_argument("--title", required=True)
     serve.add_argument("--publication", required=True)
     serve.add_argument("--publication-permit", required=True)
+    serve.add_argument("--shutdown-event-name", required=True)
+    serve.add_argument("--shutdown-nonce", required=True)
+    serve.add_argument("--read-ready")
+    serve.add_argument("--read-release")
     serve.add_argument("--duplicate-window", action="store_true")
     probe = subparsers.add_parser("probe-uia")
     probe.add_argument("--request", required=True)
