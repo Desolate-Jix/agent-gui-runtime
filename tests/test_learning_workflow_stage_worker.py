@@ -1752,6 +1752,72 @@ def test_benchmark_worker_anchored_without_record_requires_closed_no_launch_obse
         predecessor = artifact["content_sha256"]
 
 
+def test_benchmark_worker_no_launch_receipt_cut_recovers_byte_identically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker as worker_module
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    real_write = worker_module._write_benchmark_cleanup_receipt_atomic
+
+    def fail_receipt(path, payload):
+        raise OSError("injected-no-launch-receipt-cut")
+
+    monkeypatch.setattr(
+        worker_module, "_write_benchmark_cleanup_receipt_atomic", fail_receipt
+    )
+    kwargs = {
+        "worker_id": reservation["worker_id"],
+        "run_id": reservation["run_id"],
+        "stage": reservation["stage"],
+        "operation_id": reservation["operation_id"],
+        "terminate": True,
+        "expected_operation_anchor": anchor,
+        "supervision_root": root,
+    }
+    with pytest.raises(OSError, match="injected-no-launch-receipt-cut"):
+        registry.observe_benchmark_worker_cleanup(**kwargs)
+    monkeypatch.setattr(
+        worker_module, "_write_benchmark_cleanup_receipt_atomic", real_write
+    )
+
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root
+    )
+    first = restarted.observe_benchmark_worker_cleanup(**kwargs)
+    second = restarted.observe_benchmark_worker_cleanup(**kwargs)
+    assert first == second
+    assert first["outcome"] == "verified_not_launched"
+    receipt_path = tmp_path / f"{reservation['worker_id']}.benchmark-cleanup.json"
+    receipt_path.unlink()
+    provider_absence_path = (
+        tmp_path
+        / f"{reservation['worker_id']}.pre-anchor-provider-absence.json"
+    )
+    provider_absence = json.loads(
+        provider_absence_path.read_text(encoding="utf-8")
+    )
+    provider_absence["checks"] = {"provider_owner_absent": False}
+    provider_absence_path.write_text(
+        json.dumps(provider_absence), encoding="utf-8"
+    )
+    damaged = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root
+    )
+    with pytest.raises(LearningStageWorkerError):
+        damaged.observe_benchmark_worker_cleanup(**kwargs)
+    assert not receipt_path.exists()
+
+
 def test_benchmark_worker_real_gate_timeout_never_runs_handler_and_stays_recovery_required(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2082,6 +2148,74 @@ def test_benchmark_worker_pre_anchor_abort_atomic_cut_recovers_from_store(
     receipt = restarted.abort_prepared_benchmark_worker_before_anchor(**kwargs)
     assert receipt["outcome"] == "verified_aborted_before_anchor"
     assert restarted._records == {}
+
+
+@pytest.mark.parametrize("damage", ["tampered", "missing", "stale_ref"])
+def test_benchmark_worker_abort_missing_receipt_validates_observation_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    damage: str,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store,
+        "get",
+        lambda run_id: {
+            "run_id": run_id,
+            "revision": 8,
+            "current_stage": "screen_understanding",
+            "terminal": False,
+            "evidence_refs": {},
+        },
+    )
+    kwargs = {
+        "reservation_ref": {"content_sha256": reservation["content_sha256"]},
+        "run_id": reservation["run_id"],
+        "stage": reservation["stage"],
+        "operation_id": reservation["operation_id"],
+        "workflow_revision": reservation["workflow_revision"],
+        "expected_operation_anchor": anchor,
+        "reason": "store_cas_lost",
+        "supervision_root": root,
+    }
+    registry.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    receipt_path = (
+        tmp_path
+        / f"{reservation['operation_id']}.benchmark-pre-anchor-abort-receipt.json"
+    )
+    receipt_path.unlink()
+    observation_path = (
+        tmp_path / f"{reservation['operation_id']}.benchmark-pre-anchor-abort.json"
+    )
+    if damage == "tampered":
+        observation = json.loads(observation_path.read_text(encoding="utf-8"))
+        observation["unsealed_forgery"] = True
+        observation_path.write_text(json.dumps(observation), encoding="utf-8")
+    elif damage == "missing":
+        observation_path.unlink()
+    else:
+        from app.learn.recognition.uei.canonical import seal_immutable
+
+        reservation_path = (
+            tmp_path / f"{reservation['operation_id']}.benchmark-reservation.json"
+        )
+        aborted = json.loads(reservation_path.read_text(encoding="utf-8"))
+        aborted_body = dict(aborted)
+        aborted_body.pop("content_sha256")
+        aborted_body["abort_observation_ref"] = {"content_sha256": "f" * 64}
+        reservation_path.write_text(
+            json.dumps(seal_immutable(aborted_body)), encoding="utf-8"
+        )
+
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root
+    )
+    with pytest.raises(LearningStageWorkerError):
+        restarted.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    assert not receipt_path.exists()
 
 
 def test_benchmark_worker_pre_anchor_abort_rejects_matching_store_anchor(
@@ -2639,6 +2773,81 @@ def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed
                     supervision_root=root,
                 )
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+            from app.learn.recognition.uei.canonical import seal_immutable
+
+            stable_body = dict(stable_zero)
+            stable_body.pop("content_sha256")
+            stable_body["samples"] = [[], [], [{"forged_member": 999999}]]
+            forged_stable = seal_immutable(stable_body)
+            stable_path = tmp_path / f"{started['worker_id']}.stable-zero.json"
+            stable_path.write_text(json.dumps(forged_stable), encoding="utf-8")
+
+            intent_body = dict(intent)
+            intent_body.pop("content_sha256")
+            intent_body["stable_zero_observation_ref"] = {
+                "content_sha256": forged_stable["content_sha256"]
+            }
+            forged_intent = seal_immutable(intent_body)
+            intent_path = (
+                tmp_path / f"{started['worker_id']}.benchmark-cleanup-intent.json"
+            )
+            intent_path.write_text(json.dumps(forged_intent), encoding="utf-8")
+
+            owner_path = tmp_path / f"{started['worker_id']}.benchmark-owner.json"
+            current_owner = json.loads(owner_path.read_text(encoding="utf-8"))
+            owner_body = dict(current_owner)
+            owner_body.pop("content_sha256")
+            owner_body["stable_zero_observation_ref"] = {
+                "content_sha256": forged_stable["content_sha256"]
+            }
+            owner_body["cleanup_finalization_intent"] = {
+                "content_sha256": forged_intent["content_sha256"]
+            }
+            forged_owner = seal_immutable(owner_body)
+            owner_path.write_text(json.dumps(forged_owner), encoding="utf-8")
+
+            job_body = dict(job_absence)
+            job_body.pop("content_sha256")
+            job_body["predecessor_content_sha256"] = forged_intent[
+                "content_sha256"
+            ]
+            forged_job = seal_immutable(job_body)
+            job_path = tmp_path / f"{started['worker_id']}.job-absence.json"
+            job_path.write_text(json.dumps(forged_job), encoding="utf-8")
+
+            worker_body = dict(worker_absence)
+            worker_body.pop("content_sha256")
+            worker_body["predecessor_content_sha256"] = forged_job[
+                "content_sha256"
+            ]
+            forged_worker = seal_immutable(worker_body)
+            worker_path = tmp_path / f"{started['worker_id']}.worker-absence.json"
+            worker_path.write_text(json.dumps(forged_worker), encoding="utf-8")
+
+            receipt_body = dict(receipt)
+            receipt_body.pop("content_sha256")
+            receipt_body["finalization_intent_ref"] = {
+                "content_sha256": forged_intent["content_sha256"]
+            }
+            receipt_body["job_absence_observation_ref"] = {
+                "content_sha256": forged_job["content_sha256"]
+            }
+            receipt_body["worker_absence_observation_ref"] = {
+                "content_sha256": forged_worker["content_sha256"]
+            }
+            forged_receipt = seal_immutable(receipt_body)
+            receipt_path.write_text(json.dumps(forged_receipt), encoding="utf-8")
+            with pytest.raises(LearningStageWorkerError):
+                registry.observe_benchmark_worker_cleanup(
+                    worker_id=started["worker_id"],
+                    run_id="run-real-gate",
+                    stage="screen_understanding",
+                    operation_id="operation-real-gate",
+                    terminate=True,
+                    expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
             assert not Path(
                 registry._records[started["worker_id"]]["benchmark_beacon_path"]
             ).exists()

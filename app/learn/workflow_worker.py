@@ -2977,14 +2977,13 @@ class LearningStageWorkerRegistry:
                     observation_path = self._result_root / f"{operation}.benchmark-pre-anchor-abort.json"
                     if not observation_path.exists():
                         raise LearningStageWorkerError("benchmark pre-anchor abort replay does not match")
-                    observation = json.loads(observation_path.read_text(encoding="utf-8"))
-                    if (
-                        current.get("abort_observation_ref")
-                        != {"content_sha256": observation.get("content_sha256")}
-                        or observation.get("store_decision_ref")
-                        != {"content_sha256": decision["content_sha256"]}
-                    ):
-                        raise LearningStageWorkerError("benchmark pre-anchor abort replay does not match")
+                    observation = _validate_benchmark_pre_anchor_abort_observation(
+                        reservation=reservation,
+                        aborted_reservation=current,
+                        decision=decision,
+                        result_root=self._result_root,
+                        reason=reason,
+                    )
                     receipt = _compose_benchmark_pre_anchor_abort_receipt(
                         reservation=reservation,
                         aborted_reservation=current,
@@ -3240,6 +3239,24 @@ class LearningStageWorkerRegistry:
                         supervision_root=root,
                     )
                 record = self._records.get(worker)
+                if (
+                    reservation["reservation_state"] == "cancelled_before_launch"
+                    and record is None
+                ):
+                    no_launch = _validate_benchmark_not_launched_observation(
+                        result_root=self._result_root,
+                        worker_id=worker,
+                        original_reservation=original,
+                        cancelled_reservation=reservation,
+                        operation_anchor=expected_operation_anchor,
+                    )
+                    receipt = _compose_benchmark_not_launched_receipt(
+                        cancelled_reservation=reservation,
+                        operation_anchor=expected_operation_anchor,
+                        observation=no_launch,
+                    )
+                    _write_benchmark_cleanup_receipt_atomic(receipt_path, receipt)
+                    return receipt
                 if reservation["reservation_state"] == "anchored" and record is None:
                     absence = self._persist_benchmark_pre_anchor_absence_observations(
                         reservation=reservation,
@@ -3284,20 +3301,11 @@ class LearningStageWorkerRegistry:
                     self._persist_benchmark_reservation(cancelled)
                     self._benchmark_reservations[key] = cancelled
                     self._benchmark_reservations_by_ref[cancelled["content_sha256"]] = cancelled
-                    receipt = seal_immutable({
-                        "contract_version": "benchmark_worker_cleanup_receipt_v1",
-                        "outcome": "verified_not_launched",
-                        "operation_anchor_ref": {"content_sha256": expected_operation_anchor["anchor_identity_sha256"]},
-                        "reservation_ref": {"content_sha256": cancelled["content_sha256"]},
-                        "supervision_ref": None, "run_id": run, "stage": stage_value,
-                        "operation_id": operation, "worker_id": worker,
-                        "process_identity": None, "assignment_proven_ref": None,
-                        "finalization_intent_ref": None, "exact_handle_observation_refs": None,
-                        "job_absence_observation_ref": None, "worker_absence_observation_ref": None,
-                        "supervisor_absence_observation_ref": None,
-                        "reservation_abort_ref": {"content_sha256": no_launch["content_sha256"]},
-                        "artifact_is_authorization": False, "execute_binding_enabled": False,
-                    })
+                    receipt = _compose_benchmark_not_launched_receipt(
+                        cancelled_reservation=cancelled,
+                        operation_anchor=expected_operation_anchor,
+                        observation=no_launch,
+                    )
                     _write_benchmark_cleanup_receipt_atomic(receipt_path, receipt)
                     return receipt
                 if record is None:
@@ -3510,6 +3518,24 @@ class LearningStageWorkerRegistry:
                     })
                     _write_json_atomic(
                         self._result_root / f"{worker}.benchmark-cleanup-intent.json", intent
+                    )
+                    owner_body = deepcopy(owner)
+                    owner_body.pop("content_sha256")
+                    owner_body.update({
+                        "phase": "cleanup_finalization_intent",
+                        "exit_observation_ref": intent["exit_observation_ref"],
+                        "stable_zero_observation_ref": intent[
+                            "stable_zero_observation_ref"
+                        ],
+                        "exact_handle_observation_refs": {},
+                        "cleanup_finalization_intent": {
+                            "content_sha256": intent["content_sha256"]
+                        },
+                        "predecessor_content_sha256": owner["content_sha256"],
+                    })
+                    owner = seal_immutable(owner_body)
+                    _write_json_atomic(
+                        Path(record["benchmark_owner_path"]), owner
                     )
                     receipt = seal_immutable({
                         "contract_version": "benchmark_worker_cleanup_receipt_v1",
@@ -5493,6 +5519,700 @@ def _validate_benchmark_artifact_ref(
     return value
 
 
+def _benchmark_pre_anchor_absence_specs(
+    reservation: dict[str, Any],
+) -> tuple[tuple[str, dict[str, Any], str], ...]:
+    from app.learn.hybrid.windows_process_scope import benchmark_worker_scope_name_v1
+
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind=reservation["authority_kind"],
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=reservation["operation_id"],
+        worker_id=reservation["worker_id"],
+        payload_sha256=reservation["payload_sha256"],
+        execution_nonce=reservation["execution_nonce"],
+    )
+    event_name = (
+        "Local\\AgentGuiBenchmarkWorkerGate-"
+        + content_sha256({"scope_name": scope_name})
+    )
+    return (
+        (
+            "owner",
+            {"registry_record_absent": True, "owner_journal_absent": True},
+            "owner_absence_observation_ref",
+        ),
+        (
+            "process_event_job_beacon",
+            {
+                "worker_journal_absent": True,
+                "startup_event_absent": True,
+                "owner_job_absent": True,
+                "beacon_absent": True,
+                "scope_name": scope_name,
+                "event_name": event_name,
+            },
+            "process_event_job_beacon_absence_observation_ref",
+        ),
+        ("result", {"result_absent": True}, "result_absence_observation_ref"),
+        (
+            "provider",
+            {"provider_owner_absent": True},
+            "provider_absence_observation_ref",
+        ),
+    )
+
+
+def _validate_benchmark_pre_anchor_absence_chain(
+    *,
+    result_root: Path,
+    reservation: dict[str, Any],
+    refs: dict[str, Any],
+) -> str:
+    predecessor = reservation["content_sha256"]
+    exact_fields = {
+        "contract_version", "observation_kind", "outcome",
+        "reservation_ref", "run_id", "stage", "operation_id",
+        "worker_id", "checks", "predecessor_content_sha256",
+        "content_sha256",
+    }
+    for kind, expected_checks, field in _benchmark_pre_anchor_absence_specs(
+        reservation
+    ):
+        artifact = _validate_benchmark_artifact_ref(
+            path=(
+                result_root
+                / f"{reservation['worker_id']}.pre-anchor-{kind}-absence.json"
+            ),
+            ref=refs.get(field),
+            contract_version="benchmark_worker_pre_anchor_absence_observation_v1",
+        )
+        if (
+            set(artifact) != exact_fields
+            or artifact.get("observation_kind") != kind
+            or artifact.get("outcome") != "absent"
+            or artifact.get("reservation_ref")
+            != {"content_sha256": reservation["content_sha256"]}
+            or artifact.get("run_id") != reservation["run_id"]
+            or artifact.get("stage") != reservation["stage"]
+            or artifact.get("operation_id") != reservation["operation_id"]
+            or artifact.get("worker_id") != reservation["worker_id"]
+            or artifact.get("checks") != expected_checks
+            or artifact.get("predecessor_content_sha256") != predecessor
+        ):
+            raise LearningStageWorkerError(
+                "benchmark pre-anchor absence lineage is invalid"
+            )
+        predecessor = artifact["content_sha256"]
+    return predecessor
+
+
+def _compose_benchmark_not_launched_receipt(
+    *,
+    cancelled_reservation: dict[str, Any],
+    operation_anchor: dict[str, Any],
+    observation: dict[str, Any],
+) -> dict[str, Any]:
+    return seal_immutable({
+        "contract_version": "benchmark_worker_cleanup_receipt_v1",
+        "outcome": "verified_not_launched",
+        "operation_anchor_ref": {
+            "content_sha256": operation_anchor["anchor_identity_sha256"]
+        },
+        "reservation_ref": {
+            "content_sha256": cancelled_reservation["content_sha256"]
+        },
+        "supervision_ref": None,
+        "run_id": cancelled_reservation["run_id"],
+        "stage": cancelled_reservation["stage"],
+        "operation_id": cancelled_reservation["operation_id"],
+        "worker_id": cancelled_reservation["worker_id"],
+        "process_identity": None,
+        "assignment_proven_ref": None,
+        "finalization_intent_ref": None,
+        "exact_handle_observation_refs": None,
+        "job_absence_observation_ref": None,
+        "worker_absence_observation_ref": None,
+        "supervisor_absence_observation_ref": None,
+        "reservation_abort_ref": {
+            "content_sha256": observation["content_sha256"]
+        },
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    })
+
+
+def _validate_benchmark_not_launched_observation(
+    *,
+    result_root: Path,
+    worker_id: str,
+    original_reservation: dict[str, Any],
+    cancelled_reservation: dict[str, Any],
+    operation_anchor: dict[str, Any],
+) -> dict[str, Any]:
+    anchored_body = deepcopy(original_reservation)
+    anchored_body.pop("content_sha256")
+    anchored_body["reservation_state"] = "anchored"
+    anchored_body["predecessor_content_sha256"] = original_reservation[
+        "content_sha256"
+    ]
+    anchored = seal_immutable(anchored_body)
+    observation_ref = cancelled_reservation.get("abort_observation_ref")
+    observation = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.benchmark-not-launched.json",
+        ref=observation_ref,
+        contract_version="benchmark_worker_not_launched_observation_v1",
+    )
+    exact_fields = {
+        "contract_version", "outcome", "authority_kind",
+        "reservation_ref", "run_id", "stage", "operation_id",
+        "worker_id", "owner_absence_observation_ref",
+        "process_event_job_beacon_absence_observation_ref",
+        "result_absence_observation_ref", "provider_absence_observation_ref",
+        "predecessor_content_sha256", "artifact_is_authorization",
+        "execute_binding_enabled", "content_sha256",
+    }
+    terminal_body = deepcopy(anchored)
+    terminal_body.pop("content_sha256")
+    terminal_body["reservation_state"] = "cancelled_before_launch"
+    terminal_body["abort_observation_ref"] = observation_ref
+    terminal_body["predecessor_content_sha256"] = anchored["content_sha256"]
+    expected_cancelled = seal_immutable(terminal_body)
+    if (
+        cancelled_reservation != expected_cancelled
+        or operation_anchor.get("reservation_ref")
+        != {"content_sha256": original_reservation["content_sha256"]}
+        or set(observation) != exact_fields
+        or observation.get("outcome") != "verified_no_launch_artifacts"
+        or observation.get("authority_kind") != original_reservation["authority_kind"]
+        or observation.get("reservation_ref")
+        != {"content_sha256": anchored["content_sha256"]}
+        or observation.get("run_id") != original_reservation["run_id"]
+        or observation.get("stage") != original_reservation["stage"]
+        or observation.get("operation_id") != original_reservation["operation_id"]
+        or observation.get("worker_id") != worker_id
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup receipt no-launch observation is invalid"
+        )
+    predecessor = _validate_benchmark_pre_anchor_absence_chain(
+        result_root=result_root,
+        reservation=anchored,
+        refs=observation,
+    )
+    if observation.get("predecessor_content_sha256") != predecessor:
+        raise LearningStageWorkerError(
+            "benchmark cleanup no-launch absence lineage is invalid"
+        )
+    return observation
+
+
+def _benchmark_transitioned_reservation(
+    parent: dict[str, Any], state: str
+) -> dict[str, Any]:
+    body = deepcopy(parent)
+    body.pop("content_sha256")
+    body["reservation_state"] = state
+    body["predecessor_content_sha256"] = parent["content_sha256"]
+    return seal_immutable(body)
+
+
+def _validate_exact_benchmark_process_identity(
+    value: object, *, label: str
+) -> dict[str, int]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"pid", "create_time_ns"}
+        or isinstance(value.get("pid"), bool)
+        or not isinstance(value.get("pid"), int)
+        or value["pid"] <= 0
+        or isinstance(value.get("create_time_ns"), bool)
+        or not isinstance(value.get("create_time_ns"), int)
+        or value["create_time_ns"] <= 0
+    ):
+        raise LearningStageWorkerError(f"benchmark {label} identity is invalid")
+    return {"pid": value["pid"], "create_time_ns": value["create_time_ns"]}
+
+
+def _validate_benchmark_cleanup_absence_artifact(
+    *,
+    result_root: Path,
+    worker_id: str,
+    kind: str,
+    ref: object,
+    predecessor: str,
+    scope_name: str | None,
+    process_identity: dict[str, int] | None,
+) -> dict[str, Any]:
+    artifact = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.{kind}-absence.json",
+        ref=ref,
+        contract_version="benchmark_worker_absence_observation_v1",
+    )
+    if (
+        set(artifact)
+        != {
+            "contract_version", "observation_kind", "outcome",
+            "worker_id", "scope_name", "process_identity",
+            "predecessor_content_sha256", "content_sha256",
+        }
+        or artifact.get("observation_kind") != kind
+        or artifact.get("outcome") != "absent"
+        or artifact.get("worker_id") != worker_id
+        or artifact.get("scope_name") != scope_name
+        or artifact.get("process_identity") != process_identity
+        or artifact.get("predecessor_content_sha256") != predecessor
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup receipt absence observation is invalid"
+        )
+    return artifact
+
+
+def _validate_benchmark_cleanup_handle_artifact(
+    *,
+    result_root: Path,
+    worker_id: str,
+    kind: str,
+    suffix: str,
+    ref: object,
+    predecessor: str,
+) -> dict[str, Any]:
+    artifact = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.{suffix}",
+        ref=ref,
+        contract_version="benchmark_worker_handle_close_observation_v1",
+    )
+    if (
+        set(artifact)
+        != {
+            "contract_version", "handle_kind", "result", "worker_id",
+            "predecessor_content_sha256", "content_sha256",
+        }
+        or artifact.get("handle_kind") != kind
+        or artifact.get("result") != "closed"
+        or artifact.get("worker_id") != worker_id
+        or artifact.get("predecessor_content_sha256") != predecessor
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup receipt handle observation is invalid"
+        )
+    return artifact
+
+
+def _validate_benchmark_launched_cleanup_receipt(
+    value: dict[str, Any],
+    *,
+    result_root: Path,
+    worker_id: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    operation_anchor: dict[str, Any],
+    original_reservation: dict[str, Any],
+    current_reservation: dict[str, Any],
+    supervision_root: BenchmarkWorkerSupervisionRoot,
+) -> dict[str, Any]:
+    from app.learn.hybrid.windows_process_scope import benchmark_worker_scope_name_v1
+
+    anchored = _benchmark_transitioned_reservation(
+        original_reservation, "anchored"
+    )
+    launching = _benchmark_transitioned_reservation(anchored, "launching")
+    launched = _benchmark_transitioned_reservation(launching, "launched")
+    if current_reservation != launched:
+        raise LearningStageWorkerError(
+            "benchmark cleanup current reservation lineage is invalid"
+        )
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind=original_reservation["authority_kind"],
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        worker_id=worker_id,
+        payload_sha256=original_reservation["payload_sha256"],
+        execution_nonce=original_reservation["execution_nonce"],
+    )
+    assignment = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.benchmark-assignment.json",
+        ref=value.get("assignment_proven_ref"),
+        contract_version="benchmark_worker_scope_assignment_v1",
+    )
+    process_identity = _validate_exact_benchmark_process_identity(
+        assignment.get("process_identity"), label="worker"
+    )
+    exact_job_policy = {
+        "kill_on_job_close": True,
+        "breakaway_ok": False,
+        "silent_breakaway_ok": False,
+        "owner_handle_authority": "registry_parent",
+    }
+    if (
+        set(assignment)
+        != {
+            "contract_version", "scope_name", "process_identity",
+            "observed_member_identities", "job_policy",
+            "temporary_process_handle_close", "temporary_job_handle_close",
+            "content_sha256",
+        }
+        or assignment.get("scope_name") != scope_name
+        or assignment.get("observed_member_identities") != [process_identity]
+        or assignment.get("job_policy") != exact_job_policy
+        or assignment.get("temporary_process_handle_close")
+        != {"handle_kind": "temporary_process", "status": "closed"}
+        or assignment.get("temporary_job_handle_close")
+        != {"handle_kind": "temporary_job", "status": "closed"}
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup assignment observation is invalid"
+        )
+
+    owner = _read_json_object(
+        result_root / f"{worker_id}.benchmark-owner.json",
+        label="benchmark owner journal",
+    )
+    owner_fields = {
+        "contract_version", "authority_kind", "operation_anchor_ref",
+        "reservation_ref", "supervision_ref", "run_id", "stage",
+        "operation_id", "worker_id", "model_request_id", "payload_sha256",
+        "execution_nonce", "scope_name", "supervisor_process_identity",
+        "phase", "process_identity", "beacon_ref",
+        "assignment_observation_ref", "job_policy", "gate_state",
+        "exit_observation_ref", "stable_zero_observation_ref",
+        "exact_handle_observation_refs", "cleanup_finalization_intent",
+        "cleanup_receipt_ref", "predecessor_content_sha256",
+        "content_sha256",
+    }
+    if set(owner) != owner_fields or content_sha256(owner) != owner.get(
+        "content_sha256"
+    ):
+        raise LearningStageWorkerError("benchmark owner journal shape is invalid")
+    supervisor_identity = _validate_exact_benchmark_process_identity(
+        owner.get("supervisor_process_identity"), label="supervisor"
+    )
+    supervision = compose_benchmark_worker_supervision_v1(
+        supervision_root=supervision_root,
+        reservation=original_reservation,
+        expected_operation_anchor=operation_anchor,
+        supervisor_process_identity=supervisor_identity,
+        startup_gate_timeout_ms=15_000,
+    )
+    assignment_ref = {"content_sha256": assignment["content_sha256"]}
+    beacon_ref = _benchmark_exact_ref(
+        owner.get("beacon_ref"), "benchmark owner beacon ref"
+    )
+    acquiring_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+        current=anchored,
+        anchor=operation_anchor,
+        supervision=supervision,
+        scope_name=scope_name,
+        supervisor_identity=supervisor_identity,
+        phase="acquiring",
+        process_identity=None,
+        beacon_ref=None,
+        assignment_ref=None,
+        gate_state="closed",
+        predecessor=None,
+    )
+    assigned_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+        current=launching,
+        anchor=operation_anchor,
+        supervision=supervision,
+        scope_name=scope_name,
+        supervisor_identity=supervisor_identity,
+        phase="assignment_proven",
+        process_identity=process_identity,
+        beacon_ref=beacon_ref,
+        assignment_ref=assignment_ref,
+        gate_state="closed",
+        predecessor=acquiring_owner["content_sha256"],
+    )
+    gate_owner = LearningStageWorkerRegistry._benchmark_owner_journal(
+        current=launching,
+        anchor=operation_anchor,
+        supervision=supervision,
+        scope_name=scope_name,
+        supervisor_identity=supervisor_identity,
+        phase="gate_released",
+        process_identity=process_identity,
+        beacon_ref=beacon_ref,
+        assignment_ref=assignment_ref,
+        gate_state="released",
+        predecessor=assigned_owner["content_sha256"],
+    )
+    if (
+        owner.get("operation_anchor_ref")
+        != {"content_sha256": operation_anchor["anchor_identity_sha256"]}
+        or owner.get("reservation_ref")
+        != {"content_sha256": launching["content_sha256"]}
+        or owner.get("supervision_ref")
+        != {"content_sha256": supervision["content_sha256"]}
+        or owner.get("run_id") != run_id
+        or owner.get("stage") != stage
+        or owner.get("operation_id") != operation_id
+        or owner.get("worker_id") != worker_id
+        or owner.get("model_request_id")
+        != original_reservation["model_request_id"]
+        or owner.get("payload_sha256") != original_reservation["payload_sha256"]
+        or owner.get("execution_nonce") != original_reservation["execution_nonce"]
+        or owner.get("scope_name") != scope_name
+        or owner.get("process_identity") != process_identity
+        or owner.get("assignment_observation_ref") != assignment_ref
+        or owner.get("job_policy") != exact_job_policy
+        or owner.get("phase") != "cleanup_finalization_intent"
+        or owner.get("gate_state") != "released"
+        or owner.get("cleanup_receipt_ref") is not None
+        or owner.get("predecessor_content_sha256")
+        != gate_owner["content_sha256"]
+    ):
+        raise LearningStageWorkerError("benchmark owner journal lineage is invalid")
+
+    intent = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.benchmark-cleanup-intent.json",
+        ref=value.get("finalization_intent_ref"),
+        contract_version="benchmark_worker_cleanup_finalization_intent_v1",
+    )
+    intent_fields = {
+        "contract_version", "supervision_ref", "assignment_proven_ref",
+        "run_id", "stage", "operation_id", "worker_id",
+        "supervisor_process_identity", "process_identity", "scope_name",
+        "gate_state", "exit_observation_ref", "stable_zero_observation_ref",
+        "exact_owned_handles", "exact_handle_observation_refs",
+        "owner_job_handle_close_planned", "cleanup_receipt_id",
+        "predecessor_content_sha256", "content_sha256",
+    }
+    if (
+        set(intent) != intent_fields
+        or intent.get("supervision_ref")
+        != {"content_sha256": supervision["content_sha256"]}
+        or intent.get("assignment_proven_ref") != assignment_ref
+        or intent.get("run_id") != run_id
+        or intent.get("stage") != stage
+        or intent.get("operation_id") != operation_id
+        or intent.get("worker_id") != worker_id
+        or intent.get("supervisor_process_identity") != supervisor_identity
+        or intent.get("process_identity") != process_identity
+        or intent.get("scope_name") != scope_name
+        or intent.get("gate_state") != "released"
+        or intent.get("predecessor_content_sha256")
+        != gate_owner["content_sha256"]
+        or intent.get("cleanup_receipt_id")
+        != content_sha256({"worker_id": worker_id, "scope_name": scope_name})
+        or intent.get("owner_job_handle_close_planned") is not True
+        or owner.get("cleanup_finalization_intent")
+        != {"content_sha256": intent["content_sha256"]}
+        or owner.get("exit_observation_ref") != intent.get("exit_observation_ref")
+        or owner.get("stable_zero_observation_ref")
+        != intent.get("stable_zero_observation_ref")
+        or owner.get("exact_handle_observation_refs")
+        != intent.get("exact_handle_observation_refs")
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup finalization intent lineage is invalid"
+        )
+    _benchmark_exact_ref(
+        intent.get("exit_observation_ref"), "benchmark exit observation ref"
+    )
+
+    stable_zero = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.stable-zero.json",
+        ref=intent.get("stable_zero_observation_ref"),
+        contract_version="benchmark_worker_stable_zero_observation_v1",
+    )
+    if (
+        set(stable_zero)
+        != {
+            "contract_version", "worker_id", "scope_name", "samples",
+            "predecessor_content_sha256", "content_sha256",
+        }
+        or stable_zero.get("worker_id") != worker_id
+        or stable_zero.get("scope_name") != scope_name
+    ):
+        raise LearningStageWorkerError(
+            "benchmark cleanup stable-zero observation is invalid"
+        )
+
+    receipt_handle_refs = value.get("exact_handle_observation_refs")
+    intent_handle_refs = intent.get("exact_handle_observation_refs")
+    supervisor_ref = value.get("supervisor_absence_observation_ref")
+    if supervisor_ref is None:
+        expected_owned = {
+            "worker_process": "closed_explicitly",
+            "startup_event": "closed_explicitly",
+            "beacon_file": "closed_explicitly",
+            "owner_job": "open",
+        }
+        if (
+            intent.get("exact_owned_handles") != expected_owned
+            or not isinstance(intent_handle_refs, dict)
+            or set(intent_handle_refs)
+            != {"worker_process", "startup_event", "beacon_file"}
+            or not isinstance(receipt_handle_refs, dict)
+            or set(receipt_handle_refs)
+            not in (
+                {"worker_process", "startup_event", "beacon_file"},
+                {"worker_process", "startup_event", "beacon_file", "owner_job"},
+            )
+            or any(
+                receipt_handle_refs.get(kind) != intent_handle_refs.get(kind)
+                for kind in ("worker_process", "startup_event", "beacon_file")
+            )
+        ):
+            raise LearningStageWorkerError(
+                "benchmark cleanup receipt handle refs are invalid"
+            )
+        predecessor = gate_owner["content_sha256"]
+        for kind, suffix in (
+            ("worker_process", "worker-process-close.json"),
+            ("startup_event", "startup-event-close.json"),
+            ("beacon_file", "beacon-file-close.json"),
+        ):
+            artifact = _validate_benchmark_cleanup_handle_artifact(
+                result_root=result_root,
+                worker_id=worker_id,
+                kind=kind,
+                suffix=suffix,
+                ref=intent_handle_refs[kind],
+                predecessor=predecessor,
+            )
+            predecessor = artifact["content_sha256"]
+        if (
+            stable_zero.get("samples") != [[], [], []]
+            or stable_zero.get("predecessor_content_sha256") != predecessor
+        ):
+            raise LearningStageWorkerError(
+                "benchmark cleanup stable-zero observation is invalid"
+            )
+        job_predecessor = intent["content_sha256"]
+        if "owner_job" in receipt_handle_refs:
+            owner_job = _validate_benchmark_cleanup_handle_artifact(
+                result_root=result_root,
+                worker_id=worker_id,
+                kind="owner_job",
+                suffix="owner-job-close.json",
+                ref=receipt_handle_refs["owner_job"],
+                predecessor=intent["content_sha256"],
+            )
+            job_predecessor = owner_job["content_sha256"]
+    else:
+        expected_owned = {
+            "worker_process": "closed_by_verified_supervisor_exit",
+            "startup_event": "closed_by_verified_supervisor_exit",
+            "beacon_file": "closed_by_verified_supervisor_exit",
+            "owner_job": "closed_by_verified_supervisor_exit",
+        }
+        if (
+            intent.get("exact_owned_handles") != expected_owned
+            or intent_handle_refs != {}
+            or receipt_handle_refs != {}
+        ):
+            raise LearningStageWorkerError(
+                "benchmark cleanup dead-supervisor handles are invalid"
+            )
+        supervisor_absence = _validate_benchmark_cleanup_absence_artifact(
+            result_root=result_root,
+            worker_id=worker_id,
+            kind="supervisor",
+            ref=supervisor_ref,
+            predecessor=gate_owner["content_sha256"],
+            scope_name=None,
+            process_identity=supervisor_identity,
+        )
+        samples = stable_zero.get("samples")
+        open_job_absent = [
+            {"probe": "OpenJob", "outcome": "absent", "error_code": 2},
+            {"probe": "OpenJob", "outcome": "absent", "error_code": 2},
+            {"probe": "OpenJob", "outcome": "absent", "error_code": 2},
+        ]
+        if (
+            samples not in ([[], [], []], open_job_absent)
+            or stable_zero.get("predecessor_content_sha256")
+            != supervisor_absence["content_sha256"]
+            or intent.get("exit_observation_ref") != supervisor_ref
+        ):
+            raise LearningStageWorkerError(
+                "benchmark cleanup dead-supervisor stable-zero is invalid"
+            )
+        job_predecessor = stable_zero["content_sha256"]
+
+    expected_final_owner_body = deepcopy(gate_owner)
+    expected_final_owner_body.pop("content_sha256")
+    expected_final_owner_body.update({
+        "phase": "cleanup_finalization_intent",
+        "exit_observation_ref": deepcopy(intent["exit_observation_ref"]),
+        "stable_zero_observation_ref": deepcopy(
+            intent["stable_zero_observation_ref"]
+        ),
+        "exact_handle_observation_refs": deepcopy(intent_handle_refs),
+        "cleanup_finalization_intent": {
+            "content_sha256": intent["content_sha256"]
+        },
+        "predecessor_content_sha256": gate_owner["content_sha256"],
+    })
+    if owner != seal_immutable(expected_final_owner_body):
+        raise LearningStageWorkerError("benchmark owner journal lineage is invalid")
+
+    job_absence = _validate_benchmark_cleanup_absence_artifact(
+        result_root=result_root,
+        worker_id=worker_id,
+        kind="job",
+        ref=value.get("job_absence_observation_ref"),
+        predecessor=job_predecessor,
+        scope_name=scope_name,
+        process_identity=None,
+    )
+    worker_absence = _validate_benchmark_cleanup_absence_artifact(
+        result_root=result_root,
+        worker_id=worker_id,
+        kind="worker",
+        ref=value.get("worker_absence_observation_ref"),
+        predecessor=job_absence["content_sha256"],
+        scope_name=None,
+        process_identity=process_identity,
+    )
+    if supervisor_ref is not None:
+        expected_supervisor_ref = supervisor_ref
+    else:
+        expected_supervisor_ref = None
+    expected = seal_immutable({
+        "contract_version": "benchmark_worker_cleanup_receipt_v1",
+        "outcome": "verified_exact_worker_exited",
+        "operation_anchor_ref": {
+            "content_sha256": operation_anchor["anchor_identity_sha256"]
+        },
+        "reservation_ref": {
+            "content_sha256": current_reservation["content_sha256"]
+        },
+        "supervision_ref": {"content_sha256": supervision["content_sha256"]},
+        "run_id": run_id,
+        "stage": stage,
+        "operation_id": operation_id,
+        "worker_id": worker_id,
+        "process_identity": process_identity,
+        "assignment_proven_ref": assignment_ref,
+        "finalization_intent_ref": {
+            "content_sha256": intent["content_sha256"]
+        },
+        "exact_handle_observation_refs": deepcopy(receipt_handle_refs),
+        "job_absence_observation_ref": {
+            "content_sha256": job_absence["content_sha256"]
+        },
+        "worker_absence_observation_ref": {
+            "content_sha256": worker_absence["content_sha256"]
+        },
+        "supervisor_absence_observation_ref": deepcopy(expected_supervisor_ref),
+        "reservation_abort_ref": None,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    })
+    if value != expected:
+        raise LearningStageWorkerError("benchmark cleanup receipt is invalid")
+    return deepcopy(expected)
+
+
 def _validate_benchmark_cleanup_receipt(
     value: object,
     *,
@@ -5536,280 +6256,134 @@ def _validate_benchmark_cleanup_receipt(
         raise LearningStageWorkerError("benchmark cleanup receipt identity is invalid")
     outcome = value.get("outcome")
     if outcome == "verified_not_launched":
-        launched_fields = (
-            "supervision_ref", "process_identity", "assignment_proven_ref",
-            "finalization_intent_ref", "exact_handle_observation_refs",
-            "job_absence_observation_ref", "worker_absence_observation_ref",
-            "supervisor_absence_observation_ref",
+        observation = _validate_benchmark_not_launched_observation(
+            result_root=result_root,
+            worker_id=worker_id,
+            original_reservation=original_reservation,
+            cancelled_reservation=current_reservation,
+            operation_anchor=operation_anchor,
         )
-        if (
-            current_reservation.get("reservation_state")
-            != "cancelled_before_launch"
-            or any(value.get(field) is not None for field in launched_fields)
-            or value.get("reservation_abort_ref") is None
-        ):
+        expected = _compose_benchmark_not_launched_receipt(
+            cancelled_reservation=current_reservation,
+            operation_anchor=operation_anchor,
+            observation=observation,
+        )
+        if value != expected:
             raise LearningStageWorkerError(
                 "benchmark cleanup receipt not-launched lineage is invalid"
             )
-        observation = _validate_benchmark_artifact_ref(
-            path=result_root / f"{worker_id}.benchmark-not-launched.json",
-            ref=value["reservation_abort_ref"],
-            contract_version="benchmark_worker_not_launched_observation_v1",
-        )
-        no_launch_fields = {
-            "contract_version", "outcome", "authority_kind",
-            "reservation_ref", "run_id", "stage", "operation_id",
-            "worker_id", "owner_absence_observation_ref",
-            "process_event_job_beacon_absence_observation_ref",
-            "result_absence_observation_ref", "provider_absence_observation_ref",
-            "predecessor_content_sha256", "artifact_is_authorization",
-            "execute_binding_enabled", "content_sha256",
-        }
-        if (
-            set(observation) != no_launch_fields
-            or observation.get("authority_kind")
-            != original_reservation["authority_kind"]
-            or observation.get("reservation_ref")
-            != {
-                "content_sha256": current_reservation[
-                    "predecessor_content_sha256"
-                ]
-            }
-            or observation.get("run_id") != run_id
-            or observation.get("stage") != stage
-            or observation.get("operation_id") != operation_id
-            or observation.get("worker_id") != worker_id
-            or
-            current_reservation.get("abort_observation_ref")
-            != value["reservation_abort_ref"]
-            or observation.get("outcome")
-            != "verified_no_launch_artifacts"
-        ):
-            raise LearningStageWorkerError(
-                "benchmark cleanup receipt no-launch observation is invalid"
-            )
-        predecessor = observation["reservation_ref"]["content_sha256"]
-        for field, kind in (
-            ("owner_absence_observation_ref", "owner"),
-            (
-                "process_event_job_beacon_absence_observation_ref",
-                "process_event_job_beacon",
-            ),
-            ("result_absence_observation_ref", "result"),
-            ("provider_absence_observation_ref", "provider"),
-        ):
-            artifact = _validate_benchmark_artifact_ref(
-                path=result_root
-                / f"{worker_id}.pre-anchor-{kind}-absence.json",
-                ref=observation.get(field),
-                contract_version=(
-                    "benchmark_worker_pre_anchor_absence_observation_v1"
-                ),
-            )
-            if (
-                set(artifact)
-                != {
-                    "contract_version", "observation_kind", "outcome",
-                    "reservation_ref", "run_id", "stage", "operation_id",
-                    "worker_id", "checks", "predecessor_content_sha256",
-                    "content_sha256",
-                }
-                or artifact.get("observation_kind") != kind
-                or artifact.get("outcome") != "absent"
-                or artifact.get("reservation_ref")
-                != observation["reservation_ref"]
-                or artifact.get("run_id") != run_id
-                or artifact.get("stage") != stage
-                or artifact.get("operation_id") != operation_id
-                or artifact.get("worker_id") != worker_id
-                or artifact.get("predecessor_content_sha256") != predecessor
-            ):
-                raise LearningStageWorkerError(
-                    "benchmark cleanup no-launch absence lineage is invalid"
-                )
-            predecessor = artifact["content_sha256"]
-        return deepcopy(value)
+        return deepcopy(expected)
     if outcome != "verified_exact_worker_exited":
         raise LearningStageWorkerError("benchmark cleanup receipt outcome is invalid")
     if value.get("reservation_abort_ref") is not None:
         raise LearningStageWorkerError("benchmark cleanup receipt lineage is invalid")
-    owner_path = result_root / f"{worker_id}.benchmark-owner.json"
-    owner = _read_json_object(owner_path, label="benchmark owner journal")
-    if content_sha256(owner) != owner.get("content_sha256"):
-        raise LearningStageWorkerError("benchmark owner journal digest is invalid")
-    supervision = compose_benchmark_worker_supervision_v1(
+    return _validate_benchmark_launched_cleanup_receipt(
+        value,
+        result_root=result_root,
+        worker_id=worker_id,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        operation_anchor=operation_anchor,
+        original_reservation=original_reservation,
+        current_reservation=current_reservation,
         supervision_root=supervision_root,
-        reservation=original_reservation,
-        expected_operation_anchor=operation_anchor,
-        supervisor_process_identity=owner.get("supervisor_process_identity"),
-        startup_gate_timeout_ms=15_000,
     )
-    if (
-        value.get("supervision_ref")
-        != {"content_sha256": supervision["content_sha256"]}
-        or value.get("assignment_proven_ref")
-        != owner.get("assignment_observation_ref")
-        or value.get("process_identity") != owner.get("process_identity")
-    ):
+
+
+def _validate_persisted_benchmark_store_decision(
+    *,
+    result_root: Path,
+    reservation: dict[str, Any],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    persisted = _validate_benchmark_artifact_ref(
+        path=(
+            result_root
+            / f"{reservation['operation_id']}.benchmark-store-decision.json"
+        ),
+        ref={"content_sha256": decision["content_sha256"]},
+        contract_version="benchmark_worker_store_anchor_decision_v1",
+    )
+    exact_fields = {
+        "contract_version", "authority_kind", "store_identity_sha256",
+        "store_state_found", "current_state_content_sha256",
+        "current_revision", "current_stage", "current_operation_id",
+        "current_operation_outcome", "current_incumbent_document_ref",
+        "current_operation_anchor_ref", "run_id", "stage", "operation_id",
+        "workflow_revision", "reservation_ref",
+        "expected_operation_anchor_ref", "reason", "outcome", "predicate",
+        "content_sha256",
+    }
+    if set(persisted) != exact_fields or persisted != decision:
         raise LearningStageWorkerError(
-            "benchmark cleanup receipt supervision is invalid"
+            "benchmark pre-anchor store decision is invalid"
         )
-    assignment = _validate_benchmark_artifact_ref(
-        path=result_root / f"{worker_id}.benchmark-assignment.json",
-        ref=value.get("assignment_proven_ref"),
-        contract_version="benchmark_worker_scope_assignment_v1",
+    return persisted
+
+
+def _validate_benchmark_pre_anchor_abort_observation(
+    *,
+    reservation: dict[str, Any],
+    aborted_reservation: dict[str, Any],
+    decision: dict[str, Any],
+    result_root: Path,
+    reason: str,
+) -> dict[str, Any]:
+    _validate_persisted_benchmark_store_decision(
+        result_root=result_root,
+        reservation=reservation,
+        decision=decision,
     )
-    if (
-        assignment.get("process_identity") != value.get("process_identity")
-        or assignment.get("scope_name") != owner.get("scope_name")
-    ):
+    observation_ref = aborted_reservation.get("abort_observation_ref")
+    try:
+        observation = _validate_benchmark_artifact_ref(
+            path=(
+                result_root
+                / f"{reservation['operation_id']}.benchmark-pre-anchor-abort.json"
+            ),
+            ref=observation_ref,
+            contract_version="benchmark_worker_pre_anchor_abort_observation_v1",
+        )
+    except LearningStageWorkerError as error:
         raise LearningStageWorkerError(
-            "benchmark cleanup assignment observation is invalid"
-        )
-    intent = _validate_benchmark_artifact_ref(
-        path=result_root / f"{worker_id}.benchmark-cleanup-intent.json",
-        ref=value.get("finalization_intent_ref"),
-        contract_version="benchmark_worker_cleanup_finalization_intent_v1",
-    )
-    intent_fields = {
-        "contract_version", "supervision_ref", "assignment_proven_ref",
-        "run_id", "stage", "operation_id", "worker_id",
-        "supervisor_process_identity", "process_identity", "scope_name",
-        "gate_state", "exit_observation_ref", "stable_zero_observation_ref",
-        "exact_owned_handles", "exact_handle_observation_refs",
-        "owner_job_handle_close_planned", "cleanup_receipt_id",
+            "benchmark pre-anchor abort observation is invalid"
+        ) from error
+    exact_fields = {
+        "contract_version", "store_decision_ref", "reservation_ref", "reason",
+        "owner_absence_observation_ref",
+        "process_event_job_beacon_absence_observation_ref",
+        "result_absence_observation_ref", "provider_absence_observation_ref",
         "predecessor_content_sha256", "content_sha256",
     }
+    terminal_body = deepcopy(reservation)
+    terminal_body.pop("content_sha256")
+    terminal_body["reservation_state"] = "aborted_before_anchor"
+    terminal_body["abort_observation_ref"] = observation_ref
+    terminal_body["predecessor_content_sha256"] = reservation["content_sha256"]
+    expected_aborted = seal_immutable(terminal_body)
     if (
-        set(intent) != intent_fields
-        or intent.get("supervision_ref") != value.get("supervision_ref")
-        or intent.get("assignment_proven_ref")
-        != value.get("assignment_proven_ref")
-        or intent.get("process_identity") != value.get("process_identity")
-        or intent.get("worker_id") != worker_id
-        or intent.get("owner_job_handle_close_planned") is not True
+        aborted_reservation != expected_aborted
+        or set(observation) != exact_fields
+        or observation.get("store_decision_ref")
+        != {"content_sha256": decision["content_sha256"]}
+        or observation.get("reservation_ref")
+        != {"content_sha256": reservation["content_sha256"]}
+        or observation.get("reason") != reason
     ):
         raise LearningStageWorkerError(
-            "benchmark cleanup finalization intent lineage is invalid"
+            "benchmark pre-anchor abort observation is invalid"
         )
-    stable_zero = _validate_benchmark_artifact_ref(
-        path=result_root / f"{worker_id}.stable-zero.json",
-        ref=intent.get("stable_zero_observation_ref"),
-        contract_version="benchmark_worker_stable_zero_observation_v1",
+    predecessor = _validate_benchmark_pre_anchor_absence_chain(
+        result_root=result_root,
+        reservation=reservation,
+        refs=observation,
     )
-    if (
-        set(stable_zero)
-        != {
-            "contract_version", "worker_id", "scope_name", "samples",
-            "predecessor_content_sha256", "content_sha256",
-        }
-        or stable_zero.get("worker_id") != worker_id
-        or stable_zero.get("scope_name") != owner.get("scope_name")
-        or not isinstance(stable_zero.get("samples"), list)
-        or len(stable_zero["samples"]) != 3
-    ):
+    if observation.get("predecessor_content_sha256") != predecessor:
         raise LearningStageWorkerError(
-            "benchmark cleanup stable-zero observation is invalid"
+            "benchmark pre-anchor abort observation is invalid"
         )
-    handle_refs = value.get("exact_handle_observation_refs")
-    if not isinstance(handle_refs, dict):
-        raise LearningStageWorkerError(
-            "benchmark cleanup receipt handle refs are invalid"
-        )
-    handle_paths = {
-        "worker_process": "worker-process-close.json",
-        "startup_event": "startup-event-close.json",
-        "beacon_file": "beacon-file-close.json",
-        "owner_job": "owner-job-close.json",
-    }
-    for kind in ("worker_process", "startup_event", "beacon_file"):
-        if (
-            handle_refs.get(kind) is None
-            and value.get("supervisor_absence_observation_ref") is not None
-            and isinstance(intent.get("exact_owned_handles"), dict)
-            and intent["exact_owned_handles"].get(kind)
-            == "closed_by_verified_supervisor_exit"
-        ):
-            continue
-        artifact = _validate_benchmark_artifact_ref(
-            path=result_root / f"{worker_id}.{handle_paths[kind]}",
-            ref=handle_refs.get(kind),
-            contract_version="benchmark_worker_handle_close_observation_v1",
-        )
-        if (
-            set(artifact)
-            != {
-                "contract_version", "handle_kind", "result", "worker_id",
-                "predecessor_content_sha256", "content_sha256",
-            }
-            or artifact.get("handle_kind") != kind
-            or artifact.get("result") != "closed"
-            or artifact.get("worker_id") != worker_id
-        ):
-            raise LearningStageWorkerError(
-                "benchmark cleanup receipt handle observation is invalid"
-            )
-    if handle_refs.get("owner_job") is not None:
-        artifact = _validate_benchmark_artifact_ref(
-            path=result_root / f"{worker_id}.{handle_paths['owner_job']}",
-            ref=handle_refs["owner_job"],
-            contract_version="benchmark_worker_handle_close_observation_v1",
-        )
-        if (
-            set(artifact)
-            != {
-                "contract_version", "handle_kind", "result", "worker_id",
-                "predecessor_content_sha256", "content_sha256",
-            }
-            or artifact.get("handle_kind") != "owner_job"
-            or artifact.get("result") != "closed"
-            or artifact.get("worker_id") != worker_id
-        ):
-            raise LearningStageWorkerError(
-                "benchmark cleanup receipt Job observation is invalid"
-            )
-    for kind, field in (
-        ("job", "job_absence_observation_ref"),
-        ("worker", "worker_absence_observation_ref"),
-        ("supervisor", "supervisor_absence_observation_ref"),
-    ):
-        ref = value.get(field)
-        if ref is None and kind == "supervisor":
-            continue
-        artifact = _validate_benchmark_artifact_ref(
-            path=result_root / f"{worker_id}.{kind}-absence.json",
-            ref=ref,
-            contract_version="benchmark_worker_absence_observation_v1",
-        )
-        if (
-            set(artifact)
-            != {
-                "contract_version", "observation_kind", "outcome",
-                "worker_id", "scope_name", "process_identity",
-                "predecessor_content_sha256", "content_sha256",
-            }
-            or artifact.get("observation_kind") != kind
-            or artifact.get("outcome") != "absent"
-            or artifact.get("worker_id") != worker_id
-            or (
-                kind == "job"
-                and artifact.get("scope_name") != owner.get("scope_name")
-            )
-            or (
-                kind == "worker"
-                and artifact.get("process_identity")
-                != value.get("process_identity")
-            )
-            or (
-                kind == "supervisor"
-                and artifact.get("process_identity")
-                != owner.get("supervisor_process_identity")
-            )
-        ):
-            raise LearningStageWorkerError(
-                "benchmark cleanup receipt absence observation is invalid"
-            )
-    return deepcopy(value)
+    return observation
 
 
 def _compose_benchmark_pre_anchor_abort_receipt(
@@ -5878,57 +6452,13 @@ def _validate_benchmark_pre_anchor_abort_receipt(
     result_root: Path,
     reason: str,
 ) -> dict[str, Any]:
-    decision_path = (
-        result_root
-        / f"{reservation['operation_id']}.benchmark-store-decision.json"
+    observation = _validate_benchmark_pre_anchor_abort_observation(
+        reservation=reservation,
+        aborted_reservation=aborted_reservation,
+        decision=decision,
+        result_root=result_root,
+        reason=reason,
     )
-    persisted_decision = _validate_benchmark_artifact_ref(
-        path=decision_path,
-        ref={"content_sha256": decision["content_sha256"]},
-        contract_version="benchmark_worker_store_anchor_decision_v1",
-    )
-    decision_fields = {
-        "contract_version", "authority_kind", "store_identity_sha256",
-        "store_state_found", "current_state_content_sha256",
-        "current_revision", "current_stage", "current_operation_id",
-        "current_operation_outcome", "current_incumbent_document_ref",
-        "current_operation_anchor_ref", "run_id", "stage", "operation_id",
-        "workflow_revision", "reservation_ref",
-        "expected_operation_anchor_ref", "reason", "outcome", "predicate",
-        "content_sha256",
-    }
-    if set(persisted_decision) != decision_fields or persisted_decision != decision:
-        raise LearningStageWorkerError(
-            "benchmark pre-anchor store decision is invalid"
-        )
-    observation = _validate_benchmark_artifact_ref(
-        path=result_root
-        / f"{reservation['operation_id']}.benchmark-pre-anchor-abort.json",
-        ref=(
-            value.get("abort_observation_ref")
-            if isinstance(value, dict)
-            else None
-        ),
-        contract_version="benchmark_worker_pre_anchor_abort_observation_v1",
-    )
-    observation_fields = {
-        "contract_version", "store_decision_ref", "reservation_ref", "reason",
-        "owner_absence_observation_ref",
-        "process_event_job_beacon_absence_observation_ref",
-        "result_absence_observation_ref", "provider_absence_observation_ref",
-        "predecessor_content_sha256", "content_sha256",
-    }
-    if (
-        set(observation) != observation_fields
-        or observation.get("store_decision_ref")
-        != {"content_sha256": decision["content_sha256"]}
-        or observation.get("reservation_ref")
-        != {"content_sha256": reservation["content_sha256"]}
-        or observation.get("reason") != reason
-    ):
-        raise LearningStageWorkerError(
-            "benchmark pre-anchor abort observation is invalid"
-        )
     expected = _compose_benchmark_pre_anchor_abort_receipt(
         reservation=reservation,
         aborted_reservation=aborted_reservation,
@@ -5940,46 +6470,6 @@ def _validate_benchmark_pre_anchor_abort_receipt(
         raise LearningStageWorkerError(
             "benchmark pre-anchor abort receipt is invalid"
         )
-    paths = {
-        "owner_absence_observation_ref": "owner",
-        "process_event_job_beacon_absence_observation_ref": (
-            "process_event_job_beacon"
-        ),
-        "result_absence_observation_ref": "result",
-        "provider_absence_observation_ref": "provider",
-    }
-    predecessor = reservation["content_sha256"]
-    for field, kind in paths.items():
-        artifact = _validate_benchmark_artifact_ref(
-            path=result_root
-            / f"{reservation['worker_id']}.pre-anchor-{kind}-absence.json",
-            ref=value[field],
-            contract_version=(
-                "benchmark_worker_pre_anchor_absence_observation_v1"
-            ),
-        )
-        if (
-            set(artifact) != {
-                "contract_version", "observation_kind", "outcome",
-                "reservation_ref", "run_id", "stage", "operation_id",
-                "worker_id", "checks", "predecessor_content_sha256",
-                "content_sha256",
-            }
-            or
-            artifact.get("observation_kind") != kind
-            or artifact.get("outcome") != "absent"
-            or artifact.get("reservation_ref")
-            != {"content_sha256": reservation["content_sha256"]}
-            or artifact.get("run_id") != reservation["run_id"]
-            or artifact.get("stage") != reservation["stage"]
-            or artifact.get("operation_id") != reservation["operation_id"]
-            or artifact.get("worker_id") != reservation["worker_id"]
-            or artifact.get("predecessor_content_sha256") != predecessor
-        ):
-            raise LearningStageWorkerError(
-                "benchmark pre-anchor absence lineage is invalid"
-            )
-        predecessor = artifact["content_sha256"]
     return deepcopy(expected)
 
 
