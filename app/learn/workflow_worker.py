@@ -744,6 +744,52 @@ def _unlink_benchmark_failed_launch_beacon(path: Path) -> dict[str, Any]:
     }
 
 
+def _benchmark_failed_launch_process_terminate(process: object) -> object:
+    return process.terminate()
+
+
+def _benchmark_failed_launch_process_close(process: object) -> object:
+    return process.close()
+
+
+def _benchmark_failed_launch_event_close(handle: object) -> object:
+    import win32api
+
+    return win32api.CloseHandle(handle)
+
+
+def _benchmark_failed_launch_job_terminate(scope: object) -> object:
+    return scope.terminate()
+
+
+def _benchmark_failed_launch_job_close(scope: object) -> object:
+    return scope.close()
+
+
+def _benchmark_failed_launch_job_stable_zero(scope: object | None) -> dict[str, Any]:
+    if scope is None:
+        return {"not_applicable": True, "samples": [[], [], []]}
+    samples: list[list[int]] = []
+    for _ in range(3):
+        samples.append(scope.pids())
+        if samples[-1]:
+            time.sleep(0.02)
+    if samples != [[], [], []]:
+        raise LearningStageWorkerError(
+            "benchmark failed launch Job did not reach stable zero"
+        )
+    return {"samples": samples}
+
+
+def _benchmark_failed_launch_close_already_proven(
+    resource: str,
+    error: BaseException,
+) -> bool:
+    if resource == "process_close":
+        return isinstance(error, ValueError) and "closed" in str(error).casefold()
+    return _benchmark_controller_error_code(error) == 6
+
+
 @contextmanager
 def hold_benchmark_worker_controller(
     *,
@@ -871,6 +917,7 @@ def hold_benchmark_worker_controller(
         )
     handle = win32event.CreateMutex(None, False, name)
     admitted = False
+    business_admitted = False
     primary: BaseException | None = None
     try:
         outcome = win32event.WaitForSingleObject(handle, timeout_ms)
@@ -915,6 +962,14 @@ def hold_benchmark_worker_controller(
                 raise LearningStageWorkerError(
                     "benchmark worker controller recovery required"
                 )
+        fresh_state = _load_benchmark_controller_state(root, name)
+        if (
+            fresh_state is not None
+            and fresh_state["state"] == "recovery_required"
+        ):
+            raise LearningStageWorkerError(
+                "benchmark worker controller recovery required"
+            )
         guard = seal_immutable({
             "contract_version": "benchmark_worker_controller_guard_v1",
             "controller_name": name,
@@ -942,6 +997,7 @@ def hold_benchmark_worker_controller(
                 else None
             ),
         }
+        business_admitted = True
         try:
             yield guard
         except BaseException as error:
@@ -952,11 +1008,27 @@ def hold_benchmark_worker_controller(
         release_result: dict[str, Any] = {"status": "not_owned"}
         close_result: dict[str, Any] = {"status": "not_open"}
         entry = held.get(name)
+        release_fence = None
         if (
-            admitted
+            business_admitted
+            and admitted
             and handle is not None
             and entry is not None
             and entry.get("state") == "active"
+        ):
+            release_fence = _persist_benchmark_controller_state(
+                root=root,
+                controller_name=name,
+                state="recovery_required",
+                release_result={"status": "pending"},
+                close_result={"status": "pending"},
+                predecessor_content_sha256=entry.get("state_ref"),
+            )
+            entry["state_ref"] = release_fence["content_sha256"]
+        if (
+            admitted
+            and handle is not None
+            and (entry is None or entry.get("state") == "active")
         ):
             try:
                 _benchmark_checked_release_mutex(handle)
@@ -965,14 +1037,29 @@ def hold_benchmark_worker_controller(
                 release_error = error
                 release_result = {"status": "error", "error_type": type(error).__name__, "message": str(error)}
                 close_result = {"status": "retained"}
+                predecessor = (
+                    entry.get("state_ref")
+                    if entry is not None
+                    else (
+                        _load_benchmark_controller_state(root, name) or {}
+                    ).get("content_sha256")
+                )
                 state = _persist_benchmark_controller_state(
                     root=root,
                     controller_name=name,
                     state="recovery_required",
                     release_result=release_result,
                     close_result={"status": "retained"},
-                    predecessor_content_sha256=entry.get("state_ref"),
+                    predecessor_content_sha256=predecessor,
                 )
+                if entry is None:
+                    entry = {
+                        "guard": None,
+                        "handle": handle,
+                        "depth": 1,
+                        "root": root,
+                    }
+                    held[name] = entry
                 entry["state"] = "release_uncertain"
                 entry["state_ref"] = state["content_sha256"]
         if release_error is None and (
@@ -999,7 +1086,39 @@ def hold_benchmark_worker_controller(
                     entry["state"] = "close_pending"
                     entry["depth"] = 0
                     entry["state_ref"] = state["content_sha256"]
+                else:
+                    predecessor = (
+                        _load_benchmark_controller_state(root, name) or {}
+                    ).get("content_sha256")
+                    state = _persist_benchmark_controller_state(
+                        root=root,
+                        controller_name=name,
+                        state="recovery_required",
+                        release_result=release_result,
+                        close_result=close_result,
+                        predecessor_content_sha256=predecessor,
+                    )
+                    entry = {
+                        "guard": None,
+                        "handle": handle,
+                        "depth": 0,
+                        "root": root,
+                        "state": "close_pending",
+                        "state_ref": state["content_sha256"],
+                    }
+                    held[name] = entry
             else:
+                if business_admitted and release_fence is not None:
+                    _persist_benchmark_controller_state(
+                        root=root,
+                        controller_name=name,
+                        state="clean",
+                        release_result={"status": "released"},
+                        close_result={"status": "closed"},
+                        predecessor_content_sha256=release_fence[
+                            "content_sha256"
+                        ],
+                    )
                 held.pop(name, None)
         if release_error is not None or close_error is not None:
             _record_benchmark_controller_cleanup_failure(
@@ -3362,76 +3481,21 @@ class LearningStageWorkerRegistry:
                     except BaseException:
                         failed_process_identity = None
 
-            cleanup_failures: list[dict[str, str]] = []
-
-            def cleanup_step(name: str, action: Callable[[], object]) -> dict[str, Any]:
-                try:
-                    result = action()
-                except BaseException as error:
-                    failure = {
-                        "step": name,
-                        "error_type": type(error).__name__,
-                        "message": str(error),
-                    }
-                    cleanup_failures.append(failure)
-                    return {"status": "error", **failure}
-                return {"status": "completed", "result": deepcopy(result)}
-
-            process_terminate = cleanup_step(
-                "process_terminate",
-                lambda: (
-                    {
-                        "alive_before": bool(process.is_alive()),
-                        "terminate_called": (
-                            bool(process.is_alive()) and not process.terminate()
-                        ),
-                    }
-                    if process is not None
-                    else {"not_applicable": True}
-                ),
-            )
-            job_terminate = cleanup_step(
-                "job_terminate",
-                lambda: (
-                    {"terminate_called": not scope.terminate()}
-                    if scope is not None
-                    else {"not_applicable": True}
-                ),
-            )
-            process_join = cleanup_step(
-                "process_join",
-                lambda: _join_benchmark_failed_launch_process(process),
-            )
-            process_close = cleanup_step(
-                "process_close",
-                lambda: (
-                    {"close_called": not process.close()}
-                    if process is not None
-                    else {"not_applicable": True}
-                ),
-            )
-            event_close = cleanup_step(
-                "event_close",
-                lambda: (
-                    {"close_called": not win32api.CloseHandle(event_handle)}
-                    if event_handle is not None
-                    else {"not_applicable": True}
-                ),
-            )
-            beacon_unlink = cleanup_step(
-                "beacon_unlink",
-                lambda: _unlink_benchmark_failed_launch_beacon(beacon_path),
-            )
-            job_close = cleanup_step(
-                "job_close",
-                lambda: (
-                    {"close_called": not scope.close()}
-                    if scope is not None
-                    else {"not_applicable": True}
-                ),
-            )
-            cleanup_observation = seal_immutable({
-                "contract_version": "benchmark_worker_launch_failure_cleanup_v1",
+            cleanup_entry = {
+                "cleanup_kind": "benchmark_failed_launch_v1",
+                "benchmark_process": process,
+                "benchmark_event_handle": event_handle,
+                "benchmark_scope": scope,
+                "beacon_path": beacon_path,
+                "attempt": 0,
+                "step_states": {
+                    name: {"status": "pending"}
+                    for name in (
+                        "process_terminate", "job_terminate", "process_join",
+                        "job_stable_zero", "process_close", "event_close",
+                        "beacon_unlink", "job_close",
+                    )
+                },
                 "authority_kind": root.authority_kind,
                 "run_id": current["run_id"],
                 "stage": current["stage"],
@@ -3449,28 +3513,16 @@ class LearningStageWorkerRegistry:
                     "error_type": type(primary_error).__name__,
                     "message": str(primary_error),
                 },
-                "process_terminate": process_terminate,
-                "job_terminate": job_terminate,
-                "process_join": process_join,
-                "process_close": process_close,
-                "event_close": event_close,
-                "beacon_unlink": beacon_unlink,
-                "job_close": job_close,
-                "cleanup_failures": deepcopy(cleanup_failures),
-                "cleanup_status": (
-                    "verified" if not cleanup_failures else "indeterminate"
-                ),
                 "predecessor_content_sha256": (
                     owner["content_sha256"]
                     if isinstance(owner, dict)
                     else current["content_sha256"]
                 ),
-                "artifact_is_authorization": False,
-            })
-            cleanup_path = self._result_root / (
-                f"{current['worker_id']}.benchmark-launch-failure-cleanup.json"
+            }
+            self._failed_start_cleanups[operation_key] = cleanup_entry
+            cleanup_observation = self._retry_benchmark_failed_launch_cleanup(
+                operation_key
             )
-            _write_json_atomic(cleanup_path, cleanup_observation)
             if isinstance(owner, dict):
                 failed_owner = self._benchmark_owner_journal(
                     current=self._benchmark_reservations.get(operation_key, current),
@@ -3504,12 +3556,194 @@ class LearningStageWorkerRegistry:
                 }
                 failed_owner = seal_immutable(owner_body)
                 _write_json_atomic(owner_path, failed_owner)
-            if cleanup_failures:
+            if cleanup_observation["cleanup_status"] != "verified":
                 raise LearningStageWorkerCleanupError(
                     cleanup_observation,
                     "Benchmark worker launch cleanup is indeterminate",
                 ) from primary_error
             raise
+
+    def _retry_benchmark_failed_launch_cleanup(
+        self,
+        operation_key: tuple[str, str, str],
+    ) -> dict[str, Any]:
+        entry = self._failed_start_cleanups.get(operation_key)
+        if (
+            not isinstance(entry, dict)
+            or entry.get("cleanup_kind") != "benchmark_failed_launch_v1"
+        ):
+            raise LearningStageWorkerError(
+                "benchmark failed launch cleanup authority is missing"
+            )
+        states = entry["step_states"]
+        process = entry["benchmark_process"]
+        scope = entry["benchmark_scope"]
+        event_handle = entry["benchmark_event_handle"]
+        failures: list[dict[str, str]] = []
+        if (
+            states["process_join"].get("status") == "completed"
+            and states["process_join"].get("result", {}).get("alive_after")
+            is False
+            and states["process_close"].get("status") == "completed"
+        ):
+            states["process_terminate"] = {
+                "status": "completed",
+                "result": {"superseded_by_absent_closed_process": True},
+            }
+        if (
+            states["job_stable_zero"].get("status") == "completed"
+            and states["job_close"].get("status") == "completed"
+        ):
+            states["job_terminate"] = {
+                "status": "completed",
+                "result": {"superseded_by_stable_zero_closed_job": True},
+            }
+
+        def attempt(
+            name: str,
+            action: Callable[[], object],
+            *,
+            close_resource: str | None = None,
+        ) -> None:
+            if states[name].get("status") == "completed":
+                return
+            try:
+                result = action()
+                if result is False:
+                    raise LearningStageWorkerError(
+                        f"benchmark failed launch {name} returned false"
+                    )
+            except BaseException as error:
+                if (
+                    close_resource is not None
+                    and _benchmark_failed_launch_close_already_proven(
+                        close_resource, error
+                    )
+                ):
+                    states[name] = {
+                        "status": "completed",
+                        "result": {"already_closed": True},
+                    }
+                    if close_resource == "job_close" and scope is not None:
+                        scope._closed = True
+                    return
+                failure = {
+                    "step": name,
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+                failures.append(failure)
+                states[name] = {"status": "error", **failure}
+                return
+            states[name] = {"status": "completed", "result": deepcopy(result)}
+
+        def terminate_process() -> dict[str, Any]:
+            if process is None:
+                return {"not_applicable": True}
+            alive_before = bool(process.is_alive())
+            if alive_before:
+                result = _benchmark_failed_launch_process_terminate(process)
+                if result is False:
+                    return False
+            return {
+                "alive_before": alive_before,
+                "terminate_called": alive_before,
+            }
+
+        def terminate_job() -> dict[str, Any]:
+            if scope is None:
+                return {"not_applicable": True}
+            result = _benchmark_failed_launch_job_terminate(scope)
+            if result is False:
+                return False
+            return {"terminate_called": True}
+
+        attempt("process_terminate", terminate_process)
+        attempt("job_terminate", terminate_job)
+        attempt(
+            "process_join",
+            lambda: _join_benchmark_failed_launch_process(process),
+        )
+        if states["process_join"].get("status") == "completed":
+            attempt(
+                "job_stable_zero",
+                lambda: _benchmark_failed_launch_job_stable_zero(scope),
+            )
+            attempt(
+                "process_close",
+                lambda: (
+                    {"not_applicable": True}
+                    if process is None
+                    else _benchmark_failed_launch_process_close(process)
+                ),
+                close_resource="process_close",
+            )
+        attempt(
+            "event_close",
+            lambda: (
+                {"not_applicable": True}
+                if event_handle is None
+                else _benchmark_failed_launch_event_close(event_handle)
+            ),
+            close_resource="event_close",
+        )
+        attempt(
+            "beacon_unlink",
+            lambda: _unlink_benchmark_failed_launch_beacon(entry["beacon_path"]),
+        )
+        if states["job_stable_zero"].get("status") == "completed":
+            attempt(
+                "job_close",
+                lambda: (
+                    {"not_applicable": True}
+                    if scope is None
+                    else _benchmark_failed_launch_job_close(scope)
+                ),
+                close_resource="job_close",
+            )
+        verified = all(
+            state.get("status") == "completed" for state in states.values()
+        )
+        attempt_index = int(entry["attempt"])
+        observation = seal_immutable({
+            "contract_version": "benchmark_worker_launch_failure_cleanup_v1",
+            "authority_kind": entry["authority_kind"],
+            "run_id": entry["run_id"],
+            "stage": entry["stage"],
+            "operation_id": entry["operation_id"],
+            "worker_id": entry["worker_id"],
+            "scope_name": entry["scope_name"],
+            "process_identity": deepcopy(entry["process_identity"]),
+            "assignment_observation_ref": deepcopy(
+                entry["assignment_observation_ref"]
+            ),
+            "launch_identity_anchor_ref": deepcopy(
+                entry["launch_identity_anchor_ref"]
+            ),
+            "primary_error": deepcopy(entry["primary_error"]),
+            **deepcopy(states),
+            "cleanup_failures": deepcopy(failures),
+            "cleanup_status": "verified" if verified else "indeterminate",
+            "cleanup_attempt": attempt_index,
+            "predecessor_content_sha256": entry[
+                "predecessor_content_sha256"
+            ],
+            "artifact_is_authorization": False,
+        })
+        path = self._result_root / (
+            f"{entry['worker_id']}.benchmark-launch-failure-cleanup.json"
+            if attempt_index == 0
+            else (
+                f"{entry['worker_id']}.benchmark-launch-failure-cleanup-"
+                f"retry-{attempt_index:04d}.json"
+            )
+        )
+        _write_json_atomic(path, observation)
+        entry["attempt"] = attempt_index + 1
+        entry["predecessor_content_sha256"] = observation["content_sha256"]
+        if verified:
+            self._failed_start_cleanups.pop(operation_key, None)
+        return observation
 
     @staticmethod
     def _transition_benchmark_reservation(current: dict[str, Any], state: str) -> dict[str, Any]:
@@ -3967,6 +4201,36 @@ class LearningStageWorkerRegistry:
                     expected_operation_anchor, supervision_root=root,
                     expected_reservation=original,
                 )
+                retained_cleanup = self._failed_start_cleanups.get(key)
+                if (
+                    isinstance(retained_cleanup, dict)
+                    and retained_cleanup.get("cleanup_kind")
+                    == "benchmark_failed_launch_v1"
+                ):
+                    retry_observation = (
+                        self._retry_benchmark_failed_launch_cleanup(key)
+                    )
+                    if retry_observation["cleanup_status"] != "verified":
+                        raise LearningStageWorkerCleanupError(
+                            retry_observation,
+                            "Benchmark worker launch cleanup is indeterminate",
+                        )
+                    return {
+                        "contract_version": (
+                            "benchmark_worker_failed_launch_cleanup_retry_v1"
+                        ),
+                        "status": "recovery_required",
+                        "worker_id": worker,
+                        "process_identity": deepcopy(
+                            retry_observation["process_identity"]
+                        ),
+                        "cleanup_status": "verified",
+                        "cleanup_observation_ref": {
+                            "content_sha256": retry_observation[
+                                "content_sha256"
+                            ]
+                        },
+                    }
                 receipt_path = self._result_root / f"{worker}.benchmark-cleanup.json"
                 if receipt_path.exists():
                     validated_receipt = _validate_benchmark_cleanup_receipt(
