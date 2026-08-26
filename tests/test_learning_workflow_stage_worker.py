@@ -14,10 +14,19 @@ from pathlib import Path
 import pytest
 
 from app.learn.workflow_worker import (
+    BENCHMARK_WORKER_CONTROLLER_DEFAULT_TIMEOUT_MS,
+    BenchmarkWorkerSupervisionRoot,
     LearningStageWorkerError,
     LearningStageWorkerRegistry,
+    compose_benchmark_worker_operation_anchor_v1,
+    compose_benchmark_worker_supervision_v1,
+    compose_test_benchmark_worker_supervision_root,
     execute_learning_stage_worker_task,
+    hold_benchmark_worker_controller,
+    validate_benchmark_worker_operation_anchor_v1,
+    validate_benchmark_worker_supervision_v1,
 )
+from app.learn.workflow_store import LearningWorkflowRunStore
 
 
 def _hybrid_lineage(
@@ -379,6 +388,217 @@ def _identity_inspection_registry(
         payload={"image_path": f"{suffix}.png"},
     )
     return registry, started
+
+
+def _benchmark_handler_payload_source(
+    handler_payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    corpus_ref = seal_immutable({
+        "contract_version": "benchmark_v2_provider_corpus_file_ref_v1",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": "1" * 64,
+        "source_parent_ref": {"content_sha256": "2" * 64},
+    })
+    payload = handler_payload or {"capture_live": False}
+    payload_sha256 = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return seal_immutable({
+        "contract_version": "benchmark_v2_incumbent_handler_payload_source_v1",
+        "provider_corpus_file_ref": corpus_ref,
+        "provider_case_ref": {
+            "case_id": "case-provider-safe",
+            "case_content_sha256": "3" * 64,
+        },
+        "projection_contract_version": (
+            "benchmark_v2_observe_screen_payload_projection_v1"
+        ),
+        "projection_rules_content_sha256": "4" * 64,
+        "window_binding_ref": {"id": "binding", "content_sha256": "5" * 64},
+        "capture_ref": {"id": "capture", "content_sha256": "6" * 64},
+        "handler_payload_sha256": payload_sha256,
+        "predecessor_content_sha256": corpus_ref["content_sha256"],
+    })
+
+
+def _benchmark_registry_fixture(
+    tmp_path: Path,
+) -> tuple[
+    LearningStageWorkerRegistry,
+    BenchmarkWorkerSupervisionRoot,
+    LearningWorkflowRunStore,
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+]:
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path,
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    reservation = registry.prepare_benchmark_worker_identity(
+        run_id="run-benchmark-worker",
+        stage="screen_understanding",
+        operation_id="operation-benchmark-worker",
+        workflow_revision=7,
+        task_kind="vision_observe_screen",
+        handler_payload_source=source,
+        supervision_root=root,
+    )
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root,
+        reservation=reservation,
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"],
+        predecessor_content_sha256=None,
+    )
+    return registry, root, store, source, reservation, anchor
+
+
+def _benchmark_parent_death_helper(
+    root_path: str, ready_queue, cut: str = "gate_released"
+) -> None:
+    """测试拥有的 outer parent；真实被终止以验证 creator Job 关闭。"""
+    try:
+        root_dir = Path(root_path)
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=root_dir, test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(),
+            test_store_capability=object(),
+        )
+        registry = LearningStageWorkerRegistry(
+            result_root=root_dir, benchmark_supervision_root=root,
+        )
+        source = _benchmark_handler_payload_source()
+        reservation = registry.prepare_benchmark_worker_identity(
+            run_id="run-parent-death", stage="screen_understanding",
+            operation_id="operation-parent-death", workflow_revision=1,
+            task_kind="vision_observe_screen", handler_payload_source=source,
+            supervision_root=root,
+        )
+        anchor = compose_benchmark_worker_operation_anchor_v1(
+            supervision_root=root, reservation=reservation,
+            handler_payload_source=source,
+            window_binding_ref=source["window_binding_ref"],
+            capture_ref=source["capture_ref"], predecessor_content_sha256=None,
+        )
+        confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+            reservation_ref={"content_sha256": reservation["content_sha256"]},
+            expected_operation_anchor=anchor, supervision_root=root,
+        )
+        if cut == "pre_assignment":
+            from app.learn.hybrid import windows_process_scope
+            real_assign = windows_process_scope.assign_exact_process_identity_to_scope
+
+            def pause_before_assignment(**kwargs):
+                ready_queue.put({
+                    "cut_ready": True, "anchor": anchor,
+                    "worker_id": reservation["worker_id"],
+                })
+                time.sleep(60)
+                return real_assign(**kwargs)
+
+            windows_process_scope.assign_exact_process_identity_to_scope = (
+                pause_before_assignment
+            )
+        if cut == "assignment_proven":
+            import win32event
+            real_set_event = win32event.SetEvent
+
+            def pause_before_gate_release(handle):
+                ready_queue.put({
+                    "cut_ready": True,
+                    "started": {"worker_id": reservation["worker_id"]},
+                    "anchor": anchor,
+                })
+                time.sleep(60)
+                return real_set_event(handle)
+
+            win32event.SetEvent = pause_before_gate_release
+        started = registry.launch_prepared_benchmark_worker(
+            reservation_ref=confirmation["anchored_reservation_ref"],
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+        if cut == "result_write":
+            deadline = time.monotonic() + 20
+            result_path = root_dir / f"{started['worker_id']}.result.json"
+            while time.monotonic() < deadline and not result_path.exists():
+                time.sleep(0.02)
+            ready_queue.put({"cut_ready": result_path.exists(), "started": started, "anchor": anchor})
+            time.sleep(60)
+        receipt_cut = cut.startswith("receipt_")
+        if cut in {"before_intent", "after_intent", "after_job_close"} or receipt_cut:
+            from app.learn import workflow_worker as worker_module
+            from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+            real_write = worker_module._write_json_atomic
+            real_close = WindowsProcessScope.close
+
+            if cut == "before_intent":
+                suffix = ".benchmark-cleanup-intent.json"
+
+                def pause_write(path, payload):
+                    if str(path).endswith(suffix):
+                        ready_queue.put({"cut_ready": True, "started": started, "anchor": anchor})
+                        time.sleep(60)
+                    return real_write(path, payload)
+
+                worker_module._write_json_atomic = pause_write
+            elif receipt_cut:
+                target_stage = cut.removeprefix("receipt_")
+
+                def pause_receipt(stage, path):
+                    if stage == target_stage:
+                        ready_queue.put({"cut_ready": True, "started": started, "anchor": anchor})
+                        time.sleep(60)
+
+                worker_module._benchmark_cleanup_fault_hook = pause_receipt
+            else:
+                def pause_close(scope):
+                    intent_exists = bool(list(root_dir.glob("*.benchmark-cleanup-intent.json")))
+                    if intent_exists:
+                        if cut == "after_job_close":
+                            real_close(scope)
+                        ready_queue.put({"cut_ready": True, "started": started, "anchor": anchor})
+                        time.sleep(60)
+                    return real_close(scope)
+
+                WindowsProcessScope.close = pause_close
+            registry.observe_benchmark_worker_cleanup(
+                worker_id=started["worker_id"], run_id="run-parent-death",
+                stage="screen_understanding", operation_id="operation-parent-death",
+                terminate=True, expected_operation_anchor=anchor,
+                supervision_root=root,
+            )
+        ready_queue.put({"started": started, "anchor": anchor})
+        time.sleep(60)
+    except BaseException as error:
+        ready_queue.put({"error": f"{type(error).__name__}: {error}"})
+
+
+def _benchmark_controller_owner_helper(root_path: str, ready_queue) -> None:
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=Path(root_path), test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    with hold_benchmark_worker_controller(
+        supervision_root=root, run_id="run-controller-process",
+        stage="screen_understanding", operation_id="operation-controller-process",
+    ):
+        ready_queue.put({"owned": True})
+        time.sleep(60)
 
 
 def test_worker_registry_starts_and_reports_owned_process(tmp_path: Path) -> None:
@@ -903,6 +1123,1170 @@ def test_worker_registry_cancel_terminates_process_and_preserves_audit(tmp_path:
     assert process.terminated is True
     assert process.is_alive() is False
     assert process.args[3] == started["model_request_id"]
+
+
+def test_benchmark_worker_prepare_and_pre_anchor_inspection_are_byte_stable(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source, anchor
+
+    assert set(reservation) == {
+        "contract_version",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "workflow_revision",
+        "task_kind",
+        "payload_sha256",
+        "handler_payload_source",
+        "handler_payload_source_ref",
+        "worker_id",
+        "model_request_id",
+        "execution_nonce",
+        "supervision_inputs_ref",
+        "reservation_state",
+        "abort_observation_ref",
+        "predecessor_content_sha256",
+        "content_sha256",
+    }
+    assert reservation["reservation_state"] == "reserved"
+    assert registry._records == {}
+    inspected = registry.inspect_prepared_benchmark_worker_identity(
+        run_id=str(reservation["run_id"]),
+        stage=str(reservation["stage"]),
+        operation_id=str(reservation["operation_id"]),
+        supervision_root=root,
+    )
+    assert inspected == reservation
+
+    reloaded = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    assert reloaded.inspect_prepared_benchmark_worker_identity(
+        run_id=str(reservation["run_id"]),
+        stage=str(reservation["stage"]),
+        operation_id=str(reservation["operation_id"]),
+        supervision_root=root,
+    ) == reservation
+    assert not list(tmp_path.glob("*.result.json"))
+    assert not list(tmp_path.glob("*.benchmark-owner.json"))
+    assert not list(tmp_path.glob("*.benchmark-beacon.json"))
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "source_digest", "corpus_digest", "case_shape", "projection_version",
+        "binding_shape", "capture_shape", "handler_sha", "predecessor",
+    ],
+)
+def test_benchmark_worker_handler_payload_source_rejects_each_closed_fault(
+    tmp_path: Path,
+    fault: str,
+) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    broken = deepcopy(source)
+    if fault == "source_digest":
+        broken["content_sha256"] = "f" * 64
+    elif fault == "corpus_digest":
+        broken["provider_corpus_file_ref"]["content_sha256"] = "f" * 64
+        raw = deepcopy(broken); raw.pop("content_sha256")
+        broken = seal_immutable(raw)
+    elif fault == "case_shape":
+        broken["provider_case_ref"]["extra"] = True
+        raw = deepcopy(broken); raw.pop("content_sha256")
+        broken = seal_immutable(raw)
+    elif fault == "projection_version":
+        broken["projection_contract_version"] = "wrong"
+        raw = deepcopy(broken); raw.pop("content_sha256")
+        broken = seal_immutable(raw)
+    elif fault in {"binding_shape", "capture_shape"}:
+        key = "window_binding_ref" if fault == "binding_shape" else "capture_ref"
+        broken[key]["extra"] = True
+        raw = deepcopy(broken); raw.pop("content_sha256")
+        broken = seal_immutable(raw)
+    elif fault == "handler_sha":
+        broken["handler_payload_sha256"] = "bad"
+        raw = deepcopy(broken); raw.pop("content_sha256")
+        broken = seal_immutable(raw)
+    else:
+        broken["predecessor_content_sha256"] = "f" * 64
+        raw = deepcopy(broken); raw.pop("content_sha256")
+        broken = seal_immutable(raw)
+    with pytest.raises(LearningStageWorkerError, match="benchmark"):
+        registry.prepare_benchmark_worker_identity(
+            run_id="run-source-fault", stage="screen_understanding",
+            operation_id="operation-source-fault", workflow_revision=1,
+            task_kind="vision_observe_screen", handler_payload_source=broken,
+            supervision_root=root,
+        )
+    assert not list(tmp_path.glob("*.benchmark-reservation.json"))
+
+
+def test_benchmark_worker_anchor_and_supervision_reject_substitution(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del registry, store, source
+    import psutil
+
+    assert validate_benchmark_worker_operation_anchor_v1(
+        anchor,
+        supervision_root=root,
+        expected_reservation=reservation,
+    ) == anchor
+    supervisor = {
+        "pid": os.getpid(),
+        "create_time_ns": int(
+            round(psutil.Process(os.getpid()).create_time() * 1_000_000_000)
+        ),
+    }
+    supervision = compose_benchmark_worker_supervision_v1(
+        supervision_root=root,
+        reservation=reservation,
+        expected_operation_anchor=anchor,
+        supervisor_process_identity=supervisor,
+        startup_gate_timeout_ms=15_000,
+    )
+    assert validate_benchmark_worker_supervision_v1(
+        supervision,
+        supervision_root=root,
+        expected_operation_anchor=anchor,
+    ) == supervision
+
+    wrong = deepcopy(anchor)
+    wrong["worker_id"] = "wrong-worker"
+    with pytest.raises(LearningStageWorkerError):
+        validate_benchmark_worker_operation_anchor_v1(
+            wrong,
+            supervision_root=root,
+            expected_reservation=reservation,
+        )
+    wrong_root = BenchmarkWorkerSupervisionRoot(
+        authority_kind=root.authority_kind,
+        journal_root=root.journal_root,
+        root_capability=object(),
+        read_only_store_authority=root.read_only_store_authority,
+        store_identity_sha256=root.store_identity_sha256,
+    )
+    with pytest.raises(LearningStageWorkerError, match="capability"):
+        validate_benchmark_worker_operation_anchor_v1(
+            anchor,
+            supervision_root=wrong_root,
+            expected_reservation=reservation,
+        )
+
+
+def test_benchmark_worker_controller_is_recursive_and_times_out_cross_thread(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del registry, store, source, reservation, anchor
+    assert BENCHMARK_WORKER_CONTROLLER_DEFAULT_TIMEOUT_MS == 5000
+    entered = Event()
+    errors: list[BaseException] = []
+
+    with hold_benchmark_worker_controller(
+        supervision_root=root,
+        run_id="run-controller",
+        stage="screen_understanding",
+        operation_id="operation-controller",
+    ) as outer:
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id="run-controller",
+            stage="screen_understanding",
+            operation_id="operation-controller",
+        ) as inner:
+            assert inner is outer
+
+        def contend() -> None:
+            entered.set()
+            try:
+                with hold_benchmark_worker_controller(
+                    supervision_root=root,
+                    run_id="run-controller",
+                    stage="screen_understanding",
+                    operation_id="operation-controller",
+                    timeout_ms=50,
+                ):
+                    pytest.fail("controller mutex unexpectedly admitted contender")
+            except BaseException as error:
+                errors.append(error)
+
+        thread = Thread(target=contend)
+        thread.start()
+        assert entered.wait(timeout=1)
+        thread.join(timeout=2)
+    assert len(errors) == 1
+    assert isinstance(errors[0], LearningStageWorkerError)
+    assert str(errors[0]) == "benchmark worker controller mutex timed out"
+
+
+def test_benchmark_worker_controller_cleanup_sidecar_preserves_primary_precedence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import win32api
+    import win32event
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    real_release = win32event.ReleaseMutex
+    release_calls = 0
+
+    def release_then_throw(handle) -> None:
+        nonlocal release_calls
+        release_calls += 1
+        real_release(handle)
+        raise OSError("injected-release-success-after-throw")
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", release_then_throw)
+    with pytest.raises(LearningStageWorkerError, match="primary-controller-error") as captured:
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-controller-release",
+            stage="screen_understanding", operation_id="operation-controller-release",
+        ):
+            raise RuntimeError("primary-controller-error")
+    assert isinstance(captured.value.__cause__, RuntimeError)
+    assert release_calls == 1
+    first_sidecar = json.loads(
+        next(tmp_path.glob("*.benchmark-controller-cleanup-failure.json"))
+        .read_text(encoding="utf-8")
+    )
+    assert first_sidecar["primary_exception"]["message"] == "primary-controller-error"
+    assert first_sidecar["release_result"]["status"] == "error"
+    assert first_sidecar["close_result"]["status"] == "closed"
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+    real_close = win32api.CloseHandle
+    close_calls = 0
+
+    def close_then_throw(handle) -> None:
+        nonlocal close_calls
+        close_calls += 1
+        real_close(handle)
+        raise OSError("injected-close-success-after-throw")
+
+    monkeypatch.setattr(win32api, "CloseHandle", close_then_throw)
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="benchmark worker controller cleanup failed",
+    ):
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-controller-close",
+            stage="screen_understanding", operation_id="operation-controller-close",
+        ):
+            pass
+    assert close_calls == 1
+    sidecars = list(tmp_path.glob("*.benchmark-controller-cleanup-failure.json"))
+    assert len(sidecars) == 2
+    assert any(
+        json.loads(path.read_text(encoding="utf-8"))["close_result"]["status"]
+        == "error"
+        for path in sidecars
+    )
+
+
+def test_benchmark_worker_controller_real_process_timeout_then_abandoned_revalidation(
+    tmp_path: Path,
+) -> None:
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    owner = context.Process(
+        target=_benchmark_controller_owner_helper,
+        args=(str(tmp_path), queue),
+        name="test-owned-benchmark-controller-owner",
+    )
+    owner.start()
+    try:
+        assert queue.get(timeout=10) == {"owned": True}
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path, test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+        )
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="benchmark worker controller mutex timed out",
+        ):
+            with hold_benchmark_worker_controller(
+                supervision_root=root, run_id="run-controller-process",
+                stage="screen_understanding", operation_id="operation-controller-process",
+                timeout_ms=100,
+            ):
+                pytest.fail("live owner admitted a second controller")
+        assert not list(tmp_path.glob("*.benchmark-reservation.json"))
+        owner.terminate(); owner.join(timeout=10)
+        assert owner.is_alive() is False
+        with hold_benchmark_worker_controller(
+            supervision_root=root, run_id="run-controller-process",
+            stage="screen_understanding", operation_id="operation-controller-process",
+        ):
+            assert not list(tmp_path.glob("*.benchmark-owner.json"))
+    finally:
+        if owner.is_alive():
+            owner.terminate(); owner.join(timeout=10)
+        queue.close(); queue.join_thread()
+
+
+def test_benchmark_worker_confirm_requires_anchor_before_launch_and_payload_exact(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store
+    reservation_ref = {"content_sha256": reservation["content_sha256"]}
+    with pytest.raises(LearningStageWorkerError, match="anchored"):
+        registry.launch_prepared_benchmark_worker(
+            reservation_ref=reservation_ref,
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref=reservation_ref,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    replay = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref=reservation_ref,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    assert confirmation == replay
+    assert confirmation["outcome"] == "verified_anchor_confirmed"
+    assert confirmation["prior_state"] == "reserved"
+    assert confirmation["new_state"] == "anchored"
+
+    with pytest.raises(LearningStageWorkerError, match="payload"):
+        registry.launch_prepared_benchmark_worker(
+            reservation_ref={"content_sha256": confirmation["anchored_reservation_ref"]["content_sha256"]},
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": True},
+            supervision_root=root,
+        )
+    assert registry._records == {}
+    assert not list(tmp_path.glob("*.benchmark-owner.json"))
+
+
+def test_benchmark_worker_preexisting_exact_job_is_collision_without_spawn(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        benchmark_worker_scope_name_v1,
+        spawn_process_in_scope,
+    )
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor, supervision_root=root,
+    )
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind=root.authority_kind, run_id=reservation["run_id"],
+        stage=reservation["stage"], operation_id=reservation["operation_id"],
+        worker_id=reservation["worker_id"], payload_sha256=reservation["payload_sha256"],
+        execution_nonce=reservation["execution_nonce"],
+    )
+    collision = WindowsProcessScope(scope_name, create=True)
+    foreign = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name, cwd=tmp_path,
+    )
+    time.sleep(0.2)
+    before_members = collision.pids()
+    try:
+        with pytest.raises(Exception, match="already exists"):
+            registry.launch_prepared_benchmark_worker(
+                reservation_ref=confirmation["anchored_reservation_ref"],
+                expected_operation_anchor=anchor,
+                authoritative_payload={"capture_live": False},
+                supervision_root=root,
+            )
+        assert registry._records == {}
+        assert foreign.pid in before_members
+        assert collision.pids() == before_members
+        assert foreign.poll() is None
+    finally:
+        collision.terminate()
+        foreign.wait(timeout=10)
+        foreign.close()
+        collision.close()
+
+
+def test_benchmark_worker_real_gate_timeout_never_runs_handler_and_stays_recovery_required(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import windows_process_scope
+
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(), workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    reservation = registry.prepare_benchmark_worker_identity(
+        run_id="run-gate-timeout", stage="screen_understanding",
+        operation_id="operation-gate-timeout", workflow_revision=1,
+        task_kind="vision_observe_screen", handler_payload_source=source,
+        supervision_root=root,
+    )
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root, reservation=reservation,
+        handler_payload_source=source, window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"], predecessor_content_sha256=None,
+    )
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor, supervision_root=root,
+    )
+    real_assign = windows_process_scope.assign_exact_process_identity_to_scope
+
+    def delay_past_child_gate(**kwargs):
+        time.sleep(15.2)
+        return real_assign(**kwargs)
+
+    monkeypatch.setattr(
+        windows_process_scope,
+        "assign_exact_process_identity_to_scope",
+        delay_past_child_gate,
+    )
+    with pytest.raises(Exception):
+        registry.launch_prepared_benchmark_worker(
+            reservation_ref=confirmation["anchored_reservation_ref"],
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+    monkeypatch.setattr(
+        windows_process_scope,
+        "assign_exact_process_identity_to_scope",
+        real_assign,
+    )
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root,
+    )
+    cleanup = restarted.observe_benchmark_worker_cleanup(
+        worker_id=reservation["worker_id"], run_id=reservation["run_id"],
+        stage=reservation["stage"], operation_id=reservation["operation_id"],
+        terminate=True, expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    assert cleanup["status"] == "recovery_required"
+    assert not list(tmp_path.glob("*.result.json"))
+
+
+def test_benchmark_worker_duplicate_beacon_rejects_without_foreign_identity_adoption(
+    tmp_path: Path,
+) -> None:
+    import psutil
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(), workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    reservation = registry.prepare_benchmark_worker_identity(
+        run_id="run-duplicate-beacon", stage="screen_understanding",
+        operation_id="operation-duplicate-beacon", workflow_revision=1,
+        task_kind="vision_observe_screen", handler_payload_source=source,
+        supervision_root=root,
+    )
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root, reservation=reservation,
+        handler_payload_source=source, window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"], predecessor_content_sha256=None,
+    )
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor, supervision_root=root,
+    )
+    fake = seal_immutable({
+        "contract_version": "benchmark_worker_identity_beacon_v1",
+        "worker_id": reservation["worker_id"],
+        "operation_anchor_ref": {"content_sha256": anchor["anchor_identity_sha256"]},
+        "process_identity": {"pid": os.getpid(), "create_time_ns": 1},
+        "predecessor_content_sha256": "f" * 64,
+    })
+    beacon_path = tmp_path / f"{reservation['worker_id']}.benchmark-beacon.json"
+    beacon_path.write_text(json.dumps(fake), encoding="utf-8")
+    with pytest.raises(LearningStageWorkerError, match="beacon identity mismatch"):
+        registry.launch_prepared_benchmark_worker(
+            reservation_ref=confirmation["anchored_reservation_ref"],
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+    assert not beacon_path.exists()
+    assert psutil.Process(os.getpid()).is_running()
+
+
+def test_benchmark_worker_abort_same_operation_without_store_decision_is_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store,
+        "get",
+        lambda run_id: {
+            "run_id": run_id,
+            "revision": 7,
+            "evidence_refs": {
+            "stage_execution": {
+                "contract_version": "learning_workflow_stage_operation_v1",
+                "operation_id": "operation-benchmark-worker",
+                "stage": "screen_understanding",
+                "owner": "backend_lease",
+                "started_at": "2026-08-26T00:00:00+00:00",
+                "lease_expires_at": "2026-08-26T00:10:00+00:00",
+            },
+        },
+        },
+    )
+
+    with pytest.raises(LearningStageWorkerError, match="indeterminate"):
+        registry.abort_prepared_benchmark_worker_before_anchor(
+            reservation_ref={"content_sha256": reservation["content_sha256"]},
+            run_id=str(reservation["run_id"]),
+            stage=str(reservation["stage"]),
+            operation_id=str(reservation["operation_id"]),
+            workflow_revision=int(reservation["workflow_revision"]),
+            expected_operation_anchor=anchor,
+            reason="store_cas_lost",
+            supervision_root=root,
+        )
+    assert registry.inspect_prepared_benchmark_worker_identity(
+        run_id=str(reservation["run_id"]),
+        stage=str(reservation["stage"]),
+        operation_id=str(reservation["operation_id"]),
+        supervision_root=root,
+    ) == reservation
+
+
+def test_benchmark_worker_pre_anchor_abort_uses_fresh_store_and_replays_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    calls: list[str] = []
+    monkeypatch.setattr(
+        store, "get",
+        lambda run_id: calls.append(run_id) or {
+            "run_id": run_id, "revision": 8, "current_stage": "screen_understanding",
+            "terminal": False, "evidence_refs": {},
+        },
+    )
+    kwargs = {
+        "reservation_ref": {"content_sha256": reservation["content_sha256"]},
+        "run_id": reservation["run_id"], "stage": reservation["stage"],
+        "operation_id": reservation["operation_id"],
+        "workflow_revision": reservation["workflow_revision"],
+        "expected_operation_anchor": anchor, "reason": "store_cas_lost",
+        "supervision_root": root,
+    }
+    first = registry.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    second = registry.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    assert first == second
+    assert first["outcome"] == "verified_aborted_before_anchor"
+    assert calls == [reservation["run_id"], reservation["run_id"]]
+    inspected = registry.inspect_prepared_benchmark_worker_identity(
+        run_id=reservation["run_id"], stage=reservation["stage"],
+        operation_id=reservation["operation_id"], supervision_root=root,
+    )
+    assert inspected["reservation_state"] == "aborted_before_anchor"
+    assert registry._records == {}
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        ".benchmark-store-decision.json",
+        ".benchmark-pre-anchor-abort.json",
+        ".benchmark-reservation.json",
+        ".benchmark-pre-anchor-abort-receipt.json",
+    ],
+)
+def test_benchmark_worker_pre_anchor_abort_atomic_cut_recovers_from_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+) -> None:
+    from app.learn import workflow_worker as worker_module
+
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store, "get",
+        lambda run_id: {
+            "run_id": run_id, "revision": 8, "current_stage": "screen_understanding",
+            "terminal": False, "evidence_refs": {},
+        },
+    )
+    real_write = worker_module._write_json_atomic
+    injected = {"done": False}
+
+    def fail_stage(path, payload):
+        if str(path).endswith(suffix) and not injected["done"]:
+            injected["done"] = True
+            raise OSError(f"injected-abort-cut:{suffix}")
+        return real_write(path, payload)
+
+    monkeypatch.setattr(worker_module, "_write_json_atomic", fail_stage)
+    kwargs = {
+        "reservation_ref": {"content_sha256": reservation["content_sha256"]},
+        "run_id": reservation["run_id"], "stage": reservation["stage"],
+        "operation_id": reservation["operation_id"],
+        "workflow_revision": reservation["workflow_revision"],
+        "expected_operation_anchor": anchor, "reason": "store_cas_lost",
+        "supervision_root": root,
+    }
+    with pytest.raises(OSError, match="injected-abort-cut"):
+        registry.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    monkeypatch.setattr(worker_module, "_write_json_atomic", real_write)
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root,
+    )
+    receipt = restarted.abort_prepared_benchmark_worker_before_anchor(**kwargs)
+    assert receipt["outcome"] == "verified_aborted_before_anchor"
+    assert restarted._records == {}
+
+
+def test_benchmark_worker_pre_anchor_abort_rejects_matching_store_anchor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del source
+    monkeypatch.setattr(
+        store, "get",
+        lambda run_id: {
+            "run_id": run_id, "revision": reservation["workflow_revision"],
+            "current_stage": reservation["stage"], "terminal": False,
+            "evidence_refs": {
+                "benchmark_worker_operation_anchor": deepcopy(anchor)
+            },
+        },
+    )
+    with pytest.raises(LearningStageWorkerError, match="matching store anchor"):
+        registry.abort_prepared_benchmark_worker_before_anchor(
+            reservation_ref={"content_sha256": reservation["content_sha256"]},
+            run_id=reservation["run_id"], stage=reservation["stage"],
+            operation_id=reservation["operation_id"],
+            workflow_revision=reservation["workflow_revision"],
+            expected_operation_anchor=anchor, reason="store_cas_lost",
+            supervision_root=root,
+        )
+    assert registry.inspect_prepared_benchmark_worker_identity(
+        run_id=reservation["run_id"], stage=reservation["stage"],
+        operation_id=reservation["operation_id"], supervision_root=root,
+    ) == reservation
+
+
+def test_benchmark_worker_generic_start_rejects_private_markers(
+    tmp_path: Path,
+) -> None:
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    for marker in (
+        "_benchmark_worker_supervision",
+        "_benchmark_worker_bootstrap",
+        "_benchmark_worker_handler_payload_source",
+    ):
+        with pytest.raises(LearningStageWorkerError, match="reserved"):
+            registry.start(
+                run_id=f"run-{marker}",
+                stage="screen_understanding",
+                operation_id=f"operation-{marker}",
+                task_kind="vision_observe_screen",
+                payload={marker: {}},
+            )
+    assert registry._records == {}
+
+
+def test_benchmark_worker_real_gate_assigns_before_release_and_cleanup_is_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path,
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    reservation = registry.prepare_benchmark_worker_identity(
+        run_id="run-real-gate", stage="screen_understanding",
+        operation_id="operation-real-gate", workflow_revision=1,
+        task_kind="vision_observe_screen", handler_payload_source=source,
+        supervision_root=root,
+    )
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root, reservation=reservation,
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"], predecessor_content_sha256=None,
+    )
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor, supervision_root=root,
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        benchmark_supervision_root=root,
+    )
+    started = None
+    try:
+        started = registry.launch_prepared_benchmark_worker(
+            reservation_ref=confirmation["anchored_reservation_ref"],
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+        owner = json.loads(
+            Path(registry._records[started["worker_id"]]["benchmark_owner_path"])
+            .read_text(encoding="utf-8")
+        )
+        assert owner["phase"] == "gate_released"
+        assert owner["assignment_observation_ref"] is not None
+        assert owner["job_policy"] == {
+            "kill_on_job_close": True,
+            "breakaway_ok": False,
+            "silent_breakaway_ok": False,
+            "owner_handle_authority": "registry_parent",
+        }
+    finally:
+        if started is not None:
+            from app.learn import workflow_worker as worker_module
+            from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+            fault_counts: dict[tuple[str, str], int] = {}
+
+            def staged_handle_fault(kind: str, stage: str) -> None:
+                key = (kind, stage)
+                if fault_counts.get(key, 0) == 0:
+                    fault_counts[key] = 1
+                    raise RuntimeError(f"injected-{kind}-{stage}")
+
+            monkeypatch.setattr(
+                worker_module, "_benchmark_handle_fault_hook", staged_handle_fault
+            )
+            for kind in ("worker_process", "startup_event", "beacon_file"):
+                with pytest.raises(
+                    RuntimeError, match=f"injected-{kind}-before_call"
+                ):
+                    registry.observe_benchmark_worker_cleanup(
+                        worker_id=started["worker_id"], run_id="run-real-gate",
+                        stage="screen_understanding", operation_id="operation-real-gate",
+                        terminate=True, expected_operation_anchor=anchor,
+                        supervision_root=root,
+                    )
+                record = registry._records[started["worker_id"]]
+                if kind == "worker_process":
+                    owned = record["process"]
+                    real_api = owned.close
+                    monkeypatch.setattr(
+                        owned, "close",
+                        lambda: (_ for _ in ()).throw(OSError("injected-worker-process-api-error")),
+                    )
+                elif kind == "startup_event":
+                    import win32api
+                    event_handle = record["benchmark_event_handle"]
+                    real_api = win32api.CloseHandle
+
+                    def fail_event(handle):
+                        if int(handle) == int(event_handle):
+                            raise OSError("injected-startup-event-api-error")
+                        return real_api(handle)
+
+                    monkeypatch.setattr(win32api, "CloseHandle", fail_event)
+                else:
+                    beacon_path = Path(record["benchmark_beacon_path"])
+                    real_api = Path.unlink
+
+                    def fail_beacon(path, *args, **kwargs):
+                        if path == beacon_path:
+                            raise OSError("injected-beacon-file-api-error")
+                        return real_api(path, *args, **kwargs)
+
+                    monkeypatch.setattr(Path, "unlink", fail_beacon)
+                with pytest.raises(OSError, match=f"injected-{kind.replace('_', '-')}-api-error"):
+                    registry.observe_benchmark_worker_cleanup(
+                        worker_id=started["worker_id"], run_id="run-real-gate",
+                        stage="screen_understanding", operation_id="operation-real-gate",
+                        terminate=True, expected_operation_anchor=anchor,
+                        supervision_root=root,
+                    )
+                if kind == "worker_process":
+                    monkeypatch.setattr(owned, "close", real_api)
+                elif kind == "startup_event":
+                    monkeypatch.setattr(win32api, "CloseHandle", real_api)
+                else:
+                    monkeypatch.setattr(Path, "unlink", real_api)
+                with pytest.raises(
+                    RuntimeError, match=f"injected-{kind}-after_success"
+                ):
+                    registry.observe_benchmark_worker_cleanup(
+                        worker_id=started["worker_id"], run_id="run-real-gate",
+                        stage="screen_understanding", operation_id="operation-real-gate",
+                        terminate=True, expected_operation_anchor=anchor,
+                        supervision_root=root,
+                    )
+            monkeypatch.setattr(
+                worker_module,
+                "_benchmark_handle_fault_hook",
+                lambda handle_kind, stage: None,
+            )
+            owned_scope = registry._records[started["worker_id"]]["benchmark_scope"]
+            real_pids = owned_scope.pids
+            monkeypatch.setattr(owned_scope, "pids", lambda: [999999])
+            with pytest.raises(
+                LearningStageWorkerError,
+                match="benchmark Job did not reach stable zero",
+            ):
+                registry.observe_benchmark_worker_cleanup(
+                    worker_id=started["worker_id"], run_id="run-real-gate",
+                    stage="screen_understanding", operation_id="operation-real-gate",
+                    terminate=False, expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
+            monkeypatch.setattr(owned_scope, "pids", real_pids)
+            real_close = WindowsProcessScope.close
+            owner_before = {"done": False}
+
+            def owner_job_before(kind: str, stage: str) -> None:
+                if kind == "owner_job" and stage == "before_call" and not owner_before["done"]:
+                    owner_before["done"] = True
+                    raise RuntimeError("injected-owner-job-before-call")
+
+            monkeypatch.setattr(
+                worker_module, "_benchmark_handle_fault_hook", owner_job_before
+            )
+            with pytest.raises(RuntimeError, match="injected-owner-job-before-call"):
+                registry.observe_benchmark_worker_cleanup(
+                    worker_id=started["worker_id"], run_id="run-real-gate",
+                    stage="screen_understanding", operation_id="operation-real-gate",
+                    terminate=True, expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
+            monkeypatch.setattr(
+                worker_module,
+                "_benchmark_handle_fault_hook",
+                lambda handle_kind, stage: None,
+            )
+            monkeypatch.setattr(
+                WindowsProcessScope,
+                "close",
+                lambda scope: (_ for _ in ()).throw(
+                    OSError("injected-owner-job-api-error")
+                ),
+            )
+            with pytest.raises(OSError, match="injected-owner-job-api-error"):
+                registry.observe_benchmark_worker_cleanup(
+                    worker_id=started["worker_id"], run_id="run-real-gate",
+                    stage="screen_understanding", operation_id="operation-real-gate",
+                    terminate=True, expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
+            monkeypatch.setattr(WindowsProcessScope, "close", real_close)
+            injected = {"done": False}
+
+            def owner_job_after(kind: str, stage: str) -> None:
+                if (
+                    kind == "owner_job"
+                    and stage == "after_success"
+                    and not injected["done"]
+                ):
+                    injected["done"] = True
+                    raise RuntimeError("injected-job-close-success-after-throw")
+
+            monkeypatch.setattr(
+                worker_module, "_benchmark_handle_fault_hook", owner_job_after
+            )
+            with pytest.raises(
+                RuntimeError, match="injected-job-close-success-after-throw"
+            ):
+                registry.observe_benchmark_worker_cleanup(
+                    worker_id=started["worker_id"], run_id="run-real-gate",
+                    stage="screen_understanding", operation_id="operation-real-gate",
+                    terminate=True, expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
+            receipt = registry.observe_benchmark_worker_cleanup(
+                worker_id=started["worker_id"], run_id="run-real-gate",
+                stage="screen_understanding", operation_id="operation-real-gate",
+                terminate=True, expected_operation_anchor=anchor,
+                supervision_root=root,
+            )
+            assert receipt["outcome"] == "verified_exact_worker_exited"
+            assert not Path(
+                registry._records[started["worker_id"]]["benchmark_beacon_path"]
+            ).exists()
+
+
+def test_benchmark_worker_controller_post_launch_release_fault_never_second_spawns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import win32event
+
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path, test_capability=object(),
+        workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path, benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    reservation = registry.prepare_benchmark_worker_identity(
+        run_id="run-controller-post-launch", stage="screen_understanding",
+        operation_id="operation-controller-post-launch", workflow_revision=1,
+        task_kind="vision_observe_screen", handler_payload_source=source,
+        supervision_root=root,
+    )
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root, reservation=reservation,
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"], capture_ref=source["capture_ref"],
+        predecessor_content_sha256=None,
+    )
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor, supervision_root=root,
+    )
+    real_release = win32event.ReleaseMutex
+    injected = {"done": False}
+
+    def release_after_success(handle):
+        real_release(handle)
+        if not injected["done"]:
+            injected["done"] = True
+            raise OSError("injected-post-launch-release")
+
+    monkeypatch.setattr(win32event, "ReleaseMutex", release_after_success)
+    try:
+        with pytest.raises(
+            LearningStageWorkerError,
+            match="benchmark worker controller cleanup failed",
+        ):
+            registry.launch_prepared_benchmark_worker(
+                reservation_ref=confirmation["anchored_reservation_ref"],
+                expected_operation_anchor=anchor,
+                authoritative_payload={"capture_live": False},
+                supervision_root=root,
+            )
+        monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+        current = registry.inspect_prepared_benchmark_worker_identity(
+            run_id=reservation["run_id"], stage=reservation["stage"],
+            operation_id=reservation["operation_id"], supervision_root=root,
+        )
+        assert current["reservation_state"] == "launched"
+        assert len(registry._records) == 1
+        with pytest.raises(LearningStageWorkerError, match="anchored"):
+            registry.launch_prepared_benchmark_worker(
+                reservation_ref={"content_sha256": current["content_sha256"]},
+                expected_operation_anchor=anchor,
+                authoritative_payload={"capture_live": False},
+                supervision_root=root,
+            )
+    finally:
+        monkeypatch.setattr(win32event, "ReleaseMutex", real_release)
+        if registry._records:
+            registry.observe_benchmark_worker_cleanup(
+                worker_id=reservation["worker_id"], run_id=reservation["run_id"],
+                stage=reservation["stage"], operation_id=reservation["operation_id"],
+                terminate=True, expected_operation_anchor=anchor,
+                supervision_root=root,
+            )
+
+
+def test_benchmark_worker_real_parent_death_recovers_without_second_spawn(
+    tmp_path: Path,
+) -> None:
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    outer = context.Process(
+        target=_benchmark_parent_death_helper,
+        args=(str(tmp_path), queue),
+        name="test-owned-benchmark-parent-death",
+    )
+    outer.start()
+    message = None
+    try:
+        message = queue.get(timeout=25)
+        assert "error" not in message, message.get("error")
+        outer.terminate()
+        outer.join(timeout=10)
+        assert outer.is_alive() is False
+
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path, test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(),
+            test_store_capability=object(),
+        )
+        registry = LearningStageWorkerRegistry(
+            result_root=tmp_path, benchmark_supervision_root=root,
+        )
+        started = message["started"]
+        receipt = registry.observe_benchmark_worker_cleanup(
+            worker_id=started["worker_id"], run_id="run-parent-death",
+            stage="screen_understanding", operation_id="operation-parent-death",
+            terminate=True, expected_operation_anchor=message["anchor"],
+            supervision_root=root,
+        )
+        assert receipt["outcome"] == "verified_exact_worker_exited"
+        assert receipt["supervisor_absence_observation_ref"] is not None
+        assert len(list(tmp_path.glob("*.worker.json"))) == 1
+    finally:
+        if outer.is_alive():
+            outer.terminate()
+            outer.join(timeout=10)
+        queue.close()
+        queue.join_thread()
+
+
+def test_benchmark_worker_parent_death_before_assignment_terminates_beacon_identity(
+    tmp_path: Path,
+) -> None:
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    outer = context.Process(
+        target=_benchmark_parent_death_helper,
+        args=(str(tmp_path), queue, "pre_assignment"),
+        name="test-owned-benchmark-preassignment-parent-death",
+    )
+    outer.start()
+    message = None
+    try:
+        message = queue.get(timeout=25)
+        assert message.get("cut_ready") is True, message
+        outer.terminate(); outer.join(timeout=10)
+        assert outer.is_alive() is False
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path, test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(),
+            test_store_capability=object(),
+        )
+        registry = LearningStageWorkerRegistry(
+            result_root=tmp_path, benchmark_supervision_root=root,
+        )
+        cleanup = registry.observe_benchmark_worker_cleanup(
+            worker_id=message["worker_id"], run_id="run-parent-death",
+            stage="screen_understanding", operation_id="operation-parent-death",
+            terminate=True, expected_operation_anchor=message["anchor"],
+            supervision_root=root,
+        )
+        assert cleanup["status"] == "recovery_required"
+        assert cleanup["exact_process_termination"]["outcome"] in {
+            "verified_exact_incarnation_terminated",
+            "exact_incarnation_already_absent",
+        }
+        assert not list(tmp_path.glob("*.benchmark-cleanup.json"))
+    finally:
+        if outer.is_alive():
+            outer.terminate(); outer.join(timeout=10)
+        queue.close(); queue.join_thread()
+
+
+@pytest.mark.parametrize(
+    "cut",
+    [
+        "assignment_proven", "result_write", "before_intent", "after_intent", "after_job_close",
+        "receipt_temp_create", "receipt_write", "receipt_file_flush",
+        "receipt_directory_fsync", "receipt_atomic_replace",
+    ],
+)
+def test_benchmark_worker_parent_death_cleanup_cut_recovers_same_incarnation(
+    tmp_path: Path,
+    cut: str,
+) -> None:
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    outer = context.Process(
+        target=_benchmark_parent_death_helper,
+        args=(str(tmp_path), queue, cut),
+        name=f"test-owned-benchmark-parent-death-{cut}",
+    )
+    outer.start()
+    try:
+        message = queue.get(timeout=30)
+        assert message.get("cut_ready") is True, message
+        outer.terminate(); outer.join(timeout=10)
+        assert outer.is_alive() is False
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=tmp_path, test_capability=object(),
+            workflow_store=LearningWorkflowRunStore(), test_store_capability=object(),
+        )
+        registry = LearningStageWorkerRegistry(
+            result_root=tmp_path, benchmark_supervision_root=root,
+        )
+        started = message["started"]
+        receipt = registry.observe_benchmark_worker_cleanup(
+            worker_id=started["worker_id"], run_id="run-parent-death",
+            stage="screen_understanding", operation_id="operation-parent-death",
+            terminate=True, expected_operation_anchor=message["anchor"],
+            supervision_root=root,
+        )
+        assert receipt["outcome"] == "verified_exact_worker_exited"
+        assert len(list(tmp_path.glob("*.worker.json"))) == (
+            0 if cut == "assignment_proven" else 1
+        )
+    finally:
+        if outer.is_alive():
+            outer.terminate(); outer.join(timeout=10)
+        queue.close(); queue.join_thread()
 
 
 def test_completed_result_identity_is_pre_adopt_read_only_and_closed(

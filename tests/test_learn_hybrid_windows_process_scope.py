@@ -13,6 +13,9 @@ import pytest
 from app.learn.hybrid.windows_process_scope import (
     HybridProcessScopeError,
     WindowsProcessScope,
+    assign_exact_process_identity_to_scope,
+    benchmark_worker_controller_mutex_name_v1,
+    benchmark_worker_scope_name_v1,
     observe_process_scope_cleanup,
     process_scope_name,
     spawn_process_in_scope,
@@ -34,6 +37,128 @@ def _lineage(index: int) -> dict:
         "stage": "screen_understanding",
         "stage_execution_id": f"execution-job-{index}",
     }
+
+
+def test_exact_process_identity_to_scope_assigns_exact_singleton() -> None:
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind="test_only",
+        run_id="run-exact",
+        stage="screen_understanding",
+        operation_id="operation-exact",
+        worker_id="worker-exact",
+        payload_sha256="a" * 64,
+        execution_nonce="b" * 32,
+    )
+    scope = WindowsProcessScope(scope_name, create=True)
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+    )
+    identity = {
+        "pid": child.pid,
+        "create_time_ns": int(
+            round(psutil.Process(child.pid).create_time() * 1_000_000_000)
+        ),
+    }
+    try:
+        observation = assign_exact_process_identity_to_scope(
+            scope_name=scope_name,
+            process_identity=identity,
+        )
+        assert set(observation) == {
+            "contract_version",
+            "scope_name",
+            "process_identity",
+            "observed_member_identities",
+            "job_policy",
+            "temporary_process_handle_close",
+            "temporary_job_handle_close",
+            "content_sha256",
+        }
+        assert observation["process_identity"] == identity
+        assert observation["observed_member_identities"] == [identity]
+        assert observation["job_policy"] == {
+            "kill_on_job_close": True,
+            "breakaway_ok": False,
+            "silent_breakaway_ok": False,
+            "owner_handle_authority": "registry_parent",
+        }
+    finally:
+        try:
+            scope.terminate()
+        finally:
+            scope.close()
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=5)
+
+
+def test_exact_process_identity_to_scope_rejects_wrong_incarnation() -> None:
+    scope_name = benchmark_worker_scope_name_v1(
+        authority_kind="test_only",
+        run_id="run-exact-wrong",
+        stage="screen_understanding",
+        operation_id="operation-exact-wrong",
+        worker_id="worker-exact-wrong",
+        payload_sha256="c" * 64,
+        execution_nonce="d" * 32,
+    )
+    scope = WindowsProcessScope(scope_name, create=True)
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+    )
+    try:
+        wrong = {
+            "pid": child.pid,
+            "create_time_ns": int(
+                round(psutil.Process(child.pid).create_time() * 1_000_000_000)
+            )
+            + 1,
+        }
+        with pytest.raises(HybridProcessScopeError, match="incarnation"):
+            assign_exact_process_identity_to_scope(
+                scope_name=scope_name,
+                process_identity=wrong,
+            )
+        assert scope.pids() == []
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+        scope.close()
+
+
+def test_exact_process_identity_to_scope_namespaces_are_disjoint_and_canonical() -> None:
+    production = benchmark_worker_scope_name_v1(
+        authority_kind="production_workflow_service",
+        run_id="run-name",
+        stage="screen_understanding",
+        operation_id="operation-name",
+        worker_id="worker-name",
+        payload_sha256="e" * 64,
+        execution_nonce="f" * 32,
+    )
+    test = benchmark_worker_scope_name_v1(
+        authority_kind="test_only",
+        run_id="run-name",
+        stage="screen_understanding",
+        operation_id="operation-name",
+        worker_id="worker-name",
+        payload_sha256="e" * 64,
+        execution_nonce="f" * 32,
+    )
+    mutex = benchmark_worker_controller_mutex_name_v1(
+        authority_kind="test_only",
+        run_id="run-name",
+        stage="screen_understanding",
+        operation_id="operation-name",
+    )
+    assert production.startswith("Local\\AgentGuiBenchmarkWorker-")
+    assert test.startswith("Local\\AgentGuiBenchmarkWorkerTest-")
+    assert mutex.startswith("Local\\AgentGuiBenchmarkWorkerControllerTest-")
+    assert len({production, test, mutex}) == 3
 
 
 def _spawn_reparenting_helper(tmp_path: Path, index: int):

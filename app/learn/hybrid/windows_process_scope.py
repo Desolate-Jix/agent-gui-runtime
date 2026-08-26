@@ -5,6 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import ctypes
 from ctypes import wintypes
+import json
 import os
 from pathlib import Path
 import re
@@ -20,6 +21,12 @@ PROCESS_SCOPE_CONTRACT_VERSION = "hybrid_windows_process_scope_v1"
 _PROVIDERS = {"omni", "qwen", "vista"}
 _SCOPE_NAME_RE = re.compile(
     r"\ALocal\\AgentGuiHybrid-(omni|qwen|vista)-[0-9a-f]{64}\Z"
+)
+_BENCHMARK_SCOPE_NAME_RE = re.compile(
+    r"\ALocal\\AgentGuiBenchmarkWorker(?:Test)?-[0-9a-f]{64}\Z"
+)
+_BENCHMARK_CONTROLLER_NAME_RE = re.compile(
+    r"\ALocal\\AgentGuiBenchmarkWorkerController(?:Test)?-[0-9a-f]{64}\Z"
 )
 _PROCESS_LAUNCH_LOCK = Lock()
 
@@ -60,11 +67,67 @@ def process_scope_name(lineage: Mapping[str, Any], provider: str) -> str:
     return f"Local\\AgentGuiHybrid-{normalized}-{digest}"
 
 
+def benchmark_worker_scope_name_v1(
+    *,
+    authority_kind: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    worker_id: str,
+    payload_sha256: str,
+    execution_nonce: str,
+) -> str:
+    material = _benchmark_name_material(
+        contract_version="benchmark_worker_scope_name_v1",
+        authority_kind=authority_kind,
+        fields={
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "worker_id": worker_id,
+            "payload_sha256": _require_lower_hex(payload_sha256, 64, "payload_sha256"),
+            "execution_nonce": _require_lower_hex(
+                execution_nonce, 32, "execution_nonce"
+            ),
+        },
+    )
+    prefix = (
+        "Local\\AgentGuiBenchmarkWorker-"
+        if authority_kind == "production_workflow_service"
+        else "Local\\AgentGuiBenchmarkWorkerTest-"
+    )
+    return prefix + _canonical_sha256(material)
+
+
+def benchmark_worker_controller_mutex_name_v1(
+    *,
+    authority_kind: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+) -> str:
+    material = _benchmark_name_material(
+        contract_version="benchmark_worker_controller_mutex_name_v1",
+        authority_kind=authority_kind,
+        fields={
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+        },
+    )
+    prefix = (
+        "Local\\AgentGuiBenchmarkWorkerController-"
+        if authority_kind == "production_workflow_service"
+        else "Local\\AgentGuiBenchmarkWorkerControllerTest-"
+    )
+    return prefix + _canonical_sha256(material)
+
+
 class WindowsProcessScope:
     def __init__(self, name: str, *, create: bool) -> None:
         if not windows_process_scope_available():
             raise HybridProcessScopeError("Windows Job Object authority is unavailable")
-        self.name = _scope_name(name)
+        self.name = _owned_scope_name(name)
         if create:
             self._handle = win32job.CreateJobObject(None, self.name)
             if int(win32api.GetLastError()) == 183:
@@ -109,6 +172,26 @@ class WindowsProcessScope:
         self._require_open()
         win32job.AssignProcessToJobObject(self._handle, process_handle)
 
+    def job_policy(self) -> dict[str, object]:
+        self._require_open()
+        information = win32job.QueryInformationJobObject(
+            self._handle, win32job.JobObjectExtendedLimitInformation
+        )
+        basic = dict(information.get("BasicLimitInformation") or {})
+        flags = int(basic.get("LimitFlags") or 0)
+        return {
+            "kill_on_job_close": bool(
+                flags & int(win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+            ),
+            "breakaway_ok": bool(
+                flags & int(win32job.JOB_OBJECT_LIMIT_BREAKAWAY_OK)
+            ),
+            "silent_breakaway_ok": bool(
+                flags & int(win32job.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK)
+            ),
+            "owner_handle_authority": "registry_parent",
+        }
+
     def terminate(self, exit_code: int = 197) -> None:
         self._require_open()
         win32job.TerminateJobObject(self._handle, int(exit_code))
@@ -121,6 +204,100 @@ class WindowsProcessScope:
     def _require_open(self) -> None:
         if self._closed:
             raise HybridProcessScopeError("Hybrid process scope handle is closed")
+
+
+def assign_exact_process_identity_to_scope(
+    *,
+    scope_name: str,
+    process_identity: Mapping[str, int],
+) -> dict[str, Any]:
+    normalized_scope_name = _benchmark_scope_name(scope_name)
+    expected = _validated_process_identity(process_identity)
+    before = _identity_for_pid(expected["pid"])
+    if before != expected:
+        raise HybridProcessScopeError(
+            "benchmark worker process incarnation changed before OpenProcess"
+        )
+
+    process_handle = None
+    scope = None
+    observation: dict[str, Any] | None = None
+    primary_error: BaseException | None = None
+    process_close: dict[str, object] | None = None
+    job_close: dict[str, object] | None = None
+    try:
+        access = (
+            int(win32con.PROCESS_QUERY_INFORMATION)
+            | int(win32con.PROCESS_SET_QUOTA)
+            | int(win32con.PROCESS_TERMINATE)
+        )
+        process_handle = win32api.OpenProcess(access, False, expected["pid"])
+        after_open = _identity_from_handle(process_handle, expected["pid"])
+        if not _same_process_incarnation(after_open, expected):
+            raise HybridProcessScopeError(
+                "benchmark worker process incarnation changed after OpenProcess"
+            )
+        scope = WindowsProcessScope(normalized_scope_name, create=False)
+        if scope.pids():
+            raise HybridProcessScopeError(
+                "benchmark worker Job must be empty before exact assignment"
+            )
+        scope.assign(process_handle)
+        after_assignment = _identity_from_handle(process_handle, expected["pid"])
+        observed = _identities_for_pids(scope.pids())
+        if not _same_process_incarnation(after_assignment, expected) or observed != [expected]:
+            raise HybridProcessScopeError(
+                "benchmark worker Job membership does not match exact incarnation"
+            )
+        policy = scope.job_policy()
+        if policy != _benchmark_job_policy():
+            raise HybridProcessScopeError("benchmark worker Job policy is invalid")
+        observation = {
+            "contract_version": "benchmark_worker_scope_assignment_v1",
+            "scope_name": normalized_scope_name,
+            "process_identity": expected,
+            "observed_member_identities": observed,
+            "job_policy": policy,
+        }
+    except BaseException as error:
+        primary_error = error
+    finally:
+        if process_handle is not None:
+            try:
+                win32api.CloseHandle(process_handle)
+                process_close = {"handle_kind": "temporary_process", "status": "closed"}
+            except BaseException as error:
+                process_close = {
+                    "handle_kind": "temporary_process",
+                    "status": "error",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+                if primary_error is None:
+                    primary_error = error
+        if scope is not None:
+            try:
+                scope.close()
+                job_close = {"handle_kind": "temporary_job", "status": "closed"}
+            except BaseException as error:
+                job_close = {
+                    "handle_kind": "temporary_job",
+                    "status": "error",
+                    "error_type": type(error).__name__,
+                    "message": str(error),
+                }
+                if primary_error is None:
+                    primary_error = error
+    if primary_error is not None:
+        if isinstance(primary_error, HybridProcessScopeError):
+            raise primary_error
+        raise HybridProcessScopeError(
+            "benchmark worker exact Job assignment failed"
+        ) from primary_error
+    assert observation is not None and process_close is not None and job_close is not None
+    observation["temporary_process_handle_close"] = process_close
+    observation["temporary_job_handle_close"] = job_close
+    return _seal_observation(observation)
 
 
 class ScopedProcess:
@@ -479,9 +656,164 @@ def _identities_for_pids(pids: Sequence[int]) -> list[dict[str, int]]:
     return sorted(identities, key=lambda item: (item["pid"], item["create_time_ns"]))
 
 
+def _identity_for_pid(pid: int) -> dict[str, int]:
+    try:
+        process = psutil.Process(int(pid))
+        return {
+            "pid": int(process.pid),
+            "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
+        }
+    except psutil.NoSuchProcess as error:
+        raise HybridProcessScopeError(
+            "benchmark worker process incarnation is absent"
+        ) from error
+    except (psutil.AccessDenied, OSError) as error:
+        raise HybridProcessScopeError(
+            "benchmark worker process incarnation is unobservable"
+        ) from error
+
+
+def _identity_from_handle(handle: Any, pid: int) -> dict[str, int]:
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        created = wintypes.FILETIME()
+        exited = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        kernel32.GetProcessTimes.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        )
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        if not kernel32.GetProcessTimes(
+            wintypes.HANDLE(int(handle)),
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        filetime = (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+        return {
+            "pid": int(pid),
+            "create_time_ns": (filetime - 116_444_736_000_000_000) * 100,
+        }
+    except BaseException as error:
+        raise HybridProcessScopeError(
+            "benchmark worker process handle incarnation is unobservable"
+        ) from error
+
+
+def _same_process_incarnation(
+    handle_identity: Mapping[str, int],
+    expected: Mapping[str, int],
+) -> bool:
+    return (
+        handle_identity.get("pid") == expected.get("pid")
+        and abs(
+            int(handle_identity.get("create_time_ns") or 0)
+            - int(expected.get("create_time_ns") or 0)
+        )
+        < 1_000
+    )
+
+
+def _validated_process_identity(value: Mapping[str, int]) -> dict[str, int]:
+    if not isinstance(value, Mapping) or set(value) != {"pid", "create_time_ns"}:
+        raise HybridProcessScopeError("benchmark worker process identity must be closed")
+    pid = value.get("pid")
+    created = value.get("create_time_ns")
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+        or isinstance(created, bool)
+        or not isinstance(created, int)
+        or created <= 0
+    ):
+        raise HybridProcessScopeError("benchmark worker process identity is invalid")
+    return {"pid": pid, "create_time_ns": created}
+
+
+def _benchmark_job_policy() -> dict[str, object]:
+    return {
+        "kill_on_job_close": True,
+        "breakaway_ok": False,
+        "silent_breakaway_ok": False,
+        "owner_handle_authority": "registry_parent",
+    }
+
+
+def _benchmark_name_material(
+    *,
+    contract_version: str,
+    authority_kind: str,
+    fields: Mapping[str, object],
+) -> dict[str, object]:
+    if authority_kind not in {"production_workflow_service", "test_only"}:
+        raise ValueError("benchmark worker authority_kind is invalid")
+    normalized: dict[str, object] = {
+        "contract_version": contract_version,
+        "authority_kind": authority_kind,
+    }
+    for key, value in fields.items():
+        if key not in {"payload_sha256", "execution_nonce"}:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"benchmark worker {key} is required")
+        normalized[key] = value
+    return normalized
+
+
+def _require_lower_hex(value: object, length: int, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != length
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"benchmark worker {field} is invalid")
+    return value
+
+
+def _canonical_sha256(value: Mapping[str, object]) -> str:
+    return sha256(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _seal_observation(value: Mapping[str, object]) -> dict[str, Any]:
+    sealed = dict(value)
+    sealed["content_sha256"] = _canonical_sha256(sealed)
+    return sealed
+
+
 def _scope_name(value: str) -> str:
     normalized = str(value or "").strip()
     if _SCOPE_NAME_RE.fullmatch(normalized) is None:
+        raise ValueError("Hybrid process scope name is invalid")
+    return normalized
+
+
+def _benchmark_scope_name(value: str) -> str:
+    normalized = str(value or "").strip()
+    if _BENCHMARK_SCOPE_NAME_RE.fullmatch(normalized) is None:
+        raise ValueError("benchmark worker scope name is invalid")
+    return normalized
+
+
+def _owned_scope_name(value: str) -> str:
+    normalized = str(value or "").strip()
+    if (
+        _SCOPE_NAME_RE.fullmatch(normalized) is None
+        and _BENCHMARK_SCOPE_NAME_RE.fullmatch(normalized) is None
+    ):
         raise ValueError("Hybrid process scope name is invalid")
     return normalized
 
@@ -518,6 +850,9 @@ __all__ = [
     "HybridProcessScopeError",
     "ScopedProcess",
     "WindowsProcessScope",
+    "assign_exact_process_identity_to_scope",
+    "benchmark_worker_controller_mutex_name_v1",
+    "benchmark_worker_scope_name_v1",
     "observe_process_scope_cleanup",
     "process_scope_name",
     "validate_process_scope_name",
