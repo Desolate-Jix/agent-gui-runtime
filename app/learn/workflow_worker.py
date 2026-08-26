@@ -1486,10 +1486,42 @@ def _run_learning_stage_worker_entry(
             sort_keys=True,
             separators=(",", ":"),
         )
+    binding_context = None
+    binding_lifecycle: dict[str, object] | None = None
+    binding_entered = False
     try:
+        execution_payload = deepcopy(payload)
+        has_serialized_binding = "_benchmark_v2_window_binding" in execution_payload
+        serialized_binding = execution_payload.pop(
+            "_benchmark_v2_window_binding", None
+        )
+        if has_serialized_binding:
+            if task_kind != "vision_observe_screen":
+                raise LearningStageWorkerError(
+                    "benchmark-v2 window binding is limited to vision_observe_screen"
+                )
+            if not isinstance(serialized_binding, dict):
+                raise LearningStageWorkerError(
+                    "benchmark-v2 window binding must be a sealed object"
+                )
+            from app.learn.hybrid.benchmark_v2_worker_binding import (
+                install_spawned_worker_window_binding,
+                validate_spawned_worker_observation_payload,
+            )
+
+            validate_spawned_worker_observation_payload(
+                payload=execution_payload,
+                serialized=serialized_binding,
+            )
+            binding_context = install_spawned_worker_window_binding(
+                serialized=serialized_binding,
+                worker_operation_id=str(identity.get("operation_id") or ""),
+            )
+            binding_lifecycle = binding_context.__enter__()
+            binding_entered = True
         response = execute_learning_stage_worker_task(
             task_kind,
-            payload,
+            execution_payload,
             cancellation_event=cancellation_event,
         )
         envelope = {
@@ -1511,6 +1543,55 @@ def _run_learning_stage_worker_entry(
             },
         }
     finally:
+        binding_cleanup_error: BaseException | None = None
+        if binding_entered and binding_context is not None:
+            try:
+                binding_context.__exit__(None, None, None)
+            except BaseException as cleanup_error:
+                binding_cleanup_error = cleanup_error
+        if binding_lifecycle is not None:
+            adopted_receipt = binding_lifecycle.get("adopted_receipt")
+            normal_clear_receipt = binding_lifecycle.get("normal_clear_receipt")
+            if isinstance(adopted_receipt, dict):
+                envelope["benchmark_v2_window_binding_adopted_receipt"] = deepcopy(
+                    adopted_receipt
+                )
+            if isinstance(normal_clear_receipt, dict):
+                envelope["normal_clear_receipt"] = deepcopy(normal_clear_receipt)
+            snapshot = binding_lifecycle.get("snapshot")
+            response_payload = envelope.get("response")
+            if (
+                isinstance(adopted_receipt, dict)
+                and isinstance(normal_clear_receipt, dict)
+                and isinstance(snapshot, dict)
+                and isinstance(response_payload, dict)
+            ):
+                response_payload["_benchmark_v2_window_binding_evidence"] = {
+                    "adopted_receipt": deepcopy(adopted_receipt),
+                    "normal_clear_receipt": deepcopy(normal_clear_receipt),
+                    "snapshot": deepcopy(snapshot),
+                }
+        if binding_cleanup_error is not None:
+            envelope = {
+                "contract_version": LEARNING_STAGE_WORKER_RESULT_CONTRACT_VERSION,
+                **deepcopy(identity),
+                "status": "failed",
+                "finished_at": _utc_now_iso(),
+                "error": {
+                    "type": type(binding_cleanup_error).__name__,
+                    "details": str(binding_cleanup_error),
+                },
+                **(
+                    {
+                        "benchmark_v2_window_binding_adopted_receipt": deepcopy(
+                            binding_lifecycle["adopted_receipt"]
+                        )
+                    }
+                    if isinstance(binding_lifecycle, dict)
+                    and isinstance(binding_lifecycle.get("adopted_receipt"), dict)
+                    else {}
+                ),
+            }
         if previous_request_id is None:
             os.environ.pop("AGENT_GUI_MODEL_REQUEST_ID", None)
         else:

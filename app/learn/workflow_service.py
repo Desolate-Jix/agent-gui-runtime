@@ -5,7 +5,7 @@ import hashlib
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from app.learn.calibration_artifact import (
@@ -63,6 +63,215 @@ class LearningWorkflowStageOperationError(ValueError):
     """学习阶段运行租约无效，拒绝接收过期或越权结果。"""
 
 
+_BENCHMARK_V2_WINDOW_BINDING_FIELD = "_benchmark_v2_window_binding"
+_BENCHMARK_V2_WINDOW_ADOPTION_CONTRACT = (
+    "portfolio_hybrid_benchmark_v2_worker_window_binding_adoption_v1"
+)
+
+
+def _reject_client_benchmark_v2_window_binding(payload: Mapping[str, object]) -> None:
+    if _BENCHMARK_V2_WINDOW_BINDING_FIELD in payload:
+        raise LearningWorkflowStageOperationError(
+            "_benchmark_v2_window_binding is server-owned"
+        )
+
+
+def inject_benchmark_v2_worker_window_binding(
+    *,
+    payload: dict[str, Any],
+    operation_ref: Mapping[str, object],
+    owner: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    """在server-owned worker payload cut-point注入sealed窗口绑定。"""
+
+    if not isinstance(payload, dict):
+        raise LearningWorkflowStageOperationError("worker payload must be an object")
+    _reject_client_benchmark_v2_window_binding(payload)
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        serialize_worker_window_binding,
+    )
+
+    child = deepcopy(payload)
+    child[_BENCHMARK_V2_WINDOW_BINDING_FIELD] = serialize_worker_window_binding(
+        operation_ref=operation_ref,
+        owner=owner,
+        capture_ref=capture_ref,
+    )
+    return child
+
+
+def validate_benchmark_v2_worker_window_binding_adoption(
+    *,
+    worker_payload: Mapping[str, object],
+    generic_adoption: Mapping[str, object],
+    operation_ref: Mapping[str, object],
+    owner: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+) -> dict[str, object]:
+    """用server refs与generic digest重建benchmark专用adoption receipt。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import require_sha256
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        ADOPTED_RECEIPT_CONTRACT,
+        NORMAL_CLEAR_RECEIPT_CONTRACT,
+        serialize_worker_window_binding,
+        validate_spawned_worker_observation_payload,
+        validate_spawned_worker_uia_snapshot,
+    )
+
+    try:
+        if not isinstance(worker_payload, Mapping):
+            raise ValueError("worker payload is invalid")
+        serialized = worker_payload.get(_BENCHMARK_V2_WINDOW_BINDING_FIELD)
+        if not isinstance(serialized, Mapping):
+            raise ValueError("sealed worker binding is missing")
+        expected_serialized = serialize_worker_window_binding(
+            operation_ref=operation_ref,
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        if dict(serialized) != expected_serialized:
+            raise ValueError("serialized worker binding differs from server refs")
+        handler_payload = {
+            key: deepcopy(item)
+            for key, item in worker_payload.items()
+            if key != _BENCHMARK_V2_WINDOW_BINDING_FIELD
+        }
+        validate_spawned_worker_observation_payload(
+            payload=handler_payload,
+            serialized=serialized,
+        )
+        if (
+            not isinstance(generic_adoption, Mapping)
+            or generic_adoption.get("contract_version")
+            != "learning_stage_worker_result_adoption_v1"
+            or generic_adoption.get("status") != "adopted"
+        ):
+            raise ValueError("generic adoption envelope is invalid")
+        generic_receipt = generic_adoption.get("receipt")
+        response = generic_adoption.get("response")
+        if not isinstance(generic_receipt, Mapping) or not isinstance(response, Mapping):
+            raise ValueError("generic adoption receipt or response is invalid")
+        receipt_fields = {
+            "contract_version",
+            "worker_id",
+            "run_id",
+            "stage",
+            "operation_id",
+            "task_kind",
+            "model_request_id",
+            "payload_sha256",
+            "result_sha256",
+            "adopted_at",
+        }
+        if (
+            set(generic_receipt) != receipt_fields
+            or generic_receipt.get("contract_version")
+            != "learning_stage_worker_result_adoption_v1"
+            or generic_receipt.get("operation_id") != operation_ref.get("operation_id")
+            or generic_receipt.get("task_kind") != "vision_observe_screen"
+        ):
+            raise ValueError("generic adoption lineage differs")
+        encoded_payload = json.dumps(
+            worker_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        worker_payload_sha256 = hashlib.sha256(encoded_payload).hexdigest()
+        if generic_receipt.get("payload_sha256") != worker_payload_sha256:
+            raise ValueError("generic adoption full payload SHA differs")
+        worker_result_sha256 = require_sha256(
+            generic_receipt.get("result_sha256"), "worker_result_sha256"
+        )
+        evidence = response.get("_benchmark_v2_window_binding_evidence")
+        if not isinstance(evidence, Mapping) or set(evidence) != {
+            "adopted_receipt",
+            "normal_clear_receipt",
+            "snapshot",
+        }:
+            raise ValueError("worker binding evidence is invalid")
+        snapshot = evidence["snapshot"]
+        if not isinstance(snapshot, Mapping):
+            raise ValueError("worker binding snapshot evidence is invalid")
+        snapshot_ref = validate_spawned_worker_uia_snapshot(
+            snapshot=snapshot,
+            serialized=serialized,
+            owner=owner,
+        )
+        adopted = evidence["adopted_receipt"]
+        expected_adopted: dict[str, object] = {
+            "contract_version": ADOPTED_RECEIPT_CONTRACT,
+            "operation_id": serialized["operation_id"],
+            "binding_payload_sha256": serialized["payload_sha256"],
+            "capture_sha256": serialized["capture_sha256"],
+            "uia_root_hwnd": serialized["expected_uia_root_hwnd"],
+            "uia_owner_pid": serialized["expected_uia_owner_pid"],
+            "snapshot_ref": snapshot_ref,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        expected_adopted["content_sha256"] = content_sha256(expected_adopted)
+        if adopted != expected_adopted:
+            raise ValueError("worker binding adopted receipt differs")
+        normal = evidence["normal_clear_receipt"]
+        if (
+            not isinstance(normal, Mapping)
+            or set(normal)
+            != {
+                "contract_version",
+                "operation_id",
+                "binding_payload_sha256",
+                "worker_pid",
+                "cleared",
+                "prior_binding_restored",
+                "restored_hwnd",
+                "artifact_is_authorization",
+                "execute_binding_enabled",
+                "content_sha256",
+            }
+            or normal.get("contract_version") != NORMAL_CLEAR_RECEIPT_CONTRACT
+            or normal.get("operation_id") != serialized["operation_id"]
+            or normal.get("binding_payload_sha256") != serialized["payload_sha256"]
+            or isinstance(normal.get("worker_pid"), bool)
+            or not isinstance(normal.get("worker_pid"), int)
+            or int(normal["worker_pid"]) <= 0
+            or normal.get("cleared") is not True
+            or normal.get("prior_binding_restored") is not False
+            or normal.get("restored_hwnd") is not None
+            or normal.get("artifact_is_authorization") is not False
+            or normal.get("execute_binding_enabled") is not False
+            or normal.get("content_sha256") != content_sha256(normal)
+        ):
+            raise ValueError("worker binding normal clear receipt differs")
+        rebuilt: dict[str, object] = {
+            "contract_version": _BENCHMARK_V2_WINDOW_ADOPTION_CONTRACT,
+            "worker_id": generic_receipt["worker_id"],
+            "run_id": generic_receipt["run_id"],
+            "stage": generic_receipt["stage"],
+            "operation_id": generic_receipt["operation_id"],
+            "task_kind": "vision_observe_screen",
+            "binding_payload_sha256": serialized["payload_sha256"],
+            "worker_payload_sha256": worker_payload_sha256,
+            "worker_result_sha256": worker_result_sha256,
+            "capture_sha256": serialized["capture_sha256"],
+            "uia_root_hwnd": serialized["expected_uia_root_hwnd"],
+            "uia_owner_pid": serialized["expected_uia_owner_pid"],
+            "snapshot_ref": snapshot_ref,
+            "normal_clear_receipt_ref": normal["content_sha256"],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        rebuilt["content_sha256"] = content_sha256(rebuilt)
+        return rebuilt
+    except (TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark-v2 worker binding adoption invalid: {error}"
+        ) from error
+
+
 def build_learning_pipeline_initial_worker_request(
     *,
     learning_pipeline_mode: str = "incumbent",
@@ -75,6 +284,7 @@ def build_learning_pipeline_initial_worker_request(
         raise LearningWorkflowStageOperationError(
             "learning pipeline payload must be an object"
         )
+    _reject_client_benchmark_v2_window_binding(payload)
     if mode == "incumbent":
         return {
             "task_kind": "vision_observe_screen",
