@@ -167,16 +167,18 @@ def _validate_learning_workflow_service_composition(
 ) -> LearningWorkflowServiceComposition:
     from app.learn.workflow_worker import LearningStageWorkerRegistry
 
-    if not isinstance(store, LearningWorkflowRunStore):
-        raise ValueError("composition store must be LearningWorkflowRunStore")
-    if not isinstance(worker_registry, LearningStageWorkerRegistry):
-        raise ValueError("composition Registry must be LearningStageWorkerRegistry")
+    benchmark_enabled = benchmark_supervision_root is not None
+    if composition_kind == "production" or benchmark_enabled:
+        if not isinstance(store, LearningWorkflowRunStore):
+            raise ValueError("composition store must be LearningWorkflowRunStore")
+        if not isinstance(worker_registry, LearningStageWorkerRegistry):
+            raise ValueError("composition Registry must be LearningStageWorkerRegistry")
     root = Path(project_root).resolve()
     if (benchmark_supervision_root is None) != (provider_case_resolver is None):
         raise ValueError(
             "benchmark composition requires both supervision root and case resolver"
         )
-    if benchmark_supervision_root is not None:
+    if benchmark_enabled:
         journal_root = Path(
             getattr(benchmark_supervision_root, "journal_root", "")
         ).resolve()

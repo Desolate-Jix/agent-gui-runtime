@@ -214,7 +214,27 @@ def _validate_provider_corpus(value: object) -> dict[str, Any]:
 
 def load_provider_corpus(*, child_path: Path, expected_sha256: str) -> dict[str, object]:
     raw = Path(child_path).read_bytes()
-    return validate_preloaded_provider_corpus(raw=raw, expected_sha256=expected_sha256)
+    validated = validate_preloaded_provider_corpus(
+        raw=raw, expected_sha256=expected_sha256
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    initialize_production_provider_case_resolver(
+        validated_corpus=validated,
+        provider_corpus_file_ref=seal_immutable(
+            {
+                "contract_version": _PROVIDER_CORPUS_FILE_REF_CONTRACT,
+                "relative_path": "provider-corpus.v2.json",
+                "file_sha256": expected_sha256,
+                "source_parent_ref": {
+                    "content_sha256": validated["source_parent_ref"][
+                        "content_sha256"
+                    ]
+                },
+            }
+        ),
+    )
+    return validated
 
 
 def validate_preloaded_provider_corpus(

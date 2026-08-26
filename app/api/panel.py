@@ -83,6 +83,7 @@ from app.learn.workflow_service import (
     adopt_guarded_learning_stage_worker_result,
     cancel_guarded_learning_workflow_stage_operation,
     continue_guarded_learning_stage_worker_result,
+    compose_test_learning_workflow_service,
     finish_guarded_learning_workflow_stage_operation,
     get_production_learning_workflow_service_composition,
     heartbeat_guarded_learning_workflow_stage_operation,
@@ -171,18 +172,11 @@ def _panel_learning_workflow_service_composition(
         learning_workflow_run_store is _PRODUCTION_PANEL_WORKFLOW_STORE
         and learning_stage_worker_registry is _PRODUCTION_PANEL_WORKER_REGISTRY
     ):
-        try:
-            return get_production_learning_workflow_service_composition()
-        except ValueError as error:
-            if str(error) != "production validated provider corpus is unavailable":
-                raise
-    return LearningWorkflowServiceComposition(
+        return get_production_learning_workflow_service_composition()
+    return compose_test_learning_workflow_service(
         store=learning_workflow_run_store,
         worker_registry=learning_stage_worker_registry,
         project_root=ROOT_DIR,
-        composition_kind="production",
-        benchmark_supervision_root=None,
-        provider_case_resolver=None,
     )
 
 

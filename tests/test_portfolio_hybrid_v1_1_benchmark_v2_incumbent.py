@@ -1103,3 +1103,51 @@ def test_document_static_no_action_runtime_click_or_publish_import() -> None:
     }
     forbidden = ("action", "runtime", "click", "publish")
     assert not any(token in name.casefold() for name in imports for token in forbidden)
+
+
+def test_production_corpus_validation_cut_installs_one_replayable_resolver(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    validated_provider_snapshot,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_provider_corpus as corpus_module
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
+    from app.learn import workflow_service
+
+    corpus, corpus_file_ref = validated_provider_snapshot
+    path = tmp_path / "provider-corpus.v2.json"
+    path.write_bytes(canonical_json_bytes(corpus, pretty=True))
+    monkeypatch.setattr(corpus_module, "_PRODUCTION_PROVIDER_CASE_RESOLVER", None)
+    monkeypatch.setattr(
+        workflow_service, "_PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION", None
+    )
+
+    loaded = corpus_module.load_provider_corpus(
+        child_path=path,
+        expected_sha256=corpus_file_ref["file_sha256"],
+    )
+    first = corpus_module.get_production_provider_case_resolver()
+    second = corpus_module.get_production_provider_case_resolver()
+    composition = workflow_service.get_production_learning_workflow_service_composition()
+
+    assert loaded == corpus
+    assert first is second is composition.provider_case_resolver
+    assert composition.composition_kind == "production"
+    assert composition.benchmark_supervision_root is not None
+
+
+def test_panel_production_composition_never_falls_back_to_an_unvalidated_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import panel as panel_api
+
+    def unavailable():
+        raise ValueError("production validated provider corpus is unavailable")
+
+    monkeypatch.setattr(
+        panel_api, "get_production_learning_workflow_service_composition", unavailable
+    )
+    with pytest.raises(
+        ValueError, match="production validated provider corpus is unavailable"
+    ):
+        panel_api._panel_learning_workflow_service_composition()
