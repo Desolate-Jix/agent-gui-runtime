@@ -328,6 +328,8 @@ _EVENT_PAYLOAD_FIELDS = {
 }
 _CLEANUP_FIELDS = {
     "contract_version", "owner_id", "reason", "exact_hwnd", "process_identity",
+    "cleanup_subject_kind", "finalization_intent_sha256", "process_event_sha256",
+    "ready_event_sha256", "publication_content_sha256",
     "cleanup_status", "shutdown_event_name", "shutdown_event_signaled",
     "shutdown_event_error_code", "shutdown_event_handle_closed",
     "enum_windows_exact_hwnd_absent", "matching_owned_windows_after",
@@ -336,6 +338,84 @@ _CLEANUP_FIELDS = {
     "listener_or_lease_residue", "outer_owner_python_finally_observed",
     "artifact_is_authorization", "execute_binding_enabled", "content_sha256",
 }
+
+
+def _expected_cleanup_lineage(
+    root: Mapping[str, object], events: list[dict[str, object]]
+) -> dict[str, object]:
+    finalization = [event for event in events if event["event_type"] == "finalization_intent"]
+    if len(finalization) != 1 or events[-1] != finalization[0]:
+        raise ValueError("window cleanup finalization lineage is missing or ambiguous")
+    reason = finalization[0]["payload"].get("reason")
+    if not isinstance(reason, str) or not reason or len(reason) > 128:
+        raise ValueError("window cleanup finalization reason is invalid")
+    process_events = [event for event in events if event["event_type"] == "process_created"]
+    publication_events = [event for event in events if event["event_type"] == "hwnd_published"]
+    ready_events = [event for event in events if event["event_type"] == "ready"]
+    process_identity: dict[str, int] = {"pid": 0, "create_time_ns": 0}
+    process_event_sha256: str | None = None
+    exact_hwnd = 0
+    publication_content_sha256: str | None = None
+    ready_event_sha256: str | None = None
+    subject_kind = "no_process"
+    if process_events:
+        if len(process_events) != 1:
+            raise ValueError("window cleanup process lineage is ambiguous")
+        process_identity = dict(process_events[0]["payload"]["process_identity"])
+        process_event_sha256 = str(process_events[0]["content_sha256"])
+        subject_kind = "spawned_process"
+    if publication_events:
+        if len(publication_events) != 1 or len(process_events) != 1:
+            raise ValueError("window cleanup publication lineage is ambiguous")
+        publication = publication_events[0]["payload"].get("publication")
+        if not isinstance(publication, Mapping):
+            raise ValueError("window cleanup publication is invalid")
+        if (
+            publication.get("content_sha256") != content_sha256(publication)
+            or publication.get("owner_id") != root["owner_id"]
+            or publication.get("process_identity") != process_identity
+            or publication.get("window_class") != root["window_class"]
+            or publication.get("window_title") != root["window_title"]
+            or publication.get("journal_root_sha256") != root["content_sha256"]
+            or publication.get("expected_predecessor_sha256") != process_event_sha256
+            or not isinstance(publication.get("hwnd"), int)
+            or int(publication["hwnd"]) <= 0
+        ):
+            raise ValueError("window cleanup publication lineage differs")
+        exact_hwnd = int(publication["hwnd"])
+        publication_content_sha256 = str(publication["content_sha256"])
+        subject_kind = "published_window"
+    if ready_events:
+        if len(ready_events) != 1 or len(publication_events) != 1:
+            raise ValueError("window cleanup ready lineage is ambiguous")
+        binding = ready_events[0]["payload"].get("binding")
+        if not isinstance(binding, Mapping):
+            raise ValueError("window cleanup ready binding is invalid")
+        if (
+            binding.get("contract_version") != OWNER_BINDING_CONTRACT
+            or binding.get("content_sha256") != content_sha256(binding)
+            or binding.get("owner_id") != root["owner_id"]
+            or binding.get("journal_root_sha256") != root["content_sha256"]
+            or binding.get("process_identity") != process_identity
+            or binding.get("hwnd") != exact_hwnd
+            or binding.get("window_class") != root["window_class"]
+            or binding.get("window_title") != root["window_title"]
+        ):
+            raise ValueError("window cleanup ready binding lineage differs")
+        ready_event_sha256 = str(ready_events[0]["content_sha256"])
+        subject_kind = "ready_window"
+    return {
+        "owner_id": root["owner_id"],
+        "shutdown_event_name": root["shutdown_event_name"],
+        "reason": reason,
+        "cleanup_subject_kind": subject_kind,
+        "process_identity": process_identity,
+        "exact_hwnd": exact_hwnd,
+        "finalization_intent_sha256": finalization[0]["content_sha256"],
+        "process_event_sha256": process_event_sha256,
+        "ready_event_sha256": ready_event_sha256,
+        "publication_content_sha256": publication_content_sha256,
+    }
 
 
 def _validate_event_payload(event_type: str, payload: object) -> None:
@@ -366,13 +446,23 @@ def _validate_event_payload(event_type: str, payload: object) -> None:
             raise ValueError("window owner process identity payload is invalid")
 
 
-def _load_events(journal_path: Path, *, owner_id: str) -> list[dict[str, object]]:
+def _load_events(
+    journal_path: Path, *, owner_id: str, exclude_last_cleanup: bool = False
+) -> list[dict[str, object]]:
     path = _events_path(journal_path)
     if not path.exists():
         return []
     try:
         journal_raw = path.read_bytes()
         lines = journal_raw.splitlines()
+        if exclude_last_cleanup:
+            if not lines:
+                raise ValueError("window owner cleanup event is absent")
+            last = json.loads(lines[-1].decode("utf-8"))
+            if not isinstance(last, Mapping) or last.get("event_type") != "cleanup_verified":
+                raise ValueError("window owner last event is not cleanup")
+            lines = lines[:-1]
+            journal_raw = b"".join(line + b"\n" for line in lines)
         events = [json.loads(line.decode("utf-8")) for line in lines]
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("window owner journal event bytes are invalid") from error
@@ -410,15 +500,8 @@ def _load_events(journal_path: Path, *, owner_id: str) -> list[dict[str, object]
         _validate_event_payload(event_type, event["payload"])
         if event_type == "cleanup_verified":
             cleanup_payload = event["payload"]
-            process_identity = cleanup_payload["process_identity"]
-            if (
-                cleanup_payload["owner_id"] != root["owner_id"]
-                or cleanup_payload["shutdown_event_name"] != root["shutdown_event_name"]
-                or not isinstance(cleanup_payload["exact_hwnd"], int)
-                or not isinstance(process_identity, Mapping)
-                or set(process_identity) != {"pid", "create_time_ns"}
-                or not all(isinstance(value, int) and value >= 0 for value in process_identity.values())
-            ):
+            expected_cleanup = _expected_cleanup_lineage(root, events[:sequence])
+            if any(cleanup_payload.get(key) != value for key, value in expected_cleanup.items()):
                 raise ValueError("window owner cleanup receipt lineage is invalid")
         previous = str(event["content_sha256"])
         previous_type = event_type
@@ -1375,7 +1458,10 @@ def close_owned_window(*, journal_path: Path, reason: str) -> dict[str, object]:
 def _close_owned_window_for_test(
     *, journal_path: Path, reason: str, failure_stage: str
 ) -> dict[str, object]:
-    allowed = {"kill", "wait", "process_close", "scope_close", "observe", "unlink"}
+    allowed = {
+        "kill", "wait", "process_close", "scope_close", "event_close",
+        "observe", "observe_final", "enum_after", "unlink", "signal", "signal_close",
+    }
     if failure_stage not in allowed:
         raise ValueError("window cleanup failure stage is invalid")
     journal = Path(journal_path).resolve()
@@ -1386,259 +1472,299 @@ def _close_owned_window_for_test(
         )
 
 
+def _append_cleanup_event_without_sidecar(
+    journal: Path,
+    *,
+    owner_id: str,
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    events = _load_events(journal, owner_id=owner_id)
+    previous = str(events[-1]["content_sha256"])
+    root = _load_root(journal)
+    event: dict[str, object] = {
+        "contract_version": EVENT_CONTRACT,
+        "sequence": len(events),
+        "event_type": "cleanup_verified",
+        "owner_id": owner_id,
+        "previous_event_sha256": previous,
+        "root_anchor_sha256": _sha(canonical_json_bytes(root)),
+        "payload": dict(payload),
+    }
+    event["content_sha256"] = content_sha256(event)
+    with _events_path(journal).open("ab") as stream:
+        stream.write(canonical_json_bytes(event) + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    verified = _load_events(journal, owner_id=owner_id)
+    if verified[-1] != event:
+        raise ValueError("window cleanup terminal append postcondition failed")
+    return event
+
+
 def _close_owned_window_locked(
     *, journal: Path, root: Mapping[str, object], reason: str,
     failure_stage: str | None,
 ) -> dict[str, object]:
-    events = _load_events(journal, owner_id=str(root["owner_id"]))
-    terminal = [event for event in events if event["event_type"] == "cleanup_verified"]
-    if terminal:
-        receipt = dict(terminal[-1]["payload"])
-        observed = observe_process_scope_cleanup(
-            str(root["scope_name"]), terminate=False, stable_zero_observations=3
-        )
-        exact_hwnd = int(receipt["exact_hwnd"])
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        user32.IsWindow.argtypes = (wintypes.HWND,)
-        user32.IsWindow.restype = wintypes.BOOL
-        matching = _enum_matching_windows(
-            int(receipt["process_identity"]["pid"]),
-            str(root["window_class"]),
-            str(root["window_title"]),
-        )
-        residue_present = bool(
-            observed["member_pids_after"]
-            or matching
-            or (exact_hwnd and bool(user32.IsWindow(exact_hwnd)))
-        )
-        terminal_invalid = bool(
-            residue_present
-            or observed["cleanup_status"] != "verified"
-            or observed["active_listeners_after"]
-            or observed["scope_absent_after_owner_close"] is not True
-        )
-        if terminal_invalid:
-            live = _LIVE_OWNERS.get(str(journal))
-            if live is not None and live.shutdown_event is not None:
-                try:
-                    live.shutdown_event.signal()
-                except OSError:
-                    pass
-            observe_process_scope_cleanup(
-                str(root["scope_name"]), terminate=True, stable_zero_observations=3
+    invalid_terminal_error: BaseException | None = None
+    try:
+        events = _load_events(journal, owner_id=str(root["owner_id"]))
+    except ValueError as error:
+        try:
+            events = _load_events(
+                journal,
+                owner_id=str(root["owner_id"]),
+                exclude_last_cleanup=True,
             )
-            if live is not None:
-                for item in (live.process, live.scope, live.shutdown_event):
-                    if item is not None:
-                        try:
-                            item.close()
-                        except BaseException:
-                            pass
-                with _LIVE_LOCK:
-                    _LIVE_OWNERS.pop(str(journal), None)
-            for path in (
-                _publication_path(journal), _publication_permit_path(journal),
-                _event_lock_path(journal), _helper_stderr_path(journal),
-            ):
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
-            raise ValueError("window cleanup terminal receipt preceded OS cleanup")
-        for path in (
-            _publication_path(journal), _publication_permit_path(journal),
-            _event_lock_path(journal), _helper_stderr_path(journal),
-        ):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        return receipt
-    if not isinstance(reason, str) or not reason or len(reason) > 128:
-        raise ValueError("window cleanup reason is invalid")
-    if not events or events[-1]["event_type"] != "finalization_intent":
-        _append_event(
-            journal,
-            owner_id=str(root["owner_id"]),
-            event_type="finalization_intent",
-            payload={"reason": reason},
-        )
-    events = _load_events(journal, owner_id=str(root["owner_id"]))
-    owner = _owner_for_cleanup(root, events)
-    live = None
+        except ValueError:
+            raise error
+        invalid_terminal_error = error
+    terminal = [event for event in events if event["event_type"] == "cleanup_verified"]
+    terminal_receipt = dict(terminal[-1]["payload"]) if terminal else None
+    if terminal_receipt is None:
+        if not isinstance(reason, str) or not reason or len(reason) > 128:
+            raise ValueError("window cleanup reason is invalid")
+        if not events or events[-1]["event_type"] != "finalization_intent":
+            _append_event(
+                journal,
+                owner_id=str(root["owner_id"]),
+                event_type="finalization_intent",
+                payload={"reason": reason},
+            )
+            events = _load_events(journal, owner_id=str(root["owner_id"]))
+    lineage_events = events[:-1] if terminal_receipt is not None else events
+    expected_lineage = _expected_cleanup_lineage(root, lineage_events)
+    owner = _owner_for_cleanup(root, lineage_events)
     with _LIVE_LOCK:
         live = _LIVE_OWNERS.get(str(journal))
-    exact_hwnd = int(owner["hwnd"]) if owner is not None else 0
-    pid = int(owner["process_identity"]["pid"]) if owner is not None else 0
-    matching_before: list[int] = []
-    shutdown_event_signaled = False
-    shutdown_event_error_code = 0
-    if owner is not None:
-        try:
-            _raw_hwnd_attestation(owner)
-            matching_before = _enum_matching_windows(
-                pid, str(owner["window_class"]), str(owner["window_title"])
-            )
-        except (ValueError, OSError):
-            matching_before = []
-    signal_handle = None
-    try:
-        signal_handle = (
-            live.shutdown_event
-            if live is not None and live.shutdown_event is not None
-            else _ShutdownEvent(str(root["shutdown_event_name"]), create=False)
-        )
-        signal_handle.signal()
-        shutdown_event_signaled = True
-    except OSError:
-        shutdown_event_error_code = ctypes.get_last_error()
-    deadline = time.monotonic() + 1.0
-    while (
-        live is not None
-        and live.process is not None
-        and live.process.poll() is None
-        and time.monotonic() < deadline
-    ):
-        time.sleep(0.02)
-    first_cleanup = observe_process_scope_cleanup(
-        str(root["scope_name"]), terminate=True, stable_zero_observations=3
-    )
-    process_handle_closed = live is None or live.process is None
-    job_handle_closed = live is None or live.scope is None
-    shutdown_event_handle_closed = live is None or live.shutdown_event is None
+
+    exact_hwnd = int(expected_lineage["exact_hwnd"])
+    pid = int(expected_lineage["process_identity"]["pid"])
     cleanup_errors: list[BaseException] = []
-    if failure_stage == "observe":
-        cleanup_errors.append(RuntimeError("injected cleanup observe failure"))
-    if live is not None:
+    if invalid_terminal_error is not None:
+        cleanup_errors.append(invalid_terminal_error)
+    failed_once = False
+    failed_result = object()
+
+    def attempt(stage: str, operation):
+        nonlocal failed_once
         try:
-            if live.process is not None:
-                try:
-                    if live.process.poll() is None:
-                        live.process.kill()
-                    if failure_stage == "kill":
-                        raise RuntimeError("injected cleanup kill failure")
-                    live.process.wait(5)
-                    if failure_stage == "wait":
-                        raise RuntimeError("injected cleanup wait failure")
-                except BaseException as error:
-                    cleanup_errors.append(error)
-                try:
-                    live.process.close()
-                    live.process = None
-                    process_handle_closed = True
-                    if failure_stage == "process_close":
-                        raise RuntimeError("injected cleanup process-close failure")
-                except BaseException as error:
-                    cleanup_errors.append(error)
-            if live.scope is not None:
-                try:
-                    live.scope.close()
-                    live.scope = None
-                    job_handle_closed = True
-                    if failure_stage == "scope_close":
-                        raise RuntimeError("injected cleanup scope-close failure")
-                except BaseException as error:
-                    cleanup_errors.append(error)
-            if live.shutdown_event is not None:
-                try:
-                    live.shutdown_event.close()
-                    live.shutdown_event = None
-                    shutdown_event_handle_closed = True
-                except BaseException as error:
-                    cleanup_errors.append(error)
-        finally:
-            pass
-    elif signal_handle is not None:
-        try:
-            signal_handle.close()
-            shutdown_event_handle_closed = True
+            if failure_stage == stage and not failed_once:
+                failed_once = True
+                raise RuntimeError(f"injected cleanup {stage} failure")
+            return operation()
         except BaseException as error:
             cleanup_errors.append(error)
-    final_cleanup = observe_process_scope_cleanup(
-        str(root["scope_name"]), terminate=True, stable_zero_observations=3
-    )
-    matching_after = (
-        _enum_matching_windows(pid, str(root["window_class"]), str(root["window_title"]))
-        if pid
-        else []
+            return failed_result
+
+    matching_before = attempt(
+        "enum_before",
+        lambda: _enum_matching_windows(
+            pid, str(root["window_class"]), str(root["window_title"])
+        ) if pid else [],
     )
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.IsWindow.argtypes = (wintypes.HWND,)
     user32.IsWindow.restype = wintypes.BOOL
-    hwnd_absent = exact_hwnd == 0 or not bool(user32.IsWindow(exact_hwnd))
-    for path in (
+    hwnd_present_before = bool(
+        attempt("iswindow_before", lambda: exact_hwnd > 0 and bool(user32.IsWindow(exact_hwnd)))
+    )
+    pre_cleanup = attempt(
+        "observe_pre",
+        lambda: observe_process_scope_cleanup(
+            str(root["scope_name"]), terminate=False, stable_zero_observations=3
+        ),
+    )
+
+    shutdown_event_signaled = False
+    shutdown_event_error_code = 0
+    signal_handle: _ShutdownEvent | None = None
+    separate_signal_handle = False
+    no_process_observed = bool(
+        isinstance(pre_cleanup, Mapping)
+        and not pre_cleanup.get("observed_member_pids_before")
+    )
+    if not no_process_observed or (live is not None and live.shutdown_event is not None):
+        if live is not None and live.shutdown_event is not None:
+            signal_handle = live.shutdown_event
+        else:
+            signal_handle = attempt(
+                "signal_open",
+                lambda: _ShutdownEvent(str(root["shutdown_event_name"]), create=False),
+            )
+            separate_signal_handle = (
+                signal_handle is not None and signal_handle is not failed_result
+            )
+        if signal_handle is not None and signal_handle is not failed_result:
+            signaled = attempt("signal", signal_handle.signal)
+            if signaled is not failed_result:
+                # signal()正常返回None；只要没有本次signal异常即为成功。
+                shutdown_event_signaled = True
+            if not shutdown_event_signaled:
+                shutdown_event_error_code = ctypes.get_last_error()
+
+    deadline = time.monotonic() + 1.0
+    while live is not None and live.process is not None and time.monotonic() < deadline:
+        poll_result = attempt("poll", live.process.poll)
+        if poll_result is failed_result or poll_result is not None:
+            break
+        time.sleep(0.02)
+
+    first_cleanup = attempt(
+        "observe",
+        lambda: observe_process_scope_cleanup(
+            str(root["scope_name"]), terminate=True, stable_zero_observations=3
+        ),
+    )
+
+    if live is not None and live.process is not None:
+        process = live.process
+        attempt("kill", lambda: process.kill() if process.poll() is None else None)
+        attempt("wait", lambda: process.wait(5))
+        closed = attempt("process_close", process.close)
+        if closed is not failed_result:
+            live.process = None
+    if live is not None and live.scope is not None:
+        scope = live.scope
+        closed = attempt("scope_close", scope.close)
+        if closed is not failed_result:
+            live.scope = None
+    if live is not None and live.shutdown_event is not None:
+        event = live.shutdown_event
+        closed = attempt("event_close", event.close)
+        if closed is not failed_result:
+            live.shutdown_event = None
+    if separate_signal_handle and signal_handle is not None and signal_handle is not failed_result:
+        closed = attempt("signal_close", signal_handle.close)
+        if closed is failed_result:
+            if live is None:
+                live = _LiveOwner(scope=None, process=None, shutdown_event=signal_handle)
+                with _LIVE_LOCK:
+                    _LIVE_OWNERS[str(journal)] = live
+            elif live.shutdown_event is None:
+                live.shutdown_event = signal_handle
+
+    final_cleanup = attempt(
+        "observe_final",
+        lambda: observe_process_scope_cleanup(
+            str(root["scope_name"]), terminate=True, stable_zero_observations=3
+        ),
+    )
+    matching_after = attempt(
+        "enum_after",
+        lambda: _enum_matching_windows(
+            pid, str(root["window_class"]), str(root["window_title"])
+        ) if pid else [],
+    )
+    hwnd_absent_result = attempt(
+        "iswindow_after", lambda: exact_hwnd == 0 or not bool(user32.IsWindow(exact_hwnd))
+    )
+    hwnd_absent = hwnd_absent_result is True
+
+    sidecar_paths = (
         _publication_path(journal),
         _publication_permit_path(journal),
         _event_lock_path(journal),
         _helper_stderr_path(journal),
-    ):
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        except BaseException as error:
-            cleanup_errors.append(error)
-    if failure_stage == "unlink":
-        cleanup_errors.append(RuntimeError("injected cleanup sidecar-unlink failure"))
-    verified = (
-        first_cleanup["cleanup_status"] == "verified"
-        and final_cleanup["cleanup_status"] == "verified"
-        and final_cleanup["scope_absent_after_owner_close"] is True
-        and not final_cleanup["member_pids_after"]
-        and not final_cleanup["active_listeners_after"]
-        and not matching_after
+    )
+    for index, path in enumerate(sidecar_paths):
+        attempt(
+            "unlink" if index == 0 else f"unlink_{index}",
+            lambda path=path: path.unlink(missing_ok=True),
+        )
+    sidecar_check = attempt(
+        "sidecar_verify", lambda: all(not path.exists() for path in sidecar_paths)
+    )
+    sidecars_absent = sidecar_check is True
+
+    process_handle_closed = live is None or live.process is None
+    job_handle_closed = live is None or live.scope is None
+    shutdown_event_handle_closed = live is None or live.shutdown_event is None
+    final_verified = bool(
+        isinstance(final_cleanup, Mapping)
+        and final_cleanup.get("cleanup_status") == "verified"
+        and final_cleanup.get("scope_absent_after_owner_close") is True
+        and not final_cleanup.get("member_pids_after")
+        and not final_cleanup.get("active_listeners_after")
+    )
+    first_verified = bool(
+        isinstance(first_cleanup, Mapping)
+        and first_cleanup.get("cleanup_status") == "verified"
+    )
+    verified = bool(
+        first_verified
+        and final_verified
+        and matching_after == []
         and hwnd_absent
+        and sidecars_absent
         and process_handle_closed
         and job_handle_closed
         and shutdown_event_handle_closed
         and not cleanup_errors
     )
+    final_cleanup_value = final_cleanup if isinstance(final_cleanup, Mapping) else {}
     receipt: dict[str, object] = {
         "contract_version": CLEANUP_CONTRACT,
-        "owner_id": root["owner_id"],
-        "reason": reason,
-        "exact_hwnd": exact_hwnd,
-        "process_identity": (
-            dict(owner["process_identity"])
-            if owner is not None
-            else {"pid": 0, "create_time_ns": 0}
-        ),
+        **expected_lineage,
         "cleanup_status": "verified" if verified else "indeterminate",
-        "shutdown_event_name": root["shutdown_event_name"],
         "shutdown_event_signaled": shutdown_event_signaled,
         "shutdown_event_error_code": shutdown_event_error_code,
         "shutdown_event_handle_closed": shutdown_event_handle_closed,
         "enum_windows_exact_hwnd_absent": hwnd_absent,
-        "matching_owned_windows_after": matching_after,
-        "member_pids_after": final_cleanup["member_pids_after"],
-        "stable_zero_observations": final_cleanup["stable_zero_observations"],
-        "scope_absent_after_owner_close": final_cleanup[
-            "scope_absent_after_owner_close"
-        ],
+        "matching_owned_windows_after": matching_after if isinstance(matching_after, list) else [],
+        "member_pids_after": final_cleanup_value.get("member_pids_after", []),
+        "stable_zero_observations": final_cleanup_value.get("stable_zero_observations", 0),
+        "scope_absent_after_owner_close": final_cleanup_value.get(
+            "scope_absent_after_owner_close", False
+        ),
         "process_handle_closed": process_handle_closed,
         "job_handle_closed": job_handle_closed,
-        "active_listeners_after": final_cleanup["active_listeners_after"],
+        "active_listeners_after": final_cleanup_value.get("active_listeners_after", []),
         "listener_or_lease_residue": [],
         "outer_owner_python_finally_observed": live is not None,
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
     }
+    if terminal_receipt is not None:
+        for key in (
+            "shutdown_event_signaled",
+            "shutdown_event_error_code",
+            "outer_owner_python_finally_observed",
+        ):
+            receipt[key] = terminal_receipt[key]
     receipt["content_sha256"] = content_sha256(receipt)
-    if not verified:
-        raise BaseExceptionGroup(
-            f"window cleanup is indeterminate: {receipt}",
-            cleanup_errors or [RuntimeError("window cleanup absence was not verified")],
+
+    terminal_preceded_cleanup = bool(
+        terminal_receipt is not None
+        and (
+            bool(matching_before)
+            or hwnd_present_before
+            or (
+                isinstance(pre_cleanup, Mapping)
+                and bool(pre_cleanup.get("observed_member_pids_before"))
+            )
         )
-    _append_event(
-        journal,
-        owner_id=str(root["owner_id"]),
-        event_type="cleanup_verified",
-        payload=receipt,
     )
-    try:
-        _event_lock_path(journal).unlink()
-    except FileNotFoundError:
-        pass
+    if not verified or terminal_preceded_cleanup:
+        if terminal_preceded_cleanup:
+            cleanup_errors.append(
+                ValueError("window cleanup terminal receipt preceded OS cleanup")
+            )
+        if not cleanup_errors:
+            cleanup_errors.append(RuntimeError("window cleanup absence was not verified"))
+        raise BaseExceptionGroup(
+            f"window cleanup is indeterminate: {receipt}", cleanup_errors
+        )
+
+    if terminal_receipt is not None:
+        if receipt != terminal_receipt:
+            raise ValueError("window cleanup replay observation differs from exact terminal")
+        with _LIVE_LOCK:
+            _LIVE_OWNERS.pop(str(journal), None)
+        return terminal_receipt
+
+    _append_cleanup_event_without_sidecar(
+        journal, owner_id=str(root["owner_id"]), payload=receipt
+    )
     with _LIVE_LOCK:
         _LIVE_OWNERS.pop(str(journal), None)
     return receipt

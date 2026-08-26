@@ -30,6 +30,7 @@ from app.learn.hybrid.benchmark_v2_window_owner import (
     _launch_owned_window_for_test,
     _append_event,
     _close_owned_window_for_test,
+    _expected_cleanup_lineage,
     _load_events,
     _load_root,
     _raw_hwnd_attestation,
@@ -37,6 +38,8 @@ from app.learn.hybrid.benchmark_v2_window_owner import (
     _run_uia_probe,
     _uia_identity,
     _native_handle_value,
+    _LIVE_OWNERS,
+    _ShutdownEvent,
     attest_bound_window,
     close_owned_window,
     launch_owned_window,
@@ -718,11 +721,14 @@ def test_fabricated_terminal_receipt_cannot_precede_os_cleanup(tmp_path: Path) -
             journal, owner_id=owner["owner_id"], event_type="finalization_intent",
             payload={"reason": "forged"},
         )
+        lineage = _expected_cleanup_lineage(
+            owner["journal_root"],
+            _load_events(journal, owner_id=owner["owner_id"]),
+        )
         fake = {
             "contract_version": CLEANUP_CONTRACT,
-            "owner_id": owner["owner_id"], "reason": "forged",
-            "exact_hwnd": owner["hwnd"], "process_identity": owner["process_identity"],
-            "cleanup_status": "verified", "shutdown_event_name": owner["journal_root"]["shutdown_event_name"],
+            **lineage,
+            "cleanup_status": "verified",
             "shutdown_event_signaled": True, "shutdown_event_error_code": 0,
             "shutdown_event_handle_closed": True, "enum_windows_exact_hwnd_absent": True,
             "matching_owned_windows_after": [], "member_pids_after": [],
@@ -736,7 +742,7 @@ def test_fabricated_terminal_receipt_cannot_precede_os_cleanup(tmp_path: Path) -
         _append_event(
             journal, owner_id=owner["owner_id"], event_type="cleanup_verified", payload=fake
         )
-        with pytest.raises(ValueError, match="preceded OS cleanup"):
+        with pytest.raises(BaseExceptionGroup, match="indeterminate"):
             close_owned_window(journal_path=journal, reason="must-reobserve")
         assert not psutil.pid_exists(owner["process_identity"]["pid"])
     finally:
@@ -745,8 +751,77 @@ def test_fabricated_terminal_receipt_cannot_precede_os_cleanup(tmp_path: Path) -
 
 
 @windows_only
+@pytest.mark.parametrize("field", ["reason", "process_identity", "exact_hwnd"])
+def test_post_absence_terminal_lineage_mutations_fail_closed(
+    tmp_path: Path, field: str
+) -> None:
+    image = tmp_path / f"terminal-{field}.bmp"
+    digest = _bmp(image)
+    journal = _register_journal(tmp_path / f"terminal-{field}.owner.json")
+    original_events = None
+    try:
+        owner = launch_owned_window(
+            image_path=image, expected_sha256=digest,
+            operation_id=f"operation-terminal-{field}", journal_path=journal,
+        )
+        _assert_cleanup(close_owned_window(journal_path=journal, reason="exact-reason"))
+        events_path = Path(str(journal) + ".events.jsonl")
+        original_events = events_path.read_bytes()
+        events = [json.loads(line) for line in original_events.splitlines()]
+        payload = events[-1]["payload"]
+        if field == "reason":
+            payload[field] = "wrong-reason"
+        elif field == "process_identity":
+            payload[field] = {
+                "pid": owner["process_identity"]["pid"] + 100_000,
+                "create_time_ns": owner["process_identity"]["create_time_ns"],
+            }
+        else:
+            payload[field] = 0
+        payload["content_sha256"] = content_sha256(payload)
+        events[-1]["content_sha256"] = content_sha256(events[-1])
+        events_path.write_bytes(
+            b"".join(canonical_json_bytes(event) + b"\n" for event in events)
+        )
+        with pytest.raises((ValueError, BaseExceptionGroup)):
+            close_owned_window(journal_path=journal, reason="exact-reason")
+    finally:
+        if original_events is not None:
+            Path(str(journal) + ".events.jsonl").write_bytes(original_events)
+        if journal.exists():
+            _assert_cleanup(close_owned_window(journal_path=journal, reason="exact-reason"))
+
+
+@windows_only
+def test_pre_ready_cleanup_has_explicit_non_window_subject(tmp_path: Path) -> None:
+    image = tmp_path / "pre-ready-schema.bmp"
+    digest = _bmp(image)
+    journal = _register_journal(tmp_path / "pre-ready-schema.owner.json")
+    try:
+        with pytest.raises(RuntimeError, match="pre-transfer"):
+            _launch_owned_window_for_test(
+                image_path=image, expected_sha256=digest,
+                operation_id="operation-pre-ready-schema", journal_path=journal,
+                duplicate_window=False, fail_after_job_created=True,
+            )
+        receipt = close_owned_window(journal_path=journal, reason="schema-replay")
+        assert receipt["cleanup_subject_kind"] == "no_process"
+        assert receipt["ready_event_sha256"] is None
+        assert receipt["publication_content_sha256"] is None
+        assert receipt["process_identity"] == {"pid": 0, "create_time_ns": 0}
+        assert receipt["exact_hwnd"] == 0
+    finally:
+        if journal.exists():
+            close_owned_window(journal_path=journal, reason="schema-replay")
+
+
+@windows_only
 @pytest.mark.parametrize(
-    "failure_stage", ["kill", "wait", "process_close", "scope_close", "observe", "unlink"]
+    "failure_stage",
+    [
+        "kill", "wait", "process_close", "scope_close", "event_close",
+        "observe", "observe_final", "enum_after", "unlink",
+    ],
 )
 def test_cleanup_failure_injection_preserves_retry_until_verified(
     tmp_path: Path, failure_stage: str
@@ -769,6 +844,152 @@ def test_cleanup_failure_injection_preserves_retry_until_verified(
     finally:
         if journal.exists():
             _assert_cleanup(close_owned_window(journal_path=journal, reason="test_finally"))
+
+
+@windows_only
+@pytest.mark.parametrize("failure_stage", ["signal", "signal_close"])
+def test_partial_live_separate_signal_handle_is_closed_or_retained_for_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    image = tmp_path / f"partial-signal-{failure_stage}.bmp"
+    digest = _bmp(image)
+    journal = _register_journal(tmp_path / f"partial-signal-{failure_stage}.owner.json")
+    closed_handles: list[int] = []
+    original_close = _ShutdownEvent.close
+
+    def tracked_close(self: _ShutdownEvent) -> None:
+        original_close(self)
+        closed_handles.append(id(self))
+
+    try:
+        launch_owned_window(
+            image_path=image, expected_sha256=digest,
+            operation_id=f"operation-partial-signal-{failure_stage}", journal_path=journal,
+        )
+        live = _LIVE_OWNERS[str(journal)]
+        assert live.shutdown_event is not None
+        live.shutdown_event.close()
+        live.shutdown_event = None
+        monkeypatch.setattr(_ShutdownEvent, "close", tracked_close)
+        with pytest.raises(BaseExceptionGroup, match="indeterminate"):
+            _close_owned_window_for_test(
+                journal_path=journal, reason="partial", failure_stage=failure_stage
+            )
+        events = _load_events(journal, owner_id=_load_root(journal)["owner_id"])
+        assert all(event["event_type"] != "cleanup_verified" for event in events)
+        live = _LIVE_OWNERS[str(journal)]
+        if failure_stage == "signal":
+            assert closed_handles
+            assert live.shutdown_event is None
+        else:
+            assert live.shutdown_event is not None
+        _assert_cleanup(close_owned_window(journal_path=journal, reason="retry"))
+    finally:
+        monkeypatch.setattr(_ShutdownEvent, "close", original_close)
+        if journal.exists():
+            _assert_cleanup(close_owned_window(journal_path=journal, reason="test_finally"))
+
+
+@windows_only
+def test_premature_terminal_reconciliation_retains_failed_process_handle(tmp_path: Path) -> None:
+    image = tmp_path / "terminal-retry.bmp"
+    digest = _bmp(image)
+    journal = _register_journal(tmp_path / "terminal-retry.owner.json")
+    try:
+        owner = launch_owned_window(
+            image_path=image, expected_sha256=digest,
+            operation_id="operation-terminal-retry", journal_path=journal,
+        )
+        _append_event(
+            journal, owner_id=owner["owner_id"], event_type="finalization_intent",
+            payload={"reason": "terminal-retry"},
+        )
+        lineage = _expected_cleanup_lineage(
+            owner["journal_root"], _load_events(journal, owner_id=owner["owner_id"])
+        )
+        fake = {
+            "contract_version": CLEANUP_CONTRACT, **lineage,
+            "cleanup_status": "verified", "shutdown_event_signaled": True,
+            "shutdown_event_error_code": 0, "shutdown_event_handle_closed": True,
+            "enum_windows_exact_hwnd_absent": True, "matching_owned_windows_after": [],
+            "member_pids_after": [], "stable_zero_observations": 3,
+            "scope_absent_after_owner_close": True, "process_handle_closed": True,
+            "job_handle_closed": True, "active_listeners_after": [],
+            "listener_or_lease_residue": [], "outer_owner_python_finally_observed": True,
+            "artifact_is_authorization": False, "execute_binding_enabled": False,
+        }
+        fake["content_sha256"] = content_sha256(fake)
+        _append_event(
+            journal, owner_id=owner["owner_id"], event_type="cleanup_verified", payload=fake
+        )
+        with pytest.raises(BaseExceptionGroup, match="indeterminate"):
+            _close_owned_window_for_test(
+                journal_path=journal, reason="ignored", failure_stage="process_close"
+            )
+        assert str(journal) in _LIVE_OWNERS
+        assert _LIVE_OWNERS[str(journal)].process is not None
+        replay = close_owned_window(journal_path=journal, reason="ignored")
+        assert replay == fake
+    finally:
+        if journal.exists():
+            close_owned_window(journal_path=journal, reason="ignored")
+
+
+@windows_only
+def test_wrong_lineage_live_terminal_still_runs_retryable_cleanup(tmp_path: Path) -> None:
+    image = tmp_path / "wrong-live-terminal.bmp"
+    digest = _bmp(image)
+    journal = _register_journal(tmp_path / "wrong-live-terminal.owner.json")
+    prefix = None
+    try:
+        owner = launch_owned_window(
+            image_path=image, expected_sha256=digest,
+            operation_id="operation-wrong-live-terminal", journal_path=journal,
+        )
+        _append_event(
+            journal, owner_id=owner["owner_id"], event_type="finalization_intent",
+            payload={"reason": "wrong-live"},
+        )
+        events_path = Path(str(journal) + ".events.jsonl")
+        prefix = events_path.read_bytes()
+        lineage = _expected_cleanup_lineage(
+            owner["journal_root"], _load_events(journal, owner_id=owner["owner_id"])
+        )
+        lineage["process_identity"] = {
+            "pid": owner["process_identity"]["pid"] + 100_000,
+            "create_time_ns": owner["process_identity"]["create_time_ns"],
+        }
+        fake = {
+            "contract_version": CLEANUP_CONTRACT, **lineage,
+            "cleanup_status": "verified", "shutdown_event_signaled": True,
+            "shutdown_event_error_code": 0, "shutdown_event_handle_closed": True,
+            "enum_windows_exact_hwnd_absent": True, "matching_owned_windows_after": [],
+            "member_pids_after": [], "stable_zero_observations": 3,
+            "scope_absent_after_owner_close": True, "process_handle_closed": True,
+            "job_handle_closed": True, "active_listeners_after": [],
+            "listener_or_lease_residue": [], "outer_owner_python_finally_observed": True,
+            "artifact_is_authorization": False, "execute_binding_enabled": False,
+        }
+        fake["content_sha256"] = content_sha256(fake)
+        with pytest.raises(ValueError, match="cleanup|lineage"):
+            _append_event(
+                journal, owner_id=owner["owner_id"], event_type="cleanup_verified", payload=fake
+            )
+        with pytest.raises(BaseExceptionGroup, match="indeterminate"):
+            close_owned_window(journal_path=journal, reason="ignored")
+        assert not psutil.pid_exists(owner["process_identity"]["pid"])
+        assert str(journal) in _LIVE_OWNERS
+        events_path.write_bytes(prefix)
+        _assert_cleanup(close_owned_window(journal_path=journal, reason="ignored"))
+    finally:
+        if prefix is not None:
+            events_path = Path(str(journal) + ".events.jsonl")
+            try:
+                _load_events(journal, owner_id=_load_root(journal)["owner_id"])
+            except ValueError:
+                events_path.write_bytes(prefix)
+        if journal.exists():
+            close_owned_window(journal_path=journal, reason="ignored")
 
 
 def _outer_owner(argv: list[str]) -> None:
