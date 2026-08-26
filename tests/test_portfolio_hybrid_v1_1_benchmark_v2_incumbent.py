@@ -9,6 +9,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import shutil
 import socket
 import sys
 import time
@@ -76,6 +77,7 @@ def _recorded_qwen_incumbent_resume_cut(
     operation_id: str,
     worker_id: str,
     result_queue,
+    cleanup: bool = False,
 ) -> None:
     import traceback
 
@@ -85,6 +87,7 @@ def _recorded_qwen_incumbent_resume_cut(
         validate_preloaded_provider_corpus,
     )
     from app.learn.workflow_service import (
+        cancel_guarded_learning_workflow_stage_operation,
         compose_test_learning_workflow_service,
         continue_guarded_learning_stage_worker_result,
     )
@@ -123,13 +126,296 @@ def _recorded_qwen_incumbent_resume_cut(
             benchmark_supervision_root=root,
             provider_case_resolver=resolver,
         )
-        result = continue_guarded_learning_stage_worker_result(
+        state = store.get(run_id)
+        operation = state["stages"][stage]["evidence_refs"]["stage_execution"].get(
+            "benchmark_v2_incumbent"
+        )
+        completion_won = isinstance(operation, dict) and (
+            operation.get("terminal_intent") is not None
+            or operation.get("phase") in {"adopted", "complete"}
+        )
+        if cleanup and not completion_won:
+            result = cancel_guarded_learning_workflow_stage_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=state["revision"],
+                stage=stage,
+                operation_id=operation_id,
+                reason="recorded Qwen outer-finally cleanup",
+            )
+        else:
+            result = continue_guarded_learning_stage_worker_result(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=state["revision"],
+                stage=stage,
+                operation_id=operation_id,
+                worker_id=worker_id,
+            )
+        result_queue.put({"status": "ok", "result": result})
+    except BaseException as error:
+        result_queue.put(
+            {
+                "status": "error",
+                "error_type": type(error).__name__,
+                "details": str(error),
+                "traceback": traceback.format_exc(),
+            }
+        )
+        raise
+    finally:
+        if store is not None:
+            store.close()
+
+
+def _recorded_qwen_incumbent_cancel_intent_cut(
+    project_root: str,
+    state_path: str,
+    worker_root: str,
+    lease_dir: str,
+    corpus_raw: bytes,
+    corpus_file_sha: str,
+    corpus_file_ref: dict[str, object],
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    case_ref: dict[str, object],
+    window_binding_ref: dict[str, object],
+    capture_ref: dict[str, object],
+    release_event,
+    cancel_event,
+    recorded_response: dict[str, object],
+    result_queue,
+) -> None:
+    import traceback
+
+    from app.core import model_server
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        compose_test_provider_case_resolver,
+        validate_preloaded_provider_corpus,
+    )
+    from app.learn.workflow_service import (
+        cancel_guarded_learning_workflow_stage_operation,
+        compose_test_learning_workflow_service,
+        start_guarded_learning_stage_worker,
+    )
+    from app.learn.workflow_store import LearningWorkflowRunStore
+    from app.learn.workflow_worker import (
+        LearningStageWorkerRegistry,
+        compose_test_benchmark_worker_supervision_root,
+    )
+
+    store = None
+    try:
+        model_server.MODEL_SERVER_LEASE_DIR = Path(lease_dir)
+        corpus = validate_preloaded_provider_corpus(
+            raw=corpus_raw, expected_sha256=corpus_file_sha
+        )
+        store = LearningWorkflowRunStore(state_path=Path(state_path))
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=Path(worker_root),
+            test_capability=object(),
+            workflow_store=store,
+            test_store_capability=object(),
+        )
+
+        def _recorded_process_factory(*, target, args, name):
+            return multiprocessing.get_context("spawn").Process(
+                target=_recorded_qwen_benchmark_worker_entry,
+                args=(
+                    target,
+                    args,
+                    release_event,
+                    lease_dir,
+                    str(args[3]),
+                    recorded_response,
+                ),
+                name=name,
+            )
+
+        registry = LearningStageWorkerRegistry(
+            result_root=Path(worker_root),
+            process_factory=_recorded_process_factory,
+            benchmark_supervision_root=root,
+        )
+        resolver = compose_test_provider_case_resolver(
+            validated_corpus=corpus,
+            provider_corpus_file_ref=corpus_file_ref,
+            workflow_store=store,
+            benchmark_supervision_root=root,
+        )
+        composition = compose_test_learning_workflow_service(
+            store=store,
+            worker_registry=registry,
+            project_root=Path(project_root),
+            benchmark_supervision_root=root,
+            provider_case_resolver=resolver,
+        )
+        started = start_guarded_learning_stage_worker(
             composition=composition,
             run_id=run_id,
             expected_revision=store.get(run_id)["revision"],
             stage=stage,
             operation_id=operation_id,
-            worker_id=worker_id,
+            task_kind="vision_observe_screen",
+            payload={
+                "benchmark_v2_incumbent": {
+                    "provider_case_ref": case_ref,
+                    "window_binding_ref": window_binding_ref,
+                    "capture_ref": capture_ref,
+                }
+            },
+        )
+        state = store.get(run_id)
+        operation = state["stages"][stage]["evidence_refs"]["stage_execution"][
+            "benchmark_v2_incumbent"
+        ]
+        launch_owner = registry.inspect_benchmark_worker_launch_owner(
+            worker_id=started["worker_id"],
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            reservation_ref=operation["reservation_ref"],
+            expected_operation_anchor=state["stages"][stage]["evidence_refs"][
+                "stage_execution"
+            ]["benchmark_v2_operation_anchor"],
+            supervision_root=root,
+        )
+        result_queue.put(
+            {
+                "status": "started",
+                "authority_kind": root.authority_kind,
+                "worker_id": started["worker_id"],
+                "model_request_id": operation["worker_ref"]["model_request_id"],
+                "execution_nonce": operation["execution_nonce"],
+                "workflow_revision": state["revision"],
+                "process_identity": launch_owner["process_identity"],
+                "scope_name": launch_owner["scope_name"],
+                "assignment_proven_ref": launch_owner["assignment_proven_ref"],
+            }
+        )
+        if not cancel_event.wait(45):
+            raise RuntimeError("cancel cut release timed out")
+
+        original_persist = workflow_service._persist_benchmark_v2_incumbent_operation
+        crashed = False
+
+        def _persist_then_crash(**kwargs):
+            nonlocal crashed
+            persisted = original_persist(**kwargs)
+            if kwargs["operation"].get("phase") == "cancel_intent" and not crashed:
+                crashed = True
+                durable = store.get(run_id)
+                durable_operation = durable["stages"][stage]["evidence_refs"][
+                    "stage_execution"
+                ]["benchmark_v2_incumbent"]
+                result_queue.put(
+                    {
+                        "status": "intent_durable",
+                        "revision": durable["revision"],
+                        "operation": durable_operation,
+                    }
+                )
+                raise RuntimeError("crash after durable cancel intent")
+            return persisted
+
+        workflow_service._persist_benchmark_v2_incumbent_operation = _persist_then_crash
+        try:
+            cancel_guarded_learning_workflow_stage_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=store.get(run_id)["revision"],
+                stage=stage,
+                operation_id=operation_id,
+                reason="recorded Qwen durable cancel cut",
+            )
+        except RuntimeError as error:
+            if str(error) != "crash after durable cancel intent":
+                raise
+        if not crashed:
+            raise RuntimeError("durable cancel cut was not reached")
+    except BaseException as error:
+        result_queue.put(
+            {
+                "status": "error",
+                "error_type": type(error).__name__,
+                "details": str(error),
+                "traceback": traceback.format_exc(),
+            }
+        )
+        raise
+    finally:
+        if store is not None:
+            store.close()
+
+
+def _recorded_qwen_incumbent_cancel_resume_cut(
+    project_root: str,
+    state_path: str,
+    worker_root: str,
+    lease_dir: str,
+    corpus_raw: bytes,
+    corpus_file_sha: str,
+    corpus_file_ref: dict[str, object],
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    result_queue,
+) -> None:
+    import traceback
+
+    from app.core import model_server
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        compose_test_provider_case_resolver,
+        validate_preloaded_provider_corpus,
+    )
+    from app.learn.workflow_service import (
+        cancel_guarded_learning_workflow_stage_operation,
+        compose_test_learning_workflow_service,
+    )
+    from app.learn.workflow_store import LearningWorkflowRunStore
+    from app.learn.workflow_worker import (
+        LearningStageWorkerRegistry,
+        compose_test_benchmark_worker_supervision_root,
+    )
+
+    store = None
+    try:
+        model_server.MODEL_SERVER_LEASE_DIR = Path(lease_dir)
+        corpus = validate_preloaded_provider_corpus(
+            raw=corpus_raw, expected_sha256=corpus_file_sha
+        )
+        store = LearningWorkflowRunStore(state_path=Path(state_path))
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=Path(worker_root),
+            test_capability=object(),
+            workflow_store=store,
+            test_store_capability=object(),
+        )
+        registry = LearningStageWorkerRegistry(
+            result_root=Path(worker_root), benchmark_supervision_root=root
+        )
+        resolver = compose_test_provider_case_resolver(
+            validated_corpus=corpus,
+            provider_corpus_file_ref=corpus_file_ref,
+            workflow_store=store,
+            benchmark_supervision_root=root,
+        )
+        composition = compose_test_learning_workflow_service(
+            store=store,
+            worker_registry=registry,
+            project_root=Path(project_root),
+            benchmark_supervision_root=root,
+            provider_case_resolver=resolver,
+        )
+        result = cancel_guarded_learning_workflow_stage_operation(
+            composition=composition,
+            run_id=run_id,
+            expected_revision=store.get(run_id)["revision"],
+            stage=stage,
+            operation_id=operation_id,
+            reason="resume recorded Qwen durable cancel",
         )
         result_queue.put({"status": "ok", "result": result})
     except BaseException as error:
@@ -2955,6 +3241,7 @@ def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
     current_composition = None
     cleanup_errors: list[str] = []
     restart_cut_identities: list[dict[str, int]] = []
+    restart_resources: list[dict[str, object]] = []
 
     def _fresh_composition(*, process_factory=None):
         store = current_store or LearningWorkflowRunStore(state_path=state_path)
@@ -2990,7 +3277,7 @@ def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
         current_composition = None
         gc.collect()
 
-    def _fresh_resume_cut() -> dict[str, object]:
+    def _fresh_resume_cut(*, cleanup: bool = False) -> dict[str, object]:
         result_queue = context.Queue()
         process = context.Process(
             target=_recorded_qwen_incumbent_resume_cut,
@@ -3007,9 +3294,12 @@ def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
                 operation_id,
                 worker_id,
                 result_queue,
+                cleanup,
             ),
             name="benchmark-v2-incumbent-fresh-resume",
         )
+        resource = {"process": process, "queue": result_queue, "closed": False}
+        restart_resources.append(resource)
         process.start()
         assert process.pid is not None
         restart_cut_identities.append(
@@ -3027,6 +3317,7 @@ def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
         process.close()
         result_queue.close()
         result_queue.join_thread()
+        resource["closed"] = True
         assert exitcode == 0, message
         assert message["status"] == "ok", message
         return message["result"]
@@ -3293,7 +3584,26 @@ def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
             replay["terminal_receipt"], sort_keys=True, separators=(",", ":")
         ) == terminal_bytes
     finally:
-        release_event.set()
+        for resource in restart_resources:
+            if resource["closed"]:
+                continue
+            process = resource["process"]
+            queue = resource["queue"]
+            try:
+                if process.is_alive():
+                    process.terminate()
+                process.join(20)
+                if process.is_alive():
+                    cleanup_errors.append("restart process remained alive")
+                process.close()
+            except BaseException as error:
+                cleanup_errors.append(f"restart process cleanup: {error}")
+            try:
+                queue.close()
+                queue.join_thread()
+            except BaseException as error:
+                cleanup_errors.append(f"restart queue cleanup: {error}")
+            resource["closed"] = True
         if current_registry is not None and worker_id is not None:
             try:
                 current_registry.observe_benchmark_worker_cleanup(
@@ -3319,68 +3629,687 @@ def test_real_registry_spawn_recorded_qwen_completion_survives_fresh_restarts(
             except BaseException as error:
                 cleanup_errors.append(f"provider cleanup: {error}")
         if current_store is not None:
-            current_store.close()
+            try:
+                current_store.close()
+            except BaseException as error:
+                cleanup_errors.append(f"store close: {error}")
             current_store = None
+        current_registry = None
+        current_root = None
+        current_composition = None
+        gc.collect()
+        if state_path.exists():
+            try:
+                _fresh_resume_cut(cleanup=True)
+            except BaseException as error:
+                cleanup_errors.append(f"fresh composition cleanup: {error}")
+        for resource in restart_resources:
+            if resource["closed"]:
+                continue
+            process = resource["process"]
+            queue = resource["queue"]
+            try:
+                if process.is_alive():
+                    process.terminate()
+                process.join(20)
+                if process.is_alive():
+                    cleanup_errors.append("cleanup process remained alive")
+                process.close()
+            except BaseException as error:
+                cleanup_errors.append(f"cleanup process close: {error}")
+            try:
+                queue.close()
+                queue.join_thread()
+            except BaseException as error:
+                cleanup_errors.append(f"cleanup queue close: {error}")
+            resource["closed"] = True
         if provider_helper is not None:
-            provider_helper.close()
+            try:
+                provider_helper.close()
+            except BaseException as error:
+                cleanup_errors.append(f"provider helper: {error}")
         if provider_scope is not None:
-            provider_scope.close()
+            try:
+                provider_scope.close()
+            except BaseException as error:
+                cleanup_errors.append(f"provider scope: {error}")
         window_receipt = None
         if owner_journal.exists():
-            window_receipt = close_owned_window(
-                journal_path=owner_journal, reason="recorded_qwen_test_finally"
-            )
+            try:
+                window_receipt = close_owned_window(
+                    journal_path=owner_journal, reason="recorded_qwen_test_finally"
+                )
+            except BaseException as error:
+                cleanup_errors.append(f"window cleanup: {error}")
 
         if worker_identity is not None:
             try:
                 process = psutil.Process(worker_identity["pid"])
             except psutil.NoSuchProcess:
                 process = None
+            except BaseException as error:
+                process = None
+                cleanup_errors.append(f"worker identity probe: {error}")
             if process is not None:
-                assert int(round(process.create_time() * 1_000_000_000)) != (
+                if int(round(process.create_time() * 1_000_000_000)) == (
                     worker_identity["create_time_ns"]
-                )
+                ):
+                    cleanup_errors.append("worker process identity remained live")
         for cut_identity in restart_cut_identities:
             try:
                 cut_process = psutil.Process(cut_identity["pid"])
             except psutil.NoSuchProcess:
                 cut_process = None
+            except BaseException as error:
+                cut_process = None
+                cleanup_errors.append(f"restart identity probe: {error}")
             if cut_process is not None:
-                assert int(round(cut_process.create_time() * 1_000_000_000)) != (
+                if int(round(cut_process.create_time() * 1_000_000_000)) == (
                     cut_identity["create_time_ns"]
-                )
+                ):
+                    cleanup_errors.append("restart process identity remained live")
         if worker_scope_name is not None:
-            worker_zero = observe_process_scope_cleanup(
-                worker_scope_name, terminate=False, stable_zero_observations=3
-            )
-            assert worker_zero["cleanup_status"] == "verified"
-            assert worker_zero["member_pids_after"] == []
+            try:
+                worker_zero = observe_process_scope_cleanup(
+                    worker_scope_name, terminate=True, stable_zero_observations=3
+                )
+                if worker_zero["cleanup_status"] != "verified":
+                    cleanup_errors.append("worker scope was not verified zero")
+                if worker_zero["member_pids_after"] != []:
+                    cleanup_errors.append("worker scope retained members")
+            except BaseException as error:
+                cleanup_errors.append(f"worker scope probe: {error}")
         if provider_scope is not None:
-            provider_zero = observe_process_scope_cleanup(
-                provider_scope.name,
-                terminate=False,
-                listener_ports=(() if provider_port is None else (provider_port,)),
-                stable_zero_observations=3,
-            )
-            assert provider_zero["cleanup_status"] == "verified"
-            assert provider_zero["member_pids_after"] == []
-            assert provider_zero["active_listeners_after"] == []
+            try:
+                provider_zero = observe_process_scope_cleanup(
+                    provider_scope.name,
+                    terminate=True,
+                    listener_ports=(() if provider_port is None else (provider_port,)),
+                    stable_zero_observations=3,
+                )
+                if provider_zero["cleanup_status"] != "verified":
+                    cleanup_errors.append("provider scope was not verified zero")
+                if provider_zero["member_pids_after"] != []:
+                    cleanup_errors.append("provider scope retained members")
+                if provider_zero["active_listeners_after"] != []:
+                    cleanup_errors.append("provider scope retained listeners")
+            except BaseException as error:
+                cleanup_errors.append(f"provider scope probe: {error}")
         if startup_event_name is not None or controller_mutex_name is not None:
             import win32api
             import win32event
 
             if startup_event_name is not None:
-                with pytest.raises(BaseException) as event_error:
-                    win32event.OpenEvent(0x00100000, False, startup_event_name)
-                assert getattr(event_error.value, "winerror", event_error.value.args[0]) == 2
-            if controller_mutex_name is not None:
-                with pytest.raises(BaseException) as mutex_error:
-                    handle = win32event.OpenMutex(0x00100000, False, controller_mutex_name)
+                try:
+                    handle = win32event.OpenEvent(
+                        0x00100000, False, startup_event_name
+                    )
+                except BaseException as error:
+                    if getattr(error, "winerror", error.args[0]) != 2:
+                        cleanup_errors.append(f"startup event probe: {error}")
+                else:
                     win32api.CloseHandle(handle)
-                assert getattr(mutex_error.value, "winerror", mutex_error.value.args[0]) == 2
+                    cleanup_errors.append("startup event handle remained")
+            if controller_mutex_name is not None:
+                try:
+                    handle = win32event.OpenMutex(0x00100000, False, controller_mutex_name)
+                except BaseException as error:
+                    if getattr(error, "winerror", error.args[0]) != 2:
+                        cleanup_errors.append(f"controller mutex probe: {error}")
+                else:
+                    win32api.CloseHandle(handle)
+                    cleanup_errors.append("controller mutex handle remained")
         if window_receipt is not None:
-            assert window_receipt["cleanup_status"] == "verified"
-            assert window_receipt["matching_owned_windows_after"] == []
-            assert window_receipt["member_pids_after"] == []
-            assert window_receipt["active_listeners_after"] == []
+            if window_receipt["cleanup_status"] != "verified":
+                cleanup_errors.append("window cleanup was not verified")
+            if window_receipt["matching_owned_windows_after"] != []:
+                cleanup_errors.append("owned HWND residue remained")
+            if window_receipt["member_pids_after"] != []:
+                cleanup_errors.append("window owner process residue remained")
+            if window_receipt["active_listeners_after"] != []:
+                cleanup_errors.append("window owner listener residue remained")
+
+        def _remove_readonly(function, path, _error_info):
+            import stat
+
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            function(path)
+
+        try:
+            shutil.rmtree(project_root, onerror=_remove_readonly)
+        except FileNotFoundError:
+            pass
+        except BaseException as error:
+            cleanup_errors.append(f"temporary root cleanup: {error}")
+        if project_root.exists():
+            cleanup_errors.append("temporary project root remained")
+        assert cleanup_errors == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows benchmark ownership required")
+def test_real_registry_spawn_recorded_qwen_cancel_survives_durable_intent_restart(
+    tmp_path: Path,
+    validated_provider_snapshot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psutil
+    from PIL import Image
+
+    from app.core import model_server
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        compose_test_provider_case_resolver,
+        validate_preloaded_provider_corpus,
+    )
+    from app.learn.hybrid.benchmark_v2_window_owner import (
+        close_owned_window,
+        launch_owned_window,
+    )
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        compose_test_server_worker_window_binding_publisher,
+        publish_server_worker_window_binding,
+    )
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        benchmark_worker_controller_mutex_name_v1,
+        observe_process_scope_cleanup,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+    from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
+    from app.learn.workflow_service import start_learning_workflow_stage_operation
+    from app.learn.workflow_store import LearningWorkflowRunStore
+    from app.learn.workflow_worker import compose_test_benchmark_worker_supervision_root
+
+    project_root = tmp_path / "real-c-cancel-service"
+    project_root.mkdir()
+    state_path = project_root / "state.json"
+    worker_root = project_root / "workers"
+    lease_dir = project_root / "qwen-leases"
+    owner_journal = project_root / "task5-owner.json"
+    base_corpus, _base_file_ref = validated_provider_snapshot
+    source_case = base_corpus["cases"][0]
+    source_image = (PROJECT_ROOT / str(source_case["image"]["path"])).resolve()
+    benchmark_bmp = project_root / "recorded-qwen-provider.bmp"
+    with Image.open(source_image) as opened:
+        opened.convert("RGB").save(benchmark_bmp, format="BMP")
+    benchmark_bmp_sha = hashlib.sha256(benchmark_bmp.read_bytes()).hexdigest()
+    corpus_candidate = deepcopy(base_corpus)
+    source_group = source_case["screen_group"]
+    for candidate in corpus_candidate["cases"]:
+        if candidate["screen_group"] == source_group:
+            candidate["image"]["sha256"] = benchmark_bmp_sha
+    corpus_candidate.pop("content_sha256")
+    corpus_candidate["content_sha256"] = content_sha256(corpus_candidate)
+    corpus_raw = canonical_json_bytes(corpus_candidate, pretty=True)
+    corpus_file_sha = hashlib.sha256(corpus_raw).hexdigest()
+    corpus = validate_preloaded_provider_corpus(
+        raw=corpus_raw, expected_sha256=corpus_file_sha
+    )
+    corpus_file_ref = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_provider_corpus_file_ref_v1",
+            "relative_path": "provider-corpus.v2.json",
+            "file_sha256": corpus_file_sha,
+            "source_parent_ref": {
+                "content_sha256": corpus["source_parent_ref"]["content_sha256"]
+            },
+        }
+    )
+    run_id = "run-c-real-cancel"
+    stage = "screen_understanding"
+    operation_id = "operation-c-real-cancel"
+    context = multiprocessing.get_context("spawn")
+    release_event = context.Event()
+    cancel_event = context.Event()
+    recorded_response = {
+        "success": True,
+        "recorded_qwen_response": {
+            "model": "recorded-qwen",
+            "content": "harmless observation only",
+        },
+        "action_candidates": [],
+        "execute_binding_enabled": False,
+    }
+    owner = None
+    provider_scope = None
+    provider_helper = None
+    provider_port = None
+    worker_identity = None
+    worker_scope_name = None
+    startup_event_name = None
+    controller_mutex_name = None
+    cut_process = None
+    cut_queue = None
+    resume_process = None
+    resume_queue = None
+    cut_identities: list[dict[str, int]] = []
+    cleanup_errors: list[str] = []
+    cancelled = None
+
+    try:
+        monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", lease_dir)
+        store = LearningWorkflowRunStore(state_path=state_path)
+        root = compose_test_benchmark_worker_supervision_root(
+            journal_root=worker_root,
+            test_capability=object(),
+            workflow_store=store,
+            test_store_capability=object(),
+        )
+        resolver = compose_test_provider_case_resolver(
+            validated_corpus=corpus,
+            provider_corpus_file_ref=corpus_file_ref,
+            workflow_store=store,
+            benchmark_supervision_root=root,
+        )
+        case_ref = _case_ref(resolver)
+        owner = launch_owned_window(
+            image_path=benchmark_bmp,
+            expected_sha256=benchmark_bmp_sha,
+            operation_id=operation_id,
+            journal_path=owner_journal,
+        )
+        capture_ref = {
+            "id": "capture-c-real-cancel",
+            "content_sha256": benchmark_bmp_sha,
+        }
+        authority = publish_server_worker_window_binding(
+            publisher=compose_test_server_worker_window_binding_publisher(
+                authority_root=project_root
+            ),
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        first = store.transition(
+            run_id=run_id,
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            evidence_refs={},
+        )
+        bound = store.transition(
+            run_id=run_id,
+            expected_revision=first["revision"],
+            stage="bind_capture",
+            outcome="completed",
+            evidence_refs={"image_path": str(benchmark_bmp)},
+        )
+        start_learning_workflow_stage_operation(
+            store=store,
+            project_root=project_root,
+            run_id=run_id,
+            expected_revision=bound["revision"],
+            stage=stage,
+            operation_id=operation_id,
+        )
+        store.close()
+        del resolver, root, store
+        gc.collect()
+
+        cut_queue = context.Queue()
+        cut_process = context.Process(
+            target=_recorded_qwen_incumbent_cancel_intent_cut,
+            args=(
+                str(project_root),
+                str(state_path),
+                str(worker_root),
+                str(lease_dir),
+                corpus_raw,
+                corpus_file_sha,
+                corpus_file_ref,
+                run_id,
+                stage,
+                operation_id,
+                case_ref,
+                authority["window_binding_ref"],
+                capture_ref,
+                release_event,
+                cancel_event,
+                recorded_response,
+                cut_queue,
+            ),
+            name="benchmark-v2-incumbent-cancel-intent-cut",
+        )
+        cut_process.start()
+        assert cut_process.pid is not None
+        cut_identities.append(
+            {
+                "pid": cut_process.pid,
+                "create_time_ns": int(
+                    round(
+                        psutil.Process(cut_process.pid).create_time()
+                        * 1_000_000_000
+                    )
+                ),
+            }
+        )
+        started = cut_queue.get(timeout=45)
+        assert started["status"] == "started", started
+        worker_identity = deepcopy(started["process_identity"])
+        worker_scope_name = started["scope_name"]
+        startup_event_name = (
+            "Local\\AgentGuiBenchmarkWorkerGate-"
+            + hashlib.sha256(
+                json.dumps(
+                    {"scope_name": worker_scope_name},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        )
+        controller_mutex_name = benchmark_worker_controller_mutex_name_v1(
+            authority_kind=started["authority_kind"],
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+        )
+
+        provider_lineage = {
+            "run_id": run_id,
+            "workflow_revision": started["workflow_revision"],
+            "operation_id": operation_id,
+            "stage": stage,
+            "stage_execution_id": f"execution-{operation_id}",
+        }
+        provider_scope_name = process_scope_name(provider_lineage, "qwen")
+        provider_scope = WindowsProcessScope(provider_scope_name, create=True)
+        provider_helper = spawn_process_in_scope(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            scope_name=provider_scope_name,
+            cwd=project_root,
+        )
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            provider_port = int(probe.getsockname()[1])
+        endpoint = f"http://127.0.0.1:{provider_port}/v1/chat/completions"
+        readiness = {
+            "started": True,
+            "after": {
+                "status": "running",
+                "base_url": f"http://127.0.0.1:{provider_port}/v1",
+                "model_id": "recorded-qwen",
+                "server_process_identity": deepcopy(
+                    provider_helper.process_identity
+                ),
+                "server_socket": {"host": "127.0.0.1", "port": provider_port},
+            },
+        }
+        profile = {
+            "profile_id": "recorded-qwen-benchmark",
+            "endpoint": endpoint,
+            "pid_file": str(project_root / "recorded-qwen.pid"),
+        }
+        monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", provider_scope_name)
+        monkeypatch.setattr(
+            model_server,
+            "_observe_qwen_server_binding",
+            lambda _selected, observed: {
+                "server_process_identity": deepcopy(
+                    observed["after"]["server_process_identity"]
+                ),
+                "server_socket": deepcopy(observed["after"]["server_socket"]),
+            },
+        )
+        monkeypatch.setattr(
+            model_server,
+            "_attest_exact_qwen_socket_owner",
+            lambda _server_socket, process_identity: (
+                model_server._current_process_identity(process_identity["pid"])
+                == process_identity
+            ),
+        )
+        monkeypatch.setattr(
+            model_server,
+            "check_model_server",
+            lambda _selected, timeout=1.0: {"status": "unreachable"},
+        )
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=started["model_request_id"],
+            readiness=readiness,
+        )
+        released = model_server._release_exact_qwen_lease(
+            lease, reason="recorded-qwen-cancel-materialized"
+        )
+        assert released["server_termination"] == "verified_exact_process_exited"
+
+        cancel_event.set()
+        durable = cut_queue.get(timeout=45)
+        assert durable["status"] == "intent_durable", durable
+        durable_operation = durable["operation"]
+        assert durable_operation["phase"] == "cancel_intent"
+        assert durable_operation["worker_ref"]["worker_id"] == started["worker_id"]
+        assert durable_operation["execution_nonce"] == started["execution_nonce"]
+        for name in (
+            "process_identity",
+            "scope_name",
+            "assignment_proven_ref",
+        ):
+            assert durable_operation["cancel_intent"][name] == started[name]
+        cut_process.join(20)
+        assert not cut_process.is_alive()
+        assert cut_process.exitcode == 0
+        cut_process.close()
+        cut_process = None
+        cut_queue.close()
+        cut_queue.join_thread()
+        cut_queue = None
+
+        resume_queue = context.Queue()
+        resume_process = context.Process(
+            target=_recorded_qwen_incumbent_cancel_resume_cut,
+            args=(
+                str(project_root),
+                str(state_path),
+                str(worker_root),
+                str(lease_dir),
+                corpus_raw,
+                corpus_file_sha,
+                corpus_file_ref,
+                run_id,
+                stage,
+                operation_id,
+                resume_queue,
+            ),
+            name="benchmark-v2-incumbent-cancel-resume-cut",
+        )
+        resume_process.start()
+        assert resume_process.pid is not None
+        cut_identities.append(
+            {
+                "pid": resume_process.pid,
+                "create_time_ns": int(
+                    round(
+                        psutil.Process(resume_process.pid).create_time()
+                        * 1_000_000_000
+                    )
+                ),
+            }
+        )
+        message = resume_queue.get(timeout=45)
+        resume_process.join(20)
+        assert not resume_process.is_alive(), message
+        assert resume_process.exitcode == 0, message
+        assert message["status"] == "ok", message
+        cancelled = message["result"]
+        resume_process.close()
+        resume_process = None
+        resume_queue.close()
+        resume_queue.join_thread()
+        resume_queue = None
+
+        assert cancelled["status"] == "cancelled"
+        cancelled_operation = cancelled["operation"]
+        assert cancelled_operation["worker_ref"]["worker_id"] == started["worker_id"]
+        assert cancelled_operation["execution_nonce"] == started["execution_nonce"]
+        assert cancelled_operation["provider_cleanup_ref"]["outcome"] == (
+            "verified_exact_process_exited"
+        )
+        assert cancelled_operation["worker_cleanup_ref"]["outcome"] == (
+            "verified_exact_worker_exited"
+        )
+        for name in (
+            "process_identity",
+            "assignment_proven_ref",
+        ):
+            assert cancelled_operation["worker_cleanup_ref"][name] == (
+                cancelled_operation["cancel_intent"][name]
+            )
+        assert cancelled_operation["cancel_intent"]["scope_name"] == started[
+            "scope_name"
+        ]
+        assignment_files = list(worker_root.glob("*.benchmark-assignment.json"))
+        assert len(assignment_files) == 1
+        assert assignment_files[0].name == (
+            f"{started['worker_id']}.benchmark-assignment.json"
+        )
+    finally:
+        for label, process in (
+            ("cancel intent cut", cut_process),
+            ("cancel resume cut", resume_process),
+        ):
+            if process is None:
+                continue
+            try:
+                if process.is_alive():
+                    process.terminate()
+                process.join(20)
+                if process.is_alive():
+                    cleanup_errors.append(f"{label}: process remained alive")
+                process.close()
+            except BaseException as error:
+                cleanup_errors.append(f"{label}: {error}")
+        for label, queue in (
+            ("cancel intent queue", cut_queue),
+            ("cancel resume queue", resume_queue),
+        ):
+            if queue is None:
+                continue
+            try:
+                queue.close()
+                queue.join_thread()
+            except BaseException as error:
+                cleanup_errors.append(f"{label}: {error}")
+        if provider_helper is not None:
+            try:
+                provider_helper.close()
+            except BaseException as error:
+                cleanup_errors.append(f"provider helper: {error}")
+        if provider_scope is not None:
+            try:
+                provider_scope.close()
+            except BaseException as error:
+                cleanup_errors.append(f"provider scope: {error}")
+        window_receipt = None
+        if owner_journal.exists():
+            try:
+                window_receipt = close_owned_window(
+                    journal_path=owner_journal,
+                    reason="recorded_qwen_cancel_test_finally",
+                )
+            except BaseException as error:
+                cleanup_errors.append(f"window cleanup: {error}")
+
+        if worker_identity is not None:
+            try:
+                process = psutil.Process(worker_identity["pid"])
+                if int(round(process.create_time() * 1_000_000_000)) == (
+                    worker_identity["create_time_ns"]
+                ):
+                    cleanup_errors.append("worker process identity remained live")
+            except psutil.NoSuchProcess:
+                pass
+            except BaseException as error:
+                cleanup_errors.append(f"worker identity probe: {error}")
+        for cut_identity in cut_identities:
+            try:
+                process = psutil.Process(cut_identity["pid"])
+                if int(round(process.create_time() * 1_000_000_000)) == (
+                    cut_identity["create_time_ns"]
+                ):
+                    cleanup_errors.append("restart cut process identity remained live")
+            except psutil.NoSuchProcess:
+                pass
+            except BaseException as error:
+                cleanup_errors.append(f"restart cut identity probe: {error}")
+        if worker_scope_name is not None:
+            try:
+                worker_zero = observe_process_scope_cleanup(
+                    worker_scope_name, terminate=True, stable_zero_observations=3
+                )
+                if worker_zero["cleanup_status"] != "verified":
+                    cleanup_errors.append("worker scope was not verified zero")
+                if worker_zero["member_pids_after"] != []:
+                    cleanup_errors.append("worker scope retained members")
+            except BaseException as error:
+                cleanup_errors.append(f"worker scope probe: {error}")
+        if provider_scope is not None:
+            try:
+                provider_zero = observe_process_scope_cleanup(
+                    provider_scope.name,
+                    terminate=True,
+                    listener_ports=(() if provider_port is None else (provider_port,)),
+                    stable_zero_observations=3,
+                )
+                if provider_zero["cleanup_status"] != "verified":
+                    cleanup_errors.append("provider scope was not verified zero")
+                if provider_zero["member_pids_after"] != []:
+                    cleanup_errors.append("provider scope retained members")
+                if provider_zero["active_listeners_after"] != []:
+                    cleanup_errors.append("provider scope retained listeners")
+            except BaseException as error:
+                cleanup_errors.append(f"provider scope probe: {error}")
+        if startup_event_name is not None or controller_mutex_name is not None:
+            import win32api
+            import win32event
+
+            if startup_event_name is not None:
+                try:
+                    handle = win32event.OpenEvent(
+                        0x00100000, False, startup_event_name
+                    )
+                except BaseException as error:
+                    if getattr(error, "winerror", error.args[0]) != 2:
+                        cleanup_errors.append(f"startup event probe: {error}")
+                else:
+                    win32api.CloseHandle(handle)
+                    cleanup_errors.append("startup event handle remained")
+            if controller_mutex_name is not None:
+                try:
+                    handle = win32event.OpenMutex(
+                        0x00100000, False, controller_mutex_name
+                    )
+                except BaseException as error:
+                    if getattr(error, "winerror", error.args[0]) != 2:
+                        cleanup_errors.append(f"controller mutex probe: {error}")
+                else:
+                    win32api.CloseHandle(handle)
+                    cleanup_errors.append("controller mutex handle remained")
+        if window_receipt is not None:
+            if window_receipt["cleanup_status"] != "verified":
+                cleanup_errors.append("window cleanup was not verified")
+            if window_receipt["matching_owned_windows_after"] != []:
+                cleanup_errors.append("owned HWND residue remained")
+            if window_receipt["member_pids_after"] != []:
+                cleanup_errors.append("window owner process residue remained")
+            if window_receipt["active_listeners_after"] != []:
+                cleanup_errors.append("window owner listener residue remained")
+
+        def _remove_readonly(function, path, _error_info):
+            import stat
+
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            function(path)
+
+        try:
+            shutil.rmtree(project_root, onerror=_remove_readonly)
+        except FileNotFoundError:
+            pass
+        except BaseException as error:
+            cleanup_errors.append(f"temporary root cleanup: {error}")
+        if project_root.exists():
+            cleanup_errors.append("temporary project root remained")
         assert cleanup_errors == []

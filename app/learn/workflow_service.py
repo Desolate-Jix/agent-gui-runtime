@@ -2311,22 +2311,23 @@ def _resume_benchmark_v2_incumbent_operation(
                         expected_operation_anchor=anchor,
                         supervision_root=root,
                     )
-                post_cleanup_owner = _validate_benchmark_v2_post_cleanup_launch_owner(
-                    before=launch_owner,
-                    after=_inspect_benchmark_v2_launch_owner(
-                        registry=registry,
-                        operation=operation,
-                        anchor=anchor,
-                        root=root,
-                        require_assignment=True,
-                    ),
-                )
                 worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
                     cleanup=observed_worker_cleanup,
                     operation=operation,
-                    launch_owner=post_cleanup_owner,
+                    launch_owner=launch_owner,
                     allowed_outcomes={"verified_exact_worker_exited"},
                 )
+                if worker_cleanup.get("supervisor_absence_observation_ref") is None:
+                    _validate_benchmark_v2_post_cleanup_launch_owner(
+                        before=launch_owner,
+                        after=_inspect_benchmark_v2_launch_owner(
+                            registry=registry,
+                            operation=operation,
+                            anchor=anchor,
+                            root=root,
+                            require_assignment=True,
+                        ),
+                    )
                 provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
                     cleanup=registry.reconcile_benchmark_provider(
                         worker_id=expected_worker_id,
@@ -2629,27 +2630,29 @@ def _cancel_benchmark_v2_incumbent_operation(
                     expected_operation_anchor=anchor,
                     supervision_root=root,
                 )
-            replay_owner = _validate_benchmark_v2_post_cleanup_launch_owner(
-                before=launch_owner,
-                after=_inspect_benchmark_v2_launch_owner(
-                    registry=registry,
-                    operation=operation,
-                    anchor=anchor,
-                    root=root,
-                    require_assignment=(
-                        launch_owner["assignment_state"] == "proven"
-                    ),
-                ),
-            )
             worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
                 cleanup=observed_worker_cleanup,
                 operation=operation,
-                launch_owner=replay_owner,
+                launch_owner=launch_owner,
                 allowed_outcomes={
                     "verified_not_launched",
                     "verified_exact_worker_exited",
                 },
             )
+            replay_owner = launch_owner
+            if worker_cleanup.get("supervisor_absence_observation_ref") is None:
+                replay_owner = _validate_benchmark_v2_post_cleanup_launch_owner(
+                    before=launch_owner,
+                    after=_inspect_benchmark_v2_launch_owner(
+                        registry=registry,
+                        operation=operation,
+                        anchor=anchor,
+                        root=root,
+                        require_assignment=(
+                            launch_owner["assignment_state"] == "proven"
+                        ),
+                    ),
+                )
             provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
                 cleanup=registry.reconcile_benchmark_provider(
                     worker_id=operation["worker_ref"]["worker_id"],
@@ -2691,15 +2694,31 @@ def _cancel_benchmark_v2_incumbent_operation(
             else:
                 materialization_state = "materialization_possible"
                 lease_acquired = False
-            operation = advance_benchmark_v2_incumbent_cancel_cleanup(
-                operation,
-                worker_cleanup_ref=worker_cleanup if worker_verified else None,
-                provider_cleanup_ref=(
+            cleanup_changes = {
+                "worker_cleanup_ref": worker_cleanup if worker_verified else None,
+                "provider_cleanup_ref": (
                     provider_cleanup
                     if provider_outcome
                     in {"verified_not_acquired", "verified_exact_process_exited"}
                     else None
                 ),
+            }
+            if operation["phase"] == "cancel_intent":
+                operation = transition_benchmark_v2_incumbent_operation(
+                    operation,
+                    to_phase="cleanup_pending",
+                    changes=cleanup_changes,
+                )
+                current = _persist_benchmark_v2_incumbent_operation(
+                    composition=composition,
+                    workflow_state=current,
+                    stage=stage,
+                    operation=operation,
+                )
+            operation = advance_benchmark_v2_incumbent_cancel_cleanup(
+                operation,
+                worker_cleanup_ref=cleanup_changes["worker_cleanup_ref"],
+                provider_cleanup_ref=cleanup_changes["provider_cleanup_ref"],
                 provider_materialization_state=materialization_state,
                 provider_lease_acquired=lease_acquired,
                 terminal_at=_utc_datetime(None).isoformat(),

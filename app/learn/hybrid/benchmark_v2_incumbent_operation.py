@@ -1185,11 +1185,16 @@ def advance_benchmark_v2_incumbent_cancel_cleanup(
     )
     if not compatible:
         raise ValueError("benchmark provider cleanup outcome is state-incompatible")
-    current_with_cleanup = transition_benchmark_v2_incumbent_operation(
-        current,
-        to_phase="cleanup_pending",
-        changes=changes,
-    )
+    if current["phase"] == "cleanup_pending":
+        if any(current[name] != value for name, value in changes.items()):
+            raise ValueError("benchmark cleanup replay parents differ")
+        current_with_cleanup = current
+    else:
+        current_with_cleanup = transition_benchmark_v2_incumbent_operation(
+            current,
+            to_phase="cleanup_pending",
+            changes=changes,
+        )
     receipt = compose_benchmark_v2_incumbent_terminal_receipt(
         operation=current_with_cleanup,
         outcome="benchmark_v2_incumbent_cancelled",
