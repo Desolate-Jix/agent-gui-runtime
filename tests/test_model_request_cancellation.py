@@ -3520,3 +3520,481 @@ raise SystemExit(8)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "disabled by inherited test safety sentinel" in completed.stdout
     assert "REAL_WRAPPER_REACHED" not in completed.stdout + completed.stderr
+
+
+def _benchmark_qwen_runtime_owner(request_id: str) -> dict:
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_provider_runtime_owner_v1",
+            "authority_kind": "test",
+            "run_id": "run-b2-ledger",
+            "stage": "panel_learning_calibration_sequence",
+            "operation_id": f"operation-{request_id}",
+            "worker_id": f"worker-{request_id}",
+            "model_request_id": request_id,
+            "reservation_ref": {"content_sha256": "1" * 64},
+            "payload_sha256": "2" * 64,
+        }
+    )
+
+
+def _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id: str) -> dict:
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen-leases")
+    return model_server.prepare_qwen_model_request_acquisition_owner(
+        request_id,
+        runtime_owner_ref=_benchmark_qwen_runtime_owner(request_id),
+    )
+
+
+def test_materialization_ledger_prepare_is_deterministic_and_has_zero_provider_side_effect(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-prepare-zero-provider"
+    forbidden = []
+
+    def reject(name):
+        def fail(*args, **kwargs):
+            forbidden.append((name, args, kwargs))
+            raise AssertionError(f"prepare reached provider side effect: {name}")
+
+        return fail
+
+    for name in (
+        "profile_for_stage",
+        "_ensure_model_server_for_profile",
+        "acquire_qwen_model_lease",
+        "start_model_server",
+    ):
+        monkeypatch.setattr(model_server, name, reject(name))
+
+    first = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    second = model_server.prepare_qwen_model_request_acquisition_owner(
+        request_id,
+        runtime_owner_ref=_benchmark_qwen_runtime_owner(request_id),
+    )
+    ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
+
+    assert first == second
+    assert set(first) == {
+        "contract_version",
+        "model_request_id",
+        "runtime_owner_ref",
+        "acquisition_intent_ref",
+        "owner_state",
+        "content_sha256",
+    }
+    assert first["contract_version"] == "benchmark_provider_acquisition_owner_v1"
+    assert first["owner_state"] == "acquisition_prepared"
+    assert ledger == seal_immutable(
+        {
+            "contract_version": "qwen_model_request_materialization_ledger_v1",
+            "model_request_id": request_id,
+            "acquisition_intent_ref": first["acquisition_intent_ref"],
+            "runtime_owner_ref": first["runtime_owner_ref"],
+            "state": "prepared_never_materialized",
+            "revision": 0,
+            "transition": "prepare",
+            "predecessor_content_sha256": None,
+        }
+    )
+    assert forbidden == []
+    assert list((tmp_path / "qwen-leases").glob("*.json")) == []
+
+
+def test_qwen_cleanup_sidecar_abort_replays_byte_identically_and_blocks_launch(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-abort-replay"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    arguments = {
+        "acquisition_intent_ref": owner["acquisition_intent_ref"],
+        "runtime_owner_ref": owner["runtime_owner_ref"],
+        "reason": "cancelled",
+    }
+
+    first_abort = model_server.abort_qwen_model_request_acquisition(request_id, **arguments)
+    first_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+    second_abort = model_server.abort_qwen_model_request_acquisition(request_id, **arguments)
+    second_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+
+    assert first_abort == second_abort
+    assert first_receipt == second_receipt
+    assert first_receipt["contract_version"] == "qwen_model_request_cleanup_receipt_v1"
+    assert first_receipt["outcome"] == "verified_not_acquired"
+    assert set(first_receipt) == model_server._QWEN_CLEANUP_RECEIPT_FIELDS
+    assert first_receipt["lease_ref"] is None
+    assert first_receipt["server_process_identity"] is None
+    assert first_receipt["no_active_lease_observation_ref"] is not None
+    assert first_receipt["no_owned_runtime_observation_ref"] is not None
+    with pytest.raises(RuntimeError, match="conflicts|aborted"):
+        model_server._transition_qwen_model_request_materialization(
+            request_id, transition="launch"
+        )
+
+
+@pytest.mark.parametrize("first_transition", ["abort", "launch"])
+def test_materialization_ledger_cancel_launch_race_has_one_durable_winner_in_both_orders(
+    tmp_path,
+    monkeypatch,
+    first_transition,
+) -> None:
+    request_id = f"benchmark-linearization-{first_transition}"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+
+    if first_transition == "abort":
+        model_server.abort_qwen_model_request_acquisition(
+            request_id,
+            acquisition_intent_ref=owner["acquisition_intent_ref"],
+            runtime_owner_ref=owner["runtime_owner_ref"],
+            reason="cancelled",
+        )
+        with pytest.raises(RuntimeError, match="conflicts|aborted"):
+            model_server._transition_qwen_model_request_materialization(
+                request_id, transition="launch"
+            )
+        expected_state = "aborted_never_materialized"
+    else:
+        first = model_server._transition_qwen_model_request_materialization(
+            request_id, transition="launch"
+        )
+        assert model_server._transition_qwen_model_request_materialization(
+            request_id, transition="launch"
+        ) == first
+        with pytest.raises(RuntimeError, match="conflicts|materialization"):
+            model_server.abort_qwen_model_request_acquisition(
+                request_id,
+                acquisition_intent_ref=owner["acquisition_intent_ref"],
+                runtime_owner_ref=owner["runtime_owner_ref"],
+                reason="cancelled",
+            )
+        expected_state = "materialization_possible"
+
+    ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
+    assert ledger["state"] == expected_state
+    assert ledger["revision"] == 1
+    assert ledger["predecessor_content_sha256"] is not None
+
+
+def test_materialization_ledger_concurrent_cancel_launch_race_persists_one_head(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-concurrent-linearization"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    gate = Event()
+    results = []
+
+    def abort():
+        gate.wait(timeout=1.0)
+        try:
+            results.append(("abort", model_server.abort_qwen_model_request_acquisition(
+                request_id,
+                acquisition_intent_ref=owner["acquisition_intent_ref"],
+                runtime_owner_ref=owner["runtime_owner_ref"],
+                reason="cancelled",
+            )))
+        except RuntimeError as error:
+            results.append(("abort_error", str(error)))
+
+    def launch():
+        gate.wait(timeout=1.0)
+        try:
+            results.append(("launch", model_server._transition_qwen_model_request_materialization(
+                request_id, transition="launch"
+            )))
+        except RuntimeError as error:
+            results.append(("launch_error", str(error)))
+
+    threads = [Thread(target=abort), Thread(target=launch)]
+    for thread in threads:
+        thread.start()
+    gate.set()
+    for thread in threads:
+        thread.join(timeout=2.0)
+
+    ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
+    assert len(results) == 2
+    assert ledger["revision"] == 1
+    assert ledger["state"] in {"aborted_never_materialized", "materialization_possible"}
+    assert len([name for name, _ in results if not name.endswith("_error")]) == 1
+
+
+@pytest.mark.parametrize("lifetime_seconds", [0.05, 5.0])
+def test_benchmark_provider_cleanup_process_before_lease_remains_pending(
+    tmp_path,
+    monkeypatch,
+    lifetime_seconds,
+) -> None:
+    request_id = f"benchmark-process-before-lease-{lifetime_seconds}"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    model_server._transition_qwen_model_request_materialization(
+        request_id, transition="launch"
+    )
+    with subprocess.Popen(
+        [sys.executable, "-c", f"import time; time.sleep({lifetime_seconds})"],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    ) as process:
+        try:
+            if lifetime_seconds < 1:
+                process.wait(timeout=2.0)
+            observation = model_server.observe_qwen_model_request_cleanup(request_id)
+            assert observation["status"] == "cleanup_pending"
+            assert observation["outcome"] == "indeterminate"
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=2.0)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing",
+        "missing_intent",
+        "legacy",
+        "edited",
+        "wrong_owner",
+        "wrong_predecessor",
+        "revision_gap",
+        "extra_field",
+        "stale_rollback",
+        "missing_winner",
+    ],
+)
+def test_materialization_ledger_invalid_evidence_remains_pending(
+    tmp_path,
+    monkeypatch,
+    mutation,
+) -> None:
+    request_id = f"benchmark-invalid-ledger-{mutation}"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    path = model_server._qwen_materialization_ledger_path(request_id)
+    if mutation in {"stale_rollback", "missing_winner"}:
+        model_server._transition_qwen_model_request_materialization(
+            request_id, transition="launch"
+        )
+    if mutation == "missing":
+        path.unlink()
+    elif mutation == "missing_intent":
+        model_server._qwen_acquisition_artifact_paths(request_id)["intent"].unlink()
+    elif mutation == "legacy":
+        path.write_text(
+            json.dumps({"contract_version": "qwen_model_request_materialization_ledger_v0"}),
+            encoding="utf-8",
+        )
+    elif mutation == "stale_rollback":
+        revision_zero = model_server._qwen_acquisition_artifact_paths(request_id)[
+            "ledger_revision_zero"
+        ]
+        path.write_bytes(revision_zero.read_bytes())
+    elif mutation == "missing_winner":
+        model_server._qwen_acquisition_artifact_paths(request_id)["ledger_winner"].unlink()
+    else:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.pop("content_sha256")
+        if mutation == "edited":
+            payload["revision"] = 7
+        elif mutation == "wrong_owner":
+            payload["runtime_owner_ref"] = {"content_sha256": "f" * 64}
+        elif mutation == "wrong_predecessor":
+            payload.update(
+                revision=1,
+                transition="launch",
+                state="materialization_possible",
+                predecessor_content_sha256="e" * 64,
+            )
+        elif mutation == "revision_gap":
+            payload["revision"] = 2
+        else:
+            payload["observed_at"] = "forbidden"
+        path.write_text(json.dumps(seal_immutable(payload)), encoding="utf-8")
+
+    observation = model_server.observe_qwen_model_request_cleanup(request_id)
+    assert observation["status"] == "cleanup_pending"
+    assert observation["outcome"] == "indeterminate"
+
+
+def test_materialization_ledger_launch_dominates_profile_lookup_and_process_creation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-launch-dominates-provider"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+
+    def inspect_then_stop(stage, profile_id=None):
+        del stage, profile_id
+        ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
+        assert ledger["state"] == "materialization_possible"
+        raise RuntimeError("profile-lookup-sentinel")
+
+    monkeypatch.setattr(model_server, "profile_for_stage", inspect_then_stop)
+    with pytest.raises(RuntimeError, match="profile-lookup-sentinel"):
+        model_server.ensure_and_acquire_qwen_model_lease(
+            stage="understanding",
+            profile_id=None,
+            request_id=request_id,
+            wait_seconds=0.1,
+        )
+    assert model_server.observe_qwen_model_request_cleanup(request_id)["status"] == "cleanup_pending"
+
+
+def test_materialization_ledger_missing_head_rejects_launch_before_profile_lookup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-missing-ledger-before-launch"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    model_server._qwen_materialization_ledger_path(request_id).unlink()
+    profile_calls = []
+    monkeypatch.setattr(
+        model_server,
+        "profile_for_stage",
+        lambda *args, **kwargs: profile_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(RuntimeError, match="artifact|ledger"):
+        model_server.ensure_and_acquire_qwen_model_lease(
+            stage="understanding",
+            profile_id=None,
+            request_id=request_id,
+            wait_seconds=0.1,
+        )
+    assert profile_calls == []
+
+
+def test_qwen_cleanup_sidecar_observer_uses_acquisition_then_lease_lock_order(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from contextlib import contextmanager
+
+    request_id = "benchmark-observer-lock-order"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    model_server.abort_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+        reason="cancelled",
+    )
+    events = []
+    acquisition_lock = model_server._qwen_acquisition_lock
+    lease_lock = model_server._qwen_lease_lock
+
+    @contextmanager
+    def observed_acquisition_lock():
+        events.append("acquisition_enter")
+        with acquisition_lock():
+            yield
+        events.append("acquisition_exit")
+
+    @contextmanager
+    def observed_lease_lock():
+        assert events[-1] == "acquisition_enter"
+        events.append("lease_enter")
+        with lease_lock():
+            yield
+        events.append("lease_exit")
+
+    monkeypatch.setattr(model_server, "_qwen_acquisition_lock", observed_acquisition_lock)
+    monkeypatch.setattr(model_server, "_qwen_lease_lock", observed_lease_lock)
+    receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+
+    assert receipt["outcome"] == "verified_not_acquired"
+    assert events == [
+        "acquisition_enter",
+        "lease_enter",
+        "lease_exit",
+        "acquisition_exit",
+    ]
+
+
+def test_qwen_cleanup_sidecar_acquired_release_yields_only_exact_process_exited(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+        spawn_process_in_scope,
+    )
+
+    request_id = "benchmark-acquired-release"
+    _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    scope_name = process_scope_name(
+        {**_HYBRID_LINEAGE, "operation_id": "operation-benchmark-acquired"},
+        "qwen",
+    )
+    scope = WindowsProcessScope(scope_name, create=True)
+    helper = spawn_process_in_scope(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        scope_name=scope_name,
+        cwd=tmp_path,
+    )
+    profile = {
+        "profile_id": "qwen-benchmark-acquired",
+        "endpoint": "http://127.0.0.1:54329/v1/chat/completions",
+        "pid_file": str(tmp_path / "qwen-benchmark-acquired.pid"),
+    }
+    readiness = _server_readiness(
+        started=True,
+        pid=helper.process_identity["pid"],
+        created_ns=helper.process_identity["create_time_ns"],
+        base_url="http://127.0.0.1:54329/v1",
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setattr(
+        model_server,
+        "check_model_server",
+        lambda selected, timeout=1.0: {"status": "unreachable"},
+    )
+    try:
+        lease = model_server.acquire_qwen_model_lease(
+            profile=profile,
+            request_id=request_id,
+            readiness=readiness,
+        )
+        released = model_server._release_exact_qwen_lease(
+            lease,
+            reason="controlled-benchmark-release",
+        )
+        receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+        replay = model_server.observe_qwen_model_request_cleanup(request_id)
+        assert released["server_termination"] == "verified_exact_process_exited"
+        assert receipt == replay
+        assert receipt["outcome"] == "verified_exact_process_exited"
+        assert receipt["server_process_identity"] == lease["server_process_identity"]
+        assert receipt["release_reason"] == "controlled-benchmark-release"
+        assert receipt["no_owned_runtime_observation_ref"] is None
+        assert set(receipt) == model_server._QWEN_CLEANUP_RECEIPT_FIELDS
+    finally:
+        helper.close()
+        scope.close()
+
+
+def test_qwen_cleanup_sidecar_edited_receipt_fails_closed_to_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-edited-cleanup-sidecar"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    model_server.abort_qwen_model_request_acquisition(
+        request_id,
+        acquisition_intent_ref=owner["acquisition_intent_ref"],
+        runtime_owner_ref=owner["runtime_owner_ref"],
+        reason="cancelled",
+    )
+    receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+    assert receipt["outcome"] == "verified_not_acquired"
+    path = model_server._qwen_acquisition_artifact_paths(request_id)["cleanup_receipt"]
+    edited = json.loads(path.read_text(encoding="utf-8"))
+    edited["outcome"] = "verified_exact_process_exited"
+    path.write_text(json.dumps(edited), encoding="utf-8")
+
+    assert model_server.observe_qwen_model_request_cleanup(request_id) == {
+        "contract_version": "qwen_model_request_cleanup_observation_v1",
+        "status": "cleanup_pending",
+        "outcome": "indeterminate",
+        "model_request_id": request_id,
+    }

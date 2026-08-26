@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
@@ -56,6 +57,51 @@ _QWEN_LEASE_FIELDS = {
     "server_model_id",
     "profile_sha256",
     "server_process_identity",
+}
+_QWEN_RUNTIME_OWNER_FIELDS = {
+    "contract_version",
+    "authority_kind",
+    "run_id",
+    "stage",
+    "operation_id",
+    "worker_id",
+    "model_request_id",
+    "reservation_ref",
+    "payload_sha256",
+    "content_sha256",
+}
+_QWEN_MATERIALIZATION_LEDGER_FIELDS = {
+    "contract_version",
+    "model_request_id",
+    "acquisition_intent_ref",
+    "runtime_owner_ref",
+    "state",
+    "revision",
+    "transition",
+    "predecessor_content_sha256",
+    "content_sha256",
+}
+_QWEN_CLEANUP_RECEIPT_FIELDS = {
+    "contract_version",
+    "outcome",
+    "model_request_id",
+    "acquisition_intent_ref",
+    "runtime_owner_ref",
+    "lease_ref",
+    "profile_ref",
+    "server_process_identity",
+    "socket_ref",
+    "job_scope_ref",
+    "finalization_token",
+    "lease_state_ref",
+    "owner_tombstone_ref",
+    "release_reason",
+    "termination_observation_ref",
+    "scope_stable_zero_ref",
+    "listener_stable_zero_ref",
+    "no_active_lease_observation_ref",
+    "no_owned_runtime_observation_ref",
+    "content_sha256",
 }
 
 
@@ -432,6 +478,242 @@ def run_qwen_binding_model(
     return parsed
 
 
+def prepare_qwen_model_request_acquisition_owner(
+    request_id: str, *, runtime_owner_ref: Mapping[str, object]
+) -> dict[str, Any]:
+    """在零 provider 副作用边界持久化 benchmark Qwen 获取所有者。"""
+    normalized_request_id = _normalized_qwen_request_id(request_id)
+    runtime_owner = _validate_qwen_runtime_owner(
+        runtime_owner_ref, request_id=normalized_request_id
+    )
+    intent = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_acquisition_intent_v1",
+            "model_request_id": normalized_request_id,
+            "runtime_owner_ref": deepcopy(runtime_owner),
+        }
+    )
+    intent_ref = _qwen_content_ref(intent)
+    owner = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_acquisition_owner_v1",
+            "model_request_id": normalized_request_id,
+            "runtime_owner_ref": deepcopy(runtime_owner),
+            "acquisition_intent_ref": intent_ref,
+            "owner_state": "acquisition_prepared",
+        }
+    )
+    prepared = _qwen_prepared_materialization_ledger(
+        normalized_request_id,
+        acquisition_intent_ref=intent_ref,
+        runtime_owner_ref=runtime_owner,
+    )
+    with _qwen_acquisition_lock():
+        paths = _qwen_acquisition_artifact_paths(normalized_request_id)
+        existing_paths = [path for path in paths.values() if path.exists()]
+        if existing_paths:
+            persisted_intent = _load_qwen_acquisition_intent(normalized_request_id)
+            persisted_owner = _load_qwen_acquisition_owner(normalized_request_id)
+            ledger = _load_qwen_model_request_materialization_ledger(
+                normalized_request_id,
+                acquisition_intent_ref=intent_ref,
+                runtime_owner_ref=runtime_owner,
+            )
+            if persisted_intent != intent or persisted_owner != owner:
+                raise RuntimeError("Qwen acquisition owner replay conflicts with durable owner")
+            _validate_qwen_materialization_ledger(
+                ledger,
+                request_id=normalized_request_id,
+                acquisition_intent_ref=intent_ref,
+                runtime_owner_ref=runtime_owner,
+            )
+            return deepcopy(persisted_owner)
+        _write_qwen_acquisition_artifact(paths["intent"], intent)
+        _write_qwen_acquisition_artifact(paths["owner"], owner)
+        _write_qwen_acquisition_artifact(paths["ledger_revision_zero"], prepared)
+        _write_qwen_acquisition_artifact(paths["ledger"], prepared)
+        return deepcopy(owner)
+
+
+def abort_qwen_model_request_acquisition(
+    request_id: str,
+    *,
+    acquisition_intent_ref: Mapping[str, object],
+    runtime_owner_ref: Mapping[str, object],
+    reason: str,
+) -> dict[str, Any]:
+    """只允许 prepared_never_materialized 单调转为 aborted。"""
+    normalized_request_id = _normalized_qwen_request_id(request_id)
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("Qwen acquisition abort reason is required")
+    supplied_intent_ref = _validate_qwen_content_ref(acquisition_intent_ref)
+    supplied_runtime_owner = _validate_qwen_runtime_owner(
+        runtime_owner_ref, request_id=normalized_request_id
+    )
+    with _qwen_acquisition_lock():
+        owner = _load_qwen_acquisition_owner(normalized_request_id)
+        if (
+            owner["acquisition_intent_ref"] != supplied_intent_ref
+            or owner["runtime_owner_ref"] != supplied_runtime_owner
+        ):
+            raise RuntimeError("Qwen acquisition abort owner substitution rejected")
+        head = _transition_qwen_model_request_materialization_locked(
+            normalized_request_id,
+            transition="abort",
+            acquisition_intent_ref=supplied_intent_ref,
+            runtime_owner_ref=supplied_runtime_owner,
+        )
+        paths = _qwen_acquisition_artifact_paths(normalized_request_id)
+        tombstone = seal_immutable(
+            {
+                "contract_version": "benchmark_provider_aborted_acquisition_tombstone_v1",
+                "model_request_id": normalized_request_id,
+                "acquisition_intent_ref": supplied_intent_ref,
+                "runtime_owner_ref": supplied_runtime_owner,
+                "materialization_ledger_ref": _qwen_content_ref(head),
+                "reason": normalized_reason,
+                "historical_process_identity": None,
+                "historical_socket_ref": None,
+                "historical_job_scope_ref": None,
+            }
+        )
+        existing_tombstone = _load_optional_qwen_sealed_artifact(
+            paths["aborted_tombstone"]
+        )
+        if existing_tombstone is None:
+            _write_qwen_acquisition_artifact(paths["aborted_tombstone"], tombstone)
+        elif existing_tombstone != tombstone:
+            raise RuntimeError("Qwen aborted acquisition tombstone conflicts")
+        abort_result = seal_immutable(
+            {
+                "contract_version": "benchmark_provider_acquisition_abort_v1",
+                "model_request_id": normalized_request_id,
+                "acquisition_intent_ref": supplied_intent_ref,
+                "runtime_owner_ref": supplied_runtime_owner,
+                "materialization_ledger_ref": _qwen_content_ref(head),
+                "owner_tombstone_ref": _qwen_content_ref(tombstone),
+                "reason": normalized_reason,
+                "owner_state": "acquisition_aborted",
+            }
+        )
+        existing_abort = _load_optional_qwen_sealed_artifact(paths["abort"])
+        if existing_abort is None:
+            _write_qwen_acquisition_artifact(paths["abort"], abort_result)
+        elif existing_abort != abort_result:
+            raise RuntimeError("Qwen acquisition abort replay conflicts")
+        return deepcopy(abort_result)
+
+
+def _transition_qwen_model_request_materialization(
+    request_id: str,
+    *,
+    transition: str,
+    acquisition_intent_ref: Mapping[str, object] | None = None,
+    runtime_owner_ref: Mapping[str, object] | None = None,
+) -> dict[str, Any] | None:
+    normalized_request_id = _normalized_qwen_request_id(request_id)
+    with _qwen_acquisition_lock():
+        return _transition_qwen_model_request_materialization_locked(
+            normalized_request_id,
+            transition=transition,
+            acquisition_intent_ref=acquisition_intent_ref,
+            runtime_owner_ref=runtime_owner_ref,
+        )
+
+
+def _transition_qwen_model_request_materialization_locked(
+    request_id: str,
+    *,
+    transition: str,
+    acquisition_intent_ref: Mapping[str, object] | None = None,
+    runtime_owner_ref: Mapping[str, object] | None = None,
+) -> dict[str, Any] | None:
+    paths = _qwen_acquisition_artifact_paths(request_id)
+    if not paths["owner"].exists():
+        if acquisition_intent_ref is not None or runtime_owner_ref is not None:
+            raise RuntimeError("Qwen benchmark acquisition owner is missing")
+        return None
+    owner = _load_qwen_acquisition_owner(request_id)
+    intent_ref = owner["acquisition_intent_ref"]
+    exact_runtime_owner = owner["runtime_owner_ref"]
+    intent = _load_qwen_acquisition_intent(request_id)
+    if (
+        _qwen_content_ref(intent) != intent_ref
+        or intent.get("runtime_owner_ref") != exact_runtime_owner
+    ):
+        raise RuntimeError("Qwen acquisition intent lineage is invalid")
+    if (
+        acquisition_intent_ref is not None
+        and _validate_qwen_content_ref(acquisition_intent_ref) != intent_ref
+    ):
+        raise RuntimeError("Qwen materialization acquisition intent substitution rejected")
+    if (
+        runtime_owner_ref is not None
+        and _validate_qwen_runtime_owner(runtime_owner_ref, request_id=request_id)
+        != exact_runtime_owner
+    ):
+        raise RuntimeError("Qwen materialization runtime owner substitution rejected")
+    if transition not in {"abort", "launch"}:
+        raise ValueError("Qwen materialization transition is invalid")
+    raw_head = _load_optional_qwen_sealed_artifact(paths["ledger"])
+    raw_winner = _load_optional_qwen_sealed_artifact(paths["ledger_winner"])
+    if isinstance(raw_head, dict) and raw_head.get("revision") == 0 and raw_winner is not None:
+        prepared_head = _validate_qwen_materialization_ledger(
+            raw_head,
+            request_id=request_id,
+            acquisition_intent_ref=intent_ref,
+            runtime_owner_ref=exact_runtime_owner,
+        )
+        if _load_optional_qwen_sealed_artifact(paths["ledger_revision_zero"]) != prepared_head:
+            raise RuntimeError("Qwen materialization revision-zero lineage is invalid")
+        winner = _validate_qwen_materialization_ledger(
+            raw_winner,
+            request_id=request_id,
+            acquisition_intent_ref=intent_ref,
+            runtime_owner_ref=exact_runtime_owner,
+        )
+        if winner.get("transition") != transition:
+            raise RuntimeError("Qwen materialization transition conflicts with durable winner")
+        _write_qwen_acquisition_artifact(paths["ledger"], winner)
+        return deepcopy(winner)
+    head = _load_qwen_model_request_materialization_ledger(
+        request_id,
+        acquisition_intent_ref=intent_ref,
+        runtime_owner_ref=exact_runtime_owner,
+    )
+    target_state = (
+        "aborted_never_materialized"
+        if transition == "abort"
+        else "materialization_possible"
+    )
+    if head["revision"] == 1:
+        if head["transition"] == transition and head["state"] == target_state:
+            return deepcopy(head)
+        raise RuntimeError("Qwen materialization transition conflicts with durable winner")
+    if head["revision"] != 0 or head["state"] != "prepared_never_materialized":
+        raise RuntimeError("Qwen materialization ledger cannot transition")
+    next_head = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_materialization_ledger_v1",
+            "model_request_id": request_id,
+            "acquisition_intent_ref": deepcopy(intent_ref),
+            "runtime_owner_ref": deepcopy(exact_runtime_owner),
+            "state": target_state,
+            "revision": 1,
+            "transition": transition,
+            "predecessor_content_sha256": head["content_sha256"],
+        }
+    )
+    existing_winner = _load_optional_qwen_sealed_artifact(paths["ledger_winner"])
+    if existing_winner is None:
+        _write_qwen_acquisition_artifact(paths["ledger_winner"], next_head)
+    elif existing_winner != next_head:
+        raise RuntimeError("Qwen materialization winner conflicts")
+    _write_qwen_acquisition_artifact(paths["ledger"], next_head)
+    return deepcopy(next_head)
+
+
 def ensure_and_acquire_qwen_model_lease(
     *,
     stage: str,
@@ -443,6 +725,10 @@ def ensure_and_acquire_qwen_model_lease(
     """跨进程串行化 Qwen 首启与租约发布，避免无主启动副作用。"""
     _validate_qwen_runtime_acquiring(request_id)
     with _qwen_acquisition_lock():
+        _transition_qwen_model_request_materialization_locked(
+            _normalized_qwen_request_id(request_id),
+            transition="launch",
+        )
         profile = deepcopy(profile_for_stage(stage, profile_id))
         if profile_validator is not None:
             profile_validator(deepcopy(profile))
@@ -506,7 +792,7 @@ def ensure_and_acquire_qwen_model_lease(
                     )
             finally:
                 scope.close()
-        return acquire_qwen_model_lease(
+        return _acquire_qwen_model_lease_under_acquisition_lock(
             profile=profile,
             request_id=request_id,
             readiness=readiness,
@@ -514,6 +800,25 @@ def ensure_and_acquire_qwen_model_lease(
 
 
 def acquire_qwen_model_lease(
+    *,
+    profile: dict[str, Any],
+    request_id: str,
+    readiness: dict[str, Any],
+) -> dict[str, Any]:
+    owner_request_id = _normalized_qwen_request_id(request_id)
+    with _qwen_acquisition_lock():
+        _transition_qwen_model_request_materialization_locked(
+            owner_request_id,
+            transition="launch",
+        )
+        return _acquire_qwen_model_lease_under_acquisition_lock(
+            profile=profile,
+            request_id=owner_request_id,
+            readiness=readiness,
+        )
+
+
+def _acquire_qwen_model_lease_under_acquisition_lock(
     *,
     profile: dict[str, Any],
     request_id: str,
@@ -1015,6 +1320,302 @@ def qwen_model_lease_is_active(model_lease: object) -> bool:
     with _qwen_lease_lock():
         state = _load_qwen_lease_state(incarnation_id)
         return _find_exact_lease(state, model_lease) is not None
+
+
+def observe_qwen_model_request_cleanup(request_id: str) -> dict[str, Any]:
+    """按 acquisition→lease 锁序观察一个 benchmark Qwen 清理快照。"""
+    normalized_request_id = _normalized_qwen_request_id(request_id)
+    pending = {
+        "contract_version": "qwen_model_request_cleanup_observation_v1",
+        "status": "cleanup_pending",
+        "outcome": "indeterminate",
+        "model_request_id": normalized_request_id,
+    }
+    with _qwen_acquisition_lock():
+        try:
+            owner = _load_qwen_acquisition_owner(normalized_request_id)
+            intent = _load_qwen_acquisition_intent(normalized_request_id)
+            if (
+                _qwen_content_ref(intent) != owner["acquisition_intent_ref"]
+                or intent["runtime_owner_ref"] != owner["runtime_owner_ref"]
+            ):
+                return pending
+            ledger = _load_qwen_model_request_materialization_ledger(
+                normalized_request_id,
+                acquisition_intent_ref=owner["acquisition_intent_ref"],
+                runtime_owner_ref=owner["runtime_owner_ref"],
+            )
+        except (OSError, RuntimeError, ValueError, UnicodeError, json.JSONDecodeError):
+            return pending
+        with _qwen_lease_lock():
+            try:
+                active_matches = _find_qwen_owner_leases_locked(normalized_request_id)
+                terminal_owner = _load_qwen_owner_tombstone(normalized_request_id)
+                candidate = _build_qwen_model_request_cleanup_receipt_locked(
+                    normalized_request_id,
+                    owner=owner,
+                    ledger=ledger,
+                    active_matches=active_matches,
+                    terminal_owner=terminal_owner,
+                )
+                if candidate is None:
+                    return pending
+                receipt_path = _qwen_acquisition_artifact_paths(normalized_request_id)[
+                    "cleanup_receipt"
+                ]
+                existing = _load_optional_qwen_sealed_artifact(receipt_path)
+                if existing is None:
+                    _write_qwen_acquisition_artifact(receipt_path, candidate)
+                elif existing != candidate:
+                    return pending
+                return deepcopy(candidate)
+            except (OSError, RuntimeError, ValueError, UnicodeError, json.JSONDecodeError):
+                return pending
+
+
+def _build_qwen_model_request_cleanup_receipt_locked(
+    request_id: str,
+    *,
+    owner: dict[str, Any],
+    ledger: dict[str, Any],
+    active_matches: list[tuple[dict[str, Any], dict[str, Any]]],
+    terminal_owner: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    no_active = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_no_active_lease_observation_v1",
+            "model_request_id": request_id,
+            "active_lease_count": len(active_matches),
+        }
+    )
+    if active_matches:
+        return None
+    paths = _qwen_acquisition_artifact_paths(request_id)
+    if ledger["state"] == "aborted_never_materialized":
+        if terminal_owner is not None:
+            return None
+        tombstone = _load_optional_qwen_sealed_artifact(paths["aborted_tombstone"])
+        if (
+            not isinstance(tombstone, dict)
+            or set(tombstone)
+            != {
+                "contract_version",
+                "model_request_id",
+                "acquisition_intent_ref",
+                "runtime_owner_ref",
+                "materialization_ledger_ref",
+                "reason",
+                "historical_process_identity",
+                "historical_socket_ref",
+                "historical_job_scope_ref",
+                "content_sha256",
+            }
+            or tombstone.get("contract_version")
+            != "benchmark_provider_aborted_acquisition_tombstone_v1"
+            or tombstone.get("model_request_id") != request_id
+            or tombstone.get("acquisition_intent_ref")
+            != owner["acquisition_intent_ref"]
+            or tombstone.get("runtime_owner_ref") != owner["runtime_owner_ref"]
+            or tombstone.get("materialization_ledger_ref")
+            != _qwen_content_ref(ledger)
+            or tombstone.get("historical_process_identity") is not None
+            or tombstone.get("historical_socket_ref") is not None
+            or tombstone.get("historical_job_scope_ref") is not None
+        ):
+            return None
+        receipt = {
+            "contract_version": "qwen_model_request_cleanup_receipt_v1",
+            "outcome": "verified_not_acquired",
+            "model_request_id": request_id,
+            "acquisition_intent_ref": deepcopy(owner["acquisition_intent_ref"]),
+            "runtime_owner_ref": deepcopy(owner["runtime_owner_ref"]),
+            "lease_ref": None,
+            "profile_ref": None,
+            "server_process_identity": None,
+            "socket_ref": None,
+            "job_scope_ref": None,
+            "finalization_token": None,
+            "lease_state_ref": None,
+            "owner_tombstone_ref": _qwen_content_ref(tombstone),
+            "release_reason": tombstone["reason"],
+            "termination_observation_ref": None,
+            "scope_stable_zero_ref": None,
+            "listener_stable_zero_ref": None,
+            "no_active_lease_observation_ref": _qwen_content_ref(no_active),
+            "no_owned_runtime_observation_ref": _qwen_content_ref(tombstone),
+        }
+        return _validate_qwen_model_request_cleanup_receipt(
+            seal_immutable(receipt), owner=owner, ledger=ledger
+        )
+    if ledger["state"] != "materialization_possible" or terminal_owner is None:
+        return None
+    release_result = terminal_owner.get("release_result")
+    lease = release_result.get("lease") if isinstance(release_result, dict) else None
+    try:
+        exact_lease = _validate_exact_qwen_cleanup_evidence(release_result, lease)
+    except ValueError:
+        return None
+    if exact_lease.get("owner_request_id") != request_id:
+        return None
+    process_identity = exact_lease["server_process_identity"]
+    process_probe = _probe_exact_qwen_process(process_identity)
+    if (
+        process_probe.get("status") != "proven_absent"
+        or process_probe.get("identity") is not None
+    ):
+        return None
+    parsed = urlsplit(str(exact_lease.get("server_base_url") or ""))
+    port = int(parsed.port or 0)
+    listener_pids = _listening_pids_for_port(port) if port > 0 else []
+    if listener_pids:
+        return None
+    scope_acquisition = release_result.get("hybrid_process_scope_acquisition")
+    scope_cleanup = release_result.get("hybrid_process_scope_cleanup")
+    if (
+        not isinstance(scope_acquisition, dict)
+        or process_identity.get("pid") not in scope_acquisition.get("member_pids", [])
+        or not isinstance(scope_cleanup, dict)
+        or scope_cleanup.get("cleanup_status") != "verified"
+        or scope_cleanup.get("scope_name") != scope_acquisition.get("scope_name")
+        or scope_cleanup.get("authority") != "windows_job_object"
+        or scope_cleanup.get("member_pids_after") != []
+        or scope_cleanup.get("member_identities_after") != []
+        or scope_cleanup.get("active_listeners_after") != []
+        or scope_cleanup.get("pid_file_after") is not None
+        or not isinstance(scope_cleanup.get("stable_zero_observations"), int)
+        or scope_cleanup["stable_zero_observations"] < 3
+    ):
+        return None
+    release_observation = _load_optional_qwen_sealed_artifact(
+        paths["release_observation"]
+    )
+    if (
+        not isinstance(release_observation, dict)
+        or set(release_observation)
+        != {
+            "contract_version",
+            "model_request_id",
+            "lease_ref",
+            "finalization_token",
+            "release_reason",
+            "release_result_ref",
+            "content_sha256",
+        }
+        or release_observation.get("contract_version")
+        != "qwen_model_request_exact_release_observation_v1"
+        or release_observation.get("model_request_id") != request_id
+        or release_observation.get("lease_ref") != _qwen_content_ref(exact_lease)
+        or release_observation.get("finalization_token")
+        != terminal_owner.get("finalization_token")
+        or release_observation.get("release_result_ref")
+        != _qwen_content_ref(seal_immutable(release_result))
+        or not isinstance(release_observation.get("release_reason"), str)
+        or not release_observation["release_reason"]
+    ):
+        return None
+    receipt = {
+        "contract_version": "qwen_model_request_cleanup_receipt_v1",
+        "outcome": "verified_exact_process_exited",
+        "model_request_id": request_id,
+        "acquisition_intent_ref": deepcopy(owner["acquisition_intent_ref"]),
+        "runtime_owner_ref": deepcopy(owner["runtime_owner_ref"]),
+        "lease_ref": _qwen_content_ref(exact_lease),
+        "profile_ref": {"content_sha256": exact_lease["profile_sha256"]},
+        "server_process_identity": deepcopy(process_identity),
+        "socket_ref": _qwen_content_ref(
+            seal_immutable(
+                {
+                    "contract_version": "qwen_model_request_socket_identity_v1",
+                    "server_base_url": exact_lease["server_base_url"],
+                    "server_process_identity": deepcopy(process_identity),
+                }
+            )
+        ),
+        "job_scope_ref": _qwen_content_ref(seal_immutable(scope_acquisition)),
+        "finalization_token": terminal_owner.get("finalization_token"),
+        "lease_state_ref": _qwen_content_ref(seal_immutable(release_result)),
+        "owner_tombstone_ref": _qwen_content_ref(seal_immutable(terminal_owner)),
+        "release_reason": release_observation["release_reason"],
+        "termination_observation_ref": _qwen_content_ref(
+            seal_immutable(release_result["release"])
+        ),
+        "scope_stable_zero_ref": _qwen_content_ref(seal_immutable(scope_cleanup)),
+        "listener_stable_zero_ref": _qwen_content_ref(seal_immutable(scope_cleanup)),
+        "no_active_lease_observation_ref": _qwen_content_ref(no_active),
+        "no_owned_runtime_observation_ref": None,
+    }
+    return _validate_qwen_model_request_cleanup_receipt(
+        seal_immutable(receipt), owner=owner, ledger=ledger
+    )
+
+
+def _validate_qwen_model_request_cleanup_receipt(
+    receipt: object,
+    *,
+    owner: dict[str, Any],
+    ledger: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != _QWEN_CLEANUP_RECEIPT_FIELDS
+        or receipt.get("content_sha256") != content_sha256(receipt)
+        or receipt.get("contract_version")
+        != "qwen_model_request_cleanup_receipt_v1"
+        or receipt.get("model_request_id") != owner.get("model_request_id")
+        or receipt.get("acquisition_intent_ref")
+        != owner.get("acquisition_intent_ref")
+        or receipt.get("runtime_owner_ref") != owner.get("runtime_owner_ref")
+    ):
+        raise ValueError("Qwen cleanup sidecar identity is invalid")
+    outcome = receipt.get("outcome")
+    if outcome == "verified_not_acquired":
+        if ledger.get("state") != "aborted_never_materialized":
+            raise ValueError("Qwen not-acquired receipt has incompatible ledger")
+        null_fields = {
+            "lease_ref",
+            "profile_ref",
+            "server_process_identity",
+            "socket_ref",
+            "job_scope_ref",
+            "finalization_token",
+            "lease_state_ref",
+            "termination_observation_ref",
+            "scope_stable_zero_ref",
+            "listener_stable_zero_ref",
+        }
+        if any(receipt.get(field) is not None for field in null_fields):
+            raise ValueError("Qwen not-acquired receipt shape is invalid")
+        if (
+            receipt.get("owner_tombstone_ref") is None
+            or receipt.get("no_active_lease_observation_ref") is None
+            or receipt.get("no_owned_runtime_observation_ref") is None
+        ):
+            raise ValueError("Qwen not-acquired receipt evidence is incomplete")
+    elif outcome == "verified_exact_process_exited":
+        if ledger.get("state") != "materialization_possible":
+            raise ValueError("Qwen process-exited receipt has incompatible ledger")
+        required = {
+            "lease_ref",
+            "profile_ref",
+            "server_process_identity",
+            "socket_ref",
+            "job_scope_ref",
+            "finalization_token",
+            "lease_state_ref",
+            "owner_tombstone_ref",
+            "release_reason",
+            "termination_observation_ref",
+            "scope_stable_zero_ref",
+            "listener_stable_zero_ref",
+            "no_active_lease_observation_ref",
+        }
+        if any(receipt.get(field) is None for field in required):
+            raise ValueError("Qwen process-exited receipt evidence is incomplete")
+        if receipt.get("no_owned_runtime_observation_ref") is not None:
+            raise ValueError("Qwen acquired owner cannot be classified as not acquired")
+    else:
+        raise ValueError("Qwen cleanup sidecar outcome is invalid")
+    return deepcopy(receipt)
 
 
 def release_qwen_model_server(
@@ -1594,6 +2195,12 @@ def _finish_qwen_finalization_cleanup(
         lease = _qwen_public_lease(current_state["leases"][0])
         if lease != model_lease:
             raise RuntimeError("Qwen finalization lease changed before cleanup")
+        _write_qwen_benchmark_release_observation(
+            lease,
+            result=result,
+            finalization_token=token,
+            release_reason=str(finalization.get("reason") or ""),
+        )
         _write_qwen_owner_tombstone(
             lease,
             result=result,
@@ -1601,6 +2208,34 @@ def _finish_qwen_finalization_cleanup(
         )
         _delete_qwen_lease_state(incarnation_id)
     return result
+
+
+def _write_qwen_benchmark_release_observation(
+    model_lease: dict[str, Any],
+    *,
+    result: dict[str, Any],
+    finalization_token: str,
+    release_reason: str,
+) -> None:
+    request_id = str(model_lease.get("owner_request_id") or "")
+    paths = _qwen_acquisition_artifact_paths(request_id)
+    if not paths["owner"].exists():
+        return
+    observation = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_exact_release_observation_v1",
+            "model_request_id": request_id,
+            "lease_ref": _qwen_content_ref(model_lease),
+            "finalization_token": finalization_token,
+            "release_reason": release_reason,
+            "release_result_ref": _qwen_content_ref(seal_immutable(result)),
+        }
+    )
+    existing = _load_optional_qwen_sealed_artifact(paths["release_observation"])
+    if existing is None:
+        _write_qwen_acquisition_artifact(paths["release_observation"], observation)
+    elif existing != observation:
+        raise RuntimeError("Qwen exact release observation conflicts")
 
 
 def _resume_qwen_finalization(
@@ -2161,6 +2796,288 @@ def _valid_process_identity(value: object) -> bool:
         and isinstance(value.get("create_time_ns"), int)
         and value["create_time_ns"] > 0
     )
+
+
+def _normalized_qwen_request_id(request_id: object) -> str:
+    normalized = str(request_id or "").strip()
+    if not normalized:
+        raise ValueError("Qwen model request identity is required")
+    return normalized
+
+
+def _qwen_content_ref(value: Mapping[str, object]) -> dict[str, str]:
+    digest = value.get("content_sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        digest = content_sha256(dict(value))
+    return {"content_sha256": digest}
+
+
+def _validate_qwen_content_ref(value: object) -> dict[str, str]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"content_sha256"}
+        or not isinstance(value.get("content_sha256"), str)
+        or len(value["content_sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in value["content_sha256"])
+    ):
+        raise ValueError("Qwen content reference is invalid")
+    return {"content_sha256": value["content_sha256"]}
+
+
+def _validate_qwen_runtime_owner(
+    value: object, *, request_id: str
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("Qwen benchmark runtime owner is required")
+    owner = deepcopy(dict(value))
+    if (
+        set(owner) != _QWEN_RUNTIME_OWNER_FIELDS
+        or owner.get("contract_version") != "benchmark_provider_runtime_owner_v1"
+        or owner.get("model_request_id") != request_id
+        or owner.get("content_sha256") != content_sha256(owner)
+        or any(
+            not isinstance(owner.get(field), str) or not owner[field].strip()
+            for field in {
+                "authority_kind",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            }
+        )
+        or len(owner["payload_sha256"]) != 64
+    ):
+        raise ValueError("Qwen benchmark runtime owner is invalid")
+    _validate_qwen_content_ref(owner.get("reservation_ref"))
+    return owner
+
+
+def _qwen_acquisition_artifact_directory(request_id: str) -> Path:
+    digest = sha256(request_id.encode("utf-8")).hexdigest()
+    return MODEL_SERVER_LEASE_DIR / "benchmark_acquisitions" / digest
+
+
+def _qwen_acquisition_artifact_paths(request_id: str) -> dict[str, Path]:
+    directory = _qwen_acquisition_artifact_directory(request_id)
+    return {
+        "intent": directory / "acquisition-intent.json",
+        "owner": directory / "acquisition-owner.json",
+        "ledger": directory / "materialization-ledger.json",
+        "ledger_revision_zero": directory / "materialization-ledger-r0.json",
+        "ledger_winner": directory / "materialization-ledger-r1.json",
+        "abort": directory / "acquisition-abort.json",
+        "aborted_tombstone": directory / "aborted-owner-tombstone.json",
+        "release_observation": directory / "exact-release-observation.json",
+        "cleanup_receipt": directory / "cleanup-receipt.json",
+    }
+
+
+def _qwen_materialization_ledger_path(request_id: str) -> Path:
+    return _qwen_acquisition_artifact_paths(
+        _normalized_qwen_request_id(request_id)
+    )["ledger"]
+
+
+def _write_qwen_acquisition_artifact(path: Path, document: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+    raw = json.dumps(
+        dict(document), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    try:
+        with temporary.open("xb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        try:
+            directory_handle = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            directory_handle = None
+        if directory_handle is not None:
+            try:
+                os.fsync(directory_handle)
+            finally:
+                os.close(directory_handle)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _load_optional_qwen_sealed_artifact(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Qwen acquisition artifact is unreadable") from error
+    if (
+        not isinstance(value, dict)
+        or value.get("content_sha256") != content_sha256(value)
+    ):
+        raise RuntimeError("Qwen acquisition artifact seal mismatch")
+    return value
+
+
+def _load_qwen_acquisition_intent(request_id: str) -> dict[str, Any]:
+    value = _load_optional_qwen_sealed_artifact(
+        _qwen_acquisition_artifact_paths(request_id)["intent"]
+    )
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "contract_version",
+            "model_request_id",
+            "runtime_owner_ref",
+            "content_sha256",
+        }
+        or value.get("contract_version")
+        != "qwen_model_request_acquisition_intent_v1"
+        or value.get("model_request_id") != request_id
+    ):
+        raise RuntimeError("Qwen acquisition intent is invalid")
+    _validate_qwen_runtime_owner(value.get("runtime_owner_ref"), request_id=request_id)
+    return value
+
+
+def _load_qwen_acquisition_owner(request_id: str) -> dict[str, Any]:
+    value = _load_optional_qwen_sealed_artifact(
+        _qwen_acquisition_artifact_paths(request_id)["owner"]
+    )
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "contract_version",
+            "model_request_id",
+            "runtime_owner_ref",
+            "acquisition_intent_ref",
+            "owner_state",
+            "content_sha256",
+        }
+        or value.get("contract_version")
+        != "benchmark_provider_acquisition_owner_v1"
+        or value.get("model_request_id") != request_id
+        or value.get("owner_state") != "acquisition_prepared"
+    ):
+        raise RuntimeError("Qwen acquisition owner is invalid")
+    _validate_qwen_runtime_owner(value.get("runtime_owner_ref"), request_id=request_id)
+    _validate_qwen_content_ref(value.get("acquisition_intent_ref"))
+    return value
+
+
+def _qwen_prepared_materialization_ledger(
+    request_id: str,
+    *,
+    acquisition_intent_ref: Mapping[str, object],
+    runtime_owner_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    return seal_immutable(
+        {
+            "contract_version": "qwen_model_request_materialization_ledger_v1",
+            "model_request_id": request_id,
+            "acquisition_intent_ref": deepcopy(dict(acquisition_intent_ref)),
+            "runtime_owner_ref": deepcopy(dict(runtime_owner_ref)),
+            "state": "prepared_never_materialized",
+            "revision": 0,
+            "transition": "prepare",
+            "predecessor_content_sha256": None,
+        }
+    )
+
+
+def _validate_qwen_materialization_ledger(
+    value: object,
+    *,
+    request_id: str,
+    acquisition_intent_ref: Mapping[str, object],
+    runtime_owner_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != _QWEN_MATERIALIZATION_LEDGER_FIELDS
+        or value.get("content_sha256") != content_sha256(value)
+        or value.get("contract_version")
+        != "qwen_model_request_materialization_ledger_v1"
+        or value.get("model_request_id") != request_id
+        or value.get("acquisition_intent_ref") != dict(acquisition_intent_ref)
+        or value.get("runtime_owner_ref") != dict(runtime_owner_ref)
+    ):
+        raise RuntimeError("Qwen materialization ledger identity is invalid")
+    prepared = _qwen_prepared_materialization_ledger(
+        request_id,
+        acquisition_intent_ref=acquisition_intent_ref,
+        runtime_owner_ref=runtime_owner_ref,
+    )
+    if value.get("revision") == 0:
+        if value != prepared:
+            raise RuntimeError("Qwen materialization prepare head is invalid")
+    elif value.get("revision") == 1:
+        pair = (value.get("transition"), value.get("state"))
+        if (
+            pair
+            not in {
+                ("abort", "aborted_never_materialized"),
+                ("launch", "materialization_possible"),
+            }
+            or value.get("predecessor_content_sha256")
+            != prepared["content_sha256"]
+        ):
+            raise RuntimeError("Qwen materialization winner head is invalid")
+    else:
+        raise RuntimeError("Qwen materialization ledger revision is invalid")
+    return deepcopy(value)
+
+
+def _load_qwen_model_request_materialization_ledger(
+    request_id: str,
+    *,
+    acquisition_intent_ref: Mapping[str, object] | None = None,
+    runtime_owner_ref: Mapping[str, object] | None = None,
+) -> dict[str, Any]:
+    normalized_request_id = _normalized_qwen_request_id(request_id)
+    if acquisition_intent_ref is None or runtime_owner_ref is None:
+        owner = _load_qwen_acquisition_owner(normalized_request_id)
+        acquisition_intent_ref = owner["acquisition_intent_ref"]
+        runtime_owner_ref = owner["runtime_owner_ref"]
+    paths = _qwen_acquisition_artifact_paths(normalized_request_id)
+    value = _load_optional_qwen_sealed_artifact(paths["ledger"])
+    head = _validate_qwen_materialization_ledger(
+        value,
+        request_id=normalized_request_id,
+        acquisition_intent_ref=acquisition_intent_ref,
+        runtime_owner_ref=runtime_owner_ref,
+    )
+    revision_zero = _load_optional_qwen_sealed_artifact(paths["ledger_revision_zero"])
+    prepared = _qwen_prepared_materialization_ledger(
+        normalized_request_id,
+        acquisition_intent_ref=acquisition_intent_ref,
+        runtime_owner_ref=runtime_owner_ref,
+    )
+    if revision_zero != prepared:
+        raise RuntimeError("Qwen materialization revision-zero lineage is invalid")
+    winner = _load_optional_qwen_sealed_artifact(paths["ledger_winner"])
+    if head["revision"] == 0:
+        if winner is not None:
+            raise RuntimeError("Qwen materialization head is a stale rollback")
+    elif winner != head:
+        raise RuntimeError("Qwen materialization winner lineage is incoherent")
+    return head
+
+
+def _find_qwen_owner_leases_locked(
+    request_id: str,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    matches = []
+    for state in _load_all_qwen_lease_states():
+        for lease in state["leases"]:
+            if isinstance(lease, dict) and lease.get("owner_request_id") == request_id:
+                matches.append((state, _qwen_public_lease(lease)))
+    if len(matches) > 1:
+        raise RuntimeError("Qwen request ownership is ambiguous")
+    return matches
 
 
 def _qwen_lease_state_path(incarnation_id: str) -> Path:
