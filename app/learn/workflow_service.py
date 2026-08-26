@@ -1581,11 +1581,13 @@ def _validate_benchmark_v2_worker_cleanup_parent(
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent B1 cleanup lineage differs"
         )
+    if receipt.get("reservation_ref") != launch_owner["current_reservation_ref"]:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 cleanup owner differs"
+        )
     if receipt["outcome"] == "verified_exact_worker_exited":
         if (
-            receipt.get("reservation_ref")
-            != launch_owner["current_reservation_ref"]
-            or receipt.get("supervision_ref") != launch_owner["supervision_ref"]
+            receipt.get("supervision_ref") != launch_owner["supervision_ref"]
             or receipt.get("process_identity") != launch_owner["process_identity"]
             or receipt.get("assignment_proven_ref")
             != launch_owner["assignment_proven_ref"]

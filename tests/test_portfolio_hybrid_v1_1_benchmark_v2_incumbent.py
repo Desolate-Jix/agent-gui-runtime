@@ -561,7 +561,9 @@ def _binding_for_case(tmp_path: Path, case: dict[str, object], operation_id: str
     return binding, image_sha
 
 
-def _prepared_document(source_bundle: dict[str, object]) -> dict[str, object]:
+def _prepared_document(
+    source_bundle: dict[str, object], *, prepared_revision: int = 7
+) -> dict[str, object]:
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         compose_benchmark_v2_incumbent_operation,
     )
@@ -575,7 +577,7 @@ def _prepared_document(source_bundle: dict[str, object]) -> dict[str, object]:
         reservation_ref={"content_sha256": "2" * 64},
         supervision_inputs_ref={"content_sha256": "3" * 64},
         expected_supervision_ref={"content_sha256": "4" * 64},
-        prepared_revision=7,
+        prepared_revision=prepared_revision,
         handler_payload_source=source,
         handler_payload_source_ref=source_bundle["handler_payload_source_ref"],
         window_binding_ref=source["window_binding_ref"],
@@ -2610,7 +2612,7 @@ def test_b1_launch_owner_rejects_cross_authority_before_parent_use(
         ("b2", "wrong_authority"),
     ],
 )
-def test_cleanup_parent_projection_rejects_resealed_schema_and_lineage_drift_before_mutation(
+def test_cleanup_parent_projection_rejects_resealed_schema_and_lineage_drift(
     parent_kind: str,
     mutation: str,
     source_bundle: dict[str, object],
@@ -2702,7 +2704,6 @@ def test_cleanup_parent_projection_rejects_resealed_schema_and_lineage_drift_bef
     elif mutation == "wrong_authority":
         target["authority_kind"] = "cross-pair"
     sealed = seal_immutable(target)
-    persisted: list[dict[str, object]] = []
     with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
         if parent_kind == "b1":
             workflow_service._validate_benchmark_v2_worker_cleanup_parent(
@@ -2719,9 +2720,377 @@ def test_cleanup_parent_projection_rejects_resealed_schema_and_lineage_drift_bef
                 authority_kind="test",
                 allowed_outcomes={"verified_exact_process_exited"},
             )
-        persisted.append(deepcopy(operation))
-    assert persisted == []
     assert operation == original
+
+
+def test_b1_not_launched_cleanup_rejects_correctly_resealed_wrong_reservation(
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _result_ready_document(
+        source_bundle,
+        result_identity={"content_sha256": "a" * 64},
+    )
+    worker = operation["worker_ref"]
+    launch_owner = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": None,
+            "reservation_state": "aborted_before_launch",
+            "owner_phase": "reservation_aborted",
+            "assignment_state": "not_proven",
+            "process_identity": None,
+            "scope_name": None,
+            "assignment_proven_ref": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    cleanup = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_cleanup_receipt_v1",
+            "outcome": "verified_not_launched",
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "reservation_ref": {"content_sha256": "d" * 64},
+            "supervision_ref": None,
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "process_identity": None,
+            "assignment_proven_ref": None,
+            "finalization_intent_ref": None,
+            "exact_handle_observation_refs": {},
+            "job_absence_observation_ref": None,
+            "worker_absence_observation_ref": {"content_sha256": "8" * 64},
+            "supervisor_absence_observation_ref": None,
+            "reservation_abort_ref": {"content_sha256": "9" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="B1 cleanup owner differs",
+    ):
+        workflow_service._validate_benchmark_v2_worker_cleanup_parent(
+            cleanup=cleanup,
+            operation=operation,
+            launch_owner=launch_owner,
+            allowed_outcomes={"verified_not_launched"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("parent_kind", "mutation"),
+    [
+        ("b1", "extra"),
+        ("b1", "missing"),
+        ("b1", "cross_parent"),
+        ("b2", "extra"),
+        ("b2", "missing"),
+        ("b2", "cross_parent"),
+    ],
+)
+def test_result_ready_completion_rejects_resealed_cleanup_projection_without_store_cas(
+    parent_kind: str,
+    mutation: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        transition_benchmark_v2_incumbent_operation,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn.workflow_service import start_learning_workflow_stage_operation
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    result_snapshot = {
+        "contract_version": "learning_stage_worker_completed_result_identity_v1",
+        "status": "completed",
+        "worker_id": "worker-c1",
+        "run_id": "run-c1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-c1",
+        "task_kind": "vision_observe_screen",
+        "model_request_id": "request-c1",
+        "payload_sha256": source_bundle["handler_payload_source"][
+            "handler_payload_sha256"
+        ],
+        "result_sha256": "a" * 64,
+        "result_available": True,
+        "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
+        "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+    }
+    operation = _prepared_document(source_bundle, prepared_revision=4)
+    operation_documents = [operation]
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="provider_owner_prepared",
+        changes=_provider_owner_changes(),
+    )
+    operation_documents.append(operation)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="worker_starting",
+        changes={},
+    )
+    operation_documents.append(operation)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="worker_bound",
+        changes={
+            "worker_ref": {
+                **operation["worker_ref"],
+                "supervision_ref": {"content_sha256": "9" * 64},
+            }
+        },
+    )
+    operation_documents.append(operation)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="result_ready",
+        changes={"result_identity_ref": seal_immutable(result_snapshot)},
+    )
+    operation_documents.append(operation)
+    worker = operation["worker_ref"]
+    process_identity = {"pid": 321, "create_time_ns": 654}
+    launch_owner = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": worker["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": process_identity,
+            "scope_name": "Local\\AgentGuiBenchmarkWorker-" + "1" * 64,
+            "assignment_proven_ref": {"content_sha256": "5" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    b1_body = {
+        "contract_version": "benchmark_worker_cleanup_receipt_v1",
+        "outcome": "verified_exact_worker_exited",
+        "operation_anchor_ref": operation["operation_anchor_ref"],
+        "reservation_ref": launch_owner["current_reservation_ref"],
+        "supervision_ref": launch_owner["supervision_ref"],
+        "run_id": operation["run_id"],
+        "stage": operation["stage"],
+        "operation_id": operation["operation_id"],
+        "worker_id": worker["worker_id"],
+        "process_identity": process_identity,
+        "assignment_proven_ref": launch_owner["assignment_proven_ref"],
+        "finalization_intent_ref": {"content_sha256": "6" * 64},
+        "exact_handle_observation_refs": {
+            "process": {"content_sha256": "7" * 64}
+        },
+        "job_absence_observation_ref": {"content_sha256": "8" * 64},
+        "worker_absence_observation_ref": {"content_sha256": "9" * 64},
+        "supervisor_absence_observation_ref": None,
+        "reservation_abort_ref": None,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    b2_body = {
+        "contract_version": "benchmark_provider_cleanup_ref_v1",
+        "status": "cleanup_verified",
+        "outcome": "verified_exact_process_exited",
+        "authority_kind": "test",
+        "run_id": operation["run_id"],
+        "stage": operation["stage"],
+        "operation_id": operation["operation_id"],
+        "worker_id": worker["worker_id"],
+        "model_request_id": worker["model_request_id"],
+        "payload_sha256": worker["payload_sha256"],
+        "reservation_ref": operation["provider_reservation_ref"],
+        "acquisition_owner_ref": operation["acquisition_owner_ref"],
+        "acquisition_intent_ref": operation["acquisition_intent_ref"],
+        "runtime_owner_ref": operation["runtime_owner_ref"],
+        "cleanup_receipt_ref": result_snapshot["provider_cleanup_evidence_ref"],
+    }
+    target = deepcopy(b1_body if parent_kind == "b1" else b2_body)
+    if mutation == "extra":
+        target["unexpected"] = False
+    elif mutation == "missing":
+        target.pop("finalization_intent_ref" if parent_kind == "b1" else "status")
+    elif parent_kind == "b1":
+        target["supervision_ref"] = {"content_sha256": "d" * 64}
+    else:
+        target["acquisition_owner_ref"] = {"content_sha256": "d" * 64}
+    malformed = seal_immutable(target)
+    worker_cleanup = malformed if parent_kind == "b1" else seal_immutable(b1_body)
+    provider_cleanup = malformed if parent_kind == "b2" else seal_immutable(b2_body)
+    events: list[str] = []
+
+    class _Registry:
+        def inspect_completed_result_identity(self, **_kwargs):
+            events.append("inspect_a")
+            return deepcopy(result_snapshot)
+
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            if "worker_cleanup" not in events:
+                return deepcopy(launch_owner)
+            after = deepcopy(launch_owner)
+            after.pop("content_sha256")
+            after["owner_phase"] = "cleanup_finalization_intent"
+            return seal_immutable(after)
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("worker_cleanup")
+            return deepcopy(worker_cleanup)
+
+        def reconcile_benchmark_provider_cleanup(self, **_kwargs):
+            events.append("provider_cleanup")
+            return deepcopy(provider_cleanup)
+
+        def adopt_result(self, **_kwargs):
+            events.append("adopt")
+            raise AssertionError("cleanup projection reached terminal adoption")
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        lambda **kwargs: {
+            "worker_process_identity": deepcopy(kwargs["worker_process_identity"]),
+            "normal_binding_evidence_ref": deepcopy(
+                kwargs["normal_binding_evidence_ref"]
+            ),
+        },
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+
+    state_path = tmp_path / f"{parent_kind}-{mutation}-state.json"
+    store = LearningWorkflowRunStore(state_path=state_path)
+    try:
+        first = store.transition(
+            run_id=operation["run_id"],
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            evidence_refs={},
+        )
+        bound = store.transition(
+            run_id=operation["run_id"],
+            expected_revision=first["revision"],
+            stage="bind_capture",
+            outcome="completed",
+            evidence_refs={"image_path": str(tmp_path / "capture.bmp")},
+        )
+        started = start_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id=operation["run_id"],
+            expected_revision=bound["revision"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+        )["workflow_state"]
+        current = started
+        for operation_document in operation_documents:
+            stage_execution = deepcopy(
+                current["stages"][operation["stage"]]["evidence_refs"][
+                    "stage_execution"
+                ]
+            )
+            stage_execution["benchmark_v2_incumbent"] = deepcopy(operation_document)
+            stage_execution["benchmark_v2_operation_anchor"] = {
+                "contract_version": "benchmark_worker_operation_anchor_v1",
+                "anchor_identity_sha256": operation["operation_anchor_ref"][
+                    "content_sha256"
+                ],
+                "expected_supervision_ref": deepcopy(
+                    operation["expected_supervision_ref"]
+                ),
+            }
+            current = store.transition(
+                run_id=operation["run_id"],
+                expected_revision=current["revision"],
+                stage=operation["stage"],
+                outcome="running",
+                evidence_refs={"stage_execution": stage_execution},
+            )
+            assert current["revision"] == operation_document["current_document_revision"]
+        anchored = current
+        assert anchored["revision"] == operation["current_document_revision"]
+        composition = workflow_service.LearningWorkflowServiceComposition(
+            store=store,
+            worker_registry=_Registry(),
+            project_root=tmp_path,
+            composition_kind="test",
+            benchmark_supervision_root=type(
+                "_Root", (), {"authority_kind": "test"}
+            )(),
+            provider_case_resolver=source_bundle["provider_case_resolver"],
+            benchmark_v2_worker_binding_resolver=object(),
+        )
+        before_state = store.get(operation["run_id"])
+        before_bytes = state_path.read_bytes()
+        cas_winners: list[int] = []
+        real_transition = store.transition
+
+        def observe_cas(**kwargs):
+            state = real_transition(**kwargs)
+            cas_winners.append(int(state["revision"]))
+            return state
+
+        monkeypatch.setattr(store, "transition", observe_cas)
+        with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+            workflow_service.continue_guarded_learning_stage_worker_result(
+                composition=composition,
+                run_id=operation["run_id"],
+                expected_revision=anchored["revision"],
+                stage=operation["stage"],
+                operation_id=operation["operation_id"],
+                worker_id=worker["worker_id"],
+            )
+
+        after_state = store.get(operation["run_id"])
+        after_operation = after_state["stages"][operation["stage"]]["evidence_refs"][
+            "stage_execution"
+        ]["benchmark_v2_incumbent"]
+        assert state_path.read_bytes() == before_bytes
+        assert after_state == before_state
+        assert after_state["revision"] == anchored["revision"]
+        assert after_operation["phase"] == "result_ready"
+        assert after_operation.get("terminal_intent") is None
+        assert cas_winners == []
+        assert "adopt" not in events
+    finally:
+        store.close()
 
 
 def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
