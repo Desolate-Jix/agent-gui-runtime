@@ -476,6 +476,8 @@ Production port仅包装现有WorkflowService public functions与Task6 `get_prod
 
 ### Task 9: Runner and executable regression-only lifecycle probes
 
+**Mandatory prerequisite:** Complete `docs/superpowers/plans/2026-08-28-task9-production-runtime-prerequisite-amendment.md` Tasks U0–U2 before Task 9 GREEN. Two independent production call-chain reviews proved the original two-file allowlist cannot prepare real screen-group/capture parents, attest every provider dispatch at the dispatch owner, or reconcile probes/open attempts without private orchestration access. The amendment adds only benchmark-scoped internal seams and preserves this Task's exact CLI, public Contract boundary, no-action policy, and final commit.
+
 **Allowed files:**
 - Create `scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py`
 - Create `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`
