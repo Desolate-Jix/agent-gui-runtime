@@ -111,8 +111,355 @@ def test_attestation_is_fsynced_after_fresh_window_and_runtime_before_dispatch(
     ]
     journal = Path(str(context["receipt_journal_path"]))
     assert json.loads(journal.read_text(encoding="utf-8").splitlines()[0]) == receipt
+    assert module.read_latest_benchmark_dispatch_receipt(
+        dispatch_context=context
+    ) == receipt
     assert receipt["artifact_is_authorization"] is False
     assert receipt["execute_binding_enabled"] is False
+
+
+def test_common_runtime_identity_distinguishes_exact_provider_ownership() -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    process = {"pid": 101, "create_time_ns": 202}
+    scope = {
+        "scope_name": "Local\\AgentGuiHybrid-qwen-" + "a" * 64,
+        "member_pids": [101],
+        "process_identities": [process],
+    }
+    common = {
+        "profile_ref": {"content_sha256": "b" * 64},
+        "listener_owner": {
+            "host": "127.0.0.1",
+            "port": 8080,
+            "process_identities": [process],
+        },
+        "process_identities": [process],
+        "process_scope": scope,
+    }
+    qwen_a = module.compose_benchmark_provider_runtime_identity(
+        provider="qwen",
+        lease_identity={
+            "lease_id": "lease-a",
+            "incarnation_id": "incarnation-a",
+            "owner_request_id": "request-a",
+        },
+        **common,
+    )
+    qwen_b = module.compose_benchmark_provider_runtime_identity(
+        provider="qwen",
+        lease_identity={
+            "lease_id": "lease-b",
+            "incarnation_id": "incarnation-b",
+            "owner_request_id": "request-a",
+        },
+        **common,
+    )
+    qwen_c = module.compose_benchmark_provider_runtime_identity(
+        provider="qwen",
+        lease_identity={
+            "lease_id": "lease-a",
+            "incarnation_id": "incarnation-a",
+            "owner_request_id": "request-a",
+        },
+        profile_ref=common["profile_ref"],
+        listener_owner={
+            **common["listener_owner"],
+            "process_identities": [{"pid": 303, "create_time_ns": 404}],
+        },
+        process_identities=[{"pid": 303, "create_time_ns": 404}],
+        process_scope={
+            **scope,
+            "member_pids": [303],
+            "process_identities": [{"pid": 303, "create_time_ns": 404}],
+        },
+    )
+    vista_a = module.compose_benchmark_provider_runtime_identity(
+        provider="vista",
+        lease_identity={
+            "incarnation_id": "vista-a",
+            "lease_content_sha256": "c" * 64,
+        },
+        **{
+            **common,
+            "process_scope": {
+                **scope,
+                "scope_name": "Local\\AgentGuiHybrid-vista-" + "d" * 64,
+            },
+        },
+    )
+    vista_b = module.compose_benchmark_provider_runtime_identity(
+        provider="vista",
+        lease_identity={
+            "incarnation_id": "vista-b",
+            "lease_content_sha256": "e" * 64,
+        },
+        **{
+            **common,
+            "process_scope": {
+                **scope,
+                "scope_name": "Local\\AgentGuiHybrid-vista-" + "d" * 64,
+            },
+        },
+    )
+    omni_a = module.compose_benchmark_provider_runtime_identity(
+        provider="omni",
+        lease_identity=None,
+        profile_ref=None,
+        listener_owner=None,
+        process_identities=[process],
+        process_scope={
+            **scope,
+            "scope_name": "Local\\AgentGuiHybrid-omni-" + "f" * 64,
+        },
+    )
+    omni_b = module.compose_benchmark_provider_runtime_identity(
+        provider="omni",
+        lease_identity=None,
+        profile_ref=None,
+        listener_owner=None,
+        process_identities=[process],
+        process_scope={
+            **scope,
+            "scope_name": "Local\\AgentGuiHybrid-omni-" + "9" * 64,
+        },
+    )
+
+    assert qwen_a["content_sha256"] != qwen_b["content_sha256"]
+    assert qwen_a["content_sha256"] != qwen_c["content_sha256"]
+    assert vista_a["content_sha256"] != vista_b["content_sha256"]
+    assert omni_a["content_sha256"] != omni_b["content_sha256"]
+    assert qwen_a["artifact_is_authorization"] is False
+    assert qwen_a["execute_binding_enabled"] is False
+
+
+def test_registry_rejects_aggregate_only_hybrid_provider_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+    from app.learn.workflow_worker import LearningStageWorkerRegistry
+
+    context = _context(tmp_path, provider="qwen")
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: {"content_sha256": "e" * 64},
+    )
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        receipt = module.attest_benchmark_provider_dispatch(
+            provider="qwen",
+            operation_ref=deepcopy(context["operation_ref"]),
+            window_binding=deepcopy(context["window_binding"]),
+            provider_runtime={"contract_version": "test_runtime_v1"},
+        )
+
+    root = (tmp_path / "workers").resolve()
+    registry = LearningStageWorkerRegistry(result_root=root)
+    record = {
+        "contract_version": "learning_stage_worker_v1",
+        "worker_id": "worker-hybrid-cleanup",
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "model_request_id": "request-hybrid-cleanup",
+        "payload_sha256": "f" * 64,
+        "status": "cancelled",
+        "started_at": "2026-08-28T00:00:00+00:00",
+        "finished_at": "2026-08-28T00:00:01+00:00",
+        "result_path": str(root / "worker-hybrid-cleanup.result.json"),
+        "journal_path": str(root / "worker-hybrid-cleanup.worker.json"),
+        "payload": {"_benchmark_v2_dispatch_context": deepcopy(context)},
+        "process": None,
+    }
+    projection = registry._compose_hybrid_benchmark_provider_cleanup(
+        record=record,
+        worker_termination={
+            "worker_id": record["worker_id"],
+            "model_request_id": record["model_request_id"],
+            "backend_compute_termination": "terminated",
+            "model_service_compute_termination": "request_not_active",
+            "model_request_cancellation": {
+                "status": "request_not_active",
+                "request_id": record["model_request_id"],
+            },
+        },
+    )
+    assert receipt["provider_runtime_attestation_ref"] == {
+        "content_sha256": "e" * 64
+    }
+    assert projection is None
+
+
+def test_registry_persists_exact_owner_cleanup_and_replays_after_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+    from app.learn.recognition.uei import omniparser_shadow_adapter as omni
+    from app.learn.workflow_worker import LearningStageWorkerRegistry
+
+    context = _context(tmp_path, provider="omni")
+    process = {"pid": 41, "create_time_ns": 42}
+    scope_name = "Local\\AgentGuiHybrid-omni-" + "a" * 64
+    runtime_identity = module.compose_benchmark_provider_runtime_identity(
+        provider="omni",
+        lease_identity=None,
+        profile_ref=None,
+        listener_owner=None,
+        process_identities=[process],
+        process_scope={
+            "scope_name": scope_name,
+            "member_pids": [41],
+            "process_identities": [process],
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: {
+            "content_sha256": runtime_identity["content_sha256"]
+        },
+    )
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        dispatch_receipt = module.attest_benchmark_provider_dispatch(
+            provider="omni",
+            operation_ref=deepcopy(context["operation_ref"]),
+            window_binding=deepcopy(context["window_binding"]),
+            provider_runtime={"provider": "omni"},
+        )
+
+    observation = {
+        "contract_version": "omniparser_invocation_cleanup_observation_v1",
+        "provider_invocation_id": "invocation/exact",
+        "process_identity": process,
+        "descendant_identities": [],
+        "provider_processes_after": [],
+        "orphan_descendant_identities": [],
+        "active_listeners_after": [],
+        "pid_file_paths": [],
+        "lease_path": None,
+        "lease_files_after": [],
+        "inventory_observable": True,
+        "cleanup_status": "verified",
+        "process_scope_name": scope_name,
+        "process_scope_cleanup": {
+            "scope_name": scope_name,
+            "cleanup_status": "verified",
+        },
+        "process_scope_acquisition": {
+            "scope_name": scope_name,
+            "member_pids": [41],
+        },
+        "cleanup_reason": "outer_worker_terminated",
+        "lineage": {"run_id": "run-1"},
+        "resource_lease_identity": {"lease_id": "omni-lease"},
+    }
+    observation["content_sha256"] = module.content_sha256(observation)
+    monkeypatch.setattr(
+        omni,
+        "load_omniparser_invocation_cleanup_observation",
+        lambda invocation_id: deepcopy(observation),
+    )
+    provider_receipt_ref = _sealed_ref("receipt/exact", "1")
+    provider_error_ref = _sealed_ref("error/exact", "2")
+    provider_result_ref = _sealed_ref("result/exact", "3")
+    root = (tmp_path / "workers").resolve()
+    registry = LearningStageWorkerRegistry(result_root=root)
+    record = {
+        "contract_version": "learning_stage_worker_v1",
+        "worker_id": "worker-exact-omni-cleanup",
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_hybrid_omni_discovery",
+        "model_request_id": "request-exact-omni-cleanup",
+        "payload_sha256": "f" * 64,
+        "status": "cancelled",
+        "started_at": "2026-08-28T00:00:00+00:00",
+        "finished_at": "2026-08-28T00:00:01+00:00",
+        "result_path": str(root / "worker-exact-omni-cleanup.result.json"),
+        "journal_path": str(root / "worker-exact-omni-cleanup.worker.json"),
+        "payload": {"_benchmark_v2_dispatch_context": deepcopy(context)},
+        "worker_result": {
+            "status": "completed",
+            "response": {
+                "contract_version": "hybrid_omni_discovery_result_v1",
+                "outcome": "failed",
+                "provider_invocation_id": "invocation/exact",
+                "provider_receipt_ref": provider_receipt_ref,
+                "provider_error_ref": provider_error_ref,
+                "provider_result_ref": provider_result_ref,
+            },
+        },
+        "process": None,
+    }
+    termination = {
+        "worker_id": record["worker_id"],
+        "model_request_id": record["model_request_id"],
+        "backend_compute_termination": "terminated",
+        "model_service_compute_termination": "not_covered",
+        "cooperative_cleanup": {
+            "contract_version": "hybrid_omni_cooperative_cleanup_v1",
+            "provider_invocation_id": "invocation/exact",
+            "provider_claim_status": "complete",
+            "provider_result_ref": provider_result_ref,
+            "provider_error_ref": provider_error_ref,
+            "provider_receipt_ref": provider_receipt_ref,
+            "provider_reason_class": "runtime_provider_failed",
+            "failure_reason": "runtime_cancelled",
+            "cleanup_status": "clean",
+        },
+    }
+    projection = registry._compose_hybrid_benchmark_provider_cleanup(
+        record=record,
+        worker_termination=termination,
+    )
+    assert projection is not None
+    assert projection["runtime_owner_ref"] == dispatch_receipt[
+        "provider_runtime_attestation_ref"
+    ]
+    binding_path = root / (
+        "worker-exact-omni-cleanup.benchmark-v2-hybrid-provider-cleanup.json"
+    )
+    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    assert binding["predecessor_content_sha256"] == dispatch_receipt["content_sha256"]
+    assert binding["authoritative_cleanup_ref"] == {
+        "content_sha256": observation["content_sha256"]
+    }
+
+    recovered_projection = registry._compose_hybrid_benchmark_provider_cleanup(
+        record=record,
+        worker_termination={
+            "worker_id": record["worker_id"],
+            "model_request_id": record["model_request_id"],
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+        },
+    )
+    assert recovered_projection == projection
+
+    record["benchmark_provider_cleanup_ref"] = deepcopy(projection)
+    registry._persist_record_journal(record)
+    restarted = LearningStageWorkerRegistry(result_root=root)
+    attachment = restarted.attachment_by_operation(
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+    )
+    assert attachment is not None
+    assert attachment["benchmark_provider_cleanup_ref"] == projection
 
 
 @pytest.mark.parametrize("mutation", ["provider", "operation", "window"])

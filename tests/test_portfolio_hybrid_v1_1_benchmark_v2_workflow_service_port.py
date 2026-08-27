@@ -12,6 +12,7 @@ import pytest
 
 from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
 from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes, content_sha256
+from app.learn.recognition.uei.canonical import seal_immutable
 from test_portfolio_hybrid_v1_1_benchmark_v2_incumbent import (
     _prepared_document,
     _provider_owner_changes,
@@ -141,6 +142,23 @@ def _step() -> dict[str, object]:
     )
 
 
+def _provider_context_projection() -> dict[str, object]:
+    operation: dict[str, object] = {
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "revision": 6,
+        "window_binding_ref": _identity("window-1"),
+        "capture_ref": _identity("capture-1"),
+    }
+    operation["content_sha256"] = content_sha256(operation)
+    return incumbent.compose_benchmark_v2_provider_dispatch_context_projection(
+        provider="qwen",
+        context_content_sha256=SHA_B,
+        operation_ref=operation,
+    )
+
+
 def _reseal(document: dict[str, object]) -> dict[str, object]:
     document["content_sha256"] = content_sha256(document)
     return document
@@ -149,6 +167,7 @@ def _reseal(document: dict[str, object]) -> dict[str, object]:
 def test_canonical_service_surface_has_only_exact_keyword_inputs() -> None:
     expected = {
         "start_hybrid_operation": ("screen_group", "window_binding"),
+        "lookup_hybrid_operation": ("screen_group", "window_binding"),
         "continue_hybrid_operation": ("operation_ref",),
         "start_incumbent_observe": ("provider_case_ref", "window_binding"),
         "poll_incumbent_observe": ("operation_ref",),
@@ -193,6 +212,10 @@ def test_production_service_getter_is_identity_stable(monkeypatch: pytest.Monkey
         (_screen_group, incumbent.validate_benchmark_v2_hybrid_screen_group_start),
         (_operation_ref, incumbent.validate_benchmark_v2_workflow_service_operation_ref),
         (_adopted_projection, incumbent.validate_benchmark_v2_adopted_result_projection),
+        (
+            _provider_context_projection,
+            incumbent.validate_benchmark_v2_provider_dispatch_context_projection,
+        ),
         (_step, incumbent.validate_benchmark_v2_workflow_service_step),
     ],
 )
@@ -263,6 +286,16 @@ def test_step_rejects_resealed_operation_status_substitution() -> None:
 
     with pytest.raises(ValueError, match="status does not match"):
         incumbent.validate_benchmark_v2_workflow_service_step(_reseal(step))
+
+
+def test_u2_service_step_reserves_closed_pathless_dispatch_context_projection() -> None:
+    step = _step()
+
+    assert "provider_dispatch_context_projection" in step
+    assert step["provider_dispatch_context_projection"] is None
+    projection = _provider_context_projection()
+    assert "receipt_journal_path" not in projection
+    assert projection["artifact_is_authorization"] is False
 
 
 def test_contract_skeletons_fail_closed_without_worker_or_provider_dispatch() -> None:
@@ -1223,12 +1256,36 @@ class _S3Registry:
         current["status"] = "cancelled"
         current["runtime_attached"] = False
         self.active_resources = 0
+        provider_cleanup_ref = seal_immutable(
+            {
+                "contract_version": "benchmark_provider_cleanup_ref_v1",
+                "status": "cleanup_verified",
+                "outcome": "verified_exact_process_exited",
+                "authority_kind": (
+                    "benchmark_v2_workflow_service_dispatch_cleanup"
+                ),
+                "run_id": current["run_id"],
+                "stage": current["stage"],
+                "operation_id": current["operation_id"],
+                "worker_id": current["worker_id"],
+                "model_request_id": current["model_request_id"],
+                "payload_sha256": current["payload_sha256"],
+                "reservation_ref": {"content_sha256": "a" * 64},
+                "acquisition_owner_ref": {"content_sha256": "b" * 64},
+                "acquisition_intent_ref": {"content_sha256": "c" * 64},
+                "runtime_owner_ref": {"content_sha256": "c" * 64},
+                "cleanup_receipt_ref": {"content_sha256": "d" * 64},
+            }
+        )
+        current["benchmark_provider_cleanup_ref"] = provider_cleanup_ref
         return {
             "worker_id": current["worker_id"],
             "model_request_id": current["model_request_id"],
+            "payload_sha256": current["payload_sha256"],
             "backend_compute_termination": "terminated",
             "model_service_compute_termination": "request_not_active",
             "model_request_cancellation": {"status": "not_active"},
+            "benchmark_provider_cleanup_ref": deepcopy(provider_cleanup_ref),
         }
 
     def complete_current(self, response: dict[str, object]) -> None:
@@ -1425,6 +1482,7 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
     context_refs: dict[str, dict[str, object]] = {}
     issued_revisions: dict[str, int] = {}
     continuation_calls = 0
+    public_context_projections: list[dict[str, object] | None] = []
 
     def _complete_current() -> None:
         current = registry.current
@@ -1555,6 +1613,9 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
         observed = []
         while step["status"] != "complete":
             observed.append(step["observed_task_kind"])
+            public_context_projections.append(
+                deepcopy(step["provider_dispatch_context_projection"])
+            )
             _complete_current()
             step = service.continue_hybrid_operation(
                 operation_ref=step["operation_ref"]
@@ -1564,6 +1625,24 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
         assert list(issued_revisions) == ["omni", "qwen", "vista"]
         assert issued_revisions["omni"] < issued_revisions["qwen"]
         assert issued_revisions["qwen"] < issued_revisions["vista"]
+        assert [
+            projection["provider"] if isinstance(projection, dict) else None
+            for projection in public_context_projections
+        ] == ["omni", "qwen", None, "vista", None]
+        assert [
+            projection["operation_ref"]["revision"]
+            for projection in public_context_projections
+            if isinstance(projection, dict)
+        ] == [
+            issued_revisions["omni"],
+            issued_revisions["qwen"],
+            issued_revisions["vista"],
+        ]
+        assert all(
+            "receipt_journal_path" not in projection
+            for projection in public_context_projections
+            if isinstance(projection, dict)
+        )
         assert continuation_calls == len(task_order)
         assert registry.adopt_calls == len(task_order)
         assert len(receipt_refs) == 4
@@ -1594,6 +1673,164 @@ def test_s3_start_uses_authoritative_initial_builder_once_and_replays(
         assert registry.start_calls == 1
         assert first["artifact_is_authorization"] is False
         assert first["execute_binding_enabled"] is False
+    finally:
+        store.close()
+
+
+def test_u2_lookup_hybrid_operation_is_read_only_none_then_exact_step(
+    tmp_path: Path,
+) -> None:
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        assert service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        ) is None
+        assert registry.start_calls == 0
+        assert registry.status_calls == 0
+        assert registry.adopt_calls == 0
+        assert registry.cancel_calls == 0
+
+        started = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        counters = (
+            registry.start_calls,
+            registry.status_calls,
+            registry.adopt_calls,
+            registry.read_calls,
+            registry.cancel_calls,
+        )
+        looked_up = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert looked_up == started
+        assert (
+            registry.start_calls,
+            registry.status_calls,
+            registry.adopt_calls,
+            registry.read_calls,
+            registry.cancel_calls,
+        ) == counters
+    finally:
+        store.close()
+
+
+def test_u2_lookup_rejects_stale_binding_before_attachment_projection(
+    tmp_path: Path,
+) -> None:
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        stale_binding = _window_binding(
+            run_id="run-h1",
+            operation_id="operation-h1",
+            window_binding_ref=_identity("stale-window", SHA_B),
+        )
+        counters = (
+            registry.start_calls,
+            registry.status_calls,
+            registry.adopt_calls,
+            registry.read_calls,
+            registry.cancel_calls,
+        )
+
+        with pytest.raises(ValueError, match="stale"):
+            service.lookup_hybrid_operation(
+                screen_group=_screen_group(),
+                window_binding=stale_binding,
+            )
+
+        assert (
+            registry.start_calls,
+            registry.status_calls,
+            registry.adopt_calls,
+            registry.read_calls,
+            registry.cancel_calls,
+        ) == counters
+    finally:
+        store.close()
+
+
+def test_u2_lookup_reports_recovery_required_when_binding_lost_attachment(
+    tmp_path: Path,
+) -> None:
+    from app.learn.workflow_service import LearningWorkflowStageOperationError
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        registry.records.clear()
+
+        with pytest.raises(
+            LearningWorkflowStageOperationError,
+            match="recovery_required",
+        ):
+            service.lookup_hybrid_operation(
+                screen_group=_screen_group(),
+                window_binding=_s3_window_binding(),
+            )
+
+        assert registry.start_calls == 1
+        assert registry.status_calls == 0
+        assert registry.adopt_calls == 0
+        assert registry.cancel_calls == 0
+    finally:
+        store.close()
+
+
+def test_u2_hybrid_service_owns_fresh_run_initialization_idempotently(
+    tmp_path: Path,
+) -> None:
+    from app.learn.workflow_service import compose_test_learning_workflow_service_unit
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    capture = tmp_path / "artifacts" / "benchmark" / "screen-group-1.png"
+    capture.parent.mkdir(parents=True, exist_ok=True)
+    capture.write_bytes(b"production-like-capture")
+    store = LearningWorkflowRunStore(state_path=tmp_path / "fresh-workflow-state.json")
+    registry = _S3Registry()
+    composition = compose_test_learning_workflow_service_unit(
+        store=store,
+        worker_registry=registry,
+        project_root=tmp_path,
+    )
+    service = incumbent.BenchmarkV2IncumbentWorkflowService(composition)
+    try:
+        assert service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        ) is None
+
+        first = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        replay = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        current = store.get("run-h1")
+
+        assert replay == first
+        assert current["current_stage"] == "screen_understanding"
+        assert current["stages"]["screen_understanding"]["status"] == "running"
+        assert current["stages"]["screen_understanding"]["evidence_refs"][
+            "stage_execution"
+        ]["operation_id"] == "operation-h1"
+        assert registry.start_calls == 1
     finally:
         store.close()
 
@@ -2010,6 +2247,20 @@ def test_s3_hybrid_cancel_replays_and_leaves_zero_resources(tmp_path: Path) -> N
 
         assert replay == cancelled
         assert cancelled["status"] == "safe_stopped"
+        worker = cancelled["operation_ref"]["worker_ref"]
+        worker_cleanup = cancelled["cleanup_refs"]["worker_cleanup_ref"]
+        provider_cleanup = cancelled["cleanup_refs"]["provider_cleanup_ref"]
+        assert all(
+            worker_cleanup[name] == worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        assert all(
+            provider_cleanup[name] == worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        assert provider_cleanup["contract_version"] == (
+            "benchmark_provider_cleanup_ref_v1"
+        )
         assert registry.cancel_calls == 1
         assert registry.active_resources == 0
     finally:
@@ -2020,6 +2271,7 @@ def test_s3_service_facade_has_no_handler_provider_model_or_action_imports() -> 
     source = Path("app/learn/workflow_service.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     names = {
+        "_lookup_benchmark_v2_hybrid_workflow_service",
         "_start_benchmark_v2_hybrid_workflow_service",
         "_continue_benchmark_v2_hybrid_workflow_service",
         "_cancel_benchmark_v2_hybrid_workflow_service",

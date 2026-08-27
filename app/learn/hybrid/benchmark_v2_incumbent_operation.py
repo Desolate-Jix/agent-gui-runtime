@@ -54,6 +54,9 @@ BENCHMARK_V2_WORKFLOW_SERVICE_OPERATION_REF_CONTRACT = (
 BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT = (
     "benchmark_v2_workflow_service_step_v1"
 )
+BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT = (
+    "benchmark_v2_provider_dispatch_context_projection_v1"
+)
 BENCHMARK_V2_ADOPTED_RESULT_PROJECTION_CONTRACT = (
     "benchmark_v2_adopted_result_projection_v1"
 )
@@ -296,11 +299,30 @@ _WORKFLOW_SERVICE_STEP_FIELDS = {
     "operation_ref",
     "worker_ref",
     "observed_task_kind",
+    "provider_dispatch_context_projection",
     "adopted_result_projection",
     "terminal_receipt",
     "cleanup_refs",
     "artifact_is_authorization",
     "execute_binding_enabled",
+    "content_sha256",
+}
+_PROVIDER_DISPATCH_CONTEXT_PROJECTION_FIELDS = {
+    "contract_version",
+    "provider",
+    "context_content_sha256",
+    "operation_ref",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_PROVIDER_DISPATCH_OPERATION_FIELDS = {
+    "run_id",
+    "stage",
+    "operation_id",
+    "revision",
+    "window_binding_ref",
+    "capture_ref",
     "content_sha256",
 }
 _WORKFLOW_SERVICE_MODES = frozenset({"hybrid_v1_1", "incumbent_qwen_only"})
@@ -832,6 +854,26 @@ def validate_benchmark_v2_workflow_service_step(value: object) -> dict[str, Any]
         )
     if step["observed_task_kind"] is not None:
         _text(step["observed_task_kind"], "benchmark workflow service observed task kind")
+    context_projection = step["provider_dispatch_context_projection"]
+    if context_projection is not None:
+        context_projection = validate_benchmark_v2_provider_dispatch_context_projection(
+            context_projection
+        )
+        if step["mode"] != "hybrid_v1_1":
+            raise ValueError(
+                "benchmark provider dispatch context projection requires hybrid mode"
+            )
+        operation = context_projection["operation_ref"]
+        for name in ("run_id", "stage", "operation_id", "window_binding_ref", "capture_ref"):
+            if operation[name] != operation_ref[name]:
+                raise ValueError(
+                    f"benchmark workflow service provider context {name} is stale"
+                )
+        if operation["revision"] > operation_ref["workflow_state_ref"]["revision"]:
+            raise ValueError(
+                "benchmark workflow service provider context revision is from the future"
+            )
+        step["provider_dispatch_context_projection"] = context_projection
     projection = step["adopted_result_projection"]
     if projection is not None:
         projection = validate_benchmark_v2_adopted_result_projection(projection)
@@ -897,6 +939,7 @@ def compose_benchmark_v2_workflow_service_step(
     *,
     operation_ref: Mapping[str, object],
     observed_task_kind: str | None,
+    provider_dispatch_context_projection: Mapping[str, object] | None = None,
     adopted_result_projection: Mapping[str, object] | None,
     terminal_receipt: Mapping[str, object] | None,
     cleanup_refs: Mapping[str, object],
@@ -909,6 +952,11 @@ def compose_benchmark_v2_workflow_service_step(
         "operation_ref": current,
         "worker_ref": deepcopy(current["worker_ref"]),
         "observed_task_kind": observed_task_kind,
+        "provider_dispatch_context_projection": (
+            deepcopy(dict(provider_dispatch_context_projection))
+            if provider_dispatch_context_projection is not None
+            else None
+        ),
         "adopted_result_projection": (
             deepcopy(dict(adopted_result_projection))
             if adopted_result_projection is not None
@@ -922,6 +970,76 @@ def compose_benchmark_v2_workflow_service_step(
         "execute_binding_enabled": False,
     }
     return validate_benchmark_v2_workflow_service_step(_seal(body))
+
+
+def validate_benchmark_v2_provider_dispatch_context_projection(
+    value: object,
+) -> dict[str, Any]:
+    projection = _closed(
+        value,
+        _PROVIDER_DISPATCH_CONTEXT_PROJECTION_FIELDS,
+        "benchmark provider dispatch context projection",
+    )
+    if (
+        projection["contract_version"]
+        != BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT
+    ):
+        raise ValueError("benchmark provider dispatch context projection contract is invalid")
+    if projection["provider"] not in {"omni", "qwen", "vista"}:
+        raise ValueError("benchmark provider dispatch context projection provider is invalid")
+    _sha(
+        projection["context_content_sha256"],
+        "benchmark provider dispatch context projection context SHA",
+    )
+    operation = _closed(
+        projection["operation_ref"],
+        _PROVIDER_DISPATCH_OPERATION_FIELDS,
+        "benchmark provider dispatch context projection operation ref",
+    )
+    for name in ("run_id", "stage", "operation_id"):
+        _text(operation[name], f"benchmark provider dispatch operation {name}")
+    _revision(operation["revision"], "benchmark provider dispatch operation revision")
+    operation["window_binding_ref"] = _identity_ref(
+        operation["window_binding_ref"],
+        "benchmark provider dispatch operation window binding ref",
+    )
+    operation["capture_ref"] = _identity_ref(
+        operation["capture_ref"],
+        "benchmark provider dispatch operation capture ref",
+    )
+    _sha(operation["content_sha256"], "benchmark provider dispatch operation SHA")
+    if operation["content_sha256"] != content_sha256(operation):
+        raise ValueError("benchmark provider dispatch operation content SHA mismatch")
+    projection["operation_ref"] = operation
+    if (
+        projection["artifact_is_authorization"] is not False
+        or projection["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark provider dispatch context projection cannot authorize actions")
+    _sha(
+        projection["content_sha256"],
+        "benchmark provider dispatch context projection SHA",
+    )
+    if projection["content_sha256"] != content_sha256(projection):
+        raise ValueError("benchmark provider dispatch context projection content SHA mismatch")
+    return projection
+
+
+def compose_benchmark_v2_provider_dispatch_context_projection(
+    *,
+    provider: str,
+    context_content_sha256: str,
+    operation_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "contract_version": BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT,
+        "provider": provider,
+        "context_content_sha256": context_content_sha256,
+        "operation_ref": deepcopy(dict(operation_ref)),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    return validate_benchmark_v2_provider_dispatch_context_projection(_seal(body))
 
 
 def _validate_source_ref(value: object) -> dict[str, str]:
@@ -1974,6 +2092,24 @@ class BenchmarkV2IncumbentWorkflowService:
         )
 
         return _start_benchmark_v2_hybrid_workflow_service(
+            composition=self._composition,
+            screen_group=group,
+            window_binding=binding,
+        )
+
+    def lookup_hybrid_operation(
+        self,
+        *,
+        screen_group: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> dict[str, Any] | None:
+        group = validate_benchmark_v2_hybrid_screen_group_start(screen_group)
+        binding = validate_benchmark_v2_workflow_window_binding(window_binding)
+        from app.learn.workflow_service import (
+            _lookup_benchmark_v2_hybrid_workflow_service,
+        )
+
+        return _lookup_benchmark_v2_hybrid_workflow_service(
             composition=self._composition,
             screen_group=group,
             window_binding=binding,

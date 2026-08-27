@@ -185,6 +185,7 @@ class _Windows:
         self.launched: list[dict[str, object]] = []
         self.closed: list[str] = []
         self.close_calls = 0
+        self.cleanup_by_journal: dict[str, dict[str, object]] = {}
 
     def launch(self, **kwargs: object) -> dict[str, object]:
         self.active += 1
@@ -274,13 +275,18 @@ class _Windows:
         )
 
     def close(self, *, journal_path: Path, reason: str) -> dict[str, object]:
-        del journal_path
+        journal_key = str(Path(journal_path).resolve())
+        existing = self.cleanup_by_journal.get(journal_key)
+        if existing is not None:
+            return deepcopy(existing)
         self.close_calls += 1
         if self.fail_close_once and self.close_calls == 1:
             raise RuntimeError("transient cleanup failure")
         self.active -= 1
         self.closed.append(reason)
-        return _sealed({"cleanup_status": "verified", "reason": reason})
+        receipt = _sealed({"cleanup_status": "verified", "reason": reason})
+        self.cleanup_by_journal[journal_key] = deepcopy(receipt)
+        return receipt
 
 
 def _install_fakes(

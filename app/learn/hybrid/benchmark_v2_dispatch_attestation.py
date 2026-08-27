@@ -44,6 +44,18 @@ _OPERATION_FIELDS = {
     "capture_ref",
     "content_sha256",
 }
+_RUNTIME_IDENTITY_FIELDS = {
+    "contract_version",
+    "provider",
+    "lease_identity",
+    "profile_ref",
+    "listener_owner",
+    "process_identities",
+    "process_scope",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
 _ACTIVE_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar(
     "benchmark_v2_dispatch_context", default=None
 )
@@ -140,6 +152,142 @@ def validate_benchmark_dispatch_context_ref(value: object) -> dict[str, Any]:
     if ref["content_sha256"] != content_sha256(ref):
         raise ValueError("benchmark dispatch context ref content SHA mismatch")
     return ref
+
+
+def compose_benchmark_provider_runtime_identity(
+    *,
+    provider: Literal["omni", "qwen", "vista"],
+    lease_identity: Mapping[str, object] | None,
+    profile_ref: Mapping[str, object] | None,
+    listener_owner: Mapping[str, object] | None,
+    process_identities: list[Mapping[str, object]],
+    process_scope: Mapping[str, object],
+) -> dict[str, Any]:
+    """生成跨 dispatch/cleanup 共用的封闭、无路径、不可授权运行时身份。"""
+
+    normalized_provider = _provider(provider)
+    identities = [_process_identity(item) for item in process_identities]
+    if not identities or len({(item["pid"], item["create_time_ns"]) for item in identities}) != len(
+        identities
+    ):
+        raise ValueError("benchmark provider runtime process identities are invalid")
+    scope = _closed(
+        process_scope,
+        {"scope_name", "member_pids", "process_identities"},
+        "benchmark provider runtime process scope",
+    )
+    scope_name = _text(scope["scope_name"], "benchmark provider runtime scope name")
+    member_pids = scope["member_pids"]
+    if (
+        not isinstance(member_pids, list)
+        or not member_pids
+        or any(isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 for pid in member_pids)
+        or len(set(member_pids)) != len(member_pids)
+    ):
+        raise ValueError("benchmark provider runtime Job members are invalid")
+    scope_identities = [_process_identity(item) for item in scope["process_identities"]]
+    if scope_identities != identities or any(item["pid"] not in member_pids for item in identities):
+        raise ValueError("benchmark provider runtime Job membership differs")
+    scope = {
+        "scope_name": scope_name,
+        # 绑定 exact provider incarnation 的 Job 成员；不把随后出现的 helper 当成身份。
+        "member_pids": [item["pid"] for item in identities],
+        "process_identities": scope_identities,
+    }
+
+    normalized_profile = None
+    normalized_listener = None
+    normalized_lease = None
+    if normalized_provider == "omni":
+        if lease_identity is not None or profile_ref is not None or listener_owner is not None:
+            raise ValueError("benchmark Omni runtime identity has unexpected managed lease")
+    else:
+        normalized_profile = _content_ref(profile_ref, "benchmark provider profile ref")
+        listener = _closed(
+            listener_owner,
+            {"host", "port", "process_identities"},
+            "benchmark provider listener owner",
+        )
+        host = _text(listener["host"], "benchmark provider listener host")
+        port = listener["port"]
+        if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
+            raise ValueError("benchmark provider listener port is invalid")
+        listener_identities = [
+            _process_identity(item) for item in listener["process_identities"]
+        ]
+        if listener_identities != identities:
+            raise ValueError("benchmark provider listener owner differs")
+        normalized_listener = {
+            "host": host,
+            "port": port,
+            "process_identities": listener_identities,
+        }
+        if normalized_provider == "qwen":
+            normalized_lease = _closed(
+                lease_identity,
+                {"lease_id", "incarnation_id", "owner_request_id"},
+                "benchmark Qwen lease identity",
+            )
+            for name in ("lease_id", "incarnation_id", "owner_request_id"):
+                normalized_lease[name] = _text(
+                    normalized_lease[name], f"benchmark Qwen {name}"
+                )
+        else:
+            normalized_lease = _closed(
+                lease_identity,
+                {"incarnation_id", "lease_content_sha256"},
+                "benchmark VISTA lease identity",
+            )
+            normalized_lease["incarnation_id"] = _text(
+                normalized_lease["incarnation_id"],
+                "benchmark VISTA incarnation id",
+            )
+            _sha(
+                normalized_lease["lease_content_sha256"],
+                "benchmark VISTA lease SHA",
+            )
+
+    body: dict[str, Any] = {
+        "contract_version": "benchmark_v2_provider_runtime_identity_v1",
+        "provider": normalized_provider,
+        "lease_identity": normalized_lease,
+        "profile_ref": normalized_profile,
+        "listener_owner": normalized_listener,
+        "process_identities": identities,
+        "process_scope": scope,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return body
+
+
+def validate_benchmark_provider_runtime_identity(value: object) -> dict[str, Any]:
+    identity = _closed(
+        value, _RUNTIME_IDENTITY_FIELDS, "benchmark provider runtime identity"
+    )
+    if identity["contract_version"] != "benchmark_v2_provider_runtime_identity_v1":
+        raise ValueError("benchmark provider runtime identity contract is invalid")
+    if (
+        identity["artifact_is_authorization"] is not False
+        or identity["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark provider runtime identity cannot authorize actions")
+    _sha(identity["content_sha256"], "benchmark provider runtime identity SHA")
+    # 复用 composer 的封闭字段验证，但避免递归 seal。
+    unsigned = deepcopy(identity)
+    declared = unsigned.pop("content_sha256")
+    normalized = compose_benchmark_provider_runtime_identity(
+        provider=unsigned["provider"],
+        lease_identity=unsigned["lease_identity"],
+        profile_ref=unsigned["profile_ref"],
+        listener_owner=unsigned["listener_owner"],
+        process_identities=unsigned["process_identities"],
+        process_scope=unsigned["process_scope"],
+    )
+    if normalized["content_sha256"] != declared or normalized != identity:
+        raise ValueError("benchmark provider runtime identity content SHA mismatch")
+    return identity
 
 
 @contextmanager
@@ -375,6 +523,357 @@ def validate_benchmark_dispatch_receipt_refs(
     return deepcopy(normalized_refs)
 
 
+def read_latest_benchmark_dispatch_receipt(
+    *, dispatch_context: Mapping[str, object]
+) -> dict[str, Any] | None:
+    """只读返回 exact server-issued context 的最新 durable dispatch receipt。"""
+
+    context = validate_benchmark_dispatch_context(dispatch_context)
+    path = Path(context["receipt_journal_path"])
+    if not path.is_file():
+        return None
+    raw = path.read_bytes()
+    if not raw or not raw.endswith(b"\n"):
+        raise ValueError("benchmark dispatch receipt journal is incomplete")
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_line in raw.splitlines():
+        try:
+            decoded = json.loads(raw_line.decode("utf-8"))
+            if canonical_json_bytes(decoded) != raw_line:
+                raise ValueError("benchmark dispatch receipt row is not canonical")
+            receipt = _validate_dispatch_receipt(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+            raise ValueError("benchmark dispatch receipt journal is corrupt") from error
+        digest = receipt["content_sha256"]
+        if digest in seen:
+            raise ValueError("benchmark dispatch receipt journal has duplicate rows")
+        seen.add(digest)
+        if receipt["provider"] == context["provider"]:
+            if receipt["operation_ref"] != context["operation_ref"]:
+                raise ValueError(
+                    "benchmark dispatch receipt provider context is stale"
+                )
+            records.append(receipt)
+    predecessor = context["content_sha256"]
+    for index, receipt in enumerate(records, start=1):
+        if (
+            receipt["dispatch_index"] != index
+            or receipt["predecessor_content_sha256"] != predecessor
+        ):
+            raise ValueError("benchmark dispatch receipt context chain differs")
+        predecessor = receipt["content_sha256"]
+    return deepcopy(records[-1]) if records else None
+
+
+def project_authoritative_benchmark_provider_cleanup(
+    *,
+    provider: Literal["omni", "qwen", "vista"],
+    record: Mapping[str, object],
+    worker_termination: Mapping[str, object],
+) -> dict[str, Any] | None:
+    """只从 provider owner 的精确清理证据重建 dispatch 时的运行时身份。"""
+
+    normalized = _provider(provider)
+    if normalized == "qwen":
+        projected = _authoritative_qwen_cleanup(record, worker_termination)
+    elif normalized == "vista":
+        projected = _authoritative_vista_cleanup(record, worker_termination)
+    else:
+        projected = _authoritative_omni_cleanup(record, worker_termination)
+    if projected is None:
+        return None
+    identity = validate_benchmark_provider_runtime_identity(
+        projected["runtime_identity"]
+    )
+    cleanup_ref = _content_ref(
+        projected["authoritative_cleanup_ref"],
+        "benchmark authoritative provider cleanup ref",
+    )
+    return {
+        "runtime_identity": identity,
+        "authoritative_cleanup_ref": cleanup_ref,
+        "authoritative_cleanup_contract": _text(
+            projected["authoritative_cleanup_contract"],
+            "benchmark authoritative cleanup contract",
+        ),
+    }
+
+
+def _authoritative_qwen_cleanup(
+    record: Mapping[str, object], worker_termination: Mapping[str, object]
+) -> dict[str, Any] | None:
+    cancellation = worker_termination.get("model_request_cancellation")
+    results = cancellation.get("provider_results") if isinstance(cancellation, Mapping) else None
+    request_id = str(record.get("model_request_id") or "")
+    if not isinstance(results, list):
+        return None
+    owner_receipts = [
+        item.get("owner_receipt")
+        for item in results
+        if isinstance(item, Mapping) and isinstance(item.get("owner_receipt"), Mapping)
+    ]
+    owner = next(
+        (
+            deepcopy(dict(item))
+            for item in owner_receipts
+            if item.get("contract_version") == "qwen_model_request_owner_receipt_v1"
+            and item.get("status") == "finalized"
+            and item.get("owner_request_id") == request_id
+        ),
+        None,
+    )
+    if owner is None:
+        from app.core.model_server import _find_qwen_owner_record
+
+        try:
+            owner_record = _find_qwen_owner_record(request_id)
+        except (OSError, RuntimeError, ValueError):
+            owner_record = None
+        if (
+            isinstance(owner_record, Mapping)
+            and owner_record.get("kind") == "tombstone"
+            and isinstance(owner_record.get("receipt"), Mapping)
+        ):
+            owner = deepcopy(dict(owner_record["receipt"]))
+    if owner is None:
+        return None
+    release = owner.get("release_result")
+    lease = release.get("lease") if isinstance(release, Mapping) else None
+    if not isinstance(lease, dict):
+        return None
+    from app.core.model_server import (
+        _validate_exact_qwen_cleanup_evidence,
+        observe_qwen_model_request_cleanup,
+    )
+
+    try:
+        exact_lease = _validate_exact_qwen_cleanup_evidence(release, lease)
+        cleanup = observe_qwen_model_request_cleanup(request_id)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    fields = {
+        "contract_version", "outcome", "model_request_id",
+        "acquisition_intent_ref", "runtime_owner_ref", "lease_ref", "profile_ref",
+        "server_process_identity", "socket_ref", "job_scope_ref", "finalization_token",
+        "lease_state_ref", "owner_tombstone_ref", "release_reason",
+        "termination_observation_ref", "scope_stable_zero_ref",
+        "listener_stable_zero_ref", "no_active_lease_observation_ref",
+        "no_owned_runtime_observation_ref", "content_sha256",
+    }
+    if (
+        not isinstance(cleanup, Mapping)
+        or set(cleanup) != fields
+        or cleanup.get("contract_version") != "qwen_model_request_cleanup_receipt_v1"
+        or cleanup.get("outcome") != "verified_exact_process_exited"
+        or cleanup.get("model_request_id") != request_id
+        or cleanup.get("content_sha256") != content_sha256(cleanup)
+        or owner.get("lease_id") != exact_lease.get("lease_id")
+        or owner.get("incarnation_id") != exact_lease.get("incarnation_id")
+        or cleanup.get("lease_ref")
+        != {"content_sha256": content_sha256(exact_lease)}
+        or cleanup.get("profile_ref")
+        != {"content_sha256": exact_lease.get("profile_sha256")}
+        or cleanup.get("server_process_identity")
+        != exact_lease.get("server_process_identity")
+    ):
+        return None
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(str(exact_lease.get("server_base_url") or ""))
+    host = str(parsed.hostname or "")
+    port = int(parsed.port or 0)
+    process = _process_identity(exact_lease.get("server_process_identity"))
+    scope = release.get("hybrid_process_scope_acquisition")
+    if (
+        not host
+        or port <= 0
+        or not isinstance(scope, Mapping)
+        or scope.get("contract_version") != "hybrid_process_scope_acquisition_v1"
+        or scope.get("server_process_identity") != process
+        or cleanup.get("socket_ref")
+        != {"content_sha256": content_sha256({"host": host, "port": port})}
+        or cleanup.get("job_scope_ref")
+        != {"content_sha256": content_sha256(scope)}
+    ):
+        return None
+    identity = compose_benchmark_provider_runtime_identity(
+        provider="qwen",
+        lease_identity={
+            "lease_id": exact_lease["lease_id"],
+            "incarnation_id": exact_lease["incarnation_id"],
+            "owner_request_id": exact_lease["owner_request_id"],
+        },
+        profile_ref=cleanup["profile_ref"],
+        listener_owner={
+            "host": host,
+            "port": port,
+            "process_identities": [process],
+        },
+        process_identities=[process],
+        process_scope={
+            "scope_name": scope["scope_name"],
+            "member_pids": list(scope["member_pids"]),
+            "process_identities": [process],
+        },
+    )
+    return {
+        "runtime_identity": identity,
+        "authoritative_cleanup_ref": {"content_sha256": cleanup["content_sha256"]},
+        "authoritative_cleanup_contract": cleanup["contract_version"],
+    }
+
+
+def _authoritative_vista_cleanup(
+    record: Mapping[str, object], worker_termination: Mapping[str, object]
+) -> dict[str, Any] | None:
+    cooperative = worker_termination.get("cooperative_cleanup")
+    receipt = cooperative.get("vista_cleanup_receipt") if isinstance(cooperative, Mapping) else None
+    if not isinstance(receipt, Mapping):
+        result_envelope = record.get("worker_result")
+        response = (
+            result_envelope.get("response")
+            if isinstance(result_envelope, Mapping)
+            else None
+        )
+        lifecycle = response.get("lifecycle_evidence") if isinstance(response, Mapping) else None
+        receipt = lifecycle.get("vista_cleanup_receipt") if isinstance(lifecycle, Mapping) else None
+        managed_result = response.get("result") if isinstance(response, Mapping) else None
+        model_lifecycle = (
+            managed_result.get("model_lifecycle")
+            if isinstance(managed_result, Mapping)
+            else None
+        )
+        if not isinstance(receipt, Mapping) and isinstance(model_lifecycle, Mapping):
+            receipt = model_lifecycle.get("vista_cleanup_receipt")
+    if not isinstance(receipt, Mapping):
+        return None
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_cleanup_receipt
+
+    try:
+        exact_receipt = validate_hybrid_cleanup_receipt(receipt)
+    except (TypeError, ValueError):
+        return None
+    evidence = exact_receipt.get("source_cleanup_evidence")
+    lease = evidence.get("model_lease") if isinstance(evidence, Mapping) else None
+    if exact_receipt.get("provider") != "vista" or not isinstance(lease, Mapping):
+        return None
+    identities = [_process_identity(item) for item in lease.get("process_identities", [])]
+    profile = _mapping(lease.get("profile"), "VISTA cleanup profile")
+    acquisition = _mapping(
+        lease.get("process_scope_acquisition"), "VISTA cleanup scope acquisition"
+    )
+    port = profile.get("port")
+    if (
+        not identities
+        or lease.get("contract_version") != "hybrid_vista_model_lease_v2"
+        or lease.get("provider") != "vista"
+        or exact_receipt.get("provider_lease_identity", {}).get("incarnation_id")
+        != lease.get("incarnation_id")
+        or exact_receipt.get("provider_lease_identity", {}).get("process_identities")
+        != identities
+        or acquisition.get("process_identities") != identities
+        or isinstance(port, bool)
+        or not isinstance(port, int)
+        or port <= 0
+    ):
+        return None
+    identity = compose_benchmark_provider_runtime_identity(
+        provider="vista",
+        lease_identity={
+            "incarnation_id": lease["incarnation_id"],
+            "lease_content_sha256": content_sha256(lease),
+        },
+        profile_ref={"content_sha256": content_sha256(profile)},
+        listener_owner={
+            "host": str(profile.get("host") or "127.0.0.1"),
+            "port": port,
+            "process_identities": identities,
+        },
+        process_identities=identities,
+        process_scope={
+            "scope_name": acquisition["scope_name"],
+            "member_pids": list(acquisition["member_pids"]),
+            "process_identities": identities,
+        },
+    )
+    return {
+        "runtime_identity": identity,
+        "authoritative_cleanup_ref": {
+            "content_sha256": exact_receipt["content_sha256"]
+        },
+        "authoritative_cleanup_contract": exact_receipt["contract_version"],
+    }
+
+
+def _authoritative_omni_cleanup(
+    record: Mapping[str, object], worker_termination: Mapping[str, object]
+) -> dict[str, Any] | None:
+    cooperative = worker_termination.get("cooperative_cleanup")
+    result = record.get("worker_result")
+    response = result.get("response") if isinstance(result, Mapping) else None
+    if not isinstance(response, Mapping):
+        return None
+    invocation_id = response.get("provider_invocation_id")
+    if (
+        not isinstance(invocation_id, str)
+        or not invocation_id.startswith("invocation/")
+    ):
+        return None
+    if isinstance(cooperative, Mapping) and (
+        cooperative.get("contract_version") != "hybrid_omni_cooperative_cleanup_v1"
+        or cooperative.get("cleanup_status") != "clean"
+        or cooperative.get("provider_claim_status") != "complete"
+        or cooperative.get("provider_invocation_id") != invocation_id
+        or cooperative.get("provider_receipt_ref") != response.get("provider_receipt_ref")
+    ):
+        return None
+    from app.learn.recognition.uei.omniparser_shadow_adapter import (
+        load_omniparser_invocation_cleanup_observation,
+    )
+
+    try:
+        observation = load_omniparser_invocation_cleanup_observation(invocation_id)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    acquisition = observation.get("process_scope_acquisition")
+    process = observation.get("process_identity")
+    if (
+        observation.get("cleanup_status") != "verified"
+        or observation.get("inventory_observable") is not True
+        or observation.get("provider_processes_after") != []
+        or observation.get("orphan_descendant_identities") != []
+        or observation.get("active_listeners_after") != []
+        or observation.get("lease_files_after") != []
+        or not isinstance(acquisition, Mapping)
+        or acquisition.get("scope_name") != observation.get("process_scope_name")
+        or not isinstance(process, Mapping)
+        or process.get("pid") not in acquisition.get("member_pids", [])
+        or observation.get("content_sha256") != content_sha256(observation)
+    ):
+        return None
+    exact_process = _process_identity(process)
+    identity = compose_benchmark_provider_runtime_identity(
+        provider="omni",
+        lease_identity=None,
+        profile_ref=None,
+        listener_owner=None,
+        process_identities=[exact_process],
+        process_scope={
+            "scope_name": acquisition["scope_name"],
+            "member_pids": list(acquisition["member_pids"]),
+            "process_identities": [exact_process],
+        },
+    )
+    return {
+        "runtime_identity": identity,
+        "authoritative_cleanup_ref": {
+            "content_sha256": observation["content_sha256"]
+        },
+        "authoritative_cleanup_contract": observation["contract_version"],
+    }
+
+
 def _validate_dispatch_receipt(value: object) -> dict[str, Any]:
     fields = {
         "contract_version",
@@ -429,13 +928,99 @@ def _attest_exact_provider_runtime(
     provider: str, value: Mapping[str, object]
 ) -> dict[str, str]:
     if provider == "qwen":
-        from app.core.model_server import _profile_for_qwen_model_lease
-
-        profile = _profile_for_qwen_model_lease(deepcopy(dict(value)))
-        return {"content_sha256": content_sha256(profile)}
+        identity = _attest_qwen_runtime(value)
+        return {"content_sha256": identity["content_sha256"]}
     if provider == "vista":
         return _attest_vista_runtime(value)
     return _attest_scoped_process_runtime(value, expected_provider="omni")
+
+
+def _attest_qwen_runtime(value: Mapping[str, object]) -> dict[str, Any]:
+    lease = _mapping(value, "benchmark Qwen lease")
+    from app.core.model_server import _profile_for_qwen_model_lease
+
+    profile = _profile_for_qwen_model_lease(deepcopy(lease))
+    required = {
+        "contract_version",
+        "lease_id",
+        "owner_request_id",
+        "profile_id",
+        "incarnation_id",
+        "server_base_url",
+        "server_model_id",
+        "profile_sha256",
+        "server_process_identity",
+    }
+    if set(lease) != required or lease.get("contract_version") != "qwen_model_server_lease_v2":
+        raise ValueError("exact Qwen model lease is required")
+    from urllib.parse import urlsplit
+
+    from app.core.model_server import (
+        _current_process_identity,
+        _find_qwen_owner_record,
+        _listening_pids_for_port,
+        _public_profile,
+    )
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    if content_sha256(_public_profile(profile)) != lease.get("profile_sha256"):
+        raise ValueError("Qwen exact profile identity changed before dispatch")
+    owner = _find_qwen_owner_record(str(lease.get("owner_request_id") or ""))
+    if (
+        not isinstance(owner, Mapping)
+        or owner.get("kind") != "active"
+        or owner.get("lease") != lease
+        or not isinstance(owner.get("state"), Mapping)
+    ):
+        raise ValueError("Qwen exact ownership changed before dispatch")
+    state = dict(owner["state"])
+    acquisition = _mapping(
+        state.get("process_scope_acquisition"),
+        "Qwen process scope acquisition",
+    )
+    scope_name = _text(state.get("process_scope_name"), "Qwen process scope name")
+    process = _process_identity(lease.get("server_process_identity"))
+    if (
+        acquisition.get("contract_version") != "hybrid_process_scope_acquisition_v1"
+        or acquisition.get("scope_name") != scope_name
+        or acquisition.get("server_process_identity") != process
+        or not isinstance(acquisition.get("member_pids"), list)
+        or process["pid"] not in acquisition["member_pids"]
+        or _current_process_identity(process["pid"]) != process
+    ):
+        raise ValueError("Qwen exact Job ownership changed before dispatch")
+    scope = WindowsProcessScope(scope_name, create=False)
+    try:
+        current_members = scope.pids()
+    finally:
+        scope.close()
+    if process["pid"] not in current_members:
+        raise ValueError("Qwen exact process is outside its Job before dispatch")
+    parsed = urlsplit(_text(lease.get("server_base_url"), "Qwen server base URL"))
+    port = int(parsed.port or 0)
+    host = str(parsed.hostname or "")
+    if not host or port <= 0 or process["pid"] not in _listening_pids_for_port(port):
+        raise ValueError("Qwen exact listener ownership changed before dispatch")
+    return compose_benchmark_provider_runtime_identity(
+        provider="qwen",
+        lease_identity={
+            "lease_id": lease["lease_id"],
+            "incarnation_id": lease["incarnation_id"],
+            "owner_request_id": lease["owner_request_id"],
+        },
+        profile_ref={"content_sha256": lease["profile_sha256"]},
+        listener_owner={
+            "host": host,
+            "port": port,
+            "process_identities": [process],
+        },
+        process_identities=[process],
+        process_scope={
+            "scope_name": scope_name,
+            "member_pids": list(acquisition["member_pids"]),
+            "process_identities": [process],
+        },
+    )
 
 
 def _attest_scoped_process_runtime(
@@ -458,11 +1043,19 @@ def _attest_scoped_process_runtime(
         scope.close()
     if identity["pid"] not in members:
         raise ValueError("benchmark provider process is outside its exact Job")
-    return {
-        "content_sha256": content_sha256(
-            {"provider": expected_provider, "process_identity": identity, "members": members}
-        )
-    }
+    exact = compose_benchmark_provider_runtime_identity(
+        provider="omni",
+        lease_identity=None,
+        profile_ref=None,
+        listener_owner=None,
+        process_identities=[identity],
+        process_scope={
+            "scope_name": scope_name,
+            "member_pids": members,
+            "process_identities": [identity],
+        },
+    )
+    return {"content_sha256": exact["content_sha256"]}
 
 
 def _attest_vista_runtime(value: Mapping[str, object]) -> dict[str, str]:
@@ -526,17 +1119,26 @@ def _attest_vista_runtime(value: Mapping[str, object]) -> dict[str, str]:
     expected_pids = {item["pid"] for item in identities}
     if not listener_pids or not set(listener_pids).issubset(expected_pids):
         raise ValueError("VISTA listener socket ownership changed before dispatch")
-    return {
-        "content_sha256": content_sha256(
-            {
-                "incarnation_id": lease.get("incarnation_id"),
-                "profile": profile,
-                "process_identities": identities,
-                "members": members,
-                "listener_pids": listener_pids,
-            }
-        )
-    }
+    exact = compose_benchmark_provider_runtime_identity(
+        provider="vista",
+        lease_identity={
+            "incarnation_id": lease["incarnation_id"],
+            "lease_content_sha256": content_sha256(lease),
+        },
+        profile_ref={"content_sha256": content_sha256(profile)},
+        listener_owner={
+            "host": str(profile.get("host") or "127.0.0.1"),
+            "port": port,
+            "process_identities": identities,
+        },
+        process_identities=identities,
+        process_scope={
+            "scope_name": scope_name,
+            "member_pids": list(acquisition["member_pids"]),
+            "process_identities": identities,
+        },
+    )
+    return {"content_sha256": exact["content_sha256"]}
 
 
 def _append_receipt(path: Path, receipt: Mapping[str, object]) -> None:
@@ -635,9 +1237,13 @@ __all__ = [
     "attest_benchmark_provider_dispatch",
     "attest_managed_model_dispatch",
     "compose_benchmark_dispatch_context",
+    "compose_benchmark_provider_runtime_identity",
     "current_benchmark_dispatch_context",
     "current_benchmark_dispatch_receipt_refs",
     "install_benchmark_dispatch_attestor",
+    "project_authoritative_benchmark_provider_cleanup",
+    "read_latest_benchmark_dispatch_receipt",
     "validate_benchmark_dispatch_receipt_refs",
     "validate_benchmark_dispatch_context",
+    "validate_benchmark_provider_runtime_identity",
 ]

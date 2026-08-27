@@ -2009,7 +2009,13 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
         "probe_receipt_paths",
         "actual_mode",
     ]
-    assert lifecycle.__all__ == ["collect_raw_gpu_sample", "verify_lifecycle_from_raw"]
+    assert lifecycle.__all__ == [
+        "append_benchmark_v2_attempt_event",
+        "collect_raw_gpu_sample",
+        "compose_benchmark_v2_attempt_cleanup_receipt",
+        "read_benchmark_v2_attempt_journal",
+        "verify_lifecycle_from_raw",
+    ]
 
 
 def test_verify_lifecycle_canonical_fixture_is_deterministic_and_non_authorizing(tmp_path: Path) -> None:

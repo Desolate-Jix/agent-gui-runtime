@@ -14,6 +14,7 @@ import shutil
 import struct
 import subprocess
 import sys
+from threading import RLock
 from typing import Any, Mapping
 
 import psutil
@@ -51,6 +52,41 @@ _GPU_COMMANDS = (
         ),
     ),
 )
+_ATTEMPT_EVENT_CONTRACT = "benchmark_v2_attempt_resource_event_v1"
+_ATTEMPT_CLEANUP_CONTRACT = "benchmark_v2_attempt_cleanup_receipt_v1"
+_ATTEMPT_PHASES = {
+    "prepared": 0,
+    "request_in_flight": 1,
+    "body_complete": 2,
+    "terminal": 3,
+}
+_ATTEMPT_EVENT_PHASE = {
+    "attempt_prepared": "prepared",
+    "window_owned": "prepared",
+    "service_start_intent": "prepared",
+    "service_started": "prepared",
+    "service_recovered": "prepared",
+    "provider_request_in_flight": "request_in_flight",
+    "probe_triggered": "request_in_flight",
+    "provider_body_complete": "body_complete",
+    "attempt_cleanup_prepared": "body_complete",
+    "attempt_terminal": "terminal",
+}
+_ATTEMPT_EVENT_FIELDS = {
+    "contract_version",
+    "sequence",
+    "attempt_ref",
+    "phase",
+    "event_kind",
+    "provider_id",
+    "probe_kind",
+    "resource_ref",
+    "predecessor_content_sha256",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_ATTEMPT_JOURNAL_LOCK = RLock()
 
 _SAMPLE_FIELDS = {
     "contract_version",
@@ -4006,4 +4042,234 @@ def verify_lifecycle_from_raw(
         )
 
 
-__all__ = ["collect_raw_gpu_sample", "verify_lifecycle_from_raw"]
+def _attempt_sealed_parent(value: object, name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError(f"{name} must be a sealed object")
+    parent = deepcopy(dict(value))
+    digest = parent.get("content_sha256")
+    if not isinstance(digest, str) or _SHA_RE.fullmatch(digest) is None:
+        raise ValueError(f"{name} content SHA is invalid")
+    if content_sha256(parent) != digest:
+        raise ValueError(f"{name} content SHA differs")
+    return parent
+
+
+def _validate_benchmark_v2_attempt_event(value: object) -> dict[str, Any]:
+    event = _closed(value, _ATTEMPT_EVENT_FIELDS, "benchmark attempt event")
+    if (
+        event["contract_version"] != _ATTEMPT_EVENT_CONTRACT
+        or event["artifact_is_authorization"] is not False
+        or event["execute_binding_enabled"] is not False
+        or event["content_sha256"] != content_sha256(event)
+    ):
+        raise ValueError("benchmark attempt event is invalid")
+    sequence = event["sequence"]
+    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
+        raise ValueError("benchmark attempt event sequence is invalid")
+    event["attempt_ref"] = _attempt_sealed_parent(
+        event["attempt_ref"], "benchmark attempt ref"
+    )
+    phase = str(event["phase"] or "")
+    kind = str(event["event_kind"] or "")
+    if _ATTEMPT_EVENT_PHASE.get(kind) != phase:
+        raise ValueError("benchmark attempt event phase or kind is invalid")
+    provider = event["provider_id"]
+    probe_kind = event["probe_kind"]
+    provider_event = kind in {
+        "provider_request_in_flight",
+        "probe_triggered",
+        "provider_body_complete",
+    }
+    if provider_event:
+        if provider not in _PROVIDERS or probe_kind not in _PROBE_KINDS:
+            raise ValueError("benchmark attempt provider or probe is invalid")
+    elif provider is not None or probe_kind is not None:
+        raise ValueError("benchmark non-provider event cannot name a probe")
+    if event["resource_ref"] is not None:
+        event["resource_ref"] = _attempt_sealed_parent(
+            event["resource_ref"], "benchmark attempt resource ref"
+        )
+    predecessor = event["predecessor_content_sha256"]
+    if predecessor is not None and (
+        not isinstance(predecessor, str) or _SHA_RE.fullmatch(predecessor) is None
+    ):
+        raise ValueError("benchmark attempt predecessor SHA is invalid")
+    return event
+
+
+def read_benchmark_v2_attempt_journal(
+    *, journal_path: Path, attempt_ref: Mapping[str, object]
+) -> list[dict[str, Any]]:
+    path = Path(journal_path)
+    if not path.is_absolute() or path != path.resolve() or not path.is_file():
+        raise ValueError("benchmark attempt journal is unavailable")
+    attempt = _attempt_sealed_parent(attempt_ref, "benchmark attempt ref")
+    raw = path.read_bytes()
+    if not raw or not raw.endswith(b"\n"):
+        raise ValueError("benchmark attempt journal is incomplete")
+    events: list[dict[str, Any]] = []
+    for raw_line in raw.splitlines():
+        try:
+            decoded = json.loads(
+                raw_line.decode("utf-8"),
+                object_pairs_hook=_json_pairs,
+                parse_constant=_reject_constant,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+            raise ValueError("benchmark attempt journal is corrupt") from error
+        if canonical_json_bytes(decoded) != raw_line:
+            raise ValueError("benchmark attempt journal is not canonical")
+        event = _validate_benchmark_v2_attempt_event(decoded)
+        expected_sequence = len(events) + 1
+        expected_predecessor = (
+            events[-1]["content_sha256"] if events else None
+        )
+        if (
+            event["sequence"] != expected_sequence
+            or event["predecessor_content_sha256"] != expected_predecessor
+            or event["attempt_ref"] != attempt
+        ):
+            raise ValueError("benchmark attempt journal chain or attempt differs")
+        if events and _ATTEMPT_PHASES[event["phase"]] < _ATTEMPT_PHASES[
+            events[-1]["phase"]
+        ]:
+            raise ValueError("benchmark attempt journal phase regressed")
+        if events and events[-1]["phase"] == "terminal":
+            raise ValueError("benchmark attempt journal continued after terminal")
+        events.append(event)
+    return events
+
+
+def append_benchmark_v2_attempt_event(
+    *,
+    journal_path: Path,
+    attempt_ref: Mapping[str, object],
+    phase: str,
+    event_kind: str,
+    provider_id: str | None = None,
+    probe_kind: str | None = None,
+    resource_ref: Mapping[str, object] | None = None,
+) -> dict[str, Any]:
+    path = Path(journal_path)
+    if not path.is_absolute() or path != path.resolve():
+        raise ValueError("benchmark attempt journal path must be canonical")
+    attempt = _attempt_sealed_parent(attempt_ref, "benchmark attempt ref")
+    with _ATTEMPT_JOURNAL_LOCK:
+        events = (
+            read_benchmark_v2_attempt_journal(
+                journal_path=path,
+                attempt_ref=attempt,
+            )
+            if path.exists()
+            else []
+        )
+        normalized_resource = (
+            _attempt_sealed_parent(resource_ref, "benchmark attempt resource ref")
+            if resource_ref is not None
+            else None
+        )
+        idempotency = {
+            "phase": phase,
+            "event_kind": event_kind,
+            "provider_id": provider_id,
+            "probe_kind": probe_kind,
+            "resource_ref": normalized_resource,
+        }
+        if events:
+            last = events[-1]
+            if all(last[name] == value for name, value in idempotency.items()):
+                return deepcopy(last)
+            if last["phase"] == "terminal":
+                raise ValueError("benchmark attempt is already terminal")
+            if _ATTEMPT_PHASES.get(phase, -1) < _ATTEMPT_PHASES[last["phase"]]:
+                raise ValueError("benchmark attempt journal phase regressed")
+        body: dict[str, Any] = {
+            "contract_version": _ATTEMPT_EVENT_CONTRACT,
+            "sequence": len(events) + 1,
+            "attempt_ref": attempt,
+            "phase": phase,
+            "event_kind": event_kind,
+            "provider_id": provider_id,
+            "probe_kind": probe_kind,
+            "resource_ref": normalized_resource,
+            "predecessor_content_sha256": (
+                events[-1]["content_sha256"] if events else None
+            ),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        body["content_sha256"] = content_sha256(body)
+        event = _validate_benchmark_v2_attempt_event(body)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        raw = canonical_json_bytes(event) + b"\n"
+        with path.open("ab") as stream:
+            written = stream.write(raw)
+            if written != len(raw):
+                raise OSError("benchmark attempt journal short write")
+            os.fsync(stream.fileno())
+        return event
+
+
+def compose_benchmark_v2_attempt_cleanup_receipt(
+    *,
+    attempt_ref: Mapping[str, object],
+    reason: str,
+    service_terminal_ref: Mapping[str, object] | None,
+    window_cleanup_ref: Mapping[str, object] | None,
+    provider_cleanup_refs: list[Mapping[str, object]],
+    resource_counts: Mapping[str, int],
+) -> dict[str, Any]:
+    attempt = _attempt_sealed_parent(attempt_ref, "benchmark attempt ref")
+    normalized_reason = str(reason or "").strip()
+    if not normalized_reason:
+        raise ValueError("benchmark cleanup reason is invalid")
+    counts = dict(resource_counts)
+    required_counts = {
+        "service_operations",
+        "windows",
+        "providers",
+        "listeners",
+        "leases",
+    }
+    if set(counts) != required_counts or any(
+        isinstance(value, bool) or not isinstance(value, int) or value != 0
+        for value in counts.values()
+    ):
+        raise ValueError("benchmark cleanup resource counts are not stable-zero")
+    if not isinstance(provider_cleanup_refs, list):
+        raise ValueError("benchmark provider cleanup refs must be a list")
+    body: dict[str, Any] = {
+        "contract_version": _ATTEMPT_CLEANUP_CONTRACT,
+        "attempt_ref": attempt,
+        "reason": normalized_reason,
+        "service_terminal_ref": (
+            _attempt_sealed_parent(service_terminal_ref, "service terminal ref")
+            if service_terminal_ref is not None
+            else None
+        ),
+        "window_cleanup_ref": (
+            _attempt_sealed_parent(window_cleanup_ref, "window cleanup ref")
+            if window_cleanup_ref is not None
+            else None
+        ),
+        "provider_cleanup_refs": [
+            _attempt_sealed_parent(item, "provider cleanup ref")
+            for item in provider_cleanup_refs
+        ],
+        "resource_counts": counts,
+        "cleanup_status": "stable_zero",
+        "lost_response_policy": "fresh_reconcile_safe_stop_no_blind_retry",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return body
+
+
+__all__ = [
+    "append_benchmark_v2_attempt_event",
+    "collect_raw_gpu_sample",
+    "compose_benchmark_v2_attempt_cleanup_receipt",
+    "read_benchmark_v2_attempt_journal",
+    "verify_lifecycle_from_raw",
+]

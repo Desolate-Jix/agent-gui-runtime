@@ -4752,7 +4752,11 @@ def _project_benchmark_v2_hybrid_step(
     status: str,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_provider_dispatch_context_projection,
         compose_benchmark_v2_workflow_service_step,
+    )
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        validate_benchmark_dispatch_context_ref,
     )
 
     projection = None
@@ -4763,10 +4767,59 @@ def _project_benchmark_v2_hybrid_step(
             binding=binding,
         )
     worker_cleanup_ref = None
+    provider_cleanup_ref = None
     if status == "safe_stopped":
         cancellation = stage_execution.get("cancellation")
         if isinstance(cancellation, Mapping):
-            worker_cleanup_ref = seal_immutable(deepcopy(dict(cancellation)))
+            worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+            worker_cleanup_ref = seal_immutable(
+                {
+                    "contract_version": (
+                        "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+                    ),
+                    "run_id": worker_identity["run_id"],
+                    "stage": worker_identity["stage"],
+                    "operation_id": worker_identity["operation_id"],
+                    "worker_id": worker_identity["worker_id"],
+                    "model_request_id": worker_identity["model_request_id"],
+                    "payload_sha256": worker_identity["payload_sha256"],
+                    "backend_compute_termination": str(
+                        cancellation.get("backend_compute_termination")
+                        or "not_covered"
+                    ),
+                    "model_service_compute_termination": str(
+                        cancellation.get("model_service_compute_termination")
+                        or "not_covered"
+                    ),
+                    "cancellation_ref": {
+                        "content_sha256": content_sha256(dict(cancellation))
+                    },
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+        provider_cleanup_value = worker_record.get(
+            "benchmark_provider_cleanup_ref"
+        )
+        if isinstance(provider_cleanup_value, Mapping):
+            provider_cleanup_ref = _validate_benchmark_v2_hybrid_provider_cleanup(
+                cleanup=provider_cleanup_value,
+                worker_record=worker_record,
+            )
+    provider_context_projection = None
+    provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
+    if provider is not None:
+        context_ref_value = binding["provider_dispatch_context_refs"].get(provider)
+        if isinstance(context_ref_value, Mapping):
+            context_ref = validate_benchmark_dispatch_context_ref(context_ref_value)
+            context = context_ref["dispatch_context"]
+            provider_context_projection = (
+                compose_benchmark_v2_provider_dispatch_context_projection(
+                    provider=str(context["provider"]),
+                    context_content_sha256=str(context["content_sha256"]),
+                    operation_ref=context["operation_ref"],
+                )
+            )
     return compose_benchmark_v2_workflow_service_step(
         operation_ref=_project_benchmark_v2_hybrid_operation_ref(
             workflow_state=workflow_state,
@@ -4776,13 +4829,89 @@ def _project_benchmark_v2_hybrid_step(
             status=status,
         ),
         observed_task_kind=str(worker_record["task_kind"]),
+        provider_dispatch_context_projection=provider_context_projection,
         adopted_result_projection=projection,
         terminal_receipt=None,
         cleanup_refs={
             "worker_cleanup_ref": worker_cleanup_ref,
-            "provider_cleanup_ref": None,
+            "provider_cleanup_ref": provider_cleanup_ref,
         },
     )
+
+
+def _validate_benchmark_v2_hybrid_provider_cleanup(
+    *,
+    cleanup: object,
+    worker_record: Mapping[str, object],
+) -> dict[str, Any]:
+    fields = {
+        "contract_version",
+        "status",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "cleanup_receipt_ref",
+        "content_sha256",
+    }
+    if not isinstance(cleanup, Mapping) or set(cleanup) != fields:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid provider cleanup is not closed"
+        )
+    projection = deepcopy(dict(cleanup))
+    if (
+        projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
+        or projection.get("status") != "cleanup_verified"
+        or projection.get("outcome")
+        not in {"verified_not_acquired", "verified_exact_process_exited"}
+        or projection.get("authority_kind")
+        != "benchmark_v2_workflow_service_dispatch_cleanup"
+        or any(
+            projection.get(name) != worker_record.get(name)
+            for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+        )
+        or projection.get("content_sha256") != content_sha256(projection)
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid provider cleanup lineage differs"
+        )
+    for name in (
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "cleanup_receipt_ref",
+    ):
+        ref = projection.get(name)
+        if (
+            not isinstance(ref, Mapping)
+            or set(ref) != {"content_sha256"}
+            or not isinstance(ref.get("content_sha256"), str)
+            or len(str(ref["content_sha256"])) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in str(ref["content_sha256"])
+            )
+        ):
+            raise LearningWorkflowStageOperationError(
+                f"benchmark_v2 hybrid provider cleanup {name} is invalid"
+            )
+    return projection
 
 
 def _replay_benchmark_v2_hybrid_consumed_operation_ref(
@@ -4933,6 +5062,187 @@ def _benchmark_v2_hybrid_terminal_prepared_context(
     return current, stage_execution, binding, worker_record, supplied
 
 
+def _lookup_benchmark_v2_hybrid_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    screen_group: Mapping[str, object],
+    window_binding: Mapping[str, object],
+) -> dict[str, Any] | None:
+    """只读重建已存在的 Hybrid step；不存在时绝不创建 worker。"""
+
+    _require_minted_learning_workflow_service_composition(composition)
+    run_id = str(window_binding["run_id"])
+    stage = str(window_binding["stage"])
+    operation_id = str(window_binding["operation_id"])
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=run_id,
+        operation_id=operation_id,
+    ):
+        try:
+            current = composition.store.get(run_id)
+        except LearningWorkflowTransitionError as error:
+            if str(error) == "workflow run not found":
+                return None
+            raise
+        if current.get("current_stage") != stage:
+            return None
+        stage_execution = _benchmark_v2_stage_execution(current, stage)
+        binding = _benchmark_v2_hybrid_service_binding_from_execution(
+            stage_execution
+        )
+        if binding is None:
+            return None
+        proposed = _compose_benchmark_v2_hybrid_service_binding(
+            screen_group=screen_group,
+            window_binding=window_binding,
+        )
+        if (
+            _benchmark_v2_hybrid_binding_identity_sha256(binding)
+            != _benchmark_v2_hybrid_binding_identity_sha256(proposed)
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 hybrid lookup binding is stale"
+            )
+        attachment = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).project_worker_attachment(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+        )
+        if not isinstance(attachment, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 hybrid lookup recovery_required: "
+                "durable binding has no worker attachment"
+            )
+        worker_record = deepcopy(dict(attachment))
+        _benchmark_v2_hybrid_worker_ref(worker_record)
+        status = _benchmark_v2_hybrid_service_status(
+            workflow_state=current,
+            stage=stage,
+            worker_record=worker_record,
+        )
+        return _project_benchmark_v2_hybrid_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            binding=binding,
+            worker_record=worker_record,
+            status=status,
+        )
+
+
+def _ensure_benchmark_v2_hybrid_workflow_run(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    screen_group: Mapping[str, object],
+    window_binding: Mapping[str, object],
+) -> dict[str, Any]:
+    """在 service owner 内幂等建立 exact benchmark run 与受管 stage。"""
+
+    run_id = str(window_binding["run_id"])
+    stage = str(window_binding["stage"])
+    operation_id = str(window_binding["operation_id"])
+    start_intent = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_hybrid_run_start_intent_v1",
+            "screen_group_ref": {
+                "id": str(screen_group["screen_group"]),
+                "content_sha256": str(screen_group["content_sha256"]),
+            },
+            "request_ref": deepcopy(screen_group["request_ref"]),
+            "window_binding_ref": deepcopy(window_binding["window_binding_ref"]),
+            "capture_ref": deepcopy(window_binding["capture_ref"]),
+            "capture_image_path": str(screen_group["capture_image_path"]),
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    try:
+        current = composition.store.get(run_id)
+    except LearningWorkflowTransitionError as error:
+        if str(error) != "workflow run not found":
+            raise
+        current = transition_learning_workflow_run(
+            store=composition.store,
+            project_root=composition.project_root,
+            run_id=run_id,
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            reason="benchmark_v2 hybrid capture binding",
+            evidence_refs={"benchmark_v2_hybrid_start_intent": start_intent},
+        )
+
+    if current.get("current_stage") == "bind_capture":
+        record = current["stages"]["bind_capture"]
+        evidence = record.get("evidence_refs")
+        existing_intent = (
+            evidence.get("benchmark_v2_hybrid_start_intent")
+            if isinstance(evidence, Mapping)
+            else None
+        )
+        if existing_intent != start_intent:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 hybrid run start intent is stale"
+            )
+        if record.get("status") == "running":
+            current = transition_learning_workflow_run(
+                store=composition.store,
+                project_root=composition.project_root,
+                run_id=run_id,
+                expected_revision=int(current["revision"]),
+                stage="bind_capture",
+                outcome="completed",
+                reason="benchmark_v2 hybrid capture bound",
+                evidence_refs={
+                    "image_path": str(screen_group["capture_image_path"]),
+                    "benchmark_v2_hybrid_start_intent": start_intent,
+                },
+            )
+        completed_record = current["stages"]["bind_capture"]
+        completed_evidence = completed_record.get("evidence_refs")
+        if (
+            completed_record.get("status") != "completed"
+            or not isinstance(completed_evidence, Mapping)
+            or completed_evidence.get("benchmark_v2_hybrid_start_intent")
+            != start_intent
+            or not isinstance(completed_evidence.get("evidence_integrity"), Mapping)
+            or completed_evidence["evidence_integrity"].get("verified") is not True
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 hybrid bind_capture evidence is not recoverable"
+            )
+        current = start_learning_workflow_stage_operation(
+            store=composition.store,
+            project_root=composition.project_root,
+            run_id=run_id,
+            expected_revision=int(current["revision"]),
+            stage=stage,
+            operation_id=operation_id,
+            learning_pipeline_mode="hybrid_v1_1",
+            reason="benchmark_v2 hybrid workflow service start",
+        )["workflow_state"]
+
+    if current.get("current_stage") != stage:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid run stage is stale"
+        )
+    execution = _benchmark_v2_stage_execution(current, stage)
+    if (
+        execution.get("operation_id") != operation_id
+        or execution.get("learning_pipeline_mode") != "hybrid_v1_1"
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid run operation is stale"
+        )
+    return current
+
+
 def _start_benchmark_v2_hybrid_workflow_service(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -4948,7 +5258,11 @@ def _start_benchmark_v2_hybrid_workflow_service(
         run_id=run_id,
         operation_id=operation_id,
     ):
-        current = composition.store.get(run_id)
+        current = _ensure_benchmark_v2_hybrid_workflow_run(
+            composition=composition,
+            screen_group=screen_group,
+            window_binding=window_binding,
+        )
         stage_execution = _benchmark_v2_stage_execution(current, stage)
         proposed_binding = _compose_benchmark_v2_hybrid_service_binding(
             screen_group=screen_group,

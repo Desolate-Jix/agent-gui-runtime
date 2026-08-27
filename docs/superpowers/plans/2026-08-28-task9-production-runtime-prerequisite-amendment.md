@@ -183,9 +183,14 @@ Precise cut-points:
 - Modify: `app/learn/hybrid/benchmark_v2_runtime.py`
 - Modify: `app/learn/hybrid/benchmark_v2_lifecycle.py`
 - Modify: `app/learn/hybrid/benchmark_v2_dispatch_attestation.py`
+- Modify: `app/learn/hybrid/benchmark_v2_incumbent_operation.py`
+- Modify: `app/learn/workflow_service.py`
+- Modify: `app/learn/workflow_worker.py`
 - Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py`
 - Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py`
-- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`
+- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py`
+- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py`
+- Create: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime_recovery.py`
 
 **Interfaces:**
 
@@ -215,13 +220,15 @@ The benchmark-only resource journal has the closed progression:
 prepared -> request_in_flight -> body_complete -> terminal
 ```
 
-Probe selection can name only `omni`, `qwen`, or `vista`. Earlier cascade stages run normally until the selected stage reaches `request_in_flight`. Trigger and recovery bind the same PID/create-time/Job or managed lease incarnation. Cleanup order is WorkflowService cancel/reconcile, Task 4 HWND/Job close, provider/listener/lease cleanup, then Task 7 stable-zero verification.
+Probe selection can name only `omni`, `qwen`, or `vista`. Earlier cascade stages run normally until the selected stage reaches `request_in_flight`. Trigger and recovery bind the exact server-issued dispatch context and the same PID/create-time/Job or managed lease incarnation. A durable `service_start_intent` precedes WorkflowService start; a read-only exact lookup closes the crash window before `service_started` without retrying producer creation. Cleanup order is WorkflowService cancel/reconcile, Task 4 HWND/Job close, authoritative provider/listener/lease cleanup, then stable-zero verification. Aggregate termination strings alone never prove same-incarnation cleanup.
 
-- [ ] Add failing tests for crash before output, after service start, after window launch, during each provider, body-complete/response-lost, duplicate cleanup, stale attempt ref, and PID reuse.
-- [ ] Confirm failures with `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`.
-- [ ] Implement append+fsync resource events, bounded journal polling, same-incarnation trigger, idempotent attempt reconciliation, and closed stable-zero receipts.
-- [ ] Rerun the three focused suites; assert zero operations/windows/providers/listeners/leases after every path.
-- [ ] Commit `feat(benchmark-v2): recover benchmark attempts and probes`.
+- [x] Add failing tests for crash before output, after service start, after window launch, during each provider, body-complete/response-lost, duplicate cleanup, stale attempt ref, PID reuse, and start-before-journal hard crashes.
+- [x] Add a service-owned fresh-store initializer and a read-only exact lookup; prove missing intent returns `None` and no recovery path blindly calls start.
+- [x] Project the exact pathless provider dispatch context and verify the U1 receipt against its issued revision rather than the later workflow revision.
+- [x] Implement append+fsync resource events, bounded journal polling, idempotent reconciliation, best-effort exact cleanup, and closed stable-zero receipts.
+- [x] Bind trigger success to authoritative same-incarnation cleanup evidence for Omni, Qwen, and VISTA; reject completed, cross-operation, cross-request, cross-lease, cross-Job, and aggregate-only results before `probe_triggered`.
+- [x] Run deterministic U1/U2/runtime/lifecycle/WorkflowService/worker/model-cancellation focused suites and obtain an independent PASS with no Critical or Important findings.
+- [x] Commit `feat(benchmark-v2): recover benchmark attempts and probes`.
 
 ---
 

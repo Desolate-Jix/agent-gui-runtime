@@ -2174,14 +2174,18 @@ def execute_learning_stage_worker_task(
                 calibration_options["model_lease"] = model_lease
             response = calibration_handler(execution_payload, **calibration_options)
         elif normalized_kind == "vision_observe_screen":
+            screen_reader_options: dict[str, Any] = {
+                "managed_model_lease": model_lease,
+            }
+            if cancellation_event is not None:
+                screen_reader_options["cancellation_event"] = cancellation_event
             response = observe_result_to_legacy_response(
                 run_observe_task(
                     ObserveScreenTaskInput.model_validate(execution_payload),
                     project_root=_PROJECT_ROOT,
                     screen_reader=partial(
                         read_screen,
-                        managed_model_lease=model_lease,
-                        cancellation_event=cancellation_event,
+                        **screen_reader_options,
                     ),
                 )
             )
@@ -7474,6 +7478,10 @@ class LearningStageWorkerRegistry:
             payload["start_cleanup_evidence"] = deepcopy(
                 record["start_cleanup_evidence"]
             )
+        if isinstance(record.get("benchmark_provider_cleanup_ref"), dict):
+            payload["benchmark_provider_cleanup_ref"] = deepcopy(
+                record["benchmark_provider_cleanup_ref"]
+            )
         _write_json_atomic(journal_path, payload)
 
     def _cleanup_failed_start_or_retain(
@@ -8115,6 +8123,173 @@ class LearningStageWorkerRegistry:
         return None
 
     def cancel_by_operation(
+        self,
+        *,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        result = self._cancel_by_operation_impl(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+        )
+        operation_key = (str(run_id).strip(), str(stage).strip(), str(operation_id).strip())
+        with self._lock:
+            record = self._latest_operation_record(operation_key)
+            if record is None:
+                return result
+            existing = record.get("benchmark_provider_cleanup_ref")
+            if isinstance(existing, Mapping):
+                projection = _validate_hybrid_benchmark_provider_cleanup_projection(
+                    existing, identity=record
+                )
+            else:
+                projection = self._compose_hybrid_benchmark_provider_cleanup(
+                    record=record,
+                    worker_termination=result,
+                )
+                if projection is not None:
+                    record["benchmark_provider_cleanup_ref"] = deepcopy(projection)
+                    self._persist_record_journal(record)
+        if projection is not None:
+            result = deepcopy(result)
+            result["benchmark_provider_cleanup_ref"] = deepcopy(projection)
+        return result
+
+    def _compose_hybrid_benchmark_provider_cleanup(
+        self,
+        *,
+        record: Mapping[str, object],
+        worker_termination: Mapping[str, object],
+    ) -> dict[str, Any] | None:
+        payload = record.get("payload")
+        context_value = (
+            payload.get("_benchmark_v2_dispatch_context")
+            if isinstance(payload, Mapping)
+            else None
+        )
+        if context_value is None:
+            return None
+        from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+            project_authoritative_benchmark_provider_cleanup,
+            read_latest_benchmark_dispatch_receipt,
+            validate_benchmark_dispatch_context,
+        )
+
+        context = validate_benchmark_dispatch_context(context_value)
+        provider = str(context["provider"])
+        expected_provider = {
+            "panel_learning_hybrid_omni_discovery": "omni",
+            "panel_learning_hybrid_qwen_binding": "qwen",
+            "panel_learning_calibration_sequence": "vista",
+        }.get(str(record.get("task_kind") or ""))
+        if expected_provider != provider:
+            raise LearningStageWorkerError(
+                "benchmark Hybrid provider cleanup context differs from worker task"
+            )
+        receipt = read_latest_benchmark_dispatch_receipt(
+            dispatch_context=context
+        )
+        if receipt is None:
+            return None
+        identity_fields = (
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+        )
+        if any(
+            not isinstance(record.get(name), str) or not record.get(name)
+            for name in identity_fields
+        ) or any(
+            worker_termination.get(name) != record[name]
+            for name in ("worker_id", "model_request_id")
+        ):
+            raise LearningStageWorkerError(
+                "benchmark Hybrid provider cleanup worker identity differs"
+            )
+        authoritative = project_authoritative_benchmark_provider_cleanup(
+            provider=provider,
+            record=record,
+            worker_termination=worker_termination,
+        )
+        if authoritative is None:
+            return None
+        runtime_owner_ref = deepcopy(receipt["provider_runtime_attestation_ref"])
+        if authoritative["runtime_identity"]["content_sha256"] != runtime_owner_ref[
+            "content_sha256"
+        ]:
+            return None
+        cleanup_receipt = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_hybrid_provider_cleanup_binding_v1"
+                ),
+                "provider": provider,
+                **{name: str(record[name]) for name in identity_fields},
+                "dispatch_context_ref": {
+                    "content_sha256": context["content_sha256"]
+                },
+                "dispatch_receipt_ref": {
+                    "content_sha256": receipt["content_sha256"]
+                },
+                "runtime_owner_ref": runtime_owner_ref,
+                "predecessor_content_sha256": receipt["content_sha256"],
+                "authoritative_cleanup_contract": authoritative[
+                    "authoritative_cleanup_contract"
+                ],
+                "authoritative_cleanup_ref": deepcopy(
+                    authoritative["authoritative_cleanup_ref"]
+                ),
+                "outcome": "verified_exact_process_exited",
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        receipt_path = self._result_root / (
+            f"{record['worker_id']}.benchmark-v2-hybrid-provider-cleanup.json"
+        )
+        if receipt_path.exists():
+            persisted = _read_json_object(
+                receipt_path,
+                label="benchmark Hybrid provider cleanup receipt",
+            )
+            if persisted != cleanup_receipt:
+                raise LearningStageWorkerError(
+                    "benchmark Hybrid provider cleanup receipt replay differs"
+                )
+        else:
+            _write_json_create_only(receipt_path, cleanup_receipt)
+        projection = seal_immutable(
+            {
+                "contract_version": "benchmark_provider_cleanup_ref_v1",
+                "status": "cleanup_verified",
+                "outcome": "verified_exact_process_exited",
+                "authority_kind": (
+                    "benchmark_v2_workflow_service_dispatch_cleanup"
+                ),
+                **{name: str(record[name]) for name in identity_fields},
+                "reservation_ref": {
+                    "content_sha256": context["content_sha256"]
+                },
+                "acquisition_owner_ref": {
+                    "content_sha256": receipt["content_sha256"]
+                },
+                "acquisition_intent_ref": runtime_owner_ref,
+                "runtime_owner_ref": runtime_owner_ref,
+                "cleanup_receipt_ref": {
+                    "content_sha256": cleanup_receipt["content_sha256"]
+                },
+            }
+        )
+        return _validate_hybrid_benchmark_provider_cleanup_projection(
+            projection, identity=record
+        )
+
+    def _cancel_by_operation_impl(
         self,
         *,
         run_id: str,
@@ -11248,6 +11423,69 @@ def _read_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return value
 
 
+def _validate_hybrid_benchmark_provider_cleanup_projection(
+    value: object,
+    *,
+    identity: Mapping[str, object],
+) -> dict[str, Any]:
+    fields = {
+        "contract_version",
+        "status",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "cleanup_receipt_ref",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise LearningStageWorkerError(
+            "benchmark Hybrid provider cleanup projection is not closed"
+        )
+    projection = deepcopy(dict(value))
+    if (
+        projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
+        or projection.get("status") != "cleanup_verified"
+        or projection.get("outcome") != "verified_exact_process_exited"
+        or projection.get("authority_kind")
+        != "benchmark_v2_workflow_service_dispatch_cleanup"
+        or any(
+            projection.get(name) != identity.get(name)
+            for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+        )
+        or content_sha256(projection) != projection.get("content_sha256")
+    ):
+        raise LearningStageWorkerError(
+            "benchmark Hybrid provider cleanup projection lineage differs"
+        )
+    for name in (
+        "reservation_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "cleanup_receipt_ref",
+    ):
+        _benchmark_exact_ref(
+            projection.get(name), f"benchmark Hybrid provider cleanup {name}"
+        )
+    return projection
+
+
 def _load_worker_journal(
     *,
     journal_path: Path,
@@ -11316,6 +11554,14 @@ def _load_worker_journal(
         result_adoption = _validated_result_adoption(
             result_adoption,
             identity=identity,
+        )
+    provider_cleanup_ref = payload.get("benchmark_provider_cleanup_ref")
+    if provider_cleanup_ref is not None:
+        provider_cleanup_ref = (
+            _validate_hybrid_benchmark_provider_cleanup_projection(
+                provider_cleanup_ref,
+                identity=identity,
+            )
         )
 
     result_path = (result_root / result_file).resolve()
@@ -11443,6 +11689,7 @@ def _load_worker_journal(
         "cancellation_event": None,
         "completion_event": None,
         "result_adoption": result_adoption,
+        "benchmark_provider_cleanup_ref": provider_cleanup_ref,
         "start_cleanup_evidence": (
             deepcopy(payload.get("start_cleanup_evidence"))
             if isinstance(payload.get("start_cleanup_evidence"), dict)
