@@ -6,10 +6,12 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
 from pathlib import Path
+import struct
 
 import pytest
 
 from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+from app.learn.hybrid import benchmark_v2_window_owner as window_owner
 from app.learn.hybrid import benchmark_v2_worker_binding as worker_binding
 from app.learn import workflow_worker
 from app.learn.hybrid.benchmark_v2_lifecycle import (
@@ -29,6 +31,20 @@ def _sha(value: bytes) -> str:
 
 def _ref(character: str) -> dict[str, str]:
     return {"content_sha256": character * 64}
+
+
+def _bmp(*, width: int = 100, height: int = 80) -> bytes:
+    stride = ((width * 24 + 31) // 32) * 4
+    pixels = bytes(stride * height)
+    size = 54 + len(pixels)
+    return b"".join(
+        (
+            b"BM",
+            struct.pack("<IHHI", size, 0, 0, 54),
+            struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels), 0, 0, 0, 0),
+            pixels,
+        )
+    )
 
 
 def _write_json(path: Path, value: dict[str, object]) -> Path:
@@ -51,7 +67,7 @@ def _observer(kind: str = "test_fixture") -> dict[str, object]:
         {
             "contract_version": "benchmark_v2_gpu_observer_identity_v1",
             "kind": kind,
-            "platform": "test",
+            "platform": "windows" if kind == "production_direct" else "test",
             "collector_module_ref": {
                 "canonical_path": "test-fixture/benchmark_v2_lifecycle.py",
                 "file_sha256": "a" * 64,
@@ -189,33 +205,35 @@ def _parent_bundle(tmp_path: Path, *, operation_id: str = "operation-a") -> list
     window_identity = {"pid": 3101, "create_time_ns": 3101000}
     worker_identity = {"pid": 4101, "create_time_ns": 4101000}
     provider_identity = {"pid": 4201, "create_time_ns": 4201000}
-    capture_path = (tmp_path / "capture.png").resolve()
+    capture_path = (tmp_path / "capture.bmp").resolve()
     capture_path.parent.mkdir(parents=True, exist_ok=True)
-    capture_path.write_bytes(b"task7-canonical-capture")
+    capture_path.write_bytes(_bmp())
     capture_sha = _sha(capture_path.read_bytes())
 
     root_path = (tmp_path / "window-owner.json").resolve()
     events_path = root_path.with_name(root_path.name + ".events.jsonl")
-    anchor_path = root_path.with_name(root_path.name + ".root-anchor.json")
+    anchor_path = window_owner._root_anchor_path(root_path)
+    root_identity = window_owner._identity(operation_id, capture_sha, root_path)
+    bitmap = window_owner._parse_bmp(capture_path.read_bytes())
     root = seal_immutable(
         {
             "contract_version": "portfolio_hybrid_benchmark_v2_window_owner_journal_v1",
-            "owner_id": "window-owner-a",
+            "owner_id": root_identity["owner_id"],
             "operation_id": operation_id,
             "screenshot_path": str(capture_path),
             "screenshot_sha256": capture_sha,
-            "image_dimensions": {"width": 100, "height": 80},
-            "bitmap_pixel_sha256": "4" * 64,
-            "scope_name": "Local\\AgentGuiHybrid-window-owner-a",
-            "window_class": "Task7FixtureWindow",
-            "window_title": "Task 7 fixture",
-            "shutdown_event_name": "Local\\Task7FixtureShutdown",
-            "shutdown_nonce": "nonce-a",
+            "image_dimensions": bitmap["dimensions"],
+            "bitmap_pixel_sha256": bitmap["bitmap_pixel_sha256"],
+            "scope_name": root_identity["scope_name"],
+            "window_class": root_identity["window_class"],
+            "window_title": root_identity["window_title"],
+            "shutdown_event_name": root_identity["shutdown_event_name"],
+            "shutdown_nonce": root_identity["shutdown_nonce"],
             "journal_path": str(root_path),
             "events_path": str(events_path),
             "publication_path": str(root_path.with_name(root_path.name + ".publication.json")),
             "publication_permit_path": str(root_path.with_name(root_path.name + ".publication-permit.json")),
-            "helper_path": str((tmp_path / "window-helper.exe").resolve()),
+            "helper_path": str(window_owner._helper_path()),
             "root_anchor_path": str(anchor_path),
             "artifact_is_authorization": False,
             "execute_binding_enabled": False,
@@ -1913,7 +1931,7 @@ def test_collect_replay_requires_current_full_production_observer_identity_and_c
     expected_observer = _observer("production_direct")
     monkeypatch.setattr(lifecycle, "_production_gpu_observer_identity", lambda: expected_observer)
     assert collect_raw_gpu_sample(device_uuid=DEVICE, transcript_path=existing)["observer_identity"] == expected_observer
-    _mutate(existing, lambda value: value["observer_identity"].__setitem__("collector_process_identity", {"pid": 9999, "create_time_ns": 9999000}))
+    _mutate(existing, lambda value: value["observer_identity"].__setitem__("collector_process_identity", {"pid": 0, "create_time_ns": 9999000}))
     with pytest.raises(FileExistsError, match="current production observation"):
         collect_raw_gpu_sample(device_uuid=DEVICE, transcript_path=existing)
 
@@ -1921,6 +1939,66 @@ def test_collect_replay_requires_current_full_production_observer_identity_and_c
     conflicting.write_bytes(b"different bytes")
     with pytest.raises((FileExistsError, ValueError)):
         lifecycle._write_create_only(conflicting, b"expected bytes")
+
+
+def test_collect_replay_compatibility_ignores_current_collector_incarnation_but_rejects_code_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    path = _sample(
+        tmp_path / "cross-process-replay.json",
+        at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        observer_kind="production_direct",
+    )
+    value = json.loads(path.read_text(encoding="utf-8"))
+    recorded = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_gpu_observer_identity_v1",
+            "kind": "production_direct",
+            "platform": "windows",
+            "collector_module_ref": {
+                "canonical_path": "C:\\repo\\benchmark_v2_lifecycle.py",
+                "file_sha256": "a" * 64,
+            },
+            "nvidia_smi_ref": {
+                "canonical_path": "C:\\Windows\\System32\\nvidia-smi.exe",
+                "file_sha256": "b" * 64,
+            },
+            "collector_process_identity": {"pid": 9001, "create_time_ns": 9001000},
+        }
+    )
+    value["observer_identity"] = recorded
+    path.write_bytes(canonical_json_bytes(seal_immutable({key: item for key, item in value.items() if key != "content_sha256"})))
+    compatible = seal_immutable(
+        {
+            **{key: deepcopy(item) for key, item in recorded.items() if key != "content_sha256"},
+            "collector_process_identity": {"pid": 9901, "create_time_ns": 9901000},
+        }
+    )
+    monkeypatch.setattr(lifecycle, "_production_gpu_observer_identity", lambda: compatible)
+    replayed = collect_raw_gpu_sample(device_uuid=DEVICE, transcript_path=path)
+    assert replayed["observer_identity"] == recorded
+
+    for field, replacement in (
+        (
+            "collector_module_ref",
+            {"canonical_path": "C:\\repo\\benchmark_v2_lifecycle.py", "file_sha256": "c" * 64},
+        ),
+        (
+            "nvidia_smi_ref",
+            {"canonical_path": "C:\\Windows\\System32\\nvidia-smi.exe", "file_sha256": "d" * 64},
+        ),
+    ):
+        drifted = seal_immutable(
+            {
+                **{key: deepcopy(item) for key, item in compatible.items() if key != "content_sha256"},
+                field: replacement,
+            }
+        )
+        monkeypatch.setattr(lifecycle, "_production_gpu_observer_identity", lambda value=drifted: value)
+        with pytest.raises(FileExistsError, match="current production observation"):
+            collect_raw_gpu_sample(device_uuid=DEVICE, transcript_path=path)
 
 
 def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection() -> None:
@@ -1946,6 +2024,88 @@ def test_verify_lifecycle_canonical_fixture_is_deterministic_and_non_authorizing
     assert first["execute_binding_enabled"] is False
     assert first["content_sha256"] == lifecycle._content_sha256(first)
     assert {path: path.read_bytes() for path in [*parents, *samples, *probes]} == before
+
+
+def test_task4_fixture_uses_current_upstream_derived_root_and_rejects_identity_drift(tmp_path: Path) -> None:
+    import json
+
+    parents = _parent_bundle(tmp_path)
+    root_path = next(path for path in parents if path.name == "window-owner.json")
+    root = json.loads(root_path.read_text(encoding="utf-8"))
+    expected_identity = window_owner._identity(
+        str(root["operation_id"]), str(root["screenshot_sha256"]), root_path
+    )
+    assert all(root[key] == value for key, value in expected_identity.items())
+    assert root["root_anchor_path"] == str(window_owner._root_anchor_path(root_path))
+    assert root["helper_path"] == str(window_owner._helper_path())
+    lifecycle._validate_task4_root_shape(root_path, root)
+
+    wrong = seal_immutable(
+        {
+            **{key: deepcopy(value) for key, value in root.items() if key != "content_sha256"},
+            "scope_name": "Local\\wrong-scope",
+        }
+    )
+    with pytest.raises(lifecycle._EvidenceError, match="derived identity"):
+        lifecycle._validate_task4_root_shape(root_path, wrong)
+
+
+def test_task4_cleanup_reason_must_equal_finalization_reason(tmp_path: Path) -> None:
+    import json
+
+    parents = _parent_bundle(tmp_path)
+    root_path = next(path for path in parents if path.name == "window-owner.json")
+    root = json.loads(root_path.read_text(encoding="utf-8"))
+    events_path = Path(str(root["events_path"]))
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    cleanup_body = {key: deepcopy(value) for key, value in events[-1]["payload"].items() if key != "content_sha256"}
+    cleanup_body["reason"] = "different"
+    cleanup = seal_immutable(cleanup_body)
+    event_body = {key: deepcopy(value) for key, value in events[-1].items() if key != "content_sha256"}
+    event_body["payload"] = cleanup
+    events[-1] = seal_immutable(event_body)
+    events_path.write_bytes(b"".join(canonical_json_bytes(event) + b"\n" for event in events))
+
+    result = _verify(
+        parents,
+        [
+            _sample(tmp_path / "baseline.json", at=datetime(2026, 8, 27, tzinfo=timezone.utc)),
+        ],
+        [],
+    )
+    assert result["status"] == "failed"
+    assert any(item["code"] == "task4_cleanup_lineage_mismatch" for item in result["findings"])
+
+
+def test_task4_every_outer_event_payload_is_closed(tmp_path: Path) -> None:
+    import json
+
+    parents = _parent_bundle(tmp_path)
+    root_path = next(path for path in parents if path.name == "window-owner.json")
+    root = json.loads(root_path.read_text(encoding="utf-8"))
+    events_path = Path(str(root["events_path"]))
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    finalization_body = {
+        key: deepcopy(value) for key, value in events[-2].items() if key != "content_sha256"
+    }
+    finalization_body["payload"]["unexpected"] = True
+    events[-2] = seal_immutable(finalization_body)
+    cleanup_body = {
+        key: deepcopy(value) for key, value in events[-1]["payload"].items() if key != "content_sha256"
+    }
+    cleanup_body["finalization_intent_sha256"] = events[-2]["content_sha256"]
+    cleanup = seal_immutable(cleanup_body)
+    cleanup_event_body = {
+        key: deepcopy(value) for key, value in events[-1].items() if key != "content_sha256"
+    }
+    cleanup_event_body["previous_event_sha256"] = events[-2]["content_sha256"]
+    cleanup_event_body["payload"] = cleanup
+    events[-1] = seal_immutable(cleanup_event_body)
+    events_path.write_bytes(b"".join(canonical_json_bytes(event) + b"\n" for event in events))
+
+    result = _verify(parents, [], [])
+    assert result["status"] == "failed"
+    assert any(item["code"] == "task4_event_payload_invalid" for item in result["findings"])
 
 
 def test_verify_lifecycle_attributes_owned_vram_and_reports_residual_separately(tmp_path: Path) -> None:
@@ -2383,6 +2543,30 @@ def test_verify_lifecycle_not_launched_requires_production_none_semantics(tmp_pa
     assert any(item["code"] == "b1_not_launched_branch_contradiction" for item in result["findings"])
 
 
+def test_b1_not_launched_absence_recomputes_exact_scope_and_event(tmp_path: Path) -> None:
+    parents = _not_launched_parent_bundle(tmp_path)
+    roles, _refs, _findings, digest_index = lifecycle._load_parent_graph(parents)
+    cleanup = roles["b1_cleanup"][0][1]
+    observation = lifecycle._resolved_parent(
+        digest_index, cleanup["reservation_abort_ref"], "B1 not-launched observation"
+    )
+    absence_ref = observation["process_event_job_beacon_absence_observation_ref"]
+    digest = absence_ref["content_sha256"]
+    source, absence = digest_index[digest]
+    wrong = deepcopy(absence)
+    wrong["checks"]["scope_name"] = "Local\\wrong-scope"
+    wrong["checks"]["event_name"] = "Local\\AgentGuiBenchmarkWorkerGate-" + "f" * 64
+    corrupted_index = dict(digest_index)
+    corrupted_index[digest] = (source, wrong)
+
+    with pytest.raises(lifecycle._EvidenceError, match="pre-anchor absence chain"):
+        lifecycle._validate_b1_not_launched_raw(
+            roles=roles,
+            digest_index=corrupted_index,
+            cleanup=cleanup,
+        )
+
+
 def test_actual_mode_rejects_fixture_or_relabelled_observer_identity(tmp_path: Path) -> None:
     parents, samples, probes = _happy_inputs(tmp_path)
     result = _verify(parents, samples, probes, actual_mode=True)
@@ -2399,6 +2583,22 @@ def test_actual_mode_rejects_fixture_or_relabelled_observer_identity(tmp_path: P
         }
         for item in result["findings"]
     )
+
+
+def test_actual_mode_rejects_task7_self_signed_probe_parents_even_if_runner_ref_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parents, samples, probes = _happy_inputs(tmp_path)
+    monkeypatch.setattr(lifecycle, "_file_ref_matches", lambda _value, _path: True)
+    result = _verify(parents, samples, probes, actual_mode=True)
+    codes = {item["code"] for item in result["findings"]}
+    assert result["status"] == "failed"
+    assert result["release_eligible"] is False
+    assert {
+        "actual_omni_probe_authority_missing",
+        "actual_qwen_probe_authority_missing",
+        "actual_vista_probe_authority_missing",
+    } <= codes
 
 
 def test_path_alias_duplicate_and_noncanonical_json_are_rejected(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from typing import Any, Mapping
@@ -130,6 +131,14 @@ _TASK4_EVENT_FIELDS = {
     "root_anchor_sha256",
     "payload",
     "content_sha256",
+}
+_TASK4_EVENT_PAYLOAD_FIELDS = {
+    "launch_intent": {"journal_root_sha256"},
+    "job_created": {"scope_name"},
+    "process_created": {"process_identity"},
+    "hwnd_published": {"publication"},
+    "ready": {"binding", "pre_raw_identity_sha256", "post_raw_identity_sha256"},
+    "finalization_intent": {"reason"},
 }
 _TASK4_CLEANUP_FIELDS = {
     "contract_version",
@@ -896,6 +905,20 @@ def _production_gpu_observer_identity() -> dict[str, object]:
     )
 
 
+def _observer_replay_compatible(recorded: object, current: object) -> bool:
+    try:
+        persisted = _validate_observer(recorded)
+        live = _validate_observer(current)
+    except (TypeError, ValueError, _EvidenceError):
+        return False
+    return (
+        persisted.get("kind") == live.get("kind") == "production_direct"
+        and persisted.get("platform") == live.get("platform") == "windows"
+        and persisted.get("collector_module_ref") == live.get("collector_module_ref")
+        and persisted.get("nvidia_smi_ref") == live.get("nvidia_smi_ref")
+    )
+
+
 def _write_create_only(path: Path, raw: bytes) -> None:
     if len(raw) > _MAX_ARTIFACT_BYTES:
         raise ValueError("raw GPU transcript exceeds 4 MiB")
@@ -939,7 +962,9 @@ def collect_raw_gpu_sample(*, device_uuid: str, transcript_path: Path) -> dict[s
         if (
             validated["device_uuid"] != requested_uuid
             or validated["collection_mode"] != "production_direct"
-            or validated["observer_identity"] != _production_gpu_observer_identity()
+            or not _observer_replay_compatible(
+                validated["observer_identity"], _production_gpu_observer_identity()
+            )
         ):
             raise FileExistsError(
                 "raw GPU transcript is not an identical current production observation for the requested device"
@@ -1183,6 +1208,99 @@ def _source_ref(path: Path, value: Mapping[str, object], role: str) -> dict[str,
     }
 
 
+def _task4_bmp_identity(raw: bytes) -> dict[str, object]:
+    if len(raw) < 54 or raw[:2] != b"BM":
+        raise _EvidenceError("task4_capture_invalid", "Task 4 screenshot is not an exact BMP")
+    try:
+        file_size = struct.unpack_from("<I", raw, 2)[0]
+        pixel_offset = struct.unpack_from("<I", raw, 10)[0]
+        header_size, width, signed_height, planes, bit_count, compression, size_image = struct.unpack_from(
+            "<IiiHHII", raw, 14
+        )
+    except struct.error as error:
+        raise _EvidenceError("task4_capture_invalid", "Task 4 BMP header is truncated") from error
+    if (
+        file_size != len(raw)
+        or header_size != 40
+        or width <= 0
+        or signed_height == 0
+        or planes != 1
+        or bit_count not in {24, 32}
+        or compression != 0
+        or pixel_offset < 54
+    ):
+        raise _EvidenceError("task4_capture_invalid", "Task 4 BMP dimensions differ")
+    height = abs(signed_height)
+    stride = ((width * bit_count + 31) // 32) * 4
+    pixel_bytes = stride * height
+    if size_image not in {0, pixel_bytes} or pixel_offset + pixel_bytes != len(raw):
+        raise _EvidenceError("task4_capture_invalid", "Task 4 BMP pixel layout differs")
+    return {
+        "image_dimensions": {"width": width, "height": height},
+        "bitmap_pixel_sha256": _sha_bytes(raw[pixel_offset : pixel_offset + pixel_bytes]),
+    }
+
+
+def _validate_task4_root_shape(root_path: Path, raw_root: Mapping[str, object]) -> tuple[Path, bytes]:
+    root = _sealed(raw_root, _TASK4_ROOT_FIELDS, "Task 4 root")
+    if root.get("contract_version") != "portfolio_hybrid_benchmark_v2_window_owner_journal_v1":
+        raise _EvidenceError("task4_root_invalid", "Task 4 root contract differs")
+    operation_id = root.get("operation_id")
+    if not isinstance(operation_id, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", operation_id) is None:
+        raise _EvidenceError("task4_root_invalid", "Task 4 operation identity differs")
+    screenshot_sha = _sha(root.get("screenshot_sha256"), "Task 4 screenshot SHA")
+    identity_digest = _sha_bytes(
+        canonical_json_bytes(
+            {
+                "contract_version": "portfolio_hybrid_benchmark_v2_window_owner_journal_v1",
+                "operation_id": operation_id,
+                "screenshot_sha256": screenshot_sha,
+                "journal_path": str(root_path),
+            }
+        )
+    )
+    expected_identity = {
+        "owner_id": f"window-owner-{identity_digest}",
+        "scope_name": f"Local\\AgentGuiHybrid-vista-{identity_digest}",
+        "window_class": f"AgentGuiBenchmarkV2_{identity_digest[:32]}",
+        "window_title": f"AgentGui Benchmark v2 {identity_digest[:24]}",
+        "shutdown_event_name": f"Local\\AgentGuiBenchmarkV2-window-shutdown-{identity_digest}",
+        "shutdown_nonce": _sha_bytes(f"shutdown\0{identity_digest}".encode("utf-8")),
+    }
+    if any(root.get(field) != expected for field, expected in expected_identity.items()):
+        raise _EvidenceError("task4_root_invalid", "Task 4 derived identity differs")
+    root_anchor_digest = _sha_bytes(str(root_path).casefold().encode("utf-8"))
+    expected_paths = {
+        "journal_path": str(root_path),
+        "events_path": str(root_path.with_name(root_path.name + ".events.jsonl")),
+        "publication_path": str(root_path.with_name(root_path.name + ".publication.json")),
+        "publication_permit_path": str(root_path.with_name(root_path.name + ".publication-permit.json")),
+        "helper_path": str(
+            (Path(__file__).resolve().parents[3] / "scripts" / "portfolio_hybrid_v1_1_test_window_v2.py").resolve()
+        ),
+        "root_anchor_path": str(
+            root_path.with_name(f".{root_path.name}.{root_anchor_digest}.root-anchor.json")
+        ),
+    }
+    if any(root.get(field) != expected for field, expected in expected_paths.items()):
+        raise _EvidenceError("task4_path_mismatch", "Task 4 derived sibling path differs")
+    capture_path, capture_raw = _read_input(Path(str(root.get("screenshot_path"))), "Task 4 screenshot")
+    bitmap = _task4_bmp_identity(capture_raw)
+    if (
+        _sha_bytes(capture_raw) != screenshot_sha
+        or root.get("image_dimensions") != bitmap["image_dimensions"]
+        or root.get("bitmap_pixel_sha256") != bitmap["bitmap_pixel_sha256"]
+    ):
+        raise _EvidenceError("task4_capture_digest_mismatch", "Task 4 screenshot identity differs")
+    if (
+        root.get("artifact_is_authorization") is not False
+        or root.get("execute_binding_enabled") is not False
+        or root.get("display_only") is not True
+    ):
+        raise _EvidenceError("task4_safety_mismatch", "Task 4 root safety fields differ")
+    return capture_path, capture_raw
+
+
 def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple[list[dict[str, Any]], dict[str, object]]:
     related_refs: list[dict[str, str]] = []
     declared_event_path = Path(str(root.get("events_path")))
@@ -1229,19 +1347,43 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
         payload = event.get("payload")
         if not isinstance(payload, Mapping):
             raise _EvidenceError("task4_event_payload_invalid", "Task 4 event payload is not an object")
-        if event_type == "process_created":
-            if set(payload) != {"process_identity"}:
-                raise _EvidenceError("task4_event_payload_invalid", "Task 4 process event fields differ")
-            _process_identity(payload["process_identity"], "Task 4 process identity")
-        elif event_type == "cleanup_verified":
+        expected_payload_fields = _TASK4_EVENT_PAYLOAD_FIELDS.get(str(event_type))
+        if event_type == "cleanup_verified":
             cleanup = _sealed(payload, _TASK4_CLEANUP_FIELDS, "Task 4 cleanup")
             if cleanup.get("contract_version") != "portfolio_hybrid_benchmark_v2_window_cleanup_v1":
                 raise _EvidenceError("task4_cleanup_invalid", "Task 4 cleanup contract differs")
+        elif expected_payload_fields is None or set(payload) != expected_payload_fields:
+            raise _EvidenceError("task4_event_payload_invalid", "Task 4 event payload fields differ")
+        if event_type == "launch_intent" and payload.get("journal_root_sha256") != root.get("content_sha256"):
+            raise _EvidenceError("task4_event_payload_invalid", "Task 4 launch root ref differs")
+        if event_type == "job_created" and payload.get("scope_name") != root.get("scope_name"):
+            raise _EvidenceError("task4_event_payload_invalid", "Task 4 Job scope differs")
+        if event_type == "process_created":
+            _process_identity(payload["process_identity"], "Task 4 process identity")
+        if event_type == "ready":
+            pre_raw = _sha(payload.get("pre_raw_identity_sha256"), "Task 4 pre-ready identity")
+            post_raw = _sha(payload.get("post_raw_identity_sha256"), "Task 4 post-ready identity")
+            if pre_raw != post_raw:
+                raise _EvidenceError("task4_event_payload_invalid", "Task 4 raw HWND identity changed")
+        if event_type == "finalization_intent":
+            reason = payload.get("reason")
+            if not isinstance(reason, str) or not reason or len(reason) > 128:
+                raise _EvidenceError("task4_event_payload_invalid", "Task 4 finalization reason differs")
         events.append(event)
         previous = str(event["content_sha256"])
         previous_type = str(event_type)
     if previous_type != "cleanup_verified":
         raise _EvidenceError("task4_cleanup_missing", "Task 4 terminal cleanup event is absent")
+    if [event["event_type"] for event in events] != [
+        "launch_intent",
+        "job_created",
+        "process_created",
+        "hwnd_published",
+        "ready",
+        "finalization_intent",
+        "cleanup_verified",
+    ]:
+        raise _EvidenceError("task4_event_chain_invalid", "Task 4 conclusion requires the full owner event chain")
     cleanup = deepcopy(dict(events[-1]["payload"]))
     process_events = [event for event in events if event["event_type"] == "process_created"]
     finalizations = [event for event in events if event["event_type"] == "finalization_intent"]
@@ -1252,7 +1394,10 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
     expected_identity = process_events[0]["payload"]["process_identity"]
     if (
         cleanup.get("owner_id") != root.get("owner_id")
+        or cleanup.get("reason") != finalizations[0]["payload"].get("reason")
+        or cleanup.get("shutdown_event_name") != root.get("shutdown_event_name")
         or cleanup.get("process_identity") != expected_identity
+        or cleanup.get("cleanup_subject_kind") != "ready_window"
         or cleanup.get("process_event_sha256") != process_events[0]["content_sha256"]
         or cleanup.get("finalization_intent_sha256") != finalizations[0]["content_sha256"]
     ):
@@ -1320,7 +1465,16 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
             or publication.get("screenshot_sha256") != root.get("screenshot_sha256")
             or publication.get("raw_file_sha256") != root.get("screenshot_sha256")
             or publication.get("bitmap_pixel_sha256") != root.get("bitmap_pixel_sha256")
+            or publication.get("shutdown_nonce_sha256")
+            != _sha_bytes(str(root.get("shutdown_nonce")).encode("utf-8"))
             or publication.get("process_identity") != expected_identity
+            or not isinstance(publication.get("hwnd"), int)
+            or isinstance(publication.get("hwnd"), bool)
+            or int(publication.get("hwnd")) <= 0
+            or publication.get("hwnds") != [publication.get("hwnd")]
+            or publication.get("window_class") != root.get("window_class")
+            or publication.get("window_title") != root.get("window_title")
+            or publication.get("image_dimensions") != root.get("image_dimensions")
             or publication.get("journal_root_sha256") != root.get("content_sha256")
             or publication.get("expected_predecessor_sha256")
             != process_events[0].get("content_sha256")
@@ -1329,6 +1483,19 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
             or publication.get("execute_binding_enabled") is not False
             or binding.get("contract_version")
             != "portfolio_hybrid_benchmark_v2_window_binding_v1"
+            or binding.get("owner_id") != root.get("owner_id")
+            or binding.get("operation_id") != root.get("operation_id")
+            or binding.get("screenshot_path") != root.get("screenshot_path")
+            or binding.get("screenshot_sha256") != root.get("screenshot_sha256")
+            or binding.get("bitmap_pixel_sha256") != root.get("bitmap_pixel_sha256")
+            or binding.get("scope_name") != root.get("scope_name")
+            or binding.get("window_class") != root.get("window_class")
+            or binding.get("window_title") != root.get("window_title")
+            or binding.get("window_rect") != publication.get("window_rect")
+            or binding.get("client_rect") != publication.get("client_rect")
+            or binding.get("dpi") != publication.get("dpi")
+            or binding.get("image_dimensions") != root.get("image_dimensions")
+            or binding.get("journal_path") != root.get("journal_path")
             or binding.get("journal_root") != root
             or binding.get("journal_root_sha256") != root.get("content_sha256")
             or binding.get("job_member_pids") != [expected_identity["pid"]]
@@ -1619,13 +1786,9 @@ def _load_parent_graph(paths: list[Path]) -> tuple[
     if len(task4_roots) != 1:
         raise _EvidenceError("task4_root_cardinality", "exactly one Task 4 root is required")
     task4_path, task4_root = task4_roots[0]
-    if task4_root.get("artifact_is_authorization") is not False or task4_root.get("execute_binding_enabled") is not False or task4_root.get("display_only") is not True:
-        raise _EvidenceError("task4_safety_mismatch", "Task 4 root safety fields differ")
+    capture_path, capture_raw = _validate_task4_root_shape(task4_path, task4_root)
     task4_events, event_ref = _validate_task4_events(task4_path, task4_root)
-    capture_path, capture_raw = _read_input(Path(str(task4_root.get("screenshot_path"))), "Task 4 screenshot")
     capture_digest = _sha_bytes(capture_raw)
-    if capture_digest != task4_root.get("screenshot_sha256"):
-        raise _EvidenceError("task4_capture_digest_mismatch", "Task 4 screenshot bytes differ")
     digest_index[capture_digest] = (str(capture_path), {"raw_file_sha256": capture_digest})
     roles["task4_events"] = [(Path(event_ref["path"]), {"events": task4_events, **event_ref})]
     for event in task4_events:
@@ -2360,6 +2523,10 @@ def _validate_b1_not_launched_raw(
         or cleanup.get("operation_anchor_ref")
         != {"content_sha256": operation_anchor.get("anchor_identity_sha256")}
         or cleanup.get("reservation_ref") != {"content_sha256": cancelled.get("content_sha256")}
+        or cleanup.get("run_id") != anchored.get("run_id")
+        or cleanup.get("stage") != anchored.get("stage")
+        or cleanup.get("operation_id") != anchored.get("operation_id")
+        or cleanup.get("worker_id") != anchored.get("worker_id")
         or cleanup.get("supervision_ref") is not None
         or cleanup.get("process_identity") is not None
         or cleanup.get("assignment_proven_ref") is not None
@@ -2374,10 +2541,31 @@ def _validate_b1_not_launched_raw(
     if (
         observation.get("contract_version") != "benchmark_worker_not_launched_observation_v1"
         or observation.get("outcome") != "verified_no_launch_artifacts"
+        or observation.get("authority_kind") != anchored.get("authority_kind")
+        or observation.get("run_id") != anchored.get("run_id")
+        or observation.get("stage") != anchored.get("stage")
+        or observation.get("operation_id") != anchored.get("operation_id")
+        or observation.get("worker_id") != anchored.get("worker_id")
         or observation.get("reservation_ref") != {"content_sha256": anchored.get("content_sha256")}
         or cancelled.get("abort_observation_ref") != {"content_sha256": observation.get("content_sha256")}
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
     ):
         raise _EvidenceError("b1_not_launched_observation_invalid", "B1 no-launch observation differs")
+    from app.learn.hybrid.windows_process_scope import benchmark_worker_scope_name_v1
+
+    expected_scope = benchmark_worker_scope_name_v1(
+        authority_kind=str(anchored.get("authority_kind")),
+        run_id=str(anchored.get("run_id")),
+        stage=str(anchored.get("stage")),
+        operation_id=str(anchored.get("operation_id")),
+        worker_id=str(anchored.get("worker_id")),
+        payload_sha256=str(anchored.get("payload_sha256")),
+        execution_nonce=str(anchored.get("execution_nonce")),
+    )
+    expected_event = "Local\\AgentGuiBenchmarkWorkerGate-" + content_sha256(
+        {"scope_name": expected_scope}
+    )
     predecessor = str(anchored["content_sha256"])
     expected_kinds = (
         ("owner", "owner_absence_observation_ref"),
@@ -2385,14 +2573,18 @@ def _validate_b1_not_launched_raw(
         ("result", "result_absence_observation_ref"),
         ("provider", "provider_absence_observation_ref"),
     )
-    expected_check_keys = {
-        "owner": {"registry_record_absent", "owner_journal_absent"},
+    expected_checks = {
+        "owner": {"registry_record_absent": True, "owner_journal_absent": True},
         "process_event_job_beacon": {
-            "worker_journal_absent", "startup_event_absent", "owner_job_absent",
-            "beacon_absent", "scope_name", "event_name",
+            "worker_journal_absent": True,
+            "startup_event_absent": True,
+            "owner_job_absent": True,
+            "beacon_absent": True,
+            "scope_name": expected_scope,
+            "event_name": expected_event,
         },
-        "result": {"result_absent"},
-        "provider": {"provider_owner_absent"},
+        "result": {"result_absent": True},
+        "provider": {"provider_owner_absent": True},
     }
     for kind, field in expected_kinds:
         absence = _resolved_parent(digest_index, observation.get(field), f"B1 {kind} pre-anchor absence")
@@ -2402,10 +2594,11 @@ def _validate_b1_not_launched_raw(
             or absence.get("outcome") != "absent"
             or absence.get("reservation_ref") != {"content_sha256": anchored.get("content_sha256")}
             or absence.get("predecessor_content_sha256") != predecessor
-            or absence.get("worker_id") != cleanup.get("worker_id")
-            or not isinstance(absence.get("checks"), Mapping)
-            or set(absence["checks"]) != expected_check_keys[kind]
-            or any(value is not True for key, value in absence["checks"].items() if key.endswith("absent"))
+            or absence.get("run_id") != anchored.get("run_id")
+            or absence.get("stage") != anchored.get("stage")
+            or absence.get("operation_id") != anchored.get("operation_id")
+            or absence.get("worker_id") != anchored.get("worker_id")
+            or absence.get("checks") != expected_checks[kind]
         ):
             raise _EvidenceError("b1_not_launched_absence_invalid", "B1 pre-anchor absence chain differs")
         predecessor = str(absence["content_sha256"])
@@ -3437,6 +3630,79 @@ def _file_ref_matches(value: object, expected_path: Path) -> bool:
         return False
 
 
+def _actual_b1_expected_path(role: str, value: Mapping[str, object], worker_root: Path) -> Path | None:
+    worker = value.get("worker_id")
+    operation = value.get("operation_id")
+    if role == "b1_reservation" and isinstance(operation, str):
+        return worker_root / f"{operation}.benchmark-reservation.json"
+    if not isinstance(worker, str) or not worker:
+        return None
+    fixed = {
+        "b1_assignment": f"{worker}.benchmark-assignment.json",
+        "b1_owner": f"{worker}.benchmark-owner.json",
+        "b1_cleanup": f"{worker}.benchmark-cleanup.json",
+        "b1_beacon": f"{worker}.benchmark-beacon.json",
+        "b1_launch_anchor": f"{worker}.benchmark-launch-identity-anchor.json",
+        "b1_exit_join": f"{worker}.exit-join.json",
+        "b1_stable_zero": f"{worker}.stable-zero.json",
+        "b1_finalization_intent": f"{worker}.benchmark-cleanup-intent.json",
+        "b1_not_launched": f"{worker}.benchmark-not-launched.json",
+    }
+    if role in fixed:
+        return worker_root / fixed[role]
+    if role == "b1_handle_close":
+        suffixes = {
+            "worker_process": "worker-process-close.json",
+            "startup_event": "startup-event-close.json",
+            "beacon_file": "beacon-file-close.json",
+            "owner_job": "owner-job-close.json",
+        }
+        suffix = suffixes.get(str(value.get("handle_kind")))
+        return worker_root / f"{worker}.{suffix}" if suffix else None
+    if role == "b1_absence":
+        kind = value.get("observation_kind")
+        return worker_root / f"{worker}.{kind}-absence.json" if isinstance(kind, str) and kind else None
+    if role == "b1_pre_anchor_absence":
+        kind = value.get("observation_kind")
+        return worker_root / f"{worker}.pre-anchor-{kind}-absence.json" if isinstance(kind, str) and kind else None
+    return None
+
+
+def _actual_b2_expected_path(
+    role: str,
+    value: Mapping[str, object],
+    *,
+    request_paths: Mapping[str, Path],
+    worker_root: Path,
+) -> Path | None:
+    keys = {
+        "b2_acquisition_intent": "intent",
+        "b2_acquisition_owner": "owner",
+        "b2_prepared_materialization_ledger": "ledger_revision_zero",
+        "b2_materialization_ledger": "ledger",
+        "b2_acquisition_abort": "abort",
+        "b2_abort_tombstone": "aborted_tombstone",
+        "b2_lease_binding": "lease_binding",
+        "b2_lease_state": "lease_state_snapshot",
+        "b2_release_observation": "release_observation",
+        "b2_termination": "termination_observation",
+        "b2_cleanup": "cleanup_receipt",
+    }
+    if role in keys:
+        return request_paths.get(keys[role])
+    if role == "b2_owner_tombstone" or role == "b2_production_abort_tombstone":
+        from app.core import model_server
+
+        request_id = value.get("model_request_id")
+        return model_server._qwen_owner_tombstone_path(str(request_id)) if isinstance(request_id, str) else None
+    operation = value.get("operation_id")
+    if role == "b2_provider_journal" and isinstance(operation, str):
+        return worker_root / f"{operation}.benchmark-provider.json"
+    if role == "b2_provider_cleanup_journal" and isinstance(operation, str):
+        return worker_root / f"{operation}.benchmark-provider-cleanup.json"
+    return None
+
+
 def _actual_mode_findings(
     *,
     roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
@@ -3484,14 +3750,33 @@ def _actual_mode_findings(
                 )
             )
     worker_root = (Path(__file__).resolve().parents[3] / "logs" / "workflow-workers").resolve()
-    b1_expected_names = {
-        "b1_cleanup": lambda value: f"{value['worker_id']}.benchmark-cleanup.json",
-        "b1_owner": lambda value: f"{value['worker_id']}.benchmark-owner.json",
-        "b1_finalization_intent": lambda value: f"{value['worker_id']}.benchmark-cleanup-intent.json",
+    b1_roles = {
+        "b1_source",
+        "b1_reservation",
+        "b1_operation_anchor",
+        "b1_expected_supervision",
+        "b1_actual_supervision",
+        "b1_assignment",
+        "b1_beacon",
+        "b1_launch_anchor",
+        "b1_owner",
+        "b1_exit_join",
+        "b1_handle_close",
+        "b1_stable_zero",
+        "b1_finalization_intent",
+        "b1_absence",
+        "b1_pre_anchor_absence",
+        "b1_not_launched",
+        "b1_cleanup",
     }
-    for role, name_builder in b1_expected_names.items():
+    for role in sorted(b1_roles):
         for path, value in roles.get(role, []):
-            if path.parent != worker_root or path.name != name_builder(value):
+            expected = _actual_b1_expected_path(role, value, worker_root)
+            if expected is None:
+                findings.append(
+                    _finding("actual_b1_parent_provenance_unavailable", "failed", [str(value["content_sha256"])])
+                )
+            elif path != expected.resolve():
                 findings.append(
                     _finding("actual_b1_parent_path_not_canonical", "failed", [str(value["content_sha256"])])
                 )
@@ -3499,20 +3784,40 @@ def _actual_mode_findings(
 
     request_id = str(_one(roles, "b2_runtime_owner").get("model_request_id") if _one(roles, "b2_runtime_owner") else "")
     expected_b2 = model_server._qwen_acquisition_artifact_paths(request_id) if request_id else {}
-    b2_path_keys = {
-        "b2_acquisition_intent": "intent",
-        "b2_acquisition_owner": "owner",
-        "b2_prepared_materialization_ledger": "ledger_revision_zero",
-        "b2_materialization_ledger": "ledger",
-        "b2_lease_binding": "lease_binding",
-        "b2_lease_state": "lease_state_snapshot",
-        "b2_release_observation": "release_observation",
-        "b2_termination": "termination_observation",
-        "b2_cleanup": "cleanup_receipt",
+    b2_roles = {
+        "b2_runtime_owner",
+        "b2_acquisition_intent",
+        "b2_acquisition_owner",
+        "b2_acquisition_observation",
+        "b2_prepared_materialization_ledger",
+        "b2_materialization_ledger",
+        "b2_lease_binding",
+        "b2_lease_state",
+        "b2_lease",
+        "b2_socket",
+        "b2_scope_acquisition",
+        "b2_release_observation",
+        "b2_termination",
+        "b2_owner_tombstone",
+        "b2_scope_cleanup",
+        "b2_no_active_lease",
+        "b2_abort_tombstone",
+        "b2_acquisition_abort",
+        "b2_production_abort_tombstone",
+        "b2_provider_journal",
+        "b2_provider_cleanup_journal",
+        "b2_cleanup",
     }
-    for role, key in b2_path_keys.items():
+    for role in sorted(b2_roles):
         for path, value in roles.get(role, []):
-            if path != expected_b2.get(key):
+            expected = _actual_b2_expected_path(
+                role, value, request_paths=expected_b2, worker_root=worker_root
+            )
+            if expected is None:
+                findings.append(
+                    _finding("actual_b2_parent_provenance_unavailable", "failed", [str(value["content_sha256"])])
+                )
+            elif path != expected.resolve():
                 findings.append(
                     _finding("actual_b2_parent_path_not_canonical", "failed", [str(value["content_sha256"])])
                 )
@@ -3556,6 +3861,32 @@ def _actual_mode_findings(
             findings.append(_finding("actual_probe_observer_not_production", "failed", [str(probe["content_sha256"])]))
     if len(probes) != 6:
         findings.append(_finding("actual_probe_evidence_missing", "failed"))
+    qwen_cleanup = _one(roles, "b2_cleanup")
+    for probe in [item for item in probes if item.get("provider", {}).get("provider_id") == "qwen"]:
+        lease_or_owner = probe.get("lease_or_owner")
+        termination = probe.get("termination_observation")
+        if (
+            qwen_cleanup is None
+            or not isinstance(lease_or_owner, Mapping)
+            or not isinstance(termination, Mapping)
+            or probe.get("model_request_id") != qwen_cleanup.get("model_request_id")
+            or lease_or_owner.get("lease_ref") != qwen_cleanup.get("lease_ref")
+            or lease_or_owner.get("socket_ref") != qwen_cleanup.get("socket_ref")
+            or lease_or_owner.get("job_scope_ref") != qwen_cleanup.get("job_scope_ref")
+            or lease_or_owner.get("process_identity") != qwen_cleanup.get("server_process_identity")
+            or termination.get("process_identity") != qwen_cleanup.get("server_process_identity")
+            or termination.get("evidence_ref") != qwen_cleanup.get("termination_observation_ref")
+        ):
+            findings.append(
+                _finding("actual_qwen_probe_lineage_mismatch", "failed", [str(probe["content_sha256"])])
+            )
+    for provider in _PROVIDERS:
+        refs = [
+            str(probe["content_sha256"])
+            for probe in probes
+            if probe.get("provider", {}).get("provider_id") == provider
+        ]
+        findings.append(_finding(f"actual_{provider}_probe_authority_missing", "failed", refs))
     return findings
 
 
