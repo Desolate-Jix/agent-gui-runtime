@@ -5,6 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import ctypes
 from ctypes import wintypes
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ import re
 import subprocess
 from threading import Lock
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import psutil
 
@@ -374,6 +375,7 @@ def spawn_process_in_scope(
     stdout: Any = subprocess.DEVNULL,
     stderr: Any = subprocess.DEVNULL,
     creationflags: int = 0,
+    before_resume: Callable[[Mapping[str, object]], None] | None = None,
 ) -> ScopedProcess:
     """挂起创建、加入 Job，再恢复；provider 无未纳管的 spawn 窗口。"""
     scope = WindowsProcessScope(scope_name, create=False)
@@ -410,6 +412,8 @@ def spawn_process_in_scope(
             "pid": int(pid),
             "create_time_ns": int(round(process.create_time() * 1_000_000_000)),
         }
+        if before_resume is not None:
+            before_resume(deepcopy(process_identity))
         win32process.ResumeThread(thread_handle)
         return ScopedProcess(process_handle, pid, process_identity)
     except BaseException:

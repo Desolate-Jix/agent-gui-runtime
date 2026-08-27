@@ -461,10 +461,41 @@ def run_qwen_binding_model(
         method="POST",
     )
     request_attempt = None
-    if model_lease is not None:
-        request_attempt = _mark_qwen_model_request_in_flight(model_lease)
+
+    def _open_attested_response() -> Any:
+        nonlocal request_attempt
+        from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+            attest_managed_model_dispatch,
+            current_benchmark_dispatch_context,
+        )
+
+        dispatch_context = current_benchmark_dispatch_context()
+        if dispatch_context is not None and model_lease is None:
+            raise ValueError("benchmark Qwen dispatch requires the exact managed lease")
+        if model_lease is not None:
+            if dispatch_context is not None:
+                attest_managed_model_dispatch(
+                    model_lease=model_lease,
+                    dispatch_context=dispatch_context,
+                )
+            request_attempt = _mark_qwen_model_request_in_flight(model_lease)
+        return urllib.request.urlopen(http_request, timeout=float(timeout_seconds))
+
     try:
-        with urllib.request.urlopen(http_request, timeout=float(timeout_seconds)) as response:
+        if cancellation_event is not None and hasattr(
+            cancellation_event, "run_if_not_cancelled"
+        ):
+            allowed, opened_response = cancellation_event.run_if_not_cancelled(
+                "qwen_provider_dispatch",
+                _open_attested_response,
+            )
+            if not allowed:
+                raise QwenModelRequestCancelled("Qwen binding request cancelled")
+        else:
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise QwenModelRequestCancelled("Qwen binding request cancelled")
+            opened_response = _open_attested_response()
+        with opened_response as response:
             response_bytes = response.read(_QWEN_HTTP_RESPONSE_MAX_BYTES + 1)
             if len(response_bytes) > _QWEN_HTTP_RESPONSE_MAX_BYTES:
                 raise ValueError("Qwen HTTP response byte limit exceeded")

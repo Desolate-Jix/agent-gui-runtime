@@ -57,6 +57,7 @@ def read_screen(
     provider_factory: Any = VisionProviderFactory,
     trace_writer: TraceWriter = write_trace,
     managed_model_lease: dict[str, Any] | None = None,
+    cancellation_event: Any | None = None,
 ) -> ObserveScreenReadResult:
     image_path = Path(request.image_path)
     if not image_path.exists():
@@ -80,17 +81,47 @@ def read_screen(
             if not callable(binder):
                 raise RuntimeError("managed observation provider cannot bind exact Qwen lease")
             binder(managed_model_lease)
-        response = provider.analyze(
-            VisionAnalyzeRequest(
-                image_path=str(image_path),
-                task=request.task,
-                app_name=request.app_name,
-                goal=request.goal,
-                state_hint=request.state_hint,
-                provider_mode=request.provider_mode,
-                metadata=request.metadata,
-            )
+        analyze_request = VisionAnalyzeRequest(
+            image_path=str(image_path),
+            task=request.task,
+            app_name=request.app_name,
+            goal=request.goal,
+            state_hint=request.state_hint,
+            provider_mode=request.provider_mode,
+            metadata=request.metadata,
         )
+
+        def _analyze_attested() -> object:
+            from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                attest_managed_model_dispatch,
+                current_benchmark_dispatch_context,
+            )
+
+            dispatch_context = current_benchmark_dispatch_context()
+            if dispatch_context is not None:
+                if managed_model_lease is None:
+                    raise ValueError(
+                        "benchmark incumbent Qwen dispatch requires the exact managed lease"
+                    )
+                attest_managed_model_dispatch(
+                    model_lease=managed_model_lease,
+                    dispatch_context=dispatch_context,
+                )
+            return provider.analyze(analyze_request)
+
+        if cancellation_event is not None and hasattr(
+            cancellation_event, "run_if_not_cancelled"
+        ):
+            allowed, response = cancellation_event.run_if_not_cancelled(
+                "incumbent_qwen_provider_dispatch",
+                _analyze_attested,
+            )
+            if not allowed:
+                raise RuntimeError("incumbent Qwen observation cancelled")
+        else:
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise RuntimeError("incumbent Qwen observation cancelled")
+            response = _analyze_attested()
         refine_options = parse_ocr_region_refine_options(request.metadata)
         ocr_result = None
         if refine_options.enabled:

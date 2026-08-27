@@ -1169,6 +1169,9 @@ class _S3Registry:
         current = self._owned(kwargs)
         if current["status"] != "completed":
             raise AssertionError("hybrid worker was adopted before completion")
+        result_validator = kwargs.get("result_validator")
+        if callable(result_validator):
+            result_validator(deepcopy(current["response"]))
         receipt = current.get("adoption_receipt")
         if not isinstance(receipt, dict):
             response = current["response"]
@@ -1248,7 +1251,12 @@ class _S3Registry:
         return current
 
 
-def _s3_service(tmp_path: Path, registry: _S3Registry):
+def _s3_service(
+    tmp_path: Path,
+    registry: _S3Registry,
+    *,
+    benchmark_v2_worker_binding_resolver: object | None = None,
+):
     from app.learn.workflow_service import (
         compose_test_learning_workflow_service_unit,
         start_learning_workflow_stage_operation,
@@ -1283,6 +1291,7 @@ def _s3_service(tmp_path: Path, registry: _S3Registry):
         store=store,
         worker_registry=registry,
         project_root=tmp_path,
+        benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
     )
     return (
         store,
@@ -1294,6 +1303,272 @@ def _s3_service(tmp_path: Path, registry: _S3Registry):
 
 def _s3_window_binding() -> dict[str, object]:
     return _window_binding(run_id="run-h1", operation_id="operation-h1")
+
+
+def test_s3_hybrid_binding_keeps_each_exact_server_issued_provider_context(
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        compose_benchmark_dispatch_context,
+    )
+
+    binding = workflow_service._compose_benchmark_v2_hybrid_service_binding(
+        screen_group=_screen_group(),
+        window_binding=_s3_window_binding(),
+    )
+    contexts = []
+    for provider, revision in (("omni", 7), ("qwen", 8), ("vista", 10)):
+        context = compose_benchmark_dispatch_context(
+            provider=provider,
+            operation_ref={
+                "run_id": "run-h1",
+                "stage": "screen_understanding",
+                "operation_id": "operation-h1",
+                "revision": revision,
+                "window_binding_ref": deepcopy(
+                    _s3_window_binding()["window_binding_ref"]
+                ),
+                "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
+            },
+            window_binding={
+                "contract_version": "test_window_binding_v1",
+                "exact_hwnd": 101,
+                "process_identity": {"pid": 202, "create_time_ns": 303},
+                "job_name": "job-h1",
+                "payload_sha256": "c" * 64,
+            },
+            receipt_journal_path=(tmp_path / "dispatch.jsonl").resolve(),
+        )
+        contexts.append(context)
+        binding = workflow_service._benchmark_v2_hybrid_binding_with_dispatch_context(
+            binding=binding,
+            context=context,
+        )
+
+    refs = binding["provider_dispatch_context_refs"]
+    assert [
+        refs[provider]["dispatch_context"]["operation_ref"]["revision"]
+        for provider in ("omni", "qwen", "vista")
+    ] == [7, 8, 10]
+    assert [
+        refs[provider]["dispatch_context"]["content_sha256"]
+        for provider in ("omni", "qwen", "vista")
+    ] == [context["content_sha256"] for context in contexts]
+
+    stale_qwen = deepcopy(contexts[1])
+    stale_qwen["operation_ref"]["revision"] = 9
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+
+    stale_qwen["operation_ref"].pop("content_sha256")
+    stale_qwen["operation_ref"]["content_sha256"] = content_sha256(
+        stale_qwen["operation_ref"]
+    )
+    stale_qwen["content_sha256"] = content_sha256(stale_qwen)
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="already issued|differs|stale",
+    ):
+        workflow_service._benchmark_v2_hybrid_binding_with_dispatch_context(
+            binding=binding,
+            context=stale_qwen,
+        )
+
+
+def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_transitions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, composition, service, _started = _s3_service(
+        tmp_path,
+        registry,
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    serialized_window = {
+        "contract_version": "test_window_binding_v1",
+        "exact_hwnd": 101,
+        "process_identity": {"pid": 202, "create_time_ns": 303},
+        "job_name": "job-h1",
+        "payload_sha256": "c" * 64,
+    }
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        lambda **_kwargs: {"serialized_window_binding": deepcopy(serialized_window)},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: {
+            "content_sha256": {"omni": "1", "qwen": "2", "vista": "3"}[
+                provider
+            ]
+            * 64
+        },
+    )
+    task_order = [
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+        "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection",
+    ]
+    receipt_refs: list[dict[str, str]] = []
+    context_refs: dict[str, dict[str, object]] = {}
+    issued_revisions: dict[str, int] = {}
+    continuation_calls = 0
+
+    def _complete_current() -> None:
+        current = registry.current
+        assert current is not None
+        payload = current["payload"]
+        assert isinstance(payload, dict)
+        context = payload.get("_benchmark_v2_dispatch_context")
+        task_kind = str(current["task_kind"])
+        if isinstance(context, dict):
+            provider = str(context["provider"])
+            dispatch_count = 2 if provider == "vista" else 1
+            with attestation.install_benchmark_dispatch_attestor(
+                dispatch_context=context
+            ):
+                for _ in range(dispatch_count):
+                    attestation.attest_benchmark_provider_dispatch(
+                        provider=provider,
+                        operation_ref=context["operation_ref"],
+                        window_binding=context["window_binding"],
+                        provider_runtime={"provider": provider},
+                    )
+                receipt_refs.extend(
+                    attestation.current_benchmark_dispatch_receipt_refs()
+                )
+            context_refs[provider] = (
+                attestation.compose_benchmark_dispatch_context_ref(context=context)
+            )
+            issued_revisions[provider] = int(context["operation_ref"]["revision"])
+        orchestration: dict[str, object] = {
+            "benchmark_v2_provider_dispatch_receipt_refs": deepcopy(receipt_refs),
+            "benchmark_v2_provider_dispatch_context_refs": deepcopy(context_refs),
+        }
+        if "vista" in context_refs:
+            orchestration["benchmark_v2_vista_batch_count"] = 2
+        result: dict[str, object] = {"success": True}
+        if task_kind == "panel_learning_calibration_sequence":
+            result = {
+                "success": True,
+                "data": {
+                    "result": {
+                        "calibration_sequence": {
+                            "contract_version": "learning_calibration_sequence_result_v1",
+                            "status": "completed",
+                            "batch_count": 2,
+                        }
+                    }
+                },
+            }
+        registry.complete_current(
+            {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "orchestration": orchestration,
+                "result": result,
+            }
+        )
+
+    def _continue(**kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        current_worker = registry.current
+        assert current_worker is not None
+        index = task_order.index(str(current_worker["task_kind"]))
+        state = store.get("run-h1")
+        if index + 1 < len(task_order):
+            next_task_kind = task_order[index + 1]
+            context = workflow_service._benchmark_v2_dispatch_context_for_worker(
+                composition=composition,
+                window_binding=_s3_window_binding(),
+                task_kind=next_task_kind,
+                revision=int(state["revision"]),
+            )
+            sink = kwargs.get("_benchmark_dispatch_context_sink")
+            if isinstance(context, dict) and callable(sink):
+                sink(context)
+            payload = {
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "sequence_index": index + 1,
+            }
+            if isinstance(context, dict):
+                payload["_benchmark_v2_dispatch_context"] = context
+            worker = workflow_service.start_guarded_learning_stage_worker(
+                composition=composition,
+                run_id="run-h1",
+                expected_revision=int(state["revision"]),
+                stage="screen_understanding",
+                operation_id="operation-h1",
+                task_kind=next_task_kind,
+                payload=payload,
+                reuse_active_identical=True,
+            )
+            return {
+                "stage_finished": False,
+                "next_worker": worker,
+                "workflow_state": state,
+            }
+        evidence_path = tmp_path / "artifacts" / "hybrid-review.json"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_text("{}", encoding="utf-8")
+        finished = workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=int(state["revision"]),
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="completed",
+            reason="hybrid review completed",
+            evidence_refs={"trial_path": "artifacts/hybrid-review.json"},
+        )
+        return {
+            "stage_finished": True,
+            "outcome": "completed",
+            "next_stage_operation": None,
+            "next_stage_worker": None,
+            "workflow_state": finished["workflow_state"],
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        step = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        observed = []
+        while step["status"] != "complete":
+            observed.append(step["observed_task_kind"])
+            _complete_current()
+            step = service.continue_hybrid_operation(
+                operation_ref=step["operation_ref"]
+            )
+
+        assert observed == task_order
+        assert list(issued_revisions) == ["omni", "qwen", "vista"]
+        assert issued_revisions["omni"] < issued_revisions["qwen"]
+        assert issued_revisions["qwen"] < issued_revisions["vista"]
+        assert continuation_calls == len(task_order)
+        assert registry.adopt_calls == len(task_order)
+        assert len(receipt_refs) == 4
+    finally:
+        store.close()
 
 
 def test_s3_start_uses_authoritative_initial_builder_once_and_replays(

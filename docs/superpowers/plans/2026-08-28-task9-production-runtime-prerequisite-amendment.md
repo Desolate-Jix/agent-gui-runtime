@@ -114,13 +114,8 @@ The runtime registers a private cleanup owner immediately after `launch_owned_wi
 
 - Create: `app/learn/hybrid/benchmark_v2_dispatch_attestation.py`
 - Create: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py`
-- Modify: `app/learn/hybrid/benchmark_v2_runtime.py`
 - Modify: `app/learn/hybrid/windows_process_scope.py`
 - Modify: `app/learn/recognition/uei/omniparser_shadow_adapter.py`
-- Modify: `app/learn/hybrid/omni_discovery.py`
-- Modify: `app/learn/workflow_tasks/hybrid_omni.py`
-- Modify: `app/learn/hybrid/qwen_binding.py`
-- Modify: `app/learn/workflow_tasks/hybrid_qwen.py`
 - Modify: `app/core/model_server.py`
 - Modify: `app/learn/calibration_sequence.py`
 - Modify: `app/operation/observe/screen_reader.py`
@@ -128,7 +123,9 @@ The runtime registers a private cleanup owner immediately after `launch_owned_wi
 - Modify: `app/learn/workflow_worker.py`
 - Modify: `app/learn/hybrid/benchmark_v2_incumbent_operation.py`
 - Modify: `app/learn/hybrid/benchmark_v2_actual.py`
-- Modify the focused tests that already own these cut-points.
+- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py`
+- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py`
+- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py`
 
 **Interfaces:**
 
@@ -158,7 +155,7 @@ def attest_managed_model_dispatch(
 ) -> Mapping[str, object]: ...
 ```
 
-The WorkflowService creates the closed dispatch context from server-owned operation/window/capture parents. The spawned worker installs it; client payload cannot supply or override it. The attestor appends and fsyncs a receipt before the call can cross the provider boundary. The service validates the expected receipt multiset before adopting a result.
+The WorkflowService creates the closed dispatch context from server-owned operation/window/capture parents. The spawned worker installs it; client payload cannot supply or override it. Each provider keeps its own sealed server-issued context ref, including the exact operation revision and content SHA that were current when that provider context was issued. Later workflow-store revision changes do not rewrite earlier provider lineage. The attestor appends and fsyncs a receipt before the call can cross the provider boundary. Before Registry adoption mutates state, the service requires the worker-projected context map to equal the durable service binding and validates the exact provider order, count, operation refs, journal rows, contiguous indices, and predecessor chains.
 
 Precise cut-points:
 
@@ -168,13 +165,14 @@ Precise cut-points:
 - Incumbent Qwen: immediately before every `provider.analyze(...)`; one receipt for each of the five incumbent operations.
 - Fusion and Review: zero provider-dispatch receipts.
 
-- [ ] Write failing tests for the exact event order and receipt count at all four cut-points.
-- [ ] Write failing negative tests for stale operation revision, HWND/PID/create-time, Job membership, lease/profile/socket, provider mismatch, receipt fsync failure, and cancellation races; every case asserts zero dispatch.
-- [ ] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py` and confirm the expected failures.
-- [ ] Implement the closed context, suspended-child hook, managed-model attester, and provider-specific cut-point calls.
-- [ ] Add WorkflowService adoption validation and return only verified receipt refs in Task 8 projections.
-- [ ] Run the focused dispatch tests plus `tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py`, provider cancellation tests, and model-server lease tests selected by `benchmark_v2 or cancel or timeout or lease`.
-- [ ] Commit `feat(benchmark-v2): attest every provider dispatch`.
+- [x] Write failing tests for the exact event order and receipt count at all four cut-points.
+- [x] Write failing negative tests for stale operation revision, HWND/PID/create-time, Job membership, lease/profile/socket, provider mismatch, short journal writes, receipt fsync failure, and cancellation races; every case asserts zero dispatch.
+- [x] Run the focused dispatch tests and confirm the expected failures before implementation.
+- [x] Implement the closed provider-specific contexts, suspended-child hook, managed-model attester, and provider-specific cut-point calls.
+- [x] Add pre-adoption WorkflowService validation and return only verified receipt refs in Task 8 projections.
+- [x] Add deterministic multi-revision coverage for `Omni -> Qwen -> Fusion -> VISTA x2 -> Review`, including stale resealed provider-context rejection.
+- [x] Run focused U1, incumbent non-real, worker-binding non-real, provider/cancellation, and Hybrid worker verification; obtain an independent PASS with no Critical or Important findings.
+- [x] Commit `feat(benchmark-v2): attest every provider dispatch`.
 
 ---
 

@@ -209,6 +209,11 @@ class _FakeWorkflowService:
                 "omni_inventory": {"provider": "omni", "candidates": [1, 2, 3]},
                 "qwen_bindings": {"provider": "qwen", "bindings": [1, 2, 3]},
                 "fusion_result": {"fusion": "hybrid", "candidates": [1, 2, 3]},
+                "benchmark_v2_provider_dispatch_receipt_refs": [
+                    {"provider": "omni", "content_sha256": "1" * 64},
+                    {"provider": "qwen", "content_sha256": "2" * 64},
+                    {"provider": "vista", "content_sha256": "3" * 64},
+                ],
             },
             "supervisor_lineage": {"kind": "managed"},
             "lifecycle_evidence": {},
@@ -413,6 +418,14 @@ class _FakeWorkflowService:
             response={
                 "case_id": case_id,
                 "elements": [{"candidate_id": f"qwen-{case_id}"}],
+                "_benchmark_v2_provider_dispatch_receipt_refs": [
+                    {
+                        "provider": "qwen",
+                        "content_sha256": __import__("hashlib")
+                        .sha256(case_id.encode("utf-8"))
+                        .hexdigest(),
+                    }
+                ],
             },
             terminal=True,
         )
@@ -657,6 +670,13 @@ def test_run_screen_group_uses_one_hybrid_cascade_and_five_incumbent_operations(
     shared = result["shared_parent_refs"]
     for row in result["rows"]:
         assert row["shared_parent_refs"] == shared
+        refs = row["observation"]["provider_dispatch_receipt_refs"]
+        assert {ref["provider"] for ref in refs} == {
+            "qwen_only": {"qwen"},
+            "omni_only_discovery": {"omni"},
+            "omni_to_qwen": {"omni", "qwen"},
+            "omni_to_qwen_vista": {"omni", "qwen", "vista"},
+        }[row["arm_id"]]
     assert shared == {
         "screen_group_ref": {
             "id": "screen-group-1",

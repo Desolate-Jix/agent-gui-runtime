@@ -2161,13 +2161,18 @@ def execute_learning_stage_worker_task(
                 if learning_pipeline_mode == "hybrid_v1_1"
                 else run_learning_calibration_sequence
             )
-            if cancellation_event is None:
-                response = calibration_handler(execution_payload)
-            else:
-                response = calibration_handler(
-                    execution_payload,
-                    cancellation_event=cancellation_event,
-                )
+            calibration_options: dict[str, Any] = {}
+            if cancellation_event is not None:
+                calibration_options["cancellation_event"] = cancellation_event
+            from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                current_benchmark_dispatch_context,
+            )
+
+            # 只有 Benchmark-v2 的 server-owned context 才启用新的 lease cut-point；
+            # 既有非 benchmark handler 的调用合同保持不变。
+            if current_benchmark_dispatch_context() is not None:
+                calibration_options["model_lease"] = model_lease
+            response = calibration_handler(execution_payload, **calibration_options)
         elif normalized_kind == "vision_observe_screen":
             response = observe_result_to_legacy_response(
                 run_observe_task(
@@ -2176,6 +2181,7 @@ def execute_learning_stage_worker_task(
                     screen_reader=partial(
                         read_screen,
                         managed_model_lease=model_lease,
+                        cancellation_event=cancellation_event,
                     ),
                 )
             )
@@ -2881,10 +2887,42 @@ def _run_learning_stage_worker_entry(
             separators=(",", ":"),
         )
     binding_context = None
+    dispatch_context_manager = None
     binding_lifecycle: dict[str, object] | None = None
     binding_entered = False
+    dispatch_entered = False
     try:
         execution_payload = deepcopy(payload)
+        has_dispatch_context = "_benchmark_v2_dispatch_context" in execution_payload
+        dispatch_context = execution_payload.pop(
+            "_benchmark_v2_dispatch_context", None
+        )
+        if has_dispatch_context:
+            expected_provider = {
+                "panel_learning_hybrid_omni_discovery": "omni",
+                "panel_learning_hybrid_qwen_binding": "qwen",
+                "panel_learning_calibration_sequence": "vista",
+                "vision_observe_screen": "qwen",
+            }.get(task_kind)
+            if expected_provider is None or not isinstance(dispatch_context, dict):
+                raise LearningStageWorkerError(
+                    "benchmark dispatch context is not valid for this task"
+                )
+            from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                install_benchmark_dispatch_attestor,
+                validate_benchmark_dispatch_context,
+            )
+
+            validated_dispatch = validate_benchmark_dispatch_context(dispatch_context)
+            if validated_dispatch["provider"] != expected_provider:
+                raise LearningStageWorkerError(
+                    "benchmark dispatch context provider differs from task"
+                )
+            dispatch_context_manager = install_benchmark_dispatch_attestor(
+                dispatch_context=validated_dispatch
+            )
+            dispatch_context_manager.__enter__()
+            dispatch_entered = True
         has_serialized_binding = "_benchmark_v2_window_binding" in execution_payload
         serialized_binding = execution_payload.pop(
             "_benchmark_v2_window_binding", None
@@ -2918,6 +2956,81 @@ def _run_learning_stage_worker_entry(
             execution_payload,
             cancellation_event=cancellation_event,
         )
+        if dispatch_entered:
+            from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                compose_benchmark_dispatch_context_ref,
+                current_benchmark_dispatch_receipt_refs,
+            )
+
+            dispatch_refs = current_benchmark_dispatch_receipt_refs()
+            if isinstance(response, dict) and response.get(
+                "contract_version"
+            ) == "learning_hybrid_managed_stage_result_v1":
+                orchestration = response.get("orchestration")
+                if not isinstance(orchestration, dict):
+                    raise LearningStageWorkerError(
+                        "Hybrid dispatch receipt projection lost orchestration"
+                    )
+                existing_refs = orchestration.get(
+                    "benchmark_v2_provider_dispatch_receipt_refs", []
+                )
+                if not isinstance(existing_refs, list):
+                    raise LearningStageWorkerError(
+                        "Hybrid dispatch receipt projection is invalid"
+                    )
+                orchestration["benchmark_v2_provider_dispatch_receipt_refs"] = [
+                    *deepcopy(existing_refs),
+                    *deepcopy(dispatch_refs),
+                ]
+                provider_context_refs = orchestration.get(
+                    "benchmark_v2_provider_dispatch_context_refs", {}
+                )
+                if not isinstance(provider_context_refs, dict):
+                    raise LearningStageWorkerError(
+                        "Hybrid dispatch context lineage is invalid"
+                    )
+                provider_context_refs = deepcopy(provider_context_refs)
+                context_ref = compose_benchmark_dispatch_context_ref(
+                    context=validated_dispatch
+                )
+                provider = str(validated_dispatch["provider"])
+                prior_context_ref = provider_context_refs.get(provider)
+                if prior_context_ref not in (None, context_ref):
+                    raise LearningStageWorkerError(
+                        "Hybrid dispatch context lineage differs"
+                    )
+                provider_context_refs[provider] = context_ref
+                orchestration[
+                    "benchmark_v2_provider_dispatch_context_refs"
+                ] = provider_context_refs
+                if task_kind == "panel_learning_calibration_sequence":
+                    managed_result = response.get("result")
+                    sequence = (
+                        _hybrid_calibration_result(managed_result)
+                        if isinstance(managed_result, dict)
+                        else None
+                    )
+                    batch_count = (
+                        sequence.get("batch_count")
+                        if isinstance(sequence, dict)
+                        else None
+                    )
+                    if (
+                        isinstance(batch_count, bool)
+                        or not isinstance(batch_count, int)
+                        or batch_count < 1
+                        or len(dispatch_refs) != batch_count
+                    ):
+                        raise LearningStageWorkerError(
+                            "Hybrid VISTA dispatch receipts differ from batch_count"
+                        )
+                    orchestration[
+                        "benchmark_v2_vista_batch_count"
+                    ] = batch_count
+            elif isinstance(response, dict):
+                response["_benchmark_v2_provider_dispatch_receipt_refs"] = deepcopy(
+                    dispatch_refs
+                )
         envelope = {
             "contract_version": LEARNING_STAGE_WORKER_RESULT_CONTRACT_VERSION,
             **deepcopy(identity),
@@ -2938,6 +3051,11 @@ def _run_learning_stage_worker_entry(
         }
     finally:
         binding_cleanup_error: BaseException | None = None
+        if dispatch_entered and dispatch_context_manager is not None:
+            try:
+                dispatch_context_manager.__exit__(None, None, None)
+            except BaseException as cleanup_error:
+                binding_cleanup_error = cleanup_error
         if binding_entered and binding_context is not None:
             try:
                 binding_context.__exit__(None, None, None)
@@ -7849,6 +7967,7 @@ class LearningStageWorkerRegistry:
         run_id: str,
         stage: str,
         operation_id: str,
+        result_validator: Callable[[Mapping[str, object]], None] | None = None,
     ) -> dict[str, Any]:
         """显式接纳身份匹配的完成结果，并持久化不可含原始响应的回执。"""
 
@@ -7878,6 +7997,13 @@ class LearningStageWorkerRegistry:
                 raise LearningStageWorkerError(
                     "learning stage worker has no completed result to adopt"
                 )
+            response = worker_result.get("response")
+            if result_validator is not None:
+                if not isinstance(response, Mapping):
+                    raise LearningStageWorkerError(
+                        "learning stage worker adoption response is unavailable"
+                    )
+                result_validator(deepcopy(dict(response)))
 
             result_sha256 = _payload_sha256(worker_result)
             receipt = record.get("result_adoption")

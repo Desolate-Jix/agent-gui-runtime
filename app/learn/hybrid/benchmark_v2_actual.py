@@ -487,8 +487,20 @@ def _compose_screen_group_projection(
         projection = incumbent_step["adopted_result_projection"]
         if not isinstance(projection, Mapping):
             raise ValueError("incumbent terminal target projection is missing")
+        incumbent_response = _mapping(
+            projection["response"], "incumbent Qwen response"
+        )
+        incumbent_dispatch_refs = _dispatch_receipt_refs(
+            incumbent_response.pop(
+                "_benchmark_v2_provider_dispatch_receipt_refs", None
+            ),
+            expected_providers={"qwen"},
+        )
         arms = {
-            "qwen_only": {"response": deepcopy(projection["response"])},
+            "qwen_only": {
+                "response": incumbent_response,
+                "provider_dispatch_receipt_refs": incumbent_dispatch_refs,
+            },
             **hybrid_evidence,
         }
         for arm_id in _ARM_IDS:
@@ -576,20 +588,61 @@ def _extract_hybrid_evidence(
     omni = _mapping(orchestration.get("omni_inventory"), "Omni inventory")
     qwen = _mapping(orchestration.get("qwen_bindings"), "Qwen bindings")
     fusion = _mapping(orchestration.get("fusion_result"), "fusion result")
+    dispatch_refs = _dispatch_receipt_refs(
+        orchestration.get("benchmark_v2_provider_dispatch_receipt_refs"),
+        expected_providers={"omni", "qwen", "vista"},
+    )
+    omni_refs = [item for item in dispatch_refs if item["provider"] == "omni"]
+    omni_qwen_refs = [
+        item for item in dispatch_refs if item["provider"] in {"omni", "qwen"}
+    ]
     return {
-        "omni_only_discovery": {"omni_inventory": omni},
+        "omni_only_discovery": {
+            "omni_inventory": omni,
+            "provider_dispatch_receipt_refs": omni_refs,
+        },
         "omni_to_qwen": {
             "omni_inventory": deepcopy(omni),
             "qwen_bindings": qwen,
             "fusion_result": fusion,
+            "provider_dispatch_receipt_refs": omni_qwen_refs,
         },
         "omni_to_qwen_vista": {
             "omni_inventory": deepcopy(omni),
             "qwen_bindings": deepcopy(qwen),
             "fusion_result": deepcopy(fusion),
             "review_projection": deepcopy(dict(review)),
+            "provider_dispatch_receipt_refs": dispatch_refs,
         },
     }
+
+
+def _dispatch_receipt_refs(
+    value: object, *, expected_providers: set[str]
+) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("provider dispatch receipt refs are missing")
+    refs: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, Mapping) or set(item) != {
+            "provider",
+            "content_sha256",
+        }:
+            raise ValueError("provider dispatch receipt ref is invalid")
+        provider = item.get("provider")
+        digest = item.get("content_sha256")
+        if (
+            provider not in expected_providers
+            or not isinstance(digest, str)
+            or len(digest) != 64
+        ):
+            raise ValueError("provider dispatch receipt ref is stale")
+        refs.append({"provider": str(provider), "content_sha256": digest})
+    if {item["provider"] for item in refs} != expected_providers:
+        raise ValueError("provider dispatch receipt provider multiset is incomplete")
+    if len({item["content_sha256"] for item in refs}) != len(refs):
+        raise ValueError("provider dispatch receipt refs are duplicated")
+    return refs
 
 
 def _mapping(value: object, name: str) -> dict[str, Any]:

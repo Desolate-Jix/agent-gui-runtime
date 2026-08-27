@@ -313,10 +313,41 @@ class OmniParserShadowAdapter:
                 process_scope_name = os.environ.get(
                     "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
                 ).strip()
+                from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                    current_benchmark_dispatch_context,
+                )
+
+                if (
+                    current_benchmark_dispatch_context() is not None
+                    and not process_scope_name
+                ):
+                    raise OmniParserShadowAdapterError(
+                        "runtime_benchmark_process_scope_required"
+                    )
                 if process_scope_name:
                     from app.learn.hybrid.windows_process_scope import (
                         spawn_process_in_scope,
                     )
+
+                    def _before_resume(process_identity: Mapping[str, object]) -> None:
+                        from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                            attest_benchmark_provider_dispatch,
+                            current_benchmark_dispatch_context,
+                        )
+
+                        context = current_benchmark_dispatch_context()
+                        if context is None:
+                            return
+                        attest_benchmark_provider_dispatch(
+                            provider="omni",
+                            operation_ref=context["operation_ref"],
+                            window_binding=context["window_binding"],
+                            provider_runtime={
+                                "provider": "omni",
+                                "process_identity": deepcopy(dict(process_identity)),
+                                "scope_name": process_scope_name,
+                            },
+                        )
 
                     spawn = lambda: spawn_process_in_scope(
                         command,
@@ -327,6 +358,7 @@ class OmniParserShadowAdapter:
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         creationflags=int(spawn_options.get("creationflags") or 0),
+                        before_resume=_before_resume,
                     )
                 else:
                     spawn = lambda: subprocess.Popen(command, **spawn_options)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from app.learn.hybrid.vista_refinement import (
     build_vista_requests,
@@ -38,6 +38,7 @@ def run_learning_calibration_sequence(
         [dict[str, Any]], dict[str, Any]
     ]
     | None = None,
+    model_lease: Mapping[str, object] | None = None,
     cancellation_event: Any | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
@@ -127,13 +128,31 @@ def run_learning_calibration_sequence(
                 remaining_count=max(0, candidate_count - len(resume_results)),
                 completed_results=resume_results,
             )
+        def _locate_attested_batch() -> dict[str, Any]:
+            from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                attest_managed_model_dispatch,
+                current_benchmark_dispatch_context,
+            )
+
+            dispatch_context = current_benchmark_dispatch_context()
+            if dispatch_context is not None:
+                if not isinstance(model_lease, Mapping):
+                    raise LearningCalibrationSequenceError(
+                        "benchmark VISTA dispatch requires the exact managed lease"
+                    )
+                attest_managed_model_dispatch(
+                    model_lease=model_lease,
+                    dispatch_context=dispatch_context,
+                )
+            return locate(locate_payload)
+
         if (
             cancellation_event is not None
             and hasattr(cancellation_event, "run_if_not_cancelled")
         ):
             allowed, response = cancellation_event.run_if_not_cancelled(
                 "vista_batch_acquisition",
-                lambda: locate(locate_payload),
+                _locate_attested_batch,
             )
             if not allowed:
                 return _failure_response(
@@ -147,7 +166,7 @@ def run_learning_calibration_sequence(
                     completed_results=resume_results,
                 )
         else:
-            response = locate(locate_payload)
+            response = _locate_attested_batch()
         if not isinstance(response, dict):
             return _failure_response(
                 "calibration_worker_response_invalid",

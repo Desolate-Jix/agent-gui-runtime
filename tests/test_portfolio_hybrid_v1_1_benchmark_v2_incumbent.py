@@ -50,6 +50,25 @@ def _recorded_qwen_benchmark_worker_entry(
     def _recorded_task(*_args, **_kwargs):
         if not release_event.wait(45):
             raise RuntimeError("recorded Qwen response release timed out")
+        from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch
+
+        dispatch_context = dispatch.current_benchmark_dispatch_context()
+        if not isinstance(dispatch_context, dict) or dispatch_context.get(
+            "provider"
+        ) != "qwen":
+            raise RuntimeError("recorded Qwen dispatch context is unavailable")
+        dispatch._attest_exact_window = lambda value: {
+            "content_sha256": "d" * 64
+        }
+        dispatch._attest_exact_provider_runtime = lambda provider, value: {
+            "content_sha256": "e" * 64
+        }
+        dispatch.attest_benchmark_provider_dispatch(
+            provider="qwen",
+            operation_ref=dispatch_context["operation_ref"],
+            window_binding=dispatch_context["window_binding"],
+            provider_runtime={"recorded_fixture": True},
+        )
         return deepcopy(recorded_response)
 
     def _write_with_provider_parent(path, payload):
@@ -1157,6 +1176,7 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
         def launch_prepared_benchmark_worker(self, **kwargs):
             events.append("launch")
             assert kwargs["authoritative_payload"]["provider_mode"] == "local_understanding"
+            self.authoritative_payload = deepcopy(kwargs["authoritative_payload"])
             return {
                 "contract_version": "learning_stage_worker_v1",
                 "worker_id": "1" * 32,
@@ -1231,6 +1251,28 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
 
         def adopt_result(self, **_kwargs):
             events.append("adopt")
+            from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch
+
+            context = self.authoritative_payload[
+                "_benchmark_v2_dispatch_context"
+            ]
+            with dispatch.install_benchmark_dispatch_attestor(
+                dispatch_context=context
+            ):
+                dispatch.attest_benchmark_provider_dispatch(
+                    provider="qwen",
+                    operation_ref=context["operation_ref"],
+                    window_binding=context["window_binding"],
+                    provider_runtime={"fake": "qwen"},
+                )
+                dispatch_refs = dispatch.current_benchmark_dispatch_receipt_refs()
+            response = {
+                "success": True,
+                "_benchmark_v2_provider_dispatch_receipt_refs": dispatch_refs,
+            }
+            validator = _kwargs.get("result_validator")
+            if callable(validator):
+                validator(deepcopy(response))
             return {
                 "contract_version": "learning_stage_worker_result_adoption_v1",
                 "status": "adopted",
@@ -1246,7 +1288,7 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
                     "result_sha256": "a" * 64,
                     "adopted_at": "2026-08-27T00:00:00+00:00",
                 },
-                "response": {"success": True},
+                "response": response,
             }
 
         def observe_benchmark_worker_cleanup(self, **_kwargs):
@@ -1315,6 +1357,18 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
 
     registry = _Registry()
     try:
+        from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch
+
+        monkeypatch.setattr(
+            dispatch,
+            "_attest_exact_window",
+            lambda value: {"content_sha256": "e" * 64},
+        )
+        monkeypatch.setattr(
+            dispatch,
+            "_attest_exact_provider_runtime",
+            lambda provider, value: {"content_sha256": "f" * 64},
+        )
         binding_started = store.transition(
             run_id="run-c3-start",
             expected_revision=0,

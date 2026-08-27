@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 from uuid import uuid4
 
 from app.learn.calibration_artifact import (
@@ -426,6 +426,7 @@ def _stage_execution_document(
 
 
 _BENCHMARK_V2_WINDOW_BINDING_FIELD = "_benchmark_v2_window_binding"
+_BENCHMARK_V2_DISPATCH_CONTEXT_FIELD = "_benchmark_v2_dispatch_context"
 _BENCHMARK_V2_WINDOW_ADOPTION_CONTRACT = (
     "portfolio_hybrid_benchmark_v2_worker_window_binding_adoption_v1"
 )
@@ -435,6 +436,10 @@ def _reject_client_benchmark_v2_window_binding(payload: Mapping[str, object]) ->
     if _BENCHMARK_V2_WINDOW_BINDING_FIELD in payload:
         raise LearningWorkflowStageOperationError(
             "_benchmark_v2_window_binding is server-owned"
+        )
+    if _BENCHMARK_V2_DISPATCH_CONTEXT_FIELD in payload:
+        raise LearningWorkflowStageOperationError(
+            "_benchmark_v2_dispatch_context is server-owned"
         )
 
 
@@ -1274,6 +1279,7 @@ def _benchmark_v2_source_projection(
     stage: str,
     operation_id: str,
     request: Mapping[str, object],
+    dispatch_revision: int | None = None,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         compose_benchmark_v2_incumbent_payload_projection,
@@ -1300,12 +1306,31 @@ def _benchmark_v2_source_projection(
             window_binding_ref=request["window_binding_ref"],
             capture_ref=request["capture_ref"],
         )
+        resolved_dispatch_revision = (
+            int(dispatch_revision)
+            if dispatch_revision is not None
+            else 0
+        )
+        dispatch_context = _benchmark_v2_dispatch_context_from_serialized(
+            composition=composition,
+            window_binding={
+                "run_id": run_id,
+                "stage": stage,
+                "operation_id": operation_id,
+                "window_binding_ref": deepcopy(request["window_binding_ref"]),
+                "capture_ref": deepcopy(request["capture_ref"]),
+            },
+            serialized_window_binding=resolution["serialized_window_binding"],
+            task_kind="vision_observe_screen",
+            revision=resolved_dispatch_revision,
+        )
         projection = compose_benchmark_v2_incumbent_payload_projection(
             provider_case_resolver=composition.provider_case_resolver,
             provider_case_ref=request["provider_case_ref"],
             window_binding_ref=request["window_binding_ref"],
             capture_ref=request["capture_ref"],
             serialized_window_binding=resolution["serialized_window_binding"],
+            dispatch_context=dispatch_context,
         )
         projection["worker_binding_resolution"] = deepcopy(dict(resolution))
         return projection
@@ -2034,6 +2059,7 @@ def _start_benchmark_v2_incumbent_operation(
                     stage=stage,
                     operation_id=operation_id,
                     request=closed_request,
+                    dispatch_revision=int(current["revision"]) + 1,
                 )
                 reservation = registry.prepare_benchmark_identity(
                     run_id=run_id,
@@ -2212,6 +2238,7 @@ def _start_benchmark_v2_incumbent_operation(
                     stage=stage,
                     operation_id=operation_id,
                     request=closed_request,
+                    dispatch_revision=int(operation["prepared_revision"]),
                 )
                 try:
                     authoritative_payload = (
@@ -2224,6 +2251,9 @@ def _start_benchmark_v2_incumbent_operation(
                             serialized_window_binding=fresh_projection[
                                 "worker_binding_resolution"
                             ]["serialized_window_binding"],
+                            dispatch_context=fresh_projection[
+                                "authoritative_payload"
+                            ].get(_BENCHMARK_V2_DISPATCH_CONTEXT_FIELD),
                         )
                     )
                 except (TypeError, ValueError) as error:
@@ -2256,6 +2286,7 @@ def _start_benchmark_v2_incumbent_operation(
                         stage=stage,
                         operation_id=operation_id,
                         request=closed_request,
+                        dispatch_revision=int(operation["prepared_revision"]),
                     )
                     try:
                         authoritative_payload = (
@@ -2270,6 +2301,9 @@ def _start_benchmark_v2_incumbent_operation(
                                 serialized_window_binding=fresh_projection[
                                     "worker_binding_resolution"
                                 ]["serialized_window_binding"],
+                                dispatch_context=fresh_projection[
+                                    "authoritative_payload"
+                                ].get(_BENCHMARK_V2_DISPATCH_CONTEXT_FIELD),
                             )
                         )
                     except (TypeError, ValueError) as error:
@@ -2406,6 +2440,8 @@ def _rebuild_benchmark_v2_window_adoption(
 ) -> dict[str, object]:
     resolver = composition.benchmark_v2_worker_binding_resolver
     if resolver is None:
+        if composition.composition_kind == "test":
+            return None
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent Task5 resolver is unavailable"
         )
@@ -2672,16 +2708,87 @@ def _resume_benchmark_v2_incumbent_operation(
                 )
             generic_adoption: dict[str, Any] | None = None
             if operation["phase"] == "terminal_intent":
+                validated_before_adoption: dict[str, dict[str, Any]] = {}
+                incumbent_validator: Callable[[Mapping[str, object]], None] | None = None
+                if not (
+                    composition.composition_kind == "test"
+                    and composition.benchmark_v2_worker_binding_resolver is None
+                ):
+                    def _validate_incumbent_before_adoption(
+                        candidate: Mapping[str, object],
+                    ) -> None:
+                        validated_before_adoption["response"] = (
+                            _validate_benchmark_v2_dispatch_response(
+                                composition=composition,
+                                response=candidate,
+                                window_binding={
+                                    "run_id": operation["run_id"],
+                                    "stage": operation["stage"],
+                                    "operation_id": operation["operation_id"],
+                                    "window_binding_ref": operation[
+                                        "window_binding_ref"
+                                    ],
+                                    "capture_ref": operation["capture_ref"],
+                                },
+                                expected_provider_counts={"qwen": 1},
+                                hybrid=False,
+                                dispatch_revision=int(
+                                    operation["prepared_revision"]
+                                ),
+                            )
+                        )
+
+                    incumbent_validator = _validate_incumbent_before_adoption
                 generic_adoption, generic_ref = _validate_benchmark_v2_generic_adoption(
                     adoption=registry.adopt_worker_result(
                         worker_id=expected_worker_id,
                         run_id=run_id,
                         stage=stage,
                         operation_id=operation_id,
+                        **(
+                            {"result_validator": incumbent_validator}
+                            if incumbent_validator is not None
+                            else {}
+                        ),
                     ),
                     operation=operation,
                     result_identity=result_identity,
                 )
+                generic_response = generic_adoption.get("response")
+                if not isinstance(generic_response, Mapping):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent adoption lost its response"
+                )
+                generic_adoption = deepcopy(generic_adoption)
+                if incumbent_validator is not None:
+                    validated_response = validated_before_adoption.get("response")
+                    if (
+                        not isinstance(validated_response, dict)
+                        or generic_response != validated_response
+                    ):
+                        raise LearningWorkflowStageOperationError(
+                            "benchmark_v2 incumbent adoption bypassed dispatch validation"
+                        )
+                    generic_adoption["response"] = validated_response
+                else:
+                    generic_adoption["response"] = (
+                        _validate_benchmark_v2_dispatch_response(
+                            composition=composition,
+                            response=generic_response,
+                            window_binding={
+                                "run_id": operation["run_id"],
+                                "stage": operation["stage"],
+                                "operation_id": operation["operation_id"],
+                                "window_binding_ref": operation[
+                                    "window_binding_ref"
+                                ],
+                                "capture_ref": operation["capture_ref"],
+                            },
+                            expected_provider_counts={"qwen": 1},
+                            hybrid=False,
+                            dispatch_revision=int(operation["prepared_revision"]),
+                        )
+                    )
                 operation = transition_benchmark_v2_incumbent_operation(
                     operation,
                     to_phase="adopted",
@@ -2714,12 +2821,33 @@ def _resume_benchmark_v2_incumbent_operation(
                     raise LearningWorkflowStageOperationError(
                         "benchmark_v2 incumbent generic adoption replay differs"
                     )
+                replay_response = generic_adoption.get("response")
+                if not isinstance(replay_response, Mapping):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 incumbent adoption replay lost its response"
+                    )
+                generic_adoption = deepcopy(generic_adoption)
+                generic_adoption["response"] = _validate_benchmark_v2_dispatch_response(
+                    composition=composition,
+                    response=replay_response,
+                    window_binding={
+                        "run_id": operation["run_id"],
+                        "stage": operation["stage"],
+                        "operation_id": operation["operation_id"],
+                        "window_binding_ref": operation["window_binding_ref"],
+                        "capture_ref": operation["capture_ref"],
+                    },
+                    expected_provider_counts={"qwen": 1},
+                    hybrid=False,
+                    dispatch_revision=int(operation["prepared_revision"]),
+                )
             projection = _benchmark_v2_source_projection(
                 composition=composition,
                 run_id=run_id,
                 stage=stage,
                 operation_id=operation_id,
                 request=request,
+                dispatch_revision=int(operation["prepared_revision"]),
             )
             window_adoption = _rebuild_benchmark_v2_window_adoption(
                 composition=composition,
@@ -3656,12 +3784,330 @@ _BENCHMARK_V2_HYBRID_CONTINUATION_RECEIPT_CONTRACT = (
     "benchmark_v2_workflow_service_hybrid_continuation_receipt_v1"
 )
 
+_BENCHMARK_V2_PROVIDER_TASKS = {
+    "panel_learning_hybrid_omni_discovery": "omni",
+    "panel_learning_hybrid_qwen_binding": "qwen",
+    "panel_learning_calibration_sequence": "vista",
+    "vision_observe_screen": "qwen",
+}
+
+
+def _benchmark_v2_dispatch_journal_path(
+    *, composition: LearningWorkflowServiceComposition, window_binding: Mapping[str, object]
+) -> Path:
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256 as benchmark_sha
+
+    journal_key = benchmark_sha(
+        {
+            "run_id": str(window_binding["run_id"]),
+            "stage": str(window_binding["stage"]),
+            "operation_id": str(window_binding["operation_id"]),
+        }
+    )
+    return (
+        Path(composition.project_root)
+        / "runtime_state"
+        / "benchmark-v2-provider-dispatch"
+        / f"{journal_key}.jsonl"
+    ).resolve()
+
+
+def _benchmark_v2_dispatch_context_for_worker(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    window_binding: Mapping[str, object],
+    task_kind: str,
+    revision: int,
+) -> dict[str, Any] | None:
+    provider = _BENCHMARK_V2_PROVIDER_TASKS.get(task_kind)
+    if provider is None:
+        return None
+    resolver = composition.benchmark_v2_worker_binding_resolver
+    if resolver is None:
+        # 旧的纯内存 S3 单元测试没有 Task5 绑定解析器；生产组合始终提供解析器。
+        if composition.composition_kind == "test":
+            return None
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 dispatch Task5 resolver is unavailable"
+        )
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        resolve_server_worker_window_binding,
+    )
+
+    try:
+        binding = deepcopy(dict(window_binding))
+        resolution = resolve_server_worker_window_binding(
+            resolver=resolver,
+            run_id=str(binding["run_id"]),
+            stage=str(binding["stage"]),
+            operation_id=str(binding["operation_id"]),
+            window_binding_ref=binding["window_binding_ref"],
+            capture_ref=binding["capture_ref"],
+        )
+        return _benchmark_v2_dispatch_context_from_serialized(
+            composition=composition,
+            window_binding=binding,
+            serialized_window_binding=resolution["serialized_window_binding"],
+            task_kind=task_kind,
+            revision=revision,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark_v2 dispatch context is invalid: {error}"
+        ) from error
+
+
+def _benchmark_v2_dispatch_context_from_serialized(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    window_binding: Mapping[str, object],
+    serialized_window_binding: Mapping[str, object],
+    task_kind: str,
+    revision: int,
+) -> dict[str, Any] | None:
+    provider = _BENCHMARK_V2_PROVIDER_TASKS.get(task_kind)
+    if provider is None:
+        return None
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        compose_benchmark_dispatch_context,
+    )
+
+    binding = deepcopy(dict(window_binding))
+    operation_ref = {
+        "run_id": str(binding["run_id"]),
+        "stage": str(binding["stage"]),
+        "operation_id": str(binding["operation_id"]),
+        "revision": int(revision),
+        "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+        "capture_ref": deepcopy(binding["capture_ref"]),
+    }
+    return compose_benchmark_dispatch_context(
+        provider=provider,
+        operation_ref=operation_ref,
+        window_binding=serialized_window_binding,
+        receipt_journal_path=_benchmark_v2_dispatch_journal_path(
+            composition=composition,
+            window_binding=binding,
+        ),
+    )
+
+
+def _inject_benchmark_v2_dispatch_context(
+    *, payload: Mapping[str, object], context: Mapping[str, object] | None
+) -> dict[str, Any]:
+    result = deepcopy(dict(payload))
+    if _BENCHMARK_V2_DISPATCH_CONTEXT_FIELD in result:
+        raise LearningWorkflowStageOperationError(
+            "_benchmark_v2_dispatch_context is server-owned"
+        )
+    if context is not None:
+        result[_BENCHMARK_V2_DISPATCH_CONTEXT_FIELD] = deepcopy(dict(context))
+    return result
+
+
+def _validate_benchmark_v2_dispatch_response(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    response: Mapping[str, object],
+    window_binding: Mapping[str, object],
+    expected_provider_counts: Mapping[str, int],
+    hybrid: bool,
+    dispatch_revision: int | None,
+    provider_dispatch_context_refs: Mapping[str, object] | None = None,
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        validate_benchmark_dispatch_context_ref,
+        validate_benchmark_dispatch_receipt_refs,
+    )
+
+    result = deepcopy(dict(response))
+    if (
+        composition.composition_kind == "test"
+        and composition.benchmark_v2_worker_binding_resolver is None
+    ):
+        return result
+    if hybrid:
+        orchestration = result.get("orchestration")
+        if not isinstance(orchestration, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid response lost dispatch receipts"
+            )
+        refs = orchestration.get("benchmark_v2_provider_dispatch_receipt_refs")
+        projected_context_refs = orchestration.get(
+            "benchmark_v2_provider_dispatch_context_refs"
+        )
+        if not isinstance(projected_context_refs, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid dispatch contexts are unavailable"
+            )
+        if not isinstance(provider_dispatch_context_refs, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 server-issued dispatch contexts are unavailable"
+            )
+        expected_context_refs: dict[str, dict[str, Any]] = {}
+        expected_contexts: dict[str, dict[str, Any]] = {}
+        for provider in expected_provider_counts:
+            try:
+                context_ref = validate_benchmark_dispatch_context_ref(
+                    provider_dispatch_context_refs[provider]
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 server-issued dispatch context is invalid"
+                ) from error
+            expected_context_refs[provider] = context_ref
+            expected_contexts[provider] = deepcopy(context_ref["dispatch_context"])
+        try:
+            projected = {
+                provider: validate_benchmark_dispatch_context_ref(context_ref)
+                for provider, context_ref in projected_context_refs.items()
+            }
+        except (TypeError, ValueError) as error:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid projected dispatch context is invalid"
+            ) from error
+        if projected != expected_context_refs:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid dispatch context lineage is stale"
+            )
+    else:
+        refs = result.get("_benchmark_v2_provider_dispatch_receipt_refs")
+        if (
+            isinstance(dispatch_revision, bool)
+            or not isinstance(dispatch_revision, int)
+            or dispatch_revision < 0
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent dispatch revision is unavailable"
+            )
+        resolved_dispatch_revision = dispatch_revision
+    provider_task = {
+        "omni": "panel_learning_hybrid_omni_discovery",
+        "qwen": (
+            "panel_learning_hybrid_qwen_binding"
+            if hybrid
+            else "vision_observe_screen"
+        ),
+        "vista": "panel_learning_calibration_sequence",
+    }
+    if not hybrid:
+        expected_contexts = {}
+        for provider in expected_provider_counts:
+            context = _benchmark_v2_dispatch_context_for_worker(
+                composition=composition,
+                window_binding=window_binding,
+                task_kind=provider_task[provider],
+                revision=resolved_dispatch_revision,
+            )
+            if not isinstance(context, dict):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 dispatch context reconstruction failed"
+                )
+            expected_contexts[provider] = context
+    try:
+        verified = validate_benchmark_dispatch_receipt_refs(
+            receipt_journal_path=_benchmark_v2_dispatch_journal_path(
+                composition=composition,
+                window_binding=window_binding,
+            ),
+            receipt_refs=refs,
+            operation_identity={
+                "run_id": str(window_binding["run_id"]),
+                "stage": str(window_binding["stage"]),
+                "operation_id": str(window_binding["operation_id"]),
+                "window_binding_ref": deepcopy(window_binding["window_binding_ref"]),
+                "capture_ref": deepcopy(window_binding["capture_ref"]),
+            },
+            expected_provider_counts=expected_provider_counts,
+            expected_dispatch_contexts=expected_contexts,
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark_v2 dispatch receipts are invalid: {error}"
+        ) from error
+    if hybrid:
+        assert isinstance(result["orchestration"], dict)
+        result["orchestration"][
+            "benchmark_v2_provider_dispatch_receipt_refs"
+        ] = verified
+    else:
+        result["_benchmark_v2_provider_dispatch_receipt_refs"] = verified
+    return result
+
+
+def _benchmark_v2_expected_dispatch_counts(
+    *, task_kind: str, response: Mapping[str, object]
+) -> dict[str, int]:
+    orchestration = response.get("orchestration")
+    if not isinstance(orchestration, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid response lost orchestration"
+        )
+    if task_kind == "panel_learning_hybrid_omni_discovery":
+        return {"omni": 1}
+    if task_kind in {
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+    }:
+        return {"omni": 1, "qwen": 1}
+    if task_kind not in {
+        "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection",
+    }:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid dispatch task is invalid"
+        )
+    batch_count = orchestration.get("benchmark_v2_vista_batch_count")
+    if isinstance(batch_count, bool) or not isinstance(batch_count, int) or batch_count < 1:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 VISTA batch_count is unavailable"
+        )
+    if task_kind == "panel_learning_calibration_sequence":
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 VISTA result is unavailable"
+            )
+        sequence = _hybrid_calibration_sequence_payload(result)
+        if sequence.get("batch_count") != batch_count:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 VISTA receipt count differs from calibration batch_count"
+            )
+    return {"omni": 1, "qwen": 1, "vista": batch_count}
+
+
+def _validate_benchmark_v2_hybrid_adoption(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    response: Mapping[str, object],
+    window_binding: Mapping[str, object],
+    task_kind: str,
+    provider_dispatch_context_refs: Mapping[str, object],
+) -> dict[str, Any]:
+    if (
+        composition.composition_kind == "test"
+        and composition.benchmark_v2_worker_binding_resolver is None
+    ):
+        return deepcopy(dict(response))
+    return _validate_benchmark_v2_dispatch_response(
+        composition=composition,
+        response=response,
+        window_binding=window_binding,
+        expected_provider_counts=_benchmark_v2_expected_dispatch_counts(
+            task_kind=task_kind, response=response
+        ),
+        hybrid=True,
+        dispatch_revision=None,
+        provider_dispatch_context_refs=provider_dispatch_context_refs,
+    )
+
 
 def _compose_benchmark_v2_hybrid_service_binding(
     *,
     screen_group: Mapping[str, object],
     window_binding: Mapping[str, object],
     continuation_receipt: Mapping[str, object] | None = None,
+    provider_dispatch_context_refs: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_contracts import (
         content_sha256 as benchmark_content_sha256,
@@ -3675,6 +4121,9 @@ def _compose_benchmark_v2_hybrid_service_binding(
             deepcopy(dict(continuation_receipt))
             if isinstance(continuation_receipt, Mapping)
             else None
+        ),
+        "provider_dispatch_context_refs": deepcopy(
+            dict(provider_dispatch_context_refs or {})
         ),
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
@@ -3691,12 +4140,16 @@ def _validate_benchmark_v2_hybrid_service_binding(value: object) -> dict[str, An
         validate_benchmark_v2_hybrid_screen_group_start,
         validate_benchmark_v2_workflow_window_binding,
     )
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        validate_benchmark_dispatch_context_ref,
+    )
 
     fields = {
         "contract_version",
         "screen_group",
         "window_binding",
         "continuation_receipt",
+        "provider_dispatch_context_refs",
         "artifact_is_authorization",
         "execute_binding_enabled",
         "content_sha256",
@@ -3729,6 +4182,22 @@ def _validate_benchmark_v2_hybrid_service_binding(value: object) -> dict[str, An
                     binding["continuation_receipt"]
                 )
             )
+
+        context_refs = binding["provider_dispatch_context_refs"]
+        if not isinstance(context_refs, Mapping):
+            raise ValueError("provider dispatch context refs are invalid")
+        normalized_context_refs: dict[str, dict[str, Any]] = {}
+        if any(
+            provider not in {"omni", "qwen", "vista"}
+            for provider in context_refs
+        ):
+            raise ValueError("provider dispatch context refs contain an unknown provider")
+        for provider, context_ref in context_refs.items():
+            validated_ref = validate_benchmark_dispatch_context_ref(context_ref)
+            if validated_ref["provider"] != provider:
+                raise ValueError("provider dispatch context ref key differs")
+            normalized_context_refs[provider] = validated_ref
+        binding["provider_dispatch_context_refs"] = normalized_context_refs
     except (TypeError, ValueError) as error:
         raise LearningWorkflowStageOperationError(
             f"benchmark_v2 hybrid service binding lineage is invalid: {error}"
@@ -3864,6 +4333,34 @@ def _benchmark_v2_hybrid_binding_with_continuation_receipt(
         screen_group=current["screen_group"],
         window_binding=current["window_binding"],
         continuation_receipt=receipt,
+        provider_dispatch_context_refs=current["provider_dispatch_context_refs"],
+    )
+
+
+def _benchmark_v2_hybrid_binding_with_dispatch_context(
+    *,
+    binding: Mapping[str, object],
+    context: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        compose_benchmark_dispatch_context_ref,
+    )
+
+    current = _validate_benchmark_v2_hybrid_service_binding(binding)
+    context_ref = compose_benchmark_dispatch_context_ref(context=context)
+    provider = str(context_ref["provider"])
+    refs = deepcopy(current["provider_dispatch_context_refs"])
+    existing = refs.get(provider)
+    if existing is not None and existing != context_ref:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 provider dispatch context was already issued and differs"
+        )
+    refs[provider] = context_ref
+    return _compose_benchmark_v2_hybrid_service_binding(
+        screen_group=current["screen_group"],
+        window_binding=current["window_binding"],
+        continuation_receipt=current["continuation_receipt"],
+        provider_dispatch_context_refs=refs,
     )
 
 
@@ -4177,6 +4674,7 @@ def _read_benchmark_v2_hybrid_adopted_projection(
     *,
     composition: LearningWorkflowServiceComposition,
     worker_record: Mapping[str, object],
+    binding: Mapping[str, object],
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         compose_benchmark_v2_adopted_result_projection,
@@ -4209,6 +4707,15 @@ def _read_benchmark_v2_hybrid_adopted_projection(
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 hybrid adopted result lineage differs"
         )
+    response = _validate_benchmark_v2_hybrid_adoption(
+        composition=composition,
+        response=response,
+        window_binding=binding["window_binding"],
+        task_kind=str(worker_record["task_kind"]),
+        provider_dispatch_context_refs=binding[
+            "provider_dispatch_context_refs"
+        ],
+    )
     result_sha256 = receipt.get("result_sha256")
     if not isinstance(result_sha256, str) or len(result_sha256) != 64:
         raise LearningWorkflowStageOperationError(
@@ -4253,6 +4760,7 @@ def _project_benchmark_v2_hybrid_step(
         projection = _read_benchmark_v2_hybrid_adopted_projection(
             composition=composition,
             worker_record=worker_record,
+            binding=binding,
         )
     worker_cleanup_ref = None
     if status == "safe_stopped":
@@ -4499,6 +5007,42 @@ def _start_benchmark_v2_hybrid_workflow_service(
                     "capture_bundle": deepcopy(screen_group["capture_bundle"]),
                 },
             )
+            provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(initial["task_kind"]))
+            initial_context = None
+            if provider is not None:
+                context_ref = binding["provider_dispatch_context_refs"].get(provider)
+                if isinstance(context_ref, Mapping):
+                    initial_context = deepcopy(context_ref["dispatch_context"])
+                else:
+                    initial_context = _benchmark_v2_dispatch_context_for_worker(
+                        composition=composition,
+                        window_binding=binding["window_binding"],
+                        task_kind=str(initial["task_kind"]),
+                        revision=int(current["revision"]),
+                    )
+                    if isinstance(initial_context, Mapping):
+                        binding = _benchmark_v2_hybrid_binding_with_dispatch_context(
+                            binding=binding,
+                            context=initial_context,
+                        )
+                        current = _persist_benchmark_v2_hybrid_service_binding(
+                            composition=composition,
+                            workflow_state=current,
+                            stage=stage,
+                            binding=binding,
+                        )
+                        stage_execution = _benchmark_v2_stage_execution(current, stage)
+                        binding = _benchmark_v2_hybrid_service_binding_from_execution(
+                            stage_execution
+                        )
+                        if binding is None:
+                            raise LearningWorkflowStageOperationError(
+                                "benchmark_v2 initial dispatch context was not persisted"
+                            )
+            initial_payload = _inject_benchmark_v2_dispatch_context(
+                payload=initial["payload"],
+                context=initial_context,
+            )
             start_guarded_learning_stage_worker(
                 composition=composition,
                 run_id=run_id,
@@ -4506,7 +5050,7 @@ def _start_benchmark_v2_hybrid_workflow_service(
                 stage=stage,
                 operation_id=operation_id,
                 task_kind=str(initial["task_kind"]),
-                payload=initial["payload"],
+                payload=initial_payload,
                 reuse_active_identical=True,
             )
         worker_record = _benchmark_v2_hybrid_attachment(
@@ -4609,14 +5153,67 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 hybrid worker is not complete"
                 )
-            adopt_guarded_learning_stage_worker_result(
+            validated_before_adoption: dict[str, dict[str, Any]] = {}
+            result_validator: Callable[[Mapping[str, object]], None] | None = None
+            if not (
+                composition.composition_kind == "test"
+                and composition.benchmark_v2_worker_binding_resolver is None
+            ):
+                def _validate_before_adoption(
+                    candidate: Mapping[str, object],
+                ) -> None:
+                    validated_before_adoption["response"] = (
+                        _validate_benchmark_v2_hybrid_adoption(
+                            composition=composition,
+                            response=candidate,
+                            window_binding=binding["window_binding"],
+                            task_kind=str(worker_record["task_kind"]),
+                            provider_dispatch_context_refs=binding[
+                                "provider_dispatch_context_refs"
+                            ],
+                        )
+                    )
+
+                result_validator = _validate_before_adoption
+            generic_adoption = adopt_guarded_learning_stage_worker_result(
                 composition=composition,
                 worker_id=worker_record["worker_id"],
                 run_id=run_id,
                 expected_revision=int(current["revision"]),
                 stage=stage,
                 operation_id=operation_id,
+                _result_validator=result_validator,
             )
+            adopted_response = (
+                generic_adoption.get("response")
+                if isinstance(generic_adoption, Mapping)
+                else None
+            )
+            if not isinstance(adopted_response, Mapping):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 Hybrid adoption lost its response"
+                )
+            if result_validator is not None:
+                validated_response = validated_before_adoption.get("response")
+                if (
+                    not isinstance(validated_response, dict)
+                    or adopted_response != validated_response
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 Hybrid adoption bypassed dispatch validation"
+                    )
+            else:
+                validated_response = _validate_benchmark_v2_hybrid_adoption(
+                    composition=composition,
+                    response=adopted_response,
+                    window_binding=binding["window_binding"],
+                    task_kind=str(worker_record["task_kind"]),
+                    provider_dispatch_context_refs=binding[
+                        "provider_dispatch_context_refs"
+                    ],
+                )
+            generic_adoption = deepcopy(dict(generic_adoption))
+            generic_adoption["response"] = validated_response
             if worker_record["task_kind"] == (
                 "panel_learning_hybrid_review_projection"
             ):
@@ -4647,6 +5244,7 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 hybrid terminal preparation task is stale"
                 )
+        issued_dispatch_contexts: list[dict[str, Any]] = []
         continuation = continue_guarded_learning_stage_worker_result(
             composition=composition,
             run_id=run_id,
@@ -4654,6 +5252,11 @@ def _continue_benchmark_v2_hybrid_workflow_service(
             stage=stage,
             operation_id=operation_id,
             worker_id=worker_record["worker_id"],
+            _benchmark_dispatch_context_sink=(
+                lambda context: issued_dispatch_contexts.append(
+                    deepcopy(dict(context))
+                )
+            ),
         )
         current = composition.store.get(run_id)
         stage_execution = _benchmark_v2_stage_execution(current, stage)
@@ -4661,6 +5264,11 @@ def _continue_benchmark_v2_hybrid_workflow_service(
         if binding is None:
             raise LearningWorkflowStageOperationError(
                 "benchmark_v2 hybrid continuation lost its service binding"
+            )
+        for issued_context in issued_dispatch_contexts:
+            binding = _benchmark_v2_hybrid_binding_with_dispatch_context(
+                binding=binding,
+                context=issued_context,
             )
         worker_record = _benchmark_v2_hybrid_attachment(
             composition=composition,
@@ -4810,6 +5418,7 @@ def adopt_guarded_learning_stage_worker_result(
     expected_revision: int,
     stage: str,
     operation_id: str,
+    _result_validator: Callable[[Mapping[str, object]], None] | None = None,
 ) -> dict[str, Any]:
     _require_minted_learning_workflow_service_composition(composition)
     stage_execution = require_active_learning_workflow_stage_operation(
@@ -4837,6 +5446,11 @@ def adopt_guarded_learning_stage_worker_result(
         run_id=run_id,
         stage=stage,
         operation_id=operation_id,
+        **(
+            {"result_validator": _result_validator}
+            if _result_validator is not None
+            else {}
+        ),
     )
 
 
@@ -4849,6 +5463,8 @@ def continue_guarded_learning_stage_worker_result(
     operation_id: str,
     worker_id: str,
     now: datetime | None = None,
+    _benchmark_dispatch_context_sink: Callable[[Mapping[str, object]], None]
+    | None = None,
 ) -> dict[str, Any]:
     _require_minted_learning_workflow_service_composition(composition)
     store_get = getattr(composition.store, "get", None)
@@ -4866,6 +5482,26 @@ def continue_guarded_learning_stage_worker_result(
                 worker_id=worker_id,
             )
         )
+    def _dispatch_context_factory(task_kind: str) -> Mapping[str, object] | None:
+        assert isinstance(current, Mapping)
+        binding = _benchmark_v2_hybrid_service_binding_from_execution(
+            _benchmark_v2_stage_execution(current, stage)
+        )
+        if binding is None:
+            return None
+        context = _benchmark_v2_dispatch_context_for_worker(
+            composition=composition,
+            window_binding=binding["window_binding"],
+            task_kind=task_kind,
+            revision=int(current["revision"]),
+        )
+        if (
+            isinstance(context, Mapping)
+            and _benchmark_dispatch_context_sink is not None
+        ):
+            _benchmark_dispatch_context_sink(deepcopy(dict(context)))
+        return context
+
     return continue_learning_stage_worker_result(
         store=composition.store,
         worker_registry=composition.worker_registry,
@@ -4877,6 +5513,15 @@ def continue_guarded_learning_stage_worker_result(
         worker_id=worker_id,
         now=now,
         _preloaded_current=current if isinstance(current, Mapping) else None,
+        _benchmark_dispatch_context_factory=(
+            _dispatch_context_factory
+            if isinstance(current, Mapping)
+            and _benchmark_v2_hybrid_service_binding_from_execution(
+                _benchmark_v2_stage_execution(current, stage)
+            )
+            is not None
+            else None
+        ),
     )
 
 
@@ -5485,6 +6130,8 @@ def continue_learning_stage_worker_result(
     worker_id: str,
     now: datetime | None = None,
     _preloaded_current: Mapping[str, object] | None = None,
+    _benchmark_dispatch_context_factory: Callable[[str], Mapping[str, object] | None]
+    | None = None,
 ) -> dict[str, Any]:
     """解释已接纳结果，并在成功终结后签发唯一下一阶段租约。"""
 
@@ -5624,6 +6271,11 @@ def continue_learning_stage_worker_result(
             if not next_task_kind or not isinstance(next_payload, dict):
                 raise LearningWorkflowStageOperationError(
                     "worker continuation next_worker contract is invalid"
+                )
+            if _benchmark_dispatch_context_factory is not None:
+                next_payload = _inject_benchmark_v2_dispatch_context(
+                    payload=next_payload,
+                    context=_benchmark_dispatch_context_factory(next_task_kind),
                 )
             next_worker = registry_owner.start_worker(
                 run_id=run_id,

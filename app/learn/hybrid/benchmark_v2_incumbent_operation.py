@@ -1022,6 +1022,7 @@ def _compose_payload(
     window_binding_ref: Mapping[str, object],
     capture_ref: Mapping[str, object],
     serialized_window_binding: Mapping[str, object],
+    dispatch_context: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     image = case.get("image")
     layout = case.get("layout")
@@ -1098,6 +1099,15 @@ def _compose_payload(
     )
     payload = task.model_dump(mode="json")
     payload["_benchmark_v2_window_binding"] = binding
+    if dispatch_context is not None:
+        from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+            validate_benchmark_dispatch_context,
+        )
+
+        context = validate_benchmark_dispatch_context(dispatch_context)
+        if context["provider"] != "qwen" or context["window_binding"] != binding:
+            raise ValueError("incumbent benchmark dispatch context is stale")
+        payload["_benchmark_v2_dispatch_context"] = context
     from app.learn.hybrid.benchmark_v2_worker_binding import (
         validate_spawned_worker_observation_payload,
     )
@@ -1113,6 +1123,7 @@ def compose_benchmark_v2_incumbent_payload_projection(
     window_binding_ref: Mapping[str, object],
     capture_ref: Mapping[str, object],
     serialized_window_binding: Mapping[str, object],
+    dispatch_context: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     if not hasattr(provider_case_resolver, "resolve"):
         raise ValueError("provider case resolver is invalid")
@@ -1126,6 +1137,7 @@ def compose_benchmark_v2_incumbent_payload_projection(
         window_binding_ref=binding_ref,
         capture_ref=capture,
         serialized_window_binding=serialized_window_binding,
+        dispatch_context=dispatch_context,
     )
     source = _seal(
         {
@@ -1159,6 +1171,7 @@ def validate_benchmark_v2_incumbent_payload_projection(
     handler_payload_source: Mapping[str, object],
     provider_case_resolver: object,
     serialized_window_binding: Mapping[str, object],
+    dispatch_context: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     source = validate_benchmark_v2_incumbent_handler_payload_source(
         handler_payload_source
@@ -1170,6 +1183,7 @@ def validate_benchmark_v2_incumbent_payload_projection(
         window_binding_ref=source["window_binding_ref"],
         capture_ref=source["capture_ref"],
         serialized_window_binding=serialized_window_binding,
+        dispatch_context=dispatch_context,
     )
     if deepcopy(dict(payload)) != expected or _payload_sha256(expected) != source[
         "handler_payload_sha256"
