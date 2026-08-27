@@ -3128,6 +3128,524 @@ def start_guarded_learning_stage_worker(
     return result
 
 
+def _benchmark_v2_workflow_service_worker_ref(
+    operation: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        content_sha256 as benchmark_content_sha256,
+    )
+
+    worker = operation.get("worker_ref")
+    if not isinstance(worker, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 workflow service worker ref is missing"
+        )
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_workflow_service_worker_ref_v1",
+            "run_id": str(operation["run_id"]),
+            "stage": str(operation["stage"]),
+            "operation_id": str(operation["operation_id"]),
+            "worker_id": str(worker["worker_id"]),
+            "model_request_id": str(worker["model_request_id"]),
+            "payload_sha256": str(worker["payload_sha256"]),
+            "execution_nonce": str(worker["execution_nonce"]),
+            "task6_worker_content_sha256": benchmark_content_sha256(dict(worker)),
+        }
+    )
+
+
+def _benchmark_v2_workflow_service_phase_status(
+    operation: Mapping[str, object],
+    *,
+    worker_status: str | None = None,
+) -> str:
+    phase = operation.get("phase")
+    if phase in {"complete", "cancelled", "safe_stopped", "cleanup_pending"}:
+        return str(phase)
+    if phase in {"result_ready", "terminal_intent", "adopted"}:
+        return "advanced"
+    if worker_status is None or worker_status == "running":
+        return "pending"
+    if worker_status == "completed":
+        return "advanced"
+    raise LearningWorkflowStageOperationError(
+        f"benchmark_v2 incumbent worker status is not adoptable: {worker_status}"
+    )
+
+
+def _project_benchmark_v2_workflow_service_operation_ref(
+    *,
+    workflow_state: Mapping[str, object],
+    stage_execution: Mapping[str, object],
+    operation: Mapping[str, object],
+    status: str,
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_workflow_service_operation_ref,
+    )
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        content_sha256 as benchmark_content_sha256,
+    )
+
+    source = operation.get("handler_payload_source")
+    provider_case_ref = (
+        source.get("provider_case_ref") if isinstance(source, Mapping) else None
+    )
+    if not isinstance(provider_case_ref, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 workflow service provider case ref is missing"
+        )
+    return compose_benchmark_v2_workflow_service_operation_ref(
+        mode="incumbent_qwen_only",
+        run_id=str(operation["run_id"]),
+        stage=str(operation["stage"]),
+        operation_id=str(operation["operation_id"]),
+        workflow_state_ref={
+            "run_id": str(workflow_state["run_id"]),
+            "revision": int(workflow_state["revision"]),
+            "content_sha256": benchmark_content_sha256(dict(workflow_state)),
+        },
+        stage_execution_ref={
+            "run_id": str(operation["run_id"]),
+            "stage": str(operation["stage"]),
+            "operation_id": str(operation["operation_id"]),
+            "revision": int(workflow_state["revision"]),
+            "content_sha256": benchmark_content_sha256(dict(stage_execution)),
+        },
+        request_ref={
+            "id": str(provider_case_ref["case_id"]),
+            "content_sha256": str(provider_case_ref["case_content_sha256"]),
+        },
+        window_binding_ref=operation["window_binding_ref"],
+        capture_ref=operation["capture_ref"],
+        worker_ref=_benchmark_v2_workflow_service_worker_ref(operation),
+        status=status,
+        predecessor_content_sha256=operation.get("predecessor_content_sha256"),
+    )
+
+
+def _benchmark_v2_workflow_service_context(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_ref: Mapping[str, object],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        validate_benchmark_v2_workflow_service_operation_ref,
+    )
+
+    _require_minted_learning_workflow_service_composition(composition)
+    supplied = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+    if supplied["mode"] != "incumbent_qwen_only":
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid workflow service is unavailable before Amendment S3"
+        )
+    current = composition.store.get(supplied["run_id"])
+    stage_execution = _benchmark_v2_stage_execution(current, supplied["stage"])
+    operation = _benchmark_v2_incumbent_operation_from_state(
+        current, supplied["stage"]
+    )
+    if operation is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent operation is missing"
+        )
+    _require_benchmark_v2_operation_identity(
+        operation,
+        run_id=supplied["run_id"],
+        stage=supplied["stage"],
+        operation_id=supplied["operation_id"],
+    )
+    if int(operation["current_document_revision"]) != int(current["revision"]):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 workflow service document revision is stale"
+        )
+    phase_status = _benchmark_v2_workflow_service_phase_status(operation)
+    if phase_status in {"complete", "cancelled", "safe_stopped", "cleanup_pending"}:
+        allowed_statuses = {phase_status}
+    elif phase_status == "advanced":
+        allowed_statuses = {"advanced"}
+    else:
+        allowed_statuses = {"pending", "advanced"}
+    if supplied["status"] not in allowed_statuses:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 workflow service operation status is stale"
+        )
+    expected = _project_benchmark_v2_workflow_service_operation_ref(
+        workflow_state=current,
+        stage_execution=stage_execution,
+        operation=operation,
+        status=supplied["status"],
+    )
+    if supplied != expected:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 workflow service operation ref is stale"
+        )
+    return current, stage_execution, operation, supplied
+
+
+def _read_benchmark_v2_workflow_service_adopted_projection(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_adopted_result_projection,
+    )
+
+    result_identity = operation.get("result_identity_ref")
+    if not isinstance(result_identity, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent adopted result identity is missing"
+        )
+    worker = operation["worker_ref"]
+    adoption, adoption_ref = _validate_benchmark_v2_generic_adoption(
+        adoption=_LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).read_worker_result(
+            worker_id=worker["worker_id"],
+            run_id=operation["run_id"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+        ),
+        operation=operation,
+        result_identity=result_identity,
+    )
+    if adoption_ref != operation.get("generic_adoption_ref"):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent adopted result replay differs"
+        )
+    response = adoption.get("response")
+    if not isinstance(response, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent adopted response body is missing"
+        )
+    return compose_benchmark_v2_adopted_result_projection(
+        mode="incumbent_qwen_only",
+        run_id=str(operation["run_id"]),
+        stage=str(operation["stage"]),
+        operation_id=str(operation["operation_id"]),
+        worker_ref=_benchmark_v2_workflow_service_worker_ref(operation),
+        model_request_ref={
+            "id": str(worker["model_request_id"]),
+            "content_sha256": str(worker["payload_sha256"]),
+        },
+        payload_ref={"content_sha256": str(worker["payload_sha256"])},
+        result_ref={
+            "content_sha256": str(result_identity["result_sha256"]),
+        },
+        adoption_ref=adoption_ref,
+        response=response,
+        terminal_receipt=operation["terminal_receipt"],
+        window_adoption_ref=operation["window_adoption_ref"],
+        worker_cleanup_ref=operation["worker_cleanup_ref"],
+        provider_cleanup_ref=operation["provider_cleanup_ref"],
+    )
+
+
+def _project_benchmark_v2_workflow_service_step(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    workflow_state: Mapping[str, object],
+    stage_execution: Mapping[str, object],
+    operation: Mapping[str, object],
+    status: str,
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_workflow_service_step,
+    )
+
+    operation_ref = _project_benchmark_v2_workflow_service_operation_ref(
+        workflow_state=workflow_state,
+        stage_execution=stage_execution,
+        operation=operation,
+        status=status,
+    )
+    projection = None
+    if status == "complete":
+        projection = _read_benchmark_v2_workflow_service_adopted_projection(
+            composition=composition,
+            operation=operation,
+        )
+    return compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation_ref,
+        observed_task_kind="vision_observe_screen",
+        adopted_result_projection=projection,
+        terminal_receipt=operation.get("terminal_receipt"),
+        cleanup_refs={
+            "worker_cleanup_ref": operation.get("worker_cleanup_ref"),
+            "provider_cleanup_ref": operation.get("provider_cleanup_ref"),
+        },
+    )
+
+
+def _start_benchmark_v2_incumbent_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    provider_case_ref: Mapping[str, object],
+    window_binding: Mapping[str, object],
+) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
+    run_id = str(window_binding["run_id"])
+    stage = str(window_binding["stage"])
+    operation_id = str(window_binding["operation_id"])
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=run_id,
+        operation_id=operation_id,
+    ):
+        current = composition.store.get(run_id)
+        require_active_learning_workflow_stage_operation(
+            store=composition.store,
+            run_id=run_id,
+            expected_revision=int(current["revision"]),
+            stage=stage,
+            operation_id=operation_id,
+        )
+        existing = _benchmark_v2_incumbent_operation_from_state(current, stage)
+        request = {
+            "provider_case_ref": deepcopy(dict(provider_case_ref)),
+            "window_binding_ref": deepcopy(dict(window_binding["window_binding_ref"])),
+            "capture_ref": deepcopy(dict(window_binding["capture_ref"])),
+        }
+        if existing is not None:
+            existing_source = existing["handler_payload_source"]
+            if any(existing_source[name] != request[name] for name in request):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 workflow service start lineage is stale"
+                )
+            if existing["phase"] in {"complete", "cancelled", "safe_stopped"}:
+                stage_execution = _benchmark_v2_stage_execution(current, stage)
+                return _project_benchmark_v2_workflow_service_step(
+                    composition=composition,
+                    workflow_state=current,
+                    stage_execution=stage_execution,
+                    operation=existing,
+                    status=_benchmark_v2_workflow_service_phase_status(existing),
+                )
+        _start_benchmark_v2_incumbent_operation(
+            composition=composition,
+            run_id=run_id,
+            expected_revision=int(current["revision"]),
+            stage=stage,
+            operation_id=operation_id,
+            task_kind="vision_observe_screen",
+            request=request,
+        )
+        current = composition.store.get(run_id)
+        stage_execution = _benchmark_v2_stage_execution(current, stage)
+        operation = _benchmark_v2_incumbent_operation_from_state(current, stage)
+        if operation is None:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent start did not persist an operation"
+            )
+        source = operation["handler_payload_source"]
+        if any(source[name] != request[name] for name in request):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 workflow service start result lineage differs"
+            )
+        return _project_benchmark_v2_workflow_service_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            operation=operation,
+            status=_benchmark_v2_workflow_service_phase_status(operation),
+        )
+
+
+def _poll_benchmark_v2_incumbent_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
+    supplied_run_id = str(operation_ref.get("run_id") or "")
+    supplied_operation_id = str(operation_ref.get("operation_id") or "")
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=supplied_run_id,
+        operation_id=supplied_operation_id,
+    ):
+        current, stage_execution, operation, supplied = (
+            _benchmark_v2_workflow_service_context(
+                composition=composition,
+                operation_ref=operation_ref,
+            )
+        )
+        durable_status = _benchmark_v2_workflow_service_phase_status(operation)
+        if durable_status in {
+            "complete",
+            "cancelled",
+            "safe_stopped",
+            "cleanup_pending",
+            "advanced",
+        }:
+            return _project_benchmark_v2_workflow_service_step(
+                composition=composition,
+                workflow_state=current,
+                stage_execution=stage_execution,
+                operation=operation,
+                status=durable_status,
+            )
+        worker = operation["worker_ref"]
+        status_result = status_guarded_learning_stage_worker(
+            composition=composition,
+            worker_id=worker["worker_id"],
+            run_id=operation["run_id"],
+            operation_id=operation["operation_id"],
+        )
+        worker_status = str(status_result.get("status") or "")
+        projected_status = _benchmark_v2_workflow_service_phase_status(
+            operation,
+            worker_status=worker_status,
+        )
+        if supplied["status"] == "advanced" and projected_status != "advanced":
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 workflow service advanced status is stale"
+            )
+        return _project_benchmark_v2_workflow_service_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            operation=operation,
+            status=projected_status,
+        )
+
+
+def _adopt_benchmark_v2_incumbent_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_ref: Mapping[str, object],
+    worker_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
+    supplied_run_id = str(operation_ref.get("run_id") or "")
+    supplied_operation_id = str(operation_ref.get("operation_id") or "")
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=supplied_run_id,
+        operation_id=supplied_operation_id,
+    ):
+        current, stage_execution, operation, supplied = (
+            _benchmark_v2_workflow_service_context(
+                composition=composition,
+                operation_ref=operation_ref,
+            )
+        )
+        expected_worker_ref = _benchmark_v2_workflow_service_worker_ref(operation)
+        if dict(worker_ref) != expected_worker_ref or supplied["worker_ref"] != expected_worker_ref:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 workflow service adopted worker ref is stale"
+            )
+        durable_status = _benchmark_v2_workflow_service_phase_status(operation)
+        if durable_status in {"complete", "cancelled", "safe_stopped"}:
+            return _project_benchmark_v2_workflow_service_step(
+                composition=composition,
+                workflow_state=current,
+                stage_execution=stage_execution,
+                operation=operation,
+                status=durable_status,
+            )
+        if supplied["status"] != "advanced":
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent adoption requires an advanced service step"
+            )
+        if durable_status != "advanced":
+            worker_status = status_guarded_learning_stage_worker(
+                composition=composition,
+                worker_id=operation["worker_ref"]["worker_id"],
+                run_id=operation["run_id"],
+                operation_id=operation["operation_id"],
+            )
+            if str(worker_status.get("status") or "") != "completed":
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 incumbent worker result is not complete"
+                )
+        _resume_benchmark_v2_incumbent_operation(
+            composition=composition,
+            run_id=operation["run_id"],
+            expected_revision=int(current["revision"]),
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+            worker_id=operation["worker_ref"]["worker_id"],
+        )
+        current = composition.store.get(operation["run_id"])
+        stage_execution = _benchmark_v2_stage_execution(current, operation["stage"])
+        operation = _benchmark_v2_incumbent_operation_from_state(
+            current, operation["stage"]
+        )
+        if operation is None:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent resume did not persist an operation"
+            )
+        status = _benchmark_v2_workflow_service_phase_status(operation)
+        if status not in {"complete", "cancelled", "safe_stopped"}:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent resume did not reach a terminal phase"
+            )
+        return _project_benchmark_v2_workflow_service_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            operation=operation,
+            status=status,
+        )
+
+
+def _cancel_benchmark_v2_incumbent_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
+    supplied_run_id = str(operation_ref.get("run_id") or "")
+    supplied_operation_id = str(operation_ref.get("operation_id") or "")
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=supplied_run_id,
+        operation_id=supplied_operation_id,
+    ):
+        current, stage_execution, operation, _supplied = (
+            _benchmark_v2_workflow_service_context(
+                composition=composition,
+                operation_ref=operation_ref,
+            )
+        )
+        durable_status = _benchmark_v2_workflow_service_phase_status(operation)
+        if durable_status in {"complete", "cancelled", "safe_stopped"}:
+            return _project_benchmark_v2_workflow_service_step(
+                composition=composition,
+                workflow_state=current,
+                stage_execution=stage_execution,
+                operation=operation,
+                status=durable_status,
+            )
+        _cancel_benchmark_v2_incumbent_operation(
+            composition=composition,
+            run_id=operation["run_id"],
+            expected_revision=int(current["revision"]),
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+            reason="benchmark workflow service cancellation requested",
+        )
+        current = composition.store.get(operation["run_id"])
+        stage_execution = _benchmark_v2_stage_execution(current, operation["stage"])
+        operation = _benchmark_v2_incumbent_operation_from_state(
+            current, operation["stage"]
+        )
+        if operation is None:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent cancel did not persist an operation"
+            )
+        status = _benchmark_v2_workflow_service_phase_status(operation)
+        return _project_benchmark_v2_workflow_service_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            operation=operation,
+            status=status,
+        )
+
+
 def status_guarded_learning_stage_worker(
     *,
     composition: LearningWorkflowServiceComposition,

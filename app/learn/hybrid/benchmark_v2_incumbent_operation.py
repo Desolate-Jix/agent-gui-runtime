@@ -612,13 +612,18 @@ def compose_benchmark_v2_workflow_service_operation_ref(
     capture_ref: Mapping[str, object],
     worker_ref: Mapping[str, object] | None,
     status: str,
-    predecessor_operation_ref: Mapping[str, object] | None,
+    predecessor_operation_ref: Mapping[str, object] | None = None,
+    predecessor_content_sha256: str | None = None,
 ) -> dict[str, Any]:
-    predecessor_sha256 = None
+    if predecessor_operation_ref is not None and predecessor_content_sha256 is not None:
+        raise ValueError("benchmark workflow service predecessor is ambiguous")
+    predecessor_sha256 = predecessor_content_sha256
     if predecessor_operation_ref is not None:
         predecessor_sha256 = validate_benchmark_v2_workflow_service_operation_ref(
             predecessor_operation_ref
         )["content_sha256"]
+    if predecessor_sha256 is not None:
+        _sha(predecessor_sha256, "benchmark workflow service predecessor SHA")
     body = {
         "contract_version": BENCHMARK_V2_WORKFLOW_SERVICE_OPERATION_REF_CONTRACT,
         "mode": mode,
@@ -695,9 +700,48 @@ def validate_benchmark_v2_adopted_result_projection(value: object) -> dict[str, 
         raise ValueError("benchmark adopted terminal parents must be all null or all present")
     for name in terminal_names:
         if projection[name] is not None:
-            projection[name] = _runtime_sealed_parent(
-                projection[name], f"benchmark adopted result {name}"
+            if (
+                name == "terminal_receipt"
+                and isinstance(projection[name], Mapping)
+                and projection[name].get("contract_version")
+                == BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT
+            ):
+                projection[name] = validate_benchmark_v2_incumbent_terminal_receipt(
+                    projection[name]
+                )
+            else:
+                projection[name] = _runtime_sealed_parent(
+                    projection[name], f"benchmark adopted result {name}"
+                )
+    terminal_receipt = projection["terminal_receipt"]
+    if (
+        isinstance(terminal_receipt, Mapping)
+        and terminal_receipt.get("contract_version")
+        == BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT
+    ):
+        worker = projection["worker_ref"]
+        if (
+            any(
+                terminal_receipt.get(name) != projection[name]
+                for name in ("run_id", "stage", "operation_id")
             )
+            or terminal_receipt.get("worker_id") != worker.get("worker_id")
+            or terminal_receipt.get("model_request_id")
+            != projection["model_request_ref"]["id"]
+            or terminal_receipt.get("payload_sha256")
+            != projection["payload_ref"]["content_sha256"]
+            or terminal_receipt.get("result_sha256")
+            != projection["result_ref"]["content_sha256"]
+            or terminal_receipt.get("generic_adoption_ref")
+            != projection["adoption_ref"]
+            or terminal_receipt.get("window_adoption_ref")
+            != projection["window_adoption_ref"]
+            or terminal_receipt.get("worker_cleanup_ref")
+            != projection["worker_cleanup_ref"]
+            or terminal_receipt.get("provider_cleanup_ref")
+            != projection["provider_cleanup_ref"]
+        ):
+            raise ValueError("benchmark adopted terminal lineage is stale")
     if (
         projection["artifact_is_authorization"] is not False
         or projection["execute_binding_enabled"] is not False
@@ -799,9 +843,18 @@ def validate_benchmark_v2_workflow_service_step(value: object) -> dict[str, Any]
                 )
         step["adopted_result_projection"] = projection
     if step["terminal_receipt"] is not None:
-        step["terminal_receipt"] = _runtime_sealed_parent(
-            step["terminal_receipt"], "benchmark workflow service terminal receipt"
-        )
+        if (
+            isinstance(step["terminal_receipt"], Mapping)
+            and step["terminal_receipt"].get("contract_version")
+            == BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT
+        ):
+            step["terminal_receipt"] = validate_benchmark_v2_incumbent_terminal_receipt(
+                step["terminal_receipt"]
+            )
+        else:
+            step["terminal_receipt"] = _runtime_sealed_parent(
+                step["terminal_receipt"], "benchmark workflow service terminal receipt"
+            )
     cleanup_refs = _closed(
         step["cleanup_refs"],
         {"worker_cleanup_ref", "provider_cleanup_ref"},
@@ -813,6 +866,16 @@ def validate_benchmark_v2_workflow_service_step(value: object) -> dict[str, Any]
                 cleanup_refs[name], f"benchmark workflow service {name}"
             )
     step["cleanup_refs"] = cleanup_refs
+    if (
+        isinstance(step["terminal_receipt"], Mapping)
+        and step["terminal_receipt"].get("contract_version")
+        == BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT
+        and any(
+            step["terminal_receipt"].get(name) != cleanup_refs[name]
+            for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+        )
+    ):
+        raise ValueError("benchmark workflow service cleanup lineage is stale")
     if projection is not None:
         if step["terminal_receipt"] != projection["terminal_receipt"]:
             raise ValueError("benchmark workflow service terminal receipt is stale")
@@ -1914,8 +1977,14 @@ class BenchmarkV2IncumbentWorkflowService:
     ) -> dict[str, Any]:
         _validate_provider_case_ref(provider_case_ref)
         validate_benchmark_v2_workflow_window_binding(window_binding)
-        raise BenchmarkV2WorkflowServicePortUnavailableError(
-            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        from app.learn.workflow_service import (
+            _start_benchmark_v2_incumbent_workflow_service,
+        )
+
+        return _start_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            provider_case_ref=provider_case_ref,
+            window_binding=window_binding,
         )
 
     def poll_incumbent_observe(
@@ -1924,8 +1993,13 @@ class BenchmarkV2IncumbentWorkflowService:
         operation_ref: Mapping[str, object],
     ) -> dict[str, Any]:
         validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
-        raise BenchmarkV2WorkflowServicePortUnavailableError(
-            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        from app.learn.workflow_service import (
+            _poll_benchmark_v2_incumbent_workflow_service,
+        )
+
+        return _poll_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            operation_ref=operation_ref,
         )
 
     def adopt_and_terminalize_incumbent(
@@ -1940,8 +2014,14 @@ class BenchmarkV2IncumbentWorkflowService:
         )
         if current["worker_ref"] != worker:
             raise ValueError("benchmark workflow service adopted worker ref is stale")
-        raise BenchmarkV2WorkflowServicePortUnavailableError(
-            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        from app.learn.workflow_service import (
+            _adopt_benchmark_v2_incumbent_workflow_service,
+        )
+
+        return _adopt_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            operation_ref=current,
+            worker_ref=worker,
         )
 
     def cancel_operation(
@@ -1949,9 +2029,18 @@ class BenchmarkV2IncumbentWorkflowService:
         *,
         operation_ref: Mapping[str, object],
     ) -> dict[str, Any]:
-        validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
-        raise BenchmarkV2WorkflowServicePortUnavailableError(
-            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        if current["mode"] == "hybrid_v1_1":
+            raise BenchmarkV2WorkflowServicePortUnavailableError(
+                _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+            )
+        from app.learn.workflow_service import (
+            _cancel_benchmark_v2_incumbent_workflow_service,
+        )
+
+        return _cancel_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            operation_ref=current,
         )
 
 
