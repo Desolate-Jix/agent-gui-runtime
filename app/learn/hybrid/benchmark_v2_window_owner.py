@@ -5,8 +5,10 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 from contextlib import ExitStack, contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -17,8 +19,10 @@ import sys
 from threading import RLock
 import time
 from typing import Any, Mapping
+import zlib
 
 import psutil
+from PIL import Image
 
 from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes,
@@ -222,6 +226,89 @@ def _parse_bmp(raw: bytes) -> dict[str, object]:
         "pixel_offset": pixel_offset,
         "pixel_bytes": pixel_bytes,
         "bitmap_pixel_sha256": _sha(pixels),
+    }
+
+
+def _validate_png_chunks(raw: bytes) -> tuple[int, int]:
+    if len(raw) < 45 or raw[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("benchmark screenshot is not an exact PNG fixture")
+    offset = 8
+    width = height = 0
+    seen_ihdr = False
+    seen_idat = False
+    seen_iend = False
+    while offset < len(raw):
+        if offset + 12 > len(raw):
+            raise ValueError("benchmark PNG chunk is truncated")
+        length = struct.unpack_from(">I", raw, offset)[0]
+        chunk_type = raw[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + length
+        crc_end = data_end + 4
+        if crc_end > len(raw):
+            raise ValueError("benchmark PNG chunk length is invalid")
+        expected_crc = struct.unpack_from(">I", raw, data_end)[0]
+        observed_crc = zlib.crc32(chunk_type)
+        observed_crc = zlib.crc32(raw[data_start:data_end], observed_crc) & 0xFFFFFFFF
+        if observed_crc != expected_crc:
+            raise ValueError("benchmark PNG chunk checksum is invalid")
+        if not seen_ihdr:
+            if chunk_type != b"IHDR" or length != 13:
+                raise ValueError("benchmark PNG IHDR is invalid")
+            width, height = struct.unpack_from(">II", raw, data_start)
+            if width <= 0 or height <= 0 or width * height > 100_000_000:
+                raise ValueError("benchmark PNG dimensions are invalid")
+            seen_ihdr = True
+        elif chunk_type == b"IHDR":
+            raise ValueError("benchmark PNG has duplicate IHDR")
+        if chunk_type == b"IDAT":
+            seen_idat = True
+        if chunk_type == b"IEND":
+            if length != 0 or seen_iend or not seen_idat or crc_end != len(raw):
+                raise ValueError("benchmark PNG terminal chunk is invalid")
+            seen_iend = True
+        offset = crc_end
+    if not seen_ihdr or not seen_idat or not seen_iend or offset != len(raw):
+        raise ValueError("benchmark PNG structure is incomplete")
+    return width, height
+
+
+def _parse_png(raw: bytes) -> dict[str, object]:
+    width, height = _validate_png_chunks(raw)
+    try:
+        with Image.open(BytesIO(raw)) as image:
+            if image.format != "PNG" or image.size != (width, height):
+                raise ValueError("benchmark PNG decoder identity differs")
+            image.load()
+            pixels = image.convert("RGBA").tobytes("raw", "BGRA")
+    except (OSError, ValueError) as error:
+        raise ValueError("benchmark PNG decode failed") from error
+    if len(pixels) != width * height * 4:
+        raise ValueError("benchmark PNG decoded pixel layout is invalid")
+    return {
+        "dimensions": {"width": width, "height": height},
+        "signed_height": -height,
+        "bit_count": 32,
+        "stride": width * 4,
+        "pixel_offset": None,
+        "pixel_bytes": len(pixels),
+        "bitmap_pixel_sha256": _sha(pixels),
+    }
+
+
+def _parse_owned_image(raw: bytes) -> dict[str, object]:
+    if raw[:2] == b"BM":
+        parsed = _parse_bmp(raw)
+        image_format = "bmp"
+    elif raw[:8] == b"\x89PNG\r\n\x1a\n":
+        parsed = _parse_png(raw)
+        image_format = "png"
+    else:
+        raise ValueError("benchmark screenshot must be an exact BMP or PNG fixture")
+    return {
+        **parsed,
+        "image_format": image_format,
+        "raw_file_sha256": _sha(raw),
     }
 
 
@@ -1138,8 +1225,8 @@ def _launch_owned_window(
     digest = _sha(raw)
     if digest != require_sha256(expected_sha256, "expected_sha256"):
         raise ValueError("window screenshot SHA-256 differs")
-    bmp = _parse_bmp(raw)
-    dimensions = dict(bmp["dimensions"])
+    image_facts = _parse_owned_image(raw)
+    dimensions = dict(image_facts["dimensions"])
     derived = _identity(operation_id, digest, journal)
     root: dict[str, object] = {
         "contract_version": OWNER_JOURNAL_CONTRACT,
@@ -1148,7 +1235,7 @@ def _launch_owned_window(
         "screenshot_path": str(image),
         "screenshot_sha256": digest,
         "image_dimensions": dimensions,
-        "bitmap_pixel_sha256": bmp["bitmap_pixel_sha256"],
+        "bitmap_pixel_sha256": image_facts["bitmap_pixel_sha256"],
         "journal_path": str(journal),
         "events_path": str(_events_path(journal)),
         "publication_path": str(_publication_path(journal)),
@@ -1372,11 +1459,11 @@ def _validate_binding(owner: Mapping[str, object]) -> dict[str, object]:
         screenshot_bytes = Path(str(root["screenshot_path"])).read_bytes()
     except OSError as error:
         raise ValueError("window binding screenshot is missing") from error
+    image_facts = _parse_owned_image(screenshot_bytes)
     if (
         _sha(screenshot_bytes) != root["screenshot_sha256"]
-        or _bmp_dimensions(screenshot_bytes) != root["image_dimensions"]
-        or _parse_bmp(screenshot_bytes)["bitmap_pixel_sha256"]
-        != root["bitmap_pixel_sha256"]
+        or image_facts["dimensions"] != root["image_dimensions"]
+        or image_facts["bitmap_pixel_sha256"] != root["bitmap_pixel_sha256"]
     ):
         raise ValueError("window binding screenshot bytes are stale")
     if (
@@ -1470,6 +1557,44 @@ def _close_owned_window_for_test(
         return _close_owned_window_locked(
             journal=journal, root=root, reason=reason, failure_stage=failure_stage
         )
+
+
+def snapshot_owned_window(*, owner: Mapping[str, object]) -> dict[str, object]:
+    """从同一 Task 4 HWND 取得带前后证明的精确 UIA 快照。"""
+
+    if not _WINDOWS:
+        raise RuntimeError("Windows exact HWND snapshot is unavailable")
+    _validate_binding(owner)
+    pre = _raw_hwnd_attestation(owner)
+    probe = _run_uia_probe(owner)
+    uia_identity = _uia_identity(probe, owner)
+    post = _raw_hwnd_attestation(owner)
+    if pre != post or uia_identity != owner["uia_root_identity"]:
+        raise ValueError("window snapshot pre/post or UIA identity differs")
+    snapshot = probe.get("snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("window snapshot probe lost its exact UIA snapshot")
+    result: dict[str, object] = {
+        "contract_version": "portfolio_hybrid_benchmark_v2_owned_window_snapshot_v1",
+        "owner_binding_ref": {
+            "id": owner["owner_id"],
+            "content_sha256": owner["content_sha256"],
+        },
+        "operation_id": owner["operation_id"],
+        "exact_hwnd": owner["hwnd"],
+        "process_identity": deepcopy(owner["process_identity"]),
+        "job_member_pids": deepcopy(pre["job_member_pids"]),
+        "screenshot_sha256": owner["screenshot_sha256"],
+        "uia_root_identity": deepcopy(uia_identity),
+        "uia_snapshot": deepcopy(dict(snapshot)),
+        "pre_raw_identity_sha256": pre["identity_sha256"],
+        "post_raw_identity_sha256": post["identity_sha256"],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "display_only": True,
+    }
+    result["content_sha256"] = content_sha256(result)
+    return result
 
 
 def _append_cleanup_event_without_sidecar(
@@ -1770,4 +1895,9 @@ def _close_owned_window_locked(
     return receipt
 
 
-__all__ = ["launch_owned_window", "attest_bound_window", "close_owned_window"]
+__all__ = [
+    "launch_owned_window",
+    "snapshot_owned_window",
+    "attest_bound_window",
+    "close_owned_window",
+]

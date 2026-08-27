@@ -6,6 +6,7 @@ import argparse
 import ctypes
 from ctypes import wintypes
 import hashlib
+from io import BytesIO
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ import site
 import struct
 import sys
 import time
+import zlib
 
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -129,6 +131,94 @@ def _parse_bmp(raw: bytes) -> dict[str, int | str]:
     }
 
 
+def _validate_png_chunks(raw: bytes) -> tuple[int, int]:
+    if len(raw) < 45 or raw[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("screenshot is not a sealed PNG")
+    offset = 8
+    width = height = 0
+    seen_ihdr = False
+    seen_idat = False
+    seen_iend = False
+    while offset < len(raw):
+        if offset + 12 > len(raw):
+            raise ValueError("screenshot PNG chunk is truncated")
+        length = struct.unpack_from(">I", raw, offset)[0]
+        chunk_type = raw[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + length
+        crc_end = data_end + 4
+        if crc_end > len(raw):
+            raise ValueError("screenshot PNG chunk length is invalid")
+        expected_crc = struct.unpack_from(">I", raw, data_end)[0]
+        observed_crc = zlib.crc32(chunk_type)
+        observed_crc = zlib.crc32(raw[data_start:data_end], observed_crc) & 0xFFFFFFFF
+        if expected_crc != observed_crc:
+            raise ValueError("screenshot PNG chunk checksum is invalid")
+        if not seen_ihdr:
+            if chunk_type != b"IHDR" or length != 13:
+                raise ValueError("screenshot PNG IHDR is invalid")
+            width, height = struct.unpack_from(">II", raw, data_start)
+            if width <= 0 or height <= 0 or width * height > 100_000_000:
+                raise ValueError("screenshot PNG dimensions are invalid")
+            seen_ihdr = True
+        elif chunk_type == b"IHDR":
+            raise ValueError("screenshot PNG has duplicate IHDR")
+        if chunk_type == b"IDAT":
+            seen_idat = True
+        if chunk_type == b"IEND":
+            if length != 0 or seen_iend or not seen_idat or crc_end != len(raw):
+                raise ValueError("screenshot PNG terminal chunk is invalid")
+            seen_iend = True
+        offset = crc_end
+    if not seen_ihdr or not seen_idat or not seen_iend or offset != len(raw):
+        raise ValueError("screenshot PNG structure is incomplete")
+    return width, height
+
+
+def _parse_png(raw: bytes) -> dict[str, int | str | bytes | None]:
+    width, height = _validate_png_chunks(raw)
+    from PIL import Image
+
+    try:
+        with Image.open(BytesIO(raw)) as image:
+            if image.format != "PNG" or image.size != (width, height):
+                raise ValueError("screenshot PNG decoder identity differs")
+            image.load()
+            pixels = image.convert("RGBA").tobytes("raw", "BGRA")
+    except (OSError, ValueError) as error:
+        raise ValueError("screenshot PNG decode failed") from error
+    if len(pixels) != width * height * 4:
+        raise ValueError("screenshot PNG decoded pixel layout is invalid")
+    return {
+        "width": width,
+        "height": height,
+        "signed_height": -height,
+        "bit_count": 32,
+        "stride": width * 4,
+        "pixel_offset": None,
+        "pixel_bytes": len(pixels),
+        "bitmap_pixel_sha256": hashlib.sha256(pixels).hexdigest(),
+        "decoded_pixel_bytes": pixels,
+    }
+
+
+def _parse_owned_image(raw: bytes) -> dict[str, int | str | bytes | None]:
+    if raw[:2] == b"BM":
+        parsed: dict[str, int | str | bytes | None] = dict(_parse_bmp(raw))
+        offset = int(parsed["pixel_offset"])
+        length = int(parsed["pixel_bytes"])
+        parsed["decoded_pixel_bytes"] = raw[offset : offset + length]
+        image_format = "bmp"
+    elif raw[:8] == b"\x89PNG\r\n\x1a\n":
+        parsed = _parse_png(raw)
+        image_format = "png"
+    else:
+        raise ValueError("screenshot is not a sealed BMP or PNG")
+    parsed["image_format"] = image_format
+    parsed["raw_file_sha256"] = hashlib.sha256(raw).hexdigest()
+    return parsed
+
+
 def _read_sealed_bmp(kernel32: object, path: Path) -> tuple[int, bytes]:
     kernel32.CreateFileW.argtypes = (
         wintypes.LPCWSTR,
@@ -159,8 +249,8 @@ def _read_sealed_bmp(kernel32: object, path: Path) -> tuple[int, bytes]:
         size = ctypes.c_longlong()
         if not kernel32.GetFileSizeEx(handle, ctypes.byref(size)):
             raise ctypes.WinError(ctypes.get_last_error())
-        if size.value < 54 or size.value > 64 * 1024 * 1024:
-            raise ValueError("sealed BMP file length is invalid")
+        if size.value < 24 or size.value > 64 * 1024 * 1024:
+            raise ValueError("sealed image file length is invalid")
         buffer = ctypes.create_string_buffer(size.value)
         offset = 0
         while offset < size.value:
@@ -175,7 +265,7 @@ def _read_sealed_bmp(kernel32: object, path: Path) -> tuple[int, bytes]:
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
             if count.value == 0:
-                raise ValueError("sealed BMP read ended early")
+                raise ValueError("sealed image read ended early")
             offset += int(count.value)
         return int(handle), bytes(buffer.raw[: size.value])
     except BaseException:
@@ -197,17 +287,17 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
     if hashlib.sha256(raw).hexdigest() != args.sha256:
         kernel32.CloseHandle(file_handle)
         raise ValueError("screenshot SHA-256 mismatch")
-    bmp = _parse_bmp(raw)
+    bmp = _parse_owned_image(raw)
     if bmp["bitmap_pixel_sha256"] != args.pixel_sha256:
         kernel32.CloseHandle(file_handle)
-        raise ValueError("screenshot pixel digest mismatch")
+        raise ValueError("screenshot decoded pixel digest mismatch")
     if args.read_ready:
         Path(args.read_ready).write_text("sealed", encoding="utf-8")
         deadline = time.monotonic() + 20
         while not Path(args.read_release).exists():
             if time.monotonic() >= deadline:
                 kernel32.CloseHandle(file_handle)
-                raise TimeoutError("sealed BMP read barrier timed out")
+                raise TimeoutError("sealed image read barrier timed out")
             time.sleep(0.01)
 
     class BITMAPINFOHEADER(ctypes.Structure):
@@ -228,7 +318,16 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
         _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", RGBQUAD * 1)]
 
     info = BITMAPINFO()
-    ctypes.memmove(ctypes.byref(info.bmiHeader), raw[14:54], 40)
+    if bmp["image_format"] == "bmp":
+        ctypes.memmove(ctypes.byref(info.bmiHeader), raw[14:54], 40)
+    else:
+        info.bmiHeader.biSize = 40
+        info.bmiHeader.biWidth = int(bmp["width"])
+        info.bmiHeader.biHeight = int(bmp["signed_height"])
+        info.bmiHeader.biPlanes = 1
+        info.bmiHeader.biBitCount = 32
+        info.bmiHeader.biCompression = 0
+        info.bmiHeader.biSizeImage = int(bmp["pixel_bytes"])
     bits = ctypes.c_void_p()
     gdi32.CreateDIBSection.argtypes = (
         wintypes.HDC, ctypes.POINTER(BITMAPINFO), wintypes.UINT,
@@ -266,10 +365,10 @@ def _serve_bitmap(args: argparse.Namespace) -> int:
         raise ctypes.WinError(ctypes.get_last_error())
     transfer_dc = gdi32.CreateCompatibleDC(None)
     try:
-        source = ctypes.create_string_buffer(raw)
+        source = ctypes.create_string_buffer(bytes(bmp["decoded_pixel_bytes"]))
         copied = gdi32.SetDIBits(
             transfer_dc, bitmap, 0, int(bmp["height"]),
-            ctypes.c_void_p(ctypes.addressof(source) + int(bmp["pixel_offset"])),
+            ctypes.c_void_p(ctypes.addressof(source)),
             ctypes.byref(info), 0,
         )
         if copied != int(bmp["height"]):

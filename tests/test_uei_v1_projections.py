@@ -133,6 +133,37 @@ def test_uia_and_screen_parser_projection_inputs_are_immutable_and_screen_bbox_n
     assert not (_walk_keys(parser_result) & _FORBIDDEN)
 
 
+def test_uia_projection_accepts_truthful_nullable_root_automation_id(tmp_path):
+    from app.learn.recognition.uei.projections import project_uia_snapshot
+
+    context = build_context_from_sidecar(tmp_path, 'uia')
+    fixture = deepcopy(load_fixture('uia-snapshot-static.json'))
+    fixture['controls'][0]['automation_id'] = None
+
+    result = project_uia_snapshot(**context.for_case('uia'), fixture=fixture)
+
+    assert result['status'] == 'success'
+    assert result['review_only'] is True
+    assert result['items'][0]['opaque_attributes']['automation_id'] is None
+
+
+def test_uia_projection_still_rejects_non_string_non_null_automation_id(tmp_path):
+    from app.learn.recognition.uei.projections import project_uia_snapshot
+
+    context = build_context_from_sidecar(tmp_path, 'uia')
+    fixture = deepcopy(load_fixture('uia-snapshot-static.json'))
+    fixture['controls'][0]['automation_id'] = ['not', 'valid']
+
+    result = project_uia_snapshot(**context.for_case('uia'), fixture=fixture)
+    error = context.store.get(result['error_ref'], contract_version='provider_error_v1')
+
+    assert (result['status'], error['stage'], error['code']) == (
+        'failed',
+        'projection',
+        'provider_fixture_schema_invalid',
+    )
+
+
 @pytest.mark.parametrize(
     ('case', 'mutate'),
     [

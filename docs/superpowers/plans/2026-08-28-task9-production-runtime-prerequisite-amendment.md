@@ -32,11 +32,18 @@
 - Modify: `app/learn/hybrid/benchmark_v2_window_owner.py`
 - Modify: `scripts/portfolio_hybrid_v1_1_test_window_v2.py`
 - Modify: `app/learn/recognition/uei/builtin_learning_projection.py`
+- Modify: `app/learn/recognition/uei/projections.py`
 - Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py`
+- Modify: `tests/test_uei_v1_projections.py`
 
 **Interfaces:**
 
 ```python
+class BenchmarkV2ScreenGroupIterator(Iterator[Mapping[str, object]], Protocol):
+    def close(self) -> None: ...
+    def __enter__(self) -> "BenchmarkV2ScreenGroupIterator": ...
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None: ...
+
 class BenchmarkV2ProductionRuntimePort(Protocol):
     def load_provider_manifest(self, *, path: Path) -> Mapping[str, object]: ...
     def prepare_screen_groups(
@@ -46,7 +53,7 @@ class BenchmarkV2ProductionRuntimePort(Protocol):
         partition: str,
         attempt_ref: Mapping[str, object],
         attempt_dir: Path,
-    ) -> Iterable[Mapping[str, object]]: ...
+    ) -> BenchmarkV2ScreenGroupIterator: ...
 
 def get_production_benchmark_v2_runtime() -> BenchmarkV2ProductionRuntimePort: ...
 
@@ -68,6 +75,7 @@ def seal_builtin_uia_evidence(
 ```text
 validated provider manifest and corpus
 -> exact corpus PNG bytes and SHA
+-> create-only byte-identical copy under artifacts/screenshots
 -> launch exact noninteractive owned HWND
 -> capture exact UIA snapshot from that HWND
 -> seal one capture identity
@@ -78,18 +86,25 @@ validated provider manifest and corpus
 -> compose one closed Task 8 screen-group start
 ```
 
-The existing Task 4 helper must accept PNG without transcoding. It seals both original-file SHA and deterministic decoded-pixel SHA, so Task 5 receives the same path and file SHA as the corpus.
+The existing Task 4 helper must accept PNG without transcoding. The attempt-owned byte-identical copy uses the existing `app/learn/hybrid/capture.py` boundary `PROJECT_ROOT/artifacts/screenshots`; it is also the exact path displayed by Task 4 and consumed by Task 5/Task 8. It seals both original-file SHA and deterministic decoded-pixel SHA, so the copy retains the corpus SHA without weakening the capture-root boundary.
 
-- [ ] Add failing tests proving PNG launch preserves exact file SHA/pixel SHA and rejects byte tampering.
-- [ ] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py -k "png or tamper"` and confirm the expected failure.
-- [ ] Implement native PNG decode in the existing test-window helper and owner validation; retain BMP compatibility.
-- [ ] Rerun the focused window tests to green.
-- [ ] Add failing runtime tests proving 120 cases become exactly 24 groups of five, only one group is live at a time, and the two evidence parents share one capture lineage.
-- [ ] Add negative tests for empty/fabricated OCR or UIA parents, missing source, stale HWND/PID/create-time, wrong corpus SHA, and runner-facing private internals.
-- [ ] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py` and confirm the failures are caused by the absent facade/evidence function.
-- [ ] Implement the facade, real `OCRService.scan_image` projection through `seal_builtin_ocr_evidence`, exact UIA projection through `seal_builtin_uia_evidence`, and lazy group cleanup.
-- [ ] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py tests/test_learn_hybrid_capture.py`.
-- [ ] Commit `feat(benchmark-v2): prepare exact production screen groups`.
+The returned iterator is a mandatory owner context. Task 9 must consume it with `with runtime.prepare_screen_groups(...) as groups:` (or an equivalent `try/finally: groups.close()`). Exhaustion, an early `break`, and consumer exceptions must all exit that owner context before the runner retains or returns control; cleanup must not depend on garbage collection.
+If exact-owner cleanup fails transiently, the iterator remains cleanup-pending rather than closed; a subsequent `close()` retries the same runtime-owned resource and cannot advance to a second screen group.
+The runtime registers a private cleanup owner immediately after `launch_owned_window` succeeds, before OCR/UIA/bundle preparation can fail. Ready `_active` state and pending-cleanup state are distinct; admission rejects either one, and only a verified close of the matching owner token clears them.
+
+- [x] Add failing tests proving PNG launch preserves exact file SHA/pixel SHA and rejects byte tampering.
+- [x] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py -k "png or tamper"` and confirm the expected failure.
+- [x] Implement native PNG decode in the existing test-window helper and owner validation; retain BMP compatibility.
+- [x] Rerun the focused window tests to green.
+- [x] Add failing runtime tests proving 120 cases become exactly 24 groups of five, only one group is live at a time, and the two evidence parents share one capture lineage.
+- [x] Add a retained-iterator early-break test proving explicit owner-context exit closes the exact live group once.
+- [x] Add a transient cleanup failure test proving a second `close()` retries the same exact owner and records one verified cleanup.
+- [x] Add a prepare-failure plus transient-cleanup test proving the pending exact owner survives until retry and blocks a second group.
+- [x] Add negative tests for empty/fabricated OCR or UIA parents, missing source, stale HWND/PID/create-time, wrong corpus SHA, and runner-facing private internals.
+- [x] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py` and confirm the failures are caused by the absent facade/evidence function.
+- [x] Implement the facade, real `OCRService.scan_image` projection through `seal_builtin_ocr_evidence`, exact UIA projection through `seal_builtin_uia_evidence`, and lazy group cleanup.
+- [x] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py tests/test_learn_hybrid_capture.py`.
+- [x] Commit `feat(benchmark-v2): prepare exact production screen groups`.
 
 ---
 

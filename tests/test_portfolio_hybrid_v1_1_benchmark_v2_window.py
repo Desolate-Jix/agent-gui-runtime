@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import ctypes
 import json
 import os
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import psutil
 import pytest
+from PIL import Image
 
 if __name__ == "__main__":
     import site
@@ -35,6 +37,7 @@ from app.learn.hybrid.benchmark_v2_window_owner import (
     _load_root,
     _raw_hwnd_attestation,
     _parse_bmp,
+    _parse_owned_image,
     _run_uia_probe,
     _uia_identity,
     _native_handle_value,
@@ -43,9 +46,11 @@ from app.learn.hybrid.benchmark_v2_window_owner import (
     attest_bound_window,
     close_owned_window,
     launch_owned_window,
+    snapshot_owned_window,
 )
 from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes, content_sha256
 from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
+from scripts import portfolio_hybrid_v1_1_test_window_v2 as test_window_helper
 
 
 windows_only = pytest.mark.skipif(
@@ -145,6 +150,111 @@ def _bmp(path: Path, *, width: int = 96, height: int = 64) -> str:
     raw = header + pixels
     path.write_bytes(raw)
     return hashlib.sha256(raw).hexdigest()
+
+
+def _png(path: Path, *, width: int = 7, height: int = 5) -> bytes:
+    image = Image.new("RGBA", (width, height))
+    image.putdata(
+        [
+            ((x * 31) % 256, (y * 47) % 256, ((x + y) * 19) % 256, 255)
+            for y in range(height)
+            for x in range(width)
+        ]
+    )
+    image.save(path, format="PNG", optimize=False)
+    return path.read_bytes()
+
+
+def test_png_owned_window_input_preserves_exact_file_and_decoded_pixel_sha(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "owned.png"
+    raw = _png(image_path)
+    expected_pixels = Image.open(BytesIO(raw)).convert("RGBA").tobytes("raw", "BGRA")
+
+    owner_facts = _parse_owned_image(raw)
+    helper_facts = test_window_helper._parse_owned_image(raw)
+
+    assert owner_facts["image_format"] == "png"
+    assert owner_facts["raw_file_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert owner_facts["bitmap_pixel_sha256"] == hashlib.sha256(
+        expected_pixels
+    ).hexdigest()
+    assert owner_facts["dimensions"] == {"width": 7, "height": 5}
+    assert helper_facts["raw_file_sha256"] == owner_facts["raw_file_sha256"]
+    assert helper_facts["bitmap_pixel_sha256"] == owner_facts[
+        "bitmap_pixel_sha256"
+    ]
+
+
+def test_png_byte_tamper_is_rejected_before_owned_window_launch(tmp_path: Path) -> None:
+    image_path = tmp_path / "tampered.png"
+    raw = bytearray(_png(image_path))
+    idat = raw.find(b"IDAT")
+    assert idat > 8
+    raw[idat + 4] ^= 0x01
+    with pytest.raises(ValueError, match="PNG|checksum|image"):
+        _parse_owned_image(bytes(raw))
+    with pytest.raises(ValueError, match="PNG|checksum|image"):
+        test_window_helper._parse_owned_image(bytes(raw))
+
+
+def test_snapshot_owned_window_seals_exact_probe_and_attestation_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_window_owner as window_owner
+
+    owner = {
+        "owner_id": "owner-1",
+        "operation_id": "operation-1",
+        "content_sha256": "a" * 64,
+        "hwnd": 101,
+        "process_identity": {"pid": 202, "create_time_ns": 303},
+        "screenshot_sha256": "b" * 64,
+        "uia_root_identity": {"content_sha256": "c" * 64},
+    }
+    raw = {
+        "identity_sha256": "d" * 64,
+        "job_member_pids": [202],
+    }
+    snapshot = {
+        "provider": "windows_uia",
+        "provider_version": "windows_uia_provider_v1",
+        "status": "ok",
+        "window": {
+            "handle": 101,
+            "title": "Fixture",
+            "process_id": 202,
+            "process_name": "python.exe",
+            "bbox": {"x": 0, "y": 0, "w": 7, "h": 5},
+        },
+        "control_count": 1,
+        "controls": [{"control_id": "root"}],
+    }
+    probe = {"snapshot": snapshot}
+    monkeypatch.setattr(window_owner, "_WINDOWS", True)
+    monkeypatch.setattr(window_owner, "_validate_binding", lambda value: dict(value))
+    monkeypatch.setattr(window_owner, "_raw_hwnd_attestation", lambda value: dict(raw))
+    monkeypatch.setattr(window_owner, "_run_uia_probe", lambda value: dict(probe))
+    monkeypatch.setattr(
+        window_owner,
+        "_uia_identity",
+        lambda value, bound: dict(bound["uia_root_identity"]),
+    )
+
+    result = snapshot_owned_window(owner=owner)
+
+    assert result["uia_snapshot"] == snapshot
+    assert result["owner_binding_ref"] == {
+        "id": "owner-1",
+        "content_sha256": "a" * 64,
+    }
+    assert result["pre_raw_identity_sha256"] == "d" * 64
+    assert result["post_raw_identity_sha256"] == "d" * 64
+    assert result["artifact_is_authorization"] is False
+    assert result["execute_binding_enabled"] is False
+    assert result["display_only"] is True
+    assert result["content_sha256"] == content_sha256(result)
 
 
 def _assert_cleanup(receipt: dict[str, object]) -> None:

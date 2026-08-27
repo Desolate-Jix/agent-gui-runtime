@@ -1118,9 +1118,14 @@ def _validate_uia_fixture_source(fixture: object) -> dict[str, object]:
         if not isinstance(source_id, str) or not source_id or source_id in seen_source_ids:
             raise _projection_failure()
         seen_source_ids.add(source_id)
-        for field in ("name", "control_type", "automation_id", "class_name"):
+        for field in ("name", "control_type", "class_name"):
             if not isinstance(control.get(field), str) or not control[field]:
                 raise _projection_failure()
+        automation_id = control.get("automation_id")
+        if automation_id is not None and (
+            not isinstance(automation_id, str) or not automation_id
+        ):
+            raise _projection_failure()
         if not isinstance(control.get("enabled"), bool) or not isinstance(control.get("visible"), bool):
             raise _projection_failure()
         patterns = control.get("patterns")
