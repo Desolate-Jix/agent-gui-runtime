@@ -72,19 +72,21 @@ def _operation_ref(
     status: str,
     revision: int,
     predecessor: Mapping[str, object] | None,
+    run_id: str | None = None,
 ) -> dict[str, object]:
+    operation_run_id = run_id or str(window_binding["run_id"])
     return incumbent.compose_benchmark_v2_workflow_service_operation_ref(
         mode=mode,
-        run_id=str(window_binding["run_id"]),
+        run_id=operation_run_id,
         stage=str(window_binding["stage"]),
         operation_id=operation_id,
         workflow_state_ref={
-            "run_id": str(window_binding["run_id"]),
+            "run_id": operation_run_id,
             "revision": revision,
             "content_sha256": f"{revision % 10}" * 64,
         },
         stage_execution_ref={
-            "run_id": str(window_binding["run_id"]),
+            "run_id": operation_run_id,
             "stage": str(window_binding["stage"]),
             "operation_id": operation_id,
             "revision": revision,
@@ -146,6 +148,86 @@ def _step(
             "provider_cleanup_ref": (projection or {}).get("provider_cleanup_ref"),
         },
     )
+
+
+def test_incumbent_child_identity_keeps_parent_window_capture_and_case_authority() -> None:
+    binding = _window_binding()
+    request_ref = _identity("case-child")
+    child = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id="incumbent-child-operation",
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=_sealed_parent("incumbent-child-worker"),
+        status="pending",
+        revision=1,
+        predecessor=None,
+        run_id="incumbent-child-run",
+    )
+    step = _step(child, task_kind="vision_observe_screen")
+
+    assert actual._validated_service_step(
+        step,
+        expected_mode="incumbent_qwen_only",
+        binding=binding,
+        request_ref=request_ref,
+        expected_run_id=None,
+        expected_operation_id=None,
+        predecessor_step=None,
+    ) == step
+
+
+@pytest.mark.parametrize("fault", ("window", "capture", "request", "child_switch"))
+def test_incumbent_child_lineage_drift_is_rejected(fault: str) -> None:
+    binding = _window_binding()
+    request_ref = _identity("case-child")
+    child = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id="incumbent-child-operation",
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=_sealed_parent("incumbent-child-worker"),
+        status="pending",
+        revision=1,
+        predecessor=None,
+        run_id="incumbent-child-run",
+    )
+    predecessor = _step(child, task_kind="vision_observe_screen")
+    changed_binding = deepcopy(binding)
+    changed_request = request_ref
+    next_run_id = str(child["run_id"])
+    next_operation_id = str(child["operation_id"])
+    if fault == "window":
+        changed_binding["window_binding_ref"] = _identity("other-window")
+    elif fault == "capture":
+        changed_binding["capture_ref"] = _identity("other-capture")
+    elif fault == "request":
+        changed_request = _identity("other-case")
+    else:
+        next_run_id = "different-child-run"
+        next_operation_id = "different-child-operation"
+    successor = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id=next_operation_id,
+        request_ref=changed_request,
+        window_binding=changed_binding,
+        worker_ref=child["worker_ref"],
+        status="advanced",
+        revision=2,
+        predecessor=child,
+        run_id=next_run_id,
+    )
+
+    with pytest.raises(ValueError, match="window|capture|request|identity|stale"):
+        actual._validated_service_step(
+            _step(successor, task_kind="vision_observe_screen"),
+            expected_mode="incumbent_qwen_only",
+            binding=binding,
+            request_ref=request_ref,
+            expected_run_id=str(child["run_id"]),
+            expected_operation_id=str(child["operation_id"]),
+            predecessor_step=predecessor,
+        )
 
 
 class _FakeWorkflowService:
@@ -352,6 +434,7 @@ class _FakeWorkflowService:
             status="pending",
             revision=30 + self.incumbent_start_calls,
             predecessor=None,
+            run_id=f"incumbent-run-{case_id}",
         )
         self._incumbent[case_id] = {
             "case_ref": deepcopy(dict(provider_case_ref)),
@@ -381,6 +464,7 @@ class _FakeWorkflowService:
             status="advanced",
             revision=int(operation_ref["workflow_state_ref"]["revision"]),
             predecessor=None,
+            run_id=str(operation_ref["run_id"]),
         )
         state["current"] = deepcopy(advanced)
         self.active_ops[case_id] = deepcopy(advanced)
@@ -411,6 +495,7 @@ class _FakeWorkflowService:
             status="complete",
             revision=int(operation_ref["workflow_state_ref"]["revision"]) + 1,
             predecessor=operation_ref,
+            run_id=str(operation_ref["run_id"]),
         )
         projection = _projection(
             mode="incumbent_qwen_only",

@@ -204,6 +204,7 @@ def _run_hybrid(
         expected_mode="hybrid_v1_1",
         binding=binding,
         request_ref=group["request_ref"],
+        expected_run_id=None,
         expected_operation_id=None,
         predecessor_step=None,
     )
@@ -234,6 +235,7 @@ def _run_hybrid(
             expected_mode="hybrid_v1_1",
             binding=binding,
             request_ref=group["request_ref"],
+            expected_run_id=str(step["operation_ref"]["run_id"]),
             expected_operation_id=operation_id,
             predecessor_step=previous_step,
         )
@@ -263,6 +265,7 @@ def _run_incumbent(
         expected_mode="incumbent_qwen_only",
         binding=binding,
         request_ref=expected_request_ref,
+        expected_run_id=None,
         expected_operation_id=None,
         predecessor_step=None,
     )
@@ -294,6 +297,7 @@ def _run_incumbent(
                 expected_mode="incumbent_qwen_only",
                 binding=binding,
                 request_ref=consumed["request_ref"],
+                expected_run_id=str(consumed["run_id"]),
                 expected_operation_id=operation_id,
                 predecessor_step=previous_step,
             )
@@ -317,6 +321,7 @@ def _run_incumbent(
                 expected_mode="incumbent_qwen_only",
                 binding=binding,
                 request_ref=consumed["request_ref"],
+                expected_run_id=str(consumed["run_id"]),
                 expected_operation_id=operation_id,
                 predecessor_step=previous_step,
             )
@@ -333,6 +338,7 @@ def _validated_service_step(
     expected_mode: str,
     binding: Mapping[str, object],
     request_ref: Mapping[str, object] | None,
+    expected_run_id: str | None,
     expected_operation_id: str | None,
     predecessor_step: Mapping[str, object] | None,
 ) -> dict[str, Any]:
@@ -340,17 +346,19 @@ def _validated_service_step(
     operation = step["operation_ref"]
     if step["mode"] != expected_mode:
         raise ValueError("benchmark service step mode is stale")
-    for name in ("run_id", "stage"):
-        if operation[name] != binding[name]:
-            raise ValueError(f"benchmark service step {name} is stale")
+    if operation["stage"] != binding["stage"]:
+        raise ValueError("benchmark service step stage is stale")
     if operation["window_binding_ref"] != binding["window_binding_ref"]:
         raise ValueError("benchmark service step window binding is stale")
     if operation["capture_ref"] != binding["capture_ref"]:
         raise ValueError("benchmark service step capture ref is stale")
-    if expected_mode == "hybrid_v1_1" and operation["operation_id"] != binding[
-        "operation_id"
-    ]:
+    if expected_mode == "hybrid_v1_1" and (
+        operation["run_id"] != binding["run_id"]
+        or operation["operation_id"] != binding["operation_id"]
+    ):
         raise ValueError("benchmark Hybrid operation identity is stale")
+    if expected_run_id is not None and operation["run_id"] != expected_run_id:
+        raise ValueError("benchmark service successor run identity is stale")
     if (
         expected_operation_id is not None
         and operation["operation_id"] != expected_operation_id
