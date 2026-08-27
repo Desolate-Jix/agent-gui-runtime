@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
@@ -71,6 +71,7 @@ class LearningWorkflowServiceComposition:
     benchmark_supervision_root: object | None
     provider_case_resolver: object | None
     benchmark_v2_worker_binding_resolver: object | None = None
+    _factory_mint: object | None = field(default=None, repr=False, compare=False)
 
 
 class _LearningWorkflowRegistryOwner:
@@ -114,6 +115,9 @@ class _LearningWorkflowRegistryOwner:
     def launch_benchmark_worker(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.launch_prepared_benchmark_worker(**kwargs)
 
+    def recover_benchmark_launch(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.recover_launching_benchmark_worker(**kwargs)
+
     def inspect_benchmark_result(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.inspect_completed_result_identity(**kwargs)
 
@@ -122,6 +126,9 @@ class _LearningWorkflowRegistryOwner:
 
     def observe_benchmark_cleanup(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.observe_benchmark_worker_cleanup(**kwargs)
+
+    def verify_benchmark_cleanup(self, **kwargs: Any) -> dict[str, Any]:
+        return self._registry.verify_benchmark_worker_cleanup_receipt(**kwargs)
 
     def reconcile_benchmark_provider(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.reconcile_benchmark_provider_cleanup(**kwargs)
@@ -138,6 +145,43 @@ _PRODUCTION_LEARNING_WORKFLOW_SERVICE_COMPOSITION: (
     LearningWorkflowServiceComposition | None
 ) = None
 _DEFAULT_TEST_WORKER_BINDING_RESOLVER = object()
+_LEARNING_WORKFLOW_SERVICE_COMPOSITION_MINT = object()
+
+
+@dataclass(frozen=True)
+class _LearningWorkflowServiceCompositionMint:
+    secret: object
+    store: object
+    worker_registry: object
+    project_root: Path
+    composition_kind: str
+    benchmark_supervision_root: object | None
+    provider_case_resolver: object | None
+    benchmark_v2_worker_binding_resolver: object | None
+
+
+def _require_minted_learning_workflow_service_composition(
+    composition: object,
+) -> LearningWorkflowServiceComposition:
+    mint = getattr(composition, "_factory_mint", None)
+    if (
+        not isinstance(composition, LearningWorkflowServiceComposition)
+        or not isinstance(mint, _LearningWorkflowServiceCompositionMint)
+        or mint.secret is not _LEARNING_WORKFLOW_SERVICE_COMPOSITION_MINT
+        or mint.store is not composition.store
+        or mint.worker_registry is not composition.worker_registry
+        or mint.project_root != composition.project_root
+        or mint.composition_kind != composition.composition_kind
+        or mint.benchmark_supervision_root
+        is not composition.benchmark_supervision_root
+        or mint.provider_case_resolver is not composition.provider_case_resolver
+        or mint.benchmark_v2_worker_binding_resolver
+        is not composition.benchmark_v2_worker_binding_resolver
+    ):
+        raise LearningWorkflowStageOperationError(
+            "learning workflow service composition must be factory-minted"
+        )
+    return composition
 
 
 def get_learning_workflow_operation_lock(
@@ -221,14 +265,60 @@ def _validate_learning_workflow_service_composition(
             project_root=root,
             composition_kind=composition_kind,
         )
-    return LearningWorkflowServiceComposition(
+    resolved_root = Path(root)
+    mint = _LearningWorkflowServiceCompositionMint(
+        secret=_LEARNING_WORKFLOW_SERVICE_COMPOSITION_MINT,
         store=store,
         worker_registry=worker_registry,
-        project_root=root,
+        project_root=resolved_root,
         composition_kind=composition_kind,
         benchmark_supervision_root=benchmark_supervision_root,
         provider_case_resolver=provider_case_resolver,
         benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
+    )
+    return LearningWorkflowServiceComposition(
+        store=store,
+        worker_registry=worker_registry,
+        project_root=resolved_root,
+        composition_kind=composition_kind,
+        benchmark_supervision_root=benchmark_supervision_root,
+        provider_case_resolver=provider_case_resolver,
+        benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
+        _factory_mint=mint,
+    )
+
+
+def compose_test_learning_workflow_service_unit(
+    *,
+    store: object,
+    worker_registry: object,
+    project_root: str | Path,
+    benchmark_supervision_root: object | None = None,
+    provider_case_resolver: object | None = None,
+    benchmark_v2_worker_binding_resolver: object | None = None,
+) -> LearningWorkflowServiceComposition:
+    """仅供隔离单元测试的显式 factory seam；mint 仍绑定全部 exact component。"""
+
+    root = Path(project_root).resolve()
+    mint = _LearningWorkflowServiceCompositionMint(
+        secret=_LEARNING_WORKFLOW_SERVICE_COMPOSITION_MINT,
+        store=store,
+        worker_registry=worker_registry,
+        project_root=root,
+        composition_kind="test",
+        benchmark_supervision_root=benchmark_supervision_root,
+        provider_case_resolver=provider_case_resolver,
+        benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
+    )
+    return LearningWorkflowServiceComposition(
+        store=store,
+        worker_registry=worker_registry,
+        project_root=root,
+        composition_kind="test",
+        benchmark_supervision_root=benchmark_supervision_root,
+        provider_case_resolver=provider_case_resolver,
+        benchmark_v2_worker_binding_resolver=benchmark_v2_worker_binding_resolver,
+        _factory_mint=mint,
     )
 
 
@@ -1406,11 +1496,115 @@ def _inspect_benchmark_v2_launch_owner(
             raise LearningWorkflowStageOperationError(
                 "benchmark_v2 incumbent B1 actual supervision differs"
             )
+        if require_assignment and (
+            owner.get("reservation_state") != "launched"
+            or owner.get("owner_phase")
+            not in {"gate_released", "cleanup_finalization_intent"}
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 launch is not gate-released"
+            )
     else:
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent B1 assignment state is invalid"
         )
     return owner
+
+
+def _validate_benchmark_v2_launch_recovery_parent(
+    *,
+    recovery: object,
+    operation: Mapping[str, object],
+    root: object,
+) -> dict[str, Any]:
+    projection = _benchmark_v2_sealed_mapping(
+        recovery, "benchmark_v2 incumbent B1 launch recovery"
+    )
+    exact_fields = {
+        "contract_version",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "execution_nonce",
+        "reservation_ref",
+        "current_reservation_ref",
+        "operation_anchor_ref",
+        "expected_supervision_ref",
+        "supervision_ref",
+        "reservation_state",
+        "owner_phase",
+        "assignment_state",
+        "process_identity",
+        "scope_name",
+        "assignment_proven_ref",
+        "gate_release_performed",
+        "spawn_retry",
+        "cleanup_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    worker = operation["worker_ref"]
+    if (
+        set(projection) != exact_fields
+        or projection.get("contract_version")
+        != "benchmark_worker_launch_recovery_v1"
+        or projection.get("outcome")
+        not in {"recovered_gate_released", "verified_cleanup_safe_stop"}
+        or projection.get("authority_kind") != root.authority_kind
+        or any(
+            projection.get(field) != operation[field]
+            for field in ("run_id", "stage", "operation_id", "execution_nonce")
+        )
+        or any(
+            projection.get(field) != worker[field]
+            for field in ("worker_id", "model_request_id", "payload_sha256")
+        )
+        or projection.get("reservation_ref") != operation["reservation_ref"]
+        or projection.get("operation_anchor_ref")
+        != operation["operation_anchor_ref"]
+        or projection.get("expected_supervision_ref")
+        != operation["expected_supervision_ref"]
+        or projection.get("spawn_retry") is not False
+        or projection.get("artifact_is_authorization") is not False
+        or projection.get("execute_binding_enabled") is not False
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 launch recovery lineage differs"
+        )
+    if projection["outcome"] == "recovered_gate_released":
+        if (
+            projection.get("reservation_state") != "launched"
+            or projection.get("owner_phase") != "gate_released"
+            or projection.get("assignment_state") != "proven"
+            or any(
+                projection.get(field) is None
+                for field in (
+                    "supervision_ref",
+                    "process_identity",
+                    "scope_name",
+                    "assignment_proven_ref",
+                )
+            )
+            or projection.get("cleanup_ref") is not None
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent B1 launch recovery is incomplete"
+            )
+    elif (
+        projection.get("reservation_state") != "launching"
+        or not isinstance(projection.get("cleanup_ref"), Mapping)
+        or set(projection["cleanup_ref"]) != {"content_sha256"}
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent B1 launch cleanup is incomplete"
+        )
+    return projection
 
 
 def _resolve_benchmark_v2_result_binding(
@@ -1788,6 +1982,7 @@ def _start_benchmark_v2_incumbent_operation(
     task_kind: str,
     request: Mapping[str, object],
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         compose_benchmark_v2_incumbent_operation,
         transition_benchmark_v2_incumbent_operation,
@@ -2089,6 +2284,36 @@ def _start_benchmark_v2_incumbent_operation(
                         supervision_root=root,
                     )
                 elif reservation_state in {"launching", "launched"}:
+                    recovery = _validate_benchmark_v2_launch_recovery_parent(
+                        recovery=registry.recover_benchmark_launch(
+                            worker_id=operation["worker_ref"]["worker_id"],
+                            run_id=run_id,
+                            stage=stage,
+                            operation_id=operation_id,
+                            reservation_ref=operation["reservation_ref"],
+                            expected_operation_anchor=anchor,
+                            supervision_root=root,
+                        ),
+                        operation=operation,
+                        root=root,
+                    )
+                    if recovery["outcome"] == "verified_cleanup_safe_stop":
+                        operation = transition_benchmark_v2_incumbent_operation(
+                            operation,
+                            to_phase="safe_stopped",
+                            changes={"worker_cleanup_ref": recovery},
+                        )
+                        _persist_benchmark_v2_incumbent_operation(
+                            composition=composition,
+                            workflow_state=current,
+                            stage=stage,
+                            operation=operation,
+                        )
+                        return {
+                            "contract_version": "benchmark_v2_incumbent_resume_v1",
+                            "status": "safe_stopped",
+                            "operation": deepcopy(operation),
+                        }
                     started = registry.worker_status(
                         worker_id=operation["worker_ref"]["worker_id"],
                         run_id=run_id,
@@ -2209,6 +2434,48 @@ def _rebuild_benchmark_v2_window_adoption(
         ) from error
 
 
+def _recover_or_resume_benchmark_v2_incumbent_operation(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    operation_id: str,
+    worker_id: str | None = None,
+) -> dict[str, Any]:
+    """预结果阶段从 durable source 恢复，结果阶段才要求 A first-snapshot。"""
+
+    current = composition.store.get(run_id)
+    operation = _benchmark_v2_incumbent_operation_from_state(current, stage)
+    if operation is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent operation is missing"
+        )
+    if operation["phase"] in {
+        "prepared",
+        "provider_owner_prepared",
+        "worker_starting",
+    }:
+        request, _anchor = _benchmark_v2_sidecars(current, stage)
+        return _start_benchmark_v2_incumbent_operation(
+            composition=composition,
+            run_id=run_id,
+            expected_revision=expected_revision,
+            stage=stage,
+            operation_id=operation_id,
+            task_kind="vision_observe_screen",
+            request=request,
+        )
+    return _resume_benchmark_v2_incumbent_operation(
+        composition=composition,
+        run_id=run_id,
+        expected_revision=expected_revision,
+        stage=stage,
+        operation_id=operation_id,
+        worker_id=worker_id,
+    )
+
+
 def _resume_benchmark_v2_incumbent_operation(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -2218,6 +2485,7 @@ def _resume_benchmark_v2_incumbent_operation(
     operation_id: str,
     worker_id: str | None = None,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         compose_benchmark_v2_incumbent_terminal_intent,
         compose_benchmark_v2_incumbent_terminal_receipt,
@@ -2313,8 +2581,17 @@ def _resume_benchmark_v2_incumbent_operation(
                         expected_operation_anchor=anchor,
                         supervision_root=root,
                     )
+                verified_worker_cleanup = registry.verify_benchmark_cleanup(
+                    worker_id=expected_worker_id,
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
+                    receipt=observed_worker_cleanup,
+                    expected_operation_anchor=anchor,
+                    supervision_root=root,
+                )
                 worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
-                    cleanup=observed_worker_cleanup,
+                    cleanup=verified_worker_cleanup,
                     operation=operation,
                     launch_owner=launch_owner,
                     allowed_outcomes={"verified_exact_worker_exited"},
@@ -2327,7 +2604,7 @@ def _resume_benchmark_v2_incumbent_operation(
                             operation=operation,
                             anchor=anchor,
                             root=root,
-                            require_assignment=True,
+                            require_assignment=False,
                         ),
                     )
                 provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
@@ -2482,6 +2759,7 @@ def _cancel_benchmark_v2_incumbent_operation(
     operation_id: str,
     reason: str,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         advance_benchmark_v2_incumbent_cancel_cleanup,
         compose_benchmark_v2_incumbent_cancel_intent,
@@ -2632,8 +2910,17 @@ def _cancel_benchmark_v2_incumbent_operation(
                     expected_operation_anchor=anchor,
                     supervision_root=root,
                 )
+            verified_worker_cleanup = registry.verify_benchmark_cleanup(
+                worker_id=operation["worker_ref"]["worker_id"],
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
+                receipt=observed_worker_cleanup,
+                expected_operation_anchor=anchor,
+                supervision_root=root,
+            )
             worker_cleanup = _validate_benchmark_v2_worker_cleanup_parent(
-                cleanup=observed_worker_cleanup,
+                cleanup=verified_worker_cleanup,
                 operation=operation,
                 launch_owner=launch_owner,
                 allowed_outcomes={
@@ -2650,9 +2937,7 @@ def _cancel_benchmark_v2_incumbent_operation(
                         operation=operation,
                         anchor=anchor,
                         root=root,
-                        require_assignment=(
-                            launch_owner["assignment_state"] == "proven"
-                        ),
+                        require_assignment=False,
                     ),
                 )
             provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
@@ -2755,6 +3040,7 @@ def start_guarded_learning_stage_worker(
     payload: Mapping[str, object],
     reuse_active_identical: bool = False,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     if _has_benchmark_v2_incumbent_marker(payload):
         if (
             composition.benchmark_supervision_root is None
@@ -2837,6 +3123,7 @@ def status_guarded_learning_stage_worker(
     run_id: str,
     operation_id: str,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     return _LearningWorkflowRegistryOwner(
         composition.worker_registry
     ).worker_status(
@@ -2855,6 +3142,7 @@ def adopt_guarded_learning_stage_worker_result(
     stage: str,
     operation_id: str,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     stage_execution = require_active_learning_workflow_stage_operation(
         store=composition.store,
         run_id=run_id,
@@ -2864,7 +3152,7 @@ def adopt_guarded_learning_stage_worker_result(
     )
     if _has_benchmark_v2_incumbent_marker(stage_execution):
         return _call_benchmark_v2_operation(
-            lambda: _resume_benchmark_v2_incumbent_operation(
+            lambda: _recover_or_resume_benchmark_v2_incumbent_operation(
                 composition=composition,
                 run_id=run_id,
                 expected_revision=expected_revision,
@@ -2893,13 +3181,14 @@ def continue_guarded_learning_stage_worker_result(
     worker_id: str,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     store_get = getattr(composition.store, "get", None)
     current = store_get(run_id) if callable(store_get) else None
     if isinstance(current, Mapping) and (
         _benchmark_v2_incumbent_operation_from_state(current, stage) is not None
     ):
         return _call_benchmark_v2_operation(
-            lambda: _resume_benchmark_v2_incumbent_operation(
+            lambda: _recover_or_resume_benchmark_v2_incumbent_operation(
                 composition=composition,
                 run_id=run_id,
                 expected_revision=expected_revision,
@@ -2932,6 +3221,7 @@ def cancel_guarded_learning_workflow_stage_operation(
     reason: str,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     stage_execution = require_active_learning_workflow_stage_operation(
         store=composition.store,
         run_id=run_id,
@@ -2998,6 +3288,7 @@ def heartbeat_guarded_learning_workflow_stage_operation(
     lease_seconds: int = 600,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     store_get = getattr(composition.store, "get", None)
     current = store_get(run_id) if callable(store_get) else None
     if isinstance(current, Mapping):
@@ -3031,6 +3322,7 @@ def finish_guarded_learning_workflow_stage_operation(
     evidence_refs: Mapping[str, object] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     store_get = getattr(composition.store, "get", None)
     current = store_get(run_id) if callable(store_get) else None
     if isinstance(current, Mapping) and (
@@ -3038,7 +3330,7 @@ def finish_guarded_learning_workflow_stage_operation(
     ):
         if outcome == "completed":
             return _call_benchmark_v2_operation(
-                lambda: _resume_benchmark_v2_incumbent_operation(
+                lambda: _recover_or_resume_benchmark_v2_incumbent_operation(
                     composition=composition,
                     run_id=run_id,
                     expected_revision=expected_revision,
@@ -3082,6 +3374,7 @@ def recover_guarded_learning_workflow_stage_operation(
     expected_revision: int,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     store_get = getattr(composition.store, "get", None)
     current = store_get(run_id) if callable(store_get) else None
     stage = str(current.get("current_stage") or "") if isinstance(current, Mapping) else ""
@@ -3092,7 +3385,7 @@ def recover_guarded_learning_workflow_stage_operation(
     )
     if operation is not None:
         return _call_benchmark_v2_operation(
-            lambda: _resume_benchmark_v2_incumbent_operation(
+            lambda: _recover_or_resume_benchmark_v2_incumbent_operation(
                 composition=composition,
                 run_id=run_id,
                 expected_revision=expected_revision,
@@ -3116,6 +3409,7 @@ def project_guarded_learning_workflow_runtime_attachment(
     composition: LearningWorkflowServiceComposition,
     workflow_state: Mapping[str, object],
 ) -> dict[str, Any]:
+    _require_minted_learning_workflow_service_composition(composition)
     return project_learning_workflow_runtime_attachment(
         workflow_state=deepcopy(dict(workflow_state)),
         worker_registry=composition.worker_registry,

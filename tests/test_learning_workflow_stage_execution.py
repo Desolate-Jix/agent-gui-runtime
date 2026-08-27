@@ -3511,11 +3511,10 @@ def test_guarded_start_status_adopt_preserve_order_values_and_compensation(
             return {"status": "cancelled"}
 
     registry = _Registry()
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=object(),
         worker_registry=registry,
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=None,
         provider_case_resolver=None,
     )
@@ -3607,11 +3606,10 @@ def test_guarded_benchmark_start_fails_closed_before_registry_start(
             calls.append("start")
             raise AssertionError("benchmark C2 must not reach generic Registry.start")
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=object(),
         worker_registry=_Registry(),
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=None,
         provider_case_resolver=None,
     )
@@ -3664,11 +3662,10 @@ def test_guarded_remaining_wrappers_delegate_deep_equal_and_cancel_once(
             events.append("registry.attachment")
             return None
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=object(),
         worker_registry=_Registry(),
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=None,
         provider_case_resolver=None,
     )
@@ -3781,9 +3778,9 @@ def test_guarded_nonbenchmark_probe_reuses_the_only_store_read(
             calls.append("store.get")
             return current
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=object(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=None,
+benchmark_supervision_root=None,
         provider_case_resolver=None,
     )
     monkeypatch.setattr(
@@ -3811,14 +3808,14 @@ def test_guarded_benchmark_internal_value_error_maps_to_stage_operation_error(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=object(), worker_registry=object(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
+        benchmark_supervision_root=object(),
         provider_case_resolver=object(),
     )
     monkeypatch.setattr(
         workflow_service,
-        "_resume_benchmark_v2_incumbent_operation",
+        "_recover_or_resume_benchmark_v2_incumbent_operation",
         lambda **_kwargs: (_ for _ in ()).throw(ValueError("invalid closed parent")),
     )
     monkeypatch.setattr(

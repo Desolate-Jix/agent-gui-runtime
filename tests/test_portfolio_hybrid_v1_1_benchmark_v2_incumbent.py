@@ -18,6 +18,11 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class _UnitCleanupReceiptAuthority:
+    def verify_benchmark_worker_cleanup_receipt(self, **kwargs):
+        return deepcopy(kwargs["receipt"])
 PARENT_MANIFEST = (
     PROJECT_ROOT
     / "tests"
@@ -780,6 +785,67 @@ def test_composition_rejects_cross_pair_before_store_or_registry_mutation(
     other_store.close()
 
 
+def test_guarded_entry_rejects_direct_unminted_composition_before_registry_use(
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_service
+
+    calls: list[str] = []
+
+    class _Registry(_UnitCleanupReceiptAuthority):
+        def status(self, **_kwargs):
+            calls.append("status")
+            raise AssertionError("unminted composition reached Registry")
+
+    composition = workflow_service.LearningWorkflowServiceComposition(
+        store=object(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        composition_kind="test",
+        benchmark_supervision_root=None,
+        provider_case_resolver=None,
+    )
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="factory-minted",
+    ):
+        workflow_service.status_guarded_learning_stage_worker(
+            composition=composition,
+            worker_id="worker-unminted",
+            run_id="run-unminted",
+            operation_id="operation-unminted",
+        )
+    assert calls == []
+
+
+def test_guarded_entry_rejects_component_substitution_on_a_factory_mint(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+    from app.learn import workflow_service
+
+    class _Registry(_UnitCleanupReceiptAuthority):
+        def status(self, **_kwargs):
+            return {"status": "running"}
+
+    minted = workflow_service.compose_test_learning_workflow_service_unit(
+        store=object(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+    )
+    substituted = replace(minted, worker_registry=_Registry())
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="factory-minted",
+    ):
+        workflow_service.status_guarded_learning_stage_worker(
+            composition=substituted,
+            worker_id="worker-substituted",
+            run_id="run-substituted",
+            operation_id="operation-substituted",
+        )
+
+
 def test_operation_lock_key_is_exact_and_shared(tmp_path: Path) -> None:
     from app.learn.workflow_service import get_learning_workflow_operation_lock
     from app.learn.workflow_store import LearningWorkflowRunStore
@@ -843,16 +909,15 @@ def test_benchmark_v2_c3_start_routes_before_generic_registry(
 
     events: list[str] = []
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def start(self, **_kwargs):
             events.append("generic.start")
             raise AssertionError("benchmark start reached generic Registry.start")
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=object(),
         worker_registry=_Registry(),
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=object(),
         provider_case_resolver=object(),
     )
@@ -918,25 +983,24 @@ def test_benchmark_v2_c3_continue_cancel_and_recover_route_one_resume_path(
         def get(self, _run_id):
             return deepcopy(state)
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def read_adopted_result(self, **_kwargs):
             raise AssertionError("benchmark continue reached generic adopted-result reader")
 
         def cancel_by_operation(self, **_kwargs):
             raise AssertionError("benchmark cancel reached generic Registry.cancel")
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(),
         worker_registry=_Registry(),
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=object(),
         provider_case_resolver=object(),
     )
     events: list[str] = []
     monkeypatch.setattr(
         workflow_service,
-        "_resume_benchmark_v2_incumbent_operation",
+        "_recover_or_resume_benchmark_v2_incumbent_operation",
         lambda **_kwargs: events.append("resume") or {"status": "complete"},
     )
     monkeypatch.setattr(
@@ -980,7 +1044,7 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
 ) -> None:
     from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
     from app.learn.workflow_service import (
-        LearningWorkflowServiceComposition,
+        compose_test_learning_workflow_service_unit,
         start_guarded_learning_stage_worker,
         start_learning_workflow_stage_operation,
     )
@@ -994,7 +1058,7 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
     case = resolver.resolve(case_ref)
     binding, image_sha = _binding_for_case(tmp_path, case, operation_id)
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def __init__(self) -> None:
             self.reservation = None
             self.anchored = None
@@ -1273,11 +1337,10 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
             stage="screen_understanding",
             operation_id=operation_id,
         )
-        composition = LearningWorkflowServiceComposition(
+        composition = compose_test_learning_workflow_service_unit(
             store=store,
             worker_registry=registry,
             project_root=tmp_path,
-            composition_kind="test",
             benchmark_supervision_root=root,
             provider_case_resolver=resolver,
             benchmark_v2_worker_binding_resolver=object(),
@@ -1808,9 +1871,8 @@ def test_resume_rejects_wrong_operation_identity_before_sidecar_or_registry(
         def get(self, _run_id):
             return {"revision": 7}
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=object(), project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=type(
             "_Root", (), {"authority_kind": "test"}
         )(),
@@ -1845,15 +1907,21 @@ def test_resume_rejects_wrong_operation_identity_before_sidecar_or_registry(
 
 
 @pytest.mark.parametrize(
-    ("reservation_state", "expected_launches"),
-    [("anchored", 1), ("launched", 0)],
+    ("recovery_case", "expected_launches", "expected_phase"),
+    [
+        ("anchored", 1, "worker_bound"),
+        ("launching", 0, "worker_bound"),
+        ("launching_cleanup", 0, "safe_stopped"),
+        ("launched", 0, "worker_bound"),
+    ],
 )
 def test_worker_starting_restart_reuses_the_same_reservation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     source_bundle: dict[str, object],
-    reservation_state: str,
+    recovery_case: str,
     expected_launches: int,
+    expected_phase: str,
 ) -> None:
     from contextlib import nullcontext
     from app.learn import workflow_service
@@ -1875,6 +1943,10 @@ def test_worker_starting_restart_reuses_the_same_reservation(
     stage = operation["stage"]
     operation_id = operation["operation_id"]
     launches: list[dict[str, object]] = []
+    recoveries: list[dict[str, object]] = []
+    reservation_state = (
+        "launching" if recovery_case == "launching_cleanup" else recovery_case
+    )
     closed_request = {
         "provider_case_ref": deepcopy(
             operation["handler_payload_source"]["provider_case_ref"]
@@ -1887,7 +1959,7 @@ def test_worker_starting_restart_reuses_the_same_reservation(
         def get(self, _run_id):
             return {"revision": 9}
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_prepared_benchmark_worker_identity(self, **_kwargs):
             return {
                 "reservation_state": reservation_state,
@@ -1903,8 +1975,53 @@ def test_worker_starting_restart_reuses_the_same_reservation(
             return {"worker_id": operation["worker_ref"]["worker_id"], "status": "running"}
 
         def status(self, **_kwargs):
-            assert reservation_state == "launched"
+            assert reservation_state in {"launching", "launched"}
             return {"worker_id": operation["worker_ref"]["worker_id"], "status": "running"}
+
+        def recover_launching_benchmark_worker(self, **kwargs):
+            recoveries.append(deepcopy(kwargs))
+            owner = self.inspect_benchmark_worker_launch_owner()
+            if recovery_case == "launching_cleanup":
+                owner = {
+                    **owner,
+                    "reservation_state": "launching",
+                    "owner_phase": "acquiring",
+                    "assignment_state": "not_proven",
+                    "process_identity": None,
+                    "scope_name": None,
+                    "assignment_proven_ref": None,
+                }
+            return seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_launch_recovery_v1",
+                    "outcome": (
+                        "verified_cleanup_safe_stop"
+                        if recovery_case == "launching_cleanup"
+                        else "recovered_gate_released"
+                    ),
+                    **{
+                        field: deepcopy(owner[field])
+                        for field in (
+                            "authority_kind", "run_id", "stage", "operation_id",
+                            "worker_id", "model_request_id", "payload_sha256",
+                            "execution_nonce", "reservation_ref",
+                            "current_reservation_ref", "operation_anchor_ref",
+                            "expected_supervision_ref", "supervision_ref",
+                            "reservation_state", "owner_phase", "assignment_state",
+                            "process_identity", "scope_name", "assignment_proven_ref",
+                        )
+                    },
+                    "gate_release_performed": False,
+                    "spawn_retry": False,
+                    "cleanup_ref": (
+                        {"content_sha256": "7" * 64}
+                        if recovery_case == "launching_cleanup"
+                        else None
+                    ),
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
 
         def inspect_benchmark_worker_launch_owner(self, **_kwargs):
             return seal_immutable(
@@ -1936,9 +2053,8 @@ def test_worker_starting_restart_reuses_the_same_reservation(
                 }
             )
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=type(
             "_Root", (), {"authority_kind": "test"}
         )(),
@@ -1990,9 +2106,13 @@ def test_worker_starting_restart_reuses_the_same_reservation(
         stage=stage, operation_id=operation_id, task_kind="vision_observe_screen",
         request=closed_request,
     )
-    assert result["worker_id"] == operation["worker_ref"]["worker_id"]
+    if expected_phase == "worker_bound":
+        assert result["worker_id"] == operation["worker_ref"]["worker_id"]
+    else:
+        assert result["status"] == "safe_stopped"
     assert len(launches) == expected_launches
-    assert persisted[-1]["phase"] == "worker_bound"
+    assert len(recoveries) == (0 if recovery_case == "anchored" else 1)
+    assert persisted[-1]["phase"] == expected_phase
 
 
 def test_incumbent_request_accepts_only_closed_selectors_and_uses_task5_resolver(
@@ -2041,11 +2161,10 @@ def test_incumbent_request_accepts_only_closed_selectors_and_uses_task5_resolver
         "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
         resolve_binding,
     )
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=store,
         worker_registry=registry,
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=root,
         provider_case_resolver=provider_resolver,
         benchmark_v2_worker_binding_resolver=object(),
@@ -2150,7 +2269,7 @@ def test_result_ready_rejects_same_identity_a_remint_before_intent_or_cleanup(
         def get(self, _run_id):
             return {"revision": operation["current_document_revision"]}
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_completed_result_identity(self, **_kwargs):
             events.append("inspect_a")
             return deepcopy(reminted)
@@ -2163,11 +2282,10 @@ def test_result_ready_rejects_same_identity_a_remint_before_intent_or_cleanup(
             events.append("cleanup")
             raise AssertionError("cleanup is forbidden after A remint")
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(),
         worker_registry=_Registry(),
         project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=object(),
         provider_case_resolver=object(),
         benchmark_v2_worker_binding_resolver=object(),
@@ -2276,7 +2394,7 @@ def test_completion_rejects_task5_b1_create_time_cross_pair_before_intent(
         def get(self, _run_id):
             return {"revision": operation["current_document_revision"]}
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_completed_result_identity(self, **_kwargs):
             events.append("inspect_a")
             return deepcopy(snapshot)
@@ -2305,9 +2423,8 @@ def test_completion_rejects_task5_b1_create_time_cross_pair_before_intent(
         "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
         resolve_binding,
     )
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=type(
             "_Root", (), {"authority_kind": "test"}
         )(),
@@ -2422,14 +2539,13 @@ def test_post_launch_cancel_intent_copies_exact_b1_identity_before_cas(
         def get(self, _run_id):
             return {"revision": operation["current_document_revision"]}
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_benchmark_worker_launch_owner(self, **_kwargs):
             events.append("inspect_b1")
             return deepcopy(inspection)
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=type(
             "_Root", (), {"authority_kind": "test"}
         )(),
@@ -2581,7 +2697,7 @@ def test_b1_launch_owner_rejects_cross_authority_before_parent_use(
         }
     )
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_benchmark_launch_owner(self, **_kwargs):
             return owner
 
@@ -2954,7 +3070,7 @@ def test_result_ready_completion_rejects_resealed_cleanup_projection_without_sto
     provider_cleanup = malformed if parent_kind == "b2" else seal_immutable(b2_body)
     events: list[str] = []
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_completed_result_identity(self, **_kwargs):
             events.append("inspect_a")
             return deepcopy(result_snapshot)
@@ -2971,6 +3087,12 @@ def test_result_ready_completion_rejects_resealed_cleanup_projection_without_sto
         def observe_benchmark_worker_cleanup(self, **_kwargs):
             events.append("worker_cleanup")
             return deepcopy(worker_cleanup)
+
+        def verify_benchmark_worker_cleanup_receipt(self, **kwargs):
+            events.append("worker_verify")
+            if parent_kind == "b1":
+                raise ValueError("B1 authority rejected invented cleanup leaves")
+            return deepcopy(kwargs["receipt"])
 
         def reconcile_benchmark_provider_cleanup(self, **_kwargs):
             events.append("provider_cleanup")
@@ -3046,11 +3168,10 @@ def test_result_ready_completion_rejects_resealed_cleanup_projection_without_sto
             assert current["revision"] == operation_document["current_document_revision"]
         anchored = current
         assert anchored["revision"] == operation["current_document_revision"]
-        composition = workflow_service.LearningWorkflowServiceComposition(
+        composition = workflow_service.compose_test_learning_workflow_service_unit(
             store=store,
             worker_registry=_Registry(),
             project_root=tmp_path,
-            composition_kind="test",
             benchmark_supervision_root=type(
                 "_Root", (), {"authority_kind": "test"}
             )(),
@@ -3197,7 +3318,7 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
         def get(self, _run_id):
             return {"revision": operation["current_document_revision"]}
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_completed_result_identity(self, **_kwargs):
             events.append("inspect_a")
             return deepcopy(snapshot)
@@ -3232,9 +3353,8 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
         "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
         resolve_binding,
     )
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=type(
             "_Root", (), {"authority_kind": "test"}
         )(),
@@ -3361,7 +3481,7 @@ def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
         def get(self, _run_id):
             return {"revision": operation["current_document_revision"]}
 
-    class _Registry:
+    class _Registry(_UnitCleanupReceiptAuthority):
         def inspect_benchmark_worker_launch_owner(self, **_kwargs):
             events.append("inspect_b1")
             return deepcopy(inspection)
@@ -3370,9 +3490,8 @@ def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
             events.append("cleanup")
             raise AssertionError("cleanup is forbidden after identity drift")
 
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=_Store(), worker_registry=_Registry(), project_root=tmp_path,
-        composition_kind="test",
         benchmark_supervision_root=type(
             "_Root", (), {"authority_kind": "test"}
         )(),
@@ -3411,6 +3530,176 @@ def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
     assert persisted == []
 
 
+def test_cancel_rejects_self_sealed_invented_b1_cleanup_leaves_before_any_cas(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_incumbent_cancel_intent,
+        transition_benchmark_v2_incumbent_operation,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _prepared_document(source_bundle)
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="provider_owner_prepared",
+        changes=_provider_owner_changes(),
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="worker_starting", changes={}
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation,
+        to_phase="worker_bound",
+        changes={
+            "worker_ref": {
+                **operation["worker_ref"],
+                "supervision_ref": {"content_sha256": "9" * 64},
+            }
+        },
+    )
+    process_identity = {"pid": 456, "create_time_ns": 789}
+    scope_name = "Local\\AgentGuiBenchmarkWorker-" + "2" * 64
+    assignment_ref = {"content_sha256": "3" * 64}
+    intent = compose_benchmark_v2_incumbent_cancel_intent(
+        operation=operation,
+        reason="cancel",
+        intent_at="2026-08-27T00:00:00+00:00",
+        process_identity=process_identity,
+        scope_name=scope_name,
+        assignment_proven_ref=assignment_ref,
+    )
+    operation = transition_benchmark_v2_incumbent_operation(
+        operation, to_phase="cancel_intent", changes={"cancel_intent": intent}
+    )
+    inspection = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_launch_owner_inspection_v1",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "model_request_id": operation["worker_ref"]["model_request_id"],
+            "payload_sha256": operation["worker_ref"]["payload_sha256"],
+            "execution_nonce": operation["execution_nonce"],
+            "reservation_ref": operation["reservation_ref"],
+            "current_reservation_ref": {"content_sha256": "4" * 64},
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "expected_supervision_ref": operation["expected_supervision_ref"],
+            "supervision_ref": operation["worker_ref"]["supervision_ref"],
+            "reservation_state": "launched",
+            "owner_phase": "gate_released",
+            "assignment_state": "proven",
+            "process_identity": process_identity,
+            "scope_name": scope_name,
+            "assignment_proven_ref": assignment_ref,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    invented_cleanup = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_cleanup_receipt_v1",
+            "outcome": "verified_exact_worker_exited",
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "reservation_ref": inspection["current_reservation_ref"],
+            "supervision_ref": inspection["supervision_ref"],
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "process_identity": process_identity,
+            "assignment_proven_ref": assignment_ref,
+            "finalization_intent_ref": {"content_sha256": "a" * 64},
+            "exact_handle_observation_refs": {
+                "worker_process": {"content_sha256": "b" * 64},
+                "startup_event": {"content_sha256": "c" * 64},
+                "beacon_file": {"content_sha256": "d" * 64},
+                "owner_job": {"content_sha256": "e" * 64},
+            },
+            "job_absence_observation_ref": {"content_sha256": "f" * 64},
+            "worker_absence_observation_ref": {"content_sha256": "1" * 64},
+            "supervisor_absence_observation_ref": None,
+            "reservation_abort_ref": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    events: list[str] = []
+
+    class _Store:
+        def get(self, _run_id):
+            return {"revision": operation["current_document_revision"]}
+
+    class _Registry(_UnitCleanupReceiptAuthority):
+        def inspect_benchmark_worker_launch_owner(self, **_kwargs):
+            events.append("inspect_b1")
+            return deepcopy(inspection)
+
+        def observe_benchmark_worker_cleanup(self, **_kwargs):
+            events.append("cleanup")
+            return deepcopy(invented_cleanup)
+
+        def verify_benchmark_worker_cleanup_receipt(self, **_kwargs):
+            events.append("verify_b1")
+            raise ValueError("B1 authority rejected invented cleanup leaves")
+
+        def reconcile_benchmark_provider_cleanup(self, **_kwargs):
+            raise AssertionError("invented B1 cleanup reached B2 reconciliation")
+
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
+        store=_Store(),
+        worker_registry=_Registry(),
+        project_root=tmp_path,
+        benchmark_supervision_root=type(
+            "_Root", (), {"authority_kind": "test"}
+        )(),
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "get_learning_workflow_operation_lock",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        "app.learn.workflow_worker.hold_benchmark_worker_controller",
+        lambda **_kwargs: nullcontext(),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_incumbent_operation_from_state",
+        lambda *_args: deepcopy(operation),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_sidecars",
+        lambda *_args: ({}, {"anchor": True}),
+    )
+    cas_winners: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        workflow_service,
+        "_persist_benchmark_v2_incumbent_operation",
+        lambda **kwargs: cas_winners.append(deepcopy(kwargs["operation"])),
+    )
+    with pytest.raises(ValueError, match="invented cleanup leaves"):
+        workflow_service._cancel_benchmark_v2_incumbent_operation(
+            composition=composition,
+            run_id=operation["run_id"],
+            expected_revision=operation["current_document_revision"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+            reason="cancel",
+        )
+    assert events == ["inspect_b1", "cleanup", "verify_b1"]
+    assert cas_winners == []
+
+
 def test_window_adoption_rebuild_uses_only_resolver_and_exact_a_b1_parents(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -3441,9 +3730,8 @@ def test_window_adoption_rebuild_uses_only_resolver_and_exact_a_b1_parents(
         "process_identity": {"pid": 123, "create_time_ns": 456},
     }
     resolver = object()
-    composition = workflow_service.LearningWorkflowServiceComposition(
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
         store=object(), worker_registry=object(), project_root=tmp_path,
-        composition_kind="test", benchmark_supervision_root=object(),
         provider_case_resolver=object(), benchmark_v2_worker_binding_resolver=resolver,
     )
     generic_adoption = {

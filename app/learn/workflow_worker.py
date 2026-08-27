@@ -4757,6 +4757,563 @@ class LearningStageWorkerRegistry:
                     authoritative_payload=deepcopy(authoritative_payload), root=root,
                 )
 
+    def recover_launching_benchmark_worker(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        reservation_ref: Mapping[str, object],
+        expected_operation_anchor: Mapping[str, object],
+        supervision_root: BenchmarkWorkerSupervisionRoot,
+    ) -> dict[str, Any]:
+        """在同一 B1 reservation 下恢复已分配但尚未持久化完成的 launch。"""
+
+        import win32api
+        import win32event
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+        root = self._require_benchmark_root(supervision_root)
+        worker = _required_text(worker_id, "worker_id")
+        run = _required_text(run_id, "run_id")
+        stage_value = _required_text(stage, "stage")
+        operation = _required_text(operation_id, "operation_id")
+        exact_reservation_ref = _benchmark_exact_ref(
+            dict(reservation_ref), "benchmark launch recovery reservation ref"
+        )
+        key = (run, stage_value, operation)
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id=key[0],
+            stage=key[1],
+            operation_id=key[2],
+        ):
+            with self._lock:
+                original = self._benchmark_reservations_by_ref.get(
+                    exact_reservation_ref["content_sha256"]
+                )
+                if original is None or any(
+                    original.get(field) != expected
+                    for field, expected in (
+                        ("worker_id", worker),
+                        ("run_id", run),
+                        ("stage", stage_value),
+                        ("operation_id", operation),
+                    )
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark launch recovery identity does not match"
+                    )
+                current = self._benchmark_reservations.get(key)
+                if current is None:
+                    raise LearningStageWorkerError(
+                        "benchmark launch recovery reservation is missing"
+                    )
+                anchor = validate_benchmark_worker_operation_anchor_v1(
+                    deepcopy(dict(expected_operation_anchor)),
+                    supervision_root=root,
+                    expected_reservation=original,
+                )
+                inspection = _inspect_benchmark_worker_launch_owner_locked(
+                    result_root=self._result_root,
+                    original_reservation=original,
+                    current_reservation=current,
+                    expected_operation_anchor=anchor,
+                    supervision_root=root,
+                    record=self._records.get(original["worker_id"]),
+                )
+                if inspection["reservation_state"] == "launched":
+                    if (
+                        inspection["owner_phase"] != "gate_released"
+                        or inspection["assignment_state"] != "proven"
+                    ):
+                        raise LearningStageWorkerError(
+                            "benchmark launched recovery owner is invalid"
+                        )
+                    return self._benchmark_launch_recovery_projection(
+                        inspection=inspection,
+                        outcome="recovered_gate_released",
+                        gate_release_performed=False,
+                    )
+                if inspection["reservation_state"] != "launching":
+                    raise LearningStageWorkerError(
+                        "benchmark launch recovery requires launching reservation"
+                    )
+
+                owner_phase = inspection["owner_phase"]
+                if owner_phase not in {"assignment_proven", "gate_released"}:
+                    return self._cleanup_unrecoverable_benchmark_launch_locked(
+                        original=original,
+                        current=current,
+                        anchor=anchor,
+                        inspection=inspection,
+                        root=root,
+                    )
+
+                process_identity = _validate_exact_benchmark_process_identity(
+                    inspection["process_identity"],
+                    label="launch recovery worker",
+                )
+                if self._benchmark_process_incarnation_absent(process_identity):
+                    return self._cleanup_unrecoverable_benchmark_launch_locked(
+                        original=original,
+                        current=current,
+                        anchor=anchor,
+                        inspection=inspection,
+                        root=root,
+                    )
+                scope = None
+                event_handle = None
+                try:
+                    scope = WindowsProcessScope(inspection["scope_name"], create=False)
+                    if (
+                        scope.pids() != [process_identity["pid"]]
+                        or scope.job_policy()
+                        != {
+                            "kill_on_job_close": True,
+                            "breakaway_ok": False,
+                            "silent_breakaway_ok": False,
+                            "owner_handle_authority": "registry_parent",
+                        }
+                    ):
+                        raise LearningStageWorkerError(
+                            "benchmark launch recovery Job membership is invalid"
+                        )
+                    event_name = _benchmark_worker_gate_event_name(
+                        inspection["scope_name"]
+                    )
+                    event_handle = win32event.OpenEvent(
+                        win32event.EVENT_MODIFY_STATE | 0x00100000,
+                        False,
+                        event_name,
+                    )
+                    gate_wait = win32event.WaitForSingleObject(event_handle, 0)
+                    if owner_phase == "assignment_proven":
+                        if gate_wait != win32event.WAIT_TIMEOUT:
+                            raise LearningStageWorkerError(
+                                "benchmark launch recovery closed gate is invalid"
+                            )
+                        win32event.SetEvent(event_handle)
+                        owner = _read_json_object(
+                            self._result_root
+                            / f"{original['worker_id']}.benchmark-owner.json",
+                            label="benchmark launch recovery owner",
+                        )
+                        supervision = compose_benchmark_worker_supervision_v1(
+                            supervision_root=root,
+                            reservation=original,
+                            expected_operation_anchor=anchor,
+                            supervisor_process_identity=owner[
+                                "supervisor_process_identity"
+                            ],
+                            startup_gate_timeout_ms=15_000,
+                        )
+                        released = self._benchmark_owner_journal(
+                            current=current,
+                            anchor=anchor,
+                            supervision=supervision,
+                            scope_name=inspection["scope_name"],
+                            supervisor_identity=owner[
+                                "supervisor_process_identity"
+                            ],
+                            phase="gate_released",
+                            process_identity=process_identity,
+                            beacon_ref=owner["beacon_ref"],
+                            assignment_ref=owner["assignment_observation_ref"],
+                            gate_state="released",
+                            predecessor=owner["content_sha256"],
+                        )
+                        _write_json_atomic(
+                            self._result_root
+                            / f"{original['worker_id']}.benchmark-owner.json",
+                            released,
+                        )
+                        gate_release_performed = True
+                    else:
+                        if gate_wait != win32event.WAIT_OBJECT_0:
+                            raise LearningStageWorkerError(
+                                "benchmark launch recovery released gate is invalid"
+                            )
+                        gate_release_performed = False
+
+                    launched = self._transition_benchmark_reservation(
+                        current, "launched"
+                    )
+                    self._persist_benchmark_reservation(launched)
+                    self._benchmark_reservations[key] = launched
+                    self._benchmark_reservations_by_ref[
+                        launched["content_sha256"]
+                    ] = launched
+                    process = _RecoveredBenchmarkProcess(
+                        process_identity=process_identity
+                    )
+                    record = self._install_recovered_benchmark_record(
+                        original=original,
+                        reservation=launched,
+                        anchor=anchor,
+                        scope=scope,
+                        event_handle=event_handle,
+                        process=process,
+                    )
+                    scope = None
+                    event_handle = None
+                    inspection = _inspect_benchmark_worker_launch_owner_locked(
+                        result_root=self._result_root,
+                        original_reservation=original,
+                        current_reservation=launched,
+                        expected_operation_anchor=anchor,
+                        supervision_root=root,
+                        record=record,
+                    )
+                    return self._benchmark_launch_recovery_projection(
+                        inspection=inspection,
+                        outcome="recovered_gate_released",
+                        gate_release_performed=gate_release_performed,
+                    )
+                except BaseException:
+                    if event_handle is not None:
+                        win32api.CloseHandle(event_handle)
+                    if scope is not None:
+                        scope.close()
+                    return self._cleanup_unrecoverable_benchmark_launch_locked(
+                        original=original,
+                        current=current,
+                        anchor=anchor,
+                        inspection=inspection,
+                        root=root,
+                    )
+
+    @staticmethod
+    def _benchmark_launch_recovery_projection(
+        *,
+        inspection: Mapping[str, object],
+        outcome: str,
+        gate_release_performed: bool,
+        cleanup_ref: Mapping[str, object] | None = None,
+    ) -> dict[str, Any]:
+        return seal_immutable(
+            {
+                "contract_version": "benchmark_worker_launch_recovery_v1",
+                "outcome": outcome,
+                **{
+                    field: deepcopy(inspection[field])
+                    for field in (
+                        "authority_kind",
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                        "execution_nonce",
+                        "reservation_ref",
+                        "current_reservation_ref",
+                        "operation_anchor_ref",
+                        "expected_supervision_ref",
+                        "supervision_ref",
+                        "reservation_state",
+                        "owner_phase",
+                        "assignment_state",
+                        "process_identity",
+                        "scope_name",
+                        "assignment_proven_ref",
+                    )
+                },
+                "gate_release_performed": gate_release_performed,
+                "spawn_retry": False,
+                "cleanup_ref": deepcopy(dict(cleanup_ref))
+                if isinstance(cleanup_ref, Mapping)
+                else None,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+
+    def _install_recovered_benchmark_record(
+        self,
+        *,
+        original: dict[str, Any],
+        reservation: dict[str, Any],
+        anchor: dict[str, Any],
+        scope: Any,
+        event_handle: Any,
+        process: Any,
+    ) -> dict[str, Any]:
+        owner_path = self._result_root / f"{original['worker_id']}.benchmark-owner.json"
+        owner = _read_json_object(owner_path, label="benchmark recovered owner")
+        supervision = compose_benchmark_worker_supervision_v1(
+            supervision_root=self._benchmark_supervision_root,
+            reservation=original,
+            expected_operation_anchor=anchor,
+            supervisor_process_identity=owner["supervisor_process_identity"],
+            startup_gate_timeout_ms=15_000,
+        )
+        record = {
+            "contract_version": LEARNING_STAGE_WORKER_CONTRACT_VERSION,
+            **{
+                field: original[field]
+                for field in (
+                    "worker_id",
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "task_kind",
+                    "model_request_id",
+                    "payload_sha256",
+                )
+            },
+            "status": "running",
+            "started_at": _utc_now_iso(),
+            "finished_at": None,
+            "result_path": str(
+                self._result_root / f"{original['worker_id']}.result.json"
+            ),
+            "journal_path": str(
+                self._result_root / f"{original['worker_id']}.worker.json"
+            ),
+            "process": process,
+            "payload": {},
+            "cancellation_event": None,
+            "completion_event": None,
+            "provider_scope": None,
+            "provider_scope_name": None,
+            "recovered_from_journal": False,
+            "benchmark_owner_path": str(owner_path),
+            "benchmark_beacon_path": str(
+                self._result_root / f"{original['worker_id']}.benchmark-beacon.json"
+            ),
+            "benchmark_event_handle": event_handle,
+            "benchmark_scope": scope,
+            "benchmark_anchor": deepcopy(anchor),
+            "benchmark_supervision": supervision,
+            "benchmark_reservation": reservation,
+        }
+        key = (original["run_id"], original["stage"], original["operation_id"])
+        self._persist_record_journal(record)
+        self._records[original["worker_id"]] = record
+        self._active_by_operation[key] = original["worker_id"]
+        workers = self._workers_by_operation.setdefault(key, [])
+        if original["worker_id"] not in workers:
+            workers.append(original["worker_id"])
+        self._workers_by_invocation[
+            (*key, original["task_kind"], original["payload_sha256"])
+        ] = original["worker_id"]
+        return record
+
+    def _cleanup_unrecoverable_benchmark_launch_locked(
+        self,
+        *,
+        original: dict[str, Any],
+        current: dict[str, Any],
+        anchor: dict[str, Any],
+        inspection: Mapping[str, object],
+        root: BenchmarkWorkerSupervisionRoot,
+    ) -> dict[str, Any]:
+        """清理不能精确恢复的 launching cut，并持久化可重放的 SAFE_STOP 父证据。"""
+
+        import win32api
+        import win32event
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+        worker = original["worker_id"]
+        cleanup_path = self._result_root / f"{worker}.benchmark-launch-recovery-cleanup.json"
+        if cleanup_path.exists():
+            cleanup = _read_json_object(
+                cleanup_path, label="benchmark launch recovery cleanup"
+            )
+            _validate_benchmark_launch_recovery_cleanup(
+                cleanup,
+                original=original,
+                current=current,
+                anchor=anchor,
+                inspection=inspection,
+            )
+            self._retest_benchmark_launch_recovery_absence(cleanup)
+            return self._benchmark_launch_recovery_projection(
+                inspection=inspection,
+                outcome="verified_cleanup_safe_stop",
+                gate_release_performed=False,
+                cleanup_ref={"content_sha256": cleanup["content_sha256"]},
+            )
+
+        process_identity = inspection.get("process_identity")
+        beacon_path = self._result_root / f"{worker}.benchmark-beacon.json"
+        if process_identity is None and beacon_path.exists():
+            beacon = _read_json_object(
+                beacon_path, label="benchmark launch recovery beacon"
+            )
+            expected_beacon = seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_identity_beacon_v1",
+                    "worker_id": worker,
+                    "operation_anchor_ref": deepcopy(
+                        inspection["operation_anchor_ref"]
+                    ),
+                    "process_identity": deepcopy(beacon.get("process_identity")),
+                    "predecessor_content_sha256": inspection["supervision_ref"][
+                        "content_sha256"
+                    ],
+                }
+            )
+            if beacon != expected_beacon:
+                raise LearningStageWorkerError(
+                    "benchmark launch recovery beacon is invalid"
+                )
+            process_identity = _validate_exact_benchmark_process_identity(
+                beacon["process_identity"], label="launch recovery beacon worker"
+            )
+        termination = None
+        if process_identity is not None:
+            termination = self._terminate_exact_benchmark_process(process_identity)
+
+        scope_name = inspection.get("scope_name")
+        if not isinstance(scope_name, str):
+            from app.learn.hybrid.windows_process_scope import (
+                benchmark_worker_scope_name_v1,
+            )
+
+            scope_name = benchmark_worker_scope_name_v1(
+                authority_kind=original["authority_kind"],
+                run_id=original["run_id"],
+                stage=original["stage"],
+                operation_id=original["operation_id"],
+                worker_id=worker,
+                payload_sha256=original["payload_sha256"],
+                execution_nonce=original["execution_nonce"],
+            )
+        try:
+            scope = WindowsProcessScope(scope_name, create=False)
+        except BaseException as error:
+            if _windows_error_code(error) != 2:
+                raise LearningStageWorkerError(
+                    "benchmark launch recovery Job probe is indeterminate"
+                ) from error
+        else:
+            try:
+                if scope.pids():
+                    scope.terminate()
+                if scope.pids():
+                    raise LearningStageWorkerError(
+                        "benchmark launch recovery Job did not reach zero"
+                    )
+            finally:
+                scope.close()
+        event_name = _benchmark_worker_gate_event_name(scope_name)
+        try:
+            event = win32event.OpenEvent(
+                win32event.EVENT_MODIFY_STATE | 0x00100000,
+                False,
+                event_name,
+            )
+        except BaseException as error:
+            if _windows_error_code(error) != 2:
+                raise LearningStageWorkerError(
+                    "benchmark launch recovery Event probe is indeterminate"
+                ) from error
+        else:
+            win32api.CloseHandle(event)
+        beacon_path.unlink(missing_ok=True)
+        cleanup = seal_immutable(
+            {
+                "contract_version": "benchmark_worker_launch_recovery_cleanup_v1",
+                "outcome": "verified_launch_artifacts_absent",
+                "authority_kind": original["authority_kind"],
+                "run_id": original["run_id"],
+                "stage": original["stage"],
+                "operation_id": original["operation_id"],
+                "worker_id": worker,
+                "model_request_id": original["model_request_id"],
+                "payload_sha256": original["payload_sha256"],
+                "execution_nonce": original["execution_nonce"],
+                "reservation_ref": {"content_sha256": original["content_sha256"]},
+                "current_reservation_ref": {
+                    "content_sha256": current["content_sha256"]
+                },
+                "operation_anchor_ref": deepcopy(
+                    inspection["operation_anchor_ref"]
+                ),
+                "supervision_ref": deepcopy(inspection["supervision_ref"]),
+                "process_identity": deepcopy(process_identity),
+                "scope_name": scope_name,
+                "termination_observation": deepcopy(termination),
+                "job_absent": True,
+                "event_absent": True,
+                "beacon_absent": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        _write_json_create_only(cleanup_path, cleanup)
+        self._retest_benchmark_launch_recovery_absence(cleanup)
+        record = self._records.get(worker)
+        if record is not None:
+            record["status"] = "cancelled"
+            record["finished_at"] = _utc_now_iso()
+            self._active_by_operation.pop(
+                (original["run_id"], original["stage"], original["operation_id"]),
+                None,
+            )
+        return self._benchmark_launch_recovery_projection(
+            inspection=inspection,
+            outcome="verified_cleanup_safe_stop",
+            gate_release_performed=False,
+            cleanup_ref={"content_sha256": cleanup["content_sha256"]},
+        )
+
+    def _retest_benchmark_launch_recovery_absence(
+        self, cleanup: Mapping[str, object]
+    ) -> None:
+        import win32api
+        import win32event
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+        identity = cleanup.get("process_identity")
+        if identity is not None and not self._benchmark_process_incarnation_absent(
+            identity
+        ):
+            raise LearningStageWorkerError(
+                "benchmark launch recovery worker remains present"
+            )
+        try:
+            scope = WindowsProcessScope(str(cleanup["scope_name"]), create=False)
+        except BaseException as error:
+            if _windows_error_code(error) != 2:
+                raise LearningStageWorkerError(
+                    "benchmark launch recovery Job absence is indeterminate"
+                ) from error
+        else:
+            try:
+                members = scope.pids()
+            finally:
+                scope.close()
+            raise LearningStageWorkerError(
+                f"benchmark launch recovery Job remains present: {members}"
+            )
+        try:
+            handle = win32event.OpenEvent(
+                0x00100000,
+                False,
+                _benchmark_worker_gate_event_name(str(cleanup["scope_name"])),
+            )
+        except BaseException as error:
+            if _windows_error_code(error) != 2:
+                raise LearningStageWorkerError(
+                    "benchmark launch recovery Event absence is indeterminate"
+                ) from error
+        else:
+            win32api.CloseHandle(handle)
+            raise LearningStageWorkerError(
+                "benchmark launch recovery Event remains present"
+            )
+        if (
+            self._result_root
+            / f"{cleanup['worker_id']}.benchmark-beacon.json"
+        ).exists():
+            raise LearningStageWorkerError(
+                "benchmark launch recovery beacon remains present"
+            )
+
     def _launch_validated_benchmark_worker(
         self, *, current: dict[str, Any], anchor: dict[str, Any],
         authoritative_payload: dict[str, Any], root: BenchmarkWorkerSupervisionRoot,
@@ -6419,6 +6976,85 @@ class LearningStageWorkerRegistry:
                 record["status"] = "cancelled" if terminate else record.get("status", "completed")
                 self._active_by_operation.pop(key, None)
                 return receipt
+
+    def verify_benchmark_worker_cleanup_receipt(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        receipt: Mapping[str, object],
+        expected_operation_anchor: dict[str, Any],
+        supervision_root: BenchmarkWorkerSupervisionRoot,
+    ) -> dict[str, Any]:
+        """在 B1 controller/Registry authority 下重读并验证 cleanup 全部叶子。"""
+
+        root = self._require_benchmark_root(supervision_root)
+        worker = _required_text(worker_id, "worker_id")
+        run = _required_text(run_id, "run_id")
+        stage_value = _required_text(stage, "stage")
+        operation = _required_text(operation_id, "operation_id")
+        key = (run, stage_value, operation)
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id=run,
+            stage=stage_value,
+            operation_id=operation,
+        ):
+            with self._lock:
+                current = self._benchmark_reservations.get(key)
+                if current is None or current.get("worker_id") != worker:
+                    raise LearningStageWorkerError(
+                        "benchmark cleanup verification identity does not match"
+                    )
+                original = self._benchmark_reservations_by_ref.get(
+                    expected_operation_anchor.get("reservation_ref", {}).get(
+                        "content_sha256", ""
+                    )
+                )
+                if original is None:
+                    raise LearningStageWorkerError(
+                        "benchmark cleanup verification anchor is invalid"
+                    )
+                validate_benchmark_worker_operation_anchor_v1(
+                    expected_operation_anchor,
+                    supervision_root=root,
+                    expected_reservation=original,
+                )
+                receipt_path = (
+                    self._result_root / f"{worker}.benchmark-cleanup.json"
+                )
+                persisted = _read_json_object(
+                    receipt_path, label="benchmark cleanup receipt"
+                )
+                validated = _validate_benchmark_cleanup_receipt(
+                    persisted,
+                    result_root=self._result_root,
+                    worker_id=worker,
+                    run_id=run,
+                    stage=stage_value,
+                    operation_id=operation,
+                    operation_anchor=expected_operation_anchor,
+                    original_reservation=original,
+                    current_reservation=current,
+                    supervision_root=root,
+                )
+                if not isinstance(receipt, Mapping) or dict(receipt) != validated:
+                    raise LearningStageWorkerError(
+                        "benchmark cleanup receipt differs from B1 authority"
+                    )
+                if validated["outcome"] == "verified_exact_worker_exited":
+                    _benchmark_cleanup_replay_live_reattest(
+                        result_root=self._result_root,
+                        worker_id=worker,
+                        run_id=run,
+                        stage=stage_value,
+                        operation_id=operation,
+                        original_reservation=original,
+                        validated_receipt=validated,
+                    )
+                return deepcopy(validated)
 
     def _complete_benchmark_cleanup_from_intent(
         self, *, record: dict[str, Any], reservation: dict[str, Any],
@@ -8748,6 +9384,193 @@ def _validate_exact_benchmark_process_identity(
     ):
         raise LearningStageWorkerError(f"benchmark {label} identity is invalid")
     return {"pid": value["pid"], "create_time_ns": value["create_time_ns"]}
+
+
+def _windows_error_code(error: BaseException) -> int | None:
+    code = getattr(error, "winerror", None)
+    if code is None and getattr(error, "args", None):
+        first = error.args[0]
+        code = first if isinstance(first, int) else None
+    return code
+
+
+def _benchmark_worker_gate_event_name(scope_name: str) -> str:
+    return (
+        "Local\\AgentGuiBenchmarkWorkerGate-"
+        + content_sha256({"scope_name": scope_name})
+    )
+
+
+class _RecoveredBenchmarkProcess:
+    """为 fresh Registry 持有 exact worker 句柄，不伪造第二次 spawn。"""
+
+    def __init__(self, *, process_identity: Mapping[str, object]) -> None:
+        import win32api
+        import win32con
+
+        self._identity = _validate_exact_benchmark_process_identity(
+            dict(process_identity), label="recovered worker"
+        )
+        self.pid = self._identity["pid"]
+        self._handle = win32api.OpenProcess(
+            int(win32con.PROCESS_QUERY_INFORMATION)
+            | int(win32con.PROCESS_TERMINATE)
+            | 0x00100000,
+            False,
+            self.pid,
+        )
+        self._closed = False
+        self._exitcode: int | None = None
+        if LearningStageWorkerRegistry._benchmark_process_incarnation_absent(
+            self._identity
+        ):
+            self.close()
+            raise LearningStageWorkerError(
+                "benchmark recovered process incarnation is absent"
+            )
+
+    def is_alive(self) -> bool:
+        import win32event
+
+        if self._closed:
+            raise ValueError("benchmark recovered process handle is closed")
+        if LearningStageWorkerRegistry._benchmark_process_incarnation_absent(
+            self._identity
+        ):
+            return False
+        return win32event.WaitForSingleObject(self._handle, 0) == win32event.WAIT_TIMEOUT
+
+    def terminate(self) -> None:
+        import win32process
+
+        if self._closed:
+            raise ValueError("benchmark recovered process handle is closed")
+        if not LearningStageWorkerRegistry._benchmark_process_incarnation_absent(
+            self._identity
+        ):
+            win32process.TerminateProcess(self._handle, 198)
+
+    def join(self, timeout: float | int | None = None) -> None:
+        import win32event
+        import win32process
+
+        if self._closed:
+            raise ValueError("benchmark recovered process handle is closed")
+        milliseconds = (
+            0xFFFFFFFF if timeout is None else max(0, int(float(timeout) * 1000))
+        )
+        outcome = win32event.WaitForSingleObject(self._handle, milliseconds)
+        if outcome == win32event.WAIT_OBJECT_0:
+            self._exitcode = int(win32process.GetExitCodeProcess(self._handle))
+
+    @property
+    def exitcode(self) -> int | None:
+        if self._exitcode is None and not self._closed and not self.is_alive():
+            import win32process
+
+            self._exitcode = int(win32process.GetExitCodeProcess(self._handle))
+        return self._exitcode
+
+    def close(self) -> None:
+        if not self._closed:
+            import win32api
+
+            win32api.CloseHandle(self._handle)
+            self._closed = True
+
+
+def _validate_benchmark_launch_recovery_cleanup(
+    value: object,
+    *,
+    original: Mapping[str, object],
+    current: Mapping[str, object],
+    anchor: Mapping[str, object],
+    inspection: Mapping[str, object],
+) -> dict[str, Any]:
+    exact = {
+        "contract_version",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "execution_nonce",
+        "reservation_ref",
+        "current_reservation_ref",
+        "operation_anchor_ref",
+        "supervision_ref",
+        "process_identity",
+        "scope_name",
+        "termination_observation",
+        "job_absent",
+        "event_absent",
+        "beacon_absent",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != exact
+        or content_sha256(value) != value.get("content_sha256")
+        or value.get("contract_version")
+        != "benchmark_worker_launch_recovery_cleanup_v1"
+        or value.get("outcome") != "verified_launch_artifacts_absent"
+        or any(
+            value.get(field) != original.get(field)
+            for field in (
+                "authority_kind",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+                "execution_nonce",
+            )
+        )
+        or value.get("reservation_ref")
+        != {"content_sha256": original["content_sha256"]}
+        or value.get("current_reservation_ref")
+        != {"content_sha256": current["content_sha256"]}
+        or value.get("operation_anchor_ref")
+        != {"content_sha256": anchor["anchor_identity_sha256"]}
+        or value.get("supervision_ref") != inspection.get("supervision_ref")
+        or value.get("job_absent") is not True
+        or value.get("event_absent") is not True
+        or value.get("beacon_absent") is not True
+        or value.get("artifact_is_authorization") is not False
+        or value.get("execute_binding_enabled") is not False
+    ):
+        raise LearningStageWorkerError(
+            "benchmark launch recovery cleanup is invalid"
+        )
+    identity = value.get("process_identity")
+    if identity is not None:
+        _validate_exact_benchmark_process_identity(
+            identity, label="launch recovery cleanup worker"
+        )
+        termination = value.get("termination_observation")
+        if (
+            not isinstance(termination, dict)
+            or termination.get("process_identity") != identity
+            or termination.get("outcome")
+            not in {
+                "verified_exact_incarnation_terminated",
+                "exact_incarnation_already_absent",
+            }
+        ):
+            raise LearningStageWorkerError(
+                "benchmark launch recovery termination is invalid"
+            )
+    elif value.get("termination_observation") is not None:
+        raise LearningStageWorkerError(
+            "benchmark launch recovery termination is invalid"
+        )
+    return deepcopy(value)
 
 
 def _benchmark_launch_owner_reservation_lineage(
