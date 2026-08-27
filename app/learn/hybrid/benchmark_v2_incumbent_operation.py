@@ -8,7 +8,11 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
-from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes, content_sha256
+from app.learn.hybrid.benchmark_v2_contracts import (
+    BENCHMARK_RELEASE_ID,
+    canonical_json_bytes,
+    content_sha256,
+)
 from app.learn.hybrid.benchmark_v2_provider_corpus import (
     provider_case_resolver_corpus_file_ref,
 )
@@ -37,6 +41,21 @@ BENCHMARK_V2_INCUMBENT_CANCEL_INTENT_CONTRACT = (
 )
 BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT = (
     "benchmark_v2_incumbent_terminal_receipt_v1"
+)
+BENCHMARK_V2_WORKFLOW_WINDOW_BINDING_CONTRACT = (
+    "benchmark_v2_workflow_window_binding_v1"
+)
+BENCHMARK_V2_HYBRID_SCREEN_GROUP_START_CONTRACT = (
+    "benchmark_v2_hybrid_screen_group_start_v1"
+)
+BENCHMARK_V2_WORKFLOW_SERVICE_OPERATION_REF_CONTRACT = (
+    "benchmark_v2_workflow_service_operation_ref_v1"
+)
+BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT = (
+    "benchmark_v2_workflow_service_step_v1"
+)
+BENCHMARK_V2_ADOPTED_RESULT_PROJECTION_CONTRACT = (
+    "benchmark_v2_adopted_result_projection_v1"
 )
 
 BENCHMARK_V2_INCUMBENT_PAYLOAD_PROJECTION_RULES = {
@@ -200,6 +219,98 @@ _TERMINAL_RECEIPT_FIELDS = {
     "predecessor_content_sha256",
     "content_sha256",
 }
+_WORKFLOW_WINDOW_BINDING_FIELDS = {
+    "contract_version",
+    "run_id",
+    "stage",
+    "operation_id",
+    "window_binding_ref",
+    "capture_ref",
+    "owner_journal_ref",
+    "expected_uia_root_ref",
+    "safety",
+    "content_sha256",
+}
+_HYBRID_SCREEN_GROUP_START_FIELDS = {
+    "contract_version",
+    "benchmark_release_id",
+    "attempt_ref",
+    "partition",
+    "screen_group",
+    "provider_corpus_ref",
+    "case_refs",
+    "hybrid_capture_bundle_ref",
+    "request_ref",
+    "registration_ref",
+    "manifest_ref",
+    "capture_image_path",
+    "hybrid_config",
+    "capture_bundle",
+    "safety",
+    "content_sha256",
+}
+_WORKFLOW_SERVICE_OPERATION_REF_FIELDS = {
+    "contract_version",
+    "mode",
+    "run_id",
+    "stage",
+    "operation_id",
+    "workflow_state_ref",
+    "stage_execution_ref",
+    "request_ref",
+    "window_binding_ref",
+    "capture_ref",
+    "worker_ref",
+    "status",
+    "predecessor_content_sha256",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_ADOPTED_RESULT_PROJECTION_FIELDS = {
+    "contract_version",
+    "mode",
+    "run_id",
+    "stage",
+    "operation_id",
+    "worker_ref",
+    "model_request_ref",
+    "payload_ref",
+    "result_ref",
+    "adoption_ref",
+    "response",
+    "response_canonical_json",
+    "response_canonical_sha256",
+    "terminal_receipt",
+    "window_adoption_ref",
+    "worker_cleanup_ref",
+    "provider_cleanup_ref",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_WORKFLOW_SERVICE_STEP_FIELDS = {
+    "contract_version",
+    "mode",
+    "status",
+    "operation_ref",
+    "worker_ref",
+    "observed_task_kind",
+    "adopted_result_projection",
+    "terminal_receipt",
+    "cleanup_refs",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_WORKFLOW_SERVICE_MODES = frozenset({"hybrid_v1_1", "incumbent_qwen_only"})
+_WORKFLOW_SERVICE_STATUSES = frozenset(
+    {"pending", "advanced", "complete", "safe_stopped", "cancelled", "cleanup_pending"}
+)
+_NON_AUTHORIZING_SAFETY = {
+    "artifact_is_authorization": False,
+    "execute_binding_enabled": False,
+}
 
 
 def _closed(value: object, fields: set[str], name: str) -> dict[str, Any]:
@@ -258,6 +369,496 @@ def _seal(body: Mapping[str, object]) -> dict[str, Any]:
 
 def _payload_sha256(value: Mapping[str, object]) -> str:
     return hashlib.sha256(canonical_json_bytes(dict(value))).hexdigest()
+
+
+def _validate_non_authorizing_safety(value: object, name: str) -> dict[str, bool]:
+    safety = _closed(
+        value,
+        {"artifact_is_authorization", "execute_binding_enabled"},
+        name,
+    )
+    if safety != _NON_AUTHORIZING_SAFETY:
+        raise ValueError(f"{name} cannot authorize actions")
+    return safety
+
+
+def _validate_provider_case_ref(value: object) -> dict[str, Any]:
+    ref = _closed(
+        value,
+        {"case_id", "case_content_sha256"},
+        "benchmark provider case ref",
+    )
+    _text(ref["case_id"], "benchmark provider case id")
+    _sha(ref["case_content_sha256"], "benchmark provider case SHA")
+    return ref
+
+
+def validate_benchmark_v2_workflow_window_binding(value: object) -> dict[str, Any]:
+    binding = _closed(
+        value,
+        _WORKFLOW_WINDOW_BINDING_FIELDS,
+        "benchmark workflow window binding",
+    )
+    if binding["contract_version"] != BENCHMARK_V2_WORKFLOW_WINDOW_BINDING_CONTRACT:
+        raise ValueError("benchmark workflow window binding contract is invalid")
+    for name in ("run_id", "operation_id"):
+        _text(binding[name], f"benchmark workflow window binding {name}")
+    if binding["stage"] != "screen_understanding":
+        raise ValueError("benchmark workflow window binding stage is invalid")
+    binding["window_binding_ref"] = _identity_ref(
+        binding["window_binding_ref"], "benchmark workflow window binding ref"
+    )
+    binding["capture_ref"] = _identity_ref(
+        binding["capture_ref"], "benchmark workflow capture ref"
+    )
+    for name in ("owner_journal_ref", "expected_uia_root_ref"):
+        binding[name] = _runtime_sealed_parent(
+            binding[name], f"benchmark workflow window binding {name}"
+        )
+    binding["safety"] = _validate_non_authorizing_safety(
+        binding["safety"], "benchmark workflow window binding safety"
+    )
+    _sha(binding["content_sha256"], "benchmark workflow window binding SHA")
+    if binding["content_sha256"] != content_sha256(binding):
+        raise ValueError("benchmark workflow window binding content SHA mismatch")
+    return binding
+
+
+def compose_benchmark_v2_workflow_window_binding(
+    *,
+    run_id: str,
+    operation_id: str,
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    owner_journal_ref: Mapping[str, object],
+    expected_uia_root_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    body = {
+        "contract_version": BENCHMARK_V2_WORKFLOW_WINDOW_BINDING_CONTRACT,
+        "run_id": run_id,
+        "stage": "screen_understanding",
+        "operation_id": operation_id,
+        "window_binding_ref": deepcopy(dict(window_binding_ref)),
+        "capture_ref": deepcopy(dict(capture_ref)),
+        "owner_journal_ref": deepcopy(dict(owner_journal_ref)),
+        "expected_uia_root_ref": deepcopy(dict(expected_uia_root_ref)),
+        "safety": deepcopy(_NON_AUTHORIZING_SAFETY),
+    }
+    return validate_benchmark_v2_workflow_window_binding(_seal(body))
+
+
+def validate_benchmark_v2_hybrid_screen_group_start(value: object) -> dict[str, Any]:
+    start = _closed(
+        value,
+        _HYBRID_SCREEN_GROUP_START_FIELDS,
+        "benchmark hybrid screen group start",
+    )
+    if start["contract_version"] != BENCHMARK_V2_HYBRID_SCREEN_GROUP_START_CONTRACT:
+        raise ValueError("benchmark hybrid screen group start contract is invalid")
+    if start["benchmark_release_id"] != BENCHMARK_RELEASE_ID:
+        raise ValueError("benchmark hybrid screen group release is invalid")
+    for name in ("partition", "screen_group", "capture_image_path"):
+        _text(start[name], f"benchmark hybrid screen group {name}")
+    if (
+        "\\" in start["capture_image_path"]
+        or Path(start["capture_image_path"]).is_absolute()
+        or ".." in Path(start["capture_image_path"]).parts
+    ):
+        raise ValueError("benchmark hybrid capture image path is invalid")
+    for name in ("attempt_ref", "provider_corpus_ref"):
+        start[name] = _runtime_sealed_parent(
+            start[name], f"benchmark hybrid screen group {name}"
+        )
+    case_refs = start["case_refs"]
+    if not isinstance(case_refs, list) or len(case_refs) != 5:
+        raise ValueError("benchmark hybrid screen group requires exactly five case refs")
+    start["case_refs"] = [_validate_provider_case_ref(item) for item in case_refs]
+    case_ids = [item["case_id"] for item in start["case_refs"]]
+    if len(set(case_ids)) != 5:
+        raise ValueError("benchmark hybrid screen group case refs must be unique")
+    for name in (
+        "hybrid_capture_bundle_ref",
+        "request_ref",
+        "registration_ref",
+        "manifest_ref",
+    ):
+        start[name] = _identity_ref(
+            start[name], f"benchmark hybrid screen group {name}"
+        )
+    for name in ("hybrid_config", "capture_bundle"):
+        if not isinstance(start[name], Mapping):
+            raise ValueError(f"benchmark hybrid screen group {name} must be a mapping")
+        start[name] = deepcopy(dict(start[name]))
+    start["safety"] = _validate_non_authorizing_safety(
+        start["safety"], "benchmark hybrid screen group safety"
+    )
+    _sha(start["content_sha256"], "benchmark hybrid screen group SHA")
+    if start["content_sha256"] != content_sha256(start):
+        raise ValueError("benchmark hybrid screen group content SHA mismatch")
+    return start
+
+
+def compose_benchmark_v2_hybrid_screen_group_start(
+    *,
+    attempt_ref: Mapping[str, object],
+    partition: str,
+    screen_group: str,
+    provider_corpus_ref: Mapping[str, object],
+    case_refs: list[Mapping[str, object]],
+    hybrid_capture_bundle_ref: Mapping[str, object],
+    request_ref: Mapping[str, object],
+    registration_ref: Mapping[str, object],
+    manifest_ref: Mapping[str, object],
+    capture_image_path: str,
+    hybrid_config: Mapping[str, object],
+    capture_bundle: Mapping[str, object],
+) -> dict[str, Any]:
+    body = {
+        "contract_version": BENCHMARK_V2_HYBRID_SCREEN_GROUP_START_CONTRACT,
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "attempt_ref": deepcopy(dict(attempt_ref)),
+        "partition": partition,
+        "screen_group": screen_group,
+        "provider_corpus_ref": deepcopy(dict(provider_corpus_ref)),
+        "case_refs": [deepcopy(dict(item)) for item in case_refs],
+        "hybrid_capture_bundle_ref": deepcopy(dict(hybrid_capture_bundle_ref)),
+        "request_ref": deepcopy(dict(request_ref)),
+        "registration_ref": deepcopy(dict(registration_ref)),
+        "manifest_ref": deepcopy(dict(manifest_ref)),
+        "capture_image_path": capture_image_path,
+        "hybrid_config": deepcopy(dict(hybrid_config)),
+        "capture_bundle": deepcopy(dict(capture_bundle)),
+        "safety": deepcopy(_NON_AUTHORIZING_SAFETY),
+    }
+    return validate_benchmark_v2_hybrid_screen_group_start(_seal(body))
+
+
+def validate_benchmark_v2_workflow_service_operation_ref(
+    value: object,
+) -> dict[str, Any]:
+    operation_ref = _closed(
+        value,
+        _WORKFLOW_SERVICE_OPERATION_REF_FIELDS,
+        "benchmark workflow service operation ref",
+    )
+    if (
+        operation_ref["contract_version"]
+        != BENCHMARK_V2_WORKFLOW_SERVICE_OPERATION_REF_CONTRACT
+    ):
+        raise ValueError("benchmark workflow service operation ref contract is invalid")
+    if operation_ref["mode"] not in _WORKFLOW_SERVICE_MODES:
+        raise ValueError("benchmark workflow service mode is invalid")
+    for name in ("run_id", "stage", "operation_id"):
+        _text(operation_ref[name], f"benchmark workflow service operation {name}")
+    workflow_state_ref = _closed(
+        operation_ref["workflow_state_ref"],
+        {"run_id", "revision", "content_sha256"},
+        "benchmark workflow state ref",
+    )
+    if workflow_state_ref["run_id"] != operation_ref["run_id"]:
+        raise ValueError("benchmark workflow state run identity is stale")
+    _revision(workflow_state_ref["revision"], "benchmark workflow state revision")
+    _sha(workflow_state_ref["content_sha256"], "benchmark workflow state SHA")
+    stage_execution_ref = _closed(
+        operation_ref["stage_execution_ref"],
+        {"run_id", "stage", "operation_id", "revision", "content_sha256"},
+        "benchmark stage execution ref",
+    )
+    for name in ("run_id", "stage", "operation_id"):
+        if stage_execution_ref[name] != operation_ref[name]:
+            raise ValueError(f"benchmark stage execution {name} identity is stale")
+    _revision(stage_execution_ref["revision"], "benchmark stage execution revision")
+    _sha(stage_execution_ref["content_sha256"], "benchmark stage execution SHA")
+    if stage_execution_ref["revision"] != workflow_state_ref["revision"]:
+        raise ValueError("benchmark workflow service revision lineage is stale")
+    operation_ref["workflow_state_ref"] = workflow_state_ref
+    operation_ref["stage_execution_ref"] = stage_execution_ref
+    for name in ("request_ref", "window_binding_ref", "capture_ref"):
+        operation_ref[name] = _identity_ref(
+            operation_ref[name], f"benchmark workflow service {name}"
+        )
+    if operation_ref["worker_ref"] is not None:
+        operation_ref["worker_ref"] = _runtime_sealed_parent(
+            operation_ref["worker_ref"], "benchmark workflow service worker ref"
+        )
+    if operation_ref["status"] not in _WORKFLOW_SERVICE_STATUSES:
+        raise ValueError("benchmark workflow service operation status is invalid")
+    predecessor = operation_ref["predecessor_content_sha256"]
+    if predecessor is not None:
+        _sha(predecessor, "benchmark workflow service predecessor SHA")
+        if predecessor == operation_ref.get("content_sha256"):
+            raise ValueError("benchmark workflow service predecessor cannot be self")
+    if (
+        operation_ref["artifact_is_authorization"] is not False
+        or operation_ref["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark workflow service operation ref cannot authorize actions")
+    _sha(operation_ref["content_sha256"], "benchmark workflow service operation SHA")
+    if operation_ref["content_sha256"] != content_sha256(operation_ref):
+        raise ValueError("benchmark workflow service operation ref content SHA mismatch")
+    return operation_ref
+
+
+def compose_benchmark_v2_workflow_service_operation_ref(
+    *,
+    mode: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    workflow_state_ref: Mapping[str, object],
+    stage_execution_ref: Mapping[str, object],
+    request_ref: Mapping[str, object],
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    worker_ref: Mapping[str, object] | None,
+    status: str,
+    predecessor_operation_ref: Mapping[str, object] | None,
+) -> dict[str, Any]:
+    predecessor_sha256 = None
+    if predecessor_operation_ref is not None:
+        predecessor_sha256 = validate_benchmark_v2_workflow_service_operation_ref(
+            predecessor_operation_ref
+        )["content_sha256"]
+    body = {
+        "contract_version": BENCHMARK_V2_WORKFLOW_SERVICE_OPERATION_REF_CONTRACT,
+        "mode": mode,
+        "run_id": run_id,
+        "stage": stage,
+        "operation_id": operation_id,
+        "workflow_state_ref": deepcopy(dict(workflow_state_ref)),
+        "stage_execution_ref": deepcopy(dict(stage_execution_ref)),
+        "request_ref": deepcopy(dict(request_ref)),
+        "window_binding_ref": deepcopy(dict(window_binding_ref)),
+        "capture_ref": deepcopy(dict(capture_ref)),
+        "worker_ref": deepcopy(dict(worker_ref)) if worker_ref is not None else None,
+        "status": status,
+        "predecessor_content_sha256": predecessor_sha256,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    return validate_benchmark_v2_workflow_service_operation_ref(_seal(body))
+
+
+def validate_benchmark_v2_adopted_result_projection(value: object) -> dict[str, Any]:
+    projection = _closed(
+        value,
+        _ADOPTED_RESULT_PROJECTION_FIELDS,
+        "benchmark adopted result projection",
+    )
+    if (
+        projection["contract_version"]
+        != BENCHMARK_V2_ADOPTED_RESULT_PROJECTION_CONTRACT
+    ):
+        raise ValueError("benchmark adopted result projection contract is invalid")
+    if projection["mode"] not in _WORKFLOW_SERVICE_MODES:
+        raise ValueError("benchmark adopted result projection mode is invalid")
+    for name in ("run_id", "stage", "operation_id"):
+        _text(projection[name], f"benchmark adopted result projection {name}")
+    projection["worker_ref"] = _runtime_sealed_parent(
+        projection["worker_ref"], "benchmark adopted result worker ref"
+    )
+    projection["model_request_ref"] = _identity_ref(
+        projection["model_request_ref"], "benchmark adopted model request ref"
+    )
+    for name in ("payload_ref", "result_ref"):
+        projection[name] = _content_ref(
+            projection[name], f"benchmark adopted result {name}"
+        )
+    projection["adoption_ref"] = _runtime_sealed_parent(
+        projection["adoption_ref"], "benchmark adopted generic adoption ref"
+    )
+    if not isinstance(projection["response"], Mapping):
+        raise ValueError("benchmark adopted response body must be a mapping")
+    projection["response"] = deepcopy(dict(projection["response"]))
+    expected_response_bytes = canonical_json_bytes(projection["response"])
+    if (
+        not isinstance(projection["response_canonical_json"], str)
+        or projection["response_canonical_json"].encode("utf-8")
+        != expected_response_bytes
+    ):
+        raise ValueError("benchmark adopted canonical response bytes mismatch")
+    _sha(
+        projection["response_canonical_sha256"],
+        "benchmark adopted canonical response SHA",
+    )
+    expected_response_sha256 = hashlib.sha256(expected_response_bytes).hexdigest()
+    if projection["response_canonical_sha256"] != expected_response_sha256:
+        raise ValueError("benchmark adopted response SHA mismatch")
+    terminal_names = (
+        "terminal_receipt",
+        "window_adoption_ref",
+        "worker_cleanup_ref",
+        "provider_cleanup_ref",
+    )
+    terminal_presence = {projection[name] is not None for name in terminal_names}
+    if len(terminal_presence) != 1:
+        raise ValueError("benchmark adopted terminal parents must be all null or all present")
+    for name in terminal_names:
+        if projection[name] is not None:
+            projection[name] = _runtime_sealed_parent(
+                projection[name], f"benchmark adopted result {name}"
+            )
+    if (
+        projection["artifact_is_authorization"] is not False
+        or projection["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark adopted result projection cannot authorize actions")
+    _sha(projection["content_sha256"], "benchmark adopted result projection SHA")
+    if projection["content_sha256"] != content_sha256(projection):
+        raise ValueError("benchmark adopted result projection content SHA mismatch")
+    return projection
+
+
+def compose_benchmark_v2_adopted_result_projection(
+    *,
+    mode: str,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    worker_ref: Mapping[str, object],
+    model_request_ref: Mapping[str, object],
+    payload_ref: Mapping[str, object],
+    result_ref: Mapping[str, object],
+    adoption_ref: Mapping[str, object],
+    response: Mapping[str, object],
+    terminal_receipt: Mapping[str, object] | None,
+    window_adoption_ref: Mapping[str, object] | None,
+    worker_cleanup_ref: Mapping[str, object] | None,
+    provider_cleanup_ref: Mapping[str, object] | None,
+) -> dict[str, Any]:
+    copied_response = deepcopy(dict(response))
+    response_bytes = canonical_json_bytes(copied_response)
+    body = {
+        "contract_version": BENCHMARK_V2_ADOPTED_RESULT_PROJECTION_CONTRACT,
+        "mode": mode,
+        "run_id": run_id,
+        "stage": stage,
+        "operation_id": operation_id,
+        "worker_ref": deepcopy(dict(worker_ref)),
+        "model_request_ref": deepcopy(dict(model_request_ref)),
+        "payload_ref": deepcopy(dict(payload_ref)),
+        "result_ref": deepcopy(dict(result_ref)),
+        "adoption_ref": deepcopy(dict(adoption_ref)),
+        "response": copied_response,
+        "response_canonical_json": response_bytes.decode("utf-8"),
+        "response_canonical_sha256": hashlib.sha256(response_bytes).hexdigest(),
+        "terminal_receipt": (
+            deepcopy(dict(terminal_receipt)) if terminal_receipt is not None else None
+        ),
+        "window_adoption_ref": (
+            deepcopy(dict(window_adoption_ref))
+            if window_adoption_ref is not None
+            else None
+        ),
+        "worker_cleanup_ref": (
+            deepcopy(dict(worker_cleanup_ref)) if worker_cleanup_ref is not None else None
+        ),
+        "provider_cleanup_ref": (
+            deepcopy(dict(provider_cleanup_ref))
+            if provider_cleanup_ref is not None
+            else None
+        ),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    return validate_benchmark_v2_adopted_result_projection(_seal(body))
+
+
+def validate_benchmark_v2_workflow_service_step(value: object) -> dict[str, Any]:
+    step = _closed(
+        value,
+        _WORKFLOW_SERVICE_STEP_FIELDS,
+        "benchmark workflow service step",
+    )
+    if step["contract_version"] != BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT:
+        raise ValueError("benchmark workflow service step contract is invalid")
+    operation_ref = validate_benchmark_v2_workflow_service_operation_ref(
+        step["operation_ref"]
+    )
+    if step["mode"] != operation_ref["mode"]:
+        raise ValueError("benchmark workflow service step mode does not match operation")
+    if step["status"] != operation_ref["status"]:
+        raise ValueError("benchmark workflow service step status does not match operation")
+    step["operation_ref"] = operation_ref
+    if step["worker_ref"] != operation_ref["worker_ref"]:
+        raise ValueError("benchmark workflow service step worker does not match operation")
+    if step["worker_ref"] is not None:
+        step["worker_ref"] = _runtime_sealed_parent(
+            step["worker_ref"], "benchmark workflow service step worker ref"
+        )
+    if step["observed_task_kind"] is not None:
+        _text(step["observed_task_kind"], "benchmark workflow service observed task kind")
+    projection = step["adopted_result_projection"]
+    if projection is not None:
+        projection = validate_benchmark_v2_adopted_result_projection(projection)
+        for name in ("mode", "run_id", "stage", "operation_id", "worker_ref"):
+            expected = operation_ref[name] if name != "mode" else step["mode"]
+            if projection[name] != expected:
+                raise ValueError(
+                    f"benchmark workflow service adopted projection {name} is stale"
+                )
+        step["adopted_result_projection"] = projection
+    if step["terminal_receipt"] is not None:
+        step["terminal_receipt"] = _runtime_sealed_parent(
+            step["terminal_receipt"], "benchmark workflow service terminal receipt"
+        )
+    cleanup_refs = _closed(
+        step["cleanup_refs"],
+        {"worker_cleanup_ref", "provider_cleanup_ref"},
+        "benchmark workflow service cleanup refs",
+    )
+    for name in ("worker_cleanup_ref", "provider_cleanup_ref"):
+        if cleanup_refs[name] is not None:
+            cleanup_refs[name] = _runtime_sealed_parent(
+                cleanup_refs[name], f"benchmark workflow service {name}"
+            )
+    step["cleanup_refs"] = cleanup_refs
+    if projection is not None:
+        if step["terminal_receipt"] != projection["terminal_receipt"]:
+            raise ValueError("benchmark workflow service terminal receipt is stale")
+        for name in ("worker_cleanup_ref", "provider_cleanup_ref"):
+            if cleanup_refs[name] != projection[name]:
+                raise ValueError(f"benchmark workflow service {name} is stale")
+    if (
+        step["artifact_is_authorization"] is not False
+        or step["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark workflow service step cannot authorize actions")
+    _sha(step["content_sha256"], "benchmark workflow service step SHA")
+    if step["content_sha256"] != content_sha256(step):
+        raise ValueError("benchmark workflow service step content SHA mismatch")
+    return step
+
+
+def compose_benchmark_v2_workflow_service_step(
+    *,
+    operation_ref: Mapping[str, object],
+    observed_task_kind: str | None,
+    adopted_result_projection: Mapping[str, object] | None,
+    terminal_receipt: Mapping[str, object] | None,
+    cleanup_refs: Mapping[str, object],
+) -> dict[str, Any]:
+    current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+    body = {
+        "contract_version": BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT,
+        "mode": current["mode"],
+        "status": current["status"],
+        "operation_ref": current,
+        "worker_ref": deepcopy(current["worker_ref"]),
+        "observed_task_kind": observed_task_kind,
+        "adopted_result_projection": (
+            deepcopy(dict(adopted_result_projection))
+            if adopted_result_projection is not None
+            else None
+        ),
+        "terminal_receipt": (
+            deepcopy(dict(terminal_receipt)) if terminal_receipt is not None else None
+        ),
+        "cleanup_refs": deepcopy(dict(cleanup_refs)),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    return validate_benchmark_v2_workflow_service_step(_seal(body))
 
 
 def _validate_source_ref(value: object) -> dict[str, str]:
@@ -1219,6 +1820,15 @@ def replay_benchmark_v2_incumbent_terminal(
     return deepcopy(current)
 
 
+class BenchmarkV2WorkflowServicePortUnavailableError(RuntimeError):
+    """高层端口尚未接线时拒绝伪造WorkflowService成功结果。"""
+
+
+_WORKFLOW_SERVICE_PORT_UNAVAILABLE = (
+    "benchmark_v2 workflow service orchestration is unavailable before Amendment S2/S3"
+)
+
+
 class BenchmarkV2IncumbentWorkflowService:
     """以同一composition暴露closed文档、运行恢复和终态重放。"""
 
@@ -1272,6 +1882,76 @@ class BenchmarkV2IncumbentWorkflowService:
         return _cancel_benchmark_v2_incumbent_operation(
             composition=self._composition,
             **kwargs,
+        )
+
+    def start_hybrid_operation(
+        self,
+        *,
+        screen_group: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> dict[str, Any]:
+        validate_benchmark_v2_hybrid_screen_group_start(screen_group)
+        validate_benchmark_v2_workflow_window_binding(window_binding)
+        raise BenchmarkV2WorkflowServicePortUnavailableError(
+            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        )
+
+    def continue_hybrid_operation(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        raise BenchmarkV2WorkflowServicePortUnavailableError(
+            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        )
+
+    def start_incumbent_observe(
+        self,
+        *,
+        provider_case_ref: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> dict[str, Any]:
+        _validate_provider_case_ref(provider_case_ref)
+        validate_benchmark_v2_workflow_window_binding(window_binding)
+        raise BenchmarkV2WorkflowServicePortUnavailableError(
+            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        )
+
+    def poll_incumbent_observe(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        raise BenchmarkV2WorkflowServicePortUnavailableError(
+            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        )
+
+    def adopt_and_terminalize_incumbent(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+        worker_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        worker = _runtime_sealed_parent(
+            worker_ref, "benchmark workflow service adopted worker ref"
+        )
+        if current["worker_ref"] != worker:
+            raise ValueError("benchmark workflow service adopted worker ref is stale")
+        raise BenchmarkV2WorkflowServicePortUnavailableError(
+            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        )
+
+    def cancel_operation(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        raise BenchmarkV2WorkflowServicePortUnavailableError(
+            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
         )
 
 
