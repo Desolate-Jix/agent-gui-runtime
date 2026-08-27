@@ -560,7 +560,10 @@ def validate_benchmark_v2_worker_window_binding_adoption(
             set(generic_receipt) != receipt_fields
             or generic_receipt.get("contract_version")
             != "learning_stage_worker_result_adoption_v1"
-            or generic_receipt.get("operation_id") != operation_ref.get("operation_id")
+            or not _benchmark_v2_generic_receipt_matches_binding_operation(
+                generic_operation_id=generic_receipt.get("operation_id"),
+                binding_operation_id=operation_ref.get("operation_id"),
+            )
             or generic_receipt.get("task_kind") != "vision_observe_screen"
         ):
             raise ValueError("generic adoption lineage differs")
@@ -636,6 +639,24 @@ def validate_benchmark_v2_worker_window_binding_adoption(
         raise LearningWorkflowStageOperationError(
             f"benchmark-v2 worker binding adoption invalid: {error}"
         ) from error
+
+
+def _benchmark_v2_generic_receipt_matches_binding_operation(
+    *, generic_operation_id: object, binding_operation_id: object
+) -> bool:
+    generic = str(generic_operation_id or "")
+    binding = str(binding_operation_id or "")
+    if not generic or not binding:
+        return False
+    if generic == binding:
+        return True
+    separator = _BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR
+    if separator not in generic:
+        return False
+    parent, token = generic.rsplit(separator, 1)
+    return parent == binding and len(token) == 64 and all(
+        character in "0123456789abcdef" for character in token
+    )
 
 
 def build_learning_pipeline_initial_worker_request(
@@ -1298,11 +1319,19 @@ def _benchmark_v2_source_projection(
             resolve_server_worker_window_binding,
         )
 
+        binding_run_id, binding_operation_id = (
+            _benchmark_v2_incumbent_parent_binding_identity(
+                run_id=run_id,
+                stage=stage,
+                operation_id=operation_id,
+                request=request,
+            )
+        )
         resolution = resolve_server_worker_window_binding(
             resolver=composition.benchmark_v2_worker_binding_resolver,
-            run_id=run_id,
+            run_id=binding_run_id,
             stage=stage,
-            operation_id=operation_id,
+            operation_id=binding_operation_id,
             window_binding_ref=request["window_binding_ref"],
             capture_ref=request["capture_ref"],
         )
@@ -1338,6 +1367,47 @@ def _benchmark_v2_source_projection(
         raise LearningWorkflowStageOperationError(
             f"benchmark_v2 incumbent source projection is invalid: {error}"
         ) from error
+
+
+def _benchmark_v2_incumbent_parent_binding_identity(
+    *,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    request: Mapping[str, object],
+) -> tuple[str, str]:
+    """从确定性子槽恢复原 Task5 窗口 authority 身份。"""
+
+    separator = _BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR
+    if separator not in run_id and separator not in operation_id:
+        return run_id, operation_id
+    if separator not in run_id or separator not in operation_id:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent child binding identity is incomplete"
+        )
+    parent_run_id, run_token = run_id.rsplit(separator, 1)
+    parent_operation_id, operation_token = operation_id.rsplit(separator, 1)
+    case_ref = request.get("provider_case_ref")
+    case_id = case_ref.get("case_id") if isinstance(case_ref, Mapping) else None
+    expected_token = content_sha256(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
+            "parent_run_id": parent_run_id,
+            "parent_stage": stage,
+            "parent_operation_id": parent_operation_id,
+            "case_id": case_id,
+        }
+    )
+    if (
+        not parent_run_id
+        or not parent_operation_id
+        or run_token != operation_token
+        or run_token != expected_token
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent child binding identity is stale"
+        )
+    return parent_run_id, parent_operation_id
 
 def _benchmark_v2_sidecars(
     workflow_state: Mapping[str, object], stage: str
@@ -2006,6 +2076,7 @@ def _start_benchmark_v2_incumbent_operation(
     operation_id: str,
     task_kind: str,
     request: Mapping[str, object],
+    parent_window_binding: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     _require_minted_learning_workflow_service_composition(composition)
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
@@ -2028,6 +2099,22 @@ def _start_benchmark_v2_incumbent_operation(
             "benchmark_v2 incumbent supervision root is unavailable"
         )
     closed_request = _benchmark_v2_request(request)
+    if parent_window_binding is not None:
+        slot = _benchmark_v2_incumbent_child_slot(
+            provider_case_ref=closed_request["provider_case_ref"],
+            window_binding=parent_window_binding,
+        )
+        if any(
+            slot[name] != expected
+            for name, expected in (
+                ("run_id", run_id),
+                ("stage", stage),
+                ("operation_id", operation_id),
+            )
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent child start identity is stale"
+            )
     registry = _LearningWorkflowRegistryOwner(composition.worker_registry)
     operation_lock = get_learning_workflow_operation_lock(
         store=composition.store,
@@ -2450,11 +2537,23 @@ def _rebuild_benchmark_v2_window_adoption(
     )
 
     try:
+        binding_run_id, binding_operation_id = (
+            _benchmark_v2_incumbent_parent_binding_identity(
+                run_id=str(operation["run_id"]),
+                stage=str(operation["stage"]),
+                operation_id=str(operation["operation_id"]),
+                request={
+                    "provider_case_ref": operation["handler_payload_source"][
+                        "provider_case_ref"
+                    ]
+                },
+            )
+        )
         return validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
             resolver=resolver,
-            run_id=operation["run_id"],
+            run_id=binding_run_id,
             stage=operation["stage"],
-            operation_id=operation["operation_id"],
+            operation_id=binding_operation_id,
             window_binding_ref=operation["window_binding_ref"],
             capture_ref=operation["capture_ref"],
             worker_process_identity=launch_owner["process_identity"],
@@ -3283,6 +3382,446 @@ def _benchmark_v2_workflow_service_worker_ref(
     )
 
 
+_BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR = "::benchmark-v2-incumbent::"
+
+
+def _benchmark_v2_incumbent_child_slot(
+    *,
+    provider_case_ref: Mapping[str, object],
+    window_binding: Mapping[str, object],
+) -> dict[str, Any]:
+    """为一个父窗口绑定生成可恢复、确定性的 incumbent 子槽。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import require_sha256
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        validate_benchmark_v2_workflow_window_binding,
+    )
+
+    binding = validate_benchmark_v2_workflow_window_binding(window_binding)
+    if not isinstance(provider_case_ref, Mapping) or set(provider_case_ref) != {
+        "case_id",
+        "case_content_sha256",
+    }:
+        raise ValueError("benchmark incumbent child slot requires one closed case ref")
+    case_id = str(provider_case_ref.get("case_id") or "").strip()
+    if not case_id:
+        raise ValueError("benchmark incumbent child slot case id is invalid")
+    case_sha256 = require_sha256(
+        provider_case_ref.get("case_content_sha256"),
+        "benchmark incumbent child slot case SHA",
+    )
+    token = content_sha256(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
+            "parent_run_id": str(binding["run_id"]),
+            "parent_stage": str(binding["stage"]),
+            "parent_operation_id": str(binding["operation_id"]),
+            # 同一 case_id 必须命中同一槽，SHA 漂移才能被已有状态拒绝。
+            "case_id": case_id,
+        }
+    )
+    suffix = f"{_BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR}{token}"
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_v1",
+            "provider_case_ref": {
+                "case_id": case_id,
+                "case_content_sha256": case_sha256,
+            },
+            "parent_window_binding": binding,
+            "run_id": f"{binding['run_id']}{suffix}",
+            "stage": str(binding["stage"]),
+            "operation_id": f"{binding['operation_id']}{suffix}",
+            "slot_token": token,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _lookup_benchmark_v2_incumbent_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    provider_case_ref: Mapping[str, object],
+    window_binding: Mapping[str, object],
+) -> dict[str, Any] | None:
+    """只观察确定性子槽；存在但不完整时要求显式恢复。"""
+
+    _require_minted_learning_workflow_service_composition(composition)
+    slot = _benchmark_v2_incumbent_child_slot(
+        provider_case_ref=provider_case_ref,
+        window_binding=window_binding,
+    )
+    try:
+        current = composition.store.get(str(slot["run_id"]))
+    except LearningWorkflowTransitionError as error:
+        if str(error) == "workflow run not found":
+            return None
+        raise
+    try:
+        if (
+            not isinstance(current, Mapping)
+            or current.get("run_id") != slot["run_id"]
+            or current.get("current_stage") != slot["stage"]
+        ):
+            raise LearningWorkflowStageOperationError(
+                "incumbent child workflow identity is incomplete"
+            )
+        stage_execution = _benchmark_v2_stage_execution(current, str(slot["stage"]))
+        operation = _benchmark_v2_incumbent_operation_from_state(
+            current, str(slot["stage"])
+        )
+        if operation is None:
+            raise LearningWorkflowStageOperationError(
+                "incumbent child operation is missing"
+            )
+        _require_benchmark_v2_operation_identity(
+            operation,
+            run_id=str(slot["run_id"]),
+            stage=str(slot["stage"]),
+            operation_id=str(slot["operation_id"]),
+        )
+        source = operation["handler_payload_source"]
+        binding = slot["parent_window_binding"]
+        if (
+            source.get("provider_case_ref") != slot["provider_case_ref"]
+            or source.get("window_binding_ref") != binding["window_binding_ref"]
+            or source.get("capture_ref") != binding["capture_ref"]
+        ):
+            raise LearningWorkflowStageOperationError(
+                "incumbent child parent lineage is stale"
+            )
+        if operation["phase"] not in {
+            "worker_bound",
+            "result_ready",
+            "terminal_intent",
+            "adopted",
+            "complete",
+            "cancel_intent",
+            "cleanup_pending",
+            "cancelled",
+            "safe_stopped",
+        }:
+            raise LearningWorkflowStageOperationError(
+                "incumbent child launch is incomplete"
+            )
+        if int(operation["current_document_revision"]) != int(current["revision"]):
+            raise LearningWorkflowStageOperationError(
+                "incumbent child document revision is stale"
+            )
+        return _project_benchmark_v2_workflow_service_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            operation=operation,
+            status=_benchmark_v2_workflow_service_phase_status(operation),
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        if isinstance(error, LearningWorkflowStageOperationError) and str(
+            error
+        ).startswith("benchmark_v2 incumbent lookup recovery_required"):
+            raise
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent lookup recovery_required: " + str(error)
+        ) from error
+
+
+def _validate_benchmark_v2_actual_incumbent_worker_cleanup(
+    *, cleanup: object, operation: Mapping[str, object]
+) -> dict[str, Any]:
+    receipt = _benchmark_v2_sealed_mapping(
+        cleanup, "benchmark actual incumbent worker cleanup"
+    )
+    fields = {
+        "contract_version",
+        "outcome",
+        "operation_anchor_ref",
+        "reservation_ref",
+        "supervision_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "process_identity",
+        "assignment_proven_ref",
+        "finalization_intent_ref",
+        "exact_handle_observation_refs",
+        "job_absence_observation_ref",
+        "worker_absence_observation_ref",
+        "supervisor_absence_observation_ref",
+        "reservation_abort_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    worker = operation["worker_ref"]
+    if (
+        set(receipt) != fields
+        or receipt.get("contract_version") != "benchmark_worker_cleanup_receipt_v1"
+        or receipt.get("outcome")
+        not in {"verified_not_launched", "verified_exact_worker_exited"}
+        or receipt.get("operation_anchor_ref") != operation["operation_anchor_ref"]
+        or any(
+            receipt.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or receipt.get("worker_id") != worker["worker_id"]
+        or receipt.get("artifact_is_authorization") is not False
+        or receipt.get("execute_binding_enabled") is not False
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark actual incumbent worker cleanup lineage differs"
+        )
+    if receipt["outcome"] == "verified_not_launched":
+        if receipt.get("reservation_abort_ref") is None or any(
+            receipt.get(name) is not None
+            for name in (
+                "process_identity",
+                "assignment_proven_ref",
+                "finalization_intent_ref",
+                "job_absence_observation_ref",
+                "worker_absence_observation_ref",
+                "supervisor_absence_observation_ref",
+            )
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual incumbent no-launch cleanup is incomplete"
+            )
+    else:
+        for name in (
+            "process_identity",
+            "assignment_proven_ref",
+            "finalization_intent_ref",
+            "job_absence_observation_ref",
+            "worker_absence_observation_ref",
+            "supervisor_absence_observation_ref",
+        ):
+            if receipt.get(name) is None:
+                raise LearningWorkflowStageOperationError(
+                    f"benchmark actual incumbent cleanup {name} is missing"
+                )
+    return receipt
+
+
+def _attest_benchmark_v2_actual_operations_stable_zero(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_refs: list[Mapping[str, object]],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT,
+        validate_benchmark_v2_actual_operations_stable_zero,
+        validate_benchmark_v2_workflow_service_operation_ref,
+    )
+
+    _require_minted_learning_workflow_service_composition(composition)
+    if not isinstance(operation_refs, list) or len(operation_refs) != 6:
+        raise ValueError("benchmark actual stable-zero requires exactly six operations")
+    supplied = [
+        validate_benchmark_v2_workflow_service_operation_ref(item)
+        for item in operation_refs
+    ]
+    hybrid_refs = [item for item in supplied if item["mode"] == "hybrid_v1_1"]
+    incumbent_refs = [
+        item for item in supplied if item["mode"] == "incumbent_qwen_only"
+    ]
+    if len(hybrid_refs) != 1 or len(incumbent_refs) != 5:
+        raise ValueError("benchmark actual stable-zero requires exact 1 Hybrid + 5 incumbents")
+    hybrid_ref = hybrid_refs[0]
+    current, stage_execution, binding, worker_record, exact_hybrid = (
+        _benchmark_v2_hybrid_service_context(
+            composition=composition,
+            operation_ref=hybrid_ref,
+        )
+    )
+    hybrid_status = _benchmark_v2_hybrid_service_status(
+        workflow_state=current,
+        stage=str(exact_hybrid["stage"]),
+        worker_record=worker_record,
+    )
+    hybrid_step = _project_benchmark_v2_hybrid_step(
+        composition=composition,
+        workflow_state=current,
+        stage_execution=stage_execution,
+        binding=binding,
+        worker_record=worker_record,
+        status=hybrid_status,
+    )
+    hybrid_cleanup = hybrid_step["cleanup_refs"]
+    if hybrid_status == "complete":
+        provider_cleanup_value = worker_record.get("benchmark_provider_cleanup_ref")
+        if not isinstance(provider_cleanup_value, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual Hybrid provider cleanup is incomplete"
+            )
+        hybrid_provider_cleanup = _validate_benchmark_v2_hybrid_provider_cleanup(
+            cleanup=provider_cleanup_value,
+            worker_record=worker_record,
+        )
+        if (
+            hybrid_provider_cleanup.get("outcome")
+            != "verified_exact_process_exited"
+            or worker_record.get("status") != "completed"
+            or worker_record.get("runtime_attached") is not False
+            or worker_record.get("result_available") is not True
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual Hybrid completed worker cleanup is incomplete"
+            )
+        hybrid_worker_cleanup = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+                ),
+                "run_id": exact_hybrid["run_id"],
+                "stage": exact_hybrid["stage"],
+                "operation_id": exact_hybrid["operation_id"],
+                "worker_id": exact_hybrid["worker_ref"]["worker_id"],
+                "model_request_id": exact_hybrid["worker_ref"]["model_request_id"],
+                "payload_sha256": exact_hybrid["worker_ref"]["payload_sha256"],
+                "worker_status": "completed",
+                "runtime_attached": False,
+                "result_available": True,
+                "authoritative_worker_record_sha256": content_sha256(
+                    dict(worker_record)
+                ),
+                "provider_cleanup_ref": {
+                    "content_sha256": hybrid_provider_cleanup["content_sha256"]
+                },
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+    elif hybrid_status == "safe_stopped" and all(
+        isinstance(hybrid_cleanup.get(name), Mapping)
+        for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+    ):
+        hybrid_worker_cleanup = deepcopy(hybrid_cleanup["worker_cleanup_ref"])
+        hybrid_provider_cleanup = deepcopy(hybrid_cleanup["provider_cleanup_ref"])
+    else:
+        raise LearningWorkflowStageOperationError(
+            "benchmark actual Hybrid authoritative cleanup is incomplete"
+        )
+    cleanup_entries: list[dict[str, Any]] = [
+        {
+            "operation_ref_sha256": exact_hybrid["content_sha256"],
+            "terminal_receipt_ref": seal_immutable(
+                {
+                    "contract_version": "benchmark_v2_hybrid_terminal_state_ref_v1",
+                    "operation_ref_sha256": exact_hybrid["content_sha256"],
+                    "run_id": exact_hybrid["run_id"],
+                    "stage": exact_hybrid["stage"],
+                    "operation_id": exact_hybrid["operation_id"],
+                    "worker_id": exact_hybrid["worker_ref"]["worker_id"],
+                    "model_request_id": exact_hybrid["worker_ref"][
+                        "model_request_id"
+                    ],
+                    "workflow_state_ref": exact_hybrid["workflow_state_ref"],
+                    "stage_execution_ref": exact_hybrid["stage_execution_ref"],
+                    "status": hybrid_status,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            ),
+            "worker_cleanup_ref": hybrid_worker_cleanup,
+            "provider_cleanup_ref": hybrid_provider_cleanup,
+        }
+    ]
+    exact_operations = [exact_hybrid]
+    root = composition.benchmark_supervision_root
+    authority_kind = getattr(root, "authority_kind", None)
+    if not isinstance(authority_kind, str) or not authority_kind:
+        raise LearningWorkflowStageOperationError(
+            "benchmark actual incumbent cleanup authority is unavailable"
+        )
+    incumbent_reservations: set[str] = set()
+    for item in incumbent_refs:
+        child_current = composition.store.get(str(item["run_id"]))
+        child_execution = _benchmark_v2_stage_execution(
+            child_current, str(item["stage"])
+        )
+        operation = _benchmark_v2_incumbent_operation_from_state(
+            child_current, str(item["stage"])
+        )
+        if operation is None or operation["phase"] not in {"complete", "cancelled"}:
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual incumbent terminal cleanup is incomplete"
+            )
+        expected_ref = _project_benchmark_v2_workflow_service_operation_ref(
+            workflow_state=child_current,
+            stage_execution=child_execution,
+            operation=operation,
+            status=str(operation["phase"]),
+        )
+        if item != expected_ref:
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual incumbent operation ref is stale"
+            )
+        parent_run_id, parent_operation_id = (
+            _benchmark_v2_incumbent_parent_binding_identity(
+                run_id=str(operation["run_id"]),
+                stage=str(operation["stage"]),
+                operation_id=str(operation["operation_id"]),
+                request={
+                    "provider_case_ref": operation["handler_payload_source"][
+                        "provider_case_ref"
+                    ]
+                },
+            )
+        )
+        if (
+            parent_run_id != exact_hybrid["run_id"]
+            or parent_operation_id != exact_hybrid["operation_id"]
+            or operation["window_binding_ref"] != exact_hybrid["window_binding_ref"]
+            or operation["capture_ref"] != exact_hybrid["capture_ref"]
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual incumbent parent lineage is stale"
+            )
+        worker_cleanup = _validate_benchmark_v2_actual_incumbent_worker_cleanup(
+            cleanup=operation["worker_cleanup_ref"], operation=operation
+        )
+        incumbent_reservations.add(str(operation["reservation_ref"]["content_sha256"]))
+        provider_cleanup = _validate_benchmark_v2_provider_cleanup_parent(
+            cleanup=operation["provider_cleanup_ref"],
+            operation=operation,
+            result_identity=operation.get("result_identity_ref"),
+            authority_kind=authority_kind,
+            allowed_outcomes={
+                "verified_not_acquired",
+                "verified_exact_process_exited",
+            },
+        )
+        cleanup_entries.append(
+            {
+                "operation_ref_sha256": expected_ref["content_sha256"],
+                "terminal_receipt_ref": deepcopy(operation["terminal_receipt"]),
+                "worker_cleanup_ref": worker_cleanup,
+                "provider_cleanup_ref": provider_cleanup,
+            }
+        )
+        exact_operations.append(expected_ref)
+    if len(incumbent_reservations) != 5:
+        raise LearningWorkflowStageOperationError(
+            "benchmark actual incumbent reservation identities are duplicated"
+        )
+    receipt = seal_immutable(
+        {
+            "contract_version": (
+                BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT
+            ),
+            "operation_refs": exact_operations,
+            "cleanup_entries": cleanup_entries,
+            "window_binding_ref": deepcopy(exact_hybrid["window_binding_ref"]),
+            "capture_ref": deepcopy(exact_hybrid["capture_ref"]),
+            "cleanup_status": "stable_zero",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    return validate_benchmark_v2_actual_operations_stable_zero(receipt)
+
+
 def _benchmark_v2_workflow_service_phase_status(
     operation: Mapping[str, object],
     *,
@@ -3506,6 +4045,137 @@ def _project_benchmark_v2_workflow_service_step(
     )
 
 
+def _benchmark_v2_parent_has_hybrid_binding(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    window_binding: Mapping[str, object],
+) -> bool:
+    try:
+        current = composition.store.get(str(window_binding["run_id"]))
+        stage_execution = _benchmark_v2_stage_execution(
+            current, str(window_binding["stage"])
+        )
+    except (LearningWorkflowTransitionError, LearningWorkflowStageOperationError):
+        return False
+    binding = _benchmark_v2_hybrid_service_binding_from_execution(stage_execution)
+    if binding is None:
+        return False
+    if binding["window_binding"] != dict(window_binding):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent parent Hybrid binding is stale"
+        )
+    return True
+
+
+def _ensure_benchmark_v2_incumbent_child_workflow_run(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    slot: Mapping[str, object],
+) -> dict[str, Any]:
+    """仅由 WorkflowService 为实际 benchmark 建立一个 incumbent 子 run。"""
+
+    parent_binding = slot["parent_window_binding"]
+    parent_current = composition.store.get(str(parent_binding["run_id"]))
+    parent_execution = _benchmark_v2_stage_execution(
+        parent_current, str(parent_binding["stage"])
+    )
+    service_binding = _benchmark_v2_hybrid_service_binding_from_execution(
+        parent_execution
+    )
+    if (
+        service_binding is None
+        or service_binding["window_binding"] != parent_binding
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent child parent binding is unavailable"
+        )
+    capture_image_path = str(
+        service_binding["screen_group"].get("capture_image_path") or ""
+    ).strip()
+    if not capture_image_path:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent child capture image is unavailable"
+        )
+    run_id = str(slot["run_id"])
+    stage = str(slot["stage"])
+    operation_id = str(slot["operation_id"])
+    start_intent = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_run_start_intent_v1",
+            "provider_case_ref": deepcopy(slot["provider_case_ref"]),
+            "parent_run_id": str(parent_binding["run_id"]),
+            "parent_stage": str(parent_binding["stage"]),
+            "parent_operation_id": str(parent_binding["operation_id"]),
+            "window_binding_ref": deepcopy(parent_binding["window_binding_ref"]),
+            "capture_ref": deepcopy(parent_binding["capture_ref"]),
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    try:
+        current = composition.store.get(run_id)
+    except LearningWorkflowTransitionError as error:
+        if str(error) != "workflow run not found":
+            raise
+        current = transition_learning_workflow_run(
+            store=composition.store,
+            project_root=composition.project_root,
+            run_id=run_id,
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            reason="benchmark_v2 incumbent child capture binding",
+            evidence_refs={"benchmark_v2_incumbent_child_start_intent": start_intent},
+        )
+    if current.get("current_stage") == "bind_capture":
+        record = current["stages"]["bind_capture"]
+        evidence = record.get("evidence_refs")
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("benchmark_v2_incumbent_child_start_intent")
+            != start_intent
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent child run start intent is stale"
+            )
+        if record.get("status") == "running":
+            current = transition_learning_workflow_run(
+                store=composition.store,
+                project_root=composition.project_root,
+                run_id=run_id,
+                expected_revision=int(current["revision"]),
+                stage="bind_capture",
+                outcome="completed",
+                reason="benchmark_v2 incumbent child capture bound",
+                evidence_refs={
+                    "image_path": capture_image_path,
+                    "benchmark_v2_incumbent_child_start_intent": start_intent,
+                },
+            )
+        current = start_learning_workflow_stage_operation(
+            store=composition.store,
+            project_root=composition.project_root,
+            run_id=run_id,
+            expected_revision=int(current["revision"]),
+            stage=stage,
+            operation_id=operation_id,
+            reason="benchmark_v2 incumbent child workflow service start",
+        )["workflow_state"]
+    if current.get("current_stage") != stage:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent child run stage is stale"
+        )
+    execution = _benchmark_v2_stage_execution(current, stage)
+    if execution.get("operation_id") != operation_id:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent child operation slot is stale"
+        )
+    return current
+
+
 def _start_benchmark_v2_incumbent_workflow_service(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -3513,6 +4183,60 @@ def _start_benchmark_v2_incumbent_workflow_service(
     window_binding: Mapping[str, object],
 ) -> dict[str, Any]:
     _require_minted_learning_workflow_service_composition(composition)
+    if _benchmark_v2_parent_has_hybrid_binding(
+        composition=composition,
+        window_binding=window_binding,
+    ):
+        slot = _benchmark_v2_incumbent_child_slot(
+            provider_case_ref=provider_case_ref,
+            window_binding=window_binding,
+        )
+        run_id = str(slot["run_id"])
+        stage = str(slot["stage"])
+        operation_id = str(slot["operation_id"])
+        with get_learning_workflow_operation_lock(
+            store=composition.store,
+            run_id=run_id,
+            operation_id=operation_id,
+        ):
+            existing = _lookup_benchmark_v2_incumbent_workflow_service(
+                composition=composition,
+                provider_case_ref=provider_case_ref,
+                window_binding=window_binding,
+            )
+            if existing is not None:
+                return existing
+            current = _ensure_benchmark_v2_incumbent_child_workflow_run(
+                composition=composition,
+                slot=slot,
+            )
+            request = {
+                "provider_case_ref": deepcopy(dict(provider_case_ref)),
+                "window_binding_ref": deepcopy(
+                    dict(window_binding["window_binding_ref"])
+                ),
+                "capture_ref": deepcopy(dict(window_binding["capture_ref"])),
+            }
+            _start_benchmark_v2_incumbent_operation(
+                composition=composition,
+                run_id=run_id,
+                expected_revision=int(current["revision"]),
+                stage=stage,
+                operation_id=operation_id,
+                task_kind="vision_observe_screen",
+                request=request,
+                parent_window_binding=window_binding,
+            )
+            started = _lookup_benchmark_v2_incumbent_workflow_service(
+                composition=composition,
+                provider_case_ref=provider_case_ref,
+                window_binding=window_binding,
+            )
+            if started is None:
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 incumbent child start lost its durable slot"
+                )
+            return started
     run_id = str(window_binding["run_id"])
     stage = str(window_binding["stage"])
     operation_id = str(window_binding["operation_id"])

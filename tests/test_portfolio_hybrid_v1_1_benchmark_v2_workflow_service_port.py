@@ -170,9 +170,11 @@ def test_canonical_service_surface_has_only_exact_keyword_inputs() -> None:
         "lookup_hybrid_operation": ("screen_group", "window_binding"),
         "continue_hybrid_operation": ("operation_ref",),
         "start_incumbent_observe": ("provider_case_ref", "window_binding"),
+        "lookup_incumbent_observe": ("provider_case_ref", "window_binding"),
         "poll_incumbent_observe": ("operation_ref",),
         "adopt_and_terminalize_incumbent": ("operation_ref", "worker_ref"),
         "cancel_operation": ("operation_ref",),
+        "attest_actual_operations_stable_zero": ("operation_refs",),
     }
     for method_name, names in expected.items():
         signature = inspect.signature(

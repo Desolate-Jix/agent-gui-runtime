@@ -54,6 +54,9 @@ BENCHMARK_V2_WORKFLOW_SERVICE_OPERATION_REF_CONTRACT = (
 BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT = (
     "benchmark_v2_workflow_service_step_v1"
 )
+BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT = (
+    "benchmark_v2_actual_operations_stable_zero_v1"
+)
 BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT = (
     "benchmark_v2_provider_dispatch_context_projection_v1"
 )
@@ -2015,6 +2018,207 @@ def replay_benchmark_v2_incumbent_terminal(
     return deepcopy(current)
 
 
+def validate_benchmark_v2_actual_operations_stable_zero(
+    value: object,
+) -> dict[str, Any]:
+    """验证 WorkflowService 对一个实际 screen-group 的 exact 1+5 清理证明。"""
+
+    receipt = _closed(
+        value,
+        {
+            "contract_version",
+            "operation_refs",
+            "cleanup_entries",
+            "window_binding_ref",
+            "capture_ref",
+            "cleanup_status",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark actual operations stable-zero",
+    )
+    if (
+        receipt["contract_version"]
+        != BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT
+    ):
+        raise ValueError("benchmark actual operations stable-zero contract is invalid")
+    raw_operations = receipt["operation_refs"]
+    if not isinstance(raw_operations, list) or len(raw_operations) != 6:
+        raise ValueError("benchmark actual stable-zero requires exactly six operations")
+    operations = [
+        validate_benchmark_v2_workflow_service_operation_ref(item)
+        for item in raw_operations
+    ]
+    hybrid = [item for item in operations if item["mode"] == "hybrid_v1_1"]
+    incumbents = [
+        item for item in operations if item["mode"] == "incumbent_qwen_only"
+    ]
+    if len(hybrid) != 1 or len(incumbents) != 5:
+        raise ValueError("benchmark actual stable-zero requires exact 1 Hybrid + 5 incumbents")
+    if hybrid[0]["status"] not in {"complete", "safe_stopped"} or any(
+        item["status"] not in {"complete", "cancelled"} for item in incumbents
+    ):
+        raise ValueError("benchmark actual stable-zero contains an active operation")
+    if len({item["content_sha256"] for item in operations}) != 6:
+        raise ValueError("benchmark actual stable-zero operation refs are duplicated")
+    for field in ("run_id", "operation_id"):
+        if len({item[field] for item in incumbents}) != 5:
+            raise ValueError(
+                f"benchmark actual stable-zero incumbent {field} identities are duplicated"
+            )
+    if len({item["request_ref"]["id"] for item in incumbents}) != 5:
+        raise ValueError("benchmark actual stable-zero incumbent cases are duplicated")
+    worker_ids = [str(item["worker_ref"]["worker_id"]) for item in operations]
+    request_ids = [str(item["worker_ref"]["model_request_id"]) for item in operations]
+    if len(set(worker_ids)) != 6 or len(set(request_ids)) != 6:
+        raise ValueError("benchmark actual stable-zero worker identities are duplicated")
+    window_ref = _identity_ref(
+        receipt["window_binding_ref"], "benchmark actual stable-zero window ref"
+    )
+    capture_ref = _identity_ref(
+        receipt["capture_ref"], "benchmark actual stable-zero capture ref"
+    )
+    if any(
+        item["window_binding_ref"] != window_ref or item["capture_ref"] != capture_ref
+        for item in operations
+    ):
+        raise ValueError("benchmark actual stable-zero parent binding lineage is stale")
+    raw_entries = receipt["cleanup_entries"]
+    if not isinstance(raw_entries, list) or len(raw_entries) != 6:
+        raise ValueError("benchmark actual stable-zero cleanup entries are incomplete")
+    entries: list[dict[str, Any]] = []
+    incumbent_reservations: list[str] = []
+    expected = {item["content_sha256"]: item for item in operations}
+    for raw_entry in raw_entries:
+        entry = _closed(
+            raw_entry,
+            {
+                "operation_ref_sha256",
+                "terminal_receipt_ref",
+                "worker_cleanup_ref",
+                "provider_cleanup_ref",
+            },
+            "benchmark actual stable-zero cleanup entry",
+        )
+        operation_sha = _sha(
+            entry["operation_ref_sha256"],
+            "benchmark actual stable-zero operation ref SHA",
+        )
+        if operation_sha not in expected:
+            raise ValueError("benchmark actual stable-zero cleanup operation is stale")
+        operation = expected[operation_sha]
+        entry["terminal_receipt_ref"] = _runtime_sealed_parent(
+            entry["terminal_receipt_ref"],
+            "benchmark actual stable-zero terminal receipt ref",
+        )
+        entry["worker_cleanup_ref"] = _runtime_sealed_parent(
+            entry["worker_cleanup_ref"],
+            "benchmark actual stable-zero worker cleanup ref",
+        )
+        entry["provider_cleanup_ref"] = _runtime_sealed_parent(
+            entry["provider_cleanup_ref"],
+            "benchmark actual stable-zero provider cleanup ref",
+        )
+        terminal = entry["terminal_receipt_ref"]
+        worker_cleanup = entry["worker_cleanup_ref"]
+        provider_cleanup = entry["provider_cleanup_ref"]
+        worker = operation["worker_ref"]
+        if any(
+            terminal.get(name) != operation[name]
+            for name in ("run_id", "stage", "operation_id")
+        ) or terminal.get("worker_id") != worker["worker_id"]:
+            raise ValueError("benchmark actual stable-zero terminal lineage is stale")
+        if operation["mode"] == "hybrid_v1_1":
+            completed_cleanup = (
+                worker_cleanup.get("contract_version")
+                == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+                and operation["status"] == "complete"
+                and worker_cleanup.get("worker_status") == "completed"
+                and worker_cleanup.get("runtime_attached") is False
+                and worker_cleanup.get("result_available") is True
+            )
+            cancelled_cleanup = (
+                worker_cleanup.get("contract_version")
+                == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+                and operation["status"] == "safe_stopped"
+                and worker_cleanup.get("backend_compute_termination")
+                in {"not_running", "terminated"}
+                and worker_cleanup.get("model_service_compute_termination")
+                in {"request_not_active", "terminated"}
+            )
+            if (
+                not (completed_cleanup or cancelled_cleanup)
+                or any(
+                    worker_cleanup.get(name) != operation[name]
+                    for name in ("run_id", "stage", "operation_id")
+                )
+                or any(
+                    worker_cleanup.get(name) != worker[name]
+                    for name in ("worker_id", "model_request_id", "payload_sha256")
+                )
+            ):
+                raise ValueError(
+                    "benchmark actual stable-zero Hybrid worker cleanup is stale"
+                )
+        elif (
+            worker_cleanup.get("contract_version")
+            != "benchmark_worker_cleanup_receipt_v1"
+            or worker_cleanup.get("outcome")
+            not in {"verified_not_launched", "verified_exact_worker_exited"}
+            or any(
+                worker_cleanup.get(name) != operation[name]
+                for name in ("run_id", "stage", "operation_id")
+            )
+            or worker_cleanup.get("worker_id") != worker["worker_id"]
+        ):
+            raise ValueError(
+                "benchmark actual stable-zero incumbent worker cleanup is stale"
+            )
+        elif operation["mode"] == "incumbent_qwen_only":
+            reservation = _content_ref(
+                worker_cleanup.get("reservation_ref"),
+                "benchmark actual stable-zero incumbent reservation ref",
+            )
+            incumbent_reservations.append(reservation["content_sha256"])
+        if (
+            provider_cleanup.get("contract_version")
+            != "benchmark_provider_cleanup_ref_v1"
+            or provider_cleanup.get("status") != "cleanup_verified"
+            or provider_cleanup.get("outcome")
+            not in {"verified_not_acquired", "verified_exact_process_exited"}
+            or any(
+                provider_cleanup.get(name) != operation[name]
+                for name in ("run_id", "stage", "operation_id")
+            )
+            or any(
+                provider_cleanup.get(name) != worker[name]
+                for name in ("worker_id", "model_request_id", "payload_sha256")
+            )
+        ):
+            raise ValueError("benchmark actual stable-zero provider cleanup is stale")
+        entries.append(entry)
+    if len({item["operation_ref_sha256"] for item in entries}) != 6:
+        raise ValueError("benchmark actual stable-zero cleanup entries are duplicated")
+    if len(incumbent_reservations) != 5 or len(set(incumbent_reservations)) != 5:
+        raise ValueError("benchmark actual stable-zero incumbent reservations are duplicated")
+    if receipt["cleanup_status"] != "stable_zero":
+        raise ValueError("benchmark actual operations are not stable-zero")
+    if (
+        receipt["artifact_is_authorization"] is not False
+        or receipt["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark actual stable-zero cannot authorize actions")
+    _sha(receipt["content_sha256"], "benchmark actual stable-zero SHA")
+    if receipt["content_sha256"] != content_sha256(receipt):
+        raise ValueError("benchmark actual stable-zero content SHA mismatch")
+    receipt["operation_refs"] = operations
+    receipt["cleanup_entries"] = entries
+    receipt["window_binding_ref"] = window_ref
+    receipt["capture_ref"] = capture_ref
+    return receipt
+
+
 class BenchmarkV2WorkflowServicePortUnavailableError(RuntimeError):
     """高层端口尚未接线时拒绝伪造WorkflowService成功结果。"""
 
@@ -2148,6 +2352,24 @@ class BenchmarkV2IncumbentWorkflowService:
             window_binding=window_binding,
         )
 
+    def lookup_incumbent_observe(
+        self,
+        *,
+        provider_case_ref: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> dict[str, Any] | None:
+        _validate_provider_case_ref(provider_case_ref)
+        binding = validate_benchmark_v2_workflow_window_binding(window_binding)
+        from app.learn.workflow_service import (
+            _lookup_benchmark_v2_incumbent_workflow_service,
+        )
+
+        return _lookup_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            provider_case_ref=provider_case_ref,
+            window_binding=binding,
+        )
+
     def poll_incumbent_observe(
         self,
         *,
@@ -2207,6 +2429,20 @@ class BenchmarkV2IncumbentWorkflowService:
         return _cancel_benchmark_v2_incumbent_workflow_service(
             composition=self._composition,
             operation_ref=current,
+        )
+
+    def attest_actual_operations_stable_zero(
+        self,
+        *,
+        operation_refs: list[Mapping[str, object]],
+    ) -> dict[str, Any]:
+        from app.learn.workflow_service import (
+            _attest_benchmark_v2_actual_operations_stable_zero,
+        )
+
+        return _attest_benchmark_v2_actual_operations_stable_zero(
+            composition=self._composition,
+            operation_refs=operation_refs,
         )
 
 
