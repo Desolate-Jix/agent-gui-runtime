@@ -62,6 +62,7 @@ def _validate_estimand(value: object) -> dict[str, Any]:
             "arms",
             "execution_units",
             "prediction",
+            "semantic_target_metric",
             "point_metric",
             "regression_attempt_policy",
             "holdout_claim",
@@ -70,7 +71,7 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         },
         "estimand",
     )
-    if estimand["contract_version"] != "portfolio_hybrid_v1_1_estimand_v2":
+    if estimand["contract_version"] != "portfolio_hybrid_v1_1_estimand_v2_1":
         raise ValueError("estimand contract_version is invalid")
     if estimand["benchmark_release_id"] != (
         "portfolio_hybrid_v1_1_benchmark_v2_release_1"
@@ -173,7 +174,6 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         raise ValueError("metric coordinate space is invalid")
     if metric["row_key_fields"] != [
         "case_id",
-        "target_id",
         "arm_id",
         "candidate_id",
         "vista_request_ref",
@@ -181,7 +181,6 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         raise ValueError("private scorer row key is invalid")
     if metric["pair_identity_fields"] != [
         "case_id",
-        "target_id",
         "candidate_id",
         "vista_request_ref",
     ]:
@@ -209,7 +208,6 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         ],
         "validated_proposal_lineage_fields": [
             "case_id",
-            "target_id",
             "vista_request_ref",
             "candidate_id",
             "fusion_ref",
@@ -247,6 +245,18 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         raise ValueError("required point gain is invalid")
     if metric["proposal_selection"] != "exact_request_only_no_cherry_pick":
         raise ValueError("proposal selection policy is invalid")
+    if estimand["semantic_target_metric"] != {
+        "metric_id": "private_unique_target_center_containment_v1",
+        "private_join_field": "case_id",
+        "group_field": "screen_group",
+        "region_center_formula": ["(x1+x2)/2", "(y1+y2)/2"],
+        "candidate_containment_rule": "x1 <= x < x2 && y1 <= y < y2",
+        "correct_match_cardinality": 1,
+        "zero_match_policy": "wrong_target",
+        "different_match_policy": "wrong_target",
+        "multiple_match_policy": "wrong_target",
+    }:
+        raise ValueError("semantic target metric is invalid")
     binding = _exact_keys(
         metric["target_binding"],
         {
@@ -280,7 +290,6 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         ],
         "binding_ref_exact_mapping_fields": [
             "case_id",
-            "target_id",
             "candidate_id",
             "fusion_ref",
             "capture_ref",
@@ -288,7 +297,6 @@ def _validate_estimand(value: object) -> dict[str, Any]:
         ],
         "request_ref_exact_mapping_fields": [
             "case_id",
-            "target_id",
             "target_binding_ref",
             "candidate_id",
             "fusion_ref",
@@ -307,7 +315,7 @@ def _validate_estimand(value: object) -> dict[str, Any]:
             "ambiguous_binding",
             "duplicate_request",
             "missing_request",
-            "cross_target_request",
+            "cross_case_request",
             "cross_candidate_request",
             "cross_request_pair",
             "eligible_but_unsent",
@@ -524,16 +532,16 @@ def _validate_invocations(
 
 
 def _validate_target_bindings(
-    target_keys: set[tuple[str, str]],
+    target_keys: set[str],
     bindings: list[dict[str, str]],
     requests: list[dict[str, str]],
-) -> dict[tuple[str, str], dict[str, str] | None]:
-    selected: dict[tuple[str, str], dict[str, str]] = {}
-    global_ref_owners: dict[tuple[str, str], tuple[str, str]] = {}
+) -> dict[str, dict[str, str] | None]:
+    selected: dict[str, dict[str, str]] = {}
+    global_ref_owners: dict[tuple[str, str], str] = {}
     for binding in bindings:
-        key = (binding.get("case_id", ""), binding.get("target_id", ""))
+        key = binding.get("case_id", "")
         if key not in target_keys or key in selected:
-            raise ValueError("duplicate, ambiguous, or cross-target binding")
+            raise ValueError("duplicate, ambiguous, or cross-case binding")
         if not all(
             binding.get(field)
             for field in (
@@ -557,12 +565,11 @@ def _validate_target_bindings(
     if set(selected) != target_keys:
         raise ValueError("target binding is missing")
 
-    request_ref_owners: dict[str, tuple[str, str, str, str]] = {}
+    request_ref_owners: dict[str, tuple[str, str, str]] = {}
     for request in requests:
         request_ref = str(request.get("vista_request_ref") or "")
         owner = (
             str(request.get("case_id") or ""),
-            str(request.get("target_id") or ""),
             str(request.get("target_binding_ref") or ""),
             str(request.get("candidate_id") or ""),
         )
@@ -570,12 +577,12 @@ def _validate_target_bindings(
             raise ValueError("vista_request_ref must be globally unique within the run")
         request_ref_owners[request_ref] = owner
 
-    request_by_target: dict[tuple[str, str], dict[str, str] | None] = {}
+    request_by_target: dict[str, dict[str, str] | None] = {}
     for key, binding in selected.items():
         exact = [
             request
             for request in requests
-            if (request.get("case_id"), request.get("target_id")) == key
+            if request.get("case_id") == key
         ]
         if binding["eligibility"] == "INELIGIBLE":
             if not binding.get("reason") or exact:
@@ -602,35 +609,34 @@ def _validate_target_bindings(
     unexpected = [
         request
         for request in requests
-        if (request.get("case_id"), request.get("target_id")) not in target_keys
+        if request.get("case_id") not in target_keys
     ]
     if unexpected:
-        raise ValueError("cross-target request is invalid")
+        raise ValueError("cross-case request is invalid")
     return request_by_target
 
 
 def _validate_pair_rows(
     rows: list[dict[str, Any]],
     *,
-    selected_mapping: dict[tuple[str, str], dict[str, str] | None],
+    selected_mapping: dict[str, dict[str, str] | None],
 ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
-    row_keys: set[tuple[str, str, str, str, str]] = set()
-    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    row_keys: set[tuple[str, str, str, str]] = set()
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for row in rows:
         key = tuple(
             str(row.get(field) or "")
             for field in (
                 "case_id",
-                "target_id",
                 "arm_id",
                 "candidate_id",
                 "vista_request_ref",
             )
         )
         if not all(key) or key in row_keys:
-            raise ValueError("private scorer five-key row is missing or duplicate")
+            raise ValueError("private scorer four-key row is missing or duplicate")
         row_keys.add(key)
-        pair_key = (key[0], key[1], key[3], key[4])
+        pair_key = (key[0], key[2], key[3])
         grouped.setdefault(pair_key, []).append(row)
     pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
     pair_ref_owners: dict[tuple[str, str], tuple[str, str]] = {}
@@ -642,13 +648,12 @@ def _validate_pair_rows(
         for field in PAIR_PARENT_FIELDS:
             if baseline.get(field) != refined.get(field):
                 raise ValueError(f"Hybrid pair parent mismatch: {field}")
-        target_key = (str(baseline["case_id"]), str(baseline["target_id"]))
+        target_key = str(baseline["case_id"])
         selected = selected_mapping.get(target_key)
         if not isinstance(selected, dict):
             raise ValueError("Hybrid pair has no eligible selected mapping")
         for field in (
             "case_id",
-            "target_id",
             "candidate_id",
             "vista_request_ref",
             "target_binding_ref",
@@ -672,10 +677,7 @@ def _validate_pair_rows(
     expected_pair_targets = {
         key for key, selected in selected_mapping.items() if isinstance(selected, dict)
     }
-    if {(
-        str(baseline["case_id"]),
-        str(baseline["target_id"]),
-    ) for baseline, _ in pairs} != expected_pair_targets:
+    if {str(baseline["case_id"]) for baseline, _ in pairs} != expected_pair_targets:
         raise ValueError("Hybrid pairs do not exactly cover the selected mapping")
     return pairs
 
@@ -722,7 +724,6 @@ def _score_submitted_pairs(
                 field: refined[field]
                 for field in (
                     "case_id",
-                    "target_id",
                     "vista_request_ref",
                     "candidate_id",
                     "fusion_ref",
@@ -805,18 +806,16 @@ def _reject_runner_overrides(
 def _valid_selected_mapping(
     *,
     case_id: str = "case/1",
-    target_id: str = "target/1",
     candidate_id: str = "candidate/1",
     request_ref: str = "request/1",
     binding_ref: str = "binding/1",
     fusion_ref: str = "fusion/1",
     capture_ref: str = "capture/1",
     bbox_ref: str = "bbox/1",
-) -> dict[tuple[str, str], dict[str, str] | None]:
+) -> dict[str, dict[str, str] | None]:
     return {
-        (case_id, target_id): {
+        case_id: {
             "case_id": case_id,
-            "target_id": target_id,
             "candidate_id": candidate_id,
             "vista_request_ref": request_ref,
             "target_binding_ref": binding_ref,
@@ -831,7 +830,6 @@ def _valid_selected_mapping(
 def _valid_pair(
     *,
     case_id: str = "case/1",
-    target_id: str = "target/1",
     candidate_id: str = "candidate/1",
     request_ref: str = "request/1",
     binding_ref: str = "binding/1",
@@ -843,7 +841,6 @@ def _valid_pair(
 ) -> list[dict[str, Any]]:
     common: dict[str, Any] = {
         "case_id": case_id,
-        "target_id": target_id,
         "candidate_id": candidate_id,
         "vista_request_ref": request_ref,
         "fusion_ref": fusion_ref,
@@ -861,7 +858,6 @@ def _valid_pair(
         "canonical_capture_pixel_point": point if point is not None else [3, 3],
         "proposal_lineage": {
             "case_id": case_id,
-            "target_id": target_id,
             "vista_request_ref": request_ref,
             "candidate_id": candidate_id,
             "fusion_ref": fusion_ref,
@@ -883,6 +879,45 @@ def test_estimand_config_has_exact_closed_values() -> None:
     assert config["point_metric"]["metric_id"] == (
         "acceptable_region_binary_gain_v1"
     )
+
+
+def test_estimand_rejects_pre_correction_contract_version() -> None:
+    config = json.loads(ESTIMAND_PATH.read_text(encoding="utf-8"))
+    config["contract_version"] = "portfolio_hybrid_v1_1_estimand_v2"
+
+    with pytest.raises(ValueError, match="contract_version"):
+        _validate_estimand(config)
+
+
+def test_estimand_exposes_only_opaque_case_identity_to_predictions() -> None:
+    config = _load_estimand()
+    metric = config["point_metric"]
+
+    assert metric["row_key_fields"] == [
+        "case_id",
+        "arm_id",
+        "candidate_id",
+        "vista_request_ref",
+    ]
+    assert metric["pair_identity_fields"] == [
+        "case_id",
+        "candidate_id",
+        "vista_request_ref",
+    ]
+    assert "target_id" not in metric["target_binding"]["binding_ref_exact_mapping_fields"]
+    assert "target_id" not in metric["target_binding"]["request_ref_exact_mapping_fields"]
+    assert "target_id" not in metric["refined"]["validated_proposal_lineage_fields"]
+    assert config["semantic_target_metric"] == {
+        "metric_id": "private_unique_target_center_containment_v1",
+        "private_join_field": "case_id",
+        "group_field": "screen_group",
+        "region_center_formula": ["(x1+x2)/2", "(y1+y2)/2"],
+        "candidate_containment_rule": "x1 <= x < x2 && y1 <= y < y2",
+        "correct_match_cardinality": 1,
+        "zero_match_policy": "wrong_target",
+        "different_match_policy": "wrong_target",
+        "multiple_match_policy": "wrong_target",
+    }
 
 
 def test_estimand_rejects_extra_arm_and_target_level_hybrid_invocations() -> None:
@@ -939,7 +974,7 @@ def test_bbox_center_half_open_upper_edge_and_multi_region_or_are_exact() -> Non
     assert _hits_any_region((Fraction(4), Fraction(5)), regions) == 0
 
 
-def test_five_key_pair_requires_exact_two_arms_and_same_parents() -> None:
+def test_four_key_pair_requires_exact_two_arms_and_same_parents() -> None:
     rows = _valid_pair()
     selected_mapping = _valid_selected_mapping()
     assert len(_validate_pair_rows(rows, selected_mapping=selected_mapping)) == 1
@@ -951,7 +986,7 @@ def test_five_key_pair_requires_exact_two_arms_and_same_parents() -> None:
             _validate_pair_rows(mismatched, selected_mapping=selected_mapping)
 
     duplicate = deepcopy(rows) + [deepcopy(rows[1])]
-    with pytest.raises(ValueError, match="five-key"):
+    with pytest.raises(ValueError, match="four-key"):
         _validate_pair_rows(duplicate, selected_mapping=selected_mapping)
 
     cross_request = deepcopy(rows)
@@ -961,11 +996,10 @@ def test_five_key_pair_requires_exact_two_arms_and_same_parents() -> None:
 
 
 def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_request() -> None:
-    target_keys = {("case/1", "target/1"), ("case/1", "target/2")}
+    target_keys = {"case/1", "case/2"}
     bindings = [
         {
             "case_id": "case/1",
-            "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/1",
             "fusion_ref": "fusion/1",
@@ -974,8 +1008,7 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "eligibility": "ELIGIBLE",
         },
         {
-            "case_id": "case/1",
-            "target_id": "target/2",
+            "case_id": "case/2",
             "target_binding_ref": "binding/2",
             "candidate_id": "candidate/2",
             "fusion_ref": "fusion/1",
@@ -988,7 +1021,6 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
     requests = [
         {
             "case_id": "case/1",
-            "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/1",
             "fusion_ref": "fusion/1",
@@ -999,13 +1031,12 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
         }
     ]
     selected = _validate_target_bindings(target_keys, bindings, requests)
-    assert selected[("case/1", "target/1")]["vista_request_ref"] == "request/1"
-    assert selected[("case/1", "target/2")] is None
+    assert selected["case/1"]["vista_request_ref"] == "request/1"
+    assert selected["case/2"] is None
 
     multiple_same_screen_proposals = requests + [
         {
             "case_id": "case/1",
-            "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/better-looking",
             "fusion_ref": "fusion/1",
@@ -1041,8 +1072,7 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
 
     ineligible_request = requests + [
         {
-            "case_id": "case/1",
-            "target_id": "target/2",
+            "case_id": "case/2",
             "target_binding_ref": "binding/2",
             "candidate_id": "candidate/2",
             "fusion_ref": "fusion/1",
@@ -1060,10 +1090,9 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
     with pytest.raises(ValueError, match="reason"):
         _validate_target_bindings(target_keys, missing_ineligible_reason, requests)
 
-    cross_target = requests + [
+    cross_case = requests + [
         {
-            "case_id": "case/1",
-            "target_id": "target/other",
+            "case_id": "case/other",
             "target_binding_ref": "binding/other",
             "candidate_id": "candidate/other",
             "fusion_ref": "fusion/1",
@@ -1073,14 +1102,13 @@ def test_target_binding_rejects_cherry_pick_duplicate_ambiguous_and_cross_reques
             "submission_status": "SUBMITTED",
         }
     ]
-    with pytest.raises(ValueError, match="cross-target"):
-        _validate_target_bindings(target_keys, bindings, cross_target)
+    with pytest.raises(ValueError, match="cross-case"):
+        _validate_target_bindings(target_keys, bindings, cross_case)
 
 
 def test_submitted_failures_remain_in_exact_rational_denominator() -> None:
     failed_pair_rows = _valid_pair(
         case_id="case/2",
-        target_id="target/2",
         candidate_id="candidate/2",
         request_ref="request/2",
         binding_ref="binding/2",
@@ -1091,7 +1119,6 @@ def test_submitted_failures_remain_in_exact_rational_denominator() -> None:
         **_valid_selected_mapping(),
         **_valid_selected_mapping(
             case_id="case/2",
-            target_id="target/2",
             candidate_id="candidate/2",
             request_ref="request/2",
             binding_ref="binding/2",
@@ -1218,11 +1245,10 @@ def test_automatic_gates_are_exact_and_config_has_no_action_point_authority() ->
 
 
 def test_run_wide_binding_and_request_refs_cannot_be_reused_across_valid_targets() -> None:
-    target_keys = {("case/1", "target/1"), ("case/1", "target/2")}
+    target_keys = {"case/1", "case/2"}
     unique_bindings = [
         {
             "case_id": "case/1",
-            "target_id": "target/1",
             "target_binding_ref": "binding/1",
             "candidate_id": "candidate/1",
             "fusion_ref": "fusion/1",
@@ -1231,8 +1257,7 @@ def test_run_wide_binding_and_request_refs_cannot_be_reused_across_valid_targets
             "eligibility": "ELIGIBLE",
         },
         {
-            "case_id": "case/1",
-            "target_id": "target/2",
+            "case_id": "case/2",
             "target_binding_ref": "binding/2",
             "candidate_id": "candidate/2",
             "fusion_ref": "fusion/1",
@@ -1243,19 +1268,18 @@ def test_run_wide_binding_and_request_refs_cannot_be_reused_across_valid_targets
     ]
     unique_requests = [
         {
-            "case_id": "case/1",
-            "target_id": target_id,
+            "case_id": case_id,
             "target_binding_ref": binding_ref,
             "candidate_id": candidate_id,
             "fusion_ref": "fusion/1",
             "capture_ref": "capture/1",
-            "bbox_ref": "bbox/1" if target_id == "target/1" else "bbox/2",
+            "bbox_ref": "bbox/1" if case_id == "case/1" else "bbox/2",
             "vista_request_ref": request_ref,
             "submission_status": "SUBMITTED",
         }
-        for target_id, binding_ref, candidate_id, request_ref in (
-            ("target/1", "binding/1", "candidate/1", "request/1"),
-            ("target/2", "binding/2", "candidate/2", "request/2"),
+        for case_id, binding_ref, candidate_id, request_ref in (
+            ("case/1", "binding/1", "candidate/1", "request/1"),
+            ("case/2", "binding/2", "candidate/2", "request/2"),
         )
     ]
 
@@ -1277,11 +1301,10 @@ def test_run_wide_binding_and_request_refs_cannot_be_reused_across_valid_targets
 
 def test_pair_rows_must_join_the_exact_preselected_request_mapping() -> None:
     selected_mapping = _validate_target_bindings(
-        {("case/1", "target/1")},
+        {"case/1"},
         [
             {
                 "case_id": "case/1",
-                "target_id": "target/1",
                 "target_binding_ref": "binding/selected",
                 "candidate_id": "candidate/selected",
                 "fusion_ref": "fusion/1",
@@ -1293,7 +1316,6 @@ def test_pair_rows_must_join_the_exact_preselected_request_mapping() -> None:
         [
             {
                 "case_id": "case/1",
-                "target_id": "target/1",
                 "target_binding_ref": "binding/selected",
                 "candidate_id": "candidate/selected",
                 "fusion_ref": "fusion/1",
@@ -1310,11 +1332,10 @@ def test_pair_rows_must_join_the_exact_preselected_request_mapping() -> None:
         _validate_pair_rows(unselected, selected_mapping=selected_mapping)
 
     two_targets = _validate_target_bindings(
-        {("case/1", "target/1"), ("case/1", "target/2")},
+        {"case/1", "case/2"},
         [
             {
-                "case_id": "case/1",
-                "target_id": f"target/{index}",
+                "case_id": f"case/{index}",
                 "target_binding_ref": f"binding/{index}",
                 "candidate_id": f"candidate/{index}",
                 "fusion_ref": "fusion/1",
@@ -1326,8 +1347,7 @@ def test_pair_rows_must_join_the_exact_preselected_request_mapping() -> None:
         ],
         [
             {
-                "case_id": "case/1",
-                "target_id": f"target/{index}",
+                "case_id": f"case/{index}",
                 "target_binding_ref": f"binding/{index}",
                 "candidate_id": f"candidate/{index}",
                 "fusion_ref": "fusion/1",
@@ -1341,14 +1361,14 @@ def test_pair_rows_must_join_the_exact_preselected_request_mapping() -> None:
     )
     cross_attached = [
         *_valid_pair(
-            target_id="target/1",
+            case_id="case/1",
             candidate_id="candidate/2",
             request_ref="request/2",
             binding_ref="binding/2",
             bbox_ref="bbox/2",
         ),
         *_valid_pair(
-            target_id="target/2",
+            case_id="case/2",
             candidate_id="candidate/1",
             request_ref="request/1",
             binding_ref="binding/1",

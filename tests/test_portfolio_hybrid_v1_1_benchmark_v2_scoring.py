@@ -1,26 +1,34 @@
 from __future__ import annotations
 import ast, base64, hashlib, json, os, subprocess, sys
 from copy import deepcopy
+import inspect
 from pathlib import Path
 import pytest
 from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, canonical_bytes, prediction_record_ref, seal_automatic_prediction, seal_review_decision, seal_target_binding, seal_vista_request, sealed_artifact_envelope
+import app.learn.hybrid.benchmark_scorer_v2 as scorer_v2
 from app.learn.hybrid.benchmark_scorer_v2 import _score_private_child, _verified_config_snapshot, config_ref, run_private_scorer
 
 ROOT=Path(__file__).resolve().parents[1]; SCRIPT=ROOT/"scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py"; GATE=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json"; ESTIMAND=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"; RELEASE="portfolio_hybrid_v1_1_benchmark_v2_release_1"
+PRIVATE_TARGET_MARKERS=tuple(f"private-target-{index:03d}" for index in range(1,6))
+PRIVATE_LABEL_MARKERS=tuple(f"private-label-{index:03d}" for index in range(1,6))
+PRIVATE_SCREEN_GROUP_MARKER="private-screen-group-marker/never-public"
 def ref(name:str)->dict[str,str]: return {"id":name,"content_sha256":hashlib.sha256(name.encode()).hexdigest()}
 def write(path:Path,value:object)->None: path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(canonical_bytes(value)+b"\n")
 def artifact(contract:str,aid:str,**fields:object)->dict[str,object]: return {"contract_version":contract,"artifact_id":aid,**fields,"safety":deepcopy(SAFETY)}
 
 def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout:bool=False,pair_mode:str="valid")->tuple[dict[str,object],dict[str,object],dict[str,object]]:
-    parent=ref("parent/seal"); cases=[{"case_id":"opaque/1","target_id":"target/right/1","important":True,"acceptable_regions":[[2,2,4,4]]},{"case_id":"opaque/2","target_id":"target/right/2","important":True,"acceptable_regions":[[0,0,2,2]]}]
+    parent=ref("parent/seal"); cases=[{"case_id":f"opaque/{index}","screen_group":PRIVATE_SCREEN_GROUP_MARKER,"important_target":True,"acceptable_regions":[[10+(index-1)*20,10,14+(index-1)*20,14]]} for index in range(1,6)]
     envelopes=[]; rows=[]
     automatic_ref_placeholder=ref("automatic/pending")
     for case in cases:
-        cid,target=case["case_id"],case["target_id"]
-        right=seal_target_binding(artifact_id=f"binding-right/{cid}",case_id=cid,target_id=target,candidate_id=f"candidate-right/{cid}",fusion_ref=ref(f"fusion/{cid}"),capture_ref=ref(f"capture/{cid}"),bbox_ref=ref(f"bbox/{cid}"),bbox=[0,0,2,2],source_parent_ref=parent)
-        wrong=seal_target_binding(artifact_id=f"binding-wrong/{cid}",case_id=cid,target_id="target/wrong",candidate_id=f"candidate-wrong/{cid}",fusion_ref=ref(f"fusion-w/{cid}"),capture_ref=ref(f"capture-w/{cid}"),bbox_ref=ref(f"bbox-w/{cid}"),bbox=[0,0,2,2],source_parent_ref=parent)
+        cid=case["case_id"]
+        index=int(cid.rsplit("/",1)[1]); center=12+(index-1)*20
+        right_bbox=[0,0,13,13] if index==1 else [center-3,9,center+3,15]
+        wrong_bbox=[29,9,35,15] if index==1 else [0,0,13,13]
+        right=seal_target_binding(artifact_id=f"binding-right/{cid}",case_id=cid,candidate_id=f"candidate-right/{cid}",fusion_ref=ref(f"fusion/{cid}"),capture_ref=ref(f"capture/{cid}"),bbox_ref=ref(f"bbox/{cid}"),bbox=right_bbox,source_parent_ref=parent)
+        wrong=seal_target_binding(artifact_id=f"binding-wrong/{cid}",case_id=cid,candidate_id=f"candidate-wrong/{cid}",fusion_ref=ref(f"fusion-w/{cid}"),capture_ref=ref(f"capture-w/{cid}"),bbox_ref=ref(f"bbox-w/{cid}"),bbox=wrong_bbox,source_parent_ref=parent)
         envelopes += [sealed_artifact_envelope(right),sealed_artifact_envelope(wrong)]
-        request=seal_vista_request(artifact_id=f"request/{cid}",case_id=cid,target_id=target,target_binding_ref=artifact_ref(right),candidate_id=right["candidate_id"],fusion_ref=right["fusion_ref"],capture_ref=right["capture_ref"],bbox_ref=right["bbox_ref"],source_parent_ref=parent)
+        request=seal_vista_request(artifact_id=f"request/{cid}",case_id=cid,target_binding_ref=artifact_ref(right),candidate_id=right["candidate_id"],fusion_ref=right["fusion_ref"],capture_ref=right["capture_ref"],bbox_ref=right["bbox_ref"],source_parent_ref=parent)
         envelopes.append(sealed_artifact_envelope(request))
         for arm in ("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista"):
             if arm=="qwen_only" and (all_missing_qwen or (missing_qwen and cid=="opaque/1")):
@@ -28,7 +36,7 @@ def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout
             binding=wrong if arm=="qwen_only" and cid=="opaque/1" else right
             row={"case_id":cid,"arm_id":arm,"selection_status":"selected","eligibility":"ELIGIBLE","target_binding_ref":artifact_ref(binding)}
             if arm in {"omni_to_qwen","omni_to_qwen_vista"}: row["vista_request_ref"]=artifact_ref(request)
-            if arm=="omni_to_qwen_vista": row["vista_result"]={"status":"validated","request_ref":artifact_ref(request),"target_binding_ref":artifact_ref(right),"canonical_capture_pixel_point":[3,3] if cid=="opaque/1" else [1,1]}
+            if arm=="omni_to_qwen_vista": row["vista_result"]={"status":"validated","request_ref":artifact_ref(request),"target_binding_ref":artifact_ref(right),"canonical_capture_pixel_point":[center,12]}
             rows.append(row)
     if pair_mode!="valid":
         baseline=next(r for r in rows if r["case_id"]=="opaque/1" and r["arm_id"]=="omni_to_qwen"); vista=next(r for r in rows if r["case_id"]=="opaque/1" and r["arm_id"]=="omni_to_qwen_vista")
@@ -55,7 +63,7 @@ def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout
     life_env=[sealed_artifact_envelope(x) for x in (hold1,hold2,hold_ledger,reg0,reg1,reg_ledger,reg_receipt)]
     run={"contract_version":"benchmark_v2_prediction_run_v2","release_id":RELEASE,"partition":"holdout","source_parent_ref":parent,"automatic_prediction_ref":auto_ref,"attempt_ledger_ref":artifact_ref(hold_ledger),"regression_precondition_ref":artifact_ref(reg_receipt),"lifecycle_ref":artifact_ref(hold1),"sealed_artifacts":envelopes,"safety":deepcopy(SAFETY)}
     bundle={"contract_version":"benchmark_v2_lifecycle_bundle_v2","sealed_artifacts":life_env,"safety":deepcopy(SAFETY)}
-    private={"contract_version":"portfolio_hybrid_v1_1_private_manifest_v2_synthetic","source_parent_ref":parent,"partition":"holdout","release_id":RELEASE,"cases":cases,"expected_automatic_prediction_ref":auto_ref,"expected_attempt_ledger_ref":artifact_ref(hold_ledger),"expected_regression_precondition_ref":artifact_ref(reg_receipt),"estimand_ref":config_ref(ESTIMAND),"gate_ref":config_ref(GATE)}
+    private={"contract_version":"portfolio_hybrid_v1_1_private_manifest_v2_1_synthetic","source_parent_ref":parent,"partition":"holdout","release_id":RELEASE,"cases":cases,"expected_automatic_prediction_ref":auto_ref,"expected_attempt_ledger_ref":artifact_ref(hold_ledger),"expected_regression_precondition_ref":artifact_ref(reg_receipt),"estimand_ref":config_ref(ESTIMAND),"gate_ref":config_ref(GATE)}
     return private,run,bundle
 
 def files(tmp:Path,private:dict,run:dict,bundle:dict)->dict[str,Path]:
@@ -69,10 +77,158 @@ def execute(tmp:Path,private:dict,run:dict,bundle:dict)->tuple[dict[str,str],dic
 def decode(env:dict[str,object])->dict[str,object]: return json.loads(base64.b64decode(env["canonical_bytes_b64"]))
 def reseal(env:dict[str,object],value:dict[str,object])->None: env.update(sealed_artifact_envelope(value))
 
+
+def test_public_binding_and_request_contracts_reject_private_target_identity() -> None:
+    assert "target_id" not in inspect.signature(seal_target_binding).parameters
+    assert "target_id" not in inspect.signature(seal_vista_request).parameters
+    parent = ref("parent/public-contract")
+    binding = seal_target_binding(
+        artifact_id="binding/public",
+        case_id="opaque/public",
+        candidate_id="candidate/public",
+        fusion_ref=ref("fusion/public"),
+        capture_ref=ref("capture/public"),
+        bbox_ref=ref("bbox/public"),
+        bbox=[1, 2, 3, 4],
+        source_parent_ref=parent,
+    )
+    request = seal_vista_request(
+        artifact_id="request/public",
+        case_id="opaque/public",
+        target_binding_ref=artifact_ref(binding),
+        candidate_id="candidate/public",
+        fusion_ref=binding["fusion_ref"],
+        capture_ref=binding["capture_ref"],
+        bbox_ref=binding["bbox_ref"],
+        source_parent_ref=parent,
+    )
+
+    assert binding["contract_version"] == "sealed_target_binding_v3"
+    assert request["contract_version"] == "sealed_vista_request_v3"
+    assert "target_id" not in binding
+    assert "target_id" not in request
+
+
+def test_automatic_prediction_artifacts_reject_legacy_target_identity() -> None:
+    _, run, _ = evidence()
+    public_artifacts = [decode(envelope) for envelope in run["sealed_artifacts"]]
+    serialized = json.dumps(public_artifacts, sort_keys=True)
+    assert "target_id" not in serialized
+    assert all(marker not in serialized for marker in PRIVATE_TARGET_MARKERS)
+    assert all(marker not in serialized for marker in PRIVATE_LABEL_MARKERS)
+    assert PRIVATE_SCREEN_GROUP_MARKER not in serialized
+    prediction = next(
+        item for item in public_artifacts if item["contract_version"] == "automatic_prediction_v2"
+    )
+    prediction["rows"][0]["target_id"] = PRIVATE_TARGET_MARKERS[0]
+
+    with pytest.raises(ValueError, match="extra fields"):
+        seal_automatic_prediction(
+            request_ref=ref("request/legacy-rejection"),
+            pre_review=prediction,
+            execution_refs=[ref("execution/legacy-rejection")],
+            lifecycle_ref=ref("lifecycle/legacy-rejection"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("bbox", "expected"),
+    [
+        ([11, 11, 13, 13], True),
+        ([31, 11, 33, 13], False),
+        ([11, 11, 33, 13], False),
+        ([0, 0, 1, 1], False),
+    ],
+    ids=("unique-correct", "different-target", "multiple-targets", "zero-targets"),
+)
+def test_private_semantic_correctness_requires_one_matching_target(
+    bbox: list[int], expected: bool
+) -> None:
+    cases = {
+        f"opaque/{index}": {
+            "case_id": f"opaque/{index}",
+            "screen_group": "screen/opaque",
+            "important_target": True,
+            "acceptable_regions": [[10 + (index - 1) * 20, 10, 14 + (index - 1) * 20, 14]],
+        }
+        for index in range(1, 6)
+    }
+
+    assert scorer_v2._private_unique_target_center_containment(
+        case_id="opaque/1",
+        bbox=bbox,
+        cases=cases,
+    ) is expected
+
+
+@pytest.mark.parametrize("shape", ["four", "six", "singleton_split"])
+def test_private_semantic_correctness_rejects_non_five_target_groups(shape: str) -> None:
+    count = 4 if shape == "four" else 6 if shape == "six" else 5
+    cases = {
+        f"opaque/{index}": {
+            "case_id": f"opaque/{index}",
+            "screen_group": f"screen/{index}" if shape == "singleton_split" else "screen/opaque",
+            "important_target": True,
+            "acceptable_regions": [[10 + (index - 1) * 20, 10, 14 + (index - 1) * 20, 14]],
+        }
+        for index in range(1, count + 1)
+    }
+
+    with pytest.raises(ValueError, match="five|cardinality"):
+        scorer_v2._private_unique_target_center_containment(
+            case_id="opaque/1",
+            bbox=[11, 11, 13, 13],
+            cases=cases,
+        )
+
+
+def test_private_manifest_accepts_only_post_correction_contract(tmp_path: Path) -> None:
+    private, run, bundle = evidence()
+    private["contract_version"] = "portfolio_hybrid_v1_1_private_manifest_v2_1_synthetic"
+    result, _, _ = execute(tmp_path / "corrected", private, run, bundle)
+    assert result["status"] == "PASS"
+
+    private["contract_version"] = "portfolio_hybrid_v1_1_private_manifest_v2_synthetic"
+    with pytest.raises(ValueError, match="failed closed"):
+        execute(tmp_path / "legacy", private, run, bundle)
+
+
+@pytest.mark.parametrize("mutation", ["four", "six", "singleton_split", "duplicate_case", "invalid_region"])
+def test_private_manifest_rejects_invalid_screen_group_cardinality(
+    tmp_path: Path, mutation: str
+) -> None:
+    private, run, bundle = evidence()
+    cases = private["cases"]
+    if mutation == "four":
+        cases.pop()
+    elif mutation == "six":
+        cases.append(
+            {
+                "case_id": "opaque/6",
+                "screen_group": "screen/opaque",
+                "important_target": True,
+                "acceptable_regions": [[110, 10, 114, 14]],
+            }
+        )
+    elif mutation == "singleton_split":
+        cases[0]["screen_group"] = "screen/singleton"
+    elif mutation == "duplicate_case":
+        cases.append(deepcopy(cases[0]))
+    else:
+        cases[-1]["acceptable_regions"] = [[110, 10, 110, 14]]
+
+    with pytest.raises(ValueError, match="failed closed"):
+        execute(tmp_path / mutation, private, run, bundle)
+
 def test_sealed_evidence_scores_exact_pair_and_stdout_ref(tmp_path:Path)->None:
     private,run,bundle=evidence(); result,score,public=execute(tmp_path,private,run,bundle)
     assert set(result)=={"status","score_ref","content_sha256"}; assert result["status"]=="PASS"; assert public["safety"]==SAFETY
-    assert score["point_metric"]=={"gain_numerator":1,"submitted_count":2,"gain":"1/2"}; assert "opaque/" not in json.dumps(public)
+    assert score["automatic"]["arm_metrics"]["omni_to_qwen_vista"]["semantic_precision"]=="1/1"
+    assert score["automatic"]["wrong_target_count"]==0
+    assert score["point_metric"]=={"gain_numerator":1,"submitted_count":5,"gain":"1/5"}; assert "opaque/" not in json.dumps(public)
+    assert all(marker not in json.dumps(public) for marker in PRIVATE_TARGET_MARKERS)
+    assert all(marker not in json.dumps(public) for marker in PRIVATE_LABEL_MARKERS)
+    assert PRIVATE_SCREEN_GROUP_MARKER not in json.dumps(public)
 
 def test_pre_review_requires_external_anchor_and_noop_is_stable()->None:
     private,run,bundle=evidence(); env=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); raw=base64.b64decode(env["canonical_bytes_b64"])
@@ -127,7 +283,7 @@ def test_independently_anchored_partial_pair_fails_closed(tmp_path:Path,pair_mod
     private,run,bundle=evidence(pair_mode=pair_mode)
     with pytest.raises(ValueError,match="failed closed"): execute(tmp_path,private,run,bundle)
 
-@pytest.mark.parametrize("mutation",["handcrafted","missing_parent","binding_wrong_id","cross_target_request","sync_row_proposal","later_cherry_pick","lifecycle_hash","regression_self_pass","gate_ref"])
+@pytest.mark.parametrize("mutation",["handcrafted","missing_parent","binding_wrong_id","cross_case_request","legacy_request_target_id","legacy_binding_target_id","later_cherry_pick","lifecycle_hash","regression_self_pass","gate_ref"])
 def test_sealed_lineage_mutations_fail(tmp_path:Path,mutation:str)->None:
     private,run,bundle=evidence(later_holdout=True)
     if mutation=="handcrafted": run["pre_review_rows"]=[]
@@ -141,17 +297,17 @@ def test_sealed_lineage_mutations_fail(tmp_path:Path,mutation:str)->None:
         if mutation=="missing_parent":
             binding=next(x for x in run["sealed_artifacts"] if x["ref"]==row["target_binding_ref"]); b=decode(binding); b.pop("fusion_ref"); reseal(binding,b); row["target_binding_ref"]=binding["ref"]
         elif mutation=="binding_wrong_id": row["target_binding_ref"]={"id":"wrong/id","content_sha256":row["target_binding_ref"]["content_sha256"]}
-        elif mutation=="cross_target_request":
-            req=next(x for x in run["sealed_artifacts"] if x["ref"]==row["vista_request_ref"]); q=decode(req); q["target_id"]="target/other"; reseal(req,q); row["vista_request_ref"]=req["ref"]; row["vista_result"]["request_ref"]=req["ref"]
+        elif mutation in {"cross_case_request","legacy_request_target_id"}:
+            req=next(x for x in run["sealed_artifacts"] if x["ref"]==row["vista_request_ref"]); q=decode(req); q["case_id"]="opaque/2" if mutation=="cross_case_request" else q["case_id"]; q.update({"target_id":"target/legacy"} if mutation=="legacy_request_target_id" else {}); reseal(req,q); row["vista_request_ref"]=req["ref"]; row["vista_result"]["request_ref"]=req["ref"]
         else:
-            binding=next(x for x in run["sealed_artifacts"] if x["ref"]==row["target_binding_ref"]); b=decode(binding); b["target_id"]="target/wrong"; reseal(binding,b); row["target_binding_ref"]=binding["ref"]; row["vista_result"]["target_binding_ref"]=binding["ref"]
+            binding=next(x for x in run["sealed_artifacts"] if x["ref"]==row["target_binding_ref"]); b=decode(binding); b["target_id"]="target/legacy"; reseal(binding,b); row["target_binding_ref"]=binding["ref"]; row["vista_result"]["target_binding_ref"]=binding["ref"]
         reseal(auto,value); run["automatic_prediction_ref"]=auto["ref"]
     with pytest.raises(ValueError,match="failed closed|invalid|mismatch|differs|missing|wrong|cherry|lineage|artifact|closed"):
         execute(tmp_path,private,run,bundle)
 
 def test_selection_status_estimands_and_zero_selected_fail(tmp_path:Path)->None:
     private,run,bundle=evidence(missing_qwen=True); _,score,_=execute(tmp_path,private,run,bundle)
-    qwen=score["automatic"]["arm_metrics"]["qwen_only"]; assert qwen["coverage"]=="1/2"; assert qwen["semantic_precision"]=="1/1"
+    qwen=score["automatic"]["arm_metrics"]["qwen_only"]; assert qwen["coverage"]=="4/5"; assert qwen["semantic_precision"]=="1/1"
     private,run,bundle=evidence(all_missing_qwen=True)
     with pytest.raises(ValueError,match="failed closed"): execute(tmp_path/"all",private,run,bundle)
 

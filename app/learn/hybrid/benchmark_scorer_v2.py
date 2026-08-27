@@ -59,6 +59,53 @@ def _closed(value:object,fields:set[str],name:str)->dict[str,Any]:
 def _hit(point:tuple[Fraction,Fraction],regions:list[list[int]])->int:
     return int(any(Fraction(a)<=point[0]<Fraction(c) and Fraction(b)<=point[1]<Fraction(d) for a,b,c,d in regions))
 
+def _validate_private_regions(value:object)->list[list[int]]:
+    if not isinstance(value,list) or not value: raise ValueError("private acceptable regions invalid")
+    regions=[]
+    for raw in value:
+        if not isinstance(raw,list) or len(raw)!=4 or not all(isinstance(item,int) for item in raw): raise ValueError("private acceptable region invalid")
+        x1,y1,x2,y2=raw
+        if x2<=x1 or y2<=y1: raise ValueError("private acceptable region invalid")
+        regions.append(list(raw))
+    return regions
+
+def _require_five_target_groups(cases:Mapping[str,Mapping[str,Any]])->None:
+    groups:dict[str,set[str]]={}
+    for case_id,case in cases.items():
+        group=case.get("screen_group")
+        if not isinstance(case_id,str) or not case_id or not isinstance(group,str) or not group: raise ValueError("private case identity invalid")
+        groups.setdefault(group,set()).add(case_id)
+    if not groups or any(len(case_ids)!=5 for case_ids in groups.values()): raise ValueError("private screen_group must contain exactly five unique cases")
+
+def _validated_private_cases(value:object)->dict[str,dict[str,Any]]:
+    if not isinstance(value,list) or not value: raise ValueError("private cases empty/invalid")
+    cases:dict[str,dict[str,Any]]={}
+    for raw in value:
+        case=_closed(raw,{"case_id","screen_group","important_target","acceptable_regions"},"private case")
+        case_id=case["case_id"]
+        if not isinstance(case_id,str) or not case_id or case_id in cases or not isinstance(case["screen_group"],str) or not case["screen_group"] or not isinstance(case["important_target"],bool): raise ValueError("private case empty/duplicate/invalid")
+        case["acceptable_regions"]=_validate_private_regions(case["acceptable_regions"])
+        cases[case_id]=case
+    _require_five_target_groups(cases)
+    return cases
+
+def _private_unique_target_center_containment(*,case_id:str,bbox:list[int],cases:Mapping[str,Mapping[str,Any]])->bool:
+    if case_id not in cases or len(bbox)!=4 or not all(isinstance(value,int) for value in bbox): raise ValueError("private target geometry invalid")
+    _require_five_target_groups(cases)
+    x1,y1,x2,y2=bbox
+    if x2<=x1 or y2<=y1: raise ValueError("private target bbox invalid")
+    group=cases[case_id].get("screen_group")
+    matches=[]
+    for candidate_id,candidate in cases.items():
+        if candidate.get("screen_group")!=group: continue
+        regions=_validate_private_regions(candidate.get("acceptable_regions"))
+        centers=[]
+        for region in regions:
+            a,b,c,d=region
+            centers.append((Fraction(a+c,2),Fraction(b+d,2)))
+        if any(Fraction(x1)<=x<Fraction(x2) and Fraction(y1)<=y<Fraction(y2) for x,y in centers): matches.append(candidate_id)
+    return len(matches)==1 and matches[0]==case_id
+
 def _validate_lifecycle(bundle:object,run:Mapping[str,object],private:Mapping[str,object])->dict[str,Any]:
     bundle=_closed(bundle,{"contract_version","sealed_artifacts","safety"},"lifecycle bundle")
     if bundle["contract_version"]!="benchmark_v2_lifecycle_bundle_v2" or bundle["safety"]!=SAFETY: raise ValueError("lifecycle bundle invalid")
@@ -96,10 +143,10 @@ def _validate_lifecycle(bundle:object,run:Mapping[str,object],private:Mapping[st
 
 def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dict[str,Any]],dict[str,dict[str,Any]],dict[str,Any]]:
     private=_closed(private,{"contract_version","source_parent_ref","partition","release_id","cases","expected_automatic_prediction_ref","expected_attempt_ledger_ref","expected_regression_precondition_ref","estimand_ref","gate_ref"},"private manifest")
-    if private["contract_version"]!="portfolio_hybrid_v1_1_private_manifest_v2_synthetic" or private["release_id"]!=RELEASE or private["partition"]!="holdout": raise ValueError("private manifest invalid")
+    if private["contract_version"]!="portfolio_hybrid_v1_1_private_manifest_v2_1_synthetic" or private["release_id"]!=RELEASE or private["partition"]!="holdout": raise ValueError("private manifest invalid")
     exact_ref(private["source_parent_ref"],"parent")
     estimand=_verified_config_snapshot(ESTIMAND_PATH,private["estimand_ref"]); gate=_verified_config_snapshot(GATE_PATH,private["gate_ref"])
-    if estimand["contract_version"]!="portfolio_hybrid_v1_1_estimand_v2" or estimand["benchmark_release_id"]!=RELEASE or gate["contract_version"]!="portfolio_hybrid_v1_1_automatic_gate_v2" or gate["benchmark_release_id"]!=RELEASE: raise ValueError("estimand/gate release lineage mismatch")
+    if estimand["contract_version"]!="portfolio_hybrid_v1_1_estimand_v2_1" or estimand["benchmark_release_id"]!=RELEASE or gate["contract_version"]!="portfolio_hybrid_v1_1_automatic_gate_v2" or gate["benchmark_release_id"]!=RELEASE: raise ValueError("estimand/gate release lineage mismatch")
     run=_closed(run,{"contract_version","release_id","partition","source_parent_ref","automatic_prediction_ref","attempt_ledger_ref","regression_precondition_ref","lifecycle_ref","sealed_artifacts","safety"},"prediction run")
     if run["contract_version"]!="benchmark_v2_prediction_run_v2" or run["release_id"]!=RELEASE or run["partition"]!=private["partition"] or run["source_parent_ref"]!=private["source_parent_ref"] or run["safety"]!=SAFETY: raise ValueError("prediction run lineage invalid")
     for field,expected in (("automatic_prediction_ref",private["expected_automatic_prediction_ref"]),("attempt_ledger_ref",private["expected_attempt_ledger_ref"]),("regression_precondition_ref",private["expected_regression_precondition_ref"])):
@@ -107,8 +154,7 @@ def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dic
     arts=_envelopes(run["sealed_artifacts"]); prediction=_validate_pre(_get(arts,run["automatic_prediction_ref"],"automatic prediction"))
     if prediction["source_parent_ref"]!=private["source_parent_ref"] or prediction["partition"]!=run["partition"] or prediction["release_id"]!=RELEASE: raise ValueError("automatic prediction lineage invalid")
     _validate_lifecycle(lifecycle_bundle,run,private)
-    cases={c["case_id"]:dict(c) for c in private["cases"]}
-    if not cases or len(cases)!=len(private["cases"]): raise ValueError("private cases empty/duplicate")
+    cases=_validated_private_cases(private["cases"])
     rows=prediction["rows"]; by={(r["case_id"],r["arm_id"]):r for r in rows}
     if len(by)!=len(rows) or set(by)!={(c,a) for c in cases for a in ARMS}: raise ValueError("automatic arm/case rows incomplete")
     binding_by_row={}; request_by_row={}; global_owners={field:{} for field in ("binding_ref","candidate_id","bbox_ref","request_ref")}
@@ -118,19 +164,19 @@ def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dic
             row=by[(case_id,arm)]
             if row["selection_status"]!="selected": continue
             binding=_get(arts,row["target_binding_ref"],"target binding")
-            binding=_closed(binding,{"contract_version","artifact_id","case_id","target_id","candidate_id","fusion_ref","capture_ref","bbox_ref","bbox","source_parent_ref","safety"},"binding")
-            if binding["contract_version"]!="sealed_target_binding_v2" or binding["case_id"]!=case_id or binding["source_parent_ref"]!=private["source_parent_ref"] or binding["safety"]!=SAFETY: raise ValueError("cross-target binding")
+            binding=_closed(binding,{"contract_version","artifact_id","case_id","candidate_id","fusion_ref","capture_ref","bbox_ref","bbox","source_parent_ref","safety"},"binding")
+            if binding["contract_version"]!="sealed_target_binding_v3" or binding["case_id"]!=case_id or binding["source_parent_ref"]!=private["source_parent_ref"] or binding["safety"]!=SAFETY: raise ValueError("cross-case binding")
             bref=artifact_ref(binding); binding_by_row[(case_id,arm)]=bref
-            row["_target_id"]=binding["target_id"]; row["_bbox"]=list(binding["bbox"])
+            row["_bbox"]=list(binding["bbox"])
             for field,value in (("binding_ref",bref["id"]),("candidate_id",binding["candidate_id"]),("bbox_ref",binding["bbox_ref"]["id"])):
                 owner=global_owners[field].setdefault(value,case_id)
                 if owner!=case_id: raise ValueError(f"{field} reused across targets")
             selected.append((row,binding))
             if arm in {"omni_to_qwen","omni_to_qwen_vista"}:
                 request=_get(arts,row["vista_request_ref"],"VISTA request")
-                request=_closed(request,{"contract_version","artifact_id","case_id","target_id","target_binding_ref","candidate_id","fusion_ref","capture_ref","bbox_ref","submission_status","source_parent_ref","safety"},"request")
-                expected={"case_id":binding["case_id"],"target_id":binding["target_id"],"target_binding_ref":bref,"candidate_id":binding["candidate_id"],"fusion_ref":binding["fusion_ref"],"capture_ref":binding["capture_ref"],"bbox_ref":binding["bbox_ref"]}
-                if request["contract_version"]!="sealed_vista_request_v2" or any(request[k]!=v for k,v in expected.items()) or request["submission_status"]!="SUBMITTED" or request["source_parent_ref"]!=private["source_parent_ref"] or request["safety"]!=SAFETY: raise ValueError("VISTA request parent mapping invalid")
+                request=_closed(request,{"contract_version","artifact_id","case_id","target_binding_ref","candidate_id","fusion_ref","capture_ref","bbox_ref","submission_status","source_parent_ref","safety"},"request")
+                expected={"case_id":binding["case_id"],"target_binding_ref":bref,"candidate_id":binding["candidate_id"],"fusion_ref":binding["fusion_ref"],"capture_ref":binding["capture_ref"],"bbox_ref":binding["bbox_ref"]}
+                if request["contract_version"]!="sealed_vista_request_v3" or any(request[k]!=v for k,v in expected.items()) or request["submission_status"]!="SUBMITTED" or request["source_parent_ref"]!=private["source_parent_ref"] or request["safety"]!=SAFETY: raise ValueError("VISTA request parent mapping invalid")
                 qref=artifact_ref(request); request_by_row[(case_id,arm)]=qref
                 owner=global_owners["request_ref"].setdefault(qref["id"],case_id)
                 if owner!=case_id: raise ValueError("request ref reused across targets")
@@ -149,13 +195,12 @@ def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dic
 
 def _score(rows:list[dict[str,Any]],cases:dict[str,dict[str,Any]],gate:Mapping[str,Any])->dict[str,object]:
     metrics={}
-    selected_bindings={}
-    # binding target and bbox are joined earlier; reload from attached cached metadata is forbidden, so caller annotates below
+    # 公开 binding 只携带不透明 case 身份；正确性由私有几何判定。
     for arm in ARMS:
         armrows=[r for r in rows if r["arm_id"]==arm]; selected=[r for r in armrows if r["selection_status"]=="selected"]
         if not selected: raise ValueError("semantic precision selected denominator is zero")
-        correct=sum(r["_target_id"]==cases[r["case_id"]]["target_id"] for r in selected)
-        important_total=sum(bool(c["important"]) for c in cases.values()); important_correct=sum(r["_target_id"]==cases[r["case_id"]]["target_id"] and cases[r["case_id"]]["important"] for r in selected)
+        correct=sum(_private_unique_target_center_containment(case_id=r["case_id"],bbox=r["_bbox"],cases=cases) for r in selected)
+        important_total=sum(bool(c["important_target"]) for c in cases.values()); important_correct=sum(_private_unique_target_center_containment(case_id=r["case_id"],bbox=r["_bbox"],cases=cases) and cases[r["case_id"]]["important_target"] for r in selected)
         metrics[arm]={"coverage":Fraction(len(selected),len(cases)),"important_correct_coverage":Fraction(important_correct,important_total),"semantic_precision":Fraction(correct,len(selected)),"wrong":len(selected)-correct}
     numerator=submitted=0
     baselines={r["case_id"]:r for r in rows if r["arm_id"]=="omni_to_qwen"}

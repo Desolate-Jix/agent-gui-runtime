@@ -87,6 +87,22 @@ def _parent_ref_from_verified_content_sha(value: str) -> dict[str, str]:
     }
 
 
+def _opaque_case_id(screen_id: str, target_id: str) -> str:
+    if not isinstance(screen_id, str) or not screen_id or not isinstance(target_id, str) or not target_id:
+        raise ValueError("opaque case identity input is invalid")
+    return hashlib.sha256(
+        f"benchmark-v2-case\0{screen_id}\0{target_id}".encode("utf-8")
+    ).hexdigest()
+
+
+def _opaque_screen_group(screen_id: str) -> str:
+    if not isinstance(screen_id, str) or not screen_id:
+        raise ValueError("opaque screen group input is invalid")
+    return hashlib.sha256(
+        f"benchmark-v2-screen-group\0{screen_id}".encode("utf-8")
+    ).hexdigest()
+
+
 def _load_frozen_parent(path: Path) -> tuple[dict[str, Any], dict[str, str]]:
     raw = path.read_bytes()
     if sha256_bytes(raw) != PARENT_FILE_SHA256:
@@ -172,12 +188,8 @@ def _project_cases(
         goal = item["goal"]
         if not isinstance(goal, str) or not goal.strip():
             raise ValueError("parent target lacks a safe goal")
-        case_id = hashlib.sha256(
-            f"benchmark-v2-case\0{screen_id}\0{target_id}".encode("utf-8")
-        ).hexdigest()
-        screen_group = hashlib.sha256(
-            f"benchmark-v2-screen-group\0{screen_id}".encode("utf-8")
-        ).hexdigest()
+        case_id = _opaque_case_id(screen_id, target_id)
+        screen_group = _opaque_screen_group(screen_id)
         if case_id in identities:
             raise ValueError("projected case identity is not unique")
         identities.add(case_id)

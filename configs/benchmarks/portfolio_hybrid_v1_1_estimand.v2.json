@@ -1,5 +1,5 @@
 {
-  "contract_version": "portfolio_hybrid_v1_1_estimand_v2",
+  "contract_version": "portfolio_hybrid_v1_1_estimand_v2_1",
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
   "arms": {
     "arm_ids": [
@@ -33,20 +33,32 @@
     "logical_record_policy": "immutable_pre_review_append_only_post_review",
     "release_reads_split": "pre_review"
   },
+  "semantic_target_metric": {
+    "metric_id": "private_unique_target_center_containment_v1",
+    "private_join_field": "case_id",
+    "group_field": "screen_group",
+    "region_center_formula": [
+      "(x1+x2)/2",
+      "(y1+y2)/2"
+    ],
+    "candidate_containment_rule": "x1 <= x < x2 && y1 <= y < y2",
+    "correct_match_cardinality": 1,
+    "zero_match_policy": "wrong_target",
+    "different_match_policy": "wrong_target",
+    "multiple_match_policy": "wrong_target"
+  },
   "point_metric": {
     "metric_id": "acceptable_region_binary_gain_v1",
     "sealed": true,
     "coordinate_space": "capture_pixel_xyxy",
     "row_key_fields": [
       "case_id",
-      "target_id",
       "arm_id",
       "candidate_id",
       "vista_request_ref"
     ],
     "pair_identity_fields": [
       "case_id",
-      "target_id",
       "candidate_id",
       "vista_request_ref"
     ],
@@ -75,7 +87,6 @@
       ],
       "binding_ref_exact_mapping_fields": [
         "case_id",
-        "target_id",
         "candidate_id",
         "fusion_ref",
         "capture_ref",
@@ -83,7 +94,6 @@
       ],
       "request_ref_exact_mapping_fields": [
         "case_id",
-        "target_id",
         "target_binding_ref",
         "candidate_id",
         "fusion_ref",
@@ -105,7 +115,7 @@
         "ambiguous_binding",
         "duplicate_request",
         "missing_request",
-        "cross_target_request",
+        "cross_case_request",
         "cross_candidate_request",
         "cross_request_pair",
         "eligible_but_unsent",
@@ -138,7 +148,6 @@
       ],
       "validated_proposal_lineage_fields": [
         "case_id",
-        "target_id",
         "vista_request_ref",
         "candidate_id",
         "fusion_ref",

@@ -216,6 +216,74 @@ def test_projector_process_emits_closed_opaque_provider_child(
     assert all(case["goal"].strip() for case in cases)
 
 
+def test_opaque_identity_helpers_are_shared_and_do_not_expose_private_markers() -> None:
+    from app.learn.hybrid.benchmark_v2_privileged_projector import (
+        _opaque_case_id,
+        _opaque_screen_group,
+        _project_cases,
+    )
+
+    screen_id = "synthetic-screen-001"
+    target_id = "private-target-001"
+    assert _opaque_case_id(screen_id, target_id) == (
+        "8d2b4bd05850428863a7bce72d2474157bb9c49c64425db046e4b1a2cdf00c28"
+    )
+    assert _opaque_screen_group(screen_id) == (
+        "b7f2871304bb3d35d494c52cc911dceecee48758d3943a61d64ca853452d0177"
+    )
+
+    screens = {
+        screen_id: {
+            "partition": "holdout",
+            "path": "synthetic/provider-safe.png",
+            "sha256": "1" * 64,
+            "width": 1280,
+            "height": 720,
+            "layout_id": "synthetic-layout",
+            "title": "Synthetic",
+            "surface": "native",
+            "density": "normal",
+            "precision_case": False,
+            "source_kind": "privacy_safe_synthetic",
+            "source_provenance": "test-only",
+        }
+    }
+    private_markers = [f"private-target-{index:03d}" for index in range(1, 6)]
+    parent = {
+        "gold_records": [
+            {
+                "target_id": marker,
+                "screen_id": screen_id,
+                "partition": "holdout",
+                "role": "button",
+                "label": f"private-label-{index:03d}",
+                "goal": f"Open synthetic item {index}",
+                "bbox": [index, index, index + 2, index + 2],
+                "acceptable_candidate_ids": [f"candidate-{index}"],
+                "acceptable_regions": [[index, index, index + 2, index + 2]],
+                "annotator_identity_hash": "2" * 64,
+                "reviewer_identity_hash": "3" * 64,
+                "acceptable_region_disagreement": False,
+                "review_status": "approved",
+                "important_target": True,
+            }
+            for index, marker in enumerate(private_markers, start=1)
+        ]
+    }
+    provider_cases = _project_cases(parent, screens)
+    serialized = json.dumps(provider_cases, sort_keys=True)
+
+    assert [case["case_id"] for case in provider_cases] == [
+        _opaque_case_id(screen_id, marker) for marker in private_markers
+    ]
+    assert {case["screen_group"] for case in provider_cases} == {
+        _opaque_screen_group(screen_id)
+    }
+    assert "target_id" not in serialized
+    assert all(marker not in serialized for marker in private_markers)
+    assert all(f"private-label-{index:03d}" not in serialized for index in range(1, 6))
+
+
 def test_provider_child_recursively_excludes_private_gold_and_action_authority(
     projected_child: tuple[Path, dict[str, Any], str],
 ) -> None:
