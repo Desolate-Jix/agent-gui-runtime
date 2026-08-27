@@ -2445,11 +2445,23 @@ def _recover_or_resume_benchmark_v2_incumbent_operation(
 ) -> dict[str, Any]:
     """预结果阶段从 durable source 恢复，结果阶段才要求 A first-snapshot。"""
 
+    _require_minted_learning_workflow_service_composition(composition)
     current = composition.store.get(run_id)
     operation = _benchmark_v2_incumbent_operation_from_state(current, stage)
     if operation is None:
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent operation is missing"
+        )
+    _require_benchmark_v2_operation_identity(
+        operation,
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+    )
+    expected_worker_id = operation["worker_ref"]["worker_id"]
+    if worker_id is not None and worker_id != expected_worker_id:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 incumbent worker identity differs"
         )
     if operation["phase"] in {
         "prepared",

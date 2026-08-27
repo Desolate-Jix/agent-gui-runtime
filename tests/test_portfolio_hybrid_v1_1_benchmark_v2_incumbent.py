@@ -1906,6 +1906,193 @@ def test_resume_rejects_wrong_operation_identity_before_sidecar_or_registry(
         )
 
 
+@pytest.mark.parametrize("entrypoint", ["adopt", "continue"])
+@pytest.mark.parametrize(
+    "phase", ["prepared", "provider_owner_prepared", "worker_starting"]
+)
+def test_guarded_pre_result_rejects_wrong_worker_before_any_effect(
+    entrypoint: str,
+    phase: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from contextlib import nullcontext
+
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        transition_benchmark_v2_incumbent_operation,
+    )
+    from app.learn.workflow_service import start_learning_workflow_stage_operation
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    operation = _prepared_document(source_bundle, prepared_revision=4)
+    operation_documents = [operation]
+    if phase in {"provider_owner_prepared", "worker_starting"}:
+        operation = transition_benchmark_v2_incumbent_operation(
+            operation,
+            to_phase="provider_owner_prepared",
+            changes=_provider_owner_changes(),
+        )
+        operation_documents.append(operation)
+    if phase == "worker_starting":
+        operation = transition_benchmark_v2_incumbent_operation(
+            operation, to_phase="worker_starting", changes={}
+        )
+        operation_documents.append(operation)
+
+    calls = {
+        "sidecar": 0,
+        "resolver": 0,
+        "registry_other": 0,
+        "registry_recovery": 0,
+        "registry_launch": 0,
+        "spawn": 0,
+        "store_cas": 0,
+    }
+
+    class _ForbiddenRegistry:
+        def __getattr__(self, name: str):
+            def forbidden_call(**_kwargs):
+                if name == "recover_launching_benchmark_worker":
+                    calls["registry_recovery"] += 1
+                elif name == "launch_prepared_benchmark_worker":
+                    calls["registry_launch"] += 1
+                    calls["spawn"] += 1
+                else:
+                    calls["registry_other"] += 1
+                raise AssertionError(f"forbidden Registry call: {name}")
+
+            return forbidden_call
+
+    state_path = tmp_path / f"{entrypoint}-{phase}-state.json"
+    store = LearningWorkflowRunStore(state_path=state_path)
+    try:
+        first = store.transition(
+            run_id=operation["run_id"],
+            expected_revision=0,
+            stage="bind_capture",
+            outcome="running",
+            evidence_refs={},
+        )
+        bound = store.transition(
+            run_id=operation["run_id"],
+            expected_revision=first["revision"],
+            stage="bind_capture",
+            outcome="completed",
+            evidence_refs={"image_path": str(tmp_path / "capture.bmp")},
+        )
+        current = start_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id=operation["run_id"],
+            expected_revision=bound["revision"],
+            stage=operation["stage"],
+            operation_id=operation["operation_id"],
+        )["workflow_state"]
+        for operation_document in operation_documents:
+            stage_execution = deepcopy(
+                current["stages"][operation["stage"]]["evidence_refs"][
+                    "stage_execution"
+                ]
+            )
+            stage_execution["benchmark_v2_incumbent"] = deepcopy(operation_document)
+            stage_execution["benchmark_v2_operation_anchor"] = {
+                "contract_version": "benchmark_worker_operation_anchor_v1",
+                "anchor_identity_sha256": operation["operation_anchor_ref"][
+                    "content_sha256"
+                ],
+                "expected_supervision_ref": deepcopy(
+                    operation["expected_supervision_ref"]
+                ),
+            }
+            current = store.transition(
+                run_id=operation["run_id"],
+                expected_revision=current["revision"],
+                stage=operation["stage"],
+                outcome="running",
+                evidence_refs={"stage_execution": stage_execution},
+            )
+            assert current["revision"] == operation_document["current_document_revision"]
+
+        composition = workflow_service.compose_test_learning_workflow_service_unit(
+            store=store,
+            worker_registry=_ForbiddenRegistry(),
+            project_root=tmp_path,
+            benchmark_supervision_root=type(
+                "_Root", (), {"authority_kind": "test"}
+            )(),
+            provider_case_resolver=object(),
+            benchmark_v2_worker_binding_resolver=object(),
+        )
+        closed_request = {
+            "provider_case_ref": deepcopy(
+                operation["handler_payload_source"]["provider_case_ref"]
+            ),
+            "window_binding_ref": deepcopy(operation["window_binding_ref"]),
+            "capture_ref": deepcopy(operation["capture_ref"]),
+        }
+
+        def observe_sidecars(*_args):
+            calls["sidecar"] += 1
+            return deepcopy(closed_request), {"anchor": True}
+
+        def reject_resolver(**_kwargs):
+            calls["resolver"] += 1
+            raise AssertionError("forbidden resolver call")
+
+        def reject_cas(**_kwargs):
+            calls["store_cas"] += 1
+            raise AssertionError("forbidden store CAS")
+
+        monkeypatch.setattr(
+            "app.learn.workflow_worker.hold_benchmark_worker_controller",
+            lambda **_kwargs: nullcontext(),
+        )
+        monkeypatch.setattr(workflow_service, "_benchmark_v2_sidecars", observe_sidecars)
+        monkeypatch.setattr(
+            workflow_service, "_benchmark_v2_source_projection", reject_resolver
+        )
+        monkeypatch.setattr(store, "transition", reject_cas)
+        before_state = store.get(operation["run_id"])
+        before_bytes = state_path.read_bytes()
+        before_revision = before_state["revision"]
+
+        guarded = (
+            workflow_service.adopt_guarded_learning_stage_worker_result
+            if entrypoint == "adopt"
+            else workflow_service.continue_guarded_learning_stage_worker_result
+        )
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="benchmark_v2 incumbent worker identity differs",
+        ):
+            guarded(
+                composition=composition,
+                worker_id="worker-stale",
+                run_id=operation["run_id"],
+                expected_revision=before_revision,
+                stage=operation["stage"],
+                operation_id=operation["operation_id"],
+            )
+
+        after_state = store.get(operation["run_id"])
+        assert calls == {
+            "sidecar": 0,
+            "resolver": 0,
+            "registry_other": 0,
+            "registry_recovery": 0,
+            "registry_launch": 0,
+            "spawn": 0,
+            "store_cas": 0,
+        }
+        assert state_path.read_bytes() == before_bytes
+        assert after_state == before_state
+        assert after_state["revision"] == before_revision
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("recovery_case", "expected_launches", "expected_phase"),
     [
