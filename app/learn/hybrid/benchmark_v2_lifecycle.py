@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 from typing import Any, Mapping
 
 import psutil
@@ -361,6 +362,152 @@ _B2_CLEANUP_FIELDS = {
     "content_sha256",
 }
 
+_B1_SOURCE_FIELDS = {
+    "contract_version", "provider_corpus_file_ref", "provider_case_ref",
+    "projection_contract_version", "projection_rules_content_sha256",
+    "window_binding_ref", "capture_ref", "handler_payload_sha256",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_RESERVATION_FIELDS = {
+    "contract_version", "authority_kind", "run_id", "stage", "operation_id",
+    "workflow_revision", "task_kind", "payload_sha256", "handler_payload_source",
+    "handler_payload_source_ref", "worker_id", "model_request_id", "execution_nonce",
+    "supervision_inputs_ref", "reservation_state", "abort_observation_ref",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_OPERATION_ANCHOR_FIELDS = {
+    "contract_version", "run_id", "stage", "operation_id", "workflow_revision",
+    "task_kind", "worker_id", "execution_nonce", "payload_sha256", "reservation_ref",
+    "supervision_inputs_ref", "handler_payload_source_ref", "window_binding_ref",
+    "capture_ref", "expected_supervision_ref", "anchor_identity_sha256",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_EXPECTED_SUPERVISION_FIELDS = {
+    "contract_version", "authority_kind", "operation_anchor_ref", "reservation_ref",
+    "supervision_inputs_ref", "handler_payload_source_ref", "run_id", "stage",
+    "operation_id", "workflow_revision", "worker_id", "task_kind", "payload_sha256",
+    "execution_nonce", "scope_name", "startup_gate_timeout_ms",
+    "artifact_is_authorization", "execute_binding_enabled", "content_sha256",
+}
+_B1_ACTUAL_SUPERVISION_FIELDS = _B1_EXPECTED_SUPERVISION_FIELDS | {
+    "expected_supervision_ref", "supervisor_process_identity",
+}
+_B1_BEACON_FIELDS = {
+    "contract_version", "worker_id", "operation_anchor_ref", "process_identity",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_LAUNCH_ANCHOR_FIELDS = {
+    "contract_version", "authority_kind", "anchored_reservation_ref",
+    "launching_reservation_ref", "operation_anchor_ref", "actual_supervision_ref",
+    "supervisor_process_identity", "beacon_ref", "process_identity",
+    "assignment_observation_ref", "assignment_predecessor_content_sha256",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_HANDLE_FIELDS = {
+    "contract_version", "handle_kind", "handle_identity", "call_result", "call_error",
+    "observed_at", "worker_id", "predecessor_content_sha256", "content_sha256",
+}
+_B1_EXIT_FIELDS = {
+    "contract_version", "worker_id", "process_identity", "exitcode", "join_result",
+    "join_error", "observed_at", "predecessor_content_sha256", "content_sha256",
+}
+_B1_STABLE_ZERO_FIELDS = {
+    "contract_version", "worker_id", "scope_name", "samples",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_FINALIZATION_FIELDS = {
+    "contract_version", "supervision_ref", "assignment_proven_ref", "run_id", "stage",
+    "operation_id", "worker_id", "supervisor_process_identity", "process_identity",
+    "scope_name", "gate_state", "exit_observation_ref", "stable_zero_observation_ref",
+    "exact_owned_handles", "exact_handle_observation_refs",
+    "owner_job_handle_close_planned", "cleanup_receipt_id",
+    "predecessor_content_sha256", "content_sha256",
+}
+_B1_ABSENCE_FIELDS = {
+    "contract_version", "observation_kind", "outcome", "worker_id", "scope_name",
+    "process_identity", "predecessor_content_sha256", "content_sha256",
+}
+_B1_NOT_LAUNCHED_FIELDS = {
+    "contract_version", "outcome", "authority_kind", "reservation_ref", "run_id",
+    "stage", "operation_id", "worker_id", "owner_absence_observation_ref",
+    "process_event_job_beacon_absence_observation_ref", "result_absence_observation_ref",
+    "provider_absence_observation_ref", "predecessor_content_sha256",
+    "artifact_is_authorization", "execute_binding_enabled", "content_sha256",
+}
+_B1_PRE_ANCHOR_ABSENCE_FIELDS = {
+    "contract_version", "observation_kind", "outcome", "reservation_ref", "run_id",
+    "stage", "operation_id", "worker_id", "checks", "predecessor_content_sha256",
+    "content_sha256",
+}
+
+_B2_INTENT_FIELDS = {"contract_version", "model_request_id", "runtime_owner_ref", "content_sha256"}
+_B2_ACQUISITION_OWNER_FIELDS = {
+    "contract_version", "model_request_id", "runtime_owner_ref", "acquisition_intent_ref",
+    "owner_state", "content_sha256",
+}
+_B2_ACQUISITION_OBSERVATION_FIELDS = {
+    "contract_version", "model_request_id", "acquisition_owner_ref",
+    "acquisition_intent_ref", "runtime_owner_ref", "prepared_materialization_ledger_ref",
+    "materialization_ledger_ref", "materialization_state", "materialization_revision",
+    "content_sha256",
+}
+_B2_LEASE_BINDING_FIELDS = {
+    "contract_version", "model_request_id", "acquisition_intent_ref", "runtime_owner_ref",
+    "lease_ref", "profile_ref", "server_process_identity", "socket_ref", "job_scope_ref",
+    "lease_state_ref", "content_sha256",
+}
+_B2_LEASE_FIELDS = {
+    "contract_version", "lease_id", "owner_request_id", "profile_id", "incarnation_id",
+    "server_base_url", "server_model_id", "profile_sha256", "server_process_identity",
+    "content_sha256",
+}
+_B2_SOCKET_FIELDS = {"host", "port", "content_sha256"}
+_B2_SCOPE_ACQUISITION_FIELDS = {
+    "contract_version", "scope_name", "member_pids", "server_process_identity", "content_sha256",
+}
+_B2_RELEASE_OBSERVATION_FIELDS = {
+    "contract_version", "model_request_id", "lease_ref", "finalization_token",
+    "release_reason", "release_result_ref", "content_sha256",
+}
+_B2_TERMINATION_FIELDS = {
+    "contract_version", "model_request_id", "lease_ref", "finalization_token",
+    "release_result_ref", "termination_observation", "content_sha256",
+}
+_B2_TOMBSTONE_FIELDS = {
+    "contract_version", "status", "owner_request_id", "profile_id", "lease_id",
+    "incarnation_id", "server_termination", "release_result", "finalization_token",
+    "content_sha256",
+}
+_B2_SCOPE_CLEANUP_FIELDS = {
+    "contract_version", "scope_name", "authority", "scope_absent_after_owner_close",
+    "cleanup_status", "observed_member_pids_before", "observed_member_identities_before",
+    "member_pids_after", "member_identities_after", "active_listeners_after",
+    "pid_file_after", "stable_zero_observations", "samples", "content_sha256",
+}
+_B2_NO_ACTIVE_FIELDS = {
+    "contract_version", "model_request_id", "active_lease_count", "content_sha256",
+}
+_B2_LEASE_STATE_FIELDS = {
+    "contract_version", "profile_id", "profile", "incarnation", "server_started_by_runtime",
+    "process_scope_name", "process_scope_acquisition", "revision", "finalization", "leases",
+    "content_sha256",
+}
+_B2_ABORT_TOMBSTONE_FIELDS = {
+    "contract_version", "model_request_id", "acquisition_intent_ref", "runtime_owner_ref",
+    "materialization_ledger_ref", "reason", "historical_process_identity",
+    "historical_socket_ref", "historical_job_scope_ref", "content_sha256",
+}
+_B2_ABORT_FIELDS = {
+    "contract_version", "model_request_id", "acquisition_intent_ref", "runtime_owner_ref",
+    "materialization_ledger_ref", "owner_tombstone_ref", "reason", "owner_state",
+    "content_sha256",
+}
+_B2_PRODUCTION_ABORT_TOMBSTONE_FIELDS = {
+    "contract_version", "status", "model_request_id", "provider", "lineage",
+    "process_scope_name", "profile_sha256", "listener_port", "pid_file",
+    "scope_cleanup_evidence", "content_sha256",
+}
+
 _PROBE_FIELDS = {
     "contract_version",
     "probe_id",
@@ -398,6 +545,42 @@ _STABLE_ZERO_FIELDS = {
     "lease_absence_ref",
 }
 _PROBE_OBSERVER_FIELDS = {"kind", "module_ref", "content_sha256"}
+_PROBE_PROFILE_FIELDS = {
+    "contract_version", "provider_id", "profile_id", "attempt_id", "content_sha256",
+}
+_PROBE_REQUEST_FIELDS = {
+    "contract_version", "provider_id", "run_id", "stage", "operation_id",
+    "model_request_id", "attempt_id", "state", "observed_at_utc", "content_sha256",
+}
+_PROBE_BODY_PARENT_FIELDS = _PROBE_REQUEST_FIELDS
+_PROBE_SOCKET_PARENT_FIELDS = {
+    "contract_version", "provider_id", "attempt_id", "incarnation_id", "host", "port",
+    "process_identity", "content_sha256",
+}
+_PROBE_JOB_PARENT_FIELDS = {
+    "contract_version", "provider_id", "attempt_id", "incarnation_id", "scope_name",
+    "member_identities", "content_sha256",
+}
+_PROBE_LEASE_PARENT_FIELDS = {
+    "contract_version", "provider_id", "profile_ref", "attempt_id", "lease_id",
+    "incarnation_id", "process_identity", "socket_ref", "job_scope_ref",
+    "acquired_at_utc", "content_sha256",
+}
+_PROBE_TERMINATION_PARENT_FIELDS = {
+    "contract_version", "provider_id", "attempt_id", "incarnation_id",
+    "process_identity", "outcome", "terminated_at_utc", "predecessor_content_sha256",
+    "content_sha256",
+}
+_PROBE_ZERO_SAMPLE_FIELDS = {
+    "contract_version", "provider_id", "attempt_id", "incarnation_id", "sequence",
+    "observed_at_utc", "job_members", "active_listeners", "active_leases",
+    "predecessor_content_sha256", "content_sha256",
+}
+_PROBE_ZERO_BUNDLE_FIELDS = {
+    "contract_version", "provider_id", "attempt_id", "incarnation_id", "sample_refs",
+    "process_absent", "listener_absent", "lease_absent", "predecessor_content_sha256",
+    "content_sha256",
+}
 
 
 class _EvidenceError(ValueError):
@@ -462,12 +645,21 @@ def _process_identity(value: object, name: str) -> dict[str, int]:
 def _content_ref(value: object, name: str, *, nullable: bool = False) -> dict[str, Any] | None:
     if value is None and nullable:
         return None
-    if not isinstance(value, Mapping) or set(value) not in ({"content_sha256"}, {"id", "content_sha256"}):
+    if not isinstance(value, Mapping) or set(value) not in (
+        {"content_sha256"},
+        {"id", "content_sha256"},
+        {"contract_version", "content_sha256"},
+        {"capture_id", "content_sha256"},
+    ):
         raise _EvidenceError("invalid_content_ref", f"{name} must be a closed content ref")
     result = deepcopy(dict(value))
     _sha(result.get("content_sha256"), f"{name}.content_sha256")
     if "id" in result:
         _text(result["id"], f"{name}.id")
+    if "contract_version" in result:
+        _text(result["contract_version"], f"{name}.contract_version")
+    if "capture_id" in result:
+        _text(result["capture_id"], f"{name}.capture_id")
     return result
 
 
@@ -592,7 +784,6 @@ def _run_fixed_nvidia_smi_query(
         )
         try:
             stdout, stderr = process.communicate(timeout=timeout_seconds)
-            process.wait()
             return {
                 "execution_status": "completed",
                 "exit_code": int(process.returncode),
@@ -604,7 +795,6 @@ def _run_fixed_nvidia_smi_query(
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
-            process.wait()
             return {
                 "execution_status": "timed_out",
                 "exit_code": None,
@@ -624,28 +814,54 @@ def _run_fixed_nvidia_smi_query(
         }
     finally:
         if process is not None:
-            if process.poll() is None:
-                process.kill()
-                process.communicate()
-            process.wait()
-            if process.stdout is not None:
-                process.stdout.close()
-            if process.stderr is not None:
-                process.stderr.close()
+            cleanup_error: BaseException | None = None
+            try:
+                try:
+                    running = process.poll() is None
+                except BaseException as error:
+                    running = False
+                    cleanup_error = error
+                if running:
+                    try:
+                        process.kill()
+                    except BaseException as error:
+                        cleanup_error = cleanup_error or error
+                    try:
+                        process.communicate()
+                    except BaseException as error:
+                        cleanup_error = cleanup_error or error
+            finally:
+                try:
+                    process.wait()
+                except BaseException as error:
+                    cleanup_error = cleanup_error or error
+                finally:
+                    for pipe in (process.stdout, process.stderr):
+                        if pipe is not None:
+                            try:
+                                pipe.close()
+                            except BaseException as error:
+                                cleanup_error = cleanup_error or error
+            if cleanup_error is not None and sys.exc_info()[0] is None:
+                raise cleanup_error
 
 
-def _observe_pid_create_times(pids: list[int]) -> tuple[dict[int, int], list[int]]:
+def _observe_process_inventory() -> tuple[dict[int, int], list[int], str]:
+    try:
+        pids = sorted({pid for pid in psutil.pids() if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0})
+    except (psutil.Error, OSError, ValueError):
+        return {}, [], "unavailable"
     identities: dict[int, int] = {}
     unobserved: list[int] = []
-    for pid in sorted(set(pids)):
+    for pid in pids:
         try:
-            created_ns = int(psutil.Process(pid).create_time() * 1_000_000_000)
+            created_ns = int(round(psutil.Process(pid).create_time() * 1_000_000_000))
             if created_ns <= 0:
                 raise ValueError("invalid create time")
             identities[pid] = created_ns
         except (psutil.Error, OSError, ValueError):
             unobserved.append(pid)
-    return identities, unobserved
+    return identities, unobserved, "partial" if unobserved else "complete"
 
 
 def _production_gpu_observer_identity() -> dict[str, object]:
@@ -662,7 +878,7 @@ def _production_gpu_observer_identity() -> dict[str, object]:
         except OSError:
             executable_ref = None
     try:
-        create_time_ns = int(psutil.Process(os.getpid()).create_time() * 1_000_000_000)
+        create_time_ns = int(round(psutil.Process(os.getpid()).create_time() * 1_000_000_000))
     except psutil.Error as error:
         raise RuntimeError("collector process identity is unavailable") from error
     return seal_immutable(
@@ -712,15 +928,22 @@ def collect_raw_gpu_sample(*, device_uuid: str, transcript_path: Path) -> dict[s
     if not path.is_absolute():
         raise ValueError("transcript_path must be absolute")
     if path.exists():
-        resolved, raw = _read_input(path.resolve(), "transcript_path")
-        existing = _decode_canonical_json(raw, "existing raw GPU transcript")
-        validated = _validate_sample(existing)
+        try:
+            resolved, raw = _read_input(path.resolve(), "transcript_path")
+            existing = _decode_canonical_json(raw, "existing raw GPU transcript")
+            validated = _validate_sample(existing)
+        except (OSError, ValueError, TypeError) as error:
+            raise FileExistsError(
+                "raw GPU transcript is not an identical current production observation for the requested device"
+            ) from error
         if (
             validated["device_uuid"] != requested_uuid
             or validated["collection_mode"] != "production_direct"
-            or validated["observer_identity"]["kind"] != "production_direct"
+            or validated["observer_identity"] != _production_gpu_observer_identity()
         ):
-            raise FileExistsError("raw GPU transcript is not an identical production observation for the requested device")
+            raise FileExistsError(
+                "raw GPU transcript is not an identical current production observation for the requested device"
+            )
         return deepcopy(validated)
     started = _utc_now()
     commands: list[dict[str, object]] = []
@@ -756,12 +979,17 @@ def collect_raw_gpu_sample(*, device_uuid: str, transcript_path: Path) -> dict[s
             pids = sorted({row[0] for row in _parse_compute_rows(bytes(raw_results[1]["stdout"]))})
         except (ValueError, _EvidenceError) as error:
             parse_error = error
-    identities, unobserved = _observe_pid_create_times(pids) if parse_error is None else ({}, pids)
+    identities, unobserved, inventory_status = _observe_process_inventory()
+    if parse_error is None:
+        missing_compute_pids = sorted(set(pids) - set(identities) - set(unobserved))
+        if missing_compute_pids:
+            unobserved = sorted(set(unobserved) | set(missing_compute_pids))
+            inventory_status = "partial"
     snapshot = seal_immutable(
         {
             "contract_version": _PROCESS_SNAPSHOT_CONTRACT,
             "observed_at_utc": _utc_now(),
-            "status": "unavailable" if parse_error is not None else "partial" if unobserved else "complete",
+            "status": inventory_status,
             "identities": [
                 {"pid": pid, "create_time_ns": identities[pid]} for pid in sorted(identities)
             ],
@@ -956,6 +1184,7 @@ def _source_ref(path: Path, value: Mapping[str, object], role: str) -> dict[str,
 
 
 def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple[list[dict[str, Any]], dict[str, object]]:
+    related_refs: list[dict[str, str]] = []
     declared_event_path = Path(str(root.get("events_path")))
     declared_anchor_path = Path(str(root.get("root_anchor_path")))
     expected_events = root_path.with_name(root_path.name + ".events.jsonl")
@@ -1033,11 +1262,79 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
             raise _EvidenceError("task4_lineage_ambiguous", "Task 4 ready/publication lineage is ambiguous")
         publication = publication_events[0]["payload"].get("publication")
         binding = ready_events[0]["payload"].get("binding")
+        publication_fields = {
+            "contract_version", "owner_id", "screenshot_sha256", "raw_file_sha256",
+            "bitmap_pixel_sha256", "shutdown_nonce_sha256", "process_identity", "hwnd",
+            "hwnds", "window_class", "window_title", "window_rect", "client_rect", "dpi",
+            "image_dimensions", "artifact_is_authorization", "execute_binding_enabled",
+            "journal_root_sha256", "expected_predecessor_sha256", "permit_content_sha256",
+            "content_sha256",
+        }
+        binding_fields = {
+            "contract_version", "owner_id", "operation_id", "screenshot_path",
+            "screenshot_sha256", "bitmap_pixel_sha256", "scope_name", "process_identity",
+            "job_member_pids", "hwnd", "window_class", "window_title", "window_rect",
+            "client_rect", "dpi", "image_dimensions", "journal_path", "journal_root_sha256",
+            "journal_root", "artifact_is_authorization", "execute_binding_enabled",
+            "display_only", "uia_root_identity", "content_sha256",
+        }
+        permit_path, permit_raw = _read_input(
+            Path(str(root.get("publication_permit_path"))), "Task 4 publication permit"
+        )
+        publication_path, publication_raw = _read_input(
+            Path(str(root.get("publication_path"))), "Task 4 publication"
+        )
+        permit = _sealed(
+            _decode_canonical_json(permit_raw, "Task 4 publication permit"),
+            {"contract_version", "owner_id", "journal_root_sha256", "expected_predecessor_sha256", "content_sha256"},
+            "Task 4 publication permit",
+        )
+        persisted_publication = _sealed(
+            _decode_canonical_json(publication_raw, "Task 4 publication"),
+            publication_fields,
+            "Task 4 publication",
+        )
+        related_refs.extend(
+            [
+                {"semantic_role": "task4_publication_permit", "canonical_path": str(permit_path), "content_sha256": str(permit["content_sha256"])},
+                {"semantic_role": "task4_publication", "canonical_path": str(publication_path), "content_sha256": str(persisted_publication["content_sha256"])},
+            ]
+        )
         if (
             not isinstance(publication, Mapping)
             or not isinstance(binding, Mapping)
+            or set(publication) != publication_fields
+            or set(binding) != binding_fields
             or publication.get("content_sha256") != content_sha256(dict(publication))
             or binding.get("content_sha256") != content_sha256(dict(binding))
+            or persisted_publication != publication
+            or permit.get("contract_version")
+            != "portfolio_hybrid_benchmark_v2_hwnd_publication_permit_v1"
+            or permit.get("owner_id") != root.get("owner_id")
+            or permit.get("journal_root_sha256") != root.get("content_sha256")
+            or permit.get("expected_predecessor_sha256")
+            != process_events[0].get("content_sha256")
+            or publication.get("contract_version")
+            != "portfolio_hybrid_benchmark_v2_hwnd_publication_v1"
+            or publication.get("owner_id") != root.get("owner_id")
+            or publication.get("screenshot_sha256") != root.get("screenshot_sha256")
+            or publication.get("raw_file_sha256") != root.get("screenshot_sha256")
+            or publication.get("bitmap_pixel_sha256") != root.get("bitmap_pixel_sha256")
+            or publication.get("process_identity") != expected_identity
+            or publication.get("journal_root_sha256") != root.get("content_sha256")
+            or publication.get("expected_predecessor_sha256")
+            != process_events[0].get("content_sha256")
+            or publication.get("permit_content_sha256") != permit.get("content_sha256")
+            or publication.get("artifact_is_authorization") is not False
+            or publication.get("execute_binding_enabled") is not False
+            or binding.get("contract_version")
+            != "portfolio_hybrid_benchmark_v2_window_binding_v1"
+            or binding.get("journal_root") != root
+            or binding.get("journal_root_sha256") != root.get("content_sha256")
+            or binding.get("job_member_pids") != [expected_identity["pid"]]
+            or binding.get("artifact_is_authorization") is not False
+            or binding.get("execute_binding_enabled") is not False
+            or binding.get("display_only") is not True
             or cleanup.get("ready_event_sha256") != ready_events[0]["content_sha256"]
             or cleanup.get("publication_content_sha256") != publication.get("content_sha256")
             or cleanup.get("exact_hwnd") != publication.get("hwnd")
@@ -1045,6 +1342,20 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
             or binding.get("hwnd") != publication.get("hwnd")
         ):
             raise _EvidenceError("task4_cleanup_lineage_mismatch", "Task 4 ready cleanup lineage differs")
+        uia = _sealed(
+            binding.get("uia_root_identity"),
+            {
+                "provider", "provider_version", "window_handle", "window_process_id",
+                "window_title", "root_control", "content_sha256",
+            },
+            "Task 4 UIA root identity",
+        )
+        if (
+            uia.get("window_handle") != binding.get("hwnd")
+            or uia.get("window_process_id") != expected_identity["pid"]
+            or uia.get("window_title") != root.get("window_title")
+        ):
+            raise _EvidenceError("task4_uia_identity_mismatch", "Task 4 UIA identity differs")
     if (
         cleanup.get("cleanup_status") != "verified"
         or cleanup.get("artifact_is_authorization") is not False
@@ -1066,17 +1377,25 @@ def _validate_task4_events(root_path: Path, root: Mapping[str, object]) -> tuple
             "process_handle_closed",
             "job_handle_closed",
         )
+    ) or (
+        cleanup.get("shutdown_event_signaled") is not True
+        or cleanup.get("shutdown_event_error_code") is not None
+        or cleanup.get("outer_owner_python_finally_observed") is not True
     ) or _integer(cleanup.get("stable_zero_observations"), "Task 4 stable-zero") < 3:
         raise _EvidenceError("task4_cleanup_residue", "Task 4 cleanup retains process/window/handle residue")
     return events, {
         "path": str(event_path),
         "anchor_path": str(anchor_path),
         "raw_sha256": _sha_bytes(event_raw),
+        "related_refs": related_refs,
     }
 
 
 def _validate_parent_document(value: dict[str, Any]) -> str:
     contract = value.get("contract_version")
+    if contract is None and set(value) == _B2_SOCKET_FIELDS:
+        _sealed(value, _B2_SOCKET_FIELDS, "b2_socket")
+        return "b2_socket"
     schemas: dict[str, tuple[str, set[str]]] = {
         "portfolio_hybrid_benchmark_v2_window_owner_journal_v1": ("task4_window_root", _TASK4_ROOT_FIELDS),
         "benchmark_v2_worker_window_binding_authority_v1": ("task5_binding_authority", _TASK5_AUTHORITY_FIELDS),
@@ -1084,8 +1403,40 @@ def _validate_parent_document(value: dict[str, Any]) -> str:
         "benchmark_worker_scope_assignment_v1": ("b1_assignment", _B1_ASSIGNMENT_FIELDS),
         "benchmark_worker_owner_journal_v1": ("b1_owner", _B1_OWNER_FIELDS),
         "benchmark_worker_cleanup_receipt_v1": ("b1_cleanup", _B1_CLEANUP_FIELDS),
+        "benchmark_v2_incumbent_handler_payload_source_v1": ("b1_source", _B1_SOURCE_FIELDS),
+        "benchmark_worker_identity_reservation_v1": ("b1_reservation", _B1_RESERVATION_FIELDS),
+        "benchmark_worker_operation_anchor_v1": ("b1_operation_anchor", _B1_OPERATION_ANCHOR_FIELDS),
+        "benchmark_worker_expected_supervision_v1": ("b1_expected_supervision", _B1_EXPECTED_SUPERVISION_FIELDS),
+        "benchmark_worker_supervision_v1": ("b1_actual_supervision", _B1_ACTUAL_SUPERVISION_FIELDS),
+        "benchmark_worker_identity_beacon_v1": ("b1_beacon", _B1_BEACON_FIELDS),
+        "benchmark_worker_launch_identity_anchor_v1": ("b1_launch_anchor", _B1_LAUNCH_ANCHOR_FIELDS),
+        "benchmark_worker_handle_close_observation_v1": ("b1_handle_close", _B1_HANDLE_FIELDS),
+        "benchmark_worker_exit_join_observation_v1": ("b1_exit_join", _B1_EXIT_FIELDS),
+        "benchmark_worker_stable_zero_observation_v1": ("b1_stable_zero", _B1_STABLE_ZERO_FIELDS),
+        "benchmark_worker_cleanup_finalization_intent_v1": ("b1_finalization_intent", _B1_FINALIZATION_FIELDS),
+        "benchmark_worker_absence_observation_v1": ("b1_absence", _B1_ABSENCE_FIELDS),
+        "benchmark_worker_not_launched_observation_v1": ("b1_not_launched", _B1_NOT_LAUNCHED_FIELDS),
+        "benchmark_worker_pre_anchor_absence_observation_v1": ("b1_pre_anchor_absence", _B1_PRE_ANCHOR_ABSENCE_FIELDS),
         "benchmark_provider_runtime_owner_v1": ("b2_runtime_owner", _B2_RUNTIME_FIELDS),
         "qwen_model_request_materialization_ledger_v1": ("b2_materialization_ledger", _B2_LEDGER_FIELDS),
+        "qwen_model_request_acquisition_intent_v1": ("b2_acquisition_intent", _B2_INTENT_FIELDS),
+        "benchmark_provider_acquisition_owner_v1": ("b2_acquisition_owner", _B2_ACQUISITION_OWNER_FIELDS),
+        "qwen_model_request_acquisition_observation_v1": ("b2_acquisition_observation", _B2_ACQUISITION_OBSERVATION_FIELDS),
+        "qwen_model_request_acquisition_lease_binding_v1": ("b2_lease_binding", _B2_LEASE_BINDING_FIELDS),
+        "qwen_model_server_lease_state_v3": ("b2_lease_state", _B2_LEASE_STATE_FIELDS),
+        "qwen_model_server_lease_v2": ("b2_lease", _B2_LEASE_FIELDS),
+        "hybrid_process_scope_acquisition_v1": ("b2_scope_acquisition", _B2_SCOPE_ACQUISITION_FIELDS),
+        "qwen_model_request_exact_release_observation_v1": ("b2_release_observation", _B2_RELEASE_OBSERVATION_FIELDS),
+        "qwen_model_request_exact_termination_observation_v1": ("b2_termination", _B2_TERMINATION_FIELDS),
+        "qwen_model_request_owner_receipt_v1": ("b2_owner_tombstone", _B2_TOMBSTONE_FIELDS),
+        "hybrid_windows_process_scope_v1": ("b2_scope_cleanup", _B2_SCOPE_CLEANUP_FIELDS),
+        "qwen_model_request_no_active_lease_observation_v1": ("b2_no_active_lease", _B2_NO_ACTIVE_FIELDS),
+        "benchmark_provider_aborted_acquisition_tombstone_v1": ("b2_abort_tombstone", _B2_ABORT_TOMBSTONE_FIELDS),
+        "benchmark_provider_acquisition_abort_v1": ("b2_acquisition_abort", _B2_ABORT_FIELDS),
+        "hybrid_qwen_aborted_acquisition_tombstone_v1": (
+            "b2_production_abort_tombstone",
+            _B2_PRODUCTION_ABORT_TOMBSTONE_FIELDS,
+        ),
         "benchmark_provider_registry_journal_v1": ("b2_provider_journal", _B2_JOURNAL_FIELDS),
         "benchmark_provider_cleanup_registry_journal_v1": (
             "b2_provider_cleanup_journal",
@@ -1096,6 +1447,8 @@ def _validate_parent_document(value: dict[str, Any]) -> str:
     if contract not in schemas:
         raise _EvidenceError("unknown_parent_contract", f"unsupported owner parent contract: {contract!r}")
     role, fields = schemas[str(contract)]
+    if contract == "qwen_model_request_materialization_ledger_v1" and value.get("revision") == 0:
+        role = "b2_prepared_materialization_ledger"
     _sealed(value, fields, role)
     for safety_field in ("artifact_is_authorization", "execute_binding_enabled"):
         if safety_field in value and value[safety_field] is not False:
@@ -1103,13 +1456,151 @@ def _validate_parent_document(value: dict[str, Any]) -> str:
     return role
 
 
-def _load_parent_graph(paths: list[Path]) -> tuple[dict[str, list[tuple[Path, dict[str, Any]]]], list[dict[str, str]], list[dict[str, object]]]:
+def _index_sealed_values(
+    value: object,
+    *,
+    source: str,
+    digest_index: dict[str, tuple[str, object]],
+) -> None:
+    if isinstance(value, Mapping):
+        digest = value.get("content_sha256")
+        if isinstance(digest, str) and _SHA_RE.fullmatch(digest) and digest == content_sha256(dict(value)):
+            existing = digest_index.get(digest)
+            if existing is not None and canonical_json_bytes(existing[1]) != canonical_json_bytes(dict(value)):
+                raise _EvidenceError("digest_parent_collision", "one digest resolves to conflicting raw parents")
+            digest_index[digest] = (source, deepcopy(dict(value)))
+        for nested in value.values():
+            _index_sealed_values(nested, source=source, digest_index=digest_index)
+    elif isinstance(value, list):
+        for nested in value:
+            _index_sealed_values(nested, source=source, digest_index=digest_index)
+
+
+def _graph_ref_digests(role: str, value: Mapping[str, object]) -> list[str]:
+    ref_fields: dict[str, tuple[str, ...]] = {
+        "task5_binding_authority": (
+            "window_binding_ref", "capture_ref", "owner_binding_ref", "owner_journal_ref",
+            "owner_ready_event_ref",
+        ),
+        "b1_source": ("window_binding_ref", "capture_ref"),
+        "b1_reservation": ("handler_payload_source_ref", "abort_observation_ref"),
+        "b1_operation_anchor": (
+            "reservation_ref", "handler_payload_source_ref", "window_binding_ref", "capture_ref",
+            "expected_supervision_ref",
+        ),
+        "b1_expected_supervision": (
+            "operation_anchor_ref", "reservation_ref", "handler_payload_source_ref",
+        ),
+        "b1_actual_supervision": (
+            "expected_supervision_ref", "operation_anchor_ref", "reservation_ref",
+            "handler_payload_source_ref",
+        ),
+        "b1_beacon": ("operation_anchor_ref",),
+        "b1_launch_anchor": (
+            "anchored_reservation_ref", "launching_reservation_ref", "operation_anchor_ref",
+            "actual_supervision_ref", "beacon_ref", "assignment_observation_ref",
+        ),
+        "b1_owner": (
+            "operation_anchor_ref", "reservation_ref", "supervision_ref", "beacon_ref",
+            "assignment_observation_ref", "exit_observation_ref", "stable_zero_observation_ref",
+            "cleanup_finalization_intent", "cleanup_receipt_ref",
+        ),
+        "b1_cleanup": (
+            "operation_anchor_ref", "reservation_ref", "supervision_ref", "assignment_proven_ref",
+            "finalization_intent_ref", "job_absence_observation_ref",
+            "worker_absence_observation_ref", "supervisor_absence_observation_ref",
+            "reservation_abort_ref",
+        ),
+        "b1_finalization_intent": (
+            "supervision_ref", "assignment_proven_ref", "exit_observation_ref",
+            "stable_zero_observation_ref",
+        ),
+        "b1_not_launched": (
+            "reservation_ref", "owner_absence_observation_ref",
+            "process_event_job_beacon_absence_observation_ref", "result_absence_observation_ref",
+            "provider_absence_observation_ref",
+        ),
+        "b1_pre_anchor_absence": ("reservation_ref",),
+        "b2_acquisition_intent": ("runtime_owner_ref",),
+        "b2_acquisition_owner": ("runtime_owner_ref", "acquisition_intent_ref"),
+        "b2_materialization_ledger": ("acquisition_intent_ref", "runtime_owner_ref"),
+        "b2_prepared_materialization_ledger": ("acquisition_intent_ref", "runtime_owner_ref"),
+        "b2_acquisition_observation": (
+            "acquisition_owner_ref", "acquisition_intent_ref", "runtime_owner_ref",
+            "prepared_materialization_ledger_ref", "materialization_ledger_ref",
+        ),
+        "b2_lease_binding": (
+            "acquisition_intent_ref", "runtime_owner_ref", "lease_ref", "profile_ref",
+            "socket_ref", "job_scope_ref", "lease_state_ref",
+        ),
+        "b2_release_observation": ("lease_ref", "release_result_ref"),
+        "b2_termination": ("lease_ref", "release_result_ref"),
+        "b2_cleanup": (
+            "acquisition_intent_ref", "runtime_owner_ref", "lease_ref", "profile_ref",
+            "socket_ref", "job_scope_ref", "lease_state_ref", "owner_tombstone_ref",
+            "termination_observation_ref", "scope_stable_zero_ref", "listener_stable_zero_ref",
+            "no_active_lease_observation_ref", "no_owned_runtime_observation_ref",
+        ),
+        "b2_provider_journal": (
+            "reservation_ref", "runtime_owner_ref", "acquisition_owner_ref",
+            "acquisition_intent_ref", "prepared_acquisition_observation_ref",
+            "prepared_materialization_ledger_ref", "acquisition_observation_ref",
+            "materialization_ledger_ref",
+        ),
+        "b2_provider_cleanup_journal": (
+            "reservation_ref", "runtime_owner_ref", "acquisition_owner_ref",
+            "acquisition_intent_ref", "cleanup_receipt_ref",
+        ),
+        "b2_abort_tombstone": (
+            "acquisition_intent_ref", "runtime_owner_ref", "materialization_ledger_ref",
+            "historical_socket_ref", "historical_job_scope_ref",
+        ),
+        "b2_acquisition_abort": (
+            "acquisition_intent_ref", "runtime_owner_ref", "materialization_ledger_ref",
+            "owner_tombstone_ref",
+        ),
+    }
+    digests: list[str] = []
+    for field in ref_fields.get(role, ()):
+        raw_ref = value.get(field)
+        if raw_ref is None:
+            continue
+        ref = _content_ref(raw_ref, f"{role}.{field}")
+        assert ref is not None
+        digests.append(str(ref["content_sha256"]))
+    if role == "b1_source" and isinstance(value.get("provider_corpus_file_ref"), Mapping):
+        corpus_parent = _content_ref(
+            value["provider_corpus_file_ref"].get("source_parent_ref"),
+            "b1_source.provider_corpus_file_ref.source_parent_ref",
+        )
+        assert corpus_parent is not None
+        digests.append(str(corpus_parent["content_sha256"]))
+    for container_field in ("exact_handle_observation_refs",):
+        container = value.get(container_field)
+        if isinstance(container, Mapping):
+            for name, raw_ref in sorted(container.items()):
+                ref = _content_ref(raw_ref, f"{role}.{container_field}.{name}")
+                assert ref is not None
+                digests.append(str(ref["content_sha256"]))
+    predecessor = value.get("predecessor_content_sha256")
+    if predecessor is not None:
+        digests.append(_sha(predecessor, f"{role}.predecessor_content_sha256"))
+    return digests
+
+
+def _load_parent_graph(paths: list[Path]) -> tuple[
+    dict[str, list[tuple[Path, dict[str, Any]]]],
+    list[dict[str, str]],
+    list[dict[str, object]],
+    dict[str, tuple[str, object]],
+]:
     roles: dict[str, list[tuple[Path, dict[str, Any]]]] = {}
     refs: list[dict[str, str]] = []
     findings: list[dict[str, object]] = []
     resolved_seen: set[str] = set()
     content_seen: set[str] = set()
-    for index, input_path in enumerate(paths):
+    digest_index: dict[str, tuple[str, object]] = {}
+    for index, input_path in enumerate(sorted(paths, key=lambda item: os.path.normcase(str(item)))):
         resolved, raw = _read_input(input_path, f"owner_journal_paths[{index}]")
         key = os.path.normcase(str(resolved))
         if key in resolved_seen:
@@ -1123,6 +1614,7 @@ def _load_parent_graph(paths: list[Path]) -> tuple[dict[str, list[tuple[Path, di
         content_seen.add(digest)
         roles.setdefault(role, []).append((resolved, value))
         refs.append(_source_ref(resolved, value, role))
+        _index_sealed_values(value, source=str(resolved), digest_index=digest_index)
     task4_roots = roles.get("task4_window_root", [])
     if len(task4_roots) != 1:
         raise _EvidenceError("task4_root_cardinality", "exactly one Task 4 root is required")
@@ -1130,7 +1622,14 @@ def _load_parent_graph(paths: list[Path]) -> tuple[dict[str, list[tuple[Path, di
     if task4_root.get("artifact_is_authorization") is not False or task4_root.get("execute_binding_enabled") is not False or task4_root.get("display_only") is not True:
         raise _EvidenceError("task4_safety_mismatch", "Task 4 root safety fields differ")
     task4_events, event_ref = _validate_task4_events(task4_path, task4_root)
+    capture_path, capture_raw = _read_input(Path(str(task4_root.get("screenshot_path"))), "Task 4 screenshot")
+    capture_digest = _sha_bytes(capture_raw)
+    if capture_digest != task4_root.get("screenshot_sha256"):
+        raise _EvidenceError("task4_capture_digest_mismatch", "Task 4 screenshot bytes differ")
+    digest_index[capture_digest] = (str(capture_path), {"raw_file_sha256": capture_digest})
     roles["task4_events"] = [(Path(event_ref["path"]), {"events": task4_events, **event_ref})]
+    for event in task4_events:
+        _index_sealed_values(event, source=str(event_ref["path"]), digest_index=digest_index)
     refs.append(
         {
             "semantic_role": "task4_events",
@@ -1138,6 +1637,7 @@ def _load_parent_graph(paths: list[Path]) -> tuple[dict[str, list[tuple[Path, di
             "content_sha256": str(event_ref["raw_sha256"]),
         }
     )
+    refs.extend(deepcopy(event_ref.get("related_refs", [])))
     for role, required_count in (
         ("task5_binding_authority", 1),
         ("b1_cleanup", 1),
@@ -1146,8 +1646,9 @@ def _load_parent_graph(paths: list[Path]) -> tuple[dict[str, list[tuple[Path, di
     ):
         if len(roles.get(role, [])) != required_count:
             raise _EvidenceError("missing_owner_parent", f"{role} requires exactly {required_count} raw parent")
-    if not roles.get("b1_owner"):
-        raise _EvidenceError("missing_owner_parent", "at least one B1 owner journal is required")
+    b1_cleanup = roles.get("b1_cleanup", [])
+    if len(b1_cleanup) == 1 and b1_cleanup[0][1].get("outcome") == "verified_exact_worker_exited" and not roles.get("b1_owner"):
+        raise _EvidenceError("missing_owner_parent", "launched B1 cleanup requires an owner journal")
     if len(roles.get("b2_provider_journal", [])) + len(roles.get("b2_provider_cleanup_journal", [])) != 1:
         raise _EvidenceError(
             "missing_owner_parent",
@@ -1166,7 +1667,63 @@ def _load_parent_graph(paths: list[Path]) -> tuple[dict[str, list[tuple[Path, di
     ):
         if len(roles.get(singleton, [])) > 1:
             raise _EvidenceError("duplicate_owner_parent", f"{singleton} is duplicated")
-    return roles, sorted(refs, key=lambda item: (item["semantic_role"], item["content_sha256"], item["canonical_path"])), findings
+    serialized = roles["task5_binding_authority"][0][1].get("serialized_window_binding")
+    if isinstance(serialized, Mapping):
+        payload_sha = _sha(serialized.get("payload_sha256"), "Task 5 binding payload SHA")
+        digest_index[payload_sha] = (str(roles["task5_binding_authority"][0][0]), deepcopy(dict(serialized)))
+    for _path, anchor in roles.get("b1_operation_anchor", []):
+        identity_sha = _sha(anchor.get("anchor_identity_sha256"), "B1 anchor identity SHA")
+        digest_index[identity_sha] = (str(_path), deepcopy(anchor))
+    for _path, state in roles.get("b2_lease_state", []):
+        for embedded in (state.get("profile"), state.get("incarnation", {}).get("server_socket"), state.get("process_scope_acquisition")):
+            if isinstance(embedded, Mapping):
+                sealed = seal_immutable(dict(embedded))
+                digest_index[str(sealed["content_sha256"])] = (str(_path), sealed)
+        raw_leases = state.get("leases")
+        if isinstance(raw_leases, list):
+            for raw_lease in raw_leases:
+                if isinstance(raw_lease, Mapping):
+                    lease = {key: deepcopy(raw_lease[key]) for key in raw_lease if key != "lifecycle_state"}
+                    sealed = seal_immutable(lease)
+                    digest_index[str(sealed["content_sha256"])] = (str(_path), sealed)
+    for _path, tombstone in roles.get("b2_owner_tombstone", []):
+        release_result = tombstone.get("release_result")
+        if isinstance(release_result, Mapping):
+            sealed = seal_immutable(dict(release_result))
+            digest_index[str(sealed["content_sha256"])] = (str(_path), sealed)
+            for field in ("hybrid_process_scope_acquisition", "hybrid_process_scope_cleanup"):
+                embedded = release_result.get(field)
+                if isinstance(embedded, Mapping):
+                    embedded_sealed = seal_immutable(dict(embedded))
+                    digest_index[str(embedded_sealed["content_sha256"])] = (str(_path), embedded_sealed)
+    for _path, tombstone in roles.get("b2_production_abort_tombstone", []):
+        embedded = tombstone.get("scope_cleanup_evidence")
+        if isinstance(embedded, Mapping):
+            sealed = seal_immutable(dict(embedded))
+            digest_index[str(sealed["content_sha256"])] = (str(_path), sealed)
+    unresolved: list[str] = []
+    for role, candidates in sorted(roles.items()):
+        if role == "task4_events":
+            continue
+        candidates.sort(
+            key=lambda item: (
+                str(item[1].get("run_id", "")), str(item[1].get("stage", "")),
+                str(item[1].get("operation_id", "")), str(item[1].get("worker_id", "")),
+                str(item[1].get("model_request_id", "")), str(item[1].get("content_sha256", "")),
+                str(item[0]),
+            )
+        )
+        for _path, value in candidates:
+            for digest in _graph_ref_digests(role, value):
+                if digest not in digest_index:
+                    unresolved.append(digest)
+    if unresolved:
+        raise _EvidenceError(
+            "dangling_parent_ref",
+            "owner graph contains content refs that do not resolve to supplied raw parents",
+            refs=tuple(sorted(set(unresolved))),
+        )
+    return roles, sorted(refs, key=lambda item: (item["semantic_role"], item["content_sha256"], item["canonical_path"])), findings, digest_index
 
 
 def _one(roles: Mapping[str, list[tuple[Path, dict[str, Any]]]], role: str) -> dict[str, Any] | None:
@@ -1178,8 +1735,791 @@ def _same_ref(left: object, right: object) -> bool:
     return isinstance(left, Mapping) and isinstance(right, Mapping) and left.get("content_sha256") == right.get("content_sha256")
 
 
+def _resolved_parent(
+    digest_index: Mapping[str, tuple[str, object]], value: object, name: str
+) -> dict[str, Any]:
+    ref = _content_ref(value, name)
+    assert ref is not None
+    resolved = digest_index.get(str(ref["content_sha256"]))
+    if resolved is None or not isinstance(resolved[1], Mapping):
+        raise _EvidenceError("dangling_parent_ref", f"{name} does not resolve")
+    return deepcopy(dict(resolved[1]))
+
+
+def _validate_task5_binding_raw(
+    *,
+    authority: Mapping[str, object],
+    serialized: Mapping[str, object],
+    root: Mapping[str, object],
+    window_identity: Mapping[str, int],
+) -> None:
+    membership = _sealed(
+        serialized.get("job_membership_ref"),
+        {"contract_version", "job_name", "process_identity", "member_pids", "content_sha256"},
+        "Task 5 Job membership",
+    )
+    if (
+        serialized.get("contract_version")
+        != "portfolio_hybrid_benchmark_v2_worker_window_binding_v1"
+        or serialized.get("capture_sha256") != root.get("screenshot_sha256")
+        or serialized.get("screenshot_sha256") != root.get("screenshot_sha256")
+        or serialized.get("capture_image_path") != root.get("screenshot_path")
+        or serialized.get("expected_uia_root_hwnd") != serialized.get("exact_hwnd")
+        or serialized.get("expected_uia_owner_pid") != window_identity.get("pid")
+        or membership.get("contract_version")
+        != "portfolio_hybrid_benchmark_v2_worker_job_membership_ref_v1"
+        or membership.get("job_name") != serialized.get("job_name")
+        or membership.get("process_identity") != window_identity
+        or membership.get("member_pids") != [window_identity.get("pid")]
+        or authority.get("predecessor_content_sha256") is not None
+    ):
+        raise _EvidenceError("task5_binding_constraint_mismatch", "Task 5 exact binding constraints differ")
+    shapes = (
+        (serialized.get("client_rect"), {"left", "top", "right", "bottom", "width", "height"}),
+        (serialized.get("window_rect"), {"left", "top", "right", "bottom"}),
+        (serialized.get("image_dimensions"), {"width", "height"}),
+    )
+    for value, fields in shapes:
+        if not isinstance(value, Mapping) or set(value) != fields or any(
+            isinstance(item, bool) or not isinstance(item, int) for item in value.values()
+        ):
+            raise _EvidenceError("task5_binding_constraint_mismatch", "Task 5 rectangle constraints differ")
+
+
+def _validate_b1_source_anchor_raw(
+    *,
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+    digest_index: Mapping[str, tuple[str, object]],
+    reserved: Mapping[str, object],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    sources = [value for _path, value in roles.get("b1_source", [])]
+    anchors = [value for _path, value in roles.get("b1_operation_anchor", [])]
+    expected_documents = [value for _path, value in roles.get("b1_expected_supervision", [])]
+    if len(sources) != 1 or len(anchors) != 1 or len(expected_documents) != 1:
+        raise _EvidenceError("b1_anchor_parent_missing", "B1 source/anchor/expected supervision cardinality differs")
+    source = sources[0]
+    anchor = anchors[0]
+    expected = expected_documents[0]
+    corpus = _sealed(
+        source.get("provider_corpus_file_ref"),
+        {
+            "contract_version", "relative_path", "file_sha256", "source_parent_ref",
+            "content_sha256",
+        },
+        "B1 provider corpus ref",
+    )
+    case_ref = _closed(source.get("provider_case_ref"), {"case_id", "case_content_sha256"}, "B1 case ref")
+    corpus_parent = _resolved_parent(digest_index, corpus.get("source_parent_ref"), "B1 corpus source parent")
+    source_ref = {
+        "contract_version": "benchmark_v2_incumbent_handler_payload_source_ref_v1",
+        "content_sha256": source.get("content_sha256"),
+    }
+    for field in (
+        "run_id", "stage", "operation_id", "workflow_revision", "task_kind", "worker_id",
+        "execution_nonce", "payload_sha256", "supervision_inputs_ref",
+    ):
+        if anchor.get(field) != reserved.get(field):
+            raise _EvidenceError("b1_operation_anchor_invalid", f"B1 operation anchor {field} differs")
+    identity = {
+        "contract_version": "benchmark_worker_operation_anchor_v1",
+        "run_id": reserved.get("run_id"),
+        "stage": reserved.get("stage"),
+        "operation_id": reserved.get("operation_id"),
+        "workflow_revision": reserved.get("workflow_revision"),
+        "task_kind": reserved.get("task_kind"),
+        "worker_id": reserved.get("worker_id"),
+        "execution_nonce": reserved.get("execution_nonce"),
+        "payload_sha256": reserved.get("payload_sha256"),
+        "reservation_ref": {"content_sha256": reserved.get("content_sha256")},
+        "supervision_inputs_ref": deepcopy(reserved.get("supervision_inputs_ref")),
+        "handler_payload_source_ref": source_ref,
+        "window_binding_ref": deepcopy(source.get("window_binding_ref")),
+        "capture_ref": deepcopy(source.get("capture_ref")),
+    }
+    anchor_identity = content_sha256(identity)
+    try:
+        from app.learn.hybrid.windows_process_scope import benchmark_worker_scope_name_v1
+
+        expected_scope = benchmark_worker_scope_name_v1(
+            authority_kind=str(reserved.get("authority_kind")),
+            run_id=str(reserved.get("run_id")),
+            stage=str(reserved.get("stage")),
+            operation_id=str(reserved.get("operation_id")),
+            worker_id=str(reserved.get("worker_id")),
+            payload_sha256=str(reserved.get("payload_sha256")),
+            execution_nonce=str(reserved.get("execution_nonce")),
+        )
+    except (TypeError, ValueError) as error:
+        raise _EvidenceError("b1_scope_identity_invalid", "B1 scope identity differs") from error
+    expected_exact = seal_immutable(
+        {
+            "contract_version": "benchmark_worker_expected_supervision_v1",
+            "authority_kind": reserved.get("authority_kind"),
+            "operation_anchor_ref": {"content_sha256": anchor_identity},
+            "reservation_ref": {"content_sha256": reserved.get("content_sha256")},
+            "supervision_inputs_ref": deepcopy(reserved.get("supervision_inputs_ref")),
+            "handler_payload_source_ref": source_ref,
+            "run_id": reserved.get("run_id"),
+            "stage": reserved.get("stage"),
+            "operation_id": reserved.get("operation_id"),
+            "workflow_revision": reserved.get("workflow_revision"),
+            "worker_id": reserved.get("worker_id"),
+            "task_kind": reserved.get("task_kind"),
+            "payload_sha256": reserved.get("payload_sha256"),
+            "execution_nonce": reserved.get("execution_nonce"),
+            "scope_name": expected_scope,
+            "startup_gate_timeout_ms": 15_000,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    if (
+        corpus.get("contract_version") != "benchmark_v2_provider_corpus_file_ref_v1"
+        or corpus.get("relative_path") != "provider-corpus.v2.json"
+        or corpus_parent.get("contract_version")
+        != "portfolio_hybrid_benchmark_v2_window_owner_journal_v1"
+        or source.get("predecessor_content_sha256") != corpus.get("content_sha256")
+        or source.get("projection_contract_version")
+        != "benchmark_v2_observe_screen_payload_projection_v1"
+        or not _text(case_ref.get("case_id"), "B1 case id")
+        or not _sha(case_ref.get("case_content_sha256"), "B1 case digest")
+        or not _sha(corpus.get("file_sha256"), "B1 corpus digest")
+        or not _sha(source.get("projection_rules_content_sha256"), "B1 projection digest")
+        or source.get("handler_payload_sha256") != reserved.get("payload_sha256")
+        or reserved.get("handler_payload_source") != source
+        or reserved.get("handler_payload_source_ref") != source_ref
+        or reserved.get("predecessor_content_sha256") != source.get("content_sha256")
+        or reserved.get("reservation_state") != "reserved"
+        or reserved.get("abort_observation_ref") is not None
+        or anchor.get("reservation_ref") != identity["reservation_ref"]
+        or anchor.get("handler_payload_source_ref") != source_ref
+        or anchor.get("window_binding_ref") != source.get("window_binding_ref")
+        or anchor.get("capture_ref") != source.get("capture_ref")
+        or anchor.get("anchor_identity_sha256") != anchor_identity
+        or anchor.get("expected_supervision_ref")
+        != {"content_sha256": expected_exact["content_sha256"]}
+        or anchor.get("predecessor_content_sha256") != reserved.get("content_sha256")
+        or expected != expected_exact
+    ):
+        raise _EvidenceError("b1_operation_anchor_invalid", "B1 source/anchor/supervision bytes differ")
+    return source, anchor, expected
+
+
+def _validate_b1_launched_raw(
+    *,
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+    digest_index: Mapping[str, tuple[str, object]],
+    primary_owner: Mapping[str, object],
+    cleanup: Mapping[str, object],
+    assignment: Mapping[str, object],
+) -> None:
+    expected_policy = {
+        "kill_on_job_close": True,
+        "breakaway_ok": False,
+        "silent_breakaway_ok": False,
+        "owner_handle_authority": "registry_parent",
+    }
+    identity = _process_identity(assignment.get("process_identity"), "B1 assignment process")
+    if (
+        assignment.get("job_policy") != expected_policy
+        or assignment.get("temporary_process_handle_close")
+        != {"handle_kind": "temporary_process", "status": "closed"}
+        or assignment.get("temporary_job_handle_close")
+        != {"handle_kind": "temporary_job", "status": "closed"}
+        or assignment.get("observed_member_identities") != [identity]
+    ):
+        raise _EvidenceError("b1_assignment_constraint_mismatch", "B1 assignment exact constraints differ")
+    reservations = [value for _path, value in roles.get("b1_reservation", [])]
+    by_state = {str(value.get("reservation_state")): value for value in reservations}
+    if set(by_state) != {"reserved", "anchored", "launching", "launched"} or len(reservations) != 4:
+        raise _EvidenceError("b1_reservation_chain_invalid", "B1 launched reservation states differ")
+    _source, operation_anchor, expected = _validate_b1_source_anchor_raw(
+        roles=roles,
+        digest_index=digest_index,
+        reserved=by_state["reserved"],
+    )
+    previous = by_state["reserved"]
+    for state in ("anchored", "launching", "launched"):
+        current = by_state[state]
+        transitioned = {key: deepcopy(value) for key, value in previous.items() if key != "content_sha256"}
+        transitioned["reservation_state"] = state
+        transitioned["predecessor_content_sha256"] = previous["content_sha256"]
+        if current != seal_immutable(transitioned):
+            raise _EvidenceError("b1_reservation_chain_invalid", "B1 reservation predecessor differs")
+        previous = current
+    if cleanup.get("reservation_ref", {}).get("content_sha256") != by_state["launched"]["content_sha256"]:
+        raise _EvidenceError("b1_cleanup_lineage_mismatch", "B1 cleanup reservation differs")
+    resolved_anchor = _resolved_parent(digest_index, cleanup.get("operation_anchor_ref"), "B1 operation anchor")
+    actual = _resolved_parent(digest_index, cleanup.get("supervision_ref"), "B1 actual supervision")
+    resolved_expected = _resolved_parent(
+        digest_index, operation_anchor.get("expected_supervision_ref"), "B1 expected supervision"
+    )
+    if resolved_anchor != operation_anchor or resolved_expected != expected:
+        raise _EvidenceError("b1_operation_anchor_invalid", "B1 anchor aliases do not resolve exactly")
+    launch = _resolved_parent(digest_index, primary_owner.get("predecessor_content_sha256") and {"content_sha256": primary_owner["predecessor_content_sha256"]}, "B1 owner predecessor")
+    if launch.get("contract_version") != "benchmark_worker_owner_journal_v1":
+        raise _EvidenceError("b1_owner_predecessor_invalid", "B1 terminal owner does not follow the sealed owner state")
+    launch_anchor_matches = [
+        value
+        for _path, value in roles.get("b1_launch_anchor", [])
+        if value.get("process_identity") == identity
+        and value.get("actual_supervision_ref", {}).get("content_sha256") == actual.get("content_sha256")
+    ]
+    if len(launch_anchor_matches) != 1:
+        raise _EvidenceError("b1_launch_anchor_invalid", "B1 launch anchor is missing or ambiguous")
+    launch_anchor = launch_anchor_matches[0]
+    if (
+        operation_anchor.get("contract_version") != "benchmark_worker_operation_anchor_v1"
+        or expected.get("contract_version") != "benchmark_worker_expected_supervision_v1"
+        or actual.get("contract_version") != "benchmark_worker_supervision_v1"
+        or actual.get("expected_supervision_ref")
+        != {"content_sha256": expected.get("content_sha256")}
+        or actual.get("operation_anchor_ref") != cleanup.get("operation_anchor_ref")
+        or actual.get("reservation_ref") != operation_anchor.get("reservation_ref")
+        or actual.get("authority_kind") != by_state["reserved"].get("authority_kind")
+        or actual.get("reservation_ref")
+        != {"content_sha256": by_state["reserved"].get("content_sha256")}
+        or actual.get("supervision_inputs_ref") != by_state["reserved"].get("supervision_inputs_ref")
+        or actual.get("handler_payload_source_ref") != by_state["reserved"].get("handler_payload_source_ref")
+        or any(actual.get(field) != by_state["reserved"].get(field) for field in (
+            "run_id", "stage", "operation_id", "workflow_revision", "worker_id", "task_kind",
+            "payload_sha256", "execution_nonce",
+        ))
+        or actual.get("scope_name") != expected.get("scope_name")
+        or actual.get("startup_gate_timeout_ms") != 15_000
+        or actual.get("artifact_is_authorization") is not False
+        or actual.get("execute_binding_enabled") is not False
+        or assignment.get("predecessor_content_sha256") != actual.get("content_sha256")
+        or launch_anchor.get("assignment_observation_ref", {}).get("content_sha256")
+        != assignment.get("content_sha256")
+        or launch_anchor.get("process_identity") != identity
+        or launch_anchor.get("predecessor_content_sha256") != assignment.get("content_sha256")
+        or launch_anchor.get("anchored_reservation_ref")
+        != {"content_sha256": by_state["anchored"].get("content_sha256")}
+        or launch_anchor.get("launching_reservation_ref")
+        != {"content_sha256": by_state["launching"].get("content_sha256")}
+        or launch_anchor.get("operation_anchor_ref")
+        != {"content_sha256": operation_anchor.get("anchor_identity_sha256")}
+        or launch_anchor.get("beacon_ref") != primary_owner.get("beacon_ref")
+        or launch_anchor.get("supervisor_process_identity")
+        != actual.get("supervisor_process_identity")
+        or launch_anchor.get("assignment_predecessor_content_sha256")
+        != assignment.get("predecessor_content_sha256")
+    ):
+        raise _EvidenceError("b1_launch_anchor_invalid", "B1 launch identity joins differ")
+    beacons = [value for _path, value in roles.get("b1_beacon", [])]
+    if len(beacons) != 1:
+        raise _EvidenceError("b1_beacon_invalid", "B1 beacon cardinality differs")
+    beacon = beacons[0]
+    if (
+        primary_owner.get("beacon_ref") != {"content_sha256": beacon.get("content_sha256")}
+        or beacon.get("worker_id") != primary_owner.get("worker_id")
+        or beacon.get("operation_anchor_ref")
+        != {"content_sha256": operation_anchor.get("anchor_identity_sha256")}
+        or beacon.get("process_identity") != identity
+        or beacon.get("predecessor_content_sha256") != actual.get("content_sha256")
+    ):
+        raise _EvidenceError("b1_beacon_invalid", "B1 beacon identity differs")
+    if (
+        launch.get("predecessor_content_sha256") != launch_anchor.get("content_sha256")
+        or launch.get("phase") != "gate_released"
+        or launch.get("gate_state") != "released"
+        or launch.get("reservation_ref")
+        != {"content_sha256": by_state["launched"].get("content_sha256")}
+        or launch.get("supervision_ref") != {"content_sha256": actual.get("content_sha256")}
+        or launch.get("operation_anchor_ref")
+        != {"content_sha256": operation_anchor.get("anchor_identity_sha256")}
+        or launch.get("process_identity") != identity
+        or launch.get("assignment_observation_ref")
+        != {"content_sha256": assignment.get("content_sha256")}
+        or primary_owner.get("predecessor_content_sha256") != launch.get("content_sha256")
+    ):
+        raise _EvidenceError("b1_owner_predecessor_invalid", "B1 owner state lineage differs")
+    intent = _resolved_parent(digest_index, cleanup.get("finalization_intent_ref"), "B1 finalization intent")
+    exit_parent = _resolved_parent(digest_index, intent.get("exit_observation_ref"), "B1 exit observation")
+    stable = _resolved_parent(digest_index, intent.get("stable_zero_observation_ref"), "B1 stable zero")
+    cleanup_receipt_id = _sha_bytes(
+        canonical_json_bytes({"worker_id": cleanup.get("worker_id"), "scope_name": assignment.get("scope_name")})
+    )
+    if (
+        intent.get("contract_version") != "benchmark_worker_cleanup_finalization_intent_v1"
+        or intent.get("supervision_ref") != cleanup.get("supervision_ref")
+        or intent.get("assignment_proven_ref") != cleanup.get("assignment_proven_ref")
+        or intent.get("process_identity") != identity
+        or any(intent.get(field) != cleanup.get(field) for field in ("run_id", "stage", "operation_id", "worker_id"))
+        or intent.get("supervisor_process_identity") != actual.get("supervisor_process_identity")
+        or intent.get("scope_name") != assignment.get("scope_name")
+        or intent.get("gate_state") != "released"
+        or intent.get("exact_owned_handles")
+        != {
+            "worker_process": "closed_explicitly",
+            "startup_event": "closed_explicitly",
+            "beacon_file": "closed_explicitly",
+            "owner_job": "open",
+        }
+        or not isinstance(intent.get("exact_handle_observation_refs"), Mapping)
+        or set(intent["exact_handle_observation_refs"]) != {
+            "worker_process", "startup_event", "beacon_file"
+        }
+        or intent.get("owner_job_handle_close_planned") is not True
+        or intent.get("cleanup_receipt_id") != cleanup_receipt_id
+        or intent.get("predecessor_content_sha256") != launch.get("content_sha256")
+        or primary_owner.get("cleanup_finalization_intent")
+        != {"content_sha256": intent.get("content_sha256")}
+        or exit_parent.get("contract_version") != "benchmark_worker_exit_join_observation_v1"
+        or exit_parent.get("process_identity") != identity
+        or exit_parent.get("worker_id") != cleanup.get("worker_id")
+        or exit_parent.get("join_result") != "joined"
+        or exit_parent.get("join_error") is not None
+        or exit_parent.get("predecessor_content_sha256") != launch.get("content_sha256")
+        or stable.get("contract_version") != "benchmark_worker_stable_zero_observation_v1"
+        or stable.get("worker_id") != cleanup.get("worker_id")
+        or stable.get("scope_name") != assignment.get("scope_name")
+        or stable.get("samples") != [[], [], []]
+    ):
+        raise _EvidenceError("b1_cleanup_residue", "B1 exit or stable-zero proof differs")
+    terminal_body = {key: deepcopy(value) for key, value in launch.items() if key != "content_sha256"}
+    terminal_body.update(
+        {
+            "phase": "cleanup_finalization_intent",
+            "exit_observation_ref": {"content_sha256": exit_parent.get("content_sha256")},
+            "stable_zero_observation_ref": {"content_sha256": stable.get("content_sha256")},
+            "exact_handle_observation_refs": deepcopy(intent.get("exact_handle_observation_refs")),
+            "cleanup_finalization_intent": {"content_sha256": intent.get("content_sha256")},
+            "predecessor_content_sha256": launch.get("content_sha256"),
+        }
+    )
+    if primary_owner != seal_immutable(terminal_body):
+        raise _EvidenceError("b1_owner_predecessor_invalid", "B1 terminal owner state differs")
+    raw_handle_refs = cleanup.get("exact_handle_observation_refs")
+    if not isinstance(raw_handle_refs, Mapping) or set(raw_handle_refs) != {
+        "worker_process", "startup_event", "beacon_file", "owner_job"
+    }:
+        raise _EvidenceError("b1_handle_close_invalid", "B1 exact handle set differs")
+    handle_parents: dict[str, dict[str, Any]] = {}
+    for kind, raw_ref in raw_handle_refs.items():
+        parent = _resolved_parent(digest_index, raw_ref, f"B1 {kind} close")
+        if (
+            parent.get("contract_version") != "benchmark_worker_handle_close_observation_v1"
+            or parent.get("handle_kind") != kind
+            or parent.get("call_result") != "success"
+            or parent.get("call_error") is not None
+            or parent.get("worker_id") != cleanup.get("worker_id")
+        ):
+            raise _EvidenceError("b1_handle_close_invalid", "B1 exact handle close proof differs")
+        handle_parents[str(kind)] = parent
+    expected_handle_identities = {
+        "worker_process": {"process_identity": identity},
+        "startup_event": {
+            "event_name": "Local\\AgentGuiBenchmarkWorkerGate-"
+            + content_sha256({"scope_name": assignment.get("scope_name")})
+        },
+        "beacon_file": {"beacon_ref": {"content_sha256": beacon.get("content_sha256")}},
+        "owner_job": {"scope_name": assignment.get("scope_name")},
+    }
+    if any(
+        handle_parents[kind].get("handle_identity") != expected_identity
+        for kind, expected_identity in expected_handle_identities.items()
+    ):
+        raise _EvidenceError("b1_handle_close_invalid", "B1 exact handle identities differ")
+    if (
+        intent.get("exact_handle_observation_refs")
+        != {kind: raw_handle_refs[kind] for kind in ("worker_process", "startup_event", "beacon_file")}
+        or handle_parents["worker_process"].get("predecessor_content_sha256")
+        != exit_parent.get("content_sha256")
+        or handle_parents["startup_event"].get("predecessor_content_sha256")
+        != handle_parents["worker_process"].get("content_sha256")
+        or handle_parents["beacon_file"].get("predecessor_content_sha256")
+        != handle_parents["startup_event"].get("content_sha256")
+        or stable.get("predecessor_content_sha256")
+        != handle_parents["beacon_file"].get("content_sha256")
+        or handle_parents["owner_job"].get("predecessor_content_sha256")
+        != intent.get("content_sha256")
+    ):
+        raise _EvidenceError("b1_handle_close_invalid", "B1 exact handle predecessor chain differs")
+    job_absence = _resolved_parent(digest_index, cleanup.get("job_absence_observation_ref"), "B1 Job absence")
+    worker_absence = _resolved_parent(digest_index, cleanup.get("worker_absence_observation_ref"), "B1 worker absence")
+    if (
+        job_absence.get("observation_kind") != "job"
+        or job_absence.get("outcome") != "absent"
+        or job_absence.get("scope_name") != assignment.get("scope_name")
+        or job_absence.get("process_identity") is not None
+        or job_absence.get("predecessor_content_sha256")
+        != handle_parents["owner_job"].get("content_sha256")
+        or worker_absence.get("observation_kind") != "worker"
+        or worker_absence.get("outcome") != "absent"
+        or worker_absence.get("process_identity") != identity
+        or worker_absence.get("predecessor_content_sha256") != job_absence.get("content_sha256")
+        or cleanup.get("supervisor_absence_observation_ref") is not None
+        or cleanup.get("reservation_abort_ref") is not None
+        or cleanup.get("artifact_is_authorization") is not False
+        or cleanup.get("execute_binding_enabled") is not False
+    ):
+        raise _EvidenceError("b1_absence_invalid", "B1 exact absence chain differs")
+    _timestamp(exit_parent.get("observed_at"), "B1 exit time")
+
+
+def _validate_b2_acquired_raw(
+    *,
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+    digest_index: Mapping[str, tuple[str, object]],
+    runtime_owner: Mapping[str, object],
+    ledger: Mapping[str, object],
+    cleanup: Mapping[str, object],
+) -> None:
+    intent, _acquisition_owner, prepared, _prepared_observation, _acquisition_observation = (
+        _validate_b2_acquisition_chain(
+            roles=roles,
+            runtime_owner=runtime_owner,
+            ledger=ledger,
+        )
+    )
+    binding_candidates = [value for _path, value in roles.get("b2_lease_binding", [])]
+    if len(binding_candidates) != 1:
+        raise _EvidenceError("b2_lease_binding_invalid", "B2 lease binding cardinality differs")
+    binding = binding_candidates[0]
+    state = _resolved_parent(digest_index, binding.get("lease_state_ref"), "B2 lease state")
+    lease = _resolved_parent(digest_index, cleanup.get("lease_ref"), "B2 exact lease")
+    socket = _resolved_parent(digest_index, cleanup.get("socket_ref"), "B2 socket")
+    scope = _resolved_parent(digest_index, cleanup.get("job_scope_ref"), "B2 Job scope")
+    tombstone = _resolved_parent(digest_index, cleanup.get("owner_tombstone_ref"), "B2 owner tombstone")
+    termination = _resolved_parent(digest_index, cleanup.get("termination_observation_ref"), "B2 termination")
+    stable = _resolved_parent(digest_index, cleanup.get("scope_stable_zero_ref"), "B2 stable zero")
+    listener_stable = _resolved_parent(digest_index, cleanup.get("listener_stable_zero_ref"), "B2 listener zero")
+    no_active = _resolved_parent(digest_index, cleanup.get("no_active_lease_observation_ref"), "B2 no-active lease")
+    release_result = tombstone.get("release_result")
+    release_observations = [value for _path, value in roles.get("b2_release_observation", [])]
+    profile = state.get("profile")
+    incarnation = state.get("incarnation")
+    state_leases = state.get("leases")
+    if (
+        intent.get("contract_version") != "qwen_model_request_acquisition_intent_v1"
+        or intent.get("runtime_owner_ref", {}).get("content_sha256") != runtime_owner.get("content_sha256")
+        or ledger.get("revision") != 1
+        or ledger.get("transition") != "launch"
+        or ledger.get("predecessor_content_sha256") != prepared.get("content_sha256")
+        or binding.get("lease_ref") != cleanup.get("lease_ref")
+        or binding.get("profile_ref") != cleanup.get("profile_ref")
+        or binding.get("server_process_identity") != cleanup.get("server_process_identity")
+        or binding.get("socket_ref") != cleanup.get("socket_ref")
+        or binding.get("job_scope_ref") != cleanup.get("job_scope_ref")
+        or binding.get("lease_state_ref") != cleanup.get("lease_state_ref")
+        or state.get("contract_version") != "qwen_model_server_lease_state_v3"
+        or state.get("finalization") is not None
+        or not isinstance(profile, Mapping)
+        or content_sha256(dict(profile)) != lease.get("profile_sha256")
+        or cleanup.get("profile_ref") != {"content_sha256": content_sha256(dict(profile))}
+        or not isinstance(incarnation, Mapping)
+        or incarnation.get("incarnation_id") != lease.get("incarnation_id")
+        or incarnation.get("server_process_identity") != lease.get("server_process_identity")
+        or incarnation.get("server_socket") != {key: value for key, value in socket.items() if key != "content_sha256"}
+        or not isinstance(state_leases, list)
+        or len(state_leases) != 1
+        or state_leases[0] != {**{key: value for key, value in lease.items() if key != "content_sha256"}, "lifecycle_state": "not_started"}
+        or lease.get("owner_request_id") != cleanup.get("model_request_id")
+        or lease.get("server_process_identity") != cleanup.get("server_process_identity")
+        or socket.get("host") not in {"127.0.0.1", "localhost", "::1"}
+        or isinstance(socket.get("port"), bool)
+        or not isinstance(socket.get("port"), int)
+        or socket.get("port") <= 0
+        or scope.get("server_process_identity") != cleanup.get("server_process_identity")
+        or cleanup.get("server_process_identity", {}).get("pid") not in scope.get("member_pids", [])
+        or tombstone.get("lease_id") != lease.get("lease_id")
+        or tombstone.get("incarnation_id") != lease.get("incarnation_id")
+        or tombstone.get("status") != "finalized"
+        or tombstone.get("owner_request_id") != cleanup.get("model_request_id")
+        or tombstone.get("profile_id") != lease.get("profile_id")
+        or tombstone.get("server_termination") != "terminated"
+        or tombstone.get("finalization_token") != cleanup.get("finalization_token")
+        or not isinstance(release_result, Mapping)
+        or release_result.get("lease") != {key: value for key, value in lease.items() if key != "content_sha256"}
+        or termination.get("lease_ref") != cleanup.get("lease_ref")
+        or termination.get("finalization_token") != cleanup.get("finalization_token")
+        or termination.get("termination_observation") != release_result.get("release")
+        or len(release_observations) != 1
+        or release_observations[0].get("lease_ref") != cleanup.get("lease_ref")
+        or release_observations[0].get("finalization_token") != cleanup.get("finalization_token")
+        or release_observations[0].get("release_result_ref")
+        != {"content_sha256": content_sha256(dict(release_result))}
+        or stable != listener_stable
+        or stable.get("scope_name") != scope.get("scope_name")
+        or stable.get("authority") != "windows_job_object"
+        or stable.get("scope_absent_after_owner_close") is not True
+        or stable.get("cleanup_status") != "verified"
+        or stable.get("member_pids_after") != []
+        or stable.get("member_identities_after") != []
+        or stable.get("active_listeners_after") != []
+        or stable.get("pid_file_after") is not None
+        or stable.get("stable_zero_observations", 0) < 3
+        or no_active.get("active_lease_count") != 0
+        or no_active.get("model_request_id") != cleanup.get("model_request_id")
+    ):
+        raise _EvidenceError("b2_cleanup_lineage_mismatch", "B2 acquired raw parent chain differs")
+    samples = stable.get("samples")
+    if not isinstance(samples, list) or len(samples) < 3 or any(
+        not isinstance(sample, Mapping)
+        or sample.get("pids") != []
+        or sample.get("process_identities") != []
+        or sample.get("listeners") != []
+        for sample in samples[-3:]
+    ):
+        raise _EvidenceError("b2_cleanup_residue", "B2 ordered stable-zero samples differ")
+
+
+def _validate_b2_acquisition_chain(
+    *,
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+    runtime_owner: Mapping[str, object],
+    ledger: Mapping[str, object],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    intents = [value for _path, value in roles.get("b2_acquisition_intent", [])]
+    owners = [value for _path, value in roles.get("b2_acquisition_owner", [])]
+    prepared_ledgers = [value for _path, value in roles.get("b2_prepared_materialization_ledger", [])]
+    observations = [value for _path, value in roles.get("b2_acquisition_observation", [])]
+    if len(intents) != 1 or len(owners) != 1 or len(prepared_ledgers) != 1 or len(observations) != 2:
+        raise _EvidenceError("b2_acquisition_parent_missing", "B2 acquisition parent cardinality differs")
+    intent = intents[0]
+    owner = owners[0]
+    prepared = prepared_ledgers[0]
+    by_revision = {value.get("materialization_revision"): value for value in observations}
+    if set(by_revision) != {0, 1}:
+        raise _EvidenceError("b2_acquisition_observation_invalid", "B2 acquisition revisions differ")
+    prepared_observation = by_revision[0]
+    acquisition_observation = by_revision[1]
+    intent_ref = {"content_sha256": intent.get("content_sha256")}
+    runtime_ref = {"content_sha256": runtime_owner.get("content_sha256")}
+    owner_ref = {"content_sha256": owner.get("content_sha256")}
+    prepared_ref = {"content_sha256": prepared.get("content_sha256")}
+    ledger_ref = {"content_sha256": ledger.get("content_sha256")}
+    common_observation = {
+        "model_request_id": runtime_owner.get("model_request_id"),
+        "acquisition_owner_ref": owner_ref,
+        "acquisition_intent_ref": intent_ref,
+        "runtime_owner_ref": runtime_ref,
+        "prepared_materialization_ledger_ref": prepared_ref,
+    }
+    if (
+        intent.get("model_request_id") != runtime_owner.get("model_request_id")
+        or intent.get("runtime_owner_ref") != runtime_ref
+        or owner.get("model_request_id") != runtime_owner.get("model_request_id")
+        or owner.get("runtime_owner_ref") != runtime_ref
+        or owner.get("acquisition_intent_ref") != intent_ref
+        or owner.get("owner_state") != "acquisition_prepared"
+        or prepared.get("model_request_id") != runtime_owner.get("model_request_id")
+        or prepared.get("acquisition_intent_ref") != intent_ref
+        or prepared.get("runtime_owner_ref") != runtime_ref
+        or prepared.get("state") != "prepared_never_materialized"
+        or prepared.get("revision") != 0
+        or prepared.get("transition") != "prepare"
+        or prepared.get("predecessor_content_sha256") is not None
+        or ledger.get("model_request_id") != runtime_owner.get("model_request_id")
+        or ledger.get("acquisition_intent_ref") != intent_ref
+        or ledger.get("runtime_owner_ref") != runtime_ref
+        or ledger.get("revision") != 1
+        or ledger.get("predecessor_content_sha256") != prepared.get("content_sha256")
+        or any(prepared_observation.get(field) != value for field, value in common_observation.items())
+        or prepared_observation.get("materialization_ledger_ref") != prepared_ref
+        or prepared_observation.get("materialization_state") != "prepared_never_materialized"
+        or any(acquisition_observation.get(field) != value for field, value in common_observation.items())
+        or acquisition_observation.get("materialization_ledger_ref") != ledger_ref
+        or acquisition_observation.get("materialization_state") != ledger.get("state")
+    ):
+        raise _EvidenceError("b2_acquisition_lineage_mismatch", "B2 acquisition raw parent chain differs")
+    return intent, owner, prepared, prepared_observation, acquisition_observation
+
+
+def _validate_b1_not_launched_raw(
+    *,
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+    digest_index: Mapping[str, tuple[str, object]],
+    cleanup: Mapping[str, object],
+) -> dict[str, Any]:
+    reservations = [value for _path, value in roles.get("b1_reservation", [])]
+    by_state = {str(value.get("reservation_state")): value for value in reservations}
+    if set(by_state) != {"reserved", "anchored", "cancelled_before_launch"} or len(reservations) != 3:
+        raise _EvidenceError("b1_not_launched_reservation_invalid", "B1 not-launched reservation states differ")
+    reserved = by_state["reserved"]
+    anchored = by_state["anchored"]
+    cancelled = by_state["cancelled_before_launch"]
+    _source, operation_anchor, _expected = _validate_b1_source_anchor_raw(
+        roles=roles,
+        digest_index=digest_index,
+        reserved=reserved,
+    )
+    anchored_body = {key: deepcopy(value) for key, value in reserved.items() if key != "content_sha256"}
+    anchored_body["reservation_state"] = "anchored"
+    anchored_body["predecessor_content_sha256"] = reserved["content_sha256"]
+    if (
+        anchored != seal_immutable(anchored_body)
+        or cancelled.get("predecessor_content_sha256") != anchored.get("content_sha256")
+        or any(
+            cancelled.get(field) != anchored.get(field)
+            for field in _B1_RESERVATION_FIELDS
+            - {"content_sha256", "reservation_state", "abort_observation_ref", "predecessor_content_sha256"}
+        )
+        or cleanup.get("operation_anchor_ref")
+        != {"content_sha256": operation_anchor.get("anchor_identity_sha256")}
+        or cleanup.get("reservation_ref") != {"content_sha256": cancelled.get("content_sha256")}
+        or cleanup.get("supervision_ref") is not None
+        or cleanup.get("process_identity") is not None
+        or cleanup.get("assignment_proven_ref") is not None
+        or cleanup.get("finalization_intent_ref") is not None
+        or cleanup.get("exact_handle_observation_refs") is not None
+        or cleanup.get("job_absence_observation_ref") is not None
+        or cleanup.get("worker_absence_observation_ref") is not None
+        or cleanup.get("supervisor_absence_observation_ref") is not None
+    ):
+        raise _EvidenceError("b1_not_launched_branch_contradiction", "B1 not-launched nullability differs")
+    observation = _resolved_parent(digest_index, cleanup.get("reservation_abort_ref"), "B1 not-launched observation")
+    if (
+        observation.get("contract_version") != "benchmark_worker_not_launched_observation_v1"
+        or observation.get("outcome") != "verified_no_launch_artifacts"
+        or observation.get("reservation_ref") != {"content_sha256": anchored.get("content_sha256")}
+        or cancelled.get("abort_observation_ref") != {"content_sha256": observation.get("content_sha256")}
+    ):
+        raise _EvidenceError("b1_not_launched_observation_invalid", "B1 no-launch observation differs")
+    predecessor = str(anchored["content_sha256"])
+    expected_kinds = (
+        ("owner", "owner_absence_observation_ref"),
+        ("process_event_job_beacon", "process_event_job_beacon_absence_observation_ref"),
+        ("result", "result_absence_observation_ref"),
+        ("provider", "provider_absence_observation_ref"),
+    )
+    expected_check_keys = {
+        "owner": {"registry_record_absent", "owner_journal_absent"},
+        "process_event_job_beacon": {
+            "worker_journal_absent", "startup_event_absent", "owner_job_absent",
+            "beacon_absent", "scope_name", "event_name",
+        },
+        "result": {"result_absent"},
+        "provider": {"provider_owner_absent"},
+    }
+    for kind, field in expected_kinds:
+        absence = _resolved_parent(digest_index, observation.get(field), f"B1 {kind} pre-anchor absence")
+        if (
+            absence.get("contract_version") != "benchmark_worker_pre_anchor_absence_observation_v1"
+            or absence.get("observation_kind") != kind
+            or absence.get("outcome") != "absent"
+            or absence.get("reservation_ref") != {"content_sha256": anchored.get("content_sha256")}
+            or absence.get("predecessor_content_sha256") != predecessor
+            or absence.get("worker_id") != cleanup.get("worker_id")
+            or not isinstance(absence.get("checks"), Mapping)
+            or set(absence["checks"]) != expected_check_keys[kind]
+            or any(value is not True for key, value in absence["checks"].items() if key.endswith("absent"))
+        ):
+            raise _EvidenceError("b1_not_launched_absence_invalid", "B1 pre-anchor absence chain differs")
+        predecessor = str(absence["content_sha256"])
+    if observation.get("predecessor_content_sha256") != predecessor:
+        raise _EvidenceError("b1_not_launched_absence_invalid", "B1 no-launch absence head differs")
+    return cancelled
+
+
+def _validate_b2_not_acquired_raw(
+    *,
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+    digest_index: Mapping[str, tuple[str, object]],
+    runtime_owner: Mapping[str, object],
+    ledger: Mapping[str, object],
+    cleanup: Mapping[str, object],
+) -> None:
+    forbidden = (
+        "lease_ref", "profile_ref", "server_process_identity", "socket_ref", "job_scope_ref",
+        "finalization_token", "lease_state_ref", "termination_observation_ref",
+    )
+    if any(cleanup.get(field) is not None for field in forbidden):
+        raise _EvidenceError("b2_not_acquired_contains_owner", "B2 not-acquired branch contains owner resources")
+    intent, acquisition_owner, prepared, prepared_observation, acquisition_observation = (
+        _validate_b2_acquisition_chain(
+            roles=roles,
+            runtime_owner=runtime_owner,
+            ledger=ledger,
+        )
+    )
+    if (
+        ledger.get("revision") != 1
+        or ledger.get("transition") != "abort"
+        or ledger.get("state") != "aborted_never_materialized"
+        or ledger.get("predecessor_content_sha256") != prepared.get("content_sha256")
+    ):
+        raise _EvidenceError("b2_abort_ledger_invalid", "B2 abort materialization lineage differs")
+    production_tombstone = _resolved_parent(
+        digest_index, cleanup.get("owner_tombstone_ref"), "B2 no-owner tombstone"
+    )
+    no_owned = _resolved_parent(
+        digest_index, cleanup.get("no_owned_runtime_observation_ref"), "B2 no-owned runtime"
+    )
+    stable = _resolved_parent(
+        digest_index, cleanup.get("scope_stable_zero_ref"), "B2 not-acquired stable zero"
+    )
+    listener = _resolved_parent(
+        digest_index, cleanup.get("listener_stable_zero_ref"), "B2 not-acquired listener zero"
+    )
+    no_active = _resolved_parent(
+        digest_index, cleanup.get("no_active_lease_observation_ref"), "B2 not-acquired no-active lease"
+    )
+    abort_tombstones = [value for _path, value in roles.get("b2_abort_tombstone", [])]
+    abort_results = [value for _path, value in roles.get("b2_acquisition_abort", [])]
+    if len(abort_tombstones) != 1 or len(abort_results) != 1:
+        raise _EvidenceError("b2_abort_parent_missing", "B2 abort parents are missing or ambiguous")
+    tombstone = abort_tombstones[0]
+    abort = abort_results[0]
+    if (
+        production_tombstone != no_owned
+        or production_tombstone.get("contract_version")
+        != "hybrid_qwen_aborted_acquisition_tombstone_v1"
+        or production_tombstone.get("status") != "aborted_before_lease"
+        or production_tombstone.get("model_request_id") != runtime_owner.get("model_request_id")
+        or production_tombstone.get("provider") != "qwen"
+        or production_tombstone.get("lineage")
+        != {"run_id": runtime_owner.get("run_id"), "operation_id": runtime_owner.get("operation_id")}
+        or production_tombstone.get("process_scope_name") != stable.get("scope_name")
+        or production_tombstone.get("scope_cleanup_evidence")
+        != {key: value for key, value in stable.items() if key != "content_sha256"}
+        or tombstone.get("historical_process_identity") is not None
+        or tombstone.get("historical_socket_ref") is not None
+        or tombstone.get("historical_job_scope_ref") is not None
+        or tombstone.get("materialization_ledger_ref") != {"content_sha256": ledger.get("content_sha256")}
+        or tombstone.get("acquisition_intent_ref") != {"content_sha256": intent.get("content_sha256")}
+        or tombstone.get("runtime_owner_ref") != {"content_sha256": runtime_owner.get("content_sha256")}
+        or abort.get("owner_state") != "acquisition_aborted"
+        or abort.get("acquisition_intent_ref") != {"content_sha256": intent.get("content_sha256")}
+        or abort.get("runtime_owner_ref") != {"content_sha256": runtime_owner.get("content_sha256")}
+        or abort.get("materialization_ledger_ref") != {"content_sha256": ledger.get("content_sha256")}
+        or abort.get("owner_tombstone_ref")
+        != {"content_sha256": production_tombstone.get("content_sha256")}
+        or abort.get("reason") != tombstone.get("reason")
+        or cleanup.get("release_reason") != tombstone.get("reason")
+        or stable != listener
+        or stable.get("authority") != "windows_job_object"
+        or stable.get("scope_absent_after_owner_close") is not True
+        or stable.get("cleanup_status") != "verified"
+        or stable.get("member_pids_after") != []
+        or stable.get("member_identities_after") != []
+        or stable.get("active_listeners_after") != []
+        or stable.get("pid_file_after") is not None
+        or stable.get("stable_zero_observations", 0) < 3
+        or no_active.get("active_lease_count") != 0
+        or no_active.get("model_request_id") != runtime_owner.get("model_request_id")
+        or prepared_observation.get("acquisition_owner_ref")
+        != {"content_sha256": acquisition_owner.get("content_sha256")}
+        or acquisition_observation.get("acquisition_owner_ref")
+        != {"content_sha256": acquisition_owner.get("content_sha256")}
+    ):
+        raise _EvidenceError("b2_not_acquired_lineage_mismatch", "B2 not-acquired raw parent chain differs")
+    samples = stable.get("samples")
+    if not isinstance(samples, list) or len(samples) < 3 or any(
+        not isinstance(sample, Mapping)
+        or sample.get("pids") != []
+        or sample.get("process_identities") != []
+        or sample.get("listeners") != []
+        for sample in samples[-3:]
+    ):
+        raise _EvidenceError("b2_cleanup_residue", "B2 not-acquired ordered stable-zero samples differ")
+
+
 def _derive_parent_facts(
-    roles: dict[str, list[tuple[Path, dict[str, Any]]]]
+    roles: dict[str, list[tuple[Path, dict[str, Any]]]],
+    digest_index: Mapping[str, tuple[str, object]],
 ) -> tuple[list[dict[str, object]], dict[str, str], list[dict[str, object]], dict[str, str], dict[str, str]]:
     findings: list[dict[str, object]] = []
     owners: list[dict[str, object]] = []
@@ -1203,9 +2543,25 @@ def _derive_parent_facts(
     owners.append({"kind": "window", "subject_id": root["owner_id"], "process_identity": window_identity, "evidence_ref": root["content_sha256"]})
 
     serialized = _closed(authority.get("serialized_window_binding"), _SERIALIZED_BINDING_FIELDS, "Task 5 serialized binding")
+    _validate_task5_binding_raw(
+        authority=authority,
+        serialized=serialized,
+        root=root,
+        window_identity=window_identity,
+    )
     payload_unsealed = {key: value for key, value in serialized.items() if key != "payload_sha256"}
     if serialized.get("payload_sha256") != _sha_bytes(canonical_json_bytes(payload_unsealed)):
         findings.append(_finding("binding_payload_seal_mismatch", "failed", [str(authority["content_sha256"])]))
+    source = _one(roles, "b1_source")
+    if (
+        source is None
+        or source.get("window_binding_ref") != authority.get("window_binding_ref")
+        or source.get("capture_ref", {}).get("content_sha256")
+        != authority.get("capture_ref", {}).get("content_sha256")
+        or source.get("capture_ref", {}).get("id")
+        != authority.get("capture_ref", {}).get("capture_id")
+    ):
+        raise _EvidenceError("b1_source_binding_mismatch", "B1 source does not bind the exact Task 5 capture")
     ready_event = ready_events[0] if len(ready_events) == 1 else None
     ready_binding = ready_event["payload"].get("binding") if ready_event is not None else None
     if (
@@ -1224,17 +2580,33 @@ def _derive_parent_facts(
     ):
         findings.append(_finding("task4_task5_parent_mismatch", "failed", [str(root["content_sha256"]), str(authority["content_sha256"])]))
 
-    primary_owner = roles["b1_owner"][0][1]
     if worker_cleanup.get("outcome") not in {"verified_exact_worker_exited", "verified_not_launched"}:
         findings.append(_finding("b1_cleanup_outcome_invalid", "failed", [str(worker_cleanup["content_sha256"])]))
+    terminal_owner_candidates = [
+        value
+        for _path, value in roles.get("b1_owner", [])
+        if value.get("phase") == "cleanup_finalization_intent"
+    ]
     if worker_cleanup.get("outcome") == "verified_exact_worker_exited":
+        primary_candidates = [
+            value
+            for value in terminal_owner_candidates
+            if value.get("worker_id") == worker_cleanup.get("worker_id")
+            and value.get("operation_id") == worker_cleanup.get("operation_id")
+            and value.get("process_identity") == worker_cleanup.get("process_identity")
+            and value.get("reservation_ref") == worker_cleanup.get("reservation_ref")
+            and value.get("supervision_ref") == worker_cleanup.get("supervision_ref")
+        ]
+        if len(primary_candidates) != 1:
+            raise _EvidenceError("b1_primary_owner_ambiguous", "B1 primary owner lineage is missing or ambiguous")
+        primary_owner = primary_candidates[0]
         if assignment is None:
             raise _EvidenceError("missing_owner_parent", "launched B1 worker requires one assignment parent")
         assignment_identity = _process_identity(assignment.get("process_identity"), "B1 assignment identity")
         observed = assignment.get("observed_member_identities")
         if not isinstance(observed, list) or assignment_identity not in observed:
             findings.append(_finding("b1_assignment_membership_missing", "failed", [str(assignment["content_sha256"])]))
-        for _path, owner in roles["b1_owner"]:
+        for owner in terminal_owner_candidates:
             identity = _process_identity(owner.get("process_identity"), "B1 owner identity")
             owners.append({"kind": "outer_worker", "subject_id": owner["worker_id"], "process_identity": identity, "evidence_ref": owner["content_sha256"]})
             if owner.get("assignment_observation_ref", {}).get("content_sha256") != assignment.get("content_sha256") or identity != assignment_identity:
@@ -1248,28 +2620,31 @@ def _derive_parent_facts(
             or worker_cleanup.get("worker_absence_observation_ref") is None
         ):
             findings.append(_finding("b1_cleanup_lineage_mismatch", "failed", [str(worker_cleanup["content_sha256"])]))
+        _validate_b1_launched_raw(
+            roles=roles,
+            digest_index=digest_index,
+            primary_owner=primary_owner,
+            cleanup=worker_cleanup,
+            assignment=assignment,
+        )
     else:
+        if assignment is not None or roles.get("b1_owner"):
+            raise _EvidenceError("b1_not_launched_branch_contradiction", "B1 not-launched branch contains launched owner evidence")
         assignment_identity = None
-        if assignment is not None or any(
-            owner.get(field) is not None
-            for _path, owner in roles["b1_owner"]
-            for field in ("process_identity", "scope_name", "assignment_observation_ref", "job_policy")
-        ) or any(
-            worker_cleanup.get(field) is not None
-            for field in (
-                "process_identity",
-                "assignment_proven_ref",
-                "finalization_intent_ref",
-                "job_absence_observation_ref",
-                "worker_absence_observation_ref",
-            )
-        ) or worker_cleanup.get("exact_handle_observation_refs") != [] or worker_cleanup.get("reservation_abort_ref") is None:
-            findings.append(_finding("b1_not_launched_branch_contradiction", "failed", [str(worker_cleanup["content_sha256"])]))
+        primary_owner = _validate_b1_not_launched_raw(
+            roles=roles,
+            digest_index=digest_index,
+            cleanup=worker_cleanup,
+        )
 
     normal = _one(roles, "task5_normal_clear")
     binding_status = "verified"
     if normal is None:
-        binding_status = "inapplicable_strong_kill"
+        binding_status = (
+            "not_applicable_not_launched"
+            if worker_cleanup.get("outcome") == "verified_not_launched"
+            else "inapplicable_strong_kill"
+        )
     else:
         if (
             assignment_identity is None
@@ -1292,7 +2667,12 @@ def _derive_parent_facts(
             findings.append(_finding(code, "failed", [str(document["content_sha256"]) for document in lineage_documents]))
     if authority.get("operation_id") != primary_owner.get("operation_id") or root.get("operation_id") != primary_owner.get("operation_id"):
         findings.append(_finding("cross_operation_parent", "failed", [str(root["content_sha256"]), str(authority["content_sha256"]), str(primary_owner["content_sha256"])]))
-    reservation_refs = [primary_owner.get("reservation_ref"), runtime_owner.get("reservation_ref"), provider_journal.get("reservation_ref")]
+    primary_reservation_ref = (
+        primary_owner.get("reservation_ref")
+        if worker_cleanup.get("outcome") == "verified_exact_worker_exited"
+        else worker_cleanup.get("reservation_ref")
+    )
+    reservation_refs = [primary_reservation_ref, runtime_owner.get("reservation_ref"), provider_journal.get("reservation_ref")]
     if len({_content_ref(item, "reservation ref")["content_sha256"] for item in reservation_refs}) != 1:
         findings.append(_finding("cross_reservation_parent", "failed", [str(document["content_sha256"]) for document in lineage_documents]))
     if (
@@ -1301,9 +2681,31 @@ def _derive_parent_facts(
         or provider_journal.get("acquisition_intent_ref") != ledger.get("acquisition_intent_ref")
     ):
         findings.append(_finding("b2_parent_lineage_mismatch", "failed", [str(runtime_owner["content_sha256"]), str(ledger["content_sha256"]), str(provider_journal["content_sha256"])]))
-    if provider_journal.get("contract_version") == "benchmark_provider_registry_journal_v1" and provider_journal.get(
-        "materialization_ledger_ref", {}
-    ).get("content_sha256") != ledger.get("content_sha256"):
+    intent = _one(roles, "b2_acquisition_intent")
+    acquisition_owner = _one(roles, "b2_acquisition_owner")
+    prepared_ledger = _one(roles, "b2_prepared_materialization_ledger")
+    observations = [value for _path, value in roles.get("b2_acquisition_observation", [])]
+    by_revision = {value.get("materialization_revision"): value for value in observations}
+    if intent is None or acquisition_owner is None or prepared_ledger is None or set(by_revision) != {0, 1}:
+        raise _EvidenceError("b2_acquisition_parent_missing", "B2 provider journal raw parents are incomplete")
+    if (
+        provider_journal.get("acquisition_owner_ref")
+        != {"content_sha256": acquisition_owner.get("content_sha256")}
+        or provider_journal.get("acquisition_intent_ref")
+        != {"content_sha256": intent.get("content_sha256")}
+        or provider_journal.get("authority_kind") != runtime_owner.get("authority_kind")
+    ):
+        findings.append(_finding("b2_parent_lineage_mismatch", "failed", [str(provider_journal["content_sha256"])]))
+    if provider_journal.get("contract_version") == "benchmark_provider_registry_journal_v1" and (
+        provider_journal.get("prepared_materialization_ledger_ref")
+        != {"content_sha256": prepared_ledger.get("content_sha256")}
+        or provider_journal.get("prepared_acquisition_observation_ref")
+        != {"content_sha256": by_revision[0].get("content_sha256")}
+        or provider_journal.get("acquisition_observation_ref")
+        != {"content_sha256": by_revision[1].get("content_sha256")}
+        or provider_journal.get("materialization_ledger_ref")
+        != {"content_sha256": ledger.get("content_sha256")}
+    ):
         findings.append(_finding("b2_parent_lineage_mismatch", "failed", [str(ledger["content_sha256"]), str(provider_journal["content_sha256"])]))
     if provider_journal.get("contract_version") == "benchmark_provider_cleanup_registry_journal_v1":
         if provider_cleanup is None or provider_journal.get("cleanup_receipt_ref", {}).get(
@@ -1342,6 +2744,13 @@ def _derive_parent_facts(
                 or provider_cleanup.get("no_owned_runtime_observation_ref") is not None
             ):
                 findings.append(_finding("b2_cleanup_lineage_mismatch", "failed", [str(provider_cleanup["content_sha256"])]))
+            _validate_b2_acquired_raw(
+                roles=roles,
+                digest_index=digest_index,
+                runtime_owner=runtime_owner,
+                ledger=ledger,
+                cleanup=provider_cleanup,
+            )
     elif ledger.get("state") == "aborted_never_materialized":
         if provider_cleanup is None or provider_cleanup.get("outcome") != "verified_not_acquired":
             provider_status = "contradictory"
@@ -1360,6 +2769,13 @@ def _derive_parent_facts(
             )
             if any(provider_cleanup.get(field) is not None for field in forbidden_owned):
                 findings.append(_finding("b2_not_acquired_contains_owner", "failed", [str(provider_cleanup["content_sha256"])]))
+            _validate_b2_not_acquired_raw(
+                roles=roles,
+                digest_index=digest_index,
+                runtime_owner=runtime_owner,
+                ledger=ledger,
+                cleanup=provider_cleanup,
+            )
     else:
         provider_status = "pending_materialization"
         findings.append(_finding("b2_materialization_state_pending", "indeterminate", [str(ledger["content_sha256"])]))
@@ -1386,7 +2802,7 @@ def _load_samples(paths: list[Path]) -> tuple[list[dict[str, Any]], list[dict[st
     refs: list[dict[str, str]] = []
     seen_paths: set[str] = set()
     seen_content: set[str] = set()
-    for index, input_path in enumerate(paths):
+    for index, input_path in enumerate(sorted(paths, key=lambda item: os.path.normcase(str(item)))):
         resolved, raw = _read_input(input_path, f"sampler_transcript_paths[{index}]")
         path_key = os.path.normcase(str(resolved))
         if path_key in seen_paths:
@@ -1446,6 +2862,7 @@ def _account_gpu(
         "external_fingerprint_baseline": [],
         "external_fingerprint_post": [],
         "external_fingerprint_status": "indeterminate",
+        "external_rows_by_sample": [],
         "device_used_baseline_mib": None,
         "device_used_post_mib": None,
         "device_residual_baseline_mib": None,
@@ -1471,10 +2888,10 @@ def _account_gpu(
         except _EvidenceError as error:
             findings.append(_finding(error.code, error.disposition, [str(sample["content_sha256"])]))
             observations.append({"sample": sample, "totals": {}, "rows": [], "unobserved": set()})
-    owner_keys: dict[tuple[int, int], list[dict[str, object]]] = {}
+    owner_keys: dict[tuple[int, int, str], list[dict[str, object]]] = {}
     for owner in owners:
         identity = owner["process_identity"]
-        key = (int(identity["pid"]), int(identity["create_time_ns"]))
+        key = (int(identity["pid"]), int(identity["create_time_ns"]), device_uuid)
         owner_keys.setdefault(key, []).append(owner)
     for key, claims in owner_keys.items():
         if len(claims) > 1:
@@ -1517,6 +2934,16 @@ def _account_gpu(
                 "process_identity": deepcopy(identity),
                 "acquire_sample_ref": acquire_ref,
                 "release_sample_ref": release_ref,
+                "acquire_time_ns": int(identity["create_time_ns"]),
+                "release_upper_at_utc": (
+                    observations[next(
+                        candidate
+                        for candidate in range(observed_indices[-1] + 1, len(observations))
+                        if str(observations[candidate]["sample"]["content_sha256"]) == release_ref
+                    )]["sample"]["process_snapshot"]["observed_at_utc"]
+                    if release_ref is not None
+                    else None
+                ),
                 "status": interval_status,
             }
         )
@@ -1535,7 +2962,29 @@ def _account_gpu(
             max_concurrent[kind] = max(max_concurrent[kind], count)
             if count > 1:
                 findings.append(_finding("same_kind_owner_overlap", "failed", [str(observation["sample"]["content_sha256"])]))
-    overlap_status = "failed" if any(value > 1 for value in max_concurrent.values()) else "indeterminate" if any(interval_item["status"] != "bounded" for interval_item in intervals) else "verified"
+    interval_overlap = False
+    for index, left in enumerate(intervals):
+        if left["status"] != "bounded":
+            continue
+        left_release = _timestamp(left["release_upper_at_utc"], "owner release upper")
+        left_release_ns = int(round(left_release.timestamp() * 1_000_000_000))
+        for right in intervals[index + 1 :]:
+            if right["kind"] != left["kind"] or right["status"] != "bounded":
+                continue
+            right_release = _timestamp(right["release_upper_at_utc"], "owner release upper")
+            right_release_ns = int(round(right_release.timestamp() * 1_000_000_000))
+            if max(int(left["acquire_time_ns"]), int(right["acquire_time_ns"])) <= min(
+                left_release_ns, right_release_ns
+            ):
+                interval_overlap = True
+                findings.append(
+                    _finding(
+                        "same_kind_owner_interval_overlap",
+                        "failed",
+                        [str(left["subject_id"]), str(right["subject_id"])],
+                    )
+                )
+    overlap_status = "failed" if any(value > 1 for value in max_concurrent.values()) or interval_overlap else "indeterminate" if any(interval_item["status"] != "bounded" for interval_item in intervals) else "verified"
     owner_summary = {"intervals": intervals, "max_concurrent_by_kind": max_concurrent, "overlap_status": overlap_status}
 
     per_owner: dict[tuple[int, int, str], list[int]] = {}
@@ -1556,9 +3005,11 @@ def _account_gpu(
         external: list[list[object]] = []
         owned_total = 0
         for pid, created, gpu_uuid, memory in rows:
-            exact_claims = owner_keys.get((pid, created), [])
-            numeric_claims = [key for key in owner_keys if key[0] == pid]
-            if numeric_claims and not exact_claims:
+            exact_claims = owner_keys.get((pid, created, gpu_uuid), [])
+            target_device_pid_claimed = any(
+                key[0] == pid and key[2] == device_uuid for key in owner_keys
+            )
+            if gpu_uuid == device_uuid and target_device_pid_claimed and not exact_claims:
                 findings.append(_finding("owned_pid_reuse", "failed", [str(sample["content_sha256"])]))
                 external.append([pid, created, gpu_uuid, memory])
                 continue
@@ -1592,8 +3043,26 @@ def _account_gpu(
     ):
         owned_by_sample[-1] = None
         findings.append(_finding("owned_post_identity_unobservable", "indeterminate", [str(samples[-1]["content_sha256"])]))
+    elif any(
+        (int(owner["process_identity"]["pid"]), int(owner["process_identity"]["create_time_ns"]))
+        in {
+            (int(identity["pid"]), int(identity["create_time_ns"]))
+            for identity in samples[-1]["process_snapshot"]["identities"]
+        }
+        for owner in owners
+    ):
+        owned_by_sample[-1] = None
+        findings.append(_finding("owned_process_still_live", "failed", [str(samples[-1]["content_sha256"])]))
     elif owned_by_sample[-1] != 0:
         findings.append(_finding("owned_vram_residue", "failed", [str(samples[-1]["content_sha256"])]))
+    for owner in owners:
+        identity = owner["process_identity"]
+        exact_key = (int(identity["pid"]), int(identity["create_time_ns"]), device_uuid)
+        if not any(
+            exact_key in {(pid, created, gpu_uuid) for pid, created, gpu_uuid, _memory in observation["rows"]}
+            for observation in observations[1:-1]
+        ):
+            findings.append(_finding("launched_owner_gpu_row_missing", "indeterminate", [str(owner["evidence_ref"])]))
     owned_process_vram = [
         {
             "pid": pid,
@@ -1614,6 +3083,13 @@ def _account_gpu(
         "external_fingerprint_baseline": baseline_external,
         "external_fingerprint_post": post_external,
         "external_fingerprint_status": external_status,
+        "external_rows_by_sample": [
+            {
+                "sample_ref": observations[index]["sample"]["content_sha256"],
+                "rows": rows,
+            }
+            for index, rows in enumerate(external_by_sample)
+        ],
         "device_used_baseline_mib": used_by_sample[0],
         "device_used_post_mib": used_by_sample[-1],
         "device_residual_baseline_mib": residual_by_sample[0],
@@ -1621,6 +3097,187 @@ def _account_gpu(
         "device_residual_status": residual_status,
     }
     return gpu_summary, owner_summary, findings
+
+
+def _validate_probe_parent(value: dict[str, Any]) -> str:
+    contracts: dict[str, tuple[str, set[str]]] = {
+        "benchmark_v2_probe_provider_profile_v1": ("probe_profile", _PROBE_PROFILE_FIELDS),
+        "benchmark_v2_probe_request_in_flight_v1": ("probe_request", _PROBE_REQUEST_FIELDS),
+        "benchmark_v2_probe_body_observation_v1": ("probe_body", _PROBE_BODY_PARENT_FIELDS),
+        "benchmark_v2_probe_socket_owner_v1": ("probe_socket", _PROBE_SOCKET_PARENT_FIELDS),
+        "benchmark_v2_probe_job_membership_v1": ("probe_job", _PROBE_JOB_PARENT_FIELDS),
+        "benchmark_v2_probe_lease_owner_v1": ("probe_lease", _PROBE_LEASE_PARENT_FIELDS),
+        "benchmark_v2_probe_termination_v1": ("probe_termination", _PROBE_TERMINATION_PARENT_FIELDS),
+        "benchmark_v2_probe_zero_sample_v1": ("probe_zero_sample", _PROBE_ZERO_SAMPLE_FIELDS),
+        "benchmark_v2_probe_stable_zero_bundle_v1": ("probe_zero_bundle", _PROBE_ZERO_BUNDLE_FIELDS),
+    }
+    contract = value.get("contract_version")
+    if contract not in contracts:
+        raise _EvidenceError("unknown_probe_parent_contract", "probe raw parent contract differs")
+    role, fields = contracts[str(contract)]
+    parent = _sealed(value, fields, role)
+    if role.startswith("probe_") and role not in {"probe_request", "probe_body"}:
+        provider = parent.get("provider_id")
+        if provider not in _PROVIDERS:
+            raise _EvidenceError("extra_probe_cell", "probe parent provider differs")
+    return role
+
+
+def _probe_resolved(
+    index: Mapping[str, tuple[str, dict[str, Any]]], value: object, name: str
+) -> tuple[str, dict[str, Any]]:
+    ref = _content_ref(value, name)
+    assert ref is not None
+    result = index.get(str(ref["content_sha256"]))
+    if result is None:
+        raise _EvidenceError("dangling_probe_ref", f"{name} does not resolve")
+    return result
+
+
+def _validate_probe_raw_parents(
+    probe: Mapping[str, object],
+    index: Mapping[str, tuple[str, dict[str, Any]]],
+) -> None:
+    provider_id = str(probe["provider"]["provider_id"])
+    profile_role, profile = _probe_resolved(
+        index,
+        {"content_sha256": probe["provider"]["profile_sha256"]},
+        "probe profile",
+    )
+    request_role, request = _probe_resolved(
+        index, probe["request_in_flight_observation"]["evidence_ref"], "probe request"
+    )
+    body_role, body = _probe_resolved(
+        index, probe["body_completion_observation"]["evidence_ref"], "probe body"
+    )
+    lease_role, lease = _probe_resolved(index, probe["lease_or_owner"]["lease_ref"], "probe lease")
+    socket_role, socket = _probe_resolved(index, probe["lease_or_owner"]["socket_ref"], "probe socket")
+    job_role, job = _probe_resolved(index, probe["lease_or_owner"]["job_scope_ref"], "probe Job")
+    termination_role, termination = _probe_resolved(
+        index, probe["termination_observation"]["evidence_ref"], "probe termination"
+    )
+    bundle_refs = {
+        str(probe["stable_zero_observation"][field]["content_sha256"])
+        for field in ("process_absence_ref", "listener_absence_ref", "lease_absence_ref")
+    }
+    if len(bundle_refs) != 1:
+        raise _EvidenceError("probe_stable_zero_invalid", "probe stable-zero bundle refs differ")
+    bundle_role, bundle = _probe_resolved(
+        index, {"content_sha256": next(iter(bundle_refs))}, "probe stable-zero bundle"
+    )
+    expected_roles = (
+        profile_role,
+        request_role,
+        body_role,
+        lease_role,
+        socket_role,
+        job_role,
+        termination_role,
+        bundle_role,
+    )
+    if expected_roles != (
+        "probe_profile", "probe_request", "probe_body", "probe_lease", "probe_socket",
+        "probe_job", "probe_termination", "probe_zero_bundle",
+    ):
+        raise _EvidenceError("probe_parent_role_mismatch", "probe raw parent roles differ")
+    attempt_id = profile.get("attempt_id")
+    incarnation_id = lease.get("incarnation_id")
+    identity = probe["lease_or_owner"]["process_identity"]
+    lineage_fields = ("run_id", "stage", "operation_id", "model_request_id")
+    if (
+        profile.get("provider_id") != provider_id
+        or profile.get("profile_id") != probe["provider"]["profile_id"]
+        or request.get("provider_id") != provider_id
+        or request.get("attempt_id") != attempt_id
+        or any(request.get(field) != probe.get(field) for field in lineage_fields)
+        or request.get("state") != "request_in_flight"
+        or body.get("provider_id") != provider_id
+        or body.get("attempt_id") != attempt_id
+        or any(body.get(field) != probe.get(field) for field in lineage_fields)
+        or body.get("state") != probe["body_completion_observation"]["state"]
+        or lease.get("provider_id") != provider_id
+        or lease.get("attempt_id") != attempt_id
+        or lease.get("profile_ref") != {"content_sha256": profile.get("content_sha256")}
+        or lease.get("process_identity") != identity
+        or socket.get("provider_id") != provider_id
+        or socket.get("attempt_id") != attempt_id
+        or socket.get("incarnation_id") != incarnation_id
+        or socket.get("process_identity") != identity
+        or lease.get("socket_ref") != {"content_sha256": socket.get("content_sha256")}
+        or job.get("provider_id") != provider_id
+        or job.get("attempt_id") != attempt_id
+        or job.get("incarnation_id") != incarnation_id
+        or job.get("member_identities") != [identity]
+        or lease.get("job_scope_ref") != {"content_sha256": job.get("content_sha256")}
+        or termination.get("provider_id") != provider_id
+        or termination.get("attempt_id") != attempt_id
+        or termination.get("incarnation_id") != incarnation_id
+        or termination.get("process_identity") != identity
+        or termination.get("outcome") != "same_incarnation_exited"
+        or termination.get("predecessor_content_sha256") != lease.get("content_sha256")
+        or bundle.get("provider_id") != provider_id
+        or bundle.get("attempt_id") != attempt_id
+        or bundle.get("incarnation_id") != incarnation_id
+        or bundle.get("predecessor_content_sha256") != termination.get("content_sha256")
+        or probe.get("predecessor_content_sha256") != bundle.get("content_sha256")
+    ):
+        raise _EvidenceError("probe_parent_lineage_mismatch", "probe raw parent identity joins differ")
+    if (
+        bundle.get("process_absent") is not True
+        or bundle.get("listener_absent") is not True
+        or bundle.get("lease_absent") is not True
+    ):
+        raise _EvidenceError("probe_residue", "probe stable-zero bundle reports residue")
+    request_at = _timestamp(request.get("observed_at_utc"), "probe request parent time")
+    trigger_at = _timestamp(probe["trigger"]["triggered_at_utc"], "probe trigger time")
+    termination_at = _timestamp(termination.get("terminated_at_utc"), "probe termination time")
+    body_at = _timestamp(body.get("observed_at_utc"), "probe body parent time")
+    lease_at = _timestamp(lease.get("acquired_at_utc"), "probe lease acquisition time")
+    if (
+        probe["request_in_flight_observation"].get("observed_at_utc")
+        != request.get("observed_at_utc")
+        or probe["body_completion_observation"].get("observed_at_utc")
+        != body.get("observed_at_utc")
+        or not lease_at <= request_at <= trigger_at < termination_at <= body_at
+    ):
+        raise _EvidenceError("probe_trigger_order_invalid", "probe trigger/termination ordering differs")
+    raw_sample_refs = bundle.get("sample_refs")
+    if not isinstance(raw_sample_refs, list) or len(raw_sample_refs) < 3:
+        raise _EvidenceError("probe_stable_zero_invalid", "probe has fewer than three zero parents")
+    samples: list[dict[str, Any]] = []
+    for raw_ref in raw_sample_refs:
+        role, sample = _probe_resolved(index, raw_ref, "probe zero sample")
+        if role != "probe_zero_sample":
+            raise _EvidenceError("probe_stable_zero_invalid", "probe zero sample role differs")
+        samples.append(sample)
+    previous = str(termination["content_sha256"])
+    previous_at = termination_at
+    for sequence, sample in enumerate(samples):
+        observed_at = _timestamp(sample.get("observed_at_utc"), "probe zero sample time")
+        if (
+            sample.get("provider_id") != provider_id
+            or sample.get("attempt_id") != attempt_id
+            or sample.get("incarnation_id") != incarnation_id
+            or sample.get("sequence") != sequence
+            or sample.get("predecessor_content_sha256") != previous
+            or observed_at <= previous_at
+            or sample.get("job_members") != []
+            or sample.get("active_listeners") != []
+            or sample.get("active_leases") != []
+        ):
+            raise _EvidenceError("probe_residue", "probe ordered zero parent differs")
+        previous = str(sample["content_sha256"])
+        previous_at = observed_at
+    if bundle.get("sample_refs")[-1] != {"content_sha256": previous}:
+        raise _EvidenceError("probe_stable_zero_invalid", "probe zero bundle head differs")
+    receipt_zero = probe["stable_zero_observation"]
+    if (
+        receipt_zero.get("stable_zero_observations") != len(samples)
+        or receipt_zero.get("job_members") != samples[-1].get("job_members")
+        or receipt_zero.get("active_listeners") != samples[-1].get("active_listeners")
+        or receipt_zero.get("active_leases") != samples[-1].get("active_leases")
+    ):
+        raise _EvidenceError("probe_stable_zero_invalid", "probe receipt does not match raw zero parents")
 
 
 def _validate_probe(value: object) -> dict[str, Any]:
@@ -1635,9 +3292,7 @@ def _validate_probe(value: object) -> dict[str, Any]:
     if provider_id not in _PROVIDERS:
         raise _EvidenceError("extra_probe_cell", "probe provider differs")
     profile_id = _text(provider.get("profile_id"), "profile_id")
-    expected_profile_sha = _sha_bytes(canonical_json_bytes({"provider_id": provider_id, "profile_id": profile_id}))
-    if provider.get("profile_sha256") != expected_profile_sha:
-        raise _EvidenceError("probe_profile_unsealed", "probe profile SHA differs")
+    _sha(provider.get("profile_sha256"), "probe profile SHA")
     for field in ("run_id", "stage", "operation_id", "model_request_id"):
         _text(probe.get(field), f"probe {field}")
     inflight = _closed(probe.get("request_in_flight_observation"), _IN_FLIGHT_FIELDS, "request-in-flight observation")
@@ -1685,10 +3340,11 @@ def _verify_probes(
     findings: list[dict[str, object]] = []
     refs: list[dict[str, str]] = []
     probes: list[dict[str, Any]] = []
+    raw_receipts: list[tuple[Path, dict[str, Any]]] = []
+    parent_index: dict[str, tuple[str, dict[str, Any]]] = {}
     seen_paths: set[str] = set()
     seen_content: set[str] = set()
-    cells: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for index, input_path in enumerate(paths):
+    for index, input_path in enumerate(sorted(paths, key=lambda item: os.path.normcase(str(item)))):
         resolved, raw = _read_input(input_path, f"probe_receipt_paths[{index}]")
         path_key = os.path.normcase(str(resolved))
         if path_key in seen_paths:
@@ -1696,20 +3352,40 @@ def _verify_probes(
             continue
         seen_paths.add(path_key)
         try:
-            probe = _validate_probe(_decode_canonical_json(raw, f"probe receipt {resolved}"))
+            value = _decode_canonical_json(raw, f"probe evidence {resolved}")
+            digest = str(value.get("content_sha256") or "")
+            if digest in seen_content:
+                findings.append(_finding("duplicate_input_content", "failed", [digest]))
+                continue
+            seen_content.add(digest)
+            if value.get("contract_version") == _PROBE_CONTRACT:
+                probe = _validate_probe(value)
+                raw_receipts.append((resolved, probe))
+                refs.append(_source_ref(resolved, probe, "probe_receipt"))
+            else:
+                role = _validate_probe_parent(value)
+                parent_index[str(value["content_sha256"])] = (role, value)
+                refs.append(_source_ref(resolved, value, role))
         except _EvidenceError as error:
-            findings.append(_finding(error.code, error.disposition))
-            continue
+            findings.append(_finding(error.code, error.disposition, list(error.refs)))
+    cells: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for resolved, probe in sorted(
+        raw_receipts,
+        key=lambda item: (
+            str(item[1]["provider"]["provider_id"]), str(item[1]["probe_kind"]),
+            str(item[1]["content_sha256"]), str(item[0]),
+        ),
+    ):
         digest = str(probe["content_sha256"])
-        if digest in seen_content:
-            findings.append(_finding("duplicate_input_content", "failed", [digest]))
-            continue
-        seen_content.add(digest)
         provider_id = str(probe["provider"]["provider_id"])
         kind = str(probe["probe_kind"])
+        try:
+            _validate_probe_raw_parents(probe, parent_index)
+        except _EvidenceError as error:
+            findings.append(_finding(error.code, error.disposition, [digest, *error.refs]))
+            continue
         cells.setdefault((provider_id, kind), []).append(probe)
         probes.append(probe)
-        refs.append(_source_ref(resolved, probe, "probe_receipt"))
         for field in ("run_id", "stage", "operation_id", "model_request_id"):
             if probe.get(field) != lineage.get(field):
                 findings.append(_finding("cross_attempt_probe", "failed", [digest]))
@@ -1735,13 +3411,18 @@ def _verify_probes(
         findings.append(_finding("duplicate_probe_cells", "failed"))
     if extra:
         findings.append(_finding("extra_probe_cells", "failed"))
-    verified = [list(cell) for cell in _REQUIRED_MATRIX if len(cells.get(cell, [])) == 1 and cells[cell][0]["body_completion_observation"]["state"] == "not_complete"]
+    verified = [
+        list(cell)
+        for cell in _REQUIRED_MATRIX
+        if len(cells.get(cell, [])) == 1
+        and cells[cell][0]["body_completion_observation"]["state"] == "not_complete"
+    ]
     summary = {
         "required_matrix": [list(cell) for cell in _REQUIRED_MATRIX],
         "verified_matrix": verified,
         "missing_matrix": missing,
     }
-    refs.sort(key=lambda item: (item["content_sha256"], item["canonical_path"]))
+    refs.sort(key=lambda item: (item["semantic_role"], item["content_sha256"], item["canonical_path"]))
     probes.sort(key=lambda item: (str(item["provider"]["provider_id"]), str(item["probe_kind"]), str(item["content_sha256"])))
     return summary, findings, refs, probes
 
@@ -1783,10 +3464,65 @@ def _actual_mode_findings(
         findings.append(_finding("actual_gpu_observer_missing", "failed"))
     if any(value != "production_workflow_service" for value in authorities.values()):
         findings.append(_finding("actual_parent_authority_not_production", "failed"))
+    from app.learn.hybrid import benchmark_v2_worker_binding as worker_binding
+
+    binding_parent = roles.get("task5_binding_authority", [])
+    if len(binding_parent) != 1:
+        findings.append(_finding("actual_task5_parent_path_not_canonical", "failed"))
+    else:
+        binding_path, binding = binding_parent[0]
+        expected_binding_path = worker_binding._authority_file(
+            worker_binding._PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT,
+            str(binding.get("window_binding_ref", {}).get("content_sha256") or ""),
+        )
+        if binding_path != expected_binding_path:
+            findings.append(
+                _finding(
+                    "actual_task5_parent_path_not_canonical",
+                    "failed",
+                    [str(binding.get("content_sha256"))],
+                )
+            )
+    worker_root = (Path(__file__).resolve().parents[3] / "logs" / "workflow-workers").resolve()
+    b1_expected_names = {
+        "b1_cleanup": lambda value: f"{value['worker_id']}.benchmark-cleanup.json",
+        "b1_owner": lambda value: f"{value['worker_id']}.benchmark-owner.json",
+        "b1_finalization_intent": lambda value: f"{value['worker_id']}.benchmark-cleanup-intent.json",
+    }
+    for role, name_builder in b1_expected_names.items():
+        for path, value in roles.get(role, []):
+            if path.parent != worker_root or path.name != name_builder(value):
+                findings.append(
+                    _finding("actual_b1_parent_path_not_canonical", "failed", [str(value["content_sha256"])])
+                )
+    from app.core import model_server
+
+    request_id = str(_one(roles, "b2_runtime_owner").get("model_request_id") if _one(roles, "b2_runtime_owner") else "")
+    expected_b2 = model_server._qwen_acquisition_artifact_paths(request_id) if request_id else {}
+    b2_path_keys = {
+        "b2_acquisition_intent": "intent",
+        "b2_acquisition_owner": "owner",
+        "b2_prepared_materialization_ledger": "ledger_revision_zero",
+        "b2_materialization_ledger": "ledger",
+        "b2_lease_binding": "lease_binding",
+        "b2_lease_state": "lease_state_snapshot",
+        "b2_release_observation": "release_observation",
+        "b2_termination": "termination_observation",
+        "b2_cleanup": "cleanup_receipt",
+    }
+    for role, key in b2_path_keys.items():
+        for path, value in roles.get(role, []):
+            if path != expected_b2.get(key):
+                findings.append(
+                    _finding("actual_b2_parent_path_not_canonical", "failed", [str(value["content_sha256"])])
+                )
     root = _one(roles, "task4_window_root")
     expected_helper = Path(__file__).resolve().parents[3] / "scripts" / "portfolio_hybrid_v1_1_test_window_v2.py"
+    root_path_value = roles.get("task4_window_root", [])[0][0] if roles.get("task4_window_root") else None
     if root is None or root.get("helper_path") != str(expected_helper.resolve()):
         findings.append(_finding("actual_task4_helper_not_canonical", "failed"))
+    if root_path_value is None or root_path_value.parent != worker_binding._PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT:
+        findings.append(_finding("actual_task4_parent_path_not_canonical", "failed"))
     elif roles.get("task4_window_root"):
         root_path = roles["task4_window_root"][0][0]
         identity_digest = _sha_bytes(
@@ -1855,6 +3591,7 @@ def _empty_result(*, actual_mode: bool, findings: list[dict[str, object]]) -> di
                 "external_fingerprint_baseline": [],
                 "external_fingerprint_post": [],
                 "external_fingerprint_status": "indeterminate",
+                "external_rows_by_sample": [],
                 "device_used_baseline_mib": None,
                 "device_used_post_mib": None,
                 "device_residual_baseline_mib": None,
@@ -1883,8 +3620,10 @@ def verify_lifecycle_from_raw(
     if not all(isinstance(paths, list) for paths in (owner_journal_paths, sampler_transcript_paths, probe_receipt_paths)):
         raise TypeError("lifecycle inputs must be lists of explicit Path values")
     try:
-        roles, owner_refs, parent_findings = _load_parent_graph(owner_journal_paths)
-        owners, cleanup_summary, lineage_findings, lineage, authorities = _derive_parent_facts(roles)
+        roles, owner_refs, parent_findings, digest_index = _load_parent_graph(owner_journal_paths)
+        owners, cleanup_summary, lineage_findings, lineage, authorities = _derive_parent_facts(
+            roles, digest_index
+        )
         samples, sample_refs = _load_samples(sampler_transcript_paths)
         gpu_summary, owner_summary, gpu_findings = _account_gpu(samples, owners)
         probe_summary, probe_findings, probe_refs, probes = _verify_probes(probe_receipt_paths, lineage)
