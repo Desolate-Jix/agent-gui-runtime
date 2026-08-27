@@ -1953,10 +1953,16 @@ class BenchmarkV2IncumbentWorkflowService:
         screen_group: Mapping[str, object],
         window_binding: Mapping[str, object],
     ) -> dict[str, Any]:
-        validate_benchmark_v2_hybrid_screen_group_start(screen_group)
-        validate_benchmark_v2_workflow_window_binding(window_binding)
-        raise BenchmarkV2WorkflowServicePortUnavailableError(
-            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        group = validate_benchmark_v2_hybrid_screen_group_start(screen_group)
+        binding = validate_benchmark_v2_workflow_window_binding(window_binding)
+        from app.learn.workflow_service import (
+            _start_benchmark_v2_hybrid_workflow_service,
+        )
+
+        return _start_benchmark_v2_hybrid_workflow_service(
+            composition=self._composition,
+            screen_group=group,
+            window_binding=binding,
         )
 
     def continue_hybrid_operation(
@@ -1964,9 +1970,14 @@ class BenchmarkV2IncumbentWorkflowService:
         *,
         operation_ref: Mapping[str, object],
     ) -> dict[str, Any]:
-        validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
-        raise BenchmarkV2WorkflowServicePortUnavailableError(
-            _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+        current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        from app.learn.workflow_service import (
+            _continue_benchmark_v2_hybrid_workflow_service,
+        )
+
+        return _continue_benchmark_v2_hybrid_workflow_service(
+            composition=self._composition,
+            operation_ref=current,
         )
 
     def start_incumbent_observe(
@@ -2031,8 +2042,13 @@ class BenchmarkV2IncumbentWorkflowService:
     ) -> dict[str, Any]:
         current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
         if current["mode"] == "hybrid_v1_1":
-            raise BenchmarkV2WorkflowServicePortUnavailableError(
-                _WORKFLOW_SERVICE_PORT_UNAVAILABLE
+            from app.learn.workflow_service import (
+                _cancel_benchmark_v2_hybrid_workflow_service,
+            )
+
+            return _cancel_benchmark_v2_hybrid_workflow_service(
+                composition=self._composition,
+                operation_ref=current,
             )
         from app.learn.workflow_service import (
             _cancel_benchmark_v2_incumbent_workflow_service,

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import ast
+import hashlib
 import inspect
+import json
 from pathlib import Path
 from threading import Barrier, Thread
 
@@ -263,6 +266,8 @@ def test_step_rejects_resealed_operation_status_substitution() -> None:
 
 
 def test_contract_skeletons_fail_closed_without_worker_or_provider_dispatch() -> None:
+    from app.learn.workflow_service import LearningWorkflowStageOperationError
+
     service = incumbent.BenchmarkV2IncumbentWorkflowService(object())
     operation_ref = _operation_ref(worker_ref=_sealed_parent("worker"))
     calls = (
@@ -273,8 +278,8 @@ def test_contract_skeletons_fail_closed_without_worker_or_provider_dispatch() ->
     )
     for call in calls:
         with pytest.raises(
-            incumbent.BenchmarkV2WorkflowServicePortUnavailableError,
-            match="orchestration is unavailable before Amendment S2/S3",
+            LearningWorkflowStageOperationError,
+            match="composition must be factory-minted",
         ):
             call()
 
@@ -1091,3 +1096,689 @@ def test_s2_cancel_routes_existing_task6_path_and_projects_cleanup(
         assert cancel_calls == 1
     finally:
         store.close()
+
+
+class _S3Registry:
+    def __init__(self) -> None:
+        self.records: list[dict[str, object]] = []
+        self.start_calls = 0
+        self.status_calls = 0
+        self.adopt_calls = 0
+        self.read_calls = 0
+        self.cancel_calls = 0
+        self.active_resources = 0
+
+    @property
+    def current(self) -> dict[str, object] | None:
+        return self.records[-1] if self.records else None
+
+    def start(self, **kwargs) -> dict[str, object]:
+        current = self.current
+        if (
+            kwargs.get("reuse_active_identical") is True
+            and isinstance(current, dict)
+            and current["status"] == "running"
+            and current["task_kind"] == kwargs["task_kind"]
+            and current["payload"] == kwargs["payload"]
+        ):
+            return deepcopy(current)
+        self.start_calls += 1
+        payload_bytes = json.dumps(
+            kwargs["payload"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        record: dict[str, object] = {
+            "worker_id": f"worker-hybrid-{self.start_calls}",
+            "run_id": kwargs["run_id"],
+            "stage": kwargs["stage"],
+            "operation_id": kwargs["operation_id"],
+            "task_kind": kwargs["task_kind"],
+            "model_request_id": f"request-hybrid-{self.start_calls}",
+            "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+            "authoritative_workflow_revision": kwargs.get(
+                "authoritative_workflow_revision"
+            ),
+            "payload": deepcopy(kwargs["payload"]),
+            "status": "running",
+            "runtime_attached": True,
+            "result_available": False,
+            "result_adopted": False,
+            "adoption_receipt": None,
+        }
+        self.records.append(record)
+        self.active_resources = 1
+        return deepcopy(record)
+
+    def status(self, **kwargs) -> dict[str, object]:
+        self.status_calls += 1
+        current = self._owned(kwargs)
+        return deepcopy(current)
+
+    def attachment_by_operation(self, **kwargs) -> dict[str, object] | None:
+        current = self.current
+        if current is None:
+            return None
+        if any(current[name] != kwargs[name] for name in kwargs):
+            return None
+        return deepcopy(current)
+
+    def adopt_result(self, **kwargs) -> dict[str, object]:
+        self.adopt_calls += 1
+        current = self._owned(kwargs)
+        if current["status"] != "completed":
+            raise AssertionError("hybrid worker was adopted before completion")
+        receipt = current.get("adoption_receipt")
+        if not isinstance(receipt, dict):
+            response = current["response"]
+            result_sha256 = hashlib.sha256(
+                json.dumps(
+                    {"status": "completed", "response": response},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            receipt = {
+                "contract_version": "learning_stage_worker_result_adoption_v1",
+                "worker_id": current["worker_id"],
+                "run_id": current["run_id"],
+                "stage": current["stage"],
+                "operation_id": current["operation_id"],
+                "task_kind": current["task_kind"],
+                "model_request_id": current["model_request_id"],
+                "payload_sha256": current["payload_sha256"],
+                "result_sha256": result_sha256,
+                "adopted_at": "2026-08-27T00:00:00+00:00",
+            }
+            current["adoption_receipt"] = receipt
+            current["result_adopted"] = True
+        return {
+            "contract_version": "learning_stage_worker_result_adoption_v1",
+            "status": "adopted",
+            "receipt": deepcopy(receipt),
+            "response": deepcopy(current["response"]),
+        }
+
+    def read_adopted_result(self, **kwargs) -> dict[str, object]:
+        self.read_calls += 1
+        current = self._owned(kwargs)
+        receipt = current.get("adoption_receipt")
+        if not isinstance(receipt, dict):
+            raise AssertionError("hybrid terminal replay preceded adoption")
+        return {
+            "contract_version": "learning_stage_worker_result_adoption_v1",
+            "status": "adopted",
+            "receipt": deepcopy(receipt),
+            "response": deepcopy(current["response"]),
+        }
+
+    def cancel_by_operation(self, **kwargs) -> dict[str, object]:
+        self.cancel_calls += 1
+        current = self._owned(kwargs)
+        current["status"] = "cancelled"
+        current["runtime_attached"] = False
+        self.active_resources = 0
+        return {
+            "worker_id": current["worker_id"],
+            "model_request_id": current["model_request_id"],
+            "backend_compute_termination": "terminated",
+            "model_service_compute_termination": "request_not_active",
+            "model_request_cancellation": {"status": "not_active"},
+        }
+
+    def complete_current(self, response: dict[str, object]) -> None:
+        current = self.current
+        if current is None:
+            raise AssertionError("no hybrid worker exists")
+        current["status"] = "completed"
+        current["runtime_attached"] = False
+        current["result_available"] = True
+        current["response"] = deepcopy(response)
+        self.active_resources = 0
+
+    def _owned(self, kwargs: dict[str, object]) -> dict[str, object]:
+        current = self.current
+        if current is None:
+            raise AssertionError("hybrid worker is missing")
+        for name in ("worker_id", "run_id", "stage", "operation_id"):
+            if name in kwargs and current[name] != kwargs[name]:
+                raise AssertionError(f"hybrid worker ownership differs: {name}")
+        return current
+
+
+def _s3_service(tmp_path: Path, registry: _S3Registry):
+    from app.learn.workflow_service import (
+        compose_test_learning_workflow_service_unit,
+        start_learning_workflow_stage_operation,
+    )
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    store = LearningWorkflowRunStore(state_path=tmp_path / "workflow-state.json")
+    binding = store.transition(
+        run_id="run-h1",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+        evidence_refs={},
+    )
+    bound = store.transition(
+        run_id="run-h1",
+        expected_revision=binding["revision"],
+        stage="bind_capture",
+        outcome="completed",
+        evidence_refs={"image_path": "artifacts/hybrid-capture.png"},
+    )
+    started = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id="run-h1",
+        expected_revision=bound["revision"],
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        learning_pipeline_mode="hybrid_v1_1",
+    )
+    composition = compose_test_learning_workflow_service_unit(
+        store=store,
+        worker_registry=registry,
+        project_root=tmp_path,
+    )
+    return (
+        store,
+        composition,
+        incumbent.BenchmarkV2IncumbentWorkflowService(composition),
+        started,
+    )
+
+
+def _s3_window_binding() -> dict[str, object]:
+    return _window_binding(run_id="run-h1", operation_id="operation-h1")
+
+
+def test_s3_start_uses_authoritative_initial_builder_once_and_replays(
+    tmp_path: Path,
+) -> None:
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        first = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        replay = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert first == replay
+        assert first["mode"] == "hybrid_v1_1"
+        assert first["observed_task_kind"] == (
+            "panel_learning_hybrid_omni_discovery"
+        )
+        assert registry.start_calls == 1
+        assert first["artifact_is_authorization"] is False
+        assert first["execute_binding_enabled"] is False
+    finally:
+        store.close()
+
+
+def test_s3_continue_advances_exact_existing_order_one_producer_per_call(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, composition, service, _started = _s3_service(tmp_path, registry)
+    task_order = [
+        "panel_learning_hybrid_omni_discovery",
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+        "panel_learning_calibration_sequence",
+        "panel_learning_hybrid_review_projection",
+    ]
+    continuation_calls = 0
+
+    def _continue(**kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        current = registry.current
+        assert current is not None
+        index = task_order.index(str(current["task_kind"]))
+        state = store.get("run-h1")
+        if index + 1 < len(task_order):
+            worker = workflow_service.start_guarded_learning_stage_worker(
+                composition=composition,
+                run_id="run-h1",
+                expected_revision=state["revision"],
+                stage="screen_understanding",
+                operation_id="operation-h1",
+                task_kind=task_order[index + 1],
+                payload={
+                    "learning_pipeline_mode": "hybrid_v1_1",
+                    "sequence_index": index + 1,
+                },
+                reuse_active_identical=True,
+            )
+            return {
+                "stage_finished": False,
+                "next_worker": worker,
+                "workflow_state": state,
+            }
+        evidence_path = tmp_path / "artifacts" / "hybrid-review.json"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_text("{}", encoding="utf-8")
+        finished = workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="completed",
+            reason="hybrid review completed",
+            evidence_refs={"trial_path": "artifacts/hybrid-review.json"},
+        )
+        return {
+            "stage_finished": True,
+            "outcome": "completed",
+            "next_stage_operation": None,
+            "next_stage_worker": None,
+            "workflow_state": finished["workflow_state"],
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        step = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        observed = [step["observed_task_kind"]]
+        terminal_consumed_ref = None
+        for task_kind in task_order:
+            assert step["observed_task_kind"] == task_kind
+            registry.complete_current(
+                {"success": True, "completed_task_kind": task_kind}
+            )
+            terminal_consumed_ref = deepcopy(step["operation_ref"])
+            step = service.continue_hybrid_operation(
+                operation_ref=terminal_consumed_ref
+            )
+            if step["status"] != "complete":
+                observed.append(step["observed_task_kind"])
+                replay = service.continue_hybrid_operation(
+                    operation_ref=step["operation_ref"]
+                )
+                assert replay == step
+
+        terminal_replay = service.continue_hybrid_operation(
+            operation_ref=step["operation_ref"]
+        )
+        assert terminal_replay == step
+        assert terminal_consumed_ref is not None
+        lost_terminal_response_replay = service.continue_hybrid_operation(
+            operation_ref=terminal_consumed_ref
+        )
+        assert canonical_json_bytes(lost_terminal_response_replay) == (
+            canonical_json_bytes(step)
+        )
+        assert step["operation_ref"]["predecessor_content_sha256"] == (
+            terminal_consumed_ref["content_sha256"]
+        )
+        assert observed == task_order
+        assert continuation_calls == len(task_order)
+        assert registry.start_calls == len(task_order)
+        assert registry.adopt_calls == len(task_order)
+        assert step["status"] == "complete"
+        assert step["adopted_result_projection"]["response"] == {
+            "success": True,
+            "completed_task_kind": task_order[-1],
+        }
+    finally:
+        store.close()
+
+
+def test_s3_lost_response_retry_replays_consumed_ref_without_second_producer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, composition, service, _started = _s3_service(tmp_path, registry)
+    continuation_calls = 0
+
+    def _continue(**_kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        state = store.get("run-h1")
+        worker = workflow_service.start_guarded_learning_stage_worker(
+            composition=composition,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            task_kind="panel_learning_hybrid_qwen_binding",
+            payload={
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "sequence_index": 1,
+            },
+            reuse_active_identical=True,
+        )
+        return {
+            "stage_finished": False,
+            "next_worker": worker,
+            "workflow_state": state,
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current({"success": True, "stage": "omni"})
+
+        returned = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        retried = service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        assert canonical_json_bytes(retried) == canonical_json_bytes(returned)
+        assert returned["operation_ref"]["predecessor_content_sha256"] == (
+            consumed_ref["content_sha256"]
+        )
+        assert continuation_calls == 1
+        assert registry.adopt_calls == 1
+        assert registry.start_calls == 2
+    finally:
+        store.close()
+
+
+def test_s3_terminal_prepared_retry_resumes_without_false_terminal_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    continuation_calls = 0
+
+    monkeypatch.setattr(
+        workflow_service,
+        "build_learning_pipeline_initial_worker_request",
+        lambda **_kwargs: {
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "payload": {"learning_pipeline_mode": "hybrid_v1_1"},
+        },
+    )
+
+    def _continue(**_kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        if continuation_calls == 1:
+            raise RuntimeError("transient terminal continuation failure")
+        state = store.get("run-h1")
+        evidence_path = tmp_path / "artifacts" / "terminal-review.json"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_text("{}", encoding="utf-8")
+        finished = workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="completed",
+            reason="terminal retry completed",
+            evidence_refs={"trial_path": "artifacts/terminal-review.json"},
+        )
+        return {
+            "stage_finished": True,
+            "outcome": "completed",
+            "next_stage_operation": None,
+            "next_stage_worker": None,
+            "workflow_state": finished["workflow_state"],
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current({"outcome": "completed", "success": True})
+
+        with pytest.raises(
+            RuntimeError, match="transient terminal continuation failure"
+        ):
+            service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        prepared_state = store.get("run-h1")
+        prepared_execution = prepared_state["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        prepared_receipt = prepared_execution[
+            "benchmark_v2_workflow_service_hybrid"
+        ]["continuation_receipt"]
+        assert prepared_state["stages"]["screen_understanding"]["status"] == (
+            "running"
+        )
+        assert prepared_receipt["receipt_phase"] == "terminal_prepared"
+        assert prepared_receipt["returned_status"] is None
+
+        returned = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        replay = service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        assert returned["status"] == "complete"
+        assert canonical_json_bytes(replay) == canonical_json_bytes(returned)
+        assert returned["operation_ref"]["predecessor_content_sha256"] == (
+            consumed_ref["content_sha256"]
+        )
+        assert continuation_calls == 2
+        assert registry.status_calls == 1
+        assert registry.adopt_calls == 1
+        assert registry.start_calls == 1
+    finally:
+        store.close()
+
+
+def test_s3_terminal_prepared_state_remains_cancellable_with_zero_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    continuation_calls = 0
+
+    monkeypatch.setattr(
+        workflow_service,
+        "build_learning_pipeline_initial_worker_request",
+        lambda **_kwargs: {
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "payload": {"learning_pipeline_mode": "hybrid_v1_1"},
+        },
+    )
+
+    def _continue(**_kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        raise RuntimeError("transient terminal continuation failure")
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current({"outcome": "completed", "success": True})
+        with pytest.raises(RuntimeError):
+            service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        cancelled = service.cancel_operation(operation_ref=consumed_ref)
+        replay = service.cancel_operation(operation_ref=cancelled["operation_ref"])
+
+        assert cancelled["status"] == "safe_stopped"
+        assert canonical_json_bytes(replay) == canonical_json_bytes(cancelled)
+        assert cancelled["operation_ref"]["predecessor_content_sha256"] == (
+            consumed_ref["content_sha256"]
+        )
+        assert continuation_calls == 1
+        assert registry.status_calls == 1
+        assert registry.adopt_calls == 1
+        assert registry.cancel_calls == 1
+        assert registry.active_resources == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "mutated_parent",
+    (
+        "predecessor_content_sha256",
+        "revision",
+        "worker_ref",
+        "window_binding_ref",
+        "capture_ref",
+    ),
+)
+def test_s3_stale_hybrid_ref_rejects_before_downstream_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutated_parent: str,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    continuation_calls = 0
+
+    def _unexpected_continue(**_kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        raise AssertionError("stale hybrid ref reached continuation")
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _unexpected_continue,
+    )
+    try:
+        started = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        stale = deepcopy(started["operation_ref"])
+        if mutated_parent == "predecessor_content_sha256":
+            stale[mutated_parent] = "0" * 64
+        elif mutated_parent == "revision":
+            stale["workflow_state_ref"]["revision"] += 1
+            stale["stage_execution_ref"]["revision"] += 1
+        elif mutated_parent == "worker_ref":
+            worker = deepcopy(stale["worker_ref"])
+            worker.pop("content_sha256")
+            worker["worker_id"] = "worker-hybrid-stale"
+            stale["worker_ref"] = seal_immutable(worker)
+        else:
+            stale[mutated_parent]["id"] = f"stale-{mutated_parent}"
+        stale["content_sha256"] = content_sha256(stale)
+
+        with pytest.raises(ValueError, match="stale"):
+            service.continue_hybrid_operation(operation_ref=stale)
+
+        assert registry.status_calls == 0
+        assert registry.adopt_calls == 0
+        assert registry.read_calls == 0
+        assert registry.cancel_calls == 0
+        assert registry.start_calls == 1
+        assert continuation_calls == 0
+    finally:
+        store.close()
+
+
+def test_s3_hybrid_cancel_replays_and_leaves_zero_resources(tmp_path: Path) -> None:
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        started = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        cancelled = service.cancel_operation(
+            operation_ref=started["operation_ref"]
+        )
+        replay = service.cancel_operation(
+            operation_ref=cancelled["operation_ref"]
+        )
+
+        assert replay == cancelled
+        assert cancelled["status"] == "safe_stopped"
+        assert registry.cancel_calls == 1
+        assert registry.active_resources == 0
+    finally:
+        store.close()
+
+
+def test_s3_service_facade_has_no_handler_provider_model_or_action_imports() -> None:
+    source = Path("app/learn/workflow_service.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    names = {
+        "_start_benchmark_v2_hybrid_workflow_service",
+        "_continue_benchmark_v2_hybrid_workflow_service",
+        "_cancel_benchmark_v2_hybrid_workflow_service",
+    }
+    functions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in names
+    }
+    assert set(functions) == names
+    forbidden = {"handler", "provider", "model", "action"}
+    violations: list[str] = []
+    for name, function in functions.items():
+        for node in ast.walk(function):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                modules = [
+                    alias.name
+                    for alias in node.names
+                ] + ([node.module] if isinstance(node, ast.ImportFrom) else [])
+                if any(
+                    token in str(module).casefold()
+                    for module in modules
+                    for token in forbidden
+                ):
+                    violations.append(f"{name}:import:{node.lineno}")
+            if isinstance(node, ast.Call):
+                called = (
+                    node.func.attr
+                    if isinstance(node.func, ast.Attribute)
+                    else node.func.id
+                    if isinstance(node.func, ast.Name)
+                    else ""
+                )
+                if any(token in called.casefold() for token in forbidden):
+                    violations.append(f"{name}:call:{called}:{node.lineno}")
+    assert violations == []
