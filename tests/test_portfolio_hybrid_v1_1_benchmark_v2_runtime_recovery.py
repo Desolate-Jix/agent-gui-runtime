@@ -1212,6 +1212,212 @@ def test_fresh_runtime_recovers_service_started_before_response_fsync_without_re
     del iterator
 
 
+def test_fresh_runtime_cleanup_recovers_exact_incumbent_from_durable_call_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import (
+        _DurableIncumbentService,
+        _runtime,
+    )
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    delegate = _DurableIncumbentService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: delegate,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-incumbent-hard-crash", "partition": "regression"}
+    )
+    attempt_dir = (tmp_path / "attempt-incumbent-hard-crash").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt,
+        attempt_dir=attempt_dir,
+    )
+    group = deepcopy(next(iterator))
+    binding = deepcopy(runtime.open_screen_group(provider_group=group))
+    paths = runtime_module._actual_screen_group_paths(
+        attempt_dir=attempt_dir,
+        attempt_ref=attempt,
+        screen_group=str(group["screen_group"]),
+    )
+    intent = runtime_module._sealed_record(
+        {
+            "contract_version": runtime_module._ACTUAL_INTENT_CONTRACT,
+            "attempt_ref": attempt,
+            "provider_group": group,
+            "window_binding": binding,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    intent_ref = runtime_module._write_create_only_json(paths["intent"], intent)
+    service = runtime_module._ActualScreenGroupService(
+        delegate=delegate,
+        group=group,
+        binding=binding,
+        intent_ref=intent_ref,
+        result_path=paths["result"],
+    )
+    hybrid_started = service.start_hybrid_operation(
+        screen_group=group,
+        window_binding=binding,
+    )
+    incumbent_started = service.start_incumbent_observe(
+        provider_case_ref=group["case_refs"][0],
+        window_binding=binding,
+    )
+
+    runtime._active = None
+    runtime._pending_cleanup = None
+    recovered_runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    with pytest.raises(BaseExceptionGroup, match="indeterminate|stable-zero"):
+        recovered_runtime.cleanup_attempt(
+            attempt=attempt,
+            reason="hard_crash_during_incumbent",
+        )
+
+    assert delegate.incumbent_start_calls == 1
+    assert delegate.start_calls == 1
+    assert delegate.cancel_calls == 2
+    assert {
+        operation["mode"] for operation in delegate.cancelled_operation_refs
+    } == {"hybrid_v1_1", "incumbent_qwen_only"}
+    assert {
+        operation["content_sha256"] for operation in delegate.cancelled_operation_refs
+    } == {
+        hybrid_started["operation_ref"]["content_sha256"],
+        incumbent_started["operation_ref"]["content_sha256"],
+    }
+    assert delegate.incumbent_lookup_calls >= 2
+    assert windows.active == 0
+    events = runtime_module.read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    del iterator
+
+
+def test_fresh_actual_cleanup_attests_each_screen_group_without_cross_group_merge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import (
+        _DurableIncumbentService,
+        _runtime,
+    )
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    delegate = _DurableIncumbentService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: delegate,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-multi-group-crash", "partition": "regression"}
+    )
+    attempt_dir = (tmp_path / "attempt-multi-group-crash").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt,
+        attempt_dir=attempt_dir,
+    )
+
+    def service_for(group: Mapping[str, object], binding: Mapping[str, object]):
+        paths = runtime_module._actual_screen_group_paths(
+            attempt_dir=attempt_dir,
+            attempt_ref=attempt,
+            screen_group=str(group["screen_group"]),
+        )
+        intent = runtime_module._sealed_record(
+            {
+                "contract_version": runtime_module._ACTUAL_INTENT_CONTRACT,
+                "attempt_ref": attempt,
+                "provider_group": group,
+                "window_binding": binding,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        intent_ref = runtime_module._write_create_only_json(paths["intent"], intent)
+        return runtime_module._ActualScreenGroupService(
+            delegate=delegate,
+            group=group,
+            binding=binding,
+            intent_ref=intent_ref,
+            result_path=paths["result"],
+        )
+
+    first_group = deepcopy(next(iterator))
+    first_binding = deepcopy(runtime.open_screen_group(provider_group=first_group))
+    first_service = service_for(first_group, first_binding)
+    first_service.start_hybrid_operation(
+        screen_group=first_group,
+        window_binding=first_binding,
+    )
+    for case_ref in first_group["case_refs"]:
+        first_service.start_incumbent_observe(
+            provider_case_ref=case_ref,
+            window_binding=first_binding,
+        )
+    runtime.close_screen_group(
+        window_binding=first_binding,
+        reason="first_group_complete",
+    )
+
+    second_group = deepcopy(next(iterator))
+    second_binding = deepcopy(runtime.open_screen_group(provider_group=second_group))
+    second_service = service_for(second_group, second_binding)
+    second_service.start_hybrid_operation(
+        screen_group=second_group,
+        window_binding=second_binding,
+    )
+    second_service.start_incumbent_observe(
+        provider_case_ref=second_group["case_refs"][0],
+        window_binding=second_binding,
+    )
+
+    runtime._active = None
+    runtime._pending_cleanup = None
+    recovered_runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    with pytest.raises(BaseExceptionGroup, match="indeterminate|stable-zero"):
+        recovered_runtime.cleanup_attempt(
+            attempt=attempt,
+            reason="second_group_crash",
+        )
+
+    assert delegate.stable_zero_operation_counts == [6, 2]
+    assert delegate.cancel_calls == 8
+    assert windows.active == 0
+    events = runtime_module.read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    del iterator
+
+
 def test_service_recovered_checkpoint_retries_cancel_without_lookup_or_restart(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

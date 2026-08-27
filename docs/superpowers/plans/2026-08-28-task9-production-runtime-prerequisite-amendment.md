@@ -196,6 +196,10 @@ Precise cut-points:
 
 ```python
 class BenchmarkV2ProductionRuntimePort(Protocol):
+    def run_actual_screen_group(
+        self, *, provider_group: Mapping[str, object],
+        attempt_ref: Mapping[str, object], attempt_dir: Path,
+    ) -> Mapping[str, object]: ...
     def begin_probe(
         self, *, provider_id: str, probe_kind: str,
         provider_manifest: Mapping[str, object], attempt_ref: Mapping[str, object],
@@ -222,6 +226,9 @@ prepared -> request_in_flight -> body_complete -> terminal
 
 Probe selection can name only `omni`, `qwen`, or `vista`. Earlier cascade stages run normally until the selected stage reaches `request_in_flight`. Trigger and recovery bind the exact server-issued dispatch context and the same PID/create-time/Job or managed lease incarnation. A durable `service_start_intent` precedes WorkflowService start; a read-only exact lookup closes the crash window before `service_started` without retrying producer creation. Cleanup order is WorkflowService cancel/reconcile, Task 4 HWND/Job close, authoritative provider/listener/lease cleanup, then stable-zero verification. Aggregate termination strings alone never prove same-incarnation cleanup.
 
+Task 9 actual execution follows the same U2 rule through the facade: a durable screen-group service intent is fsynced first, `lookup_hybrid_operation(...)` runs before any start, the exact service result is fsynced before Task 8 receives it, and only an identical create-only projection replay is idempotent. The facade owns the private WorkflowService/window/lifecycle/prediction composition; the runner receives none of those components.
+Each incumbent start also requires a durable intent/result pair and recovery through `lookup_incumbent_observe(provider_case_ref=..., window_binding=...)`; recovery must never replace lookup with a blind start. Before the prediction sink may publish, the runtime must consume the WorkflowService-owned `attest_actual_operations_stable_zero(operation_refs=...)` result for the exact six terminal operation refs and the exact window-close receipt. Runtime aggregate `resource_counts()` remains diagnostic and cannot authorize stable-zero.
+
 - [x] Add failing tests for crash before output, after service start, after window launch, during each provider, body-complete/response-lost, duplicate cleanup, stale attempt ref, PID reuse, and start-before-journal hard crashes.
 - [x] Add a service-owned fresh-store initializer and a read-only exact lookup; prove missing intent returns `None` and no recovery path blindly calls start.
 - [x] Project the exact pathless provider dispatch context and verify the U1 receipt against its issued revision rather than the later workflow revision.
@@ -236,14 +243,19 @@ Probe selection can name only `omni`, `qwen`, or `vista`. Earlier cascade stages
 
 **Files:**
 
+- Modify: `app/learn/hybrid/benchmark_v2_runtime.py`
 - Modify: `scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py`
+- Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py`
 - Modify: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`
 
 **Interfaces:**
 
 - The script imports only `get_production_benchmark_v2_runtime()` for production orchestration.
+- Actual screen groups call only `runtime.run_actual_screen_group(provider_group=..., attempt_ref=..., attempt_dir=...)`; the getter exposes no service/window/lifecycle/sink/component getter.
 - Existing exact CLI and attempt-ledger formats remain unchanged.
 
+- [x] Add the narrow public actual-screen-group facade with hybrid and incumbent U2 lookup-before-start recovery, exact active group/attempt/window binding, WorkflowService-owned stable-zero attestation, and create-only durable projection replay.
+- [x] Prove journal fsync failure, stale attempt, missing dispatch/cleanup evidence, and different-content replay fail closed without real GUI/provider/model resources.
 - [ ] Replace the temporary production-blocked tests with failing tests proving dry-run, actual, probes, and cleanup delegate through the real facade without fake injection.
 - [ ] Remove `_ProductionRuntime._unavailable` and the early `RunnerProductionBlocked` branches; preserve fail-closed validation errors.
 - [ ] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py`.

@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable, Iterator, Mapping, Protocol
 
 from app.core.ocr_service import ocr_service
+from app.learn.hybrid import benchmark_v2_actual
 from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes,
     content_sha256,
@@ -20,10 +21,12 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     compose_benchmark_v2_hybrid_screen_group_start,
     compose_benchmark_v2_workflow_window_binding,
     get_production_benchmark_v2_workflow_service,
+    validate_benchmark_v2_actual_operations_stable_zero,
     validate_benchmark_v2_hybrid_screen_group_start,
     validate_benchmark_v2_provider_dispatch_context_projection,
     validate_benchmark_v2_workflow_window_binding,
     validate_benchmark_v2_workflow_service_operation_ref,
+    validate_benchmark_v2_workflow_service_step,
 )
 from app.learn.hybrid.benchmark_v2_lifecycle import (
     append_benchmark_v2_attempt_event,
@@ -138,6 +141,13 @@ _PROBE_TRIGGER_FIELDS = {
     "execute_binding_enabled",
     "content_sha256",
 }
+_ACTUAL_DIRECTORY = "actual-screen-groups"
+_ACTUAL_INTENT_CONTRACT = "benchmark_v2_actual_service_intent_v1"
+_ACTUAL_RESULT_CONTRACT = "benchmark_v2_actual_service_result_v1"
+_ACTUAL_LIFECYCLE_CONTRACT = "benchmark_v2_actual_stable_zero_v1"
+_ACTUAL_PROJECTION_RECORD_CONTRACT = "benchmark_v2_actual_projection_record_v1"
+_ACTUAL_CALL_INTENT_CONTRACT = "benchmark_v2_actual_service_call_intent_v1"
+_ACTUAL_CALL_RESULT_CONTRACT = "benchmark_v2_actual_service_call_result_v1"
 
 
 class BenchmarkV2ScreenGroupIterator(Iterator[Mapping[str, object]], Protocol):
@@ -159,6 +169,14 @@ class BenchmarkV2ProductionRuntimePort(Protocol):
         attempt_ref: Mapping[str, object],
         attempt_dir: Path,
     ) -> BenchmarkV2ScreenGroupIterator: ...
+
+    def run_actual_screen_group(
+        self,
+        *,
+        provider_group: Mapping[str, object],
+        attempt_ref: Mapping[str, object],
+        attempt_dir: Path,
+    ) -> Mapping[str, object]: ...
 
     def begin_probe(
         self,
@@ -262,6 +280,562 @@ class _LoadedProviderManifest(dict[str, object]):
         self._corpus = deepcopy(dict(corpus))
         self._case_refs = [deepcopy(dict(item)) for item in case_refs]
         self._corpus_file_ref = deepcopy(dict(corpus_file_ref))
+
+
+class _ActualScreenGroupService:
+    """仅为一次真实屏幕组保存 WorkflowService 的恢复与清理证据。"""
+
+    __slots__ = (
+        "_delegate",
+        "_group",
+        "_binding",
+        "_intent_ref",
+        "_result_path",
+        "_call_root",
+        "_cleanup_results",
+    )
+
+    def __init__(
+        self,
+        *,
+        delegate: object,
+        group: Mapping[str, object],
+        binding: Mapping[str, object],
+        intent_ref: Mapping[str, object],
+        result_path: Path,
+    ) -> None:
+        self._delegate = delegate
+        self._group = deepcopy(dict(group))
+        self._binding = deepcopy(dict(binding))
+        self._intent_ref = deepcopy(dict(intent_ref))
+        self._result_path = Path(result_path)
+        self._call_root = self._result_path.parent / "incumbent-calls"
+        self._cleanup_results: list[dict[str, Any]] = []
+
+    @property
+    def cleanup_results(self) -> list[dict[str, Any]]:
+        return deepcopy(self._cleanup_results)
+
+    def start_hybrid_operation(
+        self,
+        *,
+        screen_group: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        if dict(screen_group) != self._group or dict(window_binding) != self._binding:
+            raise ValueError("benchmark actual service start lineage is stale")
+        lookup = getattr(self._delegate, "lookup_hybrid_operation", None)
+        if not callable(lookup):
+            raise RuntimeError("WorkflowService lookup_hybrid_operation is unavailable")
+        recovered = lookup(
+            screen_group=deepcopy(self._group),
+            window_binding=deepcopy(self._binding),
+        )
+        recorded = _read_actual_service_result(
+            self._result_path,
+            intent_ref=self._intent_ref,
+            group=self._group,
+            binding=self._binding,
+        )
+        if recovered is None:
+            if recorded is not None:
+                raise RuntimeError(
+                    "benchmark actual service result exists but exact lookup is unavailable"
+                )
+            start = getattr(self._delegate, "start_hybrid_operation", None)
+            if not callable(start):
+                raise TypeError("WorkflowService start_hybrid_operation is unavailable")
+            recovered = start(
+                screen_group=deepcopy(self._group),
+                window_binding=deepcopy(self._binding),
+            )
+        step = validate_benchmark_v2_workflow_service_step(recovered)
+        _validate_actual_service_step(step, group=self._group, binding=self._binding)
+        if recorded is None:
+            result = _sealed_record(
+                {
+                    "contract_version": _ACTUAL_RESULT_CONTRACT,
+                    "intent_ref": deepcopy(self._intent_ref),
+                    "provider_group_ref": _actual_group_ref(self._group),
+                    "service_step": step,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            try:
+                _write_create_only_json(self._result_path, result)
+            except BaseException as persistence_error:
+                try:
+                    self.cancel_operation(operation_ref=step["operation_ref"])
+                except BaseException as cleanup_error:
+                    raise BaseExceptionGroup(
+                        "benchmark actual service result persistence and exact cleanup failed",
+                        [persistence_error, cleanup_error],
+                    )
+                persistence_error.add_note(
+                    "exact WorkflowService operation was authoritatively cancelled"
+                )
+                raise
+        return step
+
+    def continue_hybrid_operation(
+        self, *, operation_ref: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        return self._call("continue_hybrid_operation", operation_ref=operation_ref)
+
+    def start_incumbent_observe(
+        self,
+        *,
+        provider_case_ref: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        if dict(window_binding) != self._binding:
+            raise ValueError("benchmark actual incumbent window lineage is stale")
+        case_ref = _actual_case_ref(self._group, provider_case_ref)
+        return self._incumbent_call(
+            call_kind="start",
+            provider_case_ref=case_ref,
+            operation_ref=None,
+            worker_ref=None,
+        )
+
+    def poll_incumbent_observe(
+        self, *, operation_ref: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        operation = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        case_ref = _actual_case_for_operation(self._group, operation)
+        return self._incumbent_call(
+            call_kind="poll",
+            provider_case_ref=case_ref,
+            operation_ref=operation,
+            worker_ref=None,
+        )
+
+    def adopt_and_terminalize_incumbent(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+        worker_ref: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        operation = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        case_ref = _actual_case_for_operation(self._group, operation)
+        return self._incumbent_call(
+            call_kind="adopt",
+            provider_case_ref=case_ref,
+            operation_ref=operation,
+            worker_ref=worker_ref,
+        )
+
+    def _incumbent_call(
+        self,
+        *,
+        call_kind: str,
+        provider_case_ref: Mapping[str, object],
+        operation_ref: Mapping[str, object] | None,
+        worker_ref: Mapping[str, object] | None,
+    ) -> dict[str, Any]:
+        intent = _actual_incumbent_call_intent(
+            intent_ref=self._intent_ref,
+            group=self._group,
+            binding=self._binding,
+            call_kind=call_kind,
+            provider_case_ref=provider_case_ref,
+            operation_ref=operation_ref,
+            worker_ref=worker_ref,
+        )
+        paths = _actual_incumbent_call_paths(self._call_root, intent=intent)
+        intent_ref = _write_create_only_json(paths["intent"], intent)
+        recorded = _read_actual_incumbent_call_result(
+            paths["result"],
+            intent_ref=intent_ref,
+            provider_case_ref=provider_case_ref,
+            binding=self._binding,
+        )
+        lookup = getattr(self._delegate, "lookup_incumbent_observe", None)
+        if not callable(lookup):
+            raise RuntimeError("WorkflowService lookup_incumbent_observe is unavailable")
+
+        def mutate(name: str, **kwargs: object) -> Mapping[str, object]:
+            try:
+                return self._call(name, **kwargs)
+            except BaseException as mutation_error:
+                recovered_value = lookup(
+                    provider_case_ref=deepcopy(dict(provider_case_ref)),
+                    window_binding=deepcopy(self._binding),
+                )
+                if recovered_value is None:
+                    raise
+                recovered_step = _validate_actual_incumbent_step(
+                    recovered_value,
+                    provider_case_ref=provider_case_ref,
+                    binding=self._binding,
+                    expected_operation=operation_ref,
+                )
+                if (
+                    operation_ref is not None
+                    and recovered_step["operation_ref"] == operation_ref
+                ):
+                    raise
+                mutation_error.add_note(
+                    "lost WorkflowService response recovered by exact incumbent lookup"
+                )
+                return recovered_step
+
+        current_value = lookup(
+            provider_case_ref=deepcopy(dict(provider_case_ref)),
+            window_binding=deepcopy(self._binding),
+        )
+        if current_value is None:
+            if call_kind != "start" or recorded is not None:
+                raise RuntimeError(
+                    "benchmark actual incumbent durable call has no recoverable operation"
+                )
+            returned = mutate(
+                "start_incumbent_observe",
+                provider_case_ref=provider_case_ref,
+                window_binding=self._binding,
+            )
+        else:
+            current = _validate_actual_incumbent_step(
+                current_value,
+                provider_case_ref=provider_case_ref,
+                binding=self._binding,
+                expected_operation=operation_ref,
+            )
+            if recorded is not None:
+                return current
+            if call_kind == "start":
+                returned = current
+            elif current["operation_ref"] != operation_ref:
+                returned = current
+            elif call_kind == "poll":
+                returned = mutate(
+                    "poll_incumbent_observe",
+                    operation_ref=operation_ref,
+                )
+            else:
+                returned = mutate(
+                    "adopt_and_terminalize_incumbent",
+                    operation_ref=operation_ref,
+                    worker_ref=worker_ref,
+                )
+        step = _validate_actual_incumbent_step(
+            returned,
+            provider_case_ref=provider_case_ref,
+            binding=self._binding,
+            expected_operation=operation_ref,
+        )
+        result = _sealed_record(
+            {
+                "contract_version": _ACTUAL_CALL_RESULT_CONTRACT,
+                "intent_ref": intent_ref,
+                "service_step": step,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        try:
+            _write_create_only_json(paths["result"], result)
+        except BaseException as persistence_error:
+            try:
+                recovered = lookup(
+                    provider_case_ref=deepcopy(dict(provider_case_ref)),
+                    window_binding=deepcopy(self._binding),
+                )
+                if recovered is None:
+                    raise RuntimeError(
+                        "benchmark actual incumbent mutation was not recoverable"
+                    )
+                recovered_step = _validate_actual_incumbent_step(
+                    recovered,
+                    provider_case_ref=provider_case_ref,
+                    binding=self._binding,
+                    expected_operation=operation_ref,
+                )
+                self.cancel_operation(
+                    operation_ref=recovered_step["operation_ref"]
+                )
+            except BaseException as cleanup_error:
+                raise BaseExceptionGroup(
+                    "benchmark actual incumbent result persistence and exact cleanup failed",
+                    [persistence_error, cleanup_error],
+                )
+            persistence_error.add_note(
+                "exact incumbent operation was recovered by lookup and cancelled"
+            )
+            raise
+        return step
+
+    def cancel_operation(
+        self, *, operation_ref: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        result = self._call("cancel_operation", operation_ref=operation_ref)
+        terminal = _validate_service_terminal(result)
+        supplied = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        _validate_actual_terminal_successor(
+            terminal=terminal["operation_ref"],
+            supplied=supplied,
+        )
+        looked_up = self._lookup_terminal_cleanup(terminal["operation_ref"])
+        if (
+            looked_up["operation_ref"] != terminal["operation_ref"]
+            or looked_up["status"] != terminal["status"]
+            or looked_up["cleanup_refs"] != terminal["cleanup_refs"]
+        ):
+            raise ValueError(
+                "benchmark actual cleanup terminal differs from exact service lookup"
+            )
+        self._cleanup_results.append(terminal)
+        return terminal
+
+    def attest_operations_stable_zero(self) -> dict[str, Any]:
+        operation_refs = [
+            deepcopy(item["operation_ref"]) for item in self._cleanup_results
+        ]
+        if len(operation_refs) != 6:
+            raise ValueError(
+                "benchmark actual service cleanup operation multiset is incomplete"
+            )
+        attest = getattr(
+            self._delegate, "attest_actual_operations_stable_zero", None
+        )
+        if not callable(attest):
+            raise RuntimeError(
+                "WorkflowService actual stable-zero attestation is unavailable"
+            )
+        attestation = validate_benchmark_v2_actual_operations_stable_zero(
+            attest(operation_refs=deepcopy(operation_refs))
+        )
+        if attestation["operation_refs"] != operation_refs:
+            raise ValueError(
+                "benchmark actual stable-zero attestation operation lineage is stale"
+            )
+        return attestation
+
+    def _lookup_terminal_cleanup(
+        self, operation_ref: Mapping[str, object]
+    ) -> dict[str, Any]:
+        operation = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        if operation["mode"] == "hybrid_v1_1":
+            lookup = getattr(self._delegate, "lookup_hybrid_operation", None)
+            kwargs = {
+                "screen_group": deepcopy(self._group),
+                "window_binding": deepcopy(self._binding),
+            }
+        else:
+            lookup = getattr(self._delegate, "lookup_incumbent_observe", None)
+            matches = [
+                item
+                for item in self._group["case_refs"]
+                if {
+                    "id": str(item["case_id"]),
+                    "content_sha256": str(item["case_content_sha256"]),
+                }
+                == operation["request_ref"]
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    "benchmark actual incumbent cleanup request lineage is stale"
+                )
+            kwargs = {
+                "provider_case_ref": deepcopy(matches[0]),
+                "window_binding": deepcopy(self._binding),
+            }
+        if not callable(lookup):
+            raise RuntimeError(
+                "WorkflowService exact terminal cleanup lookup is unavailable"
+            )
+        step = lookup(**kwargs)
+        if step is None:
+            raise ValueError(
+                "benchmark actual cleanup was not confirmed by exact service lookup"
+            )
+        return validate_benchmark_v2_workflow_service_step(step)
+
+    def _call(self, name: str, **kwargs: object) -> Mapping[str, object]:
+        method = getattr(self._delegate, name, None)
+        if not callable(method):
+            raise TypeError(f"WorkflowService {name} is unavailable")
+        return method(**deepcopy(kwargs))
+
+
+class _ActualScreenGroupWindowOwner:
+    """只记录本次适配器通过运行时关闭的精确窗口回执。"""
+
+    __slots__ = ("_runtime", "_group", "_binding", "_close_ref")
+
+    def __init__(
+        self,
+        *,
+        runtime: "_BenchmarkV2ProductionRuntime",
+        group: Mapping[str, object],
+        binding: Mapping[str, object],
+    ) -> None:
+        self._runtime = runtime
+        self._group = deepcopy(dict(group))
+        self._binding = deepcopy(dict(binding))
+        self._close_ref: dict[str, Any] | None = None
+
+    @property
+    def close_ref(self) -> dict[str, Any] | None:
+        return deepcopy(self._close_ref)
+
+    def open_screen_group(
+        self, *, provider_group: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        if dict(provider_group) != self._group:
+            raise ValueError("benchmark actual window group lineage is stale")
+        binding = self._runtime.open_screen_group(provider_group=provider_group)
+        if dict(binding) != self._binding:
+            raise ValueError("benchmark actual opened window lineage is stale")
+        return binding
+
+    def close_screen_group(
+        self, *, window_binding: Mapping[str, object], reason: str
+    ) -> Mapping[str, object]:
+        if dict(window_binding) != self._binding:
+            raise ValueError("benchmark actual window close lineage is stale")
+        close_ref = _sealed_parent(
+            self._runtime.close_screen_group(
+                window_binding=window_binding,
+                reason=reason,
+            ),
+            name="benchmark actual runtime window close ref",
+        )
+        if self._close_ref is not None and self._close_ref != close_ref:
+            raise ValueError("benchmark actual window close replay differs")
+        self._close_ref = close_ref
+        return deepcopy(close_ref)
+
+
+class _ActualScreenGroupLifecycle:
+    __slots__ = (
+        "_runtime",
+        "_attempt",
+        "_group",
+        "_binding",
+        "_service",
+        "_window_owner",
+        "_stable_ref",
+    )
+
+    def __init__(
+        self,
+        *,
+        runtime: "_BenchmarkV2ProductionRuntime",
+        attempt: Mapping[str, object],
+        group: Mapping[str, object],
+        binding: Mapping[str, object],
+        service: _ActualScreenGroupService,
+        window_owner: _ActualScreenGroupWindowOwner,
+    ) -> None:
+        self._runtime = runtime
+        self._attempt = deepcopy(dict(attempt))
+        self._group = deepcopy(dict(group))
+        self._binding = deepcopy(dict(binding))
+        self._service = service
+        self._window_owner = window_owner
+        self._stable_ref: dict[str, Any] | None = None
+
+    @property
+    def stable_ref(self) -> dict[str, Any] | None:
+        return deepcopy(self._stable_ref)
+
+    def stable_zero(
+        self,
+        *,
+        provider_group: Mapping[str, object],
+        window_binding: Mapping[str, object],
+        execution_refs: list[Mapping[str, object]],
+        window_close_ref: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        if dict(provider_group) != self._group or dict(window_binding) != self._binding:
+            raise ValueError("benchmark actual lifecycle group/window lineage is stale")
+        close_ref = _sealed_parent(window_close_ref, name="actual window close ref")
+        if self._window_owner.close_ref != close_ref:
+            raise ValueError(
+                "benchmark actual window close was not issued by the exact runtime owner"
+            )
+        executions = [
+            _identity_ref(item, name="actual execution ref") for item in execution_refs
+        ]
+        if len(executions) != 6 or len({item["id"] for item in executions}) != 6:
+            raise ValueError("benchmark actual execution cleanup multiset is incomplete")
+        cleanup_results = self._service.cleanup_results
+        if len(cleanup_results) != 6:
+            raise ValueError("benchmark actual service cleanup evidence is incomplete")
+        cleanup_ids = {
+            f"{item['operation_ref']['mode']}/{item['operation_ref']['operation_id']}"
+            for item in cleanup_results
+        }
+        if cleanup_ids != {item["id"] for item in executions}:
+            raise ValueError("benchmark actual service cleanup lineage is stale")
+        service_stable_zero = self._service.attest_operations_stable_zero()
+        counts = dict(self._runtime.resource_counts())
+        stable = _sealed_record(
+            {
+                "contract_version": _ACTUAL_LIFECYCLE_CONTRACT,
+                "attempt_ref": deepcopy(self._attempt),
+                "provider_group_ref": _actual_group_ref(self._group),
+                "window_binding_ref": deepcopy(self._binding["window_binding_ref"]),
+                "execution_refs": executions,
+                "window_close_ref": close_ref,
+                "service_stable_zero_attestation": service_stable_zero,
+                "diagnostic_resource_counts": counts,
+                "cleanup_status": "stable_zero",
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        self._stable_ref = stable
+        return stable
+
+
+class _ActualScreenGroupPredictionSink:
+    __slots__ = ("_attempt", "_group", "_lifecycle", "_path", "_projection")
+
+    def __init__(
+        self,
+        *,
+        attempt: Mapping[str, object],
+        group: Mapping[str, object],
+        lifecycle: _ActualScreenGroupLifecycle,
+        path: Path,
+    ) -> None:
+        self._attempt = deepcopy(dict(attempt))
+        self._group = deepcopy(dict(group))
+        self._lifecycle = lifecycle
+        self._path = Path(path)
+        self._projection: dict[str, Any] | None = None
+
+    @property
+    def projection(self) -> dict[str, Any] | None:
+        return deepcopy(self._projection)
+
+    def write_screen_group(
+        self, *, projection: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        stable = self._lifecycle.stable_ref
+        if stable is None:
+            raise ValueError("benchmark actual stable-zero evidence is missing before sink")
+        current = _validate_actual_projection(
+            projection,
+            group=self._group,
+            lifecycle_ref=stable,
+        )
+        record = _sealed_record(
+            {
+                "contract_version": _ACTUAL_PROJECTION_RECORD_CONTRACT,
+                "attempt_ref": deepcopy(self._attempt),
+                "provider_group_ref": _actual_group_ref(self._group),
+                "projection": current,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        _write_create_only_json(self._path, record)
+        self._projection = current
+        return _content_ref(record, name="actual projection record")
 
 
 class _BenchmarkV2ProductionRuntime:
@@ -406,6 +980,123 @@ class _BenchmarkV2ProductionRuntime:
                 reason="benchmark_v2_screen_group_iterator_closed"
             ),
         )
+
+    def run_actual_screen_group(
+        self,
+        *,
+        provider_group: Mapping[str, object],
+        attempt_ref: Mapping[str, object],
+        attempt_dir: Path,
+    ) -> Mapping[str, object]:
+        group = validate_benchmark_v2_hybrid_screen_group_start(provider_group)
+        attempt = _sealed_parent(attempt_ref, name="attempt ref")
+        if group["attempt_ref"] != attempt:
+            raise ValueError("benchmark actual screen group attempt is stale")
+        directory = _canonical_attempt_directory(attempt_dir)
+        paths = _actual_screen_group_paths(
+            attempt_dir=directory,
+            attempt_ref=attempt,
+            screen_group=str(group["screen_group"]),
+        )
+        replay = _read_actual_projection_record(
+            paths["projection"],
+            attempt=attempt,
+            group=group,
+        )
+        if replay is not None:
+            return replay
+
+        with self._lock:
+            active = self._active
+            if (
+                active is None
+                or active["screen_group_start"] != group
+                or active["attempt_ref"] != attempt
+                or active["attempt_dir"] != str(directory)
+            ):
+                raise ValueError(
+                    "benchmark actual screen group is stale or cross-attempt"
+                )
+            if active.get("actual_running") is True:
+                raise RuntimeError("benchmark actual screen group is already running")
+            active["actual_running"] = True
+            binding = validate_benchmark_v2_workflow_window_binding(
+                active["workflow_window_binding"]
+            )
+
+        try:
+            intent = _sealed_record(
+                {
+                    "contract_version": _ACTUAL_INTENT_CONTRACT,
+                    "attempt_ref": attempt,
+                    "provider_group": group,
+                    "window_binding": binding,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            intent_ref = _write_create_only_json(paths["intent"], intent)
+            delegate = get_production_benchmark_v2_workflow_service()
+            service = _ActualScreenGroupService(
+                delegate=delegate,
+                group=group,
+                binding=binding,
+                intent_ref=intent_ref,
+                result_path=paths["result"],
+            )
+            window_owner = _ActualScreenGroupWindowOwner(
+                runtime=self,
+                group=group,
+                binding=binding,
+            )
+            lifecycle = _ActualScreenGroupLifecycle(
+                runtime=self,
+                attempt=attempt,
+                group=group,
+                binding=binding,
+                service=service,
+                window_owner=window_owner,
+            )
+            sink = _ActualScreenGroupPredictionSink(
+                attempt=attempt,
+                group=group,
+                lifecycle=lifecycle,
+                path=paths["projection"],
+            )
+            returned = benchmark_v2_actual.run_screen_group(
+                provider_group=deepcopy(group),
+                service=service,
+                window_owner=window_owner,
+                lifecycle=lifecycle,
+                prediction_sink=sink,
+            )
+            stable = lifecycle.stable_ref
+            persisted = sink.projection
+            if stable is None or persisted is None:
+                raise RuntimeError(
+                    "benchmark actual adapter returned without cleanup/prediction evidence"
+                )
+            projection = _validate_actual_projection(
+                returned,
+                group=group,
+                lifecycle_ref=stable,
+            )
+            if projection != persisted:
+                raise ValueError(
+                    "benchmark actual adapter returned a different-content projection"
+                )
+            replay = _read_actual_projection_record(
+                paths["projection"],
+                attempt=attempt,
+                group=group,
+            )
+            if replay != projection:
+                raise ValueError("benchmark actual durable projection replay differs")
+            return projection
+        finally:
+            with self._lock:
+                if self._active is active:
+                    active.pop("actual_running", None)
 
     def open_screen_group(
         self, *, provider_group: Mapping[str, object]
@@ -811,7 +1502,23 @@ class _BenchmarkV2ProductionRuntime:
         service_terminal: Mapping[str, object] | None = None
         window_cleanup: Mapping[str, object] | None = None
         cleanup_errors: list[BaseException] = []
+        actual_attestations: list[Mapping[str, object]] = []
+        actual_terminals: list[Mapping[str, object]] = []
         durable_service_operation = _service_operation_from_events(events)
+        actual_directory = _actual_attempt_directory_from_events(events)
+        if (
+            actual_directory is not None
+            and (actual_directory / _ACTUAL_DIRECTORY / "incumbent-calls").is_dir()
+        ):
+            try:
+                actual_terminals, actual_attestations = _reconcile_actual_operations(
+                    attempt_dir=actual_directory,
+                    service=get_production_benchmark_v2_workflow_service(),
+                )
+                if actual_terminals:
+                    service_terminal = actual_terminals[-1]
+            except BaseException as error:
+                cleanup_errors.append(error)
         if isinstance(state, dict):
             try:
                 service_terminal = state.get("service_terminal")
@@ -880,7 +1587,8 @@ class _BenchmarkV2ProductionRuntime:
                 cleanup_errors.append(error)
         else:
             try:
-                service_terminal = _service_terminal_from_events(events)
+                if service_terminal is None:
+                    service_terminal = _service_terminal_from_events(events)
                 service_operation = durable_service_operation
                 service: object | None = None
                 intent = _service_start_intent_from_events(events)
@@ -908,18 +1616,31 @@ class _BenchmarkV2ProductionRuntime:
             except BaseException as error:
                 cleanup_errors.append(error)
             try:
-                owner_journal = _owner_journal_from_events(
-                    events,
-                    authority_root=self._authority_root,
-                )
-                if owner_journal is not None:
-                    window_cleanup = _sealed_parent(
-                        close_owned_window(
-                            journal_path=owner_journal,
-                            reason=normalized_reason,
-                        ),
-                        name="window cleanup receipt",
+                with self._lock:
+                    active = self._active
+                    active_matches = bool(
+                        isinstance(active, Mapping)
+                        and active.get("attempt_ref") == attempt_ref
                     )
+                    owner_token = active.get("owner_token") if active_matches else None
+                if owner_token is not None:
+                    window_cleanup = self._close_active(
+                        owner_token=owner_token,
+                        reason=normalized_reason,
+                    )
+                else:
+                    owner_journal = _owner_journal_from_events(
+                        events,
+                        authority_root=self._authority_root,
+                    )
+                    if owner_journal is not None:
+                        window_cleanup = _sealed_parent(
+                            close_owned_window(
+                                journal_path=owner_journal,
+                                reason=normalized_reason,
+                            ),
+                            name="window cleanup receipt",
+                        )
             except BaseException as error:
                 cleanup_errors.append(error)
 
@@ -929,14 +1650,40 @@ class _BenchmarkV2ProductionRuntime:
                 cleanup_errors,
             )
 
-        provider_cleanup_refs = _provider_cleanup_refs(service_terminal)
+        if actual_attestations:
+            service_terminal_parent = (
+                actual_attestations[0]
+                if len(actual_attestations) == 1
+                else _runtime_resource_ref(
+                    "actual_group_stable_zero_attestations",
+                    {
+                        "group_attestation_refs": [
+                            _content_ref(item, name="actual group attestation")
+                            for item in actual_attestations
+                        ]
+                    },
+                )
+            )
+            provider_cleanup_refs = [
+                _content_ref(
+                    terminal["cleanup_refs"]["provider_cleanup_ref"],
+                    name="actual provider cleanup ref",
+                )
+                for terminal in actual_terminals
+            ]
+        else:
+            service_terminal_parent = service_terminal
+            provider_cleanup_refs = _provider_cleanup_refs(service_terminal)
         counts = self.resource_counts()
         receipt = compose_benchmark_v2_attempt_cleanup_receipt(
             attempt_ref=attempt_ref,
             reason=normalized_reason,
             service_terminal_ref=(
-                _content_ref(service_terminal, name="workflow service terminal result")
-                if isinstance(service_terminal, Mapping)
+                _content_ref(
+                    service_terminal_parent,
+                    name="workflow service terminal result",
+                )
+                if isinstance(service_terminal_parent, Mapping)
                 else None
             ),
             window_cleanup_ref=(
@@ -1220,6 +1967,7 @@ class _BenchmarkV2ProductionRuntime:
                 "owner": deepcopy(dict(owner)),
                 "journal_path": journal_path,
                 "attempt_ref": deepcopy(dict(attempt_ref)),
+                "attempt_dir": str(attempt_dir),
             }
             append_benchmark_v2_attempt_event(
                 journal_path=_benchmark_v2_attempt_journal_path(
@@ -1371,6 +2119,665 @@ def _create_identical(path: Path, raw: bytes) -> None:
         os.close(descriptor)
     if path.read_bytes() != raw:
         raise ValueError("benchmark capture copy is not byte-identical")
+
+
+def _canonical_attempt_directory(value: Path) -> Path:
+    if not isinstance(value, Path):
+        raise ValueError("benchmark attempt directory must be a server-owned Path")
+    directory = value if value.is_absolute() else value.resolve()
+    if directory != directory.resolve():
+        raise ValueError("benchmark attempt directory must be canonical")
+    return directory
+
+
+def _actual_screen_group_paths(
+    *,
+    attempt_dir: Path,
+    attempt_ref: Mapping[str, object],
+    screen_group: str,
+) -> dict[str, Path]:
+    token = sha256(
+        canonical_json_bytes(
+            {
+                "attempt_ref": dict(attempt_ref),
+                "screen_group": str(screen_group),
+            }
+        )
+    ).hexdigest()
+    root = (Path(attempt_dir) / _ACTUAL_DIRECTORY).resolve()
+    if root.parent != Path(attempt_dir).resolve():
+        raise ValueError("benchmark actual projection directory escapes attempt root")
+    return {
+        "intent": root / f"{token}.service-intent.json",
+        "result": root / f"{token}.service-result.json",
+        "projection": root / f"{token}.projection.json",
+    }
+
+
+def _actual_case_ref(
+    group: Mapping[str, object], value: Mapping[str, object]
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("benchmark actual incumbent case ref is invalid")
+    candidate = deepcopy(dict(value))
+    matches = [item for item in group["case_refs"] if dict(item) == candidate]
+    if len(matches) != 1:
+        raise ValueError("benchmark actual incumbent case lineage is stale")
+    return deepcopy(dict(matches[0]))
+
+
+def _actual_case_for_operation(
+    group: Mapping[str, object], operation: Mapping[str, object]
+) -> dict[str, Any]:
+    request_ref = operation["request_ref"]
+    matches = [
+        item
+        for item in group["case_refs"]
+        if {
+            "id": str(item["case_id"]),
+            "content_sha256": str(item["case_content_sha256"]),
+        }
+        == request_ref
+    ]
+    if len(matches) != 1:
+        raise ValueError("benchmark actual incumbent operation case lineage is stale")
+    return deepcopy(dict(matches[0]))
+
+
+def _actual_incumbent_call_intent(
+    *,
+    intent_ref: Mapping[str, object],
+    group: Mapping[str, object],
+    binding: Mapping[str, object],
+    call_kind: str,
+    provider_case_ref: Mapping[str, object],
+    operation_ref: Mapping[str, object] | None,
+    worker_ref: Mapping[str, object] | None,
+) -> dict[str, Any]:
+    if call_kind not in {"start", "poll", "adopt"}:
+        raise ValueError("benchmark actual incumbent call kind is invalid")
+    if (call_kind == "start") != (operation_ref is None):
+        raise ValueError("benchmark actual incumbent call operation input is invalid")
+    if (call_kind == "adopt") != (worker_ref is not None):
+        raise ValueError("benchmark actual incumbent adopt worker input is invalid")
+    operation = (
+        validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        if operation_ref is not None
+        else None
+    )
+    if operation is not None:
+        _actual_case_for_operation(group, operation)
+    worker = (
+        _sealed_parent(worker_ref, name="benchmark actual incumbent worker ref")
+        if worker_ref is not None
+        else None
+    )
+    if worker is not None and operation is not None and worker != operation["worker_ref"]:
+        raise ValueError("benchmark actual incumbent adopt worker lineage is stale")
+    return _sealed_record(
+        {
+            "contract_version": _ACTUAL_CALL_INTENT_CONTRACT,
+            "screen_group_ref": _actual_group_ref(group),
+            "service_intent_ref": deepcopy(dict(intent_ref)),
+            "call_kind": call_kind,
+            "provider_case_ref": deepcopy(dict(provider_case_ref)),
+            "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+            "capture_ref": deepcopy(binding["capture_ref"]),
+            "stage": str(binding["stage"]),
+            "operation_ref": operation,
+            "worker_ref": worker,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _actual_incumbent_call_paths(
+    root: Path, *, intent: Mapping[str, object]
+) -> dict[str, Path]:
+    token = str(intent["content_sha256"])
+    directory = Path(root).resolve()
+    return {
+        "intent": directory / f"{token}.intent.json",
+        "result": directory / f"{token}.result.json",
+    }
+
+
+def _read_actual_incumbent_call_result(
+    path: Path,
+    *,
+    intent_ref: Mapping[str, object],
+    provider_case_ref: Mapping[str, object],
+    binding: Mapping[str, object],
+) -> dict[str, Any] | None:
+    if not Path(path).exists():
+        return None
+    record = _sealed_parent(
+        _read_canonical_json(path, name="benchmark actual incumbent call result"),
+        name="benchmark actual incumbent call result",
+    )
+    if (
+        set(record)
+        != {
+            "contract_version",
+            "intent_ref",
+            "service_step",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        or record["contract_version"] != _ACTUAL_CALL_RESULT_CONTRACT
+        or record["intent_ref"] != intent_ref
+        or record["artifact_is_authorization"] is not False
+        or record["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark actual incumbent call result lineage is stale")
+    record["service_step"] = _validate_actual_incumbent_step(
+        record["service_step"],
+        provider_case_ref=provider_case_ref,
+        binding=binding,
+        expected_operation=None,
+    )
+    return record
+
+
+def _actual_attempt_directory_from_events(
+    events: list[Mapping[str, object]],
+) -> Path | None:
+    directories: set[str] = set()
+    for event in events:
+        if event.get("event_kind") != "attempt_prepared":
+            continue
+        value = _runtime_resource_value(event, expected_kind="attempt_directory")
+        if not isinstance(value, Mapping) or set(value) != {"attempt_dir"}:
+            raise ValueError("benchmark actual attempt directory event is not closed")
+        directory = _canonical_attempt_directory(Path(str(value["attempt_dir"])))
+        directories.add(str(directory))
+    if not directories:
+        return None
+    if len(directories) != 1:
+        raise ValueError("benchmark actual attempt directory lineage is stale")
+    return Path(next(iter(directories)))
+
+
+def _read_actual_incumbent_call_intents(
+    *, attempt_dir: Path,
+) -> list[dict[str, Any]]:
+    root = (Path(attempt_dir) / _ACTUAL_DIRECTORY / "incumbent-calls").resolve()
+    if not root.exists():
+        return []
+    if not root.is_dir() or root.parent != (Path(attempt_dir) / _ACTUAL_DIRECTORY).resolve():
+        raise ValueError("benchmark actual incumbent call directory is stale")
+    intents: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*.intent.json")):
+        intent = _sealed_parent(
+            _read_canonical_json(path, name="benchmark actual incumbent call intent"),
+            name="benchmark actual incumbent call intent",
+        )
+        if (
+            intent.get("contract_version") != _ACTUAL_CALL_INTENT_CONTRACT
+            or intent.get("call_kind") not in {"start", "poll", "adopt"}
+            or not isinstance(intent.get("provider_case_ref"), Mapping)
+            or not isinstance(intent.get("service_intent_ref"), Mapping)
+            or intent.get("artifact_is_authorization") is not False
+            or intent.get("execute_binding_enabled") is not False
+        ):
+            raise ValueError("benchmark actual incumbent call intent is invalid")
+        service_intent = _sealed_parent(
+            intent["service_intent_ref"],
+            name="benchmark actual screen-group service intent",
+        )
+        if (
+            service_intent.get("contract_version") != _ACTUAL_INTENT_CONTRACT
+            or not isinstance(service_intent.get("provider_group"), Mapping)
+            or not isinstance(service_intent.get("window_binding"), Mapping)
+        ):
+            raise ValueError("benchmark actual call parent service intent is stale")
+        group = validate_benchmark_v2_hybrid_screen_group_start(
+            service_intent["provider_group"]
+        )
+        binding = validate_benchmark_v2_workflow_window_binding(
+            service_intent["window_binding"]
+        )
+        case_ref = _actual_case_ref(group, intent["provider_case_ref"])
+        if (
+            intent.get("screen_group_ref") != _actual_group_ref(group)
+            or intent.get("window_binding_ref") != binding["window_binding_ref"]
+            or intent.get("capture_ref") != binding["capture_ref"]
+            or intent.get("stage") != binding["stage"]
+        ):
+            raise ValueError("benchmark actual incumbent call parent lineage is stale")
+        intent["provider_group"] = group
+        intent["window_binding"] = binding
+        intent["provider_case_ref"] = case_ref
+        intents.append(intent)
+    return intents
+
+
+def _read_actual_screen_group_service_intents(
+    *, attempt_dir: Path,
+) -> list[dict[str, Any]]:
+    root = (Path(attempt_dir) / _ACTUAL_DIRECTORY).resolve()
+    if not root.exists():
+        return []
+    intents: list[dict[str, Any]] = []
+    for path in sorted(root.glob("*.service-intent.json")):
+        intent = _sealed_parent(
+            _read_canonical_json(path, name="benchmark actual service intent"),
+            name="benchmark actual service intent",
+        )
+        if (
+            intent.get("contract_version") != _ACTUAL_INTENT_CONTRACT
+            or not isinstance(intent.get("provider_group"), Mapping)
+            or not isinstance(intent.get("window_binding"), Mapping)
+            or intent.get("artifact_is_authorization") is not False
+            or intent.get("execute_binding_enabled") is not False
+        ):
+            raise ValueError("benchmark actual service intent is invalid")
+        intent["provider_group"] = validate_benchmark_v2_hybrid_screen_group_start(
+            intent["provider_group"]
+        )
+        intent["window_binding"] = validate_benchmark_v2_workflow_window_binding(
+            intent["window_binding"]
+        )
+        intents.append(intent)
+    return sorted(
+        intents,
+        key=lambda item: (
+            str(item["provider_group"]["partition"]),
+            str(item["provider_group"]["screen_group"]),
+        ),
+    )
+
+
+def _reconcile_actual_operations(
+    *, attempt_dir: Path, service: object
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    intents = _read_actual_incumbent_call_intents(attempt_dir=attempt_dir)
+    screen_group_intents = _read_actual_screen_group_service_intents(
+        attempt_dir=attempt_dir
+    )
+    targets: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+    for intent in intents:
+        case_ref = intent["provider_case_ref"]
+        parent_sha = str(intent["service_intent_ref"]["content_sha256"])
+        key = (
+            str(case_ref["case_id"]),
+            str(case_ref["case_content_sha256"]),
+        )
+        targets.setdefault(parent_sha, {})[key] = intent
+    lookup_hybrid = getattr(service, "lookup_hybrid_operation", None)
+    lookup = getattr(service, "lookup_incumbent_observe", None)
+    cancel = getattr(service, "cancel_operation", None)
+    attest = getattr(service, "attest_actual_operations_stable_zero", None)
+    if not callable(cancel) or not callable(attest) or (
+        any(targets.values()) and not callable(lookup)
+    ) or (
+        screen_group_intents and not callable(lookup_hybrid)
+    ):
+        raise RuntimeError("WorkflowService actual operation recovery is unavailable")
+    terminals: list[dict[str, Any]] = []
+    attestations: list[dict[str, Any]] = []
+    for intent in screen_group_intents:
+        group_terminals: list[dict[str, Any]] = []
+        step_value = lookup_hybrid(
+            screen_group=deepcopy(intent["provider_group"]),
+            window_binding=deepcopy(intent["window_binding"]),
+        )
+        if step_value is not None:
+            step = validate_benchmark_v2_workflow_service_step(step_value)
+            _validate_actual_service_step(
+                step,
+                group=intent["provider_group"],
+                binding=intent["window_binding"],
+            )
+            terminal = _validate_service_terminal(
+                cancel(operation_ref=deepcopy(step["operation_ref"]))
+            )
+            _validate_actual_terminal_successor(
+                terminal=terminal["operation_ref"],
+                supplied=step["operation_ref"],
+            )
+            confirmed = lookup_hybrid(
+                screen_group=deepcopy(intent["provider_group"]),
+                window_binding=deepcopy(intent["window_binding"]),
+            )
+            if confirmed is None or validate_benchmark_v2_workflow_service_step(
+                confirmed
+            )["operation_ref"] != terminal["operation_ref"]:
+                raise ValueError("benchmark actual Hybrid cleanup lookup differs")
+            group_terminals.append(terminal)
+        parent_sha = str(intent["content_sha256"])
+        for key in sorted(targets.get(parent_sha, {})):
+            call_intent = targets[parent_sha][key]
+            step_value = lookup(
+                provider_case_ref=deepcopy(call_intent["provider_case_ref"]),
+                window_binding=deepcopy(call_intent["window_binding"]),
+            )
+            if step_value is None:
+                continue
+            step = _validate_actual_incumbent_step(
+                step_value,
+                provider_case_ref=call_intent["provider_case_ref"],
+                binding=call_intent["window_binding"],
+                expected_operation=None,
+            )
+            terminal = _validate_service_terminal(
+                cancel(operation_ref=deepcopy(step["operation_ref"]))
+            )
+            _validate_actual_terminal_successor(
+                terminal=terminal["operation_ref"],
+                supplied=step["operation_ref"],
+            )
+            confirmed = lookup(
+                provider_case_ref=deepcopy(call_intent["provider_case_ref"]),
+                window_binding=deepcopy(call_intent["window_binding"]),
+            )
+            if confirmed is None or validate_benchmark_v2_workflow_service_step(
+                confirmed
+            )["operation_ref"] != terminal["operation_ref"]:
+                raise ValueError("benchmark actual incumbent cleanup lookup differs")
+            group_terminals.append(terminal)
+        operation_refs = [
+            deepcopy(item["operation_ref"]) for item in group_terminals
+        ]
+        attestation = validate_benchmark_v2_actual_operations_stable_zero(
+            attest(operation_refs=deepcopy(operation_refs))
+        )
+        if attestation["operation_refs"] != operation_refs:
+            raise ValueError(
+                "benchmark actual cleanup attestation operation lineage differs"
+            )
+        terminals.extend(group_terminals)
+        attestations.append(attestation)
+    return terminals, attestations
+
+
+def _validate_actual_incumbent_step(
+    value: object,
+    *,
+    provider_case_ref: Mapping[str, object],
+    binding: Mapping[str, object],
+    expected_operation: Mapping[str, object] | None,
+) -> dict[str, Any]:
+    step = validate_benchmark_v2_workflow_service_step(value)
+    operation = step["operation_ref"]
+    request_ref = {
+        "id": str(provider_case_ref["case_id"]),
+        "content_sha256": str(provider_case_ref["case_content_sha256"]),
+    }
+    if (
+        operation["mode"] != "incumbent_qwen_only"
+        or operation["stage"] != binding["stage"]
+        or operation["window_binding_ref"] != binding["window_binding_ref"]
+        or operation["capture_ref"] != binding["capture_ref"]
+        or operation["request_ref"] != request_ref
+    ):
+        raise ValueError("benchmark actual incumbent service step lineage is stale")
+    if expected_operation is not None and any(
+        operation[name] != expected_operation[name]
+        for name in (
+            "mode",
+            "run_id",
+            "stage",
+            "operation_id",
+            "request_ref",
+            "window_binding_ref",
+            "capture_ref",
+        )
+    ):
+        raise ValueError("benchmark actual incumbent child operation identity is stale")
+    return step
+
+
+def _sealed_record(value: Mapping[str, object]) -> dict[str, Any]:
+    result = deepcopy(dict(value))
+    result["content_sha256"] = content_sha256(result)
+    return result
+
+
+def _write_create_only_json(
+    path: Path, value: Mapping[str, object]
+) -> dict[str, Any]:
+    target = Path(path)
+    if not target.is_absolute() or target != target.resolve():
+        raise ValueError("benchmark actual artifact path must be canonical")
+    record = _sealed_parent(value, name="benchmark actual durable record")
+    raw = canonical_json_bytes(record, pretty=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(target, flags)
+    except FileExistsError:
+        existing = _read_canonical_json(target, name="benchmark actual durable record")
+        if existing != record:
+            raise ValueError("benchmark actual artifact has a different-content replay")
+        with target.open("rb+") as stream:
+            os.fsync(stream.fileno())
+        return existing
+    try:
+        offset = 0
+        while offset < len(raw):
+            written = os.write(descriptor, raw[offset:])
+            if written <= 0:
+                raise OSError("benchmark actual artifact short write")
+            offset += written
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    existing = _read_canonical_json(target, name="benchmark actual durable record")
+    if existing != record:
+        raise ValueError("benchmark actual durable record differs after fsync")
+    return existing
+
+
+def _read_canonical_json(path: Path, *, name: str) -> dict[str, Any]:
+    raw = Path(path).read_bytes()
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"{name} is not canonical UTF-8 JSON") from error
+    if not isinstance(decoded, Mapping) or canonical_json_bytes(decoded, pretty=True) != raw:
+        raise ValueError(f"{name} is not canonical")
+    return deepcopy(dict(decoded))
+
+
+def _actual_group_ref(group: Mapping[str, object]) -> dict[str, str]:
+    return {
+        "id": str(group["screen_group"]),
+        "content_sha256": str(group["content_sha256"]),
+    }
+
+
+def _read_actual_service_result(
+    path: Path,
+    *,
+    intent_ref: Mapping[str, object],
+    group: Mapping[str, object],
+    binding: Mapping[str, object],
+) -> dict[str, Any] | None:
+    if not Path(path).exists():
+        return None
+    record = _sealed_parent(
+        _read_canonical_json(path, name="benchmark actual service result"),
+        name="benchmark actual service result",
+    )
+    if (
+        set(record)
+        != {
+            "contract_version",
+            "intent_ref",
+            "provider_group_ref",
+            "service_step",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        or record["contract_version"] != _ACTUAL_RESULT_CONTRACT
+        or record["intent_ref"] != intent_ref
+        or record["provider_group_ref"] != _actual_group_ref(group)
+        or record["artifact_is_authorization"] is not False
+        or record["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark actual service result lineage is stale")
+    step = validate_benchmark_v2_workflow_service_step(record["service_step"])
+    _validate_actual_service_step(step, group=group, binding=binding)
+    return record
+
+
+def _validate_actual_service_step(
+    step: Mapping[str, object],
+    *,
+    group: Mapping[str, object],
+    binding: Mapping[str, object],
+) -> None:
+    operation = validate_benchmark_v2_workflow_service_operation_ref(
+        step["operation_ref"]
+    )
+    if operation["mode"] != "hybrid_v1_1":
+        raise ValueError("benchmark actual service start mode is stale")
+    _validate_probe_operation_lineage(
+        operation=operation,
+        binding=binding,
+        request_ref=group["request_ref"],
+    )
+
+
+def _validate_actual_terminal_successor(
+    *,
+    terminal: Mapping[str, object],
+    supplied: Mapping[str, object],
+) -> None:
+    returned = validate_benchmark_v2_workflow_service_operation_ref(terminal)
+    current = validate_benchmark_v2_workflow_service_operation_ref(supplied)
+    immutable = (
+        "mode",
+        "run_id",
+        "stage",
+        "operation_id",
+        "request_ref",
+        "window_binding_ref",
+        "capture_ref",
+        "worker_ref",
+    )
+    if any(returned[name] != current[name] for name in immutable):
+        raise ValueError("benchmark actual cleanup full operation lineage is stale")
+    if returned["content_sha256"] == current["content_sha256"]:
+        if returned != current:
+            raise ValueError("benchmark actual cleanup same-ref replay differs")
+        return
+    if (
+        returned["predecessor_content_sha256"] != current["content_sha256"]
+        or returned["workflow_state_ref"]["revision"]
+        <= current["workflow_state_ref"]["revision"]
+        or returned["stage_execution_ref"]["revision"]
+        <= current["stage_execution_ref"]["revision"]
+    ):
+        raise ValueError("benchmark actual cleanup successor lineage is stale")
+
+
+def _validate_actual_projection(
+    value: object,
+    *,
+    group: Mapping[str, object],
+    lifecycle_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    projection = _sealed_parent(value, name="benchmark actual screen-group projection")
+    if (
+        projection.get("contract_version")
+        != "benchmark_v2_actual_screen_group_projection_v1"
+        or projection.get("partition") != group["partition"]
+        or projection.get("screen_group") != group["screen_group"]
+        or projection.get("request_ref") != group["request_ref"]
+        or projection.get("lifecycle_ref") != lifecycle_ref
+        or projection.get("artifact_is_authorization") is not False
+        or projection.get("execute_binding_enabled") is not False
+    ):
+        raise ValueError("benchmark actual screen-group projection lineage is stale")
+    stable = _sealed_parent(lifecycle_ref, name="benchmark actual lifecycle ref")
+    if projection.get("window_close_ref") != stable.get("window_close_ref"):
+        raise ValueError("benchmark actual projection cleanup lineage is stale")
+    if projection.get("execution_refs") != stable.get("execution_refs"):
+        raise ValueError("benchmark actual projection execution lineage is stale")
+    rows = projection.get("rows")
+    expected_pairs = {
+        (str(case["case_id"]), arm)
+        for case in group["case_refs"]
+        for arm in (
+            "qwen_only",
+            "omni_only_discovery",
+            "omni_to_qwen",
+            "omni_to_qwen_vista",
+        )
+    }
+    if not isinstance(rows, list) or len(rows) != 20:
+        raise ValueError("benchmark actual projection target multiset is incomplete")
+    observed_pairs: set[tuple[str, str]] = set()
+    for row in rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("case_ref"), Mapping):
+            raise ValueError("benchmark actual projection row is invalid")
+        observed_pairs.add((str(row["case_ref"].get("case_id")), str(row.get("arm_id"))))
+        observation = row.get("observation")
+        receipts = (
+            observation.get("provider_dispatch_receipt_refs")
+            if isinstance(observation, Mapping)
+            else None
+        )
+        if not isinstance(receipts, list) or not receipts:
+            raise ValueError("benchmark actual projection dispatch evidence is missing")
+        for receipt in receipts:
+            if (
+                not isinstance(receipt, Mapping)
+                or not isinstance(receipt.get("provider"), str)
+                or not isinstance(receipt.get("content_sha256"), str)
+                or len(str(receipt["content_sha256"])) != 64
+            ):
+                raise ValueError("benchmark actual projection dispatch evidence is invalid")
+    if observed_pairs != expected_pairs:
+        raise ValueError("benchmark actual projection target multiset is stale")
+    return projection
+
+
+def _read_actual_projection_record(
+    path: Path,
+    *,
+    attempt: Mapping[str, object],
+    group: Mapping[str, object],
+) -> dict[str, Any] | None:
+    if not Path(path).exists():
+        return None
+    record = _sealed_parent(
+        _read_canonical_json(path, name="benchmark actual projection record"),
+        name="benchmark actual projection record",
+    )
+    if (
+        set(record)
+        != {
+            "contract_version",
+            "attempt_ref",
+            "provider_group_ref",
+            "projection",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        or record["contract_version"] != _ACTUAL_PROJECTION_RECORD_CONTRACT
+        or record["attempt_ref"] != attempt
+        or record["provider_group_ref"] != _actual_group_ref(group)
+        or record["artifact_is_authorization"] is not False
+        or record["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark actual projection has a different-content replay")
+    projection = _sealed_parent(
+        record["projection"], name="benchmark actual recorded projection"
+    )
+    if (
+        projection.get("screen_group") != group["screen_group"]
+        or projection.get("partition") != group["partition"]
+        or projection.get("request_ref") != group["request_ref"]
+    ):
+        raise ValueError("benchmark actual projection replay lineage is stale")
+    return projection
 
 
 def _sealed_parent(value: Mapping[str, object], *, name: str) -> dict[str, Any]:
