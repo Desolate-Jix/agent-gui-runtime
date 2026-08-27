@@ -30,6 +30,7 @@ htmlcov/
 /tools/
 /.learnings/
 /.locus/
+/.worktrees/
 .runtime-*.pid
 demo.mp4
 tmp_*.ps1
