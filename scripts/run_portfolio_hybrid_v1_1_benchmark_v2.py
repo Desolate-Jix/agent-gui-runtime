@@ -7,10 +7,29 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 from typing import Iterator, Mapping, Sequence
 import uuid
 
+from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID
+from app.learn.hybrid.benchmark_v2_lifecycle import (
+    compose_benchmark_v2_lifecycle_bundle_v3,
+    materialize_benchmark_v2_attempt_ledger_projections,
+    project_benchmark_v2_attempt_journal,
+    project_benchmark_v2_attempt_journal_terminal_event,
+    project_benchmark_v2_attempt_lifecycle,
+    project_benchmark_v2_cleanup_lifecycle,
+    project_benchmark_v2_runner_events,
+    project_benchmark_v2_screen_group_lifecycles,
+    read_benchmark_v2_attempt_journal,
+    select_benchmark_v2_attempt_ledger_horizon,
+)
+from app.learn.hybrid.benchmark_v2_predictions import (
+    materialize_benchmark_v2_accepted_regression_score_input_v2,
+    project_benchmark_v2_actual_body,
+    project_benchmark_v2_actual_result,
+)
 from app.learn.hybrid.benchmark_v2_runtime import (
     get_production_benchmark_v2_runtime,
 )
@@ -37,6 +56,7 @@ _SAFETY = {
     "artifact_is_authorization": False,
     "execute_binding_enabled": False,
 }
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -108,6 +128,34 @@ def _write_json_create_or_identical(
             os.fsync(stream.fileno())
 
 
+def _write_pretty_json_create_or_identical(
+    path: Path, value: Mapping[str, object]
+) -> None:
+    destination = Path(path).resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    expected = (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    try:
+        with destination.open("xb") as stream:
+            stream.write(expected)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        with destination.open("rb") as stream:
+            if stream.read() != expected:
+                raise ValueError(
+                    f"existing {destination.name} differs from authoritative bytes"
+                )
+
+
 def _file_ref(path: Path, value: Mapping[str, object]) -> dict[str, object]:
     resolved = Path(path).resolve()
     return {
@@ -117,7 +165,7 @@ def _file_ref(path: Path, value: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _read_ledger(path: Path) -> list[dict[str, object]]:
+def _read_ledger_structure(path: Path) -> list[dict[str, object]]:
     ledger = Path(path).resolve()
     if not ledger.exists():
         return []
@@ -169,6 +217,13 @@ def _read_ledger(path: Path) -> list[dict[str, object]]:
         _validate_event_payload(payload, event_type=str(event["event_type"]))
         previous = hashlib.sha256(_canonical_bytes(value)).hexdigest()
         result.append(deepcopy(dict(value)))
+    return result
+
+
+def _read_ledger(path: Path) -> list[dict[str, object]]:
+    result = _read_ledger_structure(path)
+    ledger = Path(path).resolve()
+    raw_lines = ledger.read_bytes().split(b"\n")[:-1] if ledger.exists() else []
     _validate_ledger_records(result, raw_lines=raw_lines)
     return result
 
@@ -1427,6 +1482,332 @@ def _dry_run(args: argparse.Namespace, runtime: object) -> dict[str, object]:
     return result
 
 
+def _lexical_path(raw: object, *, name: str) -> Path:
+    if not isinstance(raw, str) or not raw:
+        raise ValueError(f"{name} is required")
+    if any(part in {".", ".."} for part in raw.replace("\\", "/").split("/")):
+        raise ValueError(f"{name} has a lexical alias")
+    platform_spelling = raw.replace("/", os.sep).replace("\\", os.sep)
+    if os.path.normpath(platform_spelling) != platform_spelling:
+        raise ValueError(f"{name} has a lexical alias")
+    candidate = Path(platform_spelling)
+    return Path(os.path.abspath(candidate))
+
+
+def _is_reparse(path: Path) -> bool:
+    candidate = Path(path)
+    if candidate.is_symlink():
+        return True
+    try:
+        attributes = int(getattr(candidate.lstat(), "st_file_attributes", 0))
+    except OSError:
+        return False
+    return bool(attributes & int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)))
+
+
+def _require_ordinary_path(path: Path, *, name: str, kind: str) -> Path:
+    absolute = Path(os.path.abspath(path))
+    existing = absolute if absolute.exists() or _is_reparse(absolute) else absolute.parent
+    for candidate in [existing, *existing.parents]:
+        if _is_reparse(candidate):
+            raise ValueError(f"{name} traverses a symlink, junction, or reparse point")
+    if absolute.resolve(strict=False) != absolute:
+        raise ValueError(f"{name} resolves through an alias")
+    if kind == "file" and not absolute.is_file():
+        raise ValueError(f"{name} fixed file is missing")
+    if kind == "directory" and not absolute.is_dir():
+        raise ValueError(f"{name} directory is missing")
+    return absolute
+
+
+def _materializer_attempt_paths(
+    *,
+    prefix: Sequence[Mapping[str, object]],
+    output_root: Path,
+) -> dict[str, Path]:
+    attempt_dirs: dict[str, Path] = {}
+    for envelope in prefix:
+        payload = envelope["event"]["event_payload"]
+        attempt = payload["attempt_ref"]
+        attempt_id = str(attempt["attempt_id"])
+        attempt_key = str(attempt["content_sha256"])
+        raw_attempt_dir = str(payload["attempt_dir"])
+        attempt_dir = Path(raw_attempt_dir)
+        expected = output_root / attempt_id
+        if (
+            raw_attempt_dir != str(expected)
+            or attempt_dir.parent != output_root
+            or attempt_dir.name != attempt_id
+        ):
+            raise ValueError("materializer attempt directory is not the immediate fixed child")
+        ordinary = _require_ordinary_path(
+            attempt_dir, name="materializer attempt directory", kind="directory"
+        )
+        prior = attempt_dirs.setdefault(attempt_key, ordinary)
+        if prior != ordinary:
+            raise ValueError("materializer attempt directory lineage differs")
+        event_type = str(envelope["event"]["event_type"])
+        status = str(payload["status"])
+        fixed_name = None
+        if event_type == "regression_attempt" and status == "body_complete":
+            fixed_name = "body.json"
+        elif event_type == "cleanup":
+            fixed_name = "cleanup.json"
+        elif event_type == "result":
+            fixed_name = "result.json"
+        if fixed_name is not None:
+            _require_ordinary_path(
+                ordinary / fixed_name,
+                name=f"materializer {fixed_name}",
+                kind="file",
+            )
+    return attempt_dirs
+
+
+def _materialize_score_input(args: argparse.Namespace) -> dict[str, object]:
+    if args.partition != "regression":
+        raise ValueError("score-input materialization is regression-only")
+    provider_manifest_path = _require_ordinary_path(
+        _lexical_path(args.provider_manifest, name="provider manifest"),
+        name="provider manifest",
+        kind="file",
+    )
+    if provider_manifest_path.name != "benchmark-v2-provider-manifest.json":
+        raise ValueError(
+            "provider manifest basename must be benchmark-v2-provider-manifest.json"
+        )
+    provider_corpus_path = _require_ordinary_path(
+        provider_manifest_path.parent / "provider-corpus.v2.json",
+        name="provider corpus",
+        kind="file",
+    )
+    ledger_path = _require_ordinary_path(
+        _lexical_path(args.attempt_ledger, name="attempt ledger"),
+        name="attempt ledger",
+        kind="file",
+    )
+    output_root = _require_ordinary_path(
+        _lexical_path(args.output_root, name="output root"),
+        name="output root",
+        kind="directory",
+    )
+    output_path = _lexical_path(args.output, name="materialized output")
+    _require_ordinary_path(
+        output_path, name="materialized output", kind="pending"
+    )
+    if len(
+        {
+            provider_manifest_path,
+            provider_corpus_path,
+            ledger_path,
+            output_root,
+            output_path,
+        }
+    ) != 5:
+        raise ValueError("materializer paths are aliased")
+
+    ledger = _read_ledger_structure(ledger_path)
+    horizon = select_benchmark_v2_attempt_ledger_horizon(
+        runner_ledger_events=ledger
+    )
+    prefix = ledger[: horizon.selected_result_terminal_sequence + 1]
+    attempt_dirs = _materializer_attempt_paths(
+        prefix=prefix, output_root=output_root
+    )
+    selected_evidence_paths = {
+        path
+        for attempt_dir in attempt_dirs.values()
+        for path in (
+            attempt_dir,
+            attempt_dir / "body.json",
+            attempt_dir / "cleanup.json",
+            attempt_dir / "result.json",
+        )
+    }
+    if output_path in selected_evidence_paths:
+        raise ValueError("materialized output aliases a selected evidence path")
+    raw_lines = ledger_path.read_bytes().split(b"\n")[:-1]
+    _validate_ledger_records(
+        prefix,
+        raw_lines=raw_lines[: horizon.selected_result_terminal_sequence + 1],
+    )
+
+    bodies: list[dict[str, object]] = []
+    cleanups: list[dict[str, object]] = []
+    results: list[dict[str, object]] = []
+    cleanup_projections: list[dict[str, object]] = []
+    cleanup_projection_by_attempt: dict[str, dict[str, object]] = {}
+    first_open_attempt_keys: list[str] = []
+    selected_raw_attempt: dict[str, object] | None = None
+    selected_attempt_dir: Path | None = None
+    selected_body: dict[str, object] | None = None
+    selected_cleanup: dict[str, object] | None = None
+    selected_result: dict[str, object] | None = None
+    selected_cleanup_projection: dict[str, object] | None = None
+    selected_key = horizon.selected_attempt_ref["content_sha256"]
+    for envelope in prefix:
+        event = envelope["event"]
+        payload = event["event_payload"]
+        raw_attempt = deepcopy(dict(payload["attempt_ref"]))
+        key = str(raw_attempt["content_sha256"])
+        attempt_dir = attempt_dirs[key]
+        if event["event_type"] == "regression_attempt" and payload["status"] == "opened":
+            first_open_attempt_keys.append(key)
+        if key == selected_key:
+            selected_raw_attempt = raw_attempt
+            selected_attempt_dir = attempt_dir
+        if event["event_type"] == "regression_attempt" and payload["status"] == "body_complete":
+            body = _read_canonical_json_file(attempt_dir / "body.json", name="actual body")
+            bodies.append(body)
+            if key == selected_key:
+                selected_body = body
+        elif event["event_type"] == "cleanup":
+            cleanup = _read_canonical_json_file(
+                attempt_dir / "cleanup.json", name="cleanup receipt"
+            )
+            projection = project_benchmark_v2_cleanup_lifecycle(
+                attempt_ref=raw_attempt,
+                cleanup_receipt=cleanup,
+            )
+            cleanups.append(cleanup)
+            cleanup_projections.append(projection)
+            cleanup_projection_by_attempt[key] = projection
+            if key == selected_key:
+                selected_cleanup = cleanup
+                selected_cleanup_projection = projection
+        elif event["event_type"] == "result":
+            result = _read_canonical_json_file(attempt_dir / "result.json", name="runner result")
+            results.append(result)
+            if key == selected_key:
+                selected_result = result
+    if any(
+        value is None
+        for value in (
+            selected_raw_attempt,
+            selected_attempt_dir,
+            selected_body,
+            selected_cleanup,
+            selected_result,
+            selected_cleanup_projection,
+        )
+    ):
+        raise ValueError("selected materializer evidence is incomplete")
+    assert selected_raw_attempt is not None
+    assert selected_attempt_dir is not None
+    assert selected_body is not None
+    assert selected_cleanup is not None
+    assert selected_result is not None
+    assert selected_cleanup_projection is not None
+
+    journal_path = _require_ordinary_path(
+        _PROJECT_ROOT
+        / "runtime_state"
+        / "benchmark-v2-attempts"
+        / f"{selected_raw_attempt['content_sha256']}.jsonl",
+        name="selected attempt journal",
+        kind="file",
+    )
+    if output_path == journal_path:
+        raise ValueError("materialized output aliases the selected attempt journal")
+    journal = read_benchmark_v2_attempt_journal(
+        journal_path=journal_path,
+        attempt_ref=selected_raw_attempt,
+    )
+    terminal_projection = project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=selected_raw_attempt,
+        journal_events=journal,
+        cleanup_receipt=selected_cleanup,
+        cleanup_projection=selected_cleanup_projection,
+    )
+    journal_projection = project_benchmark_v2_attempt_journal(
+        attempt_ref=selected_raw_attempt,
+        journal_events=journal,
+        terminal_event_projection=terminal_projection,
+        cleanup_projection=selected_cleanup_projection,
+    )
+    screen_projections = project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=selected_raw_attempt,
+        screen_group_projections=selected_body["screen_group_results"],
+    )
+    attempt_lifecycle = project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=selected_raw_attempt,
+        journal_events=journal,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=selected_cleanup_projection,
+        terminal_event_projection=terminal_projection,
+        screen_group_lifecycle_projections=screen_projections,
+    )
+    runner_events = project_benchmark_v2_runner_events(
+        partition="regression",
+        runner_ledger_events=prefix,
+        actual_body=bodies,
+        actual_result=results,
+        cleanup_receipt=cleanups,
+        cleanup_projection=cleanup_projections,
+    )
+    ledger_materialization = materialize_benchmark_v2_attempt_ledger_projections(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        runner_ledger_events=prefix,
+        runner_event_projections=runner_events,
+        attempt_lifecycle_projections=[attempt_lifecycle],
+    )
+    bundle_cleanup_projections = [
+        cleanup_projection_by_attempt[key]
+        for key in first_open_attempt_keys
+        if key in cleanup_projection_by_attempt
+    ]
+    lifecycle_bundle = compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        attempt_ref=selected_raw_attempt,
+        raw_ledger_prefix_projection=ledger_materialization.runner_ledger_prefix_projection,
+        projected_attempt_ledger=ledger_materialization.projected_attempt_ledger,
+        selected_attempt_lifecycle_projection=attempt_lifecycle,
+        cleanup_lifecycle_projection=selected_cleanup_projection,
+        cleanup_lifecycle_projections=bundle_cleanup_projections,
+        journal_terminal_event_projection=terminal_projection,
+        attempt_journal_projection=journal_projection,
+        screen_group_lifecycle_projections=screen_projections,
+        runner_event_projections=runner_events,
+        cleanup_receipt=selected_cleanup,
+    )
+    actual_body_bytes = (selected_attempt_dir / "body.json").read_bytes()
+    actual_result_bytes = (selected_attempt_dir / "result.json").read_bytes()
+    cleanup_receipt_bytes = (selected_attempt_dir / "cleanup.json").read_bytes()
+    provider_manifest_bytes = provider_manifest_path.read_bytes()
+    provider_corpus_bytes = provider_corpus_path.read_bytes()
+    body_projection = project_benchmark_v2_actual_body(
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    result_projection = project_benchmark_v2_actual_result(
+        actual_result_bytes=actual_result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=selected_attempt_dir,
+        actual_body_projection=body_projection,
+        cleanup_projection=selected_cleanup_projection,
+        runner_ledger_prefix_projection=ledger_materialization.runner_ledger_prefix_projection,
+        result_event_projection=runner_events[horizon.selected_result_terminal_sequence],
+    )
+    accepted = materialize_benchmark_v2_accepted_regression_score_input_v2(
+        actual_body_bytes=actual_body_bytes,
+        actual_result_bytes=actual_result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=selected_attempt_dir,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+        runner_ledger_prefix_projection=ledger_materialization.runner_ledger_prefix_projection,
+        attempt_journal_projection=journal_projection,
+        actual_body_projection=body_projection,
+        actual_result_projection=result_projection,
+        lifecycle_bundle_v3=lifecycle_bundle,
+    )
+    _write_pretty_json_create_or_identical(output_path, accepted)
+    return accepted
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Portfolio Hybrid v1.1 Benchmark-v2")
     parser.add_argument("--provider-manifest")
@@ -1438,6 +1819,7 @@ def _parser() -> argparse.ArgumentParser:
     action.add_argument("--run-timeout-probe", action="store_true")
     action.add_argument("--cleanup-open-attempts", action="store_true")
     action.add_argument("--cleanup-only", action="store_true")
+    action.add_argument("--materialize-score-input", action="store_true")
     parser.add_argument("--providers")
     parser.add_argument("--attempt-ledger")
     parser.add_argument("--ledger-root")
@@ -1460,7 +1842,33 @@ def _reject(args: argparse.Namespace, *names: str) -> None:
 
 
 def run_cli(argv: Sequence[str]) -> dict[str, object]:
-    args = _parser().parse_args(list(argv))
+    argv_list = list(argv)
+    args = _parser().parse_args(argv_list)
+    if args.materialize_score_input:
+        _require(
+            args,
+            "provider_manifest",
+            "partition",
+            "attempt_ledger",
+            "output_root",
+            "output",
+        )
+        forbidden = ("providers", "ledger_root", "holdout_authorization")
+        present = [
+            name
+            for name in forbidden
+            if any(
+                token == "--" + name.replace("_", "-")
+                or token.startswith("--" + name.replace("_", "-") + "=")
+                for token in argv_list
+            )
+        ]
+        if present:
+            raise ValueError(
+                "runner arguments are not valid for this action: "
+                + ", ".join(present)
+            )
+        return _materialize_score_input(args)
     runtime = get_production_benchmark_v2_runtime()
     if args.dry_run:
         _require(args, "provider_manifest", "partition", "output")

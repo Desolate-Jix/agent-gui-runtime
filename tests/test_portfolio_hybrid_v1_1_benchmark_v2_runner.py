@@ -5,6 +5,7 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Mapping
 
 import pytest
@@ -494,6 +495,655 @@ def test_actual_reserves_unique_attempts_before_dispatch_and_preserves_both_chai
         }
     assert all(group.closed for group in runtime.owned_groups)
     assert all(value == 0 for value in runtime.resource_counts().values())
+
+
+def _materializer_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    attempt_count: int = 1,
+    prior_incomplete: bool = False,
+) -> tuple[list[str], Path, Path, Path, dict[str, object]]:
+    runtime = _DeterministicRuntime()
+    _install_runtime(monkeypatch, runtime)
+    provider_manifest = tmp_path / "benchmark-v2-provider-manifest.json"
+    provider_manifest.write_bytes(b"{}\n")
+    provider_corpus = tmp_path / "provider-corpus.v2.json"
+    provider_corpus.write_bytes(b"{}\n")
+    ledger = tmp_path / "ledger" / "regression" / "events.jsonl"
+    output_root = tmp_path / "attempts"
+    if prior_incomplete:
+        runner._reserve_attempt(
+            ledger_path=ledger,
+            output_root=output_root,
+            mode="actual_models",
+            provider_id=None,
+        )
+    results = []
+    for _index in range(attempt_count):
+        results.append(
+            runner.run_cli(
+                [
+                    "--provider-manifest",
+                    str(provider_manifest),
+                    "--partition",
+                    "regression",
+                    "--actual-models",
+                    "--attempt-ledger",
+                    str(ledger),
+                    "--output-root",
+                    str(output_root),
+                ]
+            )
+        )
+    calls: dict[str, object] = {"accepted": []}
+    project_root = tmp_path / "project-root"
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", project_root)
+    for result in results:
+        attempt = result["attempt_ref"]
+        journal = (
+            project_root
+            / "runtime_state"
+            / "benchmark-v2-attempts"
+            / f"{attempt['content_sha256']}.jsonl"
+        )
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_bytes(b"{}\n")
+
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_cleanup_lifecycle",
+        lambda **kwargs: {"kind": "cleanup", "attempt_ref": kwargs["attempt_ref"]},
+    )
+    monkeypatch.setattr(
+        runner,
+        "read_benchmark_v2_attempt_journal",
+        lambda **kwargs: [{"kind": "journal", "path": str(kwargs["journal_path"])}],
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_attempt_journal_terminal_event",
+        lambda **kwargs: {"kind": "terminal"},
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_attempt_journal",
+        lambda **kwargs: {"kind": "journal-projection"},
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_screen_group_lifecycles",
+        lambda **kwargs: [{"kind": "screen", "index": index} for index in range(12)],
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_attempt_lifecycle",
+        lambda **kwargs: {"kind": "attempt-lifecycle"},
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_runner_events",
+        lambda **kwargs: [
+            {"kind": "runner-event", "sequence": index}
+            for index, _item in enumerate(kwargs["runner_ledger_events"])
+        ],
+    )
+    monkeypatch.setattr(
+        runner,
+        "materialize_benchmark_v2_attempt_ledger_projections",
+        lambda **kwargs: SimpleNamespace(
+            runner_ledger_prefix_projection={"kind": "prefix"},
+            projected_attempt_ledger={"kind": "projected-ledger"},
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "compose_benchmark_v2_lifecycle_bundle_v3",
+        lambda **kwargs: {"kind": "lifecycle-bundle"},
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_actual_body",
+        lambda **kwargs: {"kind": "body-projection"},
+    )
+    monkeypatch.setattr(
+        runner,
+        "project_benchmark_v2_actual_result",
+        lambda **kwargs: {"kind": "result-projection"},
+    )
+
+    def _accepted(**kwargs: object) -> dict[str, object]:
+        calls["accepted"].append(kwargs)
+        return _sealed(
+            {
+                "contract_version": "benchmark_v2_accepted_regression_score_input_v2",
+                "selected_attempt_sha256": results[0]["attempt_ref"]["content_sha256"],
+            }
+        )
+
+    monkeypatch.setattr(
+        runner,
+        "materialize_benchmark_v2_accepted_regression_score_input_v2",
+        _accepted,
+    )
+    argv = [
+        "--provider-manifest",
+        str(provider_manifest),
+        "--partition",
+        "regression",
+        "--materialize-score-input",
+        "--attempt-ledger",
+        str(ledger),
+        "--output-root",
+        str(output_root),
+        "--output",
+        str(tmp_path / "accepted-run-ref.json"),
+    ]
+    return argv, ledger, output_root, provider_manifest, calls
+
+
+def test_materialize_score_input_is_offline_and_passes_fixed_trusted_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    getter_calls = 0
+
+    def _forbid_runtime() -> object:
+        nonlocal getter_calls
+        getter_calls += 1
+        raise AssertionError("offline materializer acquired Runtime")
+
+    monkeypatch.setattr(runner, "get_production_benchmark_v2_runtime", _forbid_runtime)
+
+    first = runner.run_cli(argv)
+    second = runner.run_cli(argv)
+
+    assert getter_calls == 0
+    assert first == second == _read_json(Path(argv[-1]))
+    assert Path(argv[-1]).read_bytes() == (
+        json.dumps(first, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    assert len(calls["accepted"]) == 2
+    trusted = calls["accepted"][0]
+    chain = _read_chain(ledger)
+    selected_dir = Path(chain[0]["event"]["event_payload"]["attempt_dir"])
+    assert trusted["actual_body_bytes"] == (selected_dir / "body.json").read_bytes()
+    assert trusted["actual_result_bytes"] == (selected_dir / "result.json").read_bytes()
+    assert trusted["cleanup_receipt_bytes"] == (selected_dir / "cleanup.json").read_bytes()
+    assert trusted["expected_attempt_dir"] == selected_dir.resolve()
+    assert trusted["provider_manifest_bytes"] == provider_manifest.read_bytes()
+    assert trusted["provider_corpus_bytes"] == (
+        provider_manifest.parent / "provider-corpus.v2.json"
+    ).read_bytes()
+
+
+def test_materialize_score_input_true_offline_producer_is_deterministic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.learn.hybrid.benchmark_v2_privileged_projector import (
+        project_provider_corpus,
+    )
+    from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_isolation import (
+        PARENT_PATH,
+        _canonical_bytes as canonical_pretty_bytes,
+        _provider_manifest_value,
+    )
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle import (
+        _s13_attempt,
+        _s13_cleanup,
+        _s13_journal,
+        _s13_screen_projection,
+    )
+
+    provider_corpus_path = tmp_path / "provider-corpus.v2.json"
+    project_provider_corpus(
+        parent_manifest_path=PARENT_PATH,
+        output_path=provider_corpus_path,
+    )
+    provider_corpus = _read_json(provider_corpus_path)
+    provider_manifest = _provider_manifest_value(
+        provider_corpus,
+        hashlib.sha256(provider_corpus_path.read_bytes()).hexdigest(),
+    )
+    provider_manifest_path = tmp_path / "benchmark-v2-provider-manifest.json"
+    provider_manifest_path.write_bytes(canonical_pretty_bytes(provider_manifest))
+
+    cases_by_group: dict[str, list[dict[str, str]]] = {}
+    for case in provider_corpus["cases"]:
+        if case["partition"] != "regression":
+            continue
+        cases_by_group.setdefault(str(case["screen_group"]), []).append(
+            {
+                "case_id": str(case["case_id"]),
+                "case_content_sha256": content_sha256(case),
+            }
+        )
+    assert len(cases_by_group) == 12
+    assert {len(values) for values in cases_by_group.values()} == {5}
+
+    attempt = _s13_attempt(attempt_id="attempt-regression-true-offline")
+    output_root = tmp_path / "attempts"
+    attempt_dir = output_root / str(attempt["attempt_id"])
+    attempt_dir.mkdir(parents=True)
+    screens: list[dict[str, object]] = []
+    for screen_index, (screen_group, case_refs) in enumerate(
+        sorted(cases_by_group.items())
+    ):
+        screen = _s13_screen_projection(
+            attempt=attempt,
+            screen_group=screen_group,
+            case_refs_override=case_refs,
+            evidence_width=1280 + screen_index,
+        )
+        for row in screen["rows"]:
+            if row["arm_id"] == "qwen_only":
+                row["observation"]["response"] = {
+                    "screen_reading": {
+                        "screen_inventory": {"available_actions": []}
+                    }
+                }
+            elif row["arm_id"] == "omni_to_qwen_vista":
+                row["observation"]["review_projection"] = {"proposals": []}
+        screen.pop("content_sha256")
+        screens.append(seal_immutable(screen))
+    body = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_actual_body_v1",
+            "attempt_ref": attempt,
+            "partition": "regression",
+            "screen_group_results": screens,
+            "body_status": "complete",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    cleanup = _s13_cleanup(attempt)
+    body_path = attempt_dir / "body.json"
+    cleanup_path = attempt_dir / "cleanup.json"
+    body_path.write_bytes(_canonical(body) + b"\n")
+    cleanup_path.write_bytes(_canonical(cleanup) + b"\n")
+    ledger = tmp_path / "ledger" / "regression" / "events.jsonl"
+    runner._append_ledger_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=runner._attempt_payload(
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            status="opened",
+            output_ref=None,
+        ),
+    )
+    runner._append_ledger_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=runner._attempt_payload(
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            status="body_complete",
+            output_ref=runner._file_ref(body_path, body),
+        ),
+    )
+    runner._append_ledger_event(
+        ledger,
+        event_type="cleanup",
+        payload=runner._cleanup_payload(
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            cleanup_receipt_ref=runner._file_ref(cleanup_path, cleanup),
+            resource_counts=cleanup["resource_counts"],
+        ),
+    )
+    pre_result_ref = runner._pre_result_ref_from_ledger(
+        ledger, attempt_ref=attempt
+    )
+    result = runner._seal(
+        {
+            "contract_version": "benchmark_v2_runner_actual_result_v2",
+            "attempt_ref": attempt,
+            "attempt_dir": str(attempt_dir.resolve()),
+            "body_ref": runner._file_ref(body_path, body),
+            "cleanup_receipt_ref": runner._file_ref(cleanup_path, cleanup),
+            "attempt_ledger_pre_result_ref": pre_result_ref,
+            "screen_group_count": 12,
+            "status": "terminal",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    runner._append_result_file_event(
+        ledger_path=ledger,
+        attempt_ref=attempt,
+        attempt_dir=attempt_dir,
+        result=result,
+    )
+
+    project_root = tmp_path / "project-root"
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", project_root)
+    journal_path = (
+        project_root
+        / "runtime_state"
+        / "benchmark-v2-attempts"
+        / f"{attempt['content_sha256']}.jsonl"
+    )
+    journal_path.parent.mkdir(parents=True)
+    journal_path.write_bytes(
+        b"".join(
+            _canonical(event) + b"\n"
+            for event in _s13_journal(attempt=attempt, cleanup=cleanup)
+        )
+    )
+    getter_calls = 0
+
+    def forbid_runtime() -> object:
+        nonlocal getter_calls
+        getter_calls += 1
+        raise AssertionError("offline materializer acquired Runtime")
+
+    monkeypatch.setattr(runner, "get_production_benchmark_v2_runtime", forbid_runtime)
+    output_path = tmp_path / "accepted-run-ref.json"
+    argv = [
+        "--provider-manifest",
+        str(provider_manifest_path),
+        "--partition",
+        "regression",
+        "--materialize-score-input",
+        "--attempt-ledger",
+        str(ledger),
+        "--output-root",
+        str(output_root),
+        "--output",
+        str(output_path),
+    ]
+
+    first = runner.run_cli(argv)
+    first_bytes = output_path.read_bytes()
+    second = runner.run_cli(argv)
+
+    assert getter_calls == 0
+    assert first == second == _read_json(output_path)
+    assert output_path.read_bytes() == first_bytes
+    assert first["contract_version"] == (
+        "benchmark_v2_accepted_regression_score_input_v2"
+    )
+    assert all(value == 0 for value in cleanup["resource_counts"].values())
+
+
+def test_materialize_score_input_ignores_selected_suffix_artifact_damage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path, attempt_count=2
+    )
+    chain = _read_chain(ledger)
+    suffix_dir = Path(chain[4]["event"]["event_payload"]["attempt_dir"])
+    (suffix_dir / "body.json").write_bytes(b"damaged suffix")
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("Runtime acquired")),
+    )
+
+    runner.run_cli(argv)
+
+    assert len(calls["accepted"]) == 1
+
+
+def test_materialize_score_input_skips_prior_incomplete_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path, prior_incomplete=True
+    )
+
+    result = runner.run_cli(argv)
+
+    chain = _read_chain(ledger)
+    assert chain[0]["event"]["event_payload"]["status"] == "opened"
+    assert result["selected_attempt_sha256"] == chain[1]["event"]["event_payload"][
+        "attempt_ref"
+    ]["content_sha256"]
+    assert len(calls["accepted"]) == 1
+
+
+def test_materialize_score_input_rejects_corrupt_structural_suffix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path, attempt_count=2
+    )
+    chain = _read_chain(ledger)
+    chain[-1]["event_sha256"] = "f" * 64
+    ledger.write_bytes(b"\n".join(_canonical(item) for item in chain) + b"\n")
+
+    with pytest.raises(ValueError, match="hash chain"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_never_replaces_selected_complete_with_missing_journal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path, attempt_count=2
+    )
+    selected = _read_chain(ledger)[0]["event"]["event_payload"]["attempt_ref"]
+    journal = (
+        runner._PROJECT_ROOT
+        / "runtime_state"
+        / "benchmark-v2-attempts"
+        / f"{selected['content_sha256']}.jsonl"
+    )
+    journal.unlink()
+
+    with pytest.raises(ValueError, match="selected attempt journal fixed file is missing"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_rejects_attempt_directory_outside_immediate_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    chain = _read_chain(ledger)
+    outside = tmp_path / "outside" / chain[0]["event"]["event_payload"][
+        "attempt_ref"
+    ]["attempt_id"]
+    outside.mkdir(parents=True)
+    for envelope in chain:
+        payload = envelope["event"]["event_payload"]
+        payload["attempt_dir"] = str(outside.resolve())
+        envelope["event"]["event_payload"] = _sealed(
+            {key: value for key, value in payload.items() if key != "content_sha256"}
+        )
+    _rewrite_chain(ledger, chain)
+
+    with pytest.raises(ValueError, match="immediate fixed child"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_requires_fixed_provider_corpus_sibling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, _output_root, provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    (provider_manifest.parent / "provider-corpus.v2.json").rename(
+        provider_manifest.parent / "alternate-corpus.json"
+    )
+
+    with pytest.raises(ValueError, match="provider corpus fixed file is missing"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_requires_fixed_provider_manifest_basename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, _output_root, provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    renamed = provider_manifest.with_name("renamed-provider-manifest.json")
+    renamed.write_bytes(provider_manifest.read_bytes())
+    argv[argv.index(str(provider_manifest))] = str(renamed)
+
+    with pytest.raises(ValueError, match="benchmark-v2-provider-manifest.json"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_accepts_forward_slash_relative_cli_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    monkeypatch.chdir(tmp_path)
+    path_option_indexes = (
+        argv.index("--provider-manifest") + 1,
+        argv.index("--attempt-ledger") + 1,
+        argv.index("--output-root") + 1,
+        argv.index("--output") + 1,
+    )
+    for index in path_option_indexes:
+        argv[index] = Path(argv[index]).relative_to(tmp_path).as_posix()
+
+    accepted = runner.run_cli(argv)
+
+    assert accepted["contract_version"] == (
+        "benchmark_v2_accepted_regression_score_input_v2"
+    )
+    assert len(calls["accepted"]) == 1
+
+
+def test_materialize_score_input_rejects_lexical_root_alias_before_dereference(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    argv[argv.index(str(output_root))] = str(output_root) + "\\."
+
+    with pytest.raises(ValueError, match="lexical alias"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_rejects_output_alias_of_selected_child(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    selected_dir = Path(
+        _read_chain(ledger)[0]["event"]["event_payload"]["attempt_dir"]
+    )
+    argv[-1] = str(selected_dir / "body.json")
+
+    with pytest.raises(ValueError, match="selected evidence path"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_rejects_provider_manifest_reparse_point(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, _output_root, provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    original = runner._is_reparse
+    monkeypatch.setattr(
+        runner,
+        "_is_reparse",
+        lambda path: Path(path) == provider_manifest.resolve() or original(path),
+    )
+
+    with pytest.raises(ValueError, match="symlink|reparse"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+def test_materialize_score_input_conflicting_publication_does_not_overwrite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, _output_root, _provider_manifest, _calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    output = Path(argv[-1])
+    output.write_bytes(b"different\n")
+    before = output.read_bytes()
+
+    with pytest.raises(ValueError, match="differs from authoritative bytes"):
+        runner.run_cli(argv)
+
+    assert output.read_bytes() == before
+
+
+def test_materialize_score_input_rejects_empty_forbidden_option_presence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _ledger, _output_root, _provider_manifest, calls = _materializer_fixture(
+        monkeypatch, tmp_path
+    )
+    argv.extend(["--providers", ""])
+
+    with pytest.raises(ValueError, match="not valid for this action"):
+        runner.run_cli(argv)
+
+    assert calls["accepted"] == []
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--partition", "holdout"],
+        ["--providers", "omni"],
+        ["--ledger-root", "forbidden"],
+        ["--holdout-authorization", "forbidden"],
+    ],
+)
+def test_materialize_score_input_rejects_non_regression_or_mixed_action_inputs_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str]
+) -> None:
+    argv = [
+        "--provider-manifest",
+        str(_manifest(tmp_path)),
+        "--partition",
+        "regression",
+        "--materialize-score-input",
+        "--attempt-ledger",
+        str(tmp_path / "events.jsonl"),
+        "--output-root",
+        str(tmp_path / "attempts"),
+        "--output",
+        str(tmp_path / "accepted.json"),
+    ]
+    if extra[0] == "--partition":
+        argv[argv.index("regression")] = "holdout"
+    else:
+        argv.extend(extra)
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("Runtime acquired")),
+    )
+
+    with pytest.raises(ValueError):
+        runner.run_cli(argv)
 
 
 def test_actual_consumer_failure_closes_owner_then_cleans_and_remains_fail_closed(
@@ -1173,7 +1823,7 @@ def test_cli_rejects_private_or_fake_execution_inputs(
         )
 
 
-def test_runner_production_import_surface_is_only_the_runtime_getter() -> None:
+def test_runner_production_import_surface_is_explicit_and_provider_safe() -> None:
     source_path = Path(runner.__file__).resolve()
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
     app_imports: list[tuple[str, tuple[str, ...]]] = []
@@ -1185,6 +1835,33 @@ def test_runner_production_import_surface_is_only_the_runtime_getter() -> None:
                 if alias.name.startswith("app."):
                     app_imports.append((alias.name, ()))
     assert app_imports == [
+        (
+            "app.learn.hybrid.benchmark_v2_contracts",
+            ("BENCHMARK_RELEASE_ID",),
+        ),
+        (
+            "app.learn.hybrid.benchmark_v2_lifecycle",
+            (
+                "compose_benchmark_v2_lifecycle_bundle_v3",
+                "materialize_benchmark_v2_attempt_ledger_projections",
+                "project_benchmark_v2_attempt_journal",
+                "project_benchmark_v2_attempt_journal_terminal_event",
+                "project_benchmark_v2_attempt_lifecycle",
+                "project_benchmark_v2_cleanup_lifecycle",
+                "project_benchmark_v2_runner_events",
+                "project_benchmark_v2_screen_group_lifecycles",
+                "read_benchmark_v2_attempt_journal",
+                "select_benchmark_v2_attempt_ledger_horizon",
+            ),
+        ),
+        (
+            "app.learn.hybrid.benchmark_v2_predictions",
+            (
+                "materialize_benchmark_v2_accepted_regression_score_input_v2",
+                "project_benchmark_v2_actual_body",
+                "project_benchmark_v2_actual_result",
+            ),
+        ),
         (
             "app.learn.hybrid.benchmark_v2_runtime",
             ("get_production_benchmark_v2_runtime",),

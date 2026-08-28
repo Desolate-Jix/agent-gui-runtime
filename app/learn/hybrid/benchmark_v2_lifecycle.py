@@ -5334,6 +5334,157 @@ def _s13_raw_runner_ledger(
     return result
 
 
+@dataclass(frozen=True)
+class BenchmarkV2AttemptLedgerSelectionHorizon:
+    selected_attempt_ref: dict[str, str]
+    selected_result_terminal_sequence: int
+
+
+def select_benchmark_v2_attempt_ledger_horizon(
+    *, runner_ledger_events: Sequence[Mapping[str, object]]
+) -> BenchmarkV2AttemptLedgerSelectionHorizon:
+    """仅从完整结构链按首次 open 顺序选择首个 raw-complete attempt。"""
+
+    ledger = _s13_raw_runner_ledger(runner_ledger_events)
+    payload_fields = {
+        "regression_attempt": {
+            "contract_version",
+            "attempt_ref",
+            "attempt_dir",
+            "mode",
+            "provider_id",
+            "status",
+            "output_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "cleanup": {
+            "contract_version",
+            "attempt_ref",
+            "attempt_dir",
+            "mode",
+            "provider_id",
+            "status",
+            "cleanup_receipt_ref",
+            "resource_counts",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "result": {
+            "contract_version",
+            "attempt_ref",
+            "attempt_dir",
+            "mode",
+            "provider_id",
+            "status",
+            "output_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+    }
+    payload_contracts = {
+        "regression_attempt": "benchmark_v2_runner_regression_attempt_payload_v1",
+        "cleanup": "benchmark_v2_runner_cleanup_payload_v1",
+        "result": "benchmark_v2_runner_result_payload_v1",
+    }
+    attempts: dict[str, dict[str, object]] = {}
+    attempt_order: list[str] = []
+    attempt_ids: dict[str, str] = {}
+    attempt_dirs: dict[str, str] = {}
+    for envelope in ledger:
+        event = envelope["event"]
+        event_type = str(event["event_type"])
+        payload = event["event_payload"]
+        raw_attempt = payload.get("attempt_ref")
+        public_attempt = _s13_public_attempt_ref(raw_attempt)
+        key = public_attempt["content_sha256"]
+        attempt_id = str(raw_attempt["attempt_id"])
+        attempt_dir = str(payload.get("attempt_dir") or "")
+        status = str(payload.get("status") or "")
+        output_ref = (
+            payload.get("output_ref")
+            if event_type in {"regression_attempt", "result"}
+            else payload.get("cleanup_receipt_ref")
+        )
+        if (
+            set(payload) != payload_fields[event_type]
+            or payload.get("contract_version") != payload_contracts[event_type]
+            or payload.get("artifact_is_authorization") is not False
+            or payload.get("execute_binding_enabled") is not False
+            or not Path(attempt_dir).is_absolute()
+            or Path(attempt_dir).name != attempt_id
+            or payload.get("mode") != raw_attempt.get("mode")
+            or payload.get("provider_id") != raw_attempt.get("provider_id")
+            or (
+                output_ref is not None
+                and (
+                    not isinstance(output_ref, Mapping)
+                    or set(output_ref) != {"path", "file_sha256", "content_sha256"}
+                    or not isinstance(output_ref.get("path"), str)
+                    or not Path(str(output_ref.get("path"))).is_absolute()
+                    or str(Path(str(output_ref.get("path"))).resolve())
+                    != output_ref.get("path")
+                    or any(
+                        _SHA_RE.fullmatch(str(output_ref.get(name) or "")) is None
+                        for name in ("file_sha256", "content_sha256")
+                    )
+                )
+            )
+            or (
+                event_type == "cleanup"
+                and payload.get("resource_counts") != _S13_ZERO_COUNTS
+            )
+        ):
+            raise ValueError("benchmark v2 runner ledger structure is invalid")
+        if attempt_ids.setdefault(attempt_id, key) != key:
+            raise ValueError("benchmark v2 runner attempt identity is ambiguous")
+        if attempt_dirs.setdefault(attempt_dir, key) != key:
+            raise ValueError("benchmark v2 runner attempt directory is ambiguous")
+        state = attempts.get(key)
+        if state is None:
+            if event_type != "regression_attempt" or status != "opened" or output_ref is not None:
+                raise ValueError("benchmark v2 runner attempt starts before opened")
+            attempt_order.append(key)
+            attempts[key] = {
+                "attempt_ref": public_attempt,
+                "raw_attempt_ref": deepcopy(dict(raw_attempt)),
+                "attempt_dir": attempt_dir,
+                "state": "opened",
+                "result_sequence": None,
+            }
+            continue
+        if (
+            state["raw_attempt_ref"] != dict(raw_attempt)
+            or state["attempt_dir"] != attempt_dir
+        ):
+            raise ValueError("benchmark v2 runner cross-attempt lineage differs")
+        current = str(state["state"])
+        if event_type == "regression_attempt":
+            if status != "body_complete" or current != "opened" or output_ref is None:
+                raise ValueError("benchmark v2 runner body state differs")
+            state["state"] = "body_complete"
+        elif event_type == "cleanup":
+            if status != "terminal" or current not in {"opened", "body_complete"} or output_ref is None:
+                raise ValueError("benchmark v2 runner cleanup state differs")
+            state["state"] = "cleanup"
+        else:
+            if status != "terminal" or current != "cleanup" or output_ref is None:
+                raise ValueError("benchmark v2 runner result state differs")
+            state["state"] = "result"
+            state["result_sequence"] = int(event["sequence"])
+    for key in attempt_order:
+        state = attempts[key]
+        if state["state"] == "result":
+            return BenchmarkV2AttemptLedgerSelectionHorizon(
+                selected_attempt_ref=deepcopy(state["attempt_ref"]),
+                selected_result_terminal_sequence=int(state["result_sequence"]),
+            )
+    raise ValueError("benchmark v2 runner has no raw-complete attempt")
+
+
 def _s13_evidence_values(
     value: Mapping[str, object] | Sequence[Mapping[str, object]], *, name: str
 ) -> list[Mapping[str, object]]:
@@ -5817,13 +5968,21 @@ def _project_benchmark_v2_attempt_ledger_core(
 
     if partition != "regression" or not isinstance(benchmark_release_id, str) or not benchmark_release_id:
         raise ValueError("benchmark v2 projected attempt ledger identity is invalid")
-    ledger = _s13_raw_runner_ledger(runner_ledger_events)
+    horizon = select_benchmark_v2_attempt_ledger_horizon(
+        runner_ledger_events=runner_ledger_events
+    )
+    full_ledger = _s13_raw_runner_ledger(runner_ledger_events)
+    selected_result_sequence = horizon.selected_result_terminal_sequence
+    ledger = full_ledger[: selected_result_sequence + 1]
     if (
         not isinstance(runner_event_projections, Sequence)
         or isinstance(runner_event_projections, (str, bytes))
-        or len(runner_event_projections) != len(ledger)
+        or len(runner_event_projections) < len(ledger)
     ):
         raise ValueError("benchmark v2 event projection order differs")
+    selected_prefix_projections = list(
+        runner_event_projections[: selected_result_sequence + 1]
+    )
     from app.learn.hybrid.benchmark_v2_pathless import (
         pathless_artifact_ref,
         seal_pathless_projection,
@@ -5845,7 +6004,7 @@ def _project_benchmark_v2_attempt_ledger_core(
         ("cleanup", "terminal"): "cleanup",
         ("result", "terminal"): "result",
     }
-    for raw, projection in zip(ledger, runner_event_projections, strict=True):
+    for raw, projection in zip(ledger, selected_prefix_projections, strict=True):
         ref = _s13_pathless_projection_ref(
             projection,
             contract_version="benchmark_v2_runner_event_verified_projection_v1",
@@ -5886,59 +6045,40 @@ def _project_benchmark_v2_attempt_ledger_core(
             attempt_entries[attempt_key] = entry
         entry["observed_state"] = state_for_kind[event_kind]
         entry["event_projection_refs"].append(ref)
-    if (
-        not isinstance(attempt_lifecycle_projections, Sequence)
-        or isinstance(attempt_lifecycle_projections, (str, bytes))
-        or not attempt_lifecycle_projections
+    if not isinstance(attempt_lifecycle_projections, Sequence) or isinstance(
+        attempt_lifecycle_projections, (str, bytes)
     ):
         raise ValueError("benchmark v2 attempt lifecycle projections are unavailable")
-    lifecycle_by_attempt: dict[str, tuple[dict[str, object], dict[str, str]]] = {}
+    selected_key = horizon.selected_attempt_ref["content_sha256"]
+    selected_candidates: list[Mapping[str, object]] = []
     for raw_lifecycle in attempt_lifecycle_projections:
-        lifecycle = deepcopy(dict(raw_lifecycle))
-        lifecycle_ref = _s13_pathless_projection_ref(
-            lifecycle,
-            contract_version="benchmark_v2_lifecycle_verified_projection_v1",
-        )
-        lifecycle_attempt_ref = lifecycle.get("attempt_ref")
+        if not isinstance(raw_lifecycle, Mapping):
+            continue
+        lifecycle_attempt_ref = raw_lifecycle.get("attempt_ref")
         if (
-            lifecycle.get("lifecycle_kind") != "attempt"
-            or lifecycle.get("terminal_status") != "terminal"
-            or lifecycle.get("cleanup_stable_zero") is not True
-            or lifecycle.get("resource_counts") != _S13_ZERO_COUNTS
-            or lifecycle.get("started_request_count")
-            != lifecycle.get("terminal_or_unknown_request_count")
-            or not isinstance(lifecycle_attempt_ref, Mapping)
+            isinstance(lifecycle_attempt_ref, Mapping)
+            and lifecycle_attempt_ref.get("content_sha256") == selected_key
         ):
-            raise ValueError("benchmark v2 attempt lifecycle is invalid")
-        key = str(lifecycle_attempt_ref.get("content_sha256") or "")
-        if not key or key in lifecycle_by_attempt:
-            raise ValueError("benchmark v2 attempt lifecycle is duplicated")
-        lifecycle_by_attempt[key] = (lifecycle, lifecycle_ref)
-    complete_keys = {
-        key
-        for key, entry in attempt_entries.items()
-        if entry["observed_state"] == "result"
-    }
-    if set(lifecycle_by_attempt) != complete_keys:
-        raise ValueError("benchmark v2 complete-attempt lifecycle coverage differs")
-    selected_key = next(
-        (key for key in attempt_order if key in complete_keys),
-        None,
+            selected_candidates.append(raw_lifecycle)
+    if len(selected_candidates) != 1:
+        raise ValueError("benchmark v2 selected attempt lifecycle is unavailable")
+    selected_lifecycle = deepcopy(dict(selected_candidates[0]))
+    selected_lifecycle_ref = _s13_pathless_projection_ref(
+        selected_lifecycle,
+        contract_version="benchmark_v2_lifecycle_verified_projection_v1",
     )
-    if selected_key is None:
-        raise ValueError("benchmark v2 runner has no eligible complete attempt")
-    selected_lifecycle, selected_lifecycle_ref = lifecycle_by_attempt[selected_key]
+    if (
+        selected_lifecycle.get("lifecycle_kind") != "attempt"
+        or selected_lifecycle.get("terminal_status") != "terminal"
+        or selected_lifecycle.get("cleanup_stable_zero") is not True
+        or selected_lifecycle.get("resource_counts") != _S13_ZERO_COUNTS
+        or selected_lifecycle.get("started_request_count")
+        != selected_lifecycle.get("terminal_or_unknown_request_count")
+        or selected_lifecycle.get("attempt_ref") != horizon.selected_attempt_ref
+    ):
+        raise ValueError("benchmark v2 selected attempt lifecycle is invalid")
     selected_attempt_ref = selected_lifecycle["attempt_ref"]
-    selected_result_sequence = max(
-        int(item["sequence"])
-        for item in runner_event_projections
-        if item.get("attempt_ref") == selected_attempt_ref
-        and item.get("event_kind") == "result"
-    )
-    selected_prefix_ledger = ledger[: selected_result_sequence + 1]
-    selected_prefix_projections = list(
-        runner_event_projections[: selected_result_sequence + 1]
-    )
+    selected_prefix_ledger = ledger
     prefix_entries: dict[str, dict[str, object]] = {}
     prefix_order: list[str] = []
     for projection in selected_prefix_projections:
@@ -6259,25 +6399,37 @@ def compose_benchmark_v2_lifecycle_bundle_v3(
     entries = projected_attempt_ledger.get("entries")
     if not isinstance(entries, list) or not entries:
         raise ValueError("benchmark v2 lifecycle bundle projected entries are invalid")
-    ledger_event_refs: list[dict[str, str]] = []
     ledger_attempt_refs: list[dict[str, str]] = []
+    ledger_event_refs_by_attempt: dict[str, list[dict[str, str]]] = {}
     for entry in entries:
         if not isinstance(entry, Mapping):
             raise ValueError("benchmark v2 lifecycle bundle projected entry is invalid")
-        ledger_attempt_refs.append(
-            _s13_exact_ref(entry.get("attempt_ref"), "projected ledger attempt ref")
+        ledger_attempt = _s13_exact_ref(
+            entry.get("attempt_ref"), "projected ledger attempt ref"
         )
+        ledger_attempt_refs.append(ledger_attempt)
         event_refs = entry.get("event_projection_refs")
         if not isinstance(event_refs, list) or not event_refs:
             raise ValueError("benchmark v2 lifecycle bundle projected event refs are invalid")
-        ledger_event_refs.extend(
+        key = ledger_attempt["content_sha256"]
+        if key in ledger_event_refs_by_attempt:
+            raise ValueError("benchmark v2 lifecycle bundle projected attempt is duplicated")
+        ledger_event_refs_by_attempt[key] = [
             _s13_exact_ref(value, "projected ledger runner event ref")
             for value in event_refs
+        ]
+    runner_refs_by_attempt: dict[str, list[dict[str, str]]] = {}
+    for item, ref in zip(runner_items, runner_refs, strict=True):
+        runner_attempt = _s13_exact_ref(
+            item.get("attempt_ref"), "runner event attempt ref"
         )
-    if ledger_event_refs != runner_refs:
+        runner_refs_by_attempt.setdefault(
+            runner_attempt["content_sha256"], []
+        ).append(ref)
+    if ledger_event_refs_by_attempt != runner_refs_by_attempt:
         raise ValueError("benchmark v2 lifecycle bundle projected event prefix differs")
 
-    cleanup_attempt_order: list[str] = []
+    cleanup_event_attempts: set[str] = set()
     for item in runner_items:
         if item.get("event_kind") != "cleanup":
             continue
@@ -6291,8 +6443,18 @@ def compose_benchmark_v2_lifecycle_bundle_v3(
             != refs.get("cleanup_receipt_ref")
         ):
             raise ValueError("benchmark v2 lifecycle bundle cleanup event lineage differs")
-        cleanup_attempt_order.append(key)
-    if cleanup_attempt_order != list(cleanup_refs_by_attempt):
+        if key in cleanup_event_attempts:
+            raise ValueError("benchmark v2 lifecycle bundle cleanup event is duplicated")
+        cleanup_event_attempts.add(key)
+    cleanup_first_open_order = [
+        item["content_sha256"]
+        for item in ledger_attempt_refs
+        if item["content_sha256"] in cleanup_event_attempts
+    ]
+    if (
+        set(cleanup_refs_by_attempt) != cleanup_event_attempts
+        or list(cleanup_refs_by_attempt) != cleanup_first_open_order
+    ):
         raise ValueError("benchmark v2 lifecycle bundle cleanup projection order differs")
 
     selected_runner_items = [
@@ -6464,6 +6626,7 @@ def compose_benchmark_v2_lifecycle_bundle_v3(
 
 __all__ = [
     "BenchmarkV2AttemptLedgerProjectionMaterialization",
+    "BenchmarkV2AttemptLedgerSelectionHorizon",
     "append_benchmark_v2_attempt_event",
     "collect_raw_gpu_sample",
     "compose_benchmark_v2_attempt_cleanup_receipt",
@@ -6478,5 +6641,6 @@ __all__ = [
     "project_benchmark_v2_attempt_lifecycle",
     "project_benchmark_v2_attempt_ledger",
     "read_benchmark_v2_attempt_journal",
+    "select_benchmark_v2_attempt_ledger_horizon",
     "verify_lifecycle_from_raw",
 ]

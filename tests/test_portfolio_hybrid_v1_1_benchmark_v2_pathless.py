@@ -1199,11 +1199,30 @@ def test_recursive_projected_ledger_rejects_cleanup_lifecycle_as_selected_attemp
         )
 
 
-def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selected_complete() -> None:
-    prior_attempt = _ref("runner-attempt/prior")
-    selected_attempt = _ref("runner-attempt/selected")
-    prior_receipt = _ref("attempt-cleanup-receipt/prior")
-    selected_receipt = _ref("attempt-cleanup-receipt/selected")
+@pytest.mark.parametrize(
+    ("interleaved_complete", "select_later_complete"),
+    [(False, False), (True, False), (True, True)],
+)
+def test_lifecycle_bundle_enforces_first_open_selection_and_cleanup_order(
+    interleaved_complete: bool,
+    select_later_complete: bool,
+) -> None:
+    prior_attempt = {
+        "id": "runner-attempt/prior",
+        "content_sha256": "b" * 64,
+    }
+    selected_attempt = {
+        "id": "runner-attempt/selected",
+        "content_sha256": "c" * 64,
+    }
+    prior_receipt = {
+        "id": "attempt-cleanup-receipt/prior",
+        "content_sha256": "d" * 64,
+    }
+    selected_receipt = {
+        "id": "attempt-cleanup-receipt/selected",
+        "content_sha256": "e" * 64,
+    }
 
     def cleanup_lifecycle(attempt_ref, receipt_ref, marker):
         return seal_pathless_projection(
@@ -1227,24 +1246,48 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
     prior_cleanup_ref = pathless_artifact_ref(prior_cleanup)
     selected_cleanup_ref = pathless_artifact_ref(selected_cleanup)
     assert prior_cleanup_ref["id"] > selected_cleanup_ref["id"]
+    bundle_attempt = prior_attempt if select_later_complete else selected_attempt
+    bundle_receipt = prior_receipt if select_later_complete else selected_receipt
+    bundle_cleanup_ref = (
+        prior_cleanup_ref if select_later_complete else selected_cleanup_ref
+    )
     logical = {
         "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
-        "id": f"runner-ledger-pre-result/{'3' * 64}",
-        "attempt_ref": selected_attempt,
+            "id": f"runner-ledger-pre-result/{'3' * 64}",
+            "attempt_ref": bundle_attempt,
         "terminal_sequence": 4,
         "terminal_envelope_sha256": "4" * 64,
         "prefix_sha256": "5" * 64,
     }
     events: list[dict[str, object]] = []
     previous = None
-    for sequence, kind, attempt, receipt, cleanup_ref in (
-        (0, "opened", prior_attempt, prior_receipt, prior_cleanup_ref),
-        (1, "cleanup", prior_attempt, prior_receipt, prior_cleanup_ref),
-        (2, "opened", selected_attempt, selected_receipt, selected_cleanup_ref),
-        (3, "body_complete", selected_attempt, selected_receipt, selected_cleanup_ref),
-        (4, "cleanup", selected_attempt, selected_receipt, selected_cleanup_ref),
-        (5, "result", selected_attempt, selected_receipt, selected_cleanup_ref),
-    ):
+    if interleaved_complete:
+        raw_events = (
+            (0, "opened", selected_attempt, selected_receipt, selected_cleanup_ref),
+            (1, "opened", prior_attempt, prior_receipt, prior_cleanup_ref),
+            (2, "body_complete", prior_attempt, prior_receipt, prior_cleanup_ref),
+            (3, "cleanup", prior_attempt, prior_receipt, prior_cleanup_ref),
+            (4, "result", prior_attempt, prior_receipt, prior_cleanup_ref),
+            (5, "body_complete", selected_attempt, selected_receipt, selected_cleanup_ref),
+            (6, "cleanup", selected_attempt, selected_receipt, selected_cleanup_ref),
+            (7, "result", selected_attempt, selected_receipt, selected_cleanup_ref),
+        )
+        attempt_first_open_order = [selected_attempt, prior_attempt]
+    else:
+        raw_events = (
+            (0, "opened", prior_attempt, prior_receipt, prior_cleanup_ref),
+            (1, "cleanup", prior_attempt, prior_receipt, prior_cleanup_ref),
+            (2, "opened", selected_attempt, selected_receipt, selected_cleanup_ref),
+            (3, "body_complete", selected_attempt, selected_receipt, selected_cleanup_ref),
+            (4, "cleanup", selected_attempt, selected_receipt, selected_cleanup_ref),
+            (5, "result", selected_attempt, selected_receipt, selected_cleanup_ref),
+        )
+        attempt_first_open_order = [prior_attempt, selected_attempt]
+    events_by_attempt: dict[str, list[dict[str, object]]] = {
+        str(prior_attempt["content_sha256"]): [],
+        str(selected_attempt["content_sha256"]): [],
+    }
+    for sequence, kind, attempt, receipt, cleanup_ref in raw_events:
         event = _event_projection(
             kind=kind,
             sequence=sequence,
@@ -1255,6 +1298,7 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
             logical_ref=logical,
         )
         events.append(event)
+        events_by_attempt[str(attempt["content_sha256"])].append(event)
         previous = pathless_artifact_ref(event)
 
     screens = []
@@ -1263,7 +1307,7 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
             seal_pathless_projection(
                 contract_version="benchmark_v2_lifecycle_verified_projection_v1",
                 semantic_payload={
-                    "attempt_ref": selected_attempt,
+                        "attempt_ref": bundle_attempt,
                     "lifecycle_kind": "screen_group",
                     "raw_evidence_sha256": f"{10 + (index % 6):x}" * 64,
                     "terminal_status": "stable_zero",
@@ -1282,21 +1326,21 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
     terminal = seal_pathless_projection(
         contract_version="benchmark_v2_attempt_journal_terminal_event_verified_projection_v1",
         semantic_payload={
-            "attempt_ref": selected_attempt,
+            "attempt_ref": bundle_attempt,
             "sequence": 0,
             "phase": "terminal",
             "event_kind": "attempt_terminal",
             "raw_event_sha256": "6" * 64,
             "predecessor_content_sha256": "7" * 64,
-            "cleanup_receipt_ref": selected_receipt,
-            "cleanup_projection_ref": selected_cleanup_ref,
+            "cleanup_receipt_ref": bundle_receipt,
+            "cleanup_projection_ref": bundle_cleanup_ref,
             "safety": deepcopy(SAFETY),
         },
     )
     selected_lifecycle = seal_pathless_projection(
         contract_version="benchmark_v2_lifecycle_verified_projection_v1",
         semantic_payload={
-            "attempt_ref": selected_attempt,
+            "attempt_ref": bundle_attempt,
             "lifecycle_kind": "attempt",
             "raw_evidence_sha256": "8" * 64,
             "terminal_status": "terminal",
@@ -1306,7 +1350,7 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
             "terminal_or_unknown_request_count": 0,
             "parent_refs": {
                 "attempt_journal_projection_ref": _ref(f"verified-attempt-journal/{'9' * 64}"),
-                "cleanup_projection_ref": selected_cleanup_ref,
+                "cleanup_projection_ref": bundle_cleanup_ref,
                 "terminal_event_ref": pathless_artifact_ref(terminal),
                 "screen_group_lifecycle_projection_refs": [pathless_artifact_ref(item) for item in screens],
             },
@@ -1323,23 +1367,25 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
             "raw_ledger_prefix_verification_ref": prefix_ref,
             "entries": [
                 {
-                    "sequence": 0,
-                    "attempt_ref": prior_attempt,
-                    "observed_state": "cleanup",
-                    "event_projection_refs": [pathless_artifact_ref(item) for item in events[:2]],
-                    "lifecycle_ref": None,
-                    "selection_eligible": False,
-                },
-                {
-                    "sequence": 1,
-                    "attempt_ref": selected_attempt,
-                    "observed_state": "result",
-                    "event_projection_refs": [pathless_artifact_ref(item) for item in events[2:]],
-                    "lifecycle_ref": selected_lifecycle_ref,
-                    "selection_eligible": True,
-                },
+                    "sequence": index,
+                    "attempt_ref": attempt,
+                    "observed_state": (
+                        "result"
+                        if attempt == bundle_attempt or interleaved_complete
+                        else "cleanup"
+                    ),
+                    "event_projection_refs": [
+                        pathless_artifact_ref(item)
+                        for item in events_by_attempt[str(attempt["content_sha256"])]
+                    ],
+                    "lifecycle_ref": (
+                        selected_lifecycle_ref if attempt == bundle_attempt else None
+                    ),
+                    "selection_eligible": attempt == bundle_attempt,
+                }
+                for index, attempt in enumerate(attempt_first_open_order)
             ],
-            "selected_attempt_ref": selected_attempt,
+            "selected_attempt_ref": bundle_attempt,
             "selected_lifecycle_ref": selected_lifecycle_ref,
             "safety": deepcopy(SAFETY),
         },
@@ -1356,27 +1402,41 @@ def test_lifecycle_bundle_allows_prior_cleaned_incomplete_attempt_before_selecte
     ordered = order_pathless_envelopes(
         registry_name="lifecycle_bundle_v3",
         envelopes=raw_envelopes,
-        context={"attempt_first_open_order": [prior_attempt, selected_attempt]},
+        context={"attempt_first_open_order": attempt_first_open_order},
     )
     ordered_cleanup_refs = [
         envelope["ref"]
         for envelope in ordered
         if json.loads(base64.b64decode(envelope["canonical_bytes_b64"])).get("lifecycle_kind") == "cleanup"
     ]
-    assert ordered_cleanup_refs == [prior_cleanup_ref, selected_cleanup_ref]
-    bundle = seal_pathless_projection(
-        contract_version="benchmark_v2_lifecycle_bundle_v3",
-        semantic_payload={
-            "benchmark_release_id": "release-one",
-            "partition": "regression",
-            "attempt_ref": selected_attempt,
-            "projected_attempt_ledger_ref": pathless_artifact_ref(ledger),
-            "raw_ledger_prefix_verification_ref": prefix_ref,
-            "selected_lifecycle_ref": selected_lifecycle_ref,
-            "attempt_cleanup_projection_ref": selected_cleanup_ref,
-            "screen_group_lifecycle_projection_refs": [pathless_artifact_ref(item) for item in screens],
-            "sealed_artifact_envelopes": ordered,
-            "safety": deepcopy(SAFETY),
-        },
-    )
-    assert bundle["attempt_cleanup_projection_ref"] == selected_cleanup_ref
+    expected_cleanup_refs = [
+        selected_cleanup_ref if attempt == selected_attempt else prior_cleanup_ref
+        for attempt in attempt_first_open_order
+    ]
+    assert ordered_cleanup_refs == expected_cleanup_refs
+    payload = {
+        "benchmark_release_id": "release-one",
+        "partition": "regression",
+        "attempt_ref": bundle_attempt,
+        "projected_attempt_ledger_ref": pathless_artifact_ref(ledger),
+        "raw_ledger_prefix_verification_ref": prefix_ref,
+        "selected_lifecycle_ref": selected_lifecycle_ref,
+        "attempt_cleanup_projection_ref": bundle_cleanup_ref,
+        "screen_group_lifecycle_projection_refs": [
+            pathless_artifact_ref(item) for item in screens
+        ],
+        "sealed_artifact_envelopes": ordered,
+        "safety": deepcopy(SAFETY),
+    }
+    if select_later_complete:
+        with pytest.raises(ValueError, match="first raw-complete"):
+            seal_pathless_projection(
+                contract_version="benchmark_v2_lifecycle_bundle_v3",
+                semantic_payload=payload,
+            )
+    else:
+        bundle = seal_pathless_projection(
+            contract_version="benchmark_v2_lifecycle_bundle_v3",
+            semantic_payload=payload,
+        )
+        assert bundle["attempt_cleanup_projection_ref"] == bundle_cleanup_ref

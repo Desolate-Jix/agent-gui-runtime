@@ -2017,6 +2017,7 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
     ]
     assert lifecycle.__all__ == [
         "BenchmarkV2AttemptLedgerProjectionMaterialization",
+        "BenchmarkV2AttemptLedgerSelectionHorizon",
         "append_benchmark_v2_attempt_event",
         "collect_raw_gpu_sample",
         "compose_benchmark_v2_attempt_cleanup_receipt",
@@ -2031,6 +2032,7 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
         "project_benchmark_v2_attempt_lifecycle",
         "project_benchmark_v2_attempt_ledger",
         "read_benchmark_v2_attempt_journal",
+        "select_benchmark_v2_attempt_ledger_horizon",
         "verify_lifecycle_from_raw",
     ]
 
@@ -2808,7 +2810,11 @@ def test_s13_journal_terminal_projection_rejects_cleanup_byte_drift() -> None:
 
 
 def _s13_screen_projection(
-    *, attempt: dict[str, object], screen_group: str
+    *,
+    attempt: dict[str, object],
+    screen_group: str,
+    case_refs_override: list[dict[str, str]] | None = None,
+    evidence_width: int | None = None,
 ) -> dict[str, object]:
     def ref(name: str) -> dict[str, str]:
         return {
@@ -2819,7 +2825,7 @@ def _s13_screen_projection(
     def raw_envelope(
         value: dict[str, object], *, id_prefix: str, domain: bytes
     ) -> dict[str, object]:
-        raw = benchmark_canonical_json_bytes(value)
+        raw = canonical_json_bytes(value)
         return {
             "ref": {
                 "id": f"{id_prefix}/{hashlib.sha256(domain + raw).hexdigest()}",
@@ -2835,15 +2841,21 @@ def _s13_screen_projection(
     request_ref = ref(f"request/{screen_group}")
     window_binding_ref = ref(f"binding/{screen_group}")
     capture_ref = ref(f"capture/{screen_group}")
-    case_refs = [
-        {
-            "case_id": f"{screen_group}-case-{index}",
-            "case_content_sha256": hashlib.sha256(
-                f"case:{screen_group}:{index}".encode()
-            ).hexdigest(),
-        }
-        for index in range(5)
-    ]
+    case_refs = (
+        deepcopy(case_refs_override)
+        if case_refs_override is not None
+        else [
+            {
+                "case_id": f"{screen_group}-case-{index}",
+                "case_content_sha256": hashlib.sha256(
+                    f"case:{screen_group}:{index}".encode()
+                ).hexdigest(),
+            }
+            for index in range(5)
+        ]
+    )
+    if len(case_refs) != 5:
+        raise ValueError("screen projection helper requires five case refs")
     operations = [
         seal_immutable(
             {
@@ -2957,7 +2969,25 @@ def _s13_screen_projection(
             "execute_binding_enabled": False,
         }
     )
-    fusion, capture_bundle, omni, qwen, qwen_cleanup = _authoritative_inputs()
+    if evidence_width is None:
+        fusion, capture_bundle, omni, qwen, qwen_cleanup = _authoritative_inputs()
+    else:
+        from app.learn.hybrid.fusion import fuse_hybrid_candidates
+        from tests.test_learn_hybrid_fusion import _inputs
+        from tests.test_learn_hybrid_vista_refinement import _cleanup_receipt
+
+        config, capture_bundle, raw_omni, raw_qwen = _inputs(width=evidence_width)
+        omni = seal_immutable(raw_omni)
+        qwen = seal_immutable(raw_qwen)
+        fusion = seal_immutable(
+            fuse_hybrid_candidates(
+                config=config,
+                capture_bundle=capture_bundle,
+                omni_inventory=omni,
+                qwen_bindings=qwen,
+            )
+        )
+        qwen_cleanup = _cleanup_receipt()
     vista_requests = build_vista_requests(
         fusion,
         capture_bundle,
@@ -4300,6 +4330,248 @@ def test_s13_two_complete_attempts_select_first_open_and_do_not_publish_later_su
         "result",
     ]
     assert len(decoded) == 20
+
+
+def _c4_interleaved_complete_ledger() -> tuple[
+    list[dict[str, object]], dict[str, object], dict[str, object]
+]:
+    first_chain: list[dict[str, object]] = []
+    second_chain: list[dict[str, object]] = []
+    first = _s13_complete_attempt_artifacts(
+        first_chain, attempt_id="attempt-regression-first-open"
+    )
+    second = _s13_complete_attempt_artifacts(
+        second_chain, attempt_id="attempt-regression-first-result"
+    )
+    ledger: list[dict[str, object]] = []
+    for envelope in [
+        first_chain[0],
+        *second_chain,
+        *first_chain[1:],
+    ]:
+        _s13_append_runner_event(
+            ledger,
+            event_type=str(envelope["event"]["event_type"]),
+            payload=deepcopy(envelope["event"]["event_payload"]),
+        )
+    return ledger, first, second
+
+
+def test_c4_selection_horizon_uses_first_open_not_first_result() -> None:
+    ledger, first, _second = _c4_interleaved_complete_ledger()
+
+    horizon = lifecycle.select_benchmark_v2_attempt_ledger_horizon(
+        runner_ledger_events=ledger
+    )
+
+    assert horizon.selected_attempt_ref == {
+        "id": "runner-attempt/attempt-regression-first-open",
+        "content_sha256": first["attempt"]["content_sha256"],
+    }
+    assert horizon.selected_result_terminal_sequence == 7
+
+
+def test_c4_selection_horizon_skips_prior_incomplete_attempt() -> None:
+    complete_chain: list[dict[str, object]] = []
+    complete = _s13_complete_attempt_artifacts(
+        complete_chain, attempt_id="attempt-regression-complete-after-incomplete"
+    )
+    incomplete = _s13_attempt(attempt_id="attempt-regression-incomplete-before")
+    ledger: list[dict[str, object]] = []
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=incomplete,
+            status="opened",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+        ),
+    )
+    for envelope in complete_chain:
+        _s13_append_runner_event(
+            ledger,
+            event_type=str(envelope["event"]["event_type"]),
+            payload=deepcopy(envelope["event"]["event_payload"]),
+        )
+
+    horizon = lifecycle.select_benchmark_v2_attempt_ledger_horizon(
+        runner_ledger_events=ledger
+    )
+
+    assert horizon.selected_attempt_ref["content_sha256"] == complete["attempt"][
+        "content_sha256"
+    ]
+    assert horizon.selected_result_terminal_sequence == 4
+
+
+def test_c4_selection_horizon_rejects_corrupt_structural_suffix() -> None:
+    ledger, _first, _second = _c4_interleaved_complete_ledger()
+    ledger[-1]["event_sha256"] = "f" * 64
+
+    with pytest.raises(ValueError, match="hash chain"):
+        lifecycle.select_benchmark_v2_attempt_ledger_horizon(
+            runner_ledger_events=ledger
+        )
+
+
+def test_c4_selection_horizon_rejects_noncanonical_suffix_file_ref() -> None:
+    ledger, _first, _second = _c4_interleaved_complete_ledger()
+    payload = deepcopy(ledger[2]["event"]["event_payload"])
+    payload["output_ref"]["path"] = "relative-body.json"
+    ledger[2]["event"]["event_payload"] = seal_immutable(
+        {key: value for key, value in payload.items() if key != "content_sha256"}
+    )
+    rebuilt: list[dict[str, object]] = []
+    for envelope in ledger:
+        _s13_append_runner_event(
+            rebuilt,
+            event_type=str(envelope["event"]["event_type"]),
+            payload=deepcopy(envelope["event"]["event_payload"]),
+        )
+
+    with pytest.raises(ValueError, match="structure"):
+        lifecycle.select_benchmark_v2_attempt_ledger_horizon(
+            runner_ledger_events=rebuilt
+        )
+
+
+def test_c4_projection_never_replaces_selected_raw_complete_without_lifecycle() -> None:
+    ledger: list[dict[str, object]] = []
+    first = _s13_complete_attempt_artifacts(
+        ledger, attempt_id="attempt-regression-selected-no-lifecycle"
+    )
+    second = _s13_complete_attempt_artifacts(
+        ledger, attempt_id="attempt-regression-later-with-lifecycle"
+    )
+    events = _s13_project_multi_attempt_events(
+        ledger=ledger, complete=[first, second]
+    )
+
+    with pytest.raises(ValueError, match="selected.*lifecycle|lifecycle.*selected"):
+        lifecycle.materialize_benchmark_v2_attempt_ledger_projections(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            partition="regression",
+            runner_ledger_events=ledger,
+            runner_event_projections=events,
+            attempt_lifecycle_projections=[second["attempt_lifecycle"]],
+        )
+
+
+def test_c4_interleaved_cleanup_children_follow_first_open_order() -> None:
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        pathless_artifact_ref,
+        seal_pathless_projection,
+    )
+
+    first_chain: list[dict[str, object]] = []
+    first = _s13_complete_attempt_artifacts(
+        first_chain, attempt_id="attempt-regression-first-open-late-result"
+    )
+    second_chain: list[dict[str, object]] = []
+    second = _s13_complete_attempt_artifacts(
+        second_chain, attempt_id="attempt-regression-second-open-early-result"
+    )
+    ledger: list[dict[str, object]] = []
+    source_by_key: dict[tuple[str, str], dict[str, object]] = {}
+    for artifacts, chain in ((first, first_chain), (second, second_chain)):
+        projected = _s13_project_multi_attempt_events(
+            ledger=chain, complete=[artifacts]
+        )
+        for item in projected:
+            source_by_key[
+                (str(item["attempt_ref"]["content_sha256"]), str(item["event_kind"]))
+            ] = item
+    for envelope in [first_chain[0], *second_chain, *first_chain[1:]]:
+        _s13_append_runner_event(
+            ledger,
+            event_type=str(envelope["event"]["event_type"]),
+            payload=deepcopy(envelope["event"]["event_payload"]),
+        )
+    events: list[dict[str, object]] = []
+    kind_for_raw = {
+        ("regression_attempt", "opened"): "opened",
+        ("regression_attempt", "body_complete"): "body_complete",
+        ("cleanup", "terminal"): "cleanup",
+        ("result", "terminal"): "result",
+    }
+    for envelope in ledger:
+        raw_event = envelope["event"]
+        raw_payload = raw_event["event_payload"]
+        event_kind = kind_for_raw[
+            (str(raw_event["event_type"]), str(raw_payload["status"]))
+        ]
+        public_attempt = {
+            "id": f"runner-attempt/{raw_payload['attempt_ref']['attempt_id']}",
+            "content_sha256": raw_payload["attempt_ref"]["content_sha256"],
+        }
+        source = source_by_key[
+            (str(public_attempt["content_sha256"]), event_kind)
+        ]
+        events.append(
+            seal_pathless_projection(
+                contract_version="benchmark_v2_runner_event_verified_projection_v1",
+                semantic_payload={
+                    "partition": "regression",
+                    "event_kind": event_kind,
+                    "sequence": int(raw_event["sequence"]),
+                    "attempt_ref": public_attempt,
+                    "previous_event_projection_ref": (
+                        pathless_artifact_ref(events[-1]) if events else None
+                    ),
+                    "raw_event_sha256": hashlib.sha256(
+                        canonical_json_bytes(envelope)
+                    ).hexdigest(),
+                    "load_bearing_refs": deepcopy(source["load_bearing_refs"]),
+                    "safety": {
+                        "artifact_is_authorization": False,
+                        "execute_binding_enabled": False,
+                        "display_only": True,
+                    },
+                },
+            )
+        )
+    materialized = lifecycle.materialize_benchmark_v2_attempt_ledger_projections(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=ledger,
+        runner_event_projections=events,
+        attempt_lifecycle_projections=[first["attempt_lifecycle"]],
+    )
+
+    bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        attempt_ref=first["attempt"],
+        raw_ledger_prefix_projection=materialized.runner_ledger_prefix_projection,
+        projected_attempt_ledger=materialized.projected_attempt_ledger,
+        selected_attempt_lifecycle_projection=first["attempt_lifecycle"],
+        cleanup_lifecycle_projection=first["cleanup_projection"],
+        cleanup_lifecycle_projections=[
+            first["cleanup_projection"],
+            second["cleanup_projection"],
+        ],
+        journal_terminal_event_projection=first["terminal"],
+        attempt_journal_projection=first["journal_projection"],
+        screen_group_lifecycle_projections=first["screens"],
+        runner_event_projections=events,
+        cleanup_receipt=first["cleanup"],
+    )
+
+    decoded = [
+        json.loads(base64.b64decode(item["canonical_bytes_b64"], validate=True))
+        for item in bundle["sealed_artifact_envelopes"]
+    ]
+    cleanup_children = [
+        item
+        for item in decoded
+        if item.get("contract_version")
+        == "benchmark_v2_lifecycle_verified_projection_v1"
+        and item.get("lifecycle_kind") == "cleanup"
+    ]
+    assert [item["attempt_ref"]["content_sha256"] for item in cleanup_children] == [
+        first["attempt"]["content_sha256"],
+        second["attempt"]["content_sha256"],
+    ]
 
 
 def test_c4_runner_prefix_wrapper_uses_existing_first_complete_selector() -> None:

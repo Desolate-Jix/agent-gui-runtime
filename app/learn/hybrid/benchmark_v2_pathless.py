@@ -982,7 +982,7 @@ def _validate_lifecycle_bundle(payload: Mapping[str, object]) -> None:
             ):
                 raise ValueError("lifecycle closure selected ledger entry is invalid")
         elif (
-            entry["observed_state"] != "cleanup"
+            entry["observed_state"] not in {"cleanup", "result"}
             or entry["selection_eligible"] is not False
             or entry["lifecycle_ref"] is not None
         ):
@@ -1817,7 +1817,22 @@ def _validate_projected_ledger_graph(
         if event.get("previous_event_projection_ref") != previous_ref:
             raise ValueError("projected ledger global runner predecessor differs")
         previous_ref = event_ref
+    first_open_attempt_order = [
+        _canonical_bytes(_ref(event["attempt_ref"], name="opened event attempt_ref"))
+        for _, _, event in ordered_global
+        if event["event_kind"] == "opened"
+    ]
+    ledger_attempt_order = [
+        _canonical_bytes(
+            _ref(entry["attempt_ref"], name=f"entry[{index}].attempt_ref")
+        )
+        for index, entry in enumerate(entries)
+        if isinstance(entry, Mapping)
+    ]
+    if ledger_attempt_order != first_open_attempt_order:
+        raise ValueError("projected ledger entry order differs from runner first-open order")
     eligible: list[Mapping[str, object]] = []
+    result_entries: list[Mapping[str, object]] = []
     for index, entry in enumerate(entries):
         assert isinstance(entry, Mapping)
         attempt_ref = _ref(entry["attempt_ref"], name=f"entry[{index}].attempt_ref")
@@ -1910,8 +1925,14 @@ def _validate_projected_ledger_graph(
             eligible.append(entry)
         elif lifecycle_ref is not None:
             raise ValueError("projected ledger ineligible entry cannot carry lifecycle")
-    if not eligible:
-        raise ValueError("projected ledger has no eligible entry")
+        if observed == "result":
+            result_entries.append(entry)
+    if (
+        len(eligible) != 1
+        or not result_entries
+        or eligible[0] is not result_entries[0]
+    ):
+        raise ValueError("projected ledger first raw-complete entry is not uniquely selected")
     first = eligible[0]
     if (
         _ref(ledger["selected_attempt_ref"], name="selected_attempt_ref")
