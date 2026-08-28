@@ -5,7 +5,8 @@ import inspect
 from pathlib import Path
 import pytest
 from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, attach_vista_outcomes, canonical_bytes, parse_benchmark_v2_goal, prediction_record_ref, seal_automatic_prediction, seal_review_decision, seal_target_binding, seal_vista_request, sealed_artifact_envelope, select_pre_vista_prediction_rows
-from app.learn.hybrid.benchmark_v2_contracts import PARENT_REF
+from app.learn.hybrid.benchmark_v2_contracts import PARENT_REF, content_sha256
+from app.learn.hybrid.benchmark_v2_pathless import order_pathless_envelopes, pathless_artifact_ref, seal_pathless_envelope, seal_pathless_projection
 import app.learn.hybrid.benchmark_scorer_v2 as scorer_v2
 from app.learn.hybrid.benchmark_scorer_v2 import _score_private_child, _verified_config_snapshot, config_ref, run_private_scorer
 
@@ -96,26 +97,88 @@ def task10_evidence(cases:list[dict[str,object]])->tuple[dict[str,object],dict[s
     return run,bundle
 
 
+def _selected_accepted_input(path:Path,provider_cases:list[dict[str,object]],private_cases:list[dict[str,object]],release:dict[str,object])->None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    accepted=json.loads(path.read_text(encoding="utf-8")); run=json.loads(base64.b64decode(accepted["prediction_run_envelope"]["canonical_bytes_b64"],validate=True))
+    children=deepcopy(run["sealed_artifact_envelopes"]); automatic_index=next(index for index,envelope in enumerate(children) if json.loads(base64.b64decode(envelope["canonical_bytes_b64"],validate=True)).get("contract_version")=="automatic_prediction_v3")
+    automatic=json.loads(base64.b64decode(children[automatic_index]["canonical_bytes_b64"],validate=True))
+    provider=sorted((case for case in provider_cases if case["partition"]=="regression"),key=lambda case:str(case["case_id"]))[0]
+    private=next(case for case in private_cases if case["case_id"]==provider["case_id"])
+    dependency=next(item for item in automatic["provider_group_dependencies"] if item["provider_group_ref"]["id"]==provider["screen_group"])
+    case_ref={"case_id":provider["case_id"],"case_content_sha256":content_sha256(provider)}; actual_ref=dependency["actual_screen_group_ref"]; capture_ref=dependency["capture_ref"]
+    nested=[]
+    def nested_ref(kind:str)->dict[str,str]:
+        item=predictions._nested_evidence(evidence_kind=kind,canonical_value={"case_id":provider["case_id"],"kind":kind},case_ref=case_ref,actual_screen_group_ref=actual_ref); nested.append(item); return pathless_artifact_ref(item)
+    qsource=predictions._source_parent(case_ref=case_ref,arm_scope=["qwen_only"],source_kind="incumbent_qwen_action",evidence_refs={"incumbent_response_ref":nested_ref("incumbent_response"),"available_action_ref":nested_ref("available_action")},actual_screen_group_ref=actual_ref,capture_ref=capture_ref)
+    osource=predictions._source_parent(case_ref=case_ref,arm_scope=["omni_only_discovery"],source_kind="omni_inventory_item",evidence_refs={"omni_inventory_ref":dependency["omni_inventory_ref"],"omni_item_ref":nested_ref("omni_item")},actual_screen_group_ref=actual_ref,capture_ref=capture_ref)
+    hsource=predictions._source_parent(case_ref=case_ref,arm_scope=["omni_to_qwen","omni_to_qwen_vista"],source_kind="hybrid_bound_fusion_candidate",evidence_refs={"omni_inventory_ref":dependency["omni_inventory_ref"],"qwen_bindings_ref":dependency["qwen_bindings_ref"],"fusion_result_ref":dependency["fusion_result_ref"],"fusion_candidate_ref":nested_ref("fusion_candidate")},actual_screen_group_ref=actual_ref,capture_ref=capture_ref)
+    bbox=list(private["acceptable_regions"][0]); qarts=predictions._selection_artifacts(case_id=provider["case_id"],arm_scope=["qwen_only"],candidate_id="candidate/scorer-qwen",bbox=bbox,capture_ref=capture_ref,source_parent=qsource); oarts=predictions._selection_artifacts(case_id=provider["case_id"],arm_scope=["omni_only_discovery"],candidate_id="candidate/scorer-omni",bbox=bbox,capture_ref=capture_ref,source_parent=osource); harts=predictions._selection_artifacts(case_id=provider["case_id"],arm_scope=["omni_to_qwen","omni_to_qwen_vista"],candidate_id="candidate/scorer-hybrid",bbox=bbox,capture_ref=capture_ref,source_parent=hsource,submitted_request_ref=dependency["submitted_vista_request_refs"][0])
+    selected={"qwen_only":predictions._selected_row(provider["case_id"],"qwen_only",qarts),"omni_only_discovery":predictions._selected_row(provider["case_id"],"omni_only_discovery",oarts),"omni_to_qwen":predictions._selected_row(provider["case_id"],"omni_to_qwen",harts),"omni_to_qwen_vista":predictions._selected_row(provider["case_id"],"omni_to_qwen_vista",harts)}
+    a,b,c,d=bbox; selected["omni_to_qwen_vista"]["vista_result"]={"status":"validated","request_ref":selected["omni_to_qwen_vista"]["vista_request_ref"],"target_binding_ref":selected["omni_to_qwen_vista"]["target_binding_ref"],"canonical_capture_pixel_point":[(a+c)//2,(b+d)//2]}
+    rows=[selected.get(row["arm_id"],row) if row["case_id"]==provider["case_id"] else row for row in automatic["rows"]]
+    changed=predictions._seal_automatic_prediction_v3(benchmark_release_id=automatic["benchmark_release_id"],partition=automatic["partition"],source_parent_ref=automatic["source_parent_ref"],case_arm_multiset_sha256=automatic["case_arm_multiset_sha256"],provider_group_dependencies=automatic["provider_group_dependencies"],rows=rows)
+    children[automatic_index]=seal_pathless_envelope(changed)
+    children.extend(seal_pathless_envelope(item) for item in [*nested,*qarts,*oarts,*harts])
+    children=order_pathless_envelopes(registry_name="prediction_run_v3",envelopes=children,context={})
+    semantic={key:deepcopy(value) for key,value in run.items() if key not in {"contract_version","artifact_id","content_sha256"}}; semantic["corpus_parent_ref"]=deepcopy(release["corpus_parent_ref"]); semantic["provider_manifest_ref"]=deepcopy(release["provider_manifest_ref"]); semantic["provider_corpus_ref"]=deepcopy(release["provider_corpus_ref"]); semantic["automatic_prediction_ref"]=pathless_artifact_ref(changed); semantic["sealed_artifact_envelopes"]=children
+    changed_run=seal_pathless_projection(contract_version="benchmark_v2_prediction_run_v3",semantic_payload=semantic)
+    accepted["corpus_parent_ref"]=deepcopy(release["corpus_parent_ref"]); accepted["provider_manifest_ref"]=deepcopy(release["provider_manifest_ref"]); accepted["provider_corpus_ref"]=deepcopy(release["provider_corpus_ref"]); accepted["automatic_prediction_ref"]=pathless_artifact_ref(changed); accepted["prediction_run_envelope"]=seal_pathless_envelope(changed_run); accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); write(path,accepted)
+
+
+def _remint_pathless_unchecked(value:dict[str,object])->dict[str,object]:
+    changed=deepcopy(value); prefix=str(changed["artifact_id"]).split("/",1)[0]; changed.pop("artifact_id"); changed.pop("content_sha256")
+    contract=str(changed["contract_version"]); semantic={key:value for key,value in changed.items() if key!="contract_version"}; identity=semantic if contract=="automatic_prediction_v3" else changed
+    semantic_sha=hashlib.sha256(contract.encode("utf-8")+b"\0"+canonical_bytes(identity)).hexdigest(); changed={"contract_version":contract,"artifact_id":f"{prefix}/{semantic_sha}",**semantic}; changed["content_sha256"]=hashlib.sha256(canonical_bytes(changed)).hexdigest(); return changed
+
+
+def _unchecked_envelope(value:dict[str,object])->dict[str,object]:
+    raw=canonical_bytes(value); return {"ref":{"id":value["artifact_id"],"content_sha256":value["content_sha256"]},"canonical_bytes_b64":base64.b64encode(raw).decode("ascii")}
+
+
+def _rewrite_accepted_outer(accepted:dict[str,object],field:str,outer:dict[str,object])->None:
+    reminted=_remint_pathless_unchecked(outer); accepted[field]=_unchecked_envelope(reminted)
+
+
+def _finish_accepted_mutation(path:Path,accepted:dict[str,object])->None:
+    accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); write(path,accepted)
+
+
 @pytest.fixture(scope="module")
 def task10_release_inputs(tmp_path_factory:pytest.TempPathFactory)->dict[str,Path]:
     helper_path=ROOT/"tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py"
     spec=importlib.util.spec_from_file_location("task10_seal_helpers_for_scoring",helper_path); assert spec is not None and spec.loader is not None
     helpers=importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
     base=tmp_path_factory.mktemp("task10-real-child"); sealer=helpers._load_sealer()
-    repo,private_path,_,_,_=helpers._task10_bundle(base,sealer)
-    parent=json.loads((repo/helpers.PARENT_PATH).read_text(encoding="utf-8"))
-    cases=[]
-    for record in parent["gold_records"]:
-        if record["partition"]!="holdout": continue
-        screen_id=record["screen_id"]; target_id=record["target_id"]
-        cases.append({"case_id":hashlib.sha256(f"benchmark-v2-case\0{screen_id}\0{target_id}".encode()).hexdigest(),"screen_group":hashlib.sha256(f"benchmark-v2-screen-group\0{screen_id}".encode()).hexdigest(),"partition":"holdout","important_target":record["important_target"],"acceptable_regions":deepcopy(record["acceptable_regions"])})
-    run,bundle=task10_evidence(cases); run_path=base/"run.json"; lifecycle_path=base/"lifecycle.json"; write(run_path,run); write(lifecycle_path,bundle)
-    return {"private":private_path,"run":run_path,"lifecycle":lifecycle_path}
+    repo,private_path,provider_path,_,_=helpers._task10_bundle(base/"release",sealer)
+    runner_path=ROOT/"tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py"; runner_spec=importlib.util.spec_from_file_location("s3_runner_helpers_for_scoring",runner_path); assert runner_spec is not None and runner_spec.loader is not None
+    runner_helpers=importlib.util.module_from_spec(runner_spec); runner_spec.loader.exec_module(runner_helpers)
+    patcher=pytest.MonkeyPatch()
+    try: runner_helpers.test_materialize_score_input_true_offline_producer_is_deterministic(patcher,base/"accepted")
+    finally: patcher.undo()
+    accepted_path=base/"accepted"/"accepted-run-ref.json"; provider_manifest=json.loads(provider_path.read_text(encoding="utf-8")); provider_corpus=json.loads((provider_path.parent/provider_manifest["provider_corpus_ref"]["relative_path"]).read_text(encoding="utf-8"))
+    from app.learn.hybrid.benchmark_v2_private_release import derive_private_scoring_cases, validate_task10_private_release_bundle
+    release=validate_task10_private_release_bundle(private_manifest_path=private_path); private_cases=derive_private_scoring_cases(validated_release=release,partition="regression")
+    _selected_accepted_input(accepted_path,provider_corpus["cases"],private_cases,release)
+    return {"private":private_path,"accepted":accepted_path}
 
 def files(tmp:Path,private:dict,run:dict,bundle:dict)->dict[str,Path]:
     paths={k:tmp/f"{k}.json" for k in ("private","run","lifecycle","output","public")}
     for k,v in (("private",private),("run",run),("lifecycle",bundle)): write(paths[k],v)
     return paths
+
+
+def test_s3_private_scorer_public_signature_is_exactly_four_paths() -> None:
+    signature = inspect.signature(run_private_scorer)
+    assert list(signature.parameters) == [
+        "private_manifest_path",
+        "prediction_run_ref_path",
+        "private_output_path",
+        "public_ref_path",
+    ]
+    assert all(
+        parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        for parameter in signature.parameters.values()
+    )
 
 def execute(tmp:Path,private:dict,run:dict,bundle:dict)->tuple[dict[str,str],dict[str,object],dict[str,object]]:
     rows,cases,gate=scorer_v2._validate(private,run,bundle); score=scorer_v2._score(rows,cases,gate); raw=canonical_bytes(score); result={"status":score["gate"]["status"],"score_ref":f"direct-fixture/{hashlib.sha256(raw).hexdigest()}","content_sha256":hashlib.sha256(raw).hexdigest()}; return result,score,{}
@@ -245,8 +308,7 @@ def test_production_launcher_rejects_canonical_synthetic_manifest_without_output
     with pytest.raises(ValueError, match="failed closed"):
         run_private_scorer(
             private_manifest_path=paths["private"],
-            prediction_run_path=paths["run"],
-            lifecycle_path=paths["lifecycle"],
+            prediction_run_ref_path=paths["run"],
             private_output_path=paths["output"],
             public_ref_path=paths["public"],
         )
@@ -260,8 +322,7 @@ def test_real_task10_bundle_traverses_isolated_child_without_private_leakage(
     private_output=tmp_path/"private-score.json"; public_output=tmp_path/"public-ref.json"
     result=run_private_scorer(
         private_manifest_path=task10_release_inputs["private"],
-        prediction_run_path=task10_release_inputs["run"],
-        lifecycle_path=task10_release_inputs["lifecycle"],
+        prediction_run_ref_path=task10_release_inputs["accepted"],
         private_output_path=private_output,
         public_ref_path=public_output,
     )
@@ -269,7 +330,100 @@ def test_real_task10_bundle_traverses_isolated_child_without_private_leakage(
     assert private_output.is_file() and public_output.is_file()
     public_text=public_output.read_text(encoding="utf-8")
     assert "target_id" not in public_text and "acceptable_regions" not in public_text
-    assert "gold.v1.json" not in public_text and "private_manifest" not in public_text
+    assert "gold.v1.json" not in public_text and "artifact_inventory" not in public_text
+    assert str(task10_release_inputs["private"]) not in public_text and str(task10_release_inputs["accepted"]) not in public_text
+    private_score=json.loads(private_output.read_text(encoding="utf-8")); public=json.loads(public_text); launch=json.loads(base64.b64decode(public["launch_receipt"]["canonical_bytes_b64"],validate=True))
+    binding=private_score["score_input_binding"]
+    assert set(binding)=={"contract_version","benchmark_release_id","partition","private_manifest_ref","corpus_parent_ref","provider_manifest_ref","provider_corpus_ref","accepted_run_ref","attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref","estimand_ref","gate_ref","safety"}
+    assert binding==launch["score_input_binding"]==public["binding"]["score_input_binding"]==public["score_input_binding"]
+    assert private_score["contract_version"]=="portfolio_hybrid_v1_1_private_score_v3" and public["contract_version"]=="private_scorer_public_ref_v3"
+
+
+def test_s3_public_cli_uses_exact_four_flags_and_one_compact_projection(tmp_path:Path,task10_release_inputs:dict[str,Path])->None:
+    output=tmp_path/"cli-private.json"; public=tmp_path/"cli-public.json"
+    command=[str(Path(getattr(sys,"_base_executable",sys.executable)).resolve()),str(SCRIPT),"--private-manifest",str(task10_release_inputs["private"]),"--prediction-run-ref",str(task10_release_inputs["accepted"]),"--private-output",str(output),"--public-ref-output",str(public)]
+    completed=subprocess.run(command,cwd=tmp_path,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True,check=False)
+    assert completed.returncode==0 and completed.stderr==""
+    projection=json.loads(completed.stdout)
+    assert completed.stdout==json.dumps(projection,ensure_ascii=False,sort_keys=True,separators=(",",":"))+"\n"
+    assert list(sorted(projection))==["content_sha256","score_ref","status"] and output.is_file() and public.is_file()
+
+
+@pytest.mark.parametrize("extra",[["--lifecycle","x"],["--provider-manifest","x"],["--corpus","x"],["--Gold","x"],["--authorization","x"],["--claim","x"]])
+def test_s3_cli_rejects_forbidden_path_authorities(extra:list[str],tmp_path:Path)->None:
+    command=[str(Path(getattr(sys,"_base_executable",sys.executable)).resolve()),str(SCRIPT),"--private-manifest","p","--prediction-run-ref","r","--private-output","o","--public-ref-output","u",*extra]
+    completed=subprocess.run(command,cwd=tmp_path,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True,check=False)
+    assert completed.returncode==2 and completed.stdout==""
+
+
+def test_s3_cli_rejects_missing_mixed_and_duplicate_modes(tmp_path:Path)->None:
+    python=str(Path(getattr(sys,"_base_executable",sys.executable)).resolve()); base=[python,str(SCRIPT)]
+    commands=[base+["--private-manifest","p"],base+["--closed-launch-handle","1","--private-manifest","p","--prediction-run-ref","r","--private-output","o","--public-ref-output","u"],base+["--private-manifest","p","--private-manifest","q","--prediction-run-ref","r","--private-output","o","--public-ref-output","u"]]
+    for command in commands:
+        completed=subprocess.run(command,cwd=tmp_path,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True,check=False)
+        assert completed.returncode==2 and completed.stdout==""
+
+
+def test_s3_cli_rejects_every_flag_prefix_and_abbreviated_duplicate(tmp_path:Path)->None:
+    python=str(Path(getattr(sys,"_base_executable",sys.executable)).resolve()); base=[python,str(SCRIPT)]
+    flags=("--private-manifest","--prediction-run-ref","--private-output","--public-ref-output","--closed-launch-handle")
+    prefixes=[(flag,flag[:length]) for flag in flags for length in range(3,len(flag))]
+    failures=[]
+    for flag,prefix in prefixes:
+        for command in (base+[prefix,"1"],base+[flag,"1",prefix,"2"]):
+            completed=subprocess.run(command,cwd=tmp_path,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8",close_fds=True,check=False)
+            if completed.returncode!=2 or completed.stdout!="" or "unrecognized arguments" not in completed.stderr:
+                failures.append((flag,prefix,completed.returncode,completed.stdout,completed.stderr))
+    assert failures==[]
+
+
+@pytest.mark.parametrize("mutation",["legacy_contract","selected_lifecycle_substitution"])
+def test_s3_production_child_rejects_old_or_substituted_accepted_authority(mutation:str,tmp_path:Path,task10_release_inputs:dict[str,Path])->None:
+    accepted=json.loads(task10_release_inputs["accepted"].read_text(encoding="utf-8"))
+    if mutation=="legacy_contract": accepted["contract_version"]="benchmark_v2_accepted_regression_score_input_v1"
+    else:
+        lifecycle=json.loads(base64.b64decode(accepted["lifecycle_bundle_envelope"]["canonical_bytes_b64"],validate=True))
+        alternate=next(envelope["ref"] for envelope in lifecycle["sealed_artifact_envelopes"] if envelope["ref"]!=accepted["selected_lifecycle_ref"] and envelope["ref"]["id"].startswith("verified-lifecycle/"))
+        accepted["selected_lifecycle_ref"]=alternate
+    accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); accepted_path=tmp_path/"accepted-mutated.json"; write(accepted_path,accepted)
+    private_output=tmp_path/"private.json"; public_output=tmp_path/"public.json"
+    with pytest.raises(ValueError,match="failed closed"):
+        run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=accepted_path,private_output_path=private_output,public_ref_path=public_output)
+    assert not private_output.exists() and not public_output.exists()
+
+
+@pytest.mark.parametrize("mutation",["missing_referenced_lifecycle_with_orphan","semantic_invalid_lifecycle","closure_order"])
+def test_s3_isolated_child_rejects_non_recursive_accepted_closure_mutations(mutation:str,tmp_path:Path,task10_release_inputs:dict[str,Path])->None:
+    accepted=json.loads(task10_release_inputs["accepted"].read_text(encoding="utf-8")); lifecycle=json.loads(base64.b64decode(accepted["lifecycle_bundle_envelope"]["canonical_bytes_b64"],validate=True)); children=deepcopy(lifecycle["sealed_artifact_envelopes"])
+    if mutation=="closure_order":
+        children[0],children[1]=children[1],children[0]
+    else:
+        target_ref=lifecycle["screen_group_lifecycle_projection_refs"][0]; index=next(i for i,envelope in enumerate(children) if envelope["ref"]==target_ref); target=json.loads(base64.b64decode(children[index]["canonical_bytes_b64"],validate=True))
+        target["raw_evidence_sha256"]="f"*64
+        if mutation=="semantic_invalid_lifecycle": target["terminal_status"]="FORGED"
+        children[index]=_unchecked_envelope(_remint_pathless_unchecked(target))
+    lifecycle["sealed_artifact_envelopes"]=children; _rewrite_accepted_outer(accepted,"lifecycle_bundle_envelope",lifecycle); path=tmp_path/f"{mutation}.json"; _finish_accepted_mutation(path,accepted)
+    private_output=tmp_path/f"{mutation}-private.json"; public_output=tmp_path/f"{mutation}-public.json"
+    with pytest.raises(ValueError,match="failed closed"):
+        run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=path,private_output_path=private_output,public_ref_path=public_output)
+    assert not private_output.exists() and not public_output.exists()
+
+
+def test_s3_isolated_child_rejects_later_complete_attempt_substitution(tmp_path:Path,task10_release_inputs:dict[str,Path])->None:
+    accepted=json.loads(task10_release_inputs["accepted"].read_text(encoding="utf-8")); replacement_ref=None; replacement_env=None
+    outers={}
+    for field in ("prediction_run_envelope","lifecycle_bundle_envelope"):
+        outer=json.loads(base64.b64decode(accepted[field]["canonical_bytes_b64"],validate=True)); children=deepcopy(outer["sealed_artifact_envelopes"]); index=next(i for i,envelope in enumerate(children) if envelope["ref"]==accepted["attempt_ledger_ref"]); ledger=json.loads(base64.b64decode(children[index]["canonical_bytes_b64"],validate=True)); selected=deepcopy(ledger["entries"][0]); prior=deepcopy(selected); prior.update({"sequence":0,"attempt_ref":{"id":"runner-attempt/prior-complete","content_sha256":"d"*64},"selection_eligible":False,"lifecycle_ref":None,"event_projection_refs":[selected["event_projection_refs"][0]],"observed_state":"result"}); selected["sequence"]=1; ledger["entries"]=[prior,selected]
+        reminted=_remint_pathless_unchecked(ledger); envelope=_unchecked_envelope(reminted)
+        if replacement_ref is None: replacement_ref=envelope["ref"]; replacement_env=envelope
+        else: assert envelope==replacement_env
+        children[index]=envelope; outer["projected_attempt_ledger_ref"]=replacement_ref; outer["sealed_artifact_envelopes"]=children; outers[field]=outer
+    accepted["attempt_ledger_ref"]=replacement_ref
+    for field,outer in outers.items(): _rewrite_accepted_outer(accepted,field,outer)
+    path=tmp_path/"later-complete.json"; _finish_accepted_mutation(path,accepted); private_output=tmp_path/"later-private.json"; public_output=tmp_path/"later-public.json"
+    with pytest.raises(ValueError,match="failed closed"):
+        run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=path,private_output_path=private_output,public_ref_path=public_output)
+    assert not private_output.exists() and not public_output.exists()
 
 
 @pytest.mark.parametrize("mutation", ["four", "six", "singleton_split", "duplicate_case", "invalid_region"])
@@ -421,7 +575,7 @@ def test_real_nonproduction_launcher_without_exact_os_boundary_fails(tmp_path:Pa
         os.close(read_fd); read_fd=-1
         if mutation!="no_job" and mutation!="inherited_file": job.assign(process)
         if mutation!="inherited_file":
-            parent=os.getpid(); envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_path":str(tmp_path/"run"),"lifecycle_path":str(tmp_path/"life"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":parent,"launcher_process_identity":_process_identity(parent),"expected_process_id":process.pid,"expected_process_identity":_process_identity(process.pid),"job_name":job.name,"job_identity_sha256":job.identity_sha256,"expected_argv_sha256":hashlib.sha256(canonical_bytes([str(SCRIPT),"--closed-launch-handle",str(handle)])).hexdigest(),"expected_env_sha256":hashlib.sha256(canonical_bytes(env)).hexdigest(),"expected_cwd_sha256":hashlib.sha256(canonical_bytes(str(operation.resolve()))).hexdigest(),"expected_executable":str(python)}
+            parent=os.getpid(); envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_ref_path":str(tmp_path/"run"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":parent,"launcher_process_identity":_process_identity(parent),"expected_process_id":process.pid,"expected_process_identity":_process_identity(process.pid),"job_name":job.name,"job_identity_sha256":job.identity_sha256,"expected_argv_sha256":hashlib.sha256(canonical_bytes([str(SCRIPT),"--closed-launch-handle",str(handle)])).hexdigest(),"expected_env_sha256":hashlib.sha256(canonical_bytes(env)).hexdigest(),"expected_cwd_sha256":hashlib.sha256(canonical_bytes(str(operation.resolve()))).hexdigest(),"expected_executable":str(python)}
             os.write(write_fd,canonical_bytes(envelope)); os.close(write_fd); write_fd=-1
         stdout,stderr=process.communicate(timeout=10)
         assert process.returncode!=0 and "opaque" not in stderr and not (tmp_path/"out").exists()
@@ -477,7 +631,7 @@ def test_true_child_entry_rejects_matching_self_identity(tmp_path:Path)->None:
     from app.learn.hybrid.benchmark_scorer_v2 import _process_identity, execute_closed_child_envelope
     import msvcrt
     pid=os.getpid(); identity=_process_identity(pid)
-    envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_path":str(tmp_path/"run"),"lifecycle_path":str(tmp_path/"life"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":pid,"launcher_process_identity":identity,"expected_process_id":pid,"expected_process_identity":identity,"job_name":"self-job","job_identity_sha256":"0"*64,"expected_argv_sha256":"0"*64,"expected_env_sha256":"0"*64,"expected_cwd_sha256":"0"*64,"expected_executable":str(Path(sys.executable).resolve())}
+    envelope={"private_manifest_path":str(tmp_path/"private"),"prediction_run_ref_path":str(tmp_path/"run"),"private_output_path":str(tmp_path/"out"),"public_ref_path":str(tmp_path/"public"),"nonce":"a"*64,"pipe_capability":"b"*64,"launcher_process_id":pid,"launcher_process_identity":identity,"expected_process_id":pid,"expected_process_identity":identity,"job_name":"self-job","job_identity_sha256":"0"*64,"expected_argv_sha256":"0"*64,"expected_env_sha256":"0"*64,"expected_cwd_sha256":"0"*64,"expected_executable":str(Path(sys.executable).resolve())}
     read_fd,write_fd=os.pipe(); handle=msvcrt.get_osfhandle(read_fd); os.write(write_fd,canonical_bytes(envelope)); os.close(write_fd)
     with pytest.raises(PermissionError,match="launcher binding"):
         execute_closed_child_envelope(handle)
@@ -506,7 +660,7 @@ def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monk
         observed.update({"args":deepcopy(args),"env":deepcopy(kwargs["env"]),"cwd":Path(kwargs["cwd"]),"initial":list(Path(kwargs["cwd"]).iterdir()),"stdin":kwargs["stdin"],"handles":list(kwargs["startupinfo"].lpAttributeList["handle_list"])})
         process=original(*args,**kwargs); observed["child_pid"]=process.pid; return process
     monkeypatch.setattr(scorer.subprocess,"Popen",capture)
-    result=run_private_scorer(private_manifest_path=p["private"],prediction_run_path=p["run"],lifecycle_path=p["lifecycle"],private_output_path=p["output"],public_ref_path=p["public"])
+    result=run_private_scorer(private_manifest_path=p["private"],prediction_run_ref_path=p["accepted"],private_output_path=p["output"],public_ref_path=p["public"])
     projection=json.dumps({"args":observed["args"],"env":observed["env"],"cwd":str(observed["cwd"])},default=str)
     assert set(result)=={"status","score_ref","content_sha256"} and observed["initial"]==[] and observed["stdin"]==subprocess.DEVNULL and len(observed["handles"])==1
     assert str(tmp_path) not in projection and "opaque/" not in projection and "BENCHMARK_V2_SCORER_CHILD_CAPABILITY" not in observed["env"]
@@ -520,7 +674,7 @@ def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monk
 def test_downstream_requires_exact_production_launch_cleanup_chain(tmp_path:Path,mutation:str,task10_release_inputs:dict[str,Path])->None:
     from app.learn.hybrid.benchmark_scorer_v2 import _sealed_receipt, validate_private_scorer_public_ref
     output=tmp_path/"score.json"; public_path=tmp_path/"public.json"
-    run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_path=task10_release_inputs["run"],lifecycle_path=task10_release_inputs["lifecycle"],private_output_path=output,public_ref_path=public_path)
+    run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=task10_release_inputs["accepted"],private_output_path=output,public_ref_path=public_path)
     public=json.loads(public_path.read_text(encoding="utf-8")); changed=deepcopy(public)
     if mutation=="launch_bytes": changed["launch_receipt"]["canonical_bytes_b64"]="AA=="
     elif mutation=="cleanup_semantics":
@@ -529,6 +683,41 @@ def test_downstream_requires_exact_production_launch_cleanup_chain(tmp_path:Path
     else: changed["content_sha256"]="0"*64
     with pytest.raises(ValueError,match="scorer"):
         validate_private_scorer_public_ref(changed)
+
+
+@pytest.mark.parametrize("mutation",["status","gold_value","private_value","absolute_path","error_value","non_path_field"])
+def test_s3_public_v3_rejects_fully_reminted_status_or_recursive_leakage(tmp_path:Path,mutation:str,task10_release_inputs:dict[str,Path])->None:
+    from app.learn.hybrid.benchmark_scorer_v2 import _content_bound, _sealed_receipt, validate_private_scorer_public_ref
+    output=tmp_path/"score.json"; public_path=tmp_path/"public.json"
+    run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=task10_release_inputs["accepted"],private_output_path=output,public_ref_path=public_path)
+    public=json.loads(public_path.read_text(encoding="utf-8")); assert validate_private_scorer_public_ref(public)["score_ref"].startswith("private-score-final/")
+    launch=json.loads(base64.b64decode(public["launch_receipt"]["canonical_bytes_b64"],validate=True)); cleanup=json.loads(base64.b64decode(public["cleanup_receipt"]["canonical_bytes_b64"],validate=True)); binding=deepcopy(public["score_input_binding"]); child=deepcopy(public["binding"]["child_score_ref"]); assert child["score_ref"].startswith("private-score/")
+    if mutation=="status":
+        child["status"]="FORGED"; public["status"]="FORGED"
+    elif mutation=="non_path_field": launch["launcher_process_identity"]="private/evidence.json"
+    else:
+        binding["provider_manifest_ref"]["relative_path"]={"gold_value":"gold.v1.json","private_value":"private/evidence.json","absolute_path":r"C:\private\gold.json","error_value":"errors/provider-sensitive.txt"}[mutation]
+    launch["child_score_ref"]=deepcopy(child); launch["score_input_binding"]=deepcopy(binding); launch=_content_bound({key:value for key,value in launch.items() if key!="content_sha256"}); launch_env=_sealed_receipt(launch,"private-scorer-launch")
+    cleanup["launch_receipt_ref"]=deepcopy(launch_env["ref"]); cleanup_env=_sealed_receipt(cleanup,"private-scorer-cleanup")
+    final_binding=_content_bound({"contract_version":"private_scorer_final_binding_v2","child_score_ref":deepcopy(child),"score_input_binding":deepcopy(binding),"launch_receipt_ref":deepcopy(launch_env["ref"]),"cleanup_receipt_ref":deepcopy(cleanup_env["ref"]),"safety":deepcopy(SAFETY)})
+    reminted=_content_bound({"contract_version":"private_scorer_public_ref_v3","status":public["status"],"score_ref":f"private-score-final/{final_binding['content_sha256']}","score_input_binding":deepcopy(binding),"binding":final_binding,"launch_receipt":launch_env,"cleanup_receipt":cleanup_env,"safety":deepcopy(SAFETY)})
+    with pytest.raises(ValueError,match="scorer"):
+        validate_private_scorer_public_ref(reminted)
+
+
+def test_s3_private_score_v3_rejects_reminted_status_and_recursive_leakage(tmp_path:Path,task10_release_inputs:dict[str,Path])->None:
+    import app.learn.hybrid.benchmark_scorer_v2 as scorer
+    output=tmp_path/"score.json"; public_path=tmp_path/"public.json"
+    run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=task10_release_inputs["accepted"],private_output_path=output,public_ref_path=public_path)
+    private_score=json.loads(output.read_text(encoding="utf-8")); assert scorer._validate_private_score_artifact(private_score)["contract_version"]=="portfolio_hybrid_v1_1_private_score_v3"
+    for mutation in ("status","gold_value","private_value","absolute_path","error_value","non_path_field"):
+        changed=deepcopy(private_score)
+        if mutation=="status": changed["gate"]["status"]="FORGED"
+        elif mutation=="non_path_field": changed["gate"]["automatic_split"]="private/evidence.json"
+        else: changed["score_input_binding"]["provider_manifest_ref"]["relative_path"]={"gold_value":"gold.v1.json","private_value":"private/evidence.json","absolute_path":r"C:\private\gold.json","error_value":"errors/provider-sensitive.txt"}[mutation]
+        changed["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in changed.items() if key!="content_sha256"})).hexdigest()
+        with pytest.raises(ValueError,match="scorer"):
+            scorer._validate_private_score_artifact(changed)
 
 
 def _s12_inputs(*, goal: str = "Select the button labeled 'Apply now'") -> dict[str, object]:

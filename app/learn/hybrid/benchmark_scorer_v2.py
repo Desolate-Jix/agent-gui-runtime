@@ -1,10 +1,19 @@
 """Child-only private scorer plus production-owned isolated scorer spawner."""
 from __future__ import annotations
-import base64, hashlib, json, os, secrets, stat, subprocess, sys, tempfile
+import base64, hashlib, json, os, re, secrets, stat, subprocess, sys, tempfile
+from copy import deepcopy
 from fractions import Fraction
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Mapping
-from app.learn.hybrid.benchmark_v2_predictions import SAFETY, ARMS, artifact_ref, canonical_bytes, exact_ref, _validate_pre
+from app.learn.hybrid.benchmark_v2_predictions import (
+    SAFETY, ARMS, artifact_ref, canonical_bytes, exact_ref, _validate_pre,
+    _prediction_external_refs, _provider_case_index,
+)
+from app.learn.hybrid.benchmark_v2_pathless import (
+    order_pathless_envelopes,
+    validate_pathless_recursive,
+)
 from app.learn.hybrid.benchmark_v2_private_release import (
     derive_private_scoring_cases,
     validate_task10_private_release_bundle,
@@ -16,6 +25,7 @@ ESTIMAND_PATH=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"
 SCRIPT=ROOT/"scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py"
 FAILURES={"failed","timeout","out_of_bounds","missing"}
 RELEASE="portfolio_hybrid_v1_1_benchmark_v2_release_1"
+_SHA_RE=re.compile(r"^[0-9a-f]{64}$")
 
 def _scorer_python_executable()->Path:
     path=Path(getattr(sys,"_base_executable",sys.executable)).resolve(strict=True)
@@ -60,6 +70,303 @@ def _get(found:Mapping[str,dict[str,Any]],ref:object,name:str)->dict[str,Any]:
 def _closed(value:object,fields:set[str],name:str)->dict[str,Any]:
     if not isinstance(value,Mapping) or set(value)!=fields: raise ValueError(f"{name} not closed")
     return dict(value)
+
+def _content_bound(value:Mapping[str,object])->dict[str,object]:
+    result=dict(value)
+    result["content_sha256"]=hashlib.sha256(canonical_bytes(result)).hexdigest()
+    return result
+
+def _is_sha(value:object)->bool:
+    return isinstance(value,str) and _SHA_RE.fullmatch(value) is not None
+
+def _reject_score_leakage(value:object)->None:
+    forbidden_keys={"target_id","label","goal","acceptable_regions","reviewer","annotator","artifact_inventory","error","errors","error_text","error_message","screenshot","screenshot_path","path","gold","gold_ref","gold_records","private_path","private_manifest_path","inventory"}
+    def scan(item:object,key_name:str="")->None:
+        if isinstance(item,Mapping):
+            lowered={str(key).casefold() for key in item}
+            if forbidden_keys & lowered: raise ValueError("private scorer artifact leaks private evidence")
+            for key,child in item.items(): scan(child,str(key).casefold())
+        elif isinstance(item,list):
+            for child in item: scan(child,key_name)
+        elif isinstance(item,str):
+            lowered=item.casefold(); normalized=lowered.replace("\\","/")
+            if lowered.startswith(("file:","/","\\\\")) or (len(item)>=3 and item[0].isalpha() and item[1]==":" and item[2] in "\\/"):
+                raise ValueError("private scorer artifact leaks an absolute path")
+            safe_score_ref=re.fullmatch(r"private-score(?:-final)?/[0-9a-f]{64}",normalized) is not None
+            path_component=re.search(r"(?<![a-z0-9_-])(?:private|gold|errors?)(?=$|[/\.\s:=;,\)\]}])",normalized) is not None
+            if not safe_score_ref and path_component:
+                raise ValueError("private scorer artifact leaks private evidence")
+    scan(value)
+
+def _resolve_pathless(index:Mapping[bytes,tuple[dict[str,object],dict[str,object]]],ref:object,contract:str)->dict[str,object]:
+    if not isinstance(ref,Mapping): raise ValueError("accepted child ref invalid")
+    found=index.get(canonical_bytes(ref))
+    if found is None or found[0].get("contract_version")!=contract: raise ValueError("accepted child ref unresolved")
+    return found[0]
+
+_RAW_DOMAINS={"hybrid_omni_inventory_v1":("omni-inventory",b"benchmark-v2-omni-inventory\0"),"hybrid_qwen_bindings_v1":("qwen-bindings",b"benchmark-v2-qwen-bindings\0"),"hybrid_fusion_result_v1":("fusion-result",b"benchmark-v2-fusion-result\0"),"hybrid_vista_refinement_request_v1":("submitted-vista-request",b"benchmark-v2-submitted-vista-request\0")}
+_PATHLESS_FIELDS={
+    "benchmark_v2_prediction_run_v3":{"contract_version","artifact_id","benchmark_release_id","partition","corpus_parent_ref","provider_manifest_ref","provider_corpus_ref","attempt_ref","projected_attempt_ledger_ref","raw_ledger_prefix_verification_ref","automatic_prediction_ref","selected_lifecycle_ref","sealed_artifact_envelopes","safety","content_sha256"},
+    "benchmark_v2_lifecycle_bundle_v3":{"contract_version","artifact_id","benchmark_release_id","partition","attempt_ref","projected_attempt_ledger_ref","raw_ledger_prefix_verification_ref","selected_lifecycle_ref","attempt_cleanup_projection_ref","screen_group_lifecycle_projection_refs","sealed_artifact_envelopes","safety","content_sha256"},
+    "automatic_prediction_v3":{"contract_version","artifact_id","prediction_id","benchmark_release_id","partition","source_parent_ref","case_arm_multiset_sha256","provider_group_dependencies","rows","safety","content_sha256"},
+    "benchmark_v2_projected_attempt_ledger_v1":{"contract_version","artifact_id","benchmark_release_id","partition","raw_ledger_prefix_verification_ref","entries","selected_attempt_ref","selected_lifecycle_ref","safety","content_sha256"},
+    "benchmark_v2_runner_event_verified_projection_v1":{"contract_version","artifact_id","partition","event_kind","sequence","attempt_ref","previous_event_projection_ref","raw_event_sha256","load_bearing_refs","safety","content_sha256"},
+    "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","sequence","phase","event_kind","raw_event_sha256","predecessor_content_sha256","cleanup_receipt_ref","cleanup_projection_ref","safety","content_sha256"},
+    "benchmark_v2_lifecycle_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","lifecycle_kind","raw_evidence_sha256","terminal_status","cleanup_stable_zero","resource_counts","started_request_count","terminal_or_unknown_request_count","parent_refs","safety","content_sha256"},
+    "benchmark_v2_runner_ledger_prefix_verified_projection_v1":{"contract_version","artifact_id","partition","raw_prefix_sha256","attempt_ledger_pre_result_ref","through_result_terminal_sequence","through_result_terminal_envelope_sha256","attempt_ref","body_file_ref","cleanup_event_projection_ref","result_file_ref","result_event_projection_ref","verified","safety","content_sha256"},
+    "benchmark_v2_attempt_journal_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","raw_journal_sha256","terminal_event_ref","started_request_count","terminal_or_unknown_request_count","cleanup_projection_ref","verified","safety","content_sha256"},
+    "benchmark_v2_actual_body_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","body_contract_version","raw_file_sha256","body_content_sha256","screen_group_count","case_arm_multiset_sha256","pre_vista_evidence_refs","verified","safety","content_sha256"},
+    "benchmark_v2_actual_result_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","result_contract_version","raw_file_sha256","result_content_sha256","body_projection_ref","cleanup_projection_ref","attempt_ledger_pre_result_ref","runner_ledger_prefix_projection_ref","result_event_projection_ref","verified","safety","content_sha256"},
+    "benchmark_v2_nested_provider_evidence_ref_v1":{"contract_version","artifact_id","evidence_kind","case_ref","actual_screen_group_ref","canonical_value_sha256","safety","content_sha256"},
+    "sealed_prediction_source_parent_v1":{"contract_version","artifact_id","case_ref","arm_scope","source_kind","evidence_refs","actual_screen_group_ref","capture_ref","safety","content_sha256"},
+    "sealed_prediction_bbox_v1":{"contract_version","artifact_id","case_id","arm_scope","candidate_id","coordinate_space","xyxy","capture_ref","source_parent_ref","safety","content_sha256"},
+    "sealed_target_binding_v4":{"contract_version","artifact_id","case_id","arm_scope","candidate_id","source_parent_ref","capture_ref","bbox_ref","safety","content_sha256"},
+    "sealed_vista_request_v4":{"contract_version","artifact_id","case_id","arm_scope","candidate_id","target_binding_ref","source_parent_ref","capture_ref","bbox_ref","submitted_request_ref","submission_status","safety","content_sha256"},
+}
+_PATHLESS_PREFIXES={"benchmark_v2_prediction_run_v3":"prediction-run","benchmark_v2_lifecycle_bundle_v3":"lifecycle-bundle","automatic_prediction_v3":"automatic","benchmark_v2_projected_attempt_ledger_v1":"projected-attempt-ledger","benchmark_v2_runner_event_verified_projection_v1":"verified-runner-event","benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":"verified-attempt-journal-terminal-event","benchmark_v2_lifecycle_verified_projection_v1":"verified-lifecycle","benchmark_v2_runner_ledger_prefix_verified_projection_v1":"verified-runner-ledger-prefix","benchmark_v2_attempt_journal_verified_projection_v1":"verified-attempt-journal","benchmark_v2_actual_body_verified_projection_v1":"verified-actual-body","benchmark_v2_actual_result_verified_projection_v1":"verified-actual-result","benchmark_v2_nested_provider_evidence_ref_v1":"nested-provider-evidence","sealed_prediction_source_parent_v1":"prediction-source-parent","sealed_prediction_bbox_v1":"prediction-bbox","sealed_target_binding_v4":"target-binding","sealed_vista_request_v4":"vista-request"}
+
+def _light_envelope(value:object,*,name:str)->tuple[dict[str,object],dict[str,object]]:
+    env=_closed(value,{"ref","canonical_bytes_b64"},name)
+    try: raw=base64.b64decode(env["canonical_bytes_b64"],validate=True); item=json.loads(raw.decode("utf-8"))
+    except (ValueError,UnicodeDecodeError,base64.binascii.Error) as error: raise ValueError(f"{name} encoding invalid") from error
+    if raw!=canonical_bytes(item) or not isinstance(item,Mapping): raise ValueError(f"{name} bytes invalid")
+    artifact=dict(item); version=artifact.get("contract_version")
+    if version in _RAW_DOMAINS:
+        prefix,domain=_RAW_DOMAINS[str(version)]; expected_ref={"id":f"{prefix}/{hashlib.sha256(domain+raw).hexdigest()}","content_sha256":hashlib.sha256(raw).hexdigest()}
+    else:
+        fields=_PATHLESS_FIELDS.get(str(version))
+        if fields is None or set(artifact)!=fields or artifact.get("safety")!=SAFETY or artifact.get("content_sha256")!=hashlib.sha256(canonical_bytes({k:v for k,v in artifact.items() if k!="content_sha256"})).hexdigest(): raise ValueError(f"{name} artifact invalid")
+        semantic={k:v for k,v in artifact.items() if k not in {"contract_version","artifact_id","content_sha256"}}; identity=semantic if version=="automatic_prediction_v3" else {"contract_version":version,**semantic}; semantic_sha=hashlib.sha256(str(version).encode("utf-8")+b"\0"+canonical_bytes(identity)).hexdigest()
+        if artifact.get("artifact_id")!=f"{_PATHLESS_PREFIXES[str(version)]}/{semantic_sha}": raise ValueError(f"{name} semantic identity invalid")
+        expected_ref={"id":artifact["artifact_id"],"content_sha256":artifact["content_sha256"]}
+    if env["ref"]!=expected_ref: raise ValueError(f"{name} ref invalid")
+    return artifact,expected_ref
+
+def _light_closure_index(outer:Mapping[str,object],*,name:str)->tuple[dict[bytes,tuple[dict[str,object],dict[str,object]]],list[dict[str,object]]]:
+    envelopes=outer.get("sealed_artifact_envelopes")
+    if not isinstance(envelopes,list): raise ValueError(f"{name} closure invalid")
+    found={}; items=[]
+    for index,envelope in enumerate(envelopes):
+        item,ref=_light_envelope(envelope,name=f"{name} child {index}"); key=canonical_bytes(ref)
+        if key in found: raise ValueError(f"{name} closure duplicate")
+        found[key]=(item,dict(envelope)); items.append(item)
+    return found,items
+
+def _enable_dependency_light_pathless_validation()->None:
+    try:
+        __import__("PIL")
+    except ModuleNotFoundError as error:
+        if error.name != "PIL": raise
+        # 子进程只验证 canonical JSON；若验证器意外触发图像 I/O，必须失败关闭。
+        pil=ModuleType("PIL")
+        class UnidentifiedImageError(Exception): pass
+        class Image:
+            @staticmethod
+            def open(*_:object,**__:object)->object:
+                raise RuntimeError("image I/O is unavailable in the private scorer validator")
+        pil.Image=Image; pil.UnidentifiedImageError=UnidentifiedImageError
+        sys.modules["PIL"]=pil
+    try:
+        __import__("psutil")
+    except ModuleNotFoundError as error:
+        if error.name != "psutil": raise
+        # model_server 的 cleanup receipt 纯验证路径不调用 psutil；意外调用仍因缺少属性失败关闭。
+        sys.modules["psutil"]=ModuleType("psutil")
+
+def _validate_shared_pathless_graphs(
+    *,
+    accepted:Mapping[str,object],
+    prediction:Mapping[str,object],
+    prediction_ref:Mapping[str,object],
+    prediction_children:list[dict[str,object]],
+    lifecycle:Mapping[str,object],
+    lifecycle_ref:Mapping[str,object],
+    lifecycle_children:list[dict[str,object]],
+    automatic:Mapping[str,object],
+    parents:Mapping[str,object],
+    decoded:Mapping[str,dict[str,object]],
+    refs:Mapping[str,dict[str,object]],
+    release:Mapping[str,object],
+)->None:
+    _enable_dependency_light_pathless_validation()
+    parent_contracts=("runner_ledger_prefix_projection_envelope","attempt_journal_projection_envelope","actual_body_projection_envelope","actual_result_projection_envelope")
+    prefix=decoded[parent_contracts[0]]; journal=decoded[parent_contracts[1]]; body=decoded[parent_contracts[2]]; result=decoded[parent_contracts[3]]
+    validate_pathless_recursive(
+        registry_name="verified_parents_v1",
+        roots=[refs[parent_contracts[1]],refs[parent_contracts[3]]],
+        envelopes=[deepcopy(dict(parents[field])) for field in parent_contracts],
+        external_refs={
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.attempt_ledger_pre_result_ref":prefix["attempt_ledger_pre_result_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.attempt_ref":prefix["attempt_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.body_file_ref":prefix["body_file_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.cleanup_event_projection_ref":prefix["cleanup_event_projection_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.result_file_ref":prefix["result_file_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.result_event_projection_ref":prefix["result_event_projection_ref"],
+            "benchmark_v2_attempt_journal_verified_projection_v1.attempt_ref":journal["attempt_ref"],
+            "benchmark_v2_attempt_journal_verified_projection_v1.terminal_event_ref":journal["terminal_event_ref"],
+            "benchmark_v2_attempt_journal_verified_projection_v1.cleanup_projection_ref":journal["cleanup_projection_ref"],
+            "benchmark_v2_actual_body_verified_projection_v1.attempt_ref":body["attempt_ref"],
+            "benchmark_v2_actual_body_verified_projection_v1.pre_vista_evidence_refs":body["pre_vista_evidence_refs"],
+            "benchmark_v2_actual_result_verified_projection_v1.attempt_ref":result["attempt_ref"],
+            "benchmark_v2_actual_result_verified_projection_v1.cleanup_projection_ref":result["cleanup_projection_ref"],
+            "benchmark_v2_actual_result_verified_projection_v1.attempt_ledger_pre_result_ref":result["attempt_ledger_pre_result_ref"],
+            "benchmark_v2_actual_result_verified_projection_v1.result_event_projection_ref":result["result_event_projection_ref"],
+        },
+        context={},
+    )
+    prediction_envelopes=prediction.get("sealed_artifact_envelopes")
+    if not isinstance(prediction_envelopes,list) or order_pathless_envelopes(registry_name="prediction_run_v3",envelopes=prediction_envelopes,context={})!=prediction_envelopes:
+        raise ValueError("accepted prediction closure order invalid")
+    runner_and_ledger=[deepcopy(dict(envelope)) for envelope,item in zip(prediction_envelopes,prediction_children,strict=True) if item.get("contract_version") in {"benchmark_v2_runner_event_verified_projection_v1","benchmark_v2_projected_attempt_ledger_v1"}]
+    _,cases,_=_provider_case_index(release["provider_corpus"])
+    dependencies=automatic.get("provider_group_dependencies")
+    if not isinstance(dependencies,list): raise ValueError("accepted automatic dependencies invalid")
+    groups={str(item["provider_group_ref"]["id"]):deepcopy(dict(item)) for item in dependencies if isinstance(item,Mapping) and isinstance(item.get("provider_group_ref"),Mapping)}
+    prediction_external=_prediction_external_refs(prediction_run=prediction,automatic=automatic,artifacts=prediction_children,runner_and_ledger_envelopes=runner_and_ledger)
+    validate_pathless_recursive(
+        registry_name="prediction_run_v3",
+        roots=[prediction_ref],
+        envelopes=[deepcopy(dict(accepted["prediction_run_envelope"])),*[deepcopy(dict(item)) for item in prediction_envelopes]],
+        external_refs=prediction_external,
+        context={"provider_groups":groups,"cases":deepcopy(cases),"actual_body_projection_ref":refs["actual_body_projection_envelope"],"attempt_ref":accepted["attempt_ref"],"raw_ledger_prefix_verification_ref":refs["runner_ledger_prefix_projection_envelope"],"projected_attempt_ledger_ref":accepted["attempt_ledger_ref"],"selected_lifecycle_ref":accepted["selected_lifecycle_ref"]},
+    )
+    lifecycle_envelopes=lifecycle.get("sealed_artifact_envelopes")
+    if not isinstance(lifecycle_envelopes,list) or order_pathless_envelopes(registry_name="lifecycle_bundle_v3",envelopes=lifecycle_envelopes,context={})!=lifecycle_envelopes:
+        raise ValueError("accepted lifecycle closure order invalid")
+    collected:dict[str,list[object]]={}
+    def add(role:str,value:object)->None:
+        if value is not None: collected.setdefault(role,[]).append(deepcopy(value))
+    add("benchmark_v2_lifecycle_bundle_v3.attempt_ref",lifecycle["attempt_ref"])
+    add("benchmark_v2_lifecycle_bundle_v3.raw_ledger_prefix_verification_ref",lifecycle["raw_ledger_prefix_verification_ref"])
+    for item in lifecycle_children:
+        version=str(item["contract_version"])
+        if version=="benchmark_v2_runner_event_verified_projection_v1":
+            add(f"{version}.attempt_ref",item["attempt_ref"]); load=item["load_bearing_refs"]
+            if not isinstance(load,Mapping): raise ValueError("accepted lifecycle runner event invalid")
+            for field in ("attempt_ref","body_file_ref","cleanup_receipt_ref","result_file_ref","attempt_ledger_pre_result_ref"):
+                if field in load: add(f"{version}.load_bearing_refs.{field}",load[field])
+        elif version=="benchmark_v2_projected_attempt_ledger_v1":
+            add(f"{version}.raw_ledger_prefix_verification_ref",item["raw_ledger_prefix_verification_ref"]); add(f"{version}.selected_attempt_ref",item["selected_attempt_ref"])
+            entries=item["entries"]
+            if not isinstance(entries,list): raise ValueError("accepted lifecycle ledger invalid")
+            for entry in entries:
+                if not isinstance(entry,Mapping): raise ValueError("accepted lifecycle ledger entry invalid")
+                add(f"{version}.entries.attempt_ref",entry["attempt_ref"])
+        elif version=="benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":
+            add(f"{version}.attempt_ref",item["attempt_ref"]); add(f"{version}.cleanup_receipt_ref",item["cleanup_receipt_ref"])
+        elif version=="benchmark_v2_lifecycle_verified_projection_v1":
+            add(f"{version}.attempt_ref",item["attempt_ref"]); parent=item["parent_refs"]
+            if not isinstance(parent,Mapping): raise ValueError("accepted lifecycle parent refs invalid")
+            for field in ("cleanup_receipt_ref","actual_screen_group_ref","provider_group_ref","attempt_journal_projection_ref"):
+                if field in parent: add(f"{version}.parent_refs.{field}",parent[field])
+    lifecycle_external:dict[str,object]={}
+    for role,values in collected.items():
+        unique=[]; seen:set[bytes]=set()
+        for item in values:
+            key=canonical_bytes(item)
+            if key not in seen: seen.add(key); unique.append(item)
+        lifecycle_external[role]=unique[0] if len(unique)==1 else unique
+    validate_pathless_recursive(
+        registry_name="lifecycle_bundle_v3",
+        roots=[lifecycle_ref],
+        envelopes=[deepcopy(dict(accepted["lifecycle_bundle_envelope"])),*[deepcopy(dict(item)) for item in lifecycle_envelopes]],
+        external_refs=lifecycle_external,
+        context={},
+    )
+
+def _validate_accepted_score_input(value:object,*,raw:bytes,release:Mapping[str,object])->tuple[dict[str,object],dict[str,object],dict[bytes,tuple[dict[str,object],dict[str,object]]]]:
+    accepted=_closed(value,{"contract_version","content_sha256","benchmark_release_id","partition","corpus_parent_ref","provider_manifest_ref","provider_corpus_ref","selection_policy","attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref","verified_parent_projections","prediction_run_envelope","lifecycle_bundle_envelope","safety"},"accepted regression score input")
+    if raw!=canonical_bytes(accepted)+b"\n" or accepted["contract_version"]!="benchmark_v2_accepted_regression_score_input_v2" or accepted["benchmark_release_id"]!=RELEASE or accepted["partition"]!="regression" or accepted["selection_policy"]!="first_complete_lifecycle_verified_attempt" or accepted["safety"]!=SAFETY or accepted["content_sha256"]!=hashlib.sha256(canonical_bytes({k:v for k,v in accepted.items() if k!="content_sha256"})).hexdigest(): raise ValueError("accepted regression score input contract invalid")
+    if accepted["corpus_parent_ref"]!=release["corpus_parent_ref"] or accepted["provider_manifest_ref"]!=release["provider_manifest_ref"] or accepted["provider_corpus_ref"]!=release["provider_corpus_ref"]: raise ValueError("accepted regression release lineage differs")
+    prediction,prediction_ref=_light_envelope(accepted["prediction_run_envelope"],name="accepted prediction run")
+    lifecycle,lifecycle_ref=_light_envelope(accepted["lifecycle_bundle_envelope"],name="accepted lifecycle bundle")
+    if prediction.get("contract_version")!="benchmark_v2_prediction_run_v3" or lifecycle.get("contract_version")!="benchmark_v2_lifecycle_bundle_v3": raise ValueError("accepted regression v3 bundle contract differs")
+    prediction_by_ref,prediction_children=_light_closure_index(prediction,name="accepted prediction run")
+    lifecycle_by_ref,lifecycle_children=_light_closure_index(lifecycle,name="accepted lifecycle bundle")
+    shared_versions={"benchmark_v2_runner_event_verified_projection_v1","benchmark_v2_projected_attempt_ledger_v1"}
+    prediction_shared={key:env for key,(item,env) in prediction_by_ref.items() if item.get("contract_version") in shared_versions}
+    lifecycle_shared={key:env for key,(item,env) in lifecycle_by_ref.items() if item.get("contract_version") in shared_versions}
+    if prediction_shared!=lifecycle_shared: raise ValueError("accepted prediction/lifecycle shared closure differs")
+    parents=accepted["verified_parent_projections"]
+    parent_contracts={"runner_ledger_prefix_projection_envelope":"benchmark_v2_runner_ledger_prefix_verified_projection_v1","attempt_journal_projection_envelope":"benchmark_v2_attempt_journal_verified_projection_v1","actual_body_projection_envelope":"benchmark_v2_actual_body_verified_projection_v1","actual_result_projection_envelope":"benchmark_v2_actual_result_verified_projection_v1"}
+    if not isinstance(parents,Mapping) or set(parents)!=set(parent_contracts): raise ValueError("accepted verified parent projection set differs")
+    decoded={}; refs={}
+    for field,contract in parent_contracts.items():
+        item,item_ref=_light_envelope(parents[field],name=field)
+        if item.get("contract_version")!=contract: raise ValueError("accepted verified parent contract differs")
+        decoded[field]=item; refs[field]=item_ref
+    prefix=decoded["runner_ledger_prefix_projection_envelope"]; journal=decoded["attempt_journal_projection_envelope"]; body=decoded["actual_body_projection_envelope"]; result=decoded["actual_result_projection_envelope"]
+    attempt_ref=accepted["attempt_ref"]; ledger_ref=accepted["attempt_ledger_ref"]; automatic_ref=accepted["automatic_prediction_ref"]; selected_lifecycle_ref=accepted["selected_lifecycle_ref"]
+    if any(item.get("attempt_ref")!=attempt_ref for item in (prefix,journal,body,result)) or prediction.get("benchmark_release_id")!=RELEASE or lifecycle.get("benchmark_release_id")!=RELEASE or prediction.get("partition")!="regression" or lifecycle.get("partition")!="regression" or prediction.get("corpus_parent_ref")!=accepted["corpus_parent_ref"] or prediction.get("provider_manifest_ref")!=accepted["provider_manifest_ref"] or prediction.get("provider_corpus_ref")!=accepted["provider_corpus_ref"] or prediction.get("attempt_ref")!=attempt_ref or lifecycle.get("attempt_ref")!=attempt_ref or prediction.get("projected_attempt_ledger_ref")!=ledger_ref or lifecycle.get("projected_attempt_ledger_ref")!=ledger_ref or prediction.get("automatic_prediction_ref")!=automatic_ref or prediction.get("selected_lifecycle_ref")!=selected_lifecycle_ref or lifecycle.get("selected_lifecycle_ref")!=selected_lifecycle_ref or prediction.get("raw_ledger_prefix_verification_ref")!=refs["runner_ledger_prefix_projection_envelope"] or lifecycle.get("raw_ledger_prefix_verification_ref")!=refs["runner_ledger_prefix_projection_envelope"]: raise ValueError("accepted regression top-level lineage differs")
+    automatic=_resolve_pathless(prediction_by_ref,automatic_ref,"automatic_prediction_v3"); ledger=_resolve_pathless(prediction_by_ref,ledger_ref,"benchmark_v2_projected_attempt_ledger_v1"); selected_lifecycle=_resolve_pathless(lifecycle_by_ref,selected_lifecycle_ref,"benchmark_v2_lifecycle_verified_projection_v1")
+    _validate_shared_pathless_graphs(accepted=accepted,prediction=prediction,prediction_ref=prediction_ref,prediction_children=prediction_children,lifecycle=lifecycle,lifecycle_ref=lifecycle_ref,lifecycle_children=lifecycle_children,automatic=automatic,parents=parents,decoded=decoded,refs=refs,release=release)
+    if ledger.get("selected_attempt_ref")!=attempt_ref or ledger.get("selected_lifecycle_ref")!=selected_lifecycle_ref or automatic.get("source_parent_ref")!=refs["actual_body_projection_envelope"] or selected_lifecycle.get("attempt_ref")!=attempt_ref or selected_lifecycle.get("lifecycle_kind")!="attempt" or selected_lifecycle.get("cleanup_stable_zero") is not True: raise ValueError("accepted regression selected attempt/lifecycle differs")
+    cleanup=_resolve_pathless(lifecycle_by_ref,result["cleanup_projection_ref"],"benchmark_v2_lifecycle_verified_projection_v1"); terminal=_resolve_pathless(lifecycle_by_ref,journal["terminal_event_ref"],"benchmark_v2_attempt_journal_terminal_event_verified_projection_v1"); cleanup_event=_resolve_pathless(lifecycle_by_ref,prefix["cleanup_event_projection_ref"],"benchmark_v2_runner_event_verified_projection_v1"); result_event=_resolve_pathless(lifecycle_by_ref,prefix["result_event_projection_ref"],"benchmark_v2_runner_event_verified_projection_v1")
+    lifecycle_parents=selected_lifecycle.get("parent_refs"); cleanup_parents=cleanup.get("parent_refs"); cleanup_load=cleanup_event.get("load_bearing_refs"); result_load=result_event.get("load_bearing_refs")
+    if not isinstance(lifecycle_parents,Mapping) or not isinstance(cleanup_parents,Mapping) or not isinstance(cleanup_load,Mapping) or not isinstance(result_load,Mapping) or lifecycle_parents.get("attempt_journal_projection_ref")!=refs["attempt_journal_projection_envelope"] or lifecycle_parents.get("cleanup_projection_ref")!=result["cleanup_projection_ref"] or cleanup.get("lifecycle_kind")!="cleanup" or terminal.get("cleanup_projection_ref")!=result["cleanup_projection_ref"] or cleanup_load.get("cleanup_projection_ref")!=result["cleanup_projection_ref"] or cleanup_load.get("cleanup_receipt_ref")!=cleanup_parents.get("cleanup_receipt_ref") or terminal.get("cleanup_receipt_ref")!=cleanup_parents.get("cleanup_receipt_ref") or result_load.get("result_file_ref")!=prefix.get("result_file_ref") or result_load.get("attempt_ledger_pre_result_ref")!=prefix.get("attempt_ledger_pre_result_ref"): raise ValueError("accepted regression transitive lifecycle lineage differs")
+    _,case_context,case_digest=_provider_case_index(release["provider_corpus"])
+    dependencies=automatic.get("provider_group_dependencies")
+    if not isinstance(dependencies,list): raise ValueError("accepted automatic dependencies invalid")
+    groups={str(item["provider_group_ref"]["id"]):dict(item) for item in dependencies if isinstance(item,Mapping) and isinstance(item.get("provider_group_ref"),Mapping)}
+    expected_groups={str(item["provider_group_id"]) for item in case_context.values()}; expected_rows={(case_id,arm) for case_id in case_context for arm in ARMS}; rows=automatic.get("rows")
+    if set(groups)!=expected_groups or len(groups)!=12 or not isinstance(rows,list) or len(rows)!=240 or len({(row.get("case_id"),row.get("arm_id")) for row in rows if isinstance(row,Mapping)})!=240 or {(row.get("case_id"),row.get("arm_id")) for row in rows if isinstance(row,Mapping)}!=expected_rows or automatic.get("case_arm_multiset_sha256")!=case_digest: raise ValueError("accepted automatic authoritative 60x4 graph differs")
+    for row in rows:
+        assert isinstance(row,Mapping)
+        if row.get("selection_status")!="selected": continue
+        source=_resolve_pathless(prediction_by_ref,row.get("source_parent_ref"),"sealed_prediction_source_parent_v1"); bbox=_resolve_pathless(prediction_by_ref,row.get("bbox_ref"),"sealed_prediction_bbox_v1"); binding=_resolve_pathless(prediction_by_ref,row.get("target_binding_ref"),"sealed_target_binding_v4")
+        if source.get("case_ref")!={"case_id":row["case_id"],"case_content_sha256":case_context[row["case_id"]]["case_content_sha256"]} or bbox.get("case_id")!=row["case_id"] or binding.get("case_id")!=row["case_id"] or bbox.get("source_parent_ref")!=row.get("source_parent_ref") or binding.get("source_parent_ref")!=row.get("source_parent_ref") or binding.get("bbox_ref")!=row.get("bbox_ref"): raise ValueError("accepted prediction selected-row lineage differs")
+        if "vista_request_ref" in row:
+            request=_resolve_pathless(prediction_by_ref,row["vista_request_ref"],"sealed_vista_request_v4")
+            if request.get("target_binding_ref")!=row.get("target_binding_ref") or request.get("bbox_ref")!=row.get("bbox_ref"): raise ValueError("accepted prediction request lineage differs")
+    q_count=sum(row.get("selection_status")=="selected" and row.get("arm_id")=="qwen_only" for row in rows); o_count=sum(row.get("selection_status")=="selected" and row.get("arm_id")=="omni_only_discovery" for row in rows); h_count=sum(row.get("selection_status")=="selected" and row.get("arm_id")=="omni_to_qwen" for row in rows); request_count=sum(len(group["submitted_vista_request_refs"]) for group in groups.values())
+    counts:dict[str,int]={}
+    for item in prediction_children: counts[str(item["contract_version"])]=counts.get(str(item["contract_version"]),0)+1
+    event_count=counts.get("benchmark_v2_runner_event_verified_projection_v1",0); expected_counts={"hybrid_omni_inventory_v1":12,"hybrid_qwen_bindings_v1":12,"hybrid_fusion_result_v1":12,"hybrid_vista_refinement_request_v1":request_count,"benchmark_v2_nested_provider_evidence_ref_v1":2*q_count+o_count+h_count,"sealed_prediction_source_parent_v1":q_count+o_count+h_count,"sealed_prediction_bbox_v1":q_count+o_count+h_count,"sealed_target_binding_v4":q_count+o_count+h_count,"sealed_vista_request_v4":h_count,"automatic_prediction_v3":1,"benchmark_v2_runner_event_verified_projection_v1":event_count,"benchmark_v2_projected_attempt_ledger_v1":1}; expected_counts={key:count for key,count in expected_counts.items() if count}
+    lifecycle_counts:dict[str,int]={}
+    for item,_ in lifecycle_by_ref.values(): lifecycle_counts[str(item["contract_version"])]=lifecycle_counts.get(str(item["contract_version"]),0)+1
+    if request_count<h_count or counts!=expected_counts or lifecycle_counts!={"benchmark_v2_lifecycle_verified_projection_v1":14,"benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":1,"benchmark_v2_runner_event_verified_projection_v1":event_count,"benchmark_v2_projected_attempt_ledger_v1":1} or not isinstance(lifecycle.get("screen_group_lifecycle_projection_refs"),list) or len(lifecycle["screen_group_lifecycle_projection_refs"])!=12: raise ValueError("accepted regression closure coverage differs")
+    entries=ledger.get("entries")
+    if not isinstance(entries,list): raise ValueError("accepted projected ledger entries invalid")
+    eligible=[entry for entry in entries if isinstance(entry,Mapping) and entry.get("selection_eligible") is True]
+    result_entries=[entry for entry in entries if isinstance(entry,Mapping) and any(_resolve_pathless(prediction_by_ref,ref,"benchmark_v2_runner_event_verified_projection_v1").get("event_kind")=="result" for ref in entry.get("event_projection_refs",[]) if isinstance(ref,Mapping))]
+    if len(eligible)!=1 or not result_entries or eligible[0] is not result_entries[0] or eligible[0].get("attempt_ref")!=attempt_ref or eligible[0].get("lifecycle_ref")!=selected_lifecycle_ref: raise ValueError("accepted projected ledger later-attempt substitution")
+    if result.get("body_projection_ref")!=refs["actual_body_projection_envelope"] or result.get("runner_ledger_prefix_projection_ref")!=refs["runner_ledger_prefix_projection_envelope"] or result.get("result_event_projection_ref")!=prefix.get("result_event_projection_ref") or result.get("attempt_ledger_pre_result_ref")!=prefix.get("attempt_ledger_pre_result_ref") or result.get("cleanup_projection_ref")!=journal.get("cleanup_projection_ref"): raise ValueError("accepted verified parent transitive lineage differs")
+    return accepted,automatic,prediction_by_ref
+
+def _production_rows(automatic:Mapping[str,object],index:Mapping[bytes,tuple[dict[str,object],dict[str,object]]])->list[dict[str,Any]]:
+    rows=automatic.get("rows")
+    if not isinstance(rows,list): raise ValueError("accepted automatic rows invalid")
+    result=[]
+    for raw_row in rows:
+        if not isinstance(raw_row,Mapping): raise ValueError("accepted automatic row invalid")
+        row=dict(raw_row)
+        if row.get("selection_status")=="selected": row["_bbox"]=list(_resolve_pathless(index,row.get("bbox_ref"),"sealed_prediction_bbox_v1")["xyxy"])
+        result.append(row)
+    return result
+
+def _validate_score_input_binding(value:object)->dict[str,object]:
+    fields={"contract_version","benchmark_release_id","partition","private_manifest_ref","corpus_parent_ref","provider_manifest_ref","provider_corpus_ref","accepted_run_ref","attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref","estimand_ref","gate_ref","safety"}
+    binding=_closed(value,fields,"private scorer input binding")
+    if binding["contract_version"]!="private_scorer_input_binding_v1" or binding["benchmark_release_id"]!=RELEASE or binding["partition"]!="regression" or binding["safety"]!=SAFETY: raise ValueError("private scorer input binding invalid")
+    schemas=(("private_manifest_ref",{"contract_version","file_sha256","content_sha256"}),("corpus_parent_ref",{"contract_version","artifact_id","file_sha256","content_sha256"}),("provider_manifest_ref",{"contract_version","relative_path","file_sha256"}),("provider_corpus_ref",{"contract_version","relative_path","file_sha256","content_sha256","source_parent_ref"}),("accepted_run_ref",{"contract_version","file_sha256","content_sha256"}),("estimand_ref",{"contract_version","file_sha256"}),("gate_ref",{"contract_version","file_sha256"}))
+    for name,schema in schemas:
+        if not isinstance(binding[name],Mapping) or set(binding[name])!=schema: raise ValueError("private scorer input binding ref invalid")
+        for key,child in binding[name].items():
+            if key.endswith("sha256") and not _is_sha(child): raise ValueError("private scorer input binding SHA invalid")
+    if binding["accepted_run_ref"]["contract_version"]!="benchmark_v2_accepted_regression_score_input_v2": raise ValueError("private scorer accepted ref invalid")
+    for name in ("attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref"): exact_ref(binding[name],name)
+    _reject_score_leakage(binding)
+    return binding
+
+def _validate_private_score_artifact(value:object)->dict[str,object]:
+    fields={"contract_version","benchmark_release_id","partition","automatic","point_metric","gate","score_input_binding","automatic_prediction_ref","selected_lifecycle_ref","estimand_ref","gate_ref","safety","content_sha256"}
+    score=_closed(value,fields,"private scorer score")
+    _reject_score_leakage(score)
+    binding=_validate_score_input_binding(score["score_input_binding"])
+    gate=score.get("gate")
+    if score.get("contract_version")!="portfolio_hybrid_v1_1_private_score_v3" or score.get("benchmark_release_id")!=RELEASE or score.get("partition")!="regression" or score.get("safety")!=SAFETY or not _is_sha(score.get("content_sha256")) or score["content_sha256"]!=hashlib.sha256(canonical_bytes({key:item for key,item in score.items() if key!="content_sha256"})).hexdigest() or not isinstance(gate,Mapping) or gate.get("status") not in {"PASS","FAIL"} or score.get("automatic_prediction_ref")!=binding["automatic_prediction_ref"] or score.get("selected_lifecycle_ref")!=binding["selected_lifecycle_ref"] or score.get("estimand_ref")!=binding["estimand_ref"] or score.get("gate_ref")!=binding["gate_ref"]:
+        raise ValueError("private scorer score artifact invalid")
+    return score
 def _hit(point:tuple[Fraction,Fraction],regions:list[list[int]])->int:
     return int(any(Fraction(a)<=point[0]<Fraction(c) and Fraction(b)<=point[1]<Fraction(d) for a,b,c,d in regions))
 
@@ -245,7 +552,9 @@ def _process_identity(pid:int)->str:
     return f"proc-start/{stat[21]}"
 
 def _sealed_receipt(value:Mapping[str,object],kind:str)->dict[str,object]:
-    raw=canonical_bytes(value); digest=hashlib.sha256(raw).hexdigest()
+    raw=canonical_bytes(value); digest=value.get("content_sha256")
+    if digest is None: digest=hashlib.sha256(raw).hexdigest()
+    elif digest!=hashlib.sha256(canonical_bytes({k:v for k,v in value.items() if k!="content_sha256"})).hexdigest(): raise ValueError("receipt content identity invalid")
     return {"ref":{"id":f"{kind}/{digest}","content_sha256":digest},"canonical_bytes_b64":base64.b64encode(raw).decode("ascii")}
 
 class _ScorerJob:
@@ -314,7 +623,7 @@ def _read_launch_capability(handle_value:int)->dict[str,object]:
 def execute_closed_child_envelope(handle_value:int)->dict[str,object]:
     global _CHILD_ENTRY_USED
     envelope=_read_launch_capability(handle_value)
-    fields={"private_manifest_path","prediction_run_path","lifecycle_path","private_output_path","public_ref_path","nonce","pipe_capability","launcher_process_id","launcher_process_identity","expected_process_id","expected_process_identity","job_name","job_identity_sha256","expected_argv_sha256","expected_env_sha256","expected_cwd_sha256","expected_executable"}
+    fields={"private_manifest_path","prediction_run_ref_path","private_output_path","public_ref_path","nonce","pipe_capability","launcher_process_id","launcher_process_identity","expected_process_id","expected_process_identity","job_name","job_identity_sha256","expected_argv_sha256","expected_env_sha256","expected_cwd_sha256","expected_executable"}
     if _CHILD_ENTRY_USED or not isinstance(envelope,Mapping) or set(envelope)!=fields: raise PermissionError("private scorer entrypoint state invalid")
     pid=os.getpid(); nonce=envelope["nonce"]; capability=envelope["pipe_capability"]; launcher_pid=envelope["launcher_process_id"]
     actual_env=dict(os.environ); actual_cwd=Path.cwd().resolve(); actual_argv=list(sys.argv); actual_executable=Path(sys.executable).resolve()
@@ -329,39 +638,40 @@ def execute_closed_child_envelope(handle_value:int)->dict[str,object]:
     paths={key:Path(str(envelope[key])) for key in fields if key.endswith("_path")}
     return _run_private_child_once(nonce=nonce,pipe_capability=capability,launcher_process_id=launcher_pid,launcher_process_identity=str(envelope["launcher_process_identity"]),process_identity=str(envelope["expected_process_identity"]),job_identity_sha256=str(envelope["job_identity_sha256"]),argv_sha256=str(envelope["expected_argv_sha256"]),env_sha256=str(envelope["expected_env_sha256"]),cwd_sha256=str(envelope["expected_cwd_sha256"]),**paths)
 
-def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:int,launcher_process_identity:str,process_identity:str,job_identity_sha256:str,argv_sha256:str,env_sha256:str,cwd_sha256:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
-    run,bundle=_load(prediction_run_path),_load(lifecycle_path)
+def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:int,launcher_process_identity:str,process_identity:str,job_identity_sha256:str,argv_sha256:str,env_sha256:str,cwd_sha256:str,private_manifest_path:Path,prediction_run_ref_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
     release=validate_task10_private_release_bundle(private_manifest_path=Path(private_manifest_path))
-    partition=run.get("partition") if isinstance(run,Mapping) else None
-    derived=derive_private_scoring_cases(validated_release=release,partition=partition)
-    score_parent_ref={"id":release["corpus_parent_ref"]["artifact_id"],"content_sha256":release["corpus_parent_ref"]["content_sha256"]}
-    private={
-        "contract_version":"task10_private_release_scoring_projection_v1",
-        "source_parent_ref":score_parent_ref,
-        "partition":partition,
-        "release_id":release["private_manifest"]["benchmark_release_id"],
-        "cases":[{key:value for key,value in case.items() if key!="partition"} for case in derived],
-        "expected_automatic_prediction_ref":run.get("automatic_prediction_ref"),
-        "expected_attempt_ledger_ref":run.get("attempt_ledger_ref"),
-        "expected_regression_precondition_ref":run.get("regression_precondition_ref"),
-        "estimand_ref":config_ref(ESTIMAND_PATH),
-        "gate_ref":config_ref(GATE_PATH),
+    accepted_raw=Path(prediction_run_ref_path).read_bytes(); accepted_value=json.loads(accepted_raw.decode("utf-8"))
+    accepted,automatic,index=_validate_accepted_score_input(accepted_value,raw=accepted_raw,release=release)
+    derived=derive_private_scoring_cases(validated_release=release,partition="regression")
+    cases=_validated_private_cases([{key:value for key,value in case.items() if key!="partition"} for case in derived])
+    rows=_production_rows(automatic,index); result=_score(rows,cases,release["gate"])
+    binding={
+        "contract_version":"private_scorer_input_binding_v1","benchmark_release_id":RELEASE,"partition":"regression",
+        "private_manifest_ref":dict(release["private_manifest_ref"]),"corpus_parent_ref":dict(release["corpus_parent_ref"]),
+        "provider_manifest_ref":dict(release["provider_manifest_ref"]),"provider_corpus_ref":dict(release["provider_corpus_ref"]),
+        "accepted_run_ref":{"contract_version":"benchmark_v2_accepted_regression_score_input_v2","file_sha256":hashlib.sha256(accepted_raw).hexdigest(),"content_sha256":accepted["content_sha256"]},
+        "attempt_ref":dict(accepted["attempt_ref"]),"attempt_ledger_ref":dict(accepted["attempt_ledger_ref"]),"automatic_prediction_ref":dict(accepted["automatic_prediction_ref"]),"selected_lifecycle_ref":dict(accepted["selected_lifecycle_ref"]),
+        "estimand_ref":dict(release["estimand_ref"]),"gate_ref":dict(release["gate_ref"]),"safety":dict(SAFETY),
     }
-    rows,cases,gate=_validate(private,run,bundle,_task10_release=True)
-    result=_score(rows,cases,gate); private_result={"contract_version":"portfolio_hybrid_v1_1_private_score_v2",**result,"source_parent_ref":private["source_parent_ref"],"automatic_prediction_ref":run["automatic_prediction_ref"],"estimand_ref":private["estimand_ref"],"gate_ref":private["gate_ref"],"safety":dict(SAFETY)}
-    raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"job_identity_sha256":job_identity_sha256,"argv_sha256":argv_sha256,"env_sha256":env_sha256,"cwd_sha256":cwd_sha256,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
+    _validate_score_input_binding(binding)
+    private_result=_content_bound({"contract_version":"portfolio_hybrid_v1_1_private_score_v3","benchmark_release_id":RELEASE,"partition":"regression",**result,"score_input_binding":binding,"automatic_prediction_ref":dict(accepted["automatic_prediction_ref"]),"selected_lifecycle_ref":dict(accepted["selected_lifecycle_ref"]),"estimand_ref":dict(release["estimand_ref"]),"gate_ref":dict(release["gate_ref"]),"safety":dict(SAFETY)})
+    raw=canonical_bytes(private_result)+b"\n"; receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"job_identity_sha256":job_identity_sha256,"argv_sha256":argv_sha256,"env_sha256":env_sha256,"cwd_sha256":cwd_sha256,"safety":dict(SAFETY)}
+    public=_content_bound({"contract_version":"private_scorer_child_public_ref_v1","status":private_result["gate"]["status"],"score_ref":f"private-score/{private_result['content_sha256']}","private_score_file_sha256":hashlib.sha256(raw).hexdigest(),"score_input_binding":binding,"execution_receipt":receipt,"safety":dict(SAFETY)})
     for path,payload in ((Path(private_output_path),raw),(Path(public_ref_path),canonical_bytes(public)+b"\n")):
         path.parent.mkdir(parents=True,exist_ok=True); tmp=path.with_name("."+path.name+".tmp")
-        try: tmp.write_bytes(payload); tmp.replace(path)
+        try:
+            if path.exists(): raise FileExistsError("private scorer output already exists")
+            with tmp.open("xb") as stream: stream.write(payload)
+            tmp.replace(path)
         finally:
             if tmp.exists(): tmp.unlink()
     return public
 
-def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,str]:
+def run_private_scorer(*,private_manifest_path:Path,prediction_run_ref_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,str]:
     system_root=os.environ.get("SYSTEMROOT") or os.environ.get("SystemRoot")
     nonce=secrets.token_hex(32); pipe_capability=secrets.token_hex(32); launcher_pid=os.getpid(); launcher_identity=_process_identity(launcher_pid)
     env={"SYSTEMROOT":system_root,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
-    envelope={k:str(Path(v).resolve()) for k,v in {"private_manifest_path":private_manifest_path,"prediction_run_path":prediction_run_path,"lifecycle_path":lifecycle_path,"private_output_path":private_output_path,"public_ref_path":public_ref_path}.items()}
+    envelope={k:str(Path(v).resolve()) for k,v in {"private_manifest_path":private_manifest_path,"prediction_run_ref_path":prediction_run_ref_path,"private_output_path":private_output_path,"public_ref_path":public_ref_path}.items()}
     process=None; job=None; stdout=stderr=""; identity=""; active_after=-1; read_fd=write_fd=-1
     with tempfile.TemporaryDirectory(prefix="benchmark-v2-score-") as operation_root:
         root=Path(operation_root).resolve()
@@ -402,14 +712,20 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lif
     if process is None or process.returncode!=0: raise ValueError("private scorer failed closed; sensitive details redacted")
     lines=stdout.splitlines()
     if len(lines)!=1: raise ValueError("private scorer stdout contract invalid")
-    child_ref=json.loads(lines[0]); child_public=json.loads(Path(public_ref_path).read_text(encoding="utf-8")); receipt=child_public.get("execution_receipt")
+    child_ref=json.loads(lines[0]); child_public=json.loads(Path(public_ref_path).read_text(encoding="utf-8")); receipt=child_public.get("execution_receipt"); score_input_binding=child_public.get("score_input_binding")
     expected_receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"process_id":process.pid,"process_identity":identity,"job_identity_sha256":job.identity_sha256,"argv_sha256":envelope["expected_argv_sha256"],"env_sha256":envelope["expected_env_sha256"],"cwd_sha256":envelope["expected_cwd_sha256"],"safety":SAFETY}
-    if not isinstance(child_ref,dict) or set(child_ref)!={"status","score_ref","content_sha256"} or {k:child_public[k] for k in child_ref}!=child_ref or receipt!=expected_receipt or os.getpid()!=launcher_pid or _process_identity(launcher_pid)!=launcher_identity: raise ValueError("private scorer child artifact mismatch")
-    launch={"contract_version":"private_scorer_launch_receipt_v1","launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"child_process_id":process.pid,"child_process_identity":identity,"pipe_capability_sha256":expected_receipt["pipe_capability_sha256"],"argv_sha256":envelope["expected_argv_sha256"],"env_sha256":envelope["expected_env_sha256"],"cwd_sha256":envelope["expected_cwd_sha256"],"job_identity_sha256":job.identity_sha256,"child_execution_receipt_sha256":hashlib.sha256(canonical_bytes(receipt)).hexdigest(),"child_score_ref":child_ref,"safety":dict(SAFETY)}; launch_env=_sealed_receipt(launch,"private-scorer-launch")
+    child_fields={"contract_version","status","score_ref","private_score_file_sha256","score_input_binding","execution_receipt","safety","content_sha256"}
+    private_raw=Path(private_output_path).read_bytes(); private_score=_validate_private_score_artifact(json.loads(private_raw.decode("utf-8"))); private_fields={"contract_version","benchmark_release_id","partition","automatic","point_metric","gate","score_input_binding","automatic_prediction_ref","selected_lifecycle_ref","estimand_ref","gate_ref","safety","content_sha256"}
+    _reject_score_leakage(child_public)
+    if not isinstance(score_input_binding,Mapping): raise ValueError("private scorer child artifact mismatch")
+    private_status=private_score.get("gate",{}).get("status") if isinstance(private_score.get("gate"),Mapping) else None
+    if not isinstance(child_ref,dict) or set(child_ref)!={"status","score_ref","content_sha256"} or child_ref.get("status") not in {"PASS","FAIL"} or not _is_sha(child_ref.get("content_sha256")) or set(child_public)!=child_fields or {k:child_public[k] for k in child_ref}!=child_ref or child_public.get("contract_version")!="private_scorer_child_public_ref_v1" or child_public.get("safety")!=SAFETY or child_public.get("content_sha256")!=hashlib.sha256(canonical_bytes({k:v for k,v in child_public.items() if k!="content_sha256"})).hexdigest() or child_public.get("private_score_file_sha256")!=hashlib.sha256(private_raw).hexdigest() or not _is_sha(child_public.get("private_score_file_sha256")) or private_raw!=canonical_bytes(private_score)+b"\n" or set(private_score)!=private_fields or private_score.get("contract_version")!="portfolio_hybrid_v1_1_private_score_v3" or private_score.get("content_sha256")!=hashlib.sha256(canonical_bytes({k:v for k,v in private_score.items() if k!="content_sha256"})).hexdigest() or private_status not in {"PASS","FAIL"} or child_ref.get("status")!=private_status or child_public.get("score_ref")!=f"private-score/{private_score.get('content_sha256')}" or private_score.get("score_input_binding")!=score_input_binding or private_score.get("automatic_prediction_ref")!=score_input_binding.get("automatic_prediction_ref") or private_score.get("selected_lifecycle_ref")!=score_input_binding.get("selected_lifecycle_ref") or private_score.get("estimand_ref")!=score_input_binding.get("estimand_ref") or private_score.get("gate_ref")!=score_input_binding.get("gate_ref") or receipt!=expected_receipt or os.getpid()!=launcher_pid or _process_identity(launcher_pid)!=launcher_identity: raise ValueError("private scorer child artifact mismatch")
+    score_input_binding=_validate_score_input_binding(score_input_binding)
+    launch=_content_bound({"contract_version":"private_scorer_launch_receipt_v2","launcher_process_id":launcher_pid,"launcher_process_identity":launcher_identity,"child_process_id":process.pid,"child_process_identity":identity,"pipe_capability_sha256":expected_receipt["pipe_capability_sha256"],"argv_sha256":envelope["expected_argv_sha256"],"env_sha256":envelope["expected_env_sha256"],"cwd_sha256":envelope["expected_cwd_sha256"],"job_identity_sha256":job.identity_sha256,"child_execution_receipt_sha256":hashlib.sha256(canonical_bytes(receipt)).hexdigest(),"child_score_ref":child_ref,"score_input_binding":dict(score_input_binding),"safety":dict(SAFETY)}); launch_env=_sealed_receipt(launch,"private-scorer-launch")
     cleanup={"contract_version":"private_scorer_cleanup_receipt_v1","launch_receipt_ref":launch_env["ref"],"child_returncode":process.returncode,"job_active_processes_after":active_after,"job_stable_zero":active_after==0,"pipe_handles_closed":read_fd<0 and write_fd<0,"process_pipes_closed":all(pipe is None or pipe.closed for pipe in (process.stdout,process.stderr)),"job_handle_closed":getattr(job,"_handle",None) is None,"safety":dict(SAFETY)}
     if not all(cleanup[key] is True for key in ("job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed")): raise ValueError("private scorer cleanup did not reach stable zero")
-    cleanup_env=_sealed_receipt(cleanup,"private-scorer-cleanup"); binding={"contract_version":"private_scorer_final_binding_v1","child_score_ref":child_ref,"launch_receipt_ref":launch_env["ref"],"cleanup_receipt_ref":cleanup_env["ref"],"safety":dict(SAFETY)}; digest=hashlib.sha256(canonical_bytes(binding)).hexdigest(); final_ref={"status":child_ref["status"],"score_ref":f"private-score-final/{digest}","content_sha256":digest}
-    final_public={**final_ref,"contract_version":"private_scorer_public_ref_v2","binding":binding,"launch_receipt":launch_env,"cleanup_receipt":cleanup_env,"safety":dict(SAFETY)}
+    cleanup_env=_sealed_receipt(cleanup,"private-scorer-cleanup"); binding=_content_bound({"contract_version":"private_scorer_final_binding_v2","child_score_ref":child_ref,"score_input_binding":dict(score_input_binding),"launch_receipt_ref":launch_env["ref"],"cleanup_receipt_ref":cleanup_env["ref"],"safety":dict(SAFETY)})
+    final_public=_content_bound({"contract_version":"private_scorer_public_ref_v3","status":child_ref["status"],"score_ref":f"private-score-final/{binding['content_sha256']}","score_input_binding":dict(score_input_binding),"binding":binding,"launch_receipt":launch_env,"cleanup_receipt":cleanup_env,"safety":dict(SAFETY)})
     final_path=Path(public_ref_path); temporary=final_path.with_name("."+final_path.name+".final.tmp")
     try: temporary.write_bytes(canonical_bytes(final_public)+b"\n"); temporary.replace(final_path)
     finally:
@@ -417,22 +733,27 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_path:Path,lif
     return validate_private_scorer_public_ref(final_public)
 
 def validate_private_scorer_public_ref(public:object)->dict[str,str]:
-    fields={"status","score_ref","content_sha256","contract_version","binding","launch_receipt","cleanup_receipt","safety"}
-    if not isinstance(public,Mapping) or set(public)!=fields or public["contract_version"]!="private_scorer_public_ref_v2" or public["safety"]!=SAFETY: raise ValueError("private scorer public chain invalid")
+    fields={"status","score_ref","content_sha256","contract_version","score_input_binding","binding","launch_receipt","cleanup_receipt","safety"}
+    _reject_score_leakage(public)
+    if not isinstance(public,Mapping) or set(public)!=fields or public["contract_version"]!="private_scorer_public_ref_v3" or public.get("status") not in {"PASS","FAIL"} or public["safety"]!=SAFETY or not _is_sha(public.get("content_sha256")) or public["content_sha256"]!=hashlib.sha256(canonical_bytes({k:v for k,v in public.items() if k!="content_sha256"})).hexdigest(): raise ValueError("private scorer public chain invalid")
     decoded=[]
-    for name,contract,kind in (("launch_receipt","private_scorer_launch_receipt_v1","private-scorer-launch"),("cleanup_receipt","private_scorer_cleanup_receipt_v1","private-scorer-cleanup")):
+    for name,contract,kind in (("launch_receipt","private_scorer_launch_receipt_v2","private-scorer-launch"),("cleanup_receipt","private_scorer_cleanup_receipt_v1","private-scorer-cleanup")):
         env=public[name]
         if not isinstance(env,Mapping) or set(env)!={"ref","canonical_bytes_b64"}: raise ValueError("private scorer receipt envelope invalid")
         try: raw=base64.b64decode(env["canonical_bytes_b64"],validate=True); value=json.loads(raw.decode("utf-8"))
         except (ValueError,UnicodeDecodeError,base64.binascii.Error) as error: raise ValueError("private scorer receipt encoding invalid") from error
-        digest=hashlib.sha256(raw).hexdigest()
+        _reject_score_leakage(value)
+        digest=value.get("content_sha256") if name=="launch_receipt" else hashlib.sha256(raw).hexdigest()
         if canonical_bytes(value)!=raw or env["ref"]!={"id":f"{kind}/{digest}","content_sha256":digest} or value.get("contract_version")!=contract or value.get("safety")!=SAFETY: raise ValueError("private scorer receipt invalid")
+        if name=="launch_receipt" and digest!=hashlib.sha256(canonical_bytes({k:v for k,v in value.items() if k!="content_sha256"})).hexdigest(): raise ValueError("private scorer receipt invalid")
         decoded.append(value)
     launch,cleanup=decoded; binding=public["binding"]
+    score_input_binding=_validate_score_input_binding(public["score_input_binding"])
     child_score=binding.get("child_score_ref") if isinstance(binding,Mapping) else None
-    launch_fields={"contract_version","launcher_process_id","launcher_process_identity","child_process_id","child_process_identity","pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256","child_score_ref","safety"}; cleanup_fields={"contract_version","launch_receipt_ref","child_returncode","job_active_processes_after","job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed","safety"}
+    launch_fields={"contract_version","launcher_process_id","launcher_process_identity","child_process_id","child_process_identity","pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256","child_score_ref","score_input_binding","safety","content_sha256"}; cleanup_fields={"contract_version","launch_receipt_ref","child_returncode","job_active_processes_after","job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed","safety"}
     sha_fields=("pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256")
-    if set(launch)!=launch_fields or set(cleanup)!=cleanup_fields or not isinstance(launch.get("launcher_process_id"),int) or not isinstance(launch.get("child_process_id"),int) or launch["launcher_process_id"]<=0 or launch["child_process_id"]<=0 or launch["launcher_process_id"]==launch["child_process_id"] or any(not isinstance(launch.get(key),str) or len(launch[key])!=64 for key in sha_fields) or not isinstance(child_score,Mapping) or set(child_score)!={"status","score_ref","content_sha256"} or launch["child_score_ref"]!=child_score or binding!={"contract_version":"private_scorer_final_binding_v1","child_score_ref":child_score,"launch_receipt_ref":public["launch_receipt"]["ref"],"cleanup_receipt_ref":public["cleanup_receipt"]["ref"],"safety":SAFETY} or cleanup.get("launch_receipt_ref")!=public["launch_receipt"]["ref"] or cleanup.get("child_returncode")!=0 or cleanup.get("job_active_processes_after")!=0 or any(cleanup.get(key) is not True for key in ("job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed")): raise ValueError("private scorer launch/cleanup chain invalid")
-    digest=hashlib.sha256(canonical_bytes(binding)).hexdigest(); result={"status":binding["child_score_ref"]["status"],"score_ref":f"private-score-final/{digest}","content_sha256":digest}
+    binding_fields={"contract_version","child_score_ref","score_input_binding","launch_receipt_ref","cleanup_receipt_ref","safety","content_sha256"}
+    if set(launch)!=launch_fields or set(cleanup)!=cleanup_fields or not isinstance(launch.get("launcher_process_id"),int) or not isinstance(launch.get("child_process_id"),int) or launch["launcher_process_id"]<=0 or launch["child_process_id"]<=0 or launch["launcher_process_id"]==launch["child_process_id"] or any(not _is_sha(launch.get(key)) for key in sha_fields) or not isinstance(child_score,Mapping) or set(child_score)!={"status","score_ref","content_sha256"} or child_score.get("status") not in {"PASS","FAIL"} or not _is_sha(child_score.get("content_sha256")) or not isinstance(child_score.get("score_ref"),str) or re.fullmatch(r"private-score/[0-9a-f]{64}",child_score["score_ref"]) is None or launch["child_score_ref"]!=child_score or not isinstance(binding,Mapping) or set(binding)!=binding_fields or binding.get("contract_version")!="private_scorer_final_binding_v2" or binding.get("child_score_ref")!=child_score or binding.get("score_input_binding")!=score_input_binding or launch.get("score_input_binding")!=score_input_binding or binding.get("launch_receipt_ref")!=public["launch_receipt"]["ref"] or binding.get("cleanup_receipt_ref")!=public["cleanup_receipt"]["ref"] or binding.get("safety")!=SAFETY or not _is_sha(binding.get("content_sha256")) or binding.get("content_sha256")!=hashlib.sha256(canonical_bytes({k:v for k,v in binding.items() if k!="content_sha256"})).hexdigest() or cleanup.get("launch_receipt_ref")!=public["launch_receipt"]["ref"] or cleanup.get("child_returncode")!=0 or cleanup.get("job_active_processes_after")!=0 or any(cleanup.get(key) is not True for key in ("job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed")): raise ValueError("private scorer launch/cleanup chain invalid")
+    result={"status":binding["child_score_ref"]["status"],"score_ref":f"private-score-final/{binding['content_sha256']}","content_sha256":public["content_sha256"]}
     if any(public[key]!=value for key,value in result.items()): raise ValueError("private scorer final ref invalid")
     return result
