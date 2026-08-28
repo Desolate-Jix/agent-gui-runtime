@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterator, Mapping
 
+from app.learn.hybrid.benchmark_v2_contracts import PROVIDER_MANIFEST_CONTRACT
+
 
 RELEASE = "portfolio_hybrid_v1_1_benchmark_v2_release_1"
 CORPUS = "8503010496a426893456e903b9d768f2a281ef0509f11230d312b073c0760757"
@@ -39,17 +41,32 @@ EXACT_HOLDOUT_COMMAND = (
     "run",
     "python",
     "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+    "--provider-manifest",
+    "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-provider-manifest.json",
     "--partition",
     "holdout",
+    "--actual-models",
+    "--holdout-authorization",
+    "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json",
+    "--ledger-root",
+    "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
+    "--output-root",
+    "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout",
 )
 EXACT_RUN_ORDER = ("sealed-regression", "sealed-holdout")
-PROVIDER_MANIFEST_CONTRACT = "portfolio_hybrid_benchmark_v2_provider_manifest_v1"
 
 _PRODUCTION_BASE = (
     Path(os.environ["LOCALAPPDATA"]) / "AgentGuiRuntime" / "PortfolioHybridBenchmarkV2"
 ).resolve()
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_FILE_ROOT = (_PRODUCTION_BASE / "Claims").resolve()
 PRODUCTION_REGISTRY_ROOT = r"Software\AgentGuiRuntime\PortfolioHybridBenchmarkV2\Claims"
+PRODUCTION_LEDGER_ROOT = (
+    PROJECT_ROOT
+    / "runtime_state"
+    / "portfolio-hybrid-v1-1"
+    / "benchmark-v2-ledger"
+).resolve()
 _SHA = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 _UUID = re.compile(r"[0-9a-f]{32}")
@@ -143,16 +160,11 @@ def _validate_authorization_shape(payload: Mapping[str, object]) -> None:
     if not isinstance(ledger, dict) or set(ledger) != {
         "absolute_ledger_root",
         "holdout_events_path",
-        "genesis_envelope_sha256",
     }:
         raise ValueError("holdout authorization ledger identity invalid")
     for key in ("absolute_ledger_root", "holdout_events_path"):
         if not isinstance(ledger[key], str) or not Path(ledger[key]).is_absolute():
             raise ValueError("holdout authorization ledger path invalid")
-    if not isinstance(ledger["genesis_envelope_sha256"], str) or _SHA.fullmatch(
-        ledger["genesis_envelope_sha256"]
-    ) is None:
-        raise ValueError("holdout authorization genesis ref invalid")
     if not isinstance(payload["fixed_authorization_path"], str) or not Path(
         payload["fixed_authorization_path"]
     ).is_absolute():
@@ -201,6 +213,15 @@ def _overlaps(left: Path, right: Path) -> bool:
     return left == right or left.is_relative_to(right) or right.is_relative_to(left)
 
 
+def _production_ledger_root_is_exact(value: Path) -> bool:
+    raw = Path(value)
+    return (
+        raw.is_absolute()
+        and str(raw) == str(raw.resolve())
+        and str(raw) == str(PRODUCTION_LEDGER_ROOT)
+    )
+
+
 def _registry_overlaps(left: str, right: str) -> bool:
     lparts = tuple(part.casefold() for part in left.strip("\\").split("\\"))
     rparts = tuple(part.casefold() for part in right.strip("\\").split("\\"))
@@ -237,8 +258,7 @@ def _test_backend(
     )
     production_paths = (
         PRODUCTION_FILE_ROOT,
-        PRODUCTION_FILE_ROOT / "ledger",
-        PRODUCTION_FILE_ROOT / "owner",
+        PRODUCTION_LEDGER_ROOT,
     )
     test_paths = (file_path, ledger_path, base / "OwnerJournal")
     if (
@@ -261,7 +281,7 @@ def _production_backend() -> _Backend:
     return _Backend(
         file_root=PRODUCTION_FILE_ROOT,
         registry_root=PRODUCTION_REGISTRY_ROOT,
-        ledger_root=(PRODUCTION_FILE_ROOT / "ledger").resolve(),
+        ledger_root=PRODUCTION_LEDGER_ROOT,
         owner_journal_root=(PRODUCTION_FILE_ROOT / "owner").resolve(),
     )
 
@@ -661,6 +681,114 @@ def _create_authorization(
     return _authorization_ref(backend, wrapped, digest)
 
 
+def _publish_authorization(
+    *,
+    backend: _Backend,
+    authorization: Mapping[str, object],
+    external_ref_path: Path,
+    test_control: Mapping[str, object] | None = None,
+) -> dict[str, str]:
+    from app.learn.hybrid.benchmark_v2_holdout import (
+        _authorize_holdout_genesis,
+        _chain,
+    )
+
+    _validate_authorization_for_backend(backend, authorization)
+    raw_output = Path(external_ref_path)
+    if (
+        not raw_output.is_absolute()
+        or str(raw_output) != str(raw_output.resolve())
+    ):
+        raise ValueError("authorization external ref path is not canonical absolute")
+    wrapped, digest = authorization_envelope(authorization)
+    auth_ref = _authorization_ref(backend, wrapped, digest)
+    cid = claim_id(IDENTITY)
+    ledger_path = backend.ledger_root / "holdout" / "events.jsonl"
+    expected_event = {
+        "partition": "holdout",
+        "sequence": 0,
+        "event_type": "authorized_genesis",
+        "previous_envelope_sha256": "0" * 64,
+        "event_payload": {
+            "claim_id": cid,
+            "authorization_ref": dict(auth_ref),
+            "safety": dict(SAFETY),
+        },
+    }
+    expected_genesis = {
+        "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v1",
+        "event": expected_event,
+        "event_sha256": hashlib.sha256(canonical_bytes(expected_event)).hexdigest(),
+    }
+    with _named_mutex(_claim_mutex_name(backend)):
+        if raw_output.exists():
+            raise ValueError("permanent_refusal: authorization ref already published")
+        sentinels = list(backend.file_root.glob(f"{cid}--*.claim"))
+        try:
+            registry = _registry_read(backend, cid)
+            chain = _chain(ledger_path)
+        except ValueError as error:
+            raise ValueError("permanent_refusal: authorization prefix invalid") from error
+        if sentinels or registry is not None:
+            raise ValueError("permanent_refusal: holdout claim anchor already exists")
+        if chain and not Path(auth_ref["fixed_authorization_path"]).exists():
+            raise ValueError("permanent_refusal: genesis without authorization")
+        if chain and chain != [expected_genesis]:
+            raise ValueError("permanent_refusal: holdout genesis prefix mismatch")
+        try:
+            created_ref = _create_authorization(
+                backend, wrapped, digest, test_control=test_control
+            )
+        except ValueError as error:
+            if "permanent_refusal" in str(error):
+                raise
+            raise ValueError("permanent_refusal: authorization object mismatch") from error
+        if created_ref != auth_ref:
+            raise ValueError("permanent_refusal: authorization ref mismatch")
+        genesis = _authorize_holdout_genesis(
+            file_root=backend.file_root,
+            ledger_root=backend.ledger_root,
+            claim_identity=IDENTITY,
+            authorization_ref=auth_ref,
+        )
+        if genesis != expected_genesis or _chain(ledger_path) != [expected_genesis]:
+            raise ValueError("permanent_refusal: authorization genesis verification failed")
+        raw_ref = canonical_bytes(auth_ref)
+        raw_output.parent.mkdir(parents=True, exist_ok=True)
+        created = _write_secure_new_file(
+            raw_output, raw_ref, test_control=test_control
+        )
+        if not created or not _file_anchor_exact(
+            raw_output, size=len(raw_ref), raw=raw_ref
+        ):
+            raise ValueError("permanent_refusal: authorization ref publication failed")
+        return auth_ref
+
+
+def _publish_authorization_for_test(
+    *,
+    backend: _Backend,
+    authorization: Mapping[str, object],
+    external_ref_path: Path,
+    test_control: Mapping[str, object] | None = None,
+) -> dict[str, str]:
+    if backend.test_capability is None:
+        raise ValueError("explicit test backend capability required")
+    expected = (
+        backend.file_root.parent
+        / "AuthorizationRef"
+        / "holdout-authorization.json"
+    ).resolve()
+    if Path(external_ref_path) != expected:
+        raise ValueError("test authorization ref path is not isolated")
+    return _publish_authorization(
+        backend=backend,
+        authorization=authorization,
+        external_ref_path=expected,
+        test_control=test_control,
+    )
+
+
 def _sentinel_create(
     path: Path,
     failpoint: str | None,
@@ -961,7 +1089,11 @@ def _mirror_claim(
         if not chain:
             if require_existing_genesis:
                 raise ValueError("holdout exact genesis is required before first claim")
-            _validate_genesis_ref(backend.ledger_root, auth_ref)
+            _validate_genesis_ref(
+                file_root=backend.file_root,
+                ledger_root=backend.ledger_root,
+                authorization_ref=auth_ref,
+            )
             event = {
                 "partition": "holdout",
                 "sequence": 0,
@@ -1080,9 +1212,15 @@ def _claim_with_backend(
     _validate_authorization_for_backend(backend, authorization)
     wrapped, digest = authorization_envelope(authorization)
     with _named_mutex(_claim_mutex_name(backend)):
-        auth_ref = _create_authorization(
-            backend, wrapped, digest, test_control=test_control
-        )
+        auth_ref = _authorization_ref(backend, wrapped, digest)
+        auth_path = Path(auth_ref["fixed_authorization_path"])
+        raw_authorization = canonical_bytes(wrapped)
+        if not _file_anchor_exact(
+            auth_path, size=len(raw_authorization), raw=raw_authorization
+        ):
+            raise ValueError(
+                "permanent_refusal: published authorization object is missing or invalid"
+            )
         _, payload, _, claim_digest, expected = _expected_claim_values(
             backend, authorization
         )

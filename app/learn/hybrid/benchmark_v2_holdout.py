@@ -11,12 +11,13 @@ from typing import Iterator, Mapping
 
 from app.learn.hybrid.benchmark_v2_durable_claim import (
     IDENTITY,
-    PRODUCTION_FILE_ROOT,
     SAFETY,
     _claim_with_backend,
+    _file_anchor_exact,
     _ledger_mutex_name,
     _named_mutex,
     _production_backend,
+    _production_ledger_root_is_exact,
     _recover_with_backend,
     authorization_envelope,
     canonical_bytes,
@@ -130,7 +131,7 @@ def append_regression_event(
     *, ledger_root: Path, event: Mapping[str, object]
 ) -> dict[str, object]:
     backend = _production_backend()
-    if Path(ledger_root).resolve() != backend.ledger_root:
+    if not _production_ledger_root_is_exact(Path(ledger_root)):
         raise ValueError("production regression ledger root is fixed")
     return _append_regression_event(backend.ledger_root, event)
 
@@ -156,17 +157,17 @@ def _append_regression_event_for_test(
 
 
 def _validate_genesis_ref(
-    ledger_root: Path, authorization_ref: Mapping[str, str]
+    *,
+    file_root: Path,
+    ledger_root: Path,
+    authorization_ref: Mapping[str, str],
 ) -> None:
     root = Path(ledger_root)
     if not root.is_absolute() or str(root) != str(root.resolve()):
         raise ValueError("holdout ledger root is not canonical absolute")
-    if root == (PRODUCTION_FILE_ROOT / "ledger").resolve():
-        claim_root = PRODUCTION_FILE_ROOT
-    elif root.name == "Ledger":
-        claim_root = root.parent / "Claims"
-    else:
-        raise ValueError("holdout ledger root schema invalid")
+    claim_root = Path(file_root)
+    if not claim_root.is_absolute() or str(claim_root) != str(claim_root.resolve()):
+        raise ValueError("holdout claim root is not canonical absolute")
     cid = claim_id(IDENTITY)
     expected = {
         "authorization_id": f"holdout-authorization/{cid}",
@@ -195,13 +196,45 @@ def authorize_holdout_genesis(
     authorization_ref: Mapping[str, str],
 ) -> dict[str, object]:
     backend = _production_backend()
-    if Path(ledger_root).resolve() != backend.ledger_root:
-        raise ValueError("production holdout ledger root is fixed")
+    if not _production_ledger_root_is_exact(Path(ledger_root)):
+        raise ValueError("production holdout ledger root is not exact")
+    _validate_production_authorization_ref(backend, authorization_ref)
     return _authorize_holdout_genesis(
+        file_root=backend.file_root,
         ledger_root=backend.ledger_root,
         claim_identity=claim_identity,
         authorization_ref=authorization_ref,
     )
+
+
+def _validate_production_authorization_ref(
+    backend: object, authorization_ref: Mapping[str, str]
+) -> dict[str, object]:
+    cid = claim_id(IDENTITY)
+    path = Path(backend.file_root) / f"{cid}.authorization.json"
+    try:
+        raw = path.read_bytes()
+        wrapped = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("production authorization object is missing or invalid") from error
+    if not _file_anchor_exact(path, size=len(raw), raw=raw):
+        raise ValueError("production authorization object security is invalid")
+    try:
+        candidate, digest = authorization_envelope(wrapped["payload"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("production authorization object contract is invalid") from error
+    expected = {
+        "authorization_id": f"holdout-authorization/{cid}",
+        "envelope_sha256": digest,
+        "fixed_authorization_path": str(path),
+    }
+    if (
+        canonical_bytes(wrapped) != raw
+        or wrapped != candidate
+        or dict(authorization_ref) != expected
+    ):
+        raise ValueError("production authorization object or ref is invalid")
+    return wrapped
 
 
 def _authorize_holdout_genesis_for_test(
@@ -213,6 +246,7 @@ def _authorize_holdout_genesis_for_test(
     if getattr(backend, "test_capability", None) is None:
         raise ValueError("explicit test backend capability required")
     return _authorize_holdout_genesis(
+        file_root=Path(backend.file_root),
         ledger_root=Path(backend.ledger_root),
         claim_identity=claim_identity,
         authorization_ref=authorization_ref,
@@ -221,6 +255,7 @@ def _authorize_holdout_genesis_for_test(
 
 def _authorize_holdout_genesis(
     *,
+    file_root: Path,
     ledger_root: Path,
     claim_identity: Mapping[str, str],
     authorization_ref: Mapping[str, str],
@@ -228,7 +263,11 @@ def _authorize_holdout_genesis(
     if dict(claim_identity) != IDENTITY:
         raise ValueError("holdout genesis authority invalid")
     root = Path(ledger_root).resolve()
-    _validate_genesis_ref(root, authorization_ref)
+    _validate_genesis_ref(
+        file_root=Path(file_root),
+        ledger_root=root,
+        authorization_ref=authorization_ref,
+    )
     path = root / "holdout" / "events.jsonl"
     with _ledger_lock(path):
         chain = _chain(path)
@@ -266,20 +305,12 @@ def claim_holdout_once(
     authorization_ref: Mapping[str, str],
 ) -> dict[str, object]:
     backend = _production_backend()
-    if Path(ledger_root).resolve() != backend.ledger_root or dict(claim_identity) != IDENTITY:
+    if (
+        not _production_ledger_root_is_exact(Path(ledger_root))
+        or dict(claim_identity) != IDENTITY
+    ):
         raise ValueError("production holdout roots/identity are fixed")
-    path = Path(str(authorization_ref.get("fixed_authorization_path", ""))).resolve()
-    if path != backend.file_root / f"{claim_id(IDENTITY)}.authorization.json" or not path.exists():
-        raise ValueError("production authorization path invalid")
-    wrapped = json.loads(path.read_text(encoding="utf-8"))
-    candidate, digest = authorization_envelope(wrapped["payload"])
-    expected = {
-        "authorization_id": f"holdout-authorization/{claim_id(IDENTITY)}",
-        "envelope_sha256": digest,
-        "fixed_authorization_path": str(path),
-    }
-    if wrapped != candidate or dict(authorization_ref) != expected:
-        raise ValueError("production authorization ref invalid")
+    wrapped = _validate_production_authorization_ref(backend, authorization_ref)
     return _claim_with_backend(backend=backend, authorization=wrapped["payload"])
 
 
