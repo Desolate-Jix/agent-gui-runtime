@@ -16,6 +16,7 @@
 
 # Config / data
 *.json text eol=lf
+configs/benchmarks/portfolio_hybrid_v1_1_gate.json text eol=crlf
 *.yaml text eol=lf
 *.yml text eol=lf
 *.toml text eol=lf
