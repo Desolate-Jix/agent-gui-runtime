@@ -37,6 +37,12 @@ _ARMS = {
     ("omni_only_discovery",),
     ("omni_to_qwen", "omni_to_qwen_vista"),
 }
+_ARM_ORDER = (
+    "qwen_only",
+    "omni_only_discovery",
+    "omni_to_qwen",
+    "omni_to_qwen_vista",
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +53,7 @@ class _RefRole:
     raw_class: str | None = None
     nullable: bool = False
     ordered: bool = False
+    external_registries: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -87,7 +94,11 @@ def _validate_json_value(value: object, *, name: str) -> None:
         return
     if isinstance(value, int) and not isinstance(value, bool):
         return
-    if isinstance(value, (Path, PurePath, bytes, bytearray, float)):
+    if isinstance(value, float):
+        if not math.isfinite(value) or (value == 0.0 and math.copysign(1.0, value) < 0):
+            raise ValueError(f"{name} contains a noncanonical JSON number")
+        return
+    if isinstance(value, (Path, PurePath, bytes, bytearray)):
         raise ValueError(f"{name} contains a noncanonical JSON type")
     if isinstance(value, Mapping):
         for key, child in value.items():
@@ -96,7 +107,7 @@ def _validate_json_value(value: object, *, name: str) -> None:
             lowered = key.casefold()
             if (
                 lowered == "path"
-                or lowered.endswith("_path")
+                or (lowered.endswith("_path") and lowered != "relative_path")
                 or lowered == "attempt_dir"
                 or lowered.startswith("owner_journal")
             ):
@@ -228,6 +239,61 @@ def _case_ref(value: object, *, name: str) -> dict[str, str]:
         "case_id": _public_id(value.get("case_id"), name=f"{name}.case_id"),
         "case_content_sha256": _sha(
             value.get("case_content_sha256"), name=f"{name}.case_content_sha256"
+        ),
+    }
+
+
+def _corpus_parent_ref(value: object, *, name: str) -> dict[str, str]:
+    from app.learn.hybrid.benchmark_v2_contracts import PARENT_REF
+
+    if not isinstance(value, Mapping) or dict(value) != PARENT_REF:
+        raise ValueError(f"{name} differs from the frozen corpus parent")
+    return deepcopy(dict(PARENT_REF))
+
+
+def _provider_manifest_ref(value: object, *, name: str) -> dict[str, str]:
+    fields = {"contract_version", "relative_path", "file_sha256"}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a typed provider manifest ref")
+    _closed(value, fields, name=name)
+    if (
+        value.get("contract_version")
+        != "portfolio_hybrid_v1_1_provider_manifest_v2_1"
+        or value.get("relative_path") != "benchmark-v2-provider-manifest.json"
+    ):
+        raise ValueError(f"{name} logical identity is invalid")
+    return {
+        "contract_version": str(value["contract_version"]),
+        "relative_path": str(value["relative_path"]),
+        "file_sha256": _sha(value.get("file_sha256"), name=f"{name}.file_sha256"),
+    }
+
+
+def _provider_corpus_ref(value: object, *, name: str) -> dict[str, object]:
+    fields = {
+        "contract_version",
+        "relative_path",
+        "file_sha256",
+        "content_sha256",
+        "source_parent_ref",
+    }
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a typed provider corpus ref")
+    _closed(value, fields, name=name)
+    if (
+        value.get("contract_version") != "portfolio_hybrid_v1_1_provider_corpus_v2"
+        or value.get("relative_path") != "provider-corpus.v2.json"
+    ):
+        raise ValueError(f"{name} logical identity is invalid")
+    return {
+        "contract_version": str(value["contract_version"]),
+        "relative_path": str(value["relative_path"]),
+        "file_sha256": _sha(value.get("file_sha256"), name=f"{name}.file_sha256"),
+        "content_sha256": _sha(
+            value.get("content_sha256"), name=f"{name}.content_sha256"
+        ),
+        "source_parent_ref": _corpus_parent_ref(
+            value.get("source_parent_ref"), name=f"{name}.source_parent_ref"
         ),
     }
 
@@ -565,10 +631,11 @@ def _validate_prediction_run(payload: Mapping[str, object]) -> None:
     _public_id(payload["benchmark_release_id"], name="benchmark_release_id")
     if payload["partition"] not in {"regression", "holdout"}:
         raise ValueError("prediction run partition is invalid")
+    closure = _validated_outer_envelopes(payload, registry_name="prediction_run_v3")
+    _corpus_parent_ref(payload["corpus_parent_ref"], name="corpus_parent_ref")
+    _provider_manifest_ref(payload["provider_manifest_ref"], name="provider_manifest_ref")
+    _provider_corpus_ref(payload["provider_corpus_ref"], name="provider_corpus_ref")
     for field in (
-        "corpus_parent_ref",
-        "provider_manifest_ref",
-        "provider_corpus_ref",
         "attempt_ref",
         "projected_attempt_ledger_ref",
         "raw_ledger_prefix_verification_ref",
@@ -576,15 +643,14 @@ def _validate_prediction_run(payload: Mapping[str, object]) -> None:
         "selected_lifecycle_ref",
     ):
         _ref(payload[field], name=field)
-    closure = _validated_outer_envelopes(payload, registry_name="prediction_run_v3")
     classes = [class_name for _, _, class_name in closure]
-    if classes.count("automatic_prediction") != 1:
+    if classes.count("automatic_prediction_v3") != 1:
         raise ValueError("prediction closure requires exactly one automatic prediction")
     if classes.count("benchmark_v2_projected_attempt_ledger_v1") != 1:
         raise ValueError("prediction closure requires exactly one projected ledger")
     if not any(class_name == "benchmark_v2_runner_event_verified_projection_v1" for class_name in classes):
         raise ValueError("prediction closure requires runner events")
-    automatic_ref = next(ref_value for _, ref_value, name in closure if name == "automatic_prediction")
+    automatic_ref = next(ref_value for _, ref_value, name in closure if name == "automatic_prediction_v3")
     ledger_ref = next(
         ref_value
         for _, ref_value, name in closure
@@ -606,6 +672,178 @@ def _validate_prediction_run(payload: Mapping[str, object]) -> None:
     }.issubset(provider_classes):
         raise ValueError("prediction closure provider evidence is incomplete")
     _safety(payload["safety"])
+
+
+def _validate_automatic_prediction_v3(payload: Mapping[str, object]) -> None:
+    release_id = _public_id(payload["benchmark_release_id"], name="benchmark_release_id")
+    if payload["partition"] not in {"regression", "holdout"}:
+        raise ValueError("automatic prediction partition is invalid")
+    source_ref = _ref(
+        payload["source_parent_ref"],
+        name="source_parent_ref",
+        prefixes=("verified-actual-body",),
+    )
+    digest = _sha(
+        payload["case_arm_multiset_sha256"], name="case_arm_multiset_sha256"
+    )
+    dependencies = payload["provider_group_dependencies"]
+    if not isinstance(dependencies, list) or len(dependencies) != 12:
+        raise ValueError("automatic prediction requires exactly 12 provider dependencies")
+    dependency_fields = {
+        "actual_screen_group_ref",
+        "provider_group_ref",
+        "capture_ref",
+        "pre_vista_evidence_ref",
+        "omni_inventory_ref",
+        "qwen_bindings_ref",
+        "fusion_result_ref",
+        "submitted_vista_request_refs",
+    }
+    dependency_ids: list[str] = []
+    checked_dependencies: list[dict[str, object]] = []
+    for index, raw_dependency in enumerate(dependencies):
+        if not isinstance(raw_dependency, Mapping):
+            raise ValueError("automatic provider dependency is invalid")
+        _closed(raw_dependency, dependency_fields, name=f"provider dependency[{index}]")
+        dependency = deepcopy(dict(raw_dependency))
+        _ref(dependency["actual_screen_group_ref"], name="actual_screen_group_ref")
+        provider_ref = _ref(dependency["provider_group_ref"], name="provider_group_ref")
+        _ref(dependency["capture_ref"], name="capture_ref")
+        _ref(
+            dependency["pre_vista_evidence_ref"],
+            name="pre_vista_evidence_ref",
+            prefixes=("pre-vista-evidence",),
+        )
+        _ref(dependency["omni_inventory_ref"], name="omni_inventory_ref", prefixes=("omni-inventory",))
+        _ref(dependency["qwen_bindings_ref"], name="qwen_bindings_ref", prefixes=("qwen-bindings",))
+        _ref(dependency["fusion_result_ref"], name="fusion_result_ref", prefixes=("fusion-result",))
+        request_refs = _ref_list(
+            dependency["submitted_vista_request_refs"],
+            name="submitted_vista_request_refs",
+        )
+        if any(not item["id"].startswith("submitted-vista-request/") for item in request_refs):
+            raise ValueError("submitted VISTA request ref class is invalid")
+        if len({_canonical_bytes(item) for item in request_refs}) != len(request_refs):
+            raise ValueError("submitted VISTA request refs are duplicated")
+        dependency_ids.append(provider_ref["id"])
+        checked_dependencies.append(dependency)
+    if dependency_ids != sorted(dependency_ids) or len(set(dependency_ids)) != 12:
+        raise ValueError("automatic provider dependency order is invalid")
+
+    rows = payload["rows"]
+    if not isinstance(rows, list) or len(rows) != 240:
+        raise ValueError("automatic prediction requires exactly 240 rows")
+    checked_rows: list[dict[str, object]] = []
+    row_keys: list[tuple[str, int]] = []
+    by_case: dict[str, dict[str, dict[str, object]]] = {}
+    base = {"case_id", "arm_id", "selection_status", "eligibility"}
+    for index, raw_row in enumerate(rows):
+        if not isinstance(raw_row, Mapping):
+            raise ValueError("automatic prediction row is invalid")
+        row = deepcopy(dict(raw_row))
+        case_id = _public_id(row.get("case_id"), name=f"row[{index}].case_id")
+        arm_id = row.get("arm_id")
+        if arm_id not in _ARM_ORDER:
+            raise ValueError("automatic prediction row arm is invalid")
+        status = row.get("selection_status")
+        if status not in {"selected", "missing"}:
+            raise ValueError("production automatic prediction row status is invalid")
+        expected_eligibility = "ELIGIBLE" if status == "selected" else "INELIGIBLE"
+        if row.get("eligibility") != expected_eligibility:
+            raise ValueError("automatic prediction row eligibility is invalid")
+        if status == "missing":
+            _closed(row, base | {"failure_reason"}, name=f"row[{index}]")
+            reason = row.get("failure_reason")
+            allowed_reasons = (
+                {"target_not_present_pre_vista"}
+                if arm_id in {"qwen_only", "omni_only_discovery"}
+                else {"target_not_present_pre_vista", "fusion_not_bound"}
+            )
+            if reason not in allowed_reasons:
+                raise ValueError("automatic prediction missing reason is invalid")
+        else:
+            fields = base | {
+                "candidate_id",
+                "source_parent_ref",
+                "bbox_ref",
+                "target_binding_ref",
+            }
+            if arm_id in {"omni_to_qwen", "omni_to_qwen_vista"}:
+                fields.add("vista_request_ref")
+            if arm_id == "omni_to_qwen_vista":
+                fields.add("vista_result")
+            _closed(row, fields, name=f"row[{index}]")
+            _public_id(row["candidate_id"], name=f"row[{index}].candidate_id")
+            _ref(row["source_parent_ref"], name="source_parent_ref", prefixes=("prediction-source-parent",))
+            _ref(row["bbox_ref"], name="bbox_ref", prefixes=("prediction-bbox",))
+            binding_ref = _ref(row["target_binding_ref"], name="target_binding_ref", prefixes=("target-binding",))
+            if "vista_request_ref" in fields:
+                request_ref = _ref(row["vista_request_ref"], name="vista_request_ref", prefixes=("vista-request",))
+            if arm_id == "omni_to_qwen_vista":
+                result = row["vista_result"]
+                if not isinstance(result, Mapping):
+                    raise ValueError("VISTA result is invalid")
+                result_fields = {"status", "request_ref", "target_binding_ref"}
+                if result.get("status") == "validated":
+                    result_fields.add("canonical_capture_pixel_point")
+                _closed(result, result_fields, name="vista_result")
+                if result.get("status") not in {"validated", "failed", "timeout", "out_of_bounds", "missing"}:
+                    raise ValueError("VISTA result status is invalid")
+                if _ref(result["request_ref"], name="vista result request_ref") != request_ref:
+                    raise ValueError("VISTA result request lineage mismatch")
+                if _ref(result["target_binding_ref"], name="vista result target_binding_ref") != binding_ref:
+                    raise ValueError("VISTA result binding lineage mismatch")
+                if result.get("status") == "validated":
+                    point = result["canonical_capture_pixel_point"]
+                    if not isinstance(point, list) or len(point) != 2:
+                        raise ValueError("VISTA canonical point is invalid")
+                    for coordinate in point:
+                        if isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)):
+                            raise ValueError("VISTA canonical point is invalid")
+                        _validate_json_value(coordinate, name="VISTA canonical point")
+        arm_rank = _ARM_ORDER.index(str(arm_id))
+        row_keys.append((case_id, arm_rank))
+        case_rows = by_case.setdefault(case_id, {})
+        if str(arm_id) in case_rows:
+            raise ValueError("automatic prediction row is duplicated")
+        case_rows[str(arm_id)] = row
+        checked_rows.append(row)
+    if row_keys != sorted(row_keys) or len(set(row_keys)) != 240 or len(by_case) != 60:
+        raise ValueError("automatic prediction row order is invalid")
+    for case_rows in by_case.values():
+        if set(case_rows) != set(_ARM_ORDER):
+            raise ValueError("automatic prediction case arm multiset is incomplete")
+        baseline = case_rows["omni_to_qwen"]
+        vista = case_rows["omni_to_qwen_vista"]
+        if baseline["selection_status"] != vista["selection_status"]:
+            raise ValueError("paired hybrid row status mismatch")
+        if baseline["selection_status"] == "selected":
+            for field in (
+                "candidate_id",
+                "source_parent_ref",
+                "bbox_ref",
+                "target_binding_ref",
+                "vista_request_ref",
+            ):
+                if baseline[field] != vista[field]:
+                    raise ValueError("paired hybrid row lineage mismatch")
+        elif baseline["failure_reason"] != vista["failure_reason"]:
+            raise ValueError("paired hybrid row reason mismatch")
+    _safety(payload["safety"])
+    identity_source = {
+        "benchmark_release_id": release_id,
+        "partition": payload["partition"],
+        "source_parent_ref": source_ref,
+        "case_arm_multiset_sha256": digest,
+        "provider_group_dependencies": checked_dependencies,
+        "rows": checked_rows,
+        "safety": deepcopy(dict(payload["safety"])),
+    }
+    expected_prediction_id = "prediction/" + hashlib.sha256(
+        b"benchmark-v2-automatic-prediction-v3\0" + _canonical_bytes(identity_source)
+    ).hexdigest()
+    if payload["prediction_id"] != expected_prediction_id:
+        raise ValueError("automatic prediction identity mismatch")
 
 
 def _validate_lifecycle_bundle(payload: Mapping[str, object]) -> None:
@@ -888,9 +1126,9 @@ _CONTRACTS_MUTABLE = {
                 "evidence_refs.available_action_ref": _INTERNAL_NESTED,
                 "evidence_refs.omni_item_ref": _INTERNAL_NESTED,
                 "evidence_refs.fusion_candidate_ref": _INTERNAL_NESTED,
-                "evidence_refs.omni_inventory_ref": _RefRole("opaque_raw_ref", external=True, raw_class="omni_inventory"),
-                "evidence_refs.qwen_bindings_ref": _RefRole("opaque_raw_ref", external=True, raw_class="qwen_bindings"),
-                "evidence_refs.fusion_result_ref": _RefRole("opaque_raw_ref", external=True, raw_class="fusion_result"),
+                "evidence_refs.omni_inventory_ref": _RefRole("opaque_raw_ref", external=True, raw_class="omni_inventory", external_registries=frozenset({"prediction_selection_v1"})),
+                "evidence_refs.qwen_bindings_ref": _RefRole("opaque_raw_ref", external=True, raw_class="qwen_bindings", external_registries=frozenset({"prediction_selection_v1"})),
+                "evidence_refs.fusion_result_ref": _RefRole("opaque_raw_ref", external=True, raw_class="fusion_result", external_registries=frozenset({"prediction_selection_v1"})),
             },
         ),
         ("prediction_selection_v1", "prediction_run_v3"),
@@ -928,7 +1166,7 @@ _CONTRACTS_MUTABLE = {
             source_parent_ref=_RefRole("exact_ref", ("sealed_prediction_source_parent_v1",)),
             capture_ref=_EXTERNAL_REF,
             bbox_ref=_RefRole("exact_ref", ("sealed_prediction_bbox_v1",)),
-            submitted_request_ref=_RefRole("opaque_raw_ref", external=True, raw_class="submitted_vista_request"),
+            submitted_request_ref=_RefRole("opaque_raw_ref", external=True, raw_class="submitted_vista_request", external_registries=frozenset({"prediction_selection_v1"})),
         ),
         ("prediction_selection_v1", "prediction_run_v3"),
         _ranks(prediction_selection_v1=9, prediction_run_v3=9),
@@ -945,7 +1183,7 @@ _CONTRACTS_MUTABLE = {
                 "load_bearing_refs.attempt_ref": _EXTERNAL_REF,
                 "load_bearing_refs.body_file_ref": _RefRole("pathless_file_ref", external=True),
                 "load_bearing_refs.cleanup_receipt_ref": _RefRole("opaque_raw_ref", external=True, raw_class="cleanup_receipt"),
-                "load_bearing_refs.cleanup_projection_ref": _RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
+                "load_bearing_refs.cleanup_projection_ref": _RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",), external_registries=frozenset({"prediction_run_v3"})),
                 "load_bearing_refs.result_file_ref": _RefRole("pathless_file_ref", external=True),
                 "load_bearing_refs.attempt_ledger_pre_result_ref": _RefRole("closed_logical_ref", external=True),
             },
@@ -996,15 +1234,51 @@ _CONTRACTS_MUTABLE = {
         _roles(
             raw_ledger_prefix_verification_ref=_RefRole("exact_ref", ("benchmark_v2_runner_ledger_prefix_verified_projection_v1",), True),
             selected_attempt_ref=_EXTERNAL_REF,
-            selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
+            selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",), external_registries=frozenset({"prediction_run_v3"})),
             **{
                 "entries.attempt_ref": _EXTERNAL_REF,
                 "entries.event_projection_refs": _RefRole("ordered_exact_ref_list", ("benchmark_v2_runner_event_verified_projection_v1",), ordered=True),
-                "entries.lifecycle_ref": _RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",), nullable=True),
+                "entries.lifecycle_ref": _RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",), nullable=True, external_registries=frozenset({"prediction_run_v3"})),
             },
         ),
         ("prediction_run_v3", "lifecycle_bundle_v3"),
         _ranks(prediction_run_v3=12, lifecycle_bundle_v3=6),
+    ),
+    "automatic_prediction_v3": _spec(
+        "automatic_prediction_v3",
+        "automatic",
+        (
+            "prediction_id",
+            "benchmark_release_id",
+            "partition",
+            "source_parent_ref",
+            "case_arm_multiset_sha256",
+            "provider_group_dependencies",
+            "rows",
+            "safety",
+        ),
+        _validate_automatic_prediction_v3,
+        _roles(
+            source_parent_ref=_RefRole("exact_ref", external=True),
+            **{
+                "provider_group_dependencies.actual_screen_group_ref": _RefRole("exact_ref", external=True),
+                "provider_group_dependencies.provider_group_ref": _RefRole("exact_ref", external=True),
+                "provider_group_dependencies.capture_ref": _RefRole("exact_ref", external=True),
+                "provider_group_dependencies.pre_vista_evidence_ref": _RefRole("exact_ref", external=True),
+                "provider_group_dependencies.omni_inventory_ref": _RefRole("opaque_raw_ref", raw_class="omni_inventory"),
+                "provider_group_dependencies.qwen_bindings_ref": _RefRole("opaque_raw_ref", raw_class="qwen_bindings"),
+                "provider_group_dependencies.fusion_result_ref": _RefRole("opaque_raw_ref", raw_class="fusion_result"),
+                "provider_group_dependencies.submitted_vista_request_refs": _RefRole("opaque_raw_ref", raw_class="submitted_vista_request", ordered=True),
+                "rows.source_parent_ref": _RefRole("exact_ref", ("sealed_prediction_source_parent_v1",)),
+                "rows.bbox_ref": _RefRole("exact_ref", ("sealed_prediction_bbox_v1",)),
+                "rows.target_binding_ref": _RefRole("exact_ref", ("sealed_target_binding_v4",)),
+                "rows.vista_request_ref": _RefRole("exact_ref", ("sealed_vista_request_v4",)),
+                "rows.vista_result.request_ref": _RefRole("exact_ref", ("sealed_vista_request_v4",)),
+                "rows.vista_result.target_binding_ref": _RefRole("exact_ref", ("sealed_target_binding_v4",)),
+            },
+        ),
+        ("prediction_run_v3",),
+        _ranks(prediction_run_v3=10),
     ),
     "benchmark_v2_prediction_run_v3": _spec(
         "benchmark_v2_prediction_run_v3",
@@ -1012,14 +1286,15 @@ _CONTRACTS_MUTABLE = {
         ("benchmark_release_id", "partition", "corpus_parent_ref", "provider_manifest_ref", "provider_corpus_ref", "attempt_ref", "projected_attempt_ledger_ref", "raw_ledger_prefix_verification_ref", "automatic_prediction_ref", "selected_lifecycle_ref", "sealed_artifact_envelopes", "safety"),
         _validate_prediction_run,
         _roles(
-            corpus_parent_ref=_EXTERNAL_REF,
-            provider_manifest_ref=_EXTERNAL_REF,
-            provider_corpus_ref=_EXTERNAL_REF,
+            corpus_parent_ref=_RefRole("corpus_parent_ref", external=True),
+            provider_manifest_ref=_RefRole("provider_manifest_ref", external=True),
+            provider_corpus_ref=_RefRole("provider_corpus_ref", external=True),
             attempt_ref=_EXTERNAL_REF,
             projected_attempt_ledger_ref=_RefRole("exact_ref", ("benchmark_v2_projected_attempt_ledger_v1",)),
             raw_ledger_prefix_verification_ref=_RefRole("exact_ref", ("benchmark_v2_runner_ledger_prefix_verified_projection_v1",), True),
-            automatic_prediction_ref=_EXTERNAL_REF,
-            selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
+            automatic_prediction_ref=_RefRole("exact_ref", ("automatic_prediction_v3",)),
+            selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",), external=True),
+            **{"sealed_artifact_envelopes.ref": _RefRole("closure_ref")},
         ),
         ("prediction_run_v3",),
         _ranks(prediction_run_v3=100),
@@ -1036,6 +1311,7 @@ _CONTRACTS_MUTABLE = {
             selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
             attempt_cleanup_projection_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
             screen_group_lifecycle_projection_refs=_RefRole("ordered_exact_ref_list", ("benchmark_v2_lifecycle_verified_projection_v1",), ordered=True),
+            **{"sealed_artifact_envelopes.ref": _RefRole("closure_ref")},
         ),
         ("lifecycle_bundle_v3",),
         _ranks(lifecycle_bundle_v3=100),
@@ -1127,13 +1403,6 @@ _RAW_CLASSES: Mapping[str, _RawClass] = MappingProxyType(
             frozenset({"prediction_run_v3"}),
             _ranks(prediction_run_v3=4),
         ),
-        "automatic_prediction": _RawClass(
-            "automatic_prediction_v2",
-            "automatic",
-            None,
-            frozenset({"prediction_run_v3"}),
-            _ranks(prediction_run_v3=10),
-        ),
         "cleanup_receipt": _RawClass(
             "benchmark_v2_attempt_cleanup_receipt_v1",
             "attempt-cleanup-receipt",
@@ -1174,8 +1443,11 @@ def seal_pathless_projection(
     spec = _registered(contract_version)
     payload = _validated_semantic(spec, semantic_payload)
     semantic = {"contract_version": contract_version, **payload}
+    identity_payload: object = (
+        payload if contract_version == "automatic_prediction_v3" else semantic
+    )
     semantic_sha256 = hashlib.sha256(
-        contract_version.encode("utf-8") + b"\0" + _canonical_bytes(semantic)
+        contract_version.encode("utf-8") + b"\0" + _canonical_bytes(identity_payload)
     ).hexdigest()
     without_content = {
         "contract_version": contract_version,
@@ -1401,6 +1673,12 @@ def validate_pathless_ref(
         return _case_ref(value, name=role)
     if role_spec.kind == "closed_logical_ref":
         return _ledger_pre_result_ref(value, name=role)  # type: ignore[return-value]
+    if role_spec.kind == "corpus_parent_ref":
+        return _corpus_parent_ref(value, name=role)  # type: ignore[return-value]
+    if role_spec.kind == "provider_manifest_ref":
+        return _provider_manifest_ref(value, name=role)  # type: ignore[return-value]
+    if role_spec.kind == "provider_corpus_ref":
+        return _provider_corpus_ref(value, name=role)  # type: ignore[return-value]
     expected_prefixes = tuple(_registered(target).artifact_prefix for target in role_spec.targets)
     result = _ref(value, name=role, prefixes=expected_prefixes)
     if role_spec.kind == "opaque_raw_ref":
@@ -1412,7 +1690,7 @@ def validate_pathless_ref(
         )
         if result != expected:
             raise ValueError("opaque raw ref does not match validated canonical bytes")
-    elif role_spec.kind not in {"exact_ref", "ordered_exact_ref_list"}:
+    elif role_spec.kind not in {"exact_ref", "ordered_exact_ref_list", "closure_ref"}:
         raise ValueError("unknown typed ref role")
     return result
 
@@ -1465,7 +1743,9 @@ def _value_at(value: Mapping[str, object], path: str) -> list[object]:
     return current
 
 
-def _edges(item: Mapping[str, object]) -> list[tuple[str, _RefRole, dict[str, object]]]:
+def _edges(
+    item: Mapping[str, object], *, registry_name: str
+) -> list[tuple[str, _RefRole, dict[str, object]]]:
     if item.get("contract_version") in _RAW_CONTRACTS:
         return []
     spec = _registered(item["contract_version"])
@@ -1482,6 +1762,12 @@ def _edges(item: Mapping[str, object]) -> list[tuple[str, _RefRole, dict[str, ob
                     result.append((role, role_spec, _case_ref(value, name=role)))
                 elif role_spec.kind == "closed_logical_ref":
                     result.append((role, role_spec, _ledger_pre_result_ref(value, name=role)))
+                elif role_spec.kind == "corpus_parent_ref":
+                    result.append((role, role_spec, _corpus_parent_ref(value, name=role)))
+                elif role_spec.kind == "provider_manifest_ref":
+                    result.append((role, role_spec, _provider_manifest_ref(value, name=role)))
+                elif role_spec.kind == "provider_corpus_ref":
+                    result.append((role, role_spec, _provider_corpus_ref(value, name=role)))
                 else:
                     prefixes = tuple(_registered(target).artifact_prefix for target in role_spec.targets)
                     result.append((role, role_spec, _ref(value, name=role, prefixes=prefixes)))
@@ -1491,10 +1777,46 @@ def _edges(item: Mapping[str, object]) -> list[tuple[str, _RefRole, dict[str, ob
 def _validate_projected_ledger_graph(
     ledger: Mapping[str, object],
     by_ref: Mapping[bytes, tuple[dict[str, object], dict[str, object]]],
+    *,
+    allow_external_lifecycle: bool = False,
 ) -> None:
     expected_kinds = ("opened", "body_complete", "cleanup", "result")
     entries = ledger["entries"]
     assert isinstance(entries, list)
+    global_events: list[tuple[int, dict[str, object], Mapping[str, object]]] = []
+    seen_global_refs: set[bytes] = set()
+    for index, entry in enumerate(entries):
+        assert isinstance(entry, Mapping)
+        event_refs = _ref_list(
+            entry["event_projection_refs"],
+            name=f"entry[{index}].event_projection_refs",
+        )
+        for event_ref in event_refs:
+            key = _canonical_bytes(event_ref)
+            if key in seen_global_refs:
+                raise ValueError("projected ledger global runner event is duplicated")
+            seen_global_refs.add(key)
+            resolved = by_ref.get(key)
+            if resolved is None:
+                raise ValueError("projected ledger event ref is unresolved")
+            event = resolved[0]
+            if event.get("contract_version") != "benchmark_v2_runner_event_verified_projection_v1":
+                raise ValueError("projected ledger event ref has class drift")
+            global_events.append(
+                (
+                    _nonnegative(event.get("sequence"), name="runner event sequence"),
+                    event_ref,
+                    event,
+                )
+            )
+    ordered_global = sorted(global_events, key=lambda item: item[0])
+    if [item[0] for item in ordered_global] != list(range(len(ordered_global))):
+        raise ValueError("projected ledger global runner sequence is not contiguous")
+    previous_ref: dict[str, object] | None = None
+    for _, event_ref, event in ordered_global:
+        if event.get("previous_event_projection_ref") != previous_ref:
+            raise ValueError("projected ledger global runner predecessor differs")
+        previous_ref = event_ref
     eligible: list[Mapping[str, object]] = []
     for index, entry in enumerate(entries):
         assert isinstance(entry, Mapping)
@@ -1541,37 +1863,45 @@ def _validate_projected_ledger_graph(
             )
             resolved_cleanup = by_ref.get(_canonical_bytes(cleanup_ref))
             if resolved_cleanup is None:
-                raise ValueError("projected ledger cleanup projection ref is unresolved")
-            cleanup_lifecycle = resolved_cleanup[0]
-            if (
-                cleanup_lifecycle.get("contract_version")
-                != "benchmark_v2_lifecycle_verified_projection_v1"
-                or cleanup_lifecycle.get("lifecycle_kind") != "cleanup"
-            ):
-                raise ValueError("projected ledger cleanup projection has class drift")
-            if _ref(cleanup_lifecycle.get("attempt_ref"), name="cleanup lifecycle attempt_ref") != attempt_ref:
-                raise ValueError("projected ledger cleanup lifecycle attempt mismatch")
+                if not allow_external_lifecycle:
+                    raise ValueError("projected ledger cleanup projection ref is unresolved")
+                cleanup_ref = None
+                resolved_cleanup = None
+            if resolved_cleanup is not None:
+                cleanup_lifecycle = resolved_cleanup[0]
+                if (
+                    cleanup_lifecycle.get("contract_version")
+                    != "benchmark_v2_lifecycle_verified_projection_v1"
+                    or cleanup_lifecycle.get("lifecycle_kind") != "cleanup"
+                ):
+                    raise ValueError("projected ledger cleanup projection has class drift")
+                if _ref(cleanup_lifecycle.get("attempt_ref"), name="cleanup lifecycle attempt_ref") != attempt_ref:
+                    raise ValueError("projected ledger cleanup lifecycle attempt mismatch")
         lifecycle_ref = entry["lifecycle_ref"]
         if lifecycle_ref is not None:
             resolved_lifecycle = by_ref.get(
                 _canonical_bytes(_ref(lifecycle_ref, name=f"entry[{index}].lifecycle_ref"))
             )
             if resolved_lifecycle is None:
-                raise ValueError("projected ledger lifecycle ref is unresolved")
-            lifecycle = resolved_lifecycle[0]
-            if (
-                lifecycle.get("contract_version")
-                != "benchmark_v2_lifecycle_verified_projection_v1"
-                or lifecycle.get("lifecycle_kind") != "attempt"
-            ):
-                raise ValueError("projected ledger selected lifecycle must be an attempt lifecycle")
-            if _ref(lifecycle.get("attempt_ref"), name="attempt lifecycle attempt_ref") != attempt_ref:
-                raise ValueError("projected ledger lifecycle attempt mismatch")
-            parents = lifecycle.get("parent_refs")
-            if not isinstance(parents, Mapping) or cleanup_ref is None:
-                raise ValueError("projected ledger selected lifecycle cleanup is missing")
-            if _ref(parents.get("cleanup_projection_ref"), name="attempt lifecycle cleanup ref") != cleanup_ref:
-                raise ValueError("projected ledger selected lifecycle cleanup mismatch")
+                if allow_external_lifecycle:
+                    resolved_lifecycle = None
+                else:
+                    raise ValueError("projected ledger lifecycle ref is unresolved")
+            if resolved_lifecycle is not None:
+                lifecycle = resolved_lifecycle[0]
+                if (
+                    lifecycle.get("contract_version")
+                    != "benchmark_v2_lifecycle_verified_projection_v1"
+                    or lifecycle.get("lifecycle_kind") != "attempt"
+                ):
+                    raise ValueError("projected ledger selected lifecycle must be an attempt lifecycle")
+                if _ref(lifecycle.get("attempt_ref"), name="attempt lifecycle attempt_ref") != attempt_ref:
+                    raise ValueError("projected ledger lifecycle attempt mismatch")
+                parents = lifecycle.get("parent_refs")
+                if not isinstance(parents, Mapping) or cleanup_ref is None:
+                    raise ValueError("projected ledger selected lifecycle cleanup is missing")
+                if _ref(parents.get("cleanup_projection_ref"), name="attempt lifecycle cleanup ref") != cleanup_ref:
+                    raise ValueError("projected ledger selected lifecycle cleanup mismatch")
         elif entry["selection_eligible"] is True:
             raise ValueError("projected ledger eligible lifecycle is missing")
         if entry["selection_eligible"] is True:
@@ -1592,6 +1922,327 @@ def _validate_projected_ledger_graph(
         raise ValueError("projected ledger selected refs are not earliest eligible")
 
 
+def _validate_prediction_graph(
+    run: Mapping[str, object],
+    by_ref: Mapping[bytes, tuple[dict[str, object], dict[str, object]]],
+    context: Mapping[str, object],
+) -> None:
+    expected_context_fields = {
+        "provider_groups",
+        "cases",
+        "actual_body_projection_ref",
+        "attempt_ref",
+        "raw_ledger_prefix_verification_ref",
+        "projected_attempt_ledger_ref",
+        "selected_lifecycle_ref",
+    }
+    _closed(context, expected_context_fields, name="prediction composer context")
+    raw_groups = context["provider_groups"]
+    raw_cases = context["cases"]
+    if not isinstance(raw_groups, Mapping) or len(raw_groups) != 12:
+        raise ValueError("prediction composer group context is invalid")
+    if not isinstance(raw_cases, Mapping) or len(raw_cases) != 60:
+        raise ValueError("prediction composer case context is invalid")
+    groups: dict[str, dict[str, object]] = {}
+    dependency_fields = {
+        "actual_screen_group_ref",
+        "provider_group_ref",
+        "capture_ref",
+        "pre_vista_evidence_ref",
+        "omni_inventory_ref",
+        "qwen_bindings_ref",
+        "fusion_result_ref",
+        "submitted_vista_request_refs",
+    }
+    for group_id, raw_group in raw_groups.items():
+        if not isinstance(group_id, str) or not isinstance(raw_group, Mapping):
+            raise ValueError("prediction composer group context is invalid")
+        _closed(raw_group, dependency_fields, name=f"prediction group {group_id}")
+        group = deepcopy(dict(raw_group))
+        provider_ref = _ref(group["provider_group_ref"], name="context provider_group_ref")
+        if provider_ref["id"] != group_id:
+            raise ValueError("prediction composer group key mismatch")
+        groups[group_id] = group
+    cases: dict[str, dict[str, str]] = {}
+    for case_id, raw_case in raw_cases.items():
+        if not isinstance(case_id, str) or not isinstance(raw_case, Mapping):
+            raise ValueError("prediction composer case context is invalid")
+        _closed(raw_case, {"provider_group_id", "case_content_sha256"}, name=f"prediction case {case_id}")
+        group_id = raw_case.get("provider_group_id")
+        if group_id not in groups:
+            raise ValueError("prediction composer case group is unknown")
+        cases[case_id] = {
+            "provider_group_id": str(group_id),
+            "case_content_sha256": _sha(
+                raw_case.get("case_content_sha256"), name="context case_content_sha256"
+            ),
+        }
+    expected_body_ref = _ref(context["actual_body_projection_ref"], name="context actual body ref")
+    expected_attempt_ref = _ref(context["attempt_ref"], name="context attempt ref")
+    expected_prefix_ref = _ref(context["raw_ledger_prefix_verification_ref"], name="context raw prefix ref")
+    expected_ledger_ref = _ref(context["projected_attempt_ledger_ref"], name="context ledger ref")
+    expected_lifecycle_ref = _ref(context["selected_lifecycle_ref"], name="context lifecycle ref")
+    if (
+        _ref(run["attempt_ref"], name="run attempt_ref") != expected_attempt_ref
+        or _ref(run["raw_ledger_prefix_verification_ref"], name="run raw prefix ref") != expected_prefix_ref
+        or _ref(run["projected_attempt_ledger_ref"], name="run ledger ref") != expected_ledger_ref
+        or _ref(run["selected_lifecycle_ref"], name="run lifecycle ref") != expected_lifecycle_ref
+    ):
+        raise ValueError("prediction run outer lineage differs from composer context")
+    automatic_resolved = by_ref.get(
+        _canonical_bytes(_ref(run["automatic_prediction_ref"], name="run automatic ref"))
+    )
+    ledger_resolved = by_ref.get(_canonical_bytes(expected_ledger_ref))
+    if automatic_resolved is None or ledger_resolved is None:
+        raise ValueError("prediction run core child is unresolved")
+    automatic = automatic_resolved[0]
+    ledger = ledger_resolved[0]
+    if automatic.get("contract_version") != "automatic_prediction_v3":
+        raise ValueError("prediction run automatic class drift")
+    if (
+        automatic.get("benchmark_release_id") != run["benchmark_release_id"]
+        or automatic.get("partition") != run["partition"]
+        or _ref(automatic.get("source_parent_ref"), name="automatic source parent") != expected_body_ref
+        or ledger.get("benchmark_release_id") != run["benchmark_release_id"]
+        or ledger.get("partition") != run["partition"]
+        or _ref(ledger.get("raw_ledger_prefix_verification_ref"), name="ledger raw prefix") != expected_prefix_ref
+        or _ref(ledger.get("selected_attempt_ref"), name="ledger selected attempt") != expected_attempt_ref
+        or _ref(ledger.get("selected_lifecycle_ref"), name="ledger selected lifecycle") != expected_lifecycle_ref
+    ):
+        raise ValueError("prediction run cross-object lineage mismatch")
+    dependencies = automatic["provider_group_dependencies"]
+    assert isinstance(dependencies, list)
+    expected_dependencies = [groups[key] for key in sorted(groups)]
+    if dependencies != expected_dependencies:
+        raise ValueError("prediction dependency differs from authoritative group context")
+    for dependency in dependencies:
+        for field in (
+            "omni_inventory_ref",
+            "qwen_bindings_ref",
+            "fusion_result_ref",
+        ):
+            if _canonical_bytes(_ref(dependency[field], name=field)) not in by_ref:
+                raise ValueError("prediction dependency raw evidence is unresolved")
+        request_candidate_ids: list[str] = []
+        for request_ref in dependency["submitted_vista_request_refs"]:
+            resolved_request = by_ref.get(
+                _canonical_bytes(_ref(request_ref, name="submitted request ref"))
+            )
+            if resolved_request is None:
+                raise ValueError("prediction dependency submitted request is unresolved")
+            candidate_id = resolved_request[0].get("candidate_id")
+            if not isinstance(candidate_id, str) or not candidate_id:
+                raise ValueError("prediction dependency submitted request identity is invalid")
+            request_candidate_ids.append(candidate_id)
+        if request_candidate_ids != sorted(request_candidate_ids) or len(set(request_candidate_ids)) != len(request_candidate_ids):
+            raise ValueError("prediction dependency submitted request order is invalid")
+
+    arm_scopes = {
+        "qwen_only": ["qwen_only"],
+        "omni_only_discovery": ["omni_only_discovery"],
+        "omni_to_qwen": ["omni_to_qwen", "omni_to_qwen_vista"],
+        "omni_to_qwen_vista": ["omni_to_qwen", "omni_to_qwen_vista"],
+    }
+    rows = automatic["rows"]
+    assert isinstance(rows, list)
+    expected_row_keys = {
+        (case_id, arm_id) for case_id in cases for arm_id in _ARM_ORDER
+    }
+    actual_row_keys: list[tuple[str, str]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("prediction row is invalid")
+        case_id = str(row.get("case_id") or "")
+        arm_id = str(row.get("arm_id") or "")
+        if case_id not in cases:
+            raise ValueError("prediction row case is absent from authoritative cases")
+        actual_row_keys.append((case_id, arm_id))
+    if (
+        len(actual_row_keys) != len(expected_row_keys)
+        or len(set(actual_row_keys)) != len(actual_row_keys)
+        or set(actual_row_keys) != expected_row_keys
+    ):
+        raise ValueError("prediction row authoritative 60x4 key set differs")
+    for row in rows:
+        assert isinstance(row, Mapping)
+        case_id = str(row["case_id"])
+        case = cases[case_id]
+        if row["selection_status"] != "selected":
+            continue
+        dependency = groups[case["provider_group_id"]]
+
+        def resolve(field: str, contract: str) -> Mapping[str, object]:
+            resolved = by_ref.get(_canonical_bytes(_ref(row[field], name=f"row {field}")))
+            if resolved is None or resolved[0].get("contract_version") != contract:
+                raise ValueError("prediction row chain is unresolved")
+            return resolved[0]
+
+        source = resolve("source_parent_ref", "sealed_prediction_source_parent_v1")
+        bbox = resolve("bbox_ref", "sealed_prediction_bbox_v1")
+        binding = resolve("target_binding_ref", "sealed_target_binding_v4")
+        expected_case_ref = {
+            "case_id": case_id,
+            "case_content_sha256": case["case_content_sha256"],
+        }
+        expected_scope = arm_scopes[str(row["arm_id"])]
+        if (
+            source.get("case_ref") != expected_case_ref
+            or source.get("arm_scope") != expected_scope
+            or source.get("actual_screen_group_ref") != dependency["actual_screen_group_ref"]
+            or source.get("capture_ref") != dependency["capture_ref"]
+            or bbox.get("case_id") != case_id
+            or bbox.get("arm_scope") != expected_scope
+            or bbox.get("candidate_id") != row["candidate_id"]
+            or bbox.get("capture_ref") != dependency["capture_ref"]
+            or bbox.get("source_parent_ref") != row["source_parent_ref"]
+            or binding.get("case_id") != case_id
+            or binding.get("arm_scope") != expected_scope
+            or binding.get("candidate_id") != row["candidate_id"]
+            or binding.get("capture_ref") != dependency["capture_ref"]
+            or binding.get("source_parent_ref") != row["source_parent_ref"]
+            or binding.get("bbox_ref") != row["bbox_ref"]
+        ):
+            raise ValueError("prediction row case/group/capture lineage mismatch")
+        evidence_refs = source.get("evidence_refs")
+        if not isinstance(evidence_refs, Mapping):
+            raise ValueError("prediction source evidence refs are invalid")
+        source_kind = source.get("source_kind")
+        expected_raw_refs = {
+            "omni_inventory_item": {
+                "omni_inventory_ref": dependency["omni_inventory_ref"]
+            },
+            "hybrid_bound_fusion_candidate": {
+                "omni_inventory_ref": dependency["omni_inventory_ref"],
+                "qwen_bindings_ref": dependency["qwen_bindings_ref"],
+                "fusion_result_ref": dependency["fusion_result_ref"],
+            },
+        }.get(str(source_kind), {})
+        if any(evidence_refs.get(field) != value for field, value in expected_raw_refs.items()):
+            raise ValueError("prediction source raw evidence group lineage mismatch")
+        nested_fields = {
+            "incumbent_qwen_action": (
+                "incumbent_response_ref",
+                "available_action_ref",
+            ),
+            "omni_inventory_item": ("omni_item_ref",),
+            "hybrid_bound_fusion_candidate": ("fusion_candidate_ref",),
+        }.get(str(source_kind))
+        if nested_fields is None:
+            raise ValueError("prediction source kind is invalid")
+        for field in nested_fields:
+            nested_ref = _ref(evidence_refs[field], name=f"source {field}")
+            nested_resolved = by_ref.get(_canonical_bytes(nested_ref))
+            if nested_resolved is None:
+                raise ValueError("prediction source nested evidence is unresolved")
+            nested = nested_resolved[0]
+            if (
+                nested.get("contract_version")
+                != "benchmark_v2_nested_provider_evidence_ref_v1"
+                or nested.get("case_ref") != expected_case_ref
+                or nested.get("actual_screen_group_ref")
+                != dependency["actual_screen_group_ref"]
+            ):
+                raise ValueError("prediction source nested evidence lineage mismatch")
+        if "vista_request_ref" in row:
+            request = resolve("vista_request_ref", "sealed_vista_request_v4")
+            if (
+                request.get("case_id") != case_id
+                or request.get("arm_scope") != expected_scope
+                or request.get("candidate_id") != row["candidate_id"]
+                or request.get("capture_ref") != dependency["capture_ref"]
+                or request.get("source_parent_ref") != row["source_parent_ref"]
+                or request.get("bbox_ref") != row["bbox_ref"]
+                or request.get("target_binding_ref") != row["target_binding_ref"]
+                or request.get("submitted_request_ref")
+                not in dependency["submitted_vista_request_refs"]
+            ):
+                raise ValueError("prediction VISTA request lineage mismatch")
+
+    multiset = [
+        {
+            "case_id": case_id,
+            "case_content_sha256": cases[case_id]["case_content_sha256"],
+            "arm_id": arm_id,
+        }
+        for case_id in sorted(cases)
+        for arm_id in _ARM_ORDER
+    ]
+    digest = hashlib.sha256(_canonical_bytes(multiset)).hexdigest()
+    if automatic.get("case_arm_multiset_sha256") != digest:
+        raise ValueError("prediction case-arm multiset digest mismatch")
+    q_count = sum(
+        row.get("selection_status") == "selected" and row.get("arm_id") == "qwen_only"
+        for row in rows
+    )
+    o_count = sum(
+        row.get("selection_status") == "selected" and row.get("arm_id") == "omni_only_discovery"
+        for row in rows
+    )
+    h_count = sum(
+        row.get("selection_status") == "selected" and row.get("arm_id") == "omni_to_qwen"
+        for row in rows
+    )
+    request_count = sum(
+        len(group["submitted_vista_request_refs"]) for group in groups.values()
+    )
+    if request_count < h_count:
+        raise ValueError("prediction submitted request count is below selected hybrid count")
+    class_counts: dict[str, int] = {}
+    class_ref_keys: dict[str, set[bytes]] = {}
+    for ref_key, (item, _) in by_ref.items():
+        version = str(item.get("contract_version") or "")
+        class_counts[version] = class_counts.get(version, 0) + 1
+        class_ref_keys.setdefault(version, set()).add(ref_key)
+    expected_class_counts = {
+        "hybrid_omni_inventory_v1": 12,
+        "hybrid_qwen_bindings_v1": 12,
+        "hybrid_fusion_result_v1": 12,
+        "hybrid_vista_refinement_request_v1": request_count,
+        "benchmark_v2_nested_provider_evidence_ref_v1": 2 * q_count + o_count + h_count,
+        "sealed_prediction_source_parent_v1": q_count + o_count + h_count,
+        "sealed_prediction_bbox_v1": q_count + o_count + h_count,
+        "sealed_target_binding_v4": q_count + o_count + h_count,
+        "sealed_vista_request_v4": h_count,
+        "automatic_prediction_v3": 1,
+        "benchmark_v2_projected_attempt_ledger_v1": 1,
+        "benchmark_v2_prediction_run_v3": 1,
+    }
+    event_count = class_counts.get(
+        "benchmark_v2_runner_event_verified_projection_v1", 0
+    )
+    expected_class_counts["benchmark_v2_runner_event_verified_projection_v1"] = event_count
+    expected_class_counts = {
+        version: count for version, count in expected_class_counts.items() if count
+    }
+    if class_counts != expected_class_counts:
+        raise ValueError("prediction child-envelope class count mismatch")
+    dependency_ref_fields = {
+        "hybrid_omni_inventory_v1": "omni_inventory_ref",
+        "hybrid_qwen_bindings_v1": "qwen_bindings_ref",
+        "hybrid_fusion_result_v1": "fusion_result_ref",
+    }
+    for version, field in dependency_ref_fields.items():
+        expected_refs = {
+            _canonical_bytes(_ref(group[field], name=field)) for group in groups.values()
+        }
+        if len(expected_refs) != 12 or expected_refs != class_ref_keys.get(version, set()):
+            raise ValueError("prediction dependency raw evidence class coverage mismatch")
+    expected_request_refs = {
+        _canonical_bytes(_ref(item, name="submitted request ref"))
+        for group in groups.values()
+        for item in group["submitted_vista_request_refs"]
+    }
+    if (
+        len(expected_request_refs) != request_count
+        or expected_request_refs
+        != class_ref_keys.get("hybrid_vista_refinement_request_v1", set())
+    ):
+        raise ValueError("prediction dependency submitted request coverage mismatch")
+    expected_child_count = 38 + request_count + 5 * q_count + 4 * o_count + 5 * h_count + event_count
+    if len(by_ref) - 1 != expected_child_count:
+        raise ValueError("prediction child-envelope closure count mismatch")
+
+
 def _external_values(
     value: object, *, role: str, role_spec: _RefRole
 ) -> list[dict[str, object]]:
@@ -1605,7 +2256,19 @@ def _external_values(
         return [_case_ref(item, name=f"external {role}") for item in values]
     if role_spec.kind == "closed_logical_ref":
         return [_ledger_pre_result_ref(item, name=f"external {role}") for item in values]
+    if role_spec.kind == "corpus_parent_ref":
+        return [_corpus_parent_ref(item, name=f"external {role}") for item in values]
+    if role_spec.kind == "provider_manifest_ref":
+        return [_provider_manifest_ref(item, name=f"external {role}") for item in values]
+    if role_spec.kind == "provider_corpus_ref":
+        return [_provider_corpus_ref(item, name=f"external {role}") for item in values]
     return [_ref(item, name=f"external {role}") for item in values]
+
+
+def _is_external_role(role_spec: _RefRole, registry_name: str) -> bool:
+    if role_spec.external_registries is not None:
+        return registry_name in role_spec.external_registries
+    return role_spec.external
 
 
 def _decode_envelope(
@@ -1626,6 +2289,8 @@ def _decode_envelope(
         raise ValueError("pathless envelope artifact is invalid")
     item = deepcopy(dict(preview))
     contract_version = item.get("contract_version")
+    if contract_version == "automatic_prediction_v2":
+        raise ValueError("automatic_prediction_v2 is legacy and not allowed")
     if isinstance(contract_version, str) and contract_version in _CONTRACTS:
         spec = _registered(contract_version)
         if _canonical_bytes(item) != raw:
@@ -1822,11 +2487,15 @@ def validate_pathless_recursive(
             raise ValueError("pathless graph root or child is missing")
         visiting.add(key)
         item, _ = by_ref[key]
+        if item.get("contract_version") in _RAW_CONTRACTS:
+            visiting.remove(key)
+            visited.add(key)
+            return
         spec = _registered(item["contract_version"])
-        for role, role_spec, child_ref in _edges(item):
+        for role, role_spec, child_ref in _edges(item, registry_name=registry_name):
             qualified = f"{spec.contract_version}.{role}"
             child_key = _canonical_bytes(child_ref)
-            if role_spec.external:
+            if _is_external_role(role_spec, registry_name):
                 if role_spec.kind in {"exact_ref", "opaque_raw_ref"} and child_key in by_ref:
                     raise ValueError("external ref was injected as an internal envelope")
                 if qualified not in external:
@@ -1849,7 +2518,16 @@ def validate_pathless_recursive(
     for key in visited:
         item = by_ref[key][0]
         if item.get("contract_version") == "benchmark_v2_projected_attempt_ledger_v1":
-            _validate_projected_ledger_graph(item, by_ref)
+            _validate_projected_ledger_graph(
+                item,
+                by_ref,
+                allow_external_lifecycle=registry_name == "prediction_run_v3",
+            )
+    if registry_name == "prediction_run_v3":
+        for root in root_refs:
+            root_item = by_ref[_canonical_bytes(root)][0]
+            if root_item.get("contract_version") == "benchmark_v2_prediction_run_v3":
+                _validate_prediction_graph(root_item, by_ref, context)
     if visited != set(by_ref):
         raise ValueError("pathless graph contains an orphan envelope")
     extras = set(external) - consumed_external
@@ -1857,7 +2535,10 @@ def validate_pathless_recursive(
         internal = any(
             key.split(".", 1)[0] in _CONTRACTS
             and key.split(".", 1)[1] in _CONTRACTS[key.split(".", 1)[0]].ref_role_schema
-            and not _CONTRACTS[key.split(".", 1)[0]].ref_role_schema[key.split(".", 1)[1]].external
+            and not _is_external_role(
+                _CONTRACTS[key.split(".", 1)[0]].ref_role_schema[key.split(".", 1)[1]],
+                registry_name,
+            )
             for key in extras
         )
         if internal:

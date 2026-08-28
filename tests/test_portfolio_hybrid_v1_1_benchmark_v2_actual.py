@@ -18,6 +18,10 @@ from app.learn.hybrid.benchmark_v2_actual import (
     run_screen_group,
 )
 from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+from app.learn.hybrid.benchmark_v2_predictions import (
+    PredictionRunV3Materialization,
+    materialize_prediction_run_v3,
+)
 from app.learn.hybrid.vista_refinement import build_vista_requests
 from app.learn.recognition.uei.canonical import seal_immutable
 from tests.test_learn_hybrid_vista_refinement import _authoritative_inputs
@@ -25,6 +29,354 @@ from tests.test_learn_hybrid_vista_refinement import _authoritative_inputs
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
+
+
+def test_prediction_run_v3_materializer_is_byte_only_and_rejects_legacy_body() -> None:
+    signature = inspect.signature(materialize_prediction_run_v3)
+    assert list(signature.parameters) == [
+        "actual_body_bytes",
+        "provider_manifest_bytes",
+        "provider_corpus_bytes",
+        "actual_body_verified_projection",
+        "lifecycle_bundle_v3",
+    ]
+    assert all(
+        parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        for parameter in signature.parameters.values()
+    )
+    assert PredictionRunV3Materialization.__dataclass_params__.frozen is True
+    legacy_body = {
+        "contract_version": "benchmark_v2_runner_actual_body_v0",
+        "content_sha256": "a" * 64,
+    }
+    legacy_bytes = (
+        json.dumps(
+            legacy_body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    with pytest.raises(ValueError, match="actual body contract"):
+        materialize_prediction_run_v3(
+            actual_body_bytes=legacy_bytes,
+            provider_manifest_bytes=b"{}\n",
+            provider_corpus_bytes=b"{}\n",
+            actual_body_verified_projection={},
+            lifecycle_bundle_v3={},
+        )
+
+
+def _offline_c3_inputs(monkeypatch):
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        ARM_ORDER,
+        BENCHMARK_RELEASE_ID,
+        PARENT_REF,
+    )
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle import (
+        _s13_complete_graph,
+    )
+
+    graph = _s13_complete_graph()
+    ledger = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        runner_ledger_events=graph["ledger"],
+        runner_event_projections=graph["events"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+    )
+    bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        attempt_ref=graph["attempt"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        projected_attempt_ledger=ledger,
+        selected_attempt_lifecycle_projection=graph["attempt_lifecycle"],
+        cleanup_lifecycle_projection=graph["cleanup_projection"],
+        journal_terminal_event_projection=graph["terminal"],
+        attempt_journal_projection=graph["journal_projection"],
+        screen_group_lifecycle_projections=graph["screens"],
+        runner_event_projections=graph["events"],
+        cleanup_receipt=graph["cleanup"],
+    )
+    body = deepcopy(graph["body"])
+    body_bytes = (
+        json.dumps(
+            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+    case_context = {}
+    provider_cases = {}
+    multiset = []
+    for screen in body["screen_group_results"]:
+        group_id = str(screen["screen_group"])
+        seen = set()
+        for row in screen["rows"]:
+            case_ref = row["case_ref"]
+            case_id = str(case_ref["case_id"])
+            if case_id in seen:
+                continue
+            seen.add(case_id)
+            case_context[case_id] = {
+                "provider_group_id": group_id,
+                "case_content_sha256": str(case_ref["case_content_sha256"]),
+            }
+            provider_cases[case_id] = {
+                "case_id": case_id,
+                "partition": "regression",
+                "screen_group": group_id,
+                "goal": "Select the button labeled 'missing'",
+                "image": {},
+                "layout": {},
+            }
+            for arm_id in ARM_ORDER:
+                multiset.append(
+                    {
+                        "case_id": case_id,
+                        "case_content_sha256": str(case_ref["case_content_sha256"]),
+                        "arm_id": arm_id,
+                    }
+                )
+    arm_rank = {arm: index for index, arm in enumerate(ARM_ORDER)}
+    multiset.sort(key=lambda item: (item["case_id"], arm_rank[item["arm_id"]]))
+    digest = hashlib.sha256(
+        json.dumps(
+            multiset,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    dependency_by_group = {}
+    material_by_group = {}
+    for group_index, screen in enumerate(body["screen_group_results"]):
+        group_id = str(screen["screen_group"])
+        capture_identity = {"capture_id": f"offline-capture-{group_index:02d}"}
+        raw_values = {
+            "omni": seal_immutable(
+                {
+                    "contract_version": "hybrid_omni_inventory_v1",
+                    "capture_identity": capture_identity,
+                }
+            ),
+            "qwen": seal_immutable(
+                {
+                    "contract_version": "hybrid_qwen_bindings_v1",
+                    "capture_identity": capture_identity,
+                }
+            ),
+            "fusion": seal_immutable(
+                {
+                    "contract_version": "hybrid_fusion_result_v1",
+                    "capture_identity": capture_identity,
+                }
+            ),
+        }
+
+        def raw_envelope(value, prefix, domain):
+            raw = json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return {
+                "ref": {
+                    "id": f"{prefix}/{hashlib.sha256(domain + raw).hexdigest()}",
+                    "content_sha256": hashlib.sha256(raw).hexdigest(),
+                },
+                "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+            }
+
+        envelopes = {
+            "omni": raw_envelope(
+                raw_values["omni"],
+                "omni-inventory",
+                b"benchmark-v2-omni-inventory\0",
+            ),
+            "qwen": raw_envelope(
+                raw_values["qwen"],
+                "qwen-bindings",
+                b"benchmark-v2-qwen-bindings\0",
+            ),
+            "fusion": raw_envelope(
+                raw_values["fusion"],
+                "fusion-result",
+                b"benchmark-v2-fusion-result\0",
+            ),
+        }
+        provider_group_ref = deepcopy(screen["pre_vista_evidence"]["provider_group_ref"])
+        dependency = {
+            "actual_screen_group_ref": {
+                "id": group_id,
+                "content_sha256": str(screen["content_sha256"]),
+            },
+            "provider_group_ref": provider_group_ref,
+            "capture_ref": deepcopy(screen["shared_parent_refs"]["capture_ref"]),
+            "pre_vista_evidence_ref": {
+                "id": f"pre-vista-evidence/{group_index:064x}",
+                "content_sha256": hashlib.sha256(
+                    f"pre:{group_index}".encode()
+                ).hexdigest(),
+            },
+            "omni_inventory_ref": deepcopy(envelopes["omni"]["ref"]),
+            "qwen_bindings_ref": deepcopy(envelopes["qwen"]["ref"]),
+            "fusion_result_ref": deepcopy(envelopes["fusion"]["ref"]),
+            "submitted_vista_request_refs": [],
+        }
+        missing_rows = [
+            {
+                "case_id": case_id,
+                "arm_id": arm_id,
+                "selection_status": "missing",
+                "eligibility": "INELIGIBLE",
+                "failure_reason": "target_not_present_pre_vista",
+            }
+            for case_id, case in case_context.items()
+            if case["provider_group_id"] == group_id
+            for arm_id in ARM_ORDER
+        ]
+        dependency_by_group[group_id] = dependency
+        material_by_group[group_id] = (
+            dependency,
+            missing_rows,
+            [],
+            {"raw_envelopes": list(envelopes.values())},
+        )
+
+    manifest_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+        "relative_path": "benchmark-v2-provider-manifest.json",
+        "file_sha256": "b" * 64,
+    }
+    corpus_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": "c" * 64,
+        "content_sha256": "d" * 64,
+        "source_parent_ref": deepcopy(PARENT_REF),
+    }
+    monkeypatch.setattr(
+        predictions,
+        "_parse_provider_inputs",
+        lambda **_kwargs: ({}, {}, manifest_ref, corpus_ref),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "_provider_case_index",
+        lambda _corpus: (provider_cases, case_context, digest),
+    )
+    monkeypatch.setattr(
+        predictions,
+        "_screen_group_material",
+        lambda **kwargs: deepcopy(material_by_group[str(kwargs["screen"]["screen_group"])]),
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_omni_inventory", lambda value: value
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_qwen_bindings",
+        lambda value, _inventory: value,
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_fusion_result",
+        lambda value, _inventory, _bindings: value,
+    )
+    public_attempt_ref = lifecycle._s13_public_attempt_ref(graph["attempt"])
+    projection = seal_pathless_projection(
+        contract_version="benchmark_v2_actual_body_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": public_attempt_ref,
+            "body_contract_version": "benchmark_v2_runner_actual_body_v1",
+            "raw_file_sha256": hashlib.sha256(body_bytes).hexdigest(),
+            "body_content_sha256": str(body["content_sha256"]),
+            "screen_group_count": 12,
+            "case_arm_multiset_sha256": digest,
+            "pre_vista_evidence_refs": [
+                deepcopy(dependency_by_group[group]["pre_vista_evidence_ref"])
+                for group in sorted(dependency_by_group)
+            ],
+            "verified": True,
+            "safety": deepcopy(predictions.SAFETY),
+        },
+    )
+    return {
+        "actual_body_bytes": body_bytes,
+        "provider_manifest_bytes": b"offline-manifest",
+        "provider_corpus_bytes": b"offline-corpus",
+        "actual_body_verified_projection": projection,
+        "lifecycle_bundle_v3": bundle,
+    }, body
+
+
+def test_prediction_run_v3_materializer_succeeds_deterministically_offline(monkeypatch) -> None:
+    kwargs, _ = _offline_c3_inputs(monkeypatch)
+    first = materialize_prediction_run_v3(**kwargs)
+    second = materialize_prediction_run_v3(**kwargs)
+    assert first == second
+    assert first.automatic_prediction["contract_version"] == "automatic_prediction_v3"
+    assert first.prediction_run["contract_version"] == "benchmark_v2_prediction_run_v3"
+    assert first.prediction_run_envelope["ref"] == {
+        "id": first.prediction_run["artifact_id"],
+        "content_sha256": first.prediction_run["content_sha256"],
+    }
+
+
+def test_prediction_run_v3_rejects_resealed_body_not_bound_to_lifecycle(monkeypatch) -> None:
+    kwargs, body = _offline_c3_inputs(monkeypatch)
+    changed = deepcopy(body)
+    changed_screen = changed["screen_group_results"][0]
+    changed_screen["request_ref"] = {
+        "id": "request/resealed-body",
+        "content_sha256": "e" * 64,
+    }
+    changed_screen["content_sha256"] = content_sha256(changed_screen)
+    changed["content_sha256"] = content_sha256(changed)
+    changed_bytes = (
+        json.dumps(
+            changed, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+
+    prior_projection = kwargs["actual_body_verified_projection"]
+    changed_projection = seal_pathless_projection(
+        contract_version="benchmark_v2_actual_body_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": deepcopy(prior_projection["attempt_ref"]),
+            "body_contract_version": "benchmark_v2_runner_actual_body_v1",
+            "raw_file_sha256": hashlib.sha256(changed_bytes).hexdigest(),
+            "body_content_sha256": str(changed["content_sha256"]),
+            "screen_group_count": 12,
+            "case_arm_multiset_sha256": str(
+                prior_projection["case_arm_multiset_sha256"]
+            ),
+            "pre_vista_evidence_refs": deepcopy(
+                prior_projection["pre_vista_evidence_refs"]
+            ),
+            "verified": True,
+            "safety": deepcopy(predictions.SAFETY),
+        },
+    )
+    del lifecycle
+    with pytest.raises(ValueError, match="body_file_ref|body file|lifecycle.*body"):
+        materialize_prediction_run_v3(
+            **{
+                **kwargs,
+                "actual_body_bytes": changed_bytes,
+                "actual_body_verified_projection": changed_projection,
+            }
+        )
 
 
 def _identity(identity: str, digest: str = SHA_A) -> dict[str, object]:

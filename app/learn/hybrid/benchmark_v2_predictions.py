@@ -2,6 +2,7 @@
 from __future__ import annotations
 import base64
 from copy import deepcopy
+from dataclasses import dataclass
 import hashlib
 import json
 import re
@@ -9,8 +10,10 @@ from typing import Any, Mapping
 
 from app.learn.hybrid.benchmark_v2_pathless import (
     pathless_artifact_ref,
+    order_pathless_envelopes,
     seal_pathless_envelope,
     seal_pathless_projection,
+    validate_pathless_recursive,
     validate_pathless_ref,
 )
 
@@ -559,6 +562,580 @@ def attach_vista_outcomes(selection: Mapping[str, object], vista_proposals: list
             raise ValueError("unknown VISTA proposal state")
     row["vista_result"] = outcome
     return result
+
+
+@dataclass(frozen=True)
+class PredictionRunV3Materialization:
+    automatic_prediction: dict[str, object]
+    prediction_run: dict[str, object]
+    prediction_run_envelope: dict[str, object]
+
+
+def _decode_canonical_envelope(value: object, *, name: str) -> tuple[dict[str, object], bytes]:
+    if not isinstance(value, Mapping) or set(value) != {"ref", "canonical_bytes_b64"}:
+        raise ValueError(f"{name} envelope is invalid")
+    encoded = value.get("canonical_bytes_b64")
+    if not isinstance(encoded, str):
+        raise ValueError(f"{name} envelope bytes are invalid")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        decoded = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} envelope bytes are invalid") from exc
+    if not isinstance(decoded, Mapping) or canonical_bytes(decoded) != raw:
+        raise ValueError(f"{name} envelope bytes are not canonical")
+    return deepcopy(dict(decoded)), raw
+
+
+def _pre_vista_evidence_ref(value: Mapping[str, object]) -> dict[str, str]:
+    raw = canonical_bytes(value)
+    return {
+        "id": "pre-vista-evidence/"
+        + hashlib.sha256(
+            b"benchmark_v2_actual_pre_vista_evidence_v1\0" + raw
+        ).hexdigest(),
+        "content_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _seal_automatic_prediction_v3(
+    *,
+    benchmark_release_id: str,
+    partition: str,
+    source_parent_ref: Mapping[str, object],
+    case_arm_multiset_sha256: str,
+    provider_group_dependencies: list[Mapping[str, object]],
+    rows: list[Mapping[str, object]],
+) -> dict[str, object]:
+    identity_source = {
+        "benchmark_release_id": benchmark_release_id,
+        "partition": partition,
+        "source_parent_ref": deepcopy(dict(source_parent_ref)),
+        "case_arm_multiset_sha256": case_arm_multiset_sha256,
+        "provider_group_dependencies": [deepcopy(dict(item)) for item in provider_group_dependencies],
+        "rows": [deepcopy(dict(item)) for item in rows],
+        "safety": deepcopy(SAFETY),
+    }
+    prediction_id = "prediction/" + hashlib.sha256(
+        b"benchmark-v2-automatic-prediction-v3\0"
+        + canonical_bytes(identity_source)
+    ).hexdigest()
+    return seal_pathless_projection(
+        contract_version="automatic_prediction_v3",
+        semantic_payload={"prediction_id": prediction_id, **identity_source},
+    )
+
+
+def _parse_actual_body_bytes(actual_body_bytes: bytes) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    if not isinstance(actual_body_bytes, bytes):
+        raise ValueError("actual body bytes are required")
+    try:
+        decoded = json.loads(actual_body_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("actual body is not UTF-8 JSON") from exc
+    if not isinstance(decoded, Mapping) or actual_body_bytes != canonical_bytes(decoded) + b"\n":
+        raise ValueError("actual body bytes are not canonical")
+    body = deepcopy(dict(decoded))
+    expected_fields = {
+        "contract_version",
+        "attempt_ref",
+        "partition",
+        "screen_group_results",
+        "body_status",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if (
+        set(body) != expected_fields
+        or body.get("contract_version") != "benchmark_v2_runner_actual_body_v1"
+        or body.get("partition") != "regression"
+        or body.get("body_status") != "complete"
+        or body.get("artifact_is_authorization") is not False
+        or body.get("execute_binding_enabled") is not False
+        or not isinstance(body.get("screen_group_results"), list)
+        or len(body["screen_group_results"]) != 12
+        or body.get("content_sha256") != content_sha256(body)
+    ):
+        raise ValueError("actual body contract is invalid")
+    return body
+
+
+def _parse_provider_inputs(
+    *, provider_manifest_bytes: bytes, provider_corpus_bytes: bytes
+) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]:
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        PARENT_REF,
+        canonical_json_bytes,
+    )
+    from app.learn.hybrid.benchmark_v2_provider_corpus import (
+        validate_preloaded_provider_corpus,
+        validate_provider_manifest,
+    )
+
+    if not isinstance(provider_manifest_bytes, bytes) or not isinstance(provider_corpus_bytes, bytes):
+        raise ValueError("provider manifest and corpus bytes are required")
+    try:
+        manifest_value = json.loads(provider_manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("provider manifest is not UTF-8 JSON") from exc
+    if (
+        not isinstance(manifest_value, Mapping)
+        or provider_manifest_bytes != canonical_json_bytes(manifest_value, pretty=True)
+    ):
+        raise ValueError("provider manifest bytes are not canonical")
+    manifest = validate_provider_manifest(manifest_value)
+    corpus_file_sha = hashlib.sha256(provider_corpus_bytes).hexdigest()
+    corpus = validate_preloaded_provider_corpus(
+        raw=provider_corpus_bytes, expected_sha256=corpus_file_sha
+    )
+    corpus_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": corpus_file_sha,
+        "content_sha256": str(corpus["content_sha256"]),
+        "source_parent_ref": deepcopy(PARENT_REF),
+    }
+    if manifest.get("provider_corpus_ref") != corpus_ref:
+        raise ValueError("provider manifest/corpus lineage differs")
+    manifest_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+        "relative_path": "benchmark-v2-provider-manifest.json",
+        "file_sha256": hashlib.sha256(provider_manifest_bytes).hexdigest(),
+    }
+    return manifest, corpus, manifest_ref, corpus_ref
+
+
+def _provider_case_index(corpus: Mapping[str, object]) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, str]], str]:
+    from app.learn.hybrid.benchmark_v2_contracts import ARM_ORDER
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    cases = corpus.get("cases")
+    if not isinstance(cases, list):
+        raise ValueError("provider corpus cases are unavailable")
+    regression = [deepcopy(dict(item)) for item in cases if isinstance(item, Mapping) and item.get("partition") == "regression"]
+    if len(regression) != 60:
+        raise ValueError("provider corpus regression partition must contain 60 cases")
+    by_id: dict[str, dict[str, object]] = {}
+    context: dict[str, dict[str, str]] = {}
+    multiset: list[dict[str, str]] = []
+    groups: dict[str, int] = {}
+    for case in regression:
+        case_id = str(case.get("case_id") or "")
+        group_id = str(case.get("screen_group") or "")
+        if not case_id or not group_id or case_id in by_id:
+            raise ValueError("provider corpus regression case identity is invalid")
+        case_sha = content_sha256(case)
+        by_id[case_id] = case
+        context[case_id] = {
+            "provider_group_id": group_id,
+            "case_content_sha256": case_sha,
+        }
+        groups[group_id] = groups.get(group_id, 0) + 1
+        for arm_id in ARM_ORDER:
+            multiset.append(
+                {
+                    "case_id": case_id,
+                    "case_content_sha256": case_sha,
+                    "arm_id": arm_id,
+                }
+            )
+    if len(groups) != 12 or set(groups.values()) != {5}:
+        raise ValueError("provider corpus regression group multiset is invalid")
+    arm_rank = {arm: index for index, arm in enumerate(ARM_ORDER)}
+    multiset.sort(key=lambda item: (item["case_id"], arm_rank[item["arm_id"]]))
+    return by_id, context, hashlib.sha256(canonical_bytes(multiset)).hexdigest()
+
+
+def _screen_group_material(
+    *,
+    screen: Mapping[str, object],
+    raw_attempt_ref: Mapping[str, object],
+    provider_cases: Mapping[str, Mapping[str, object]],
+    case_context: Mapping[str, Mapping[str, str]],
+) -> tuple[dict[str, object], list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+    from app.learn.hybrid.benchmark_v2_lifecycle import _s13_screen_group_parent
+
+    _, _, actual_group_ref, provider_group_ref = _s13_screen_group_parent(
+        screen, attempt_ref=raw_attempt_ref
+    )
+    shared = screen.get("shared_parent_refs")
+    evidence = screen.get("pre_vista_evidence")
+    rows = screen.get("rows")
+    if not isinstance(shared, Mapping) or not isinstance(evidence, Mapping) or not isinstance(rows, list):
+        raise ValueError("actual screen group material is incomplete")
+    evidence_ref = _pre_vista_evidence_ref(evidence)
+    decoded_raw: dict[str, dict[str, object]] = {}
+    raw_envelopes: list[dict[str, object]] = []
+    for field, key in (
+        ("omni_inventory_envelope", "omni_inventory"),
+        ("qwen_bindings_envelope", "qwen_bindings"),
+        ("fusion_result_envelope", "fusion_result"),
+    ):
+        decoded, _ = _decode_canonical_envelope(evidence[field], name=field)
+        decoded_raw[key] = decoded
+        raw_envelopes.append(deepcopy(dict(evidence[field])))
+    submitted: list[dict[str, object]] = []
+    submitted_envelopes = evidence.get("submitted_vista_request_envelopes")
+    if not isinstance(submitted_envelopes, list):
+        raise ValueError("submitted VISTA request envelopes are unavailable")
+    for envelope in submitted_envelopes:
+        decoded, _ = _decode_canonical_envelope(envelope, name="submitted VISTA request")
+        submitted.append(decoded)
+        raw_envelopes.append(deepcopy(dict(envelope)))
+    request_ids = [str(item.get("candidate_id") or "") for item in submitted]
+    if request_ids != sorted(request_ids) or any(not item for item in request_ids):
+        raise ValueError("submitted VISTA request order differs")
+    group_id = str(provider_group_ref["id"])
+    group_case_ids = sorted(
+        case_id for case_id, item in case_context.items() if item["provider_group_id"] == group_id
+    )
+    qwen_by_case: dict[str, Mapping[str, object]] = {}
+    vista_proposals: list[Mapping[str, object]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("actual screen group row is invalid")
+        case_ref = row.get("case_ref")
+        observation = row.get("observation")
+        if not isinstance(case_ref, Mapping) or not isinstance(observation, Mapping):
+            raise ValueError("actual screen group row evidence is invalid")
+        case_id = str(case_ref.get("case_id") or "")
+        expected_case = case_context.get(case_id)
+        if (
+            expected_case is None
+            or expected_case["provider_group_id"] != group_id
+            or case_ref.get("case_content_sha256") != expected_case["case_content_sha256"]
+        ):
+            raise ValueError("actual screen group case/corpus lineage differs")
+        if row.get("arm_id") == "qwen_only":
+            response = observation.get("response")
+            if not isinstance(response, Mapping) or case_id in qwen_by_case:
+                raise ValueError("actual screen group Qwen response is invalid")
+            qwen_by_case[case_id] = response
+        elif row.get("arm_id") == "omni_to_qwen_vista":
+            review = observation.get("review_projection")
+            proposals = review.get("proposals") if isinstance(review, Mapping) else None
+            if not isinstance(proposals, list):
+                raise ValueError("actual screen group VISTA proposals are invalid")
+            vista_proposals = proposals
+    if sorted(qwen_by_case) != group_case_ids:
+        raise ValueError("actual screen group case coverage differs")
+    selected_rows: list[dict[str, object]] = []
+    sealed_artifacts: list[dict[str, object]] = []
+    for case_id in group_case_ids:
+        selection = select_pre_vista_prediction_rows(
+            provider_case=provider_cases[case_id],
+            incumbent_response=qwen_by_case[case_id],
+            omni_inventory=decoded_raw["omni_inventory"],
+            qwen_bindings=decoded_raw["qwen_bindings"],
+            fusion_result=decoded_raw["fusion_result"],
+            submitted_vista_requests=submitted,
+            actual_screen_group_ref=actual_group_ref,
+            capture_ref=shared["capture_ref"],
+        )
+        attached = attach_vista_outcomes(selection, list(vista_proposals))
+        selected_rows.extend(deepcopy(attached["rows"]))
+        sealed_artifacts.extend(deepcopy(attached["sealed_artifacts"]))
+    dependency = {
+        "actual_screen_group_ref": actual_group_ref,
+        "provider_group_ref": provider_group_ref,
+        "capture_ref": deepcopy(dict(shared["capture_ref"])),
+        "pre_vista_evidence_ref": evidence_ref,
+        "omni_inventory_ref": deepcopy(dict(evidence["omni_inventory_envelope"]["ref"])),
+        "qwen_bindings_ref": deepcopy(dict(evidence["qwen_bindings_envelope"]["ref"])),
+        "fusion_result_ref": deepcopy(dict(evidence["fusion_result_envelope"]["ref"])),
+        "submitted_vista_request_refs": [deepcopy(dict(item["ref"])) for item in submitted_envelopes],
+    }
+    return dependency, selected_rows, sealed_artifacts, {"raw_envelopes": raw_envelopes}
+
+
+def _prediction_external_refs(
+    *,
+    prediction_run: Mapping[str, object],
+    automatic: Mapping[str, object],
+    artifacts: list[Mapping[str, object]],
+    runner_and_ledger_envelopes: list[Mapping[str, object]],
+) -> dict[str, object]:
+    collected: dict[str, list[object]] = {}
+
+    def add(role: str, value: object) -> None:
+        if value is not None:
+            collected.setdefault(role, []).append(deepcopy(value))
+
+    outer_version = "benchmark_v2_prediction_run_v3"
+    for field in (
+        "corpus_parent_ref",
+        "provider_manifest_ref",
+        "provider_corpus_ref",
+        "attempt_ref",
+        "raw_ledger_prefix_verification_ref",
+        "selected_lifecycle_ref",
+    ):
+        add(f"{outer_version}.{field}", prediction_run[field])
+    automatic_version = "automatic_prediction_v3"
+    add(f"{automatic_version}.source_parent_ref", automatic["source_parent_ref"])
+    for dependency in automatic["provider_group_dependencies"]:
+        assert isinstance(dependency, Mapping)
+        for field in (
+            "actual_screen_group_ref",
+            "provider_group_ref",
+            "capture_ref",
+            "pre_vista_evidence_ref",
+        ):
+            add(f"{automatic_version}.provider_group_dependencies.{field}", dependency[field])
+    for artifact in artifacts:
+        version = str(artifact["contract_version"])
+        if version == "benchmark_v2_nested_provider_evidence_ref_v1":
+            add(f"{version}.case_ref", artifact["case_ref"])
+            add(f"{version}.actual_screen_group_ref", artifact["actual_screen_group_ref"])
+        elif version == "sealed_prediction_source_parent_v1":
+            add(f"{version}.case_ref", artifact["case_ref"])
+            add(f"{version}.actual_screen_group_ref", artifact["actual_screen_group_ref"])
+            add(f"{version}.capture_ref", artifact["capture_ref"])
+        elif version in {"sealed_prediction_bbox_v1", "sealed_target_binding_v4", "sealed_vista_request_v4"}:
+            add(f"{version}.capture_ref", artifact["capture_ref"])
+    for envelope in runner_and_ledger_envelopes:
+        item, _ = _decode_canonical_envelope(envelope, name="prediction lifecycle child")
+        version = str(item["contract_version"])
+        if version == "benchmark_v2_runner_event_verified_projection_v1":
+            add(f"{version}.attempt_ref", item["attempt_ref"])
+            refs = item["load_bearing_refs"]
+            assert isinstance(refs, Mapping)
+            for field in (
+                "attempt_ref",
+                "body_file_ref",
+                "cleanup_receipt_ref",
+                "cleanup_projection_ref",
+                "result_file_ref",
+                "attempt_ledger_pre_result_ref",
+            ):
+                if field in refs:
+                    add(f"{version}.load_bearing_refs.{field}", refs[field])
+        elif version == "benchmark_v2_projected_attempt_ledger_v1":
+            add(f"{version}.raw_ledger_prefix_verification_ref", item["raw_ledger_prefix_verification_ref"])
+            add(f"{version}.selected_attempt_ref", item["selected_attempt_ref"])
+            add(f"{version}.selected_lifecycle_ref", item["selected_lifecycle_ref"])
+            for entry in item["entries"]:
+                assert isinstance(entry, Mapping)
+                add(f"{version}.entries.attempt_ref", entry["attempt_ref"])
+                add(f"{version}.entries.lifecycle_ref", entry["lifecycle_ref"])
+    result: dict[str, object] = {}
+    for role, values in collected.items():
+        unique: list[object] = []
+        seen: set[bytes] = set()
+        for value in values:
+            key = canonical_bytes(value)
+            if key not in seen:
+                seen.add(key)
+                unique.append(value)
+        result[role] = unique[0] if len(unique) == 1 else unique
+    return result
+
+
+def materialize_prediction_run_v3(
+    *,
+    actual_body_bytes: bytes,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+    actual_body_verified_projection: Mapping[str, object],
+    lifecycle_bundle_v3: Mapping[str, object],
+) -> PredictionRunV3Materialization:
+    """从已验证原始字节离线生成 production Prediction-run-v3。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID, PARENT_REF
+    from app.learn.hybrid.benchmark_v2_lifecycle import _s13_public_attempt_ref
+
+    body = _parse_actual_body_bytes(actual_body_bytes)
+    _, corpus, manifest_ref, corpus_ref = _parse_provider_inputs(
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    provider_cases, case_context, corpus_digest = _provider_case_index(corpus)
+    if not isinstance(actual_body_verified_projection, Mapping):
+        raise ValueError("actual body verified projection is required")
+    body_projection_ref = pathless_artifact_ref(actual_body_verified_projection)
+    raw_attempt_ref = body.get("attempt_ref")
+    if not isinstance(raw_attempt_ref, Mapping):
+        raise ValueError("actual body attempt ref is invalid")
+    public_attempt_ref = _s13_public_attempt_ref(raw_attempt_ref)
+    if (
+        actual_body_verified_projection.get("contract_version")
+        != "benchmark_v2_actual_body_verified_projection_v1"
+        or actual_body_verified_projection.get("attempt_ref") != public_attempt_ref
+        or actual_body_verified_projection.get("raw_file_sha256")
+        != hashlib.sha256(actual_body_bytes).hexdigest()
+        or actual_body_verified_projection.get("body_content_sha256")
+        != body.get("content_sha256")
+        or actual_body_verified_projection.get("case_arm_multiset_sha256") != corpus_digest
+    ):
+        raise ValueError("actual body verified projection lineage differs")
+
+    pathless_artifact_ref(lifecycle_bundle_v3)
+    if (
+        lifecycle_bundle_v3.get("contract_version") != "benchmark_v2_lifecycle_bundle_v3"
+        or lifecycle_bundle_v3.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
+        or lifecycle_bundle_v3.get("partition") != "regression"
+        or lifecycle_bundle_v3.get("attempt_ref") != public_attempt_ref
+    ):
+        raise ValueError("lifecycle bundle lineage differs")
+    lifecycle_envelopes = lifecycle_bundle_v3.get("sealed_artifact_envelopes")
+    if not isinstance(lifecycle_envelopes, list):
+        raise ValueError("lifecycle bundle closure is unavailable")
+    runner_and_ledger_envelopes: list[dict[str, object]] = []
+    runner_events: list[dict[str, object]] = []
+    ledger: dict[str, object] | None = None
+    for envelope in lifecycle_envelopes:
+        decoded, _ = _decode_canonical_envelope(envelope, name="lifecycle child")
+        version = decoded.get("contract_version")
+        if version in {
+            "benchmark_v2_runner_event_verified_projection_v1",
+            "benchmark_v2_projected_attempt_ledger_v1",
+        }:
+            pathless_artifact_ref(decoded)
+            runner_and_ledger_envelopes.append(deepcopy(dict(envelope)))
+            if version == "benchmark_v2_runner_event_verified_projection_v1":
+                runner_events.append(decoded)
+            elif version == "benchmark_v2_projected_attempt_ledger_v1":
+                if ledger is not None:
+                    raise ValueError("lifecycle bundle projected ledger is duplicated")
+                ledger = decoded
+    if ledger is None:
+        raise ValueError("lifecycle bundle projected ledger is missing")
+    ledger_ref = pathless_artifact_ref(ledger)
+    if (
+        ledger_ref != lifecycle_bundle_v3.get("projected_attempt_ledger_ref")
+        or ledger.get("selected_attempt_ref") != public_attempt_ref
+        or ledger.get("selected_lifecycle_ref") != lifecycle_bundle_v3.get("selected_lifecycle_ref")
+        or ledger.get("raw_ledger_prefix_verification_ref")
+        != lifecycle_bundle_v3.get("raw_ledger_prefix_verification_ref")
+    ):
+        raise ValueError("lifecycle bundle ledger lineage differs")
+    selected_body_events = [
+        event
+        for event in runner_events
+        if event.get("event_kind") == "body_complete"
+        and event.get("attempt_ref") == public_attempt_ref
+    ]
+    if len(selected_body_events) != 1:
+        raise ValueError("selected lifecycle body_complete event is not unique")
+    expected_body_file_ref = {
+        "file_sha256": hashlib.sha256(actual_body_bytes).hexdigest(),
+        "content_sha256": str(body["content_sha256"]),
+    }
+    load_bearing_refs = selected_body_events[0].get("load_bearing_refs")
+    if (
+        not isinstance(load_bearing_refs, Mapping)
+        or load_bearing_refs.get("body_file_ref") != expected_body_file_ref
+    ):
+        raise ValueError("selected lifecycle body_file_ref differs from actual body bytes")
+
+    dependencies: list[dict[str, object]] = []
+    rows: list[dict[str, object]] = []
+    artifacts_by_ref: dict[bytes, dict[str, object]] = {}
+    raw_envelopes: list[dict[str, object]] = []
+    screens = body["screen_group_results"]
+    assert isinstance(screens, list)
+    for raw_screen in screens:
+        if not isinstance(raw_screen, Mapping):
+            raise ValueError("actual body screen group is invalid")
+        dependency, group_rows, group_artifacts, material = _screen_group_material(
+            screen=raw_screen,
+            raw_attempt_ref=raw_attempt_ref,
+            provider_cases=provider_cases,
+            case_context=case_context,
+        )
+        dependencies.append(dependency)
+        rows.extend(group_rows)
+        for artifact in group_artifacts:
+            ref = pathless_artifact_ref(artifact)
+            key = canonical_bytes(ref)
+            prior = artifacts_by_ref.get(key)
+            if prior is not None and prior != artifact:
+                raise ValueError("prediction sealed artifact identity conflicts")
+            artifacts_by_ref[key] = artifact
+        raw_envelopes.extend(material["raw_envelopes"])
+    dependencies.sort(key=lambda item: str(item["provider_group_ref"]["id"]))
+    arm_rank = {arm: index for index, arm in enumerate(ARMS)}
+    rows.sort(key=lambda item: (str(item["case_id"]), arm_rank[str(item["arm_id"])]))
+    pre_refs = [deepcopy(item["pre_vista_evidence_ref"]) for item in dependencies]
+    if (
+        actual_body_verified_projection.get("pre_vista_evidence_refs") != pre_refs
+        or len({str(item["provider_group_ref"]["id"]) for item in dependencies}) != 12
+        or len(rows) != 240
+    ):
+        raise ValueError("actual body dependency/row multiset differs")
+    automatic = _seal_automatic_prediction_v3(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        source_parent_ref=body_projection_ref,
+        case_arm_multiset_sha256=corpus_digest,
+        provider_group_dependencies=dependencies,
+        rows=rows,
+    )
+
+    child_envelopes = [
+        *raw_envelopes,
+        *[seal_pathless_envelope(item) for item in artifacts_by_ref.values()],
+        seal_pathless_envelope(automatic),
+        *runner_and_ledger_envelopes,
+    ]
+    ordered_children = order_pathless_envelopes(
+        registry_name="prediction_run_v3", envelopes=child_envelopes, context={}
+    )
+    prediction_run = seal_pathless_projection(
+        contract_version="benchmark_v2_prediction_run_v3",
+        semantic_payload={
+            "benchmark_release_id": BENCHMARK_RELEASE_ID,
+            "partition": "regression",
+            "corpus_parent_ref": deepcopy(PARENT_REF),
+            "provider_manifest_ref": manifest_ref,
+            "provider_corpus_ref": corpus_ref,
+            "attempt_ref": public_attempt_ref,
+            "projected_attempt_ledger_ref": ledger_ref,
+            "raw_ledger_prefix_verification_ref": deepcopy(
+                lifecycle_bundle_v3["raw_ledger_prefix_verification_ref"]
+            ),
+            "automatic_prediction_ref": pathless_artifact_ref(automatic),
+            "selected_lifecycle_ref": deepcopy(lifecycle_bundle_v3["selected_lifecycle_ref"]),
+            "sealed_artifact_envelopes": ordered_children,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+    prediction_run_envelope = seal_pathless_envelope(prediction_run)
+    provider_group_context = {
+        str(item["provider_group_ref"]["id"]): deepcopy(item) for item in dependencies
+    }
+    external_refs = _prediction_external_refs(
+        prediction_run=prediction_run,
+        automatic=automatic,
+        artifacts=list(artifacts_by_ref.values()),
+        runner_and_ledger_envelopes=runner_and_ledger_envelopes,
+    )
+    context = {
+        "provider_groups": provider_group_context,
+        "cases": deepcopy(case_context),
+        "actual_body_projection_ref": body_projection_ref,
+        "attempt_ref": public_attempt_ref,
+        "raw_ledger_prefix_verification_ref": deepcopy(
+            lifecycle_bundle_v3["raw_ledger_prefix_verification_ref"]
+        ),
+        "projected_attempt_ledger_ref": ledger_ref,
+        "selected_lifecycle_ref": deepcopy(lifecycle_bundle_v3["selected_lifecycle_ref"]),
+    }
+    validate_pathless_recursive(
+        registry_name="prediction_run_v3",
+        roots=[pathless_artifact_ref(prediction_run)],
+        envelopes=[prediction_run_envelope, *ordered_children],
+        external_refs=external_refs,
+        context=context,
+    )
+    return PredictionRunV3Materialization(
+        automatic_prediction=automatic,
+        prediction_run=prediction_run,
+        prediction_run_envelope=prediction_run_envelope,
+    )
 
 def seal_target_binding(*,artifact_id:str,case_id:str,candidate_id:str,fusion_ref:Mapping[str,str],capture_ref:Mapping[str,str],bbox_ref:Mapping[str,str],bbox:list[int],source_parent_ref:Mapping[str,str])->dict[str,object]:
     if len(bbox)!=4 or not all(isinstance(v,int) for v in bbox): raise ValueError("bbox invalid")

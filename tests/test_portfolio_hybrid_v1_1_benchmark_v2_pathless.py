@@ -485,6 +485,399 @@ def test_prediction_registry_orders_raw_provider_classes_and_invokes_closed_vali
     assert calls == ["omni", "qwen", "fusion", "request"]
 
 
+def test_prediction_registry_resolves_raw_provider_as_internal_leaf(monkeypatch) -> None:
+    capture = {"capture_id": "capture-one"}
+    omni = seal_immutable(
+        {
+            "contract_version": "hybrid_omni_inventory_v1",
+            "capture_identity": capture,
+            "confidence": 0.5,
+        }
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_omni_inventory", lambda value: value
+    )
+    omni_envelope = _raw_envelope(
+        omni,
+        prefix="omni-inventory",
+        domain=b"benchmark-v2-omni-inventory\0",
+    )
+    nested = _seal_nested()
+    source = seal_pathless_projection(
+        contract_version="sealed_prediction_source_parent_v1",
+        semantic_payload={
+            "case_ref": _case_ref(),
+            "arm_scope": ["omni_only_discovery"],
+            "source_kind": "omni_inventory_item",
+            "evidence_refs": {
+                "omni_inventory_ref": deepcopy(omni_envelope["ref"]),
+                "omni_item_ref": pathless_artifact_ref(nested),
+            },
+            "actual_screen_group_ref": _ref("actual-screen-group/one"),
+            "capture_ref": _ref("capture/one"),
+            "safety": deepcopy(SAFETY),
+        },
+    )
+    external = {
+        "benchmark_v2_nested_provider_evidence_ref_v1.case_ref": _case_ref(),
+        "benchmark_v2_nested_provider_evidence_ref_v1.actual_screen_group_ref": _ref("actual-screen-group/one"),
+        "sealed_prediction_source_parent_v1.case_ref": _case_ref(),
+        "sealed_prediction_source_parent_v1.actual_screen_group_ref": _ref("actual-screen-group/one"),
+        "sealed_prediction_source_parent_v1.capture_ref": _ref("capture/one"),
+    }
+    ordered = validate_pathless_recursive(
+        registry_name="prediction_run_v3",
+        roots=[pathless_artifact_ref(source)],
+        envelopes=[
+            omni_envelope,
+            seal_pathless_envelope(nested),
+            seal_pathless_envelope(source),
+        ],
+        external_refs=external,
+        context={},
+    )
+    assert [item["ref"] for item in ordered] == [
+        omni_envelope["ref"],
+        pathless_artifact_ref(nested),
+        pathless_artifact_ref(source),
+    ]
+
+
+def test_prediction_graph_accepts_exact_r_zero_missing_row_closure(monkeypatch) -> None:
+    from app.learn.hybrid.benchmark_v2_contracts import PARENT_REF
+    from app.learn.hybrid.benchmark_v2_predictions import _prediction_external_refs
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        _decode_envelope,
+        _validate_prediction_graph,
+        _validate_projected_ledger_graph,
+    )
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_omni_inventory", lambda value: value
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_qwen_bindings",
+        lambda value, _inventory: value,
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.contracts.validate_fusion_result",
+        lambda value, _inventory, _bindings: value,
+    )
+    dependencies = []
+    raw_envelopes = []
+    groups = {}
+    cases = {}
+    multiset = []
+    rows = []
+    arms = (
+        "qwen_only",
+        "omni_only_discovery",
+        "omni_to_qwen",
+        "omni_to_qwen_vista",
+    )
+    for group_index in range(12):
+        capture_identity = {"capture_id": f"capture-{group_index:02d}"}
+        raw_values = {
+            "omni": seal_immutable(
+                {
+                    "contract_version": "hybrid_omni_inventory_v1",
+                    "capture_identity": capture_identity,
+                }
+            ),
+            "qwen": seal_immutable(
+                {
+                    "contract_version": "hybrid_qwen_bindings_v1",
+                    "capture_identity": capture_identity,
+                }
+            ),
+            "fusion": seal_immutable(
+                {
+                    "contract_version": "hybrid_fusion_result_v1",
+                    "capture_identity": capture_identity,
+                }
+            ),
+        }
+        envelopes = {
+            "omni": _raw_envelope(
+                raw_values["omni"],
+                prefix="omni-inventory",
+                domain=b"benchmark-v2-omni-inventory\0",
+            ),
+            "qwen": _raw_envelope(
+                raw_values["qwen"],
+                prefix="qwen-bindings",
+                domain=b"benchmark-v2-qwen-bindings\0",
+            ),
+            "fusion": _raw_envelope(
+                raw_values["fusion"],
+                prefix="fusion-result",
+                domain=b"benchmark-v2-fusion-result\0",
+            ),
+        }
+        raw_envelopes.extend(envelopes.values())
+        group_id = f"provider-{group_index:02d}"
+        dependency = {
+            "actual_screen_group_ref": _ref(f"screen-{group_index:02d}"),
+            "provider_group_ref": _ref(group_id),
+            "capture_ref": _ref(f"capture-{group_index:02d}"),
+            "pre_vista_evidence_ref": _ref(
+                f"pre-vista-evidence/{group_index:064x}"
+            ),
+            "omni_inventory_ref": deepcopy(envelopes["omni"]["ref"]),
+            "qwen_bindings_ref": deepcopy(envelopes["qwen"]["ref"]),
+            "fusion_result_ref": deepcopy(envelopes["fusion"]["ref"]),
+            "submitted_vista_request_refs": [],
+        }
+        dependencies.append(dependency)
+        groups[group_id] = deepcopy(dependency)
+        for case_offset in range(5):
+            case_id = f"case-{group_index * 5 + case_offset:03d}"
+            case_sha = hashlib.sha256(case_id.encode()).hexdigest()
+            cases[case_id] = {
+                "provider_group_id": group_id,
+                "case_content_sha256": case_sha,
+            }
+            for arm in arms:
+                multiset.append(
+                    {
+                        "case_id": case_id,
+                        "case_content_sha256": case_sha,
+                        "arm_id": arm,
+                    }
+                )
+                rows.append(
+                    {
+                        "case_id": case_id,
+                        "arm_id": arm,
+                        "selection_status": "missing",
+                        "eligibility": "INELIGIBLE",
+                        "failure_reason": "target_not_present_pre_vista",
+                    }
+                )
+    digest = hashlib.sha256(_canonical(multiset)).hexdigest()
+    body_ref = _ref(f"verified-actual-body/{'1' * 64}")
+    identity_source = {
+        "benchmark_release_id": "release-one",
+        "partition": "regression",
+        "source_parent_ref": body_ref,
+        "case_arm_multiset_sha256": digest,
+        "provider_group_dependencies": dependencies,
+        "rows": rows,
+        "safety": deepcopy(SAFETY),
+    }
+    prediction_id = "prediction/" + hashlib.sha256(
+        b"benchmark-v2-automatic-prediction-v3\0" + _canonical(identity_source)
+    ).hexdigest()
+    automatic = seal_pathless_projection(
+        contract_version="automatic_prediction_v3",
+        semantic_payload={"prediction_id": prediction_id, **identity_source},
+    )
+    attempt_ref = _ref("runner-attempt/one")
+    cleanup_ref = _ref(f"verified-lifecycle/{'2' * 64}")
+    selected_lifecycle_ref = _ref(f"verified-lifecycle/{'3' * 64}")
+    logical_ref = {
+        "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
+        "id": f"runner-ledger-pre-result/{'4' * 64}",
+        "attempt_ref": attempt_ref,
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": "5" * 64,
+        "prefix_sha256": "6" * 64,
+    }
+    event_payloads = (
+        ("opened", {"attempt_ref": attempt_ref}),
+        (
+            "body_complete",
+            {"body_file_ref": {"file_sha256": "7" * 64, "content_sha256": "8" * 64}},
+        ),
+        (
+            "cleanup",
+            {
+                "cleanup_receipt_ref": _ref("attempt-cleanup-receipt/one"),
+                "cleanup_projection_ref": cleanup_ref,
+            },
+        ),
+        (
+            "result",
+            {
+                "result_file_ref": {"file_sha256": "9" * 64, "content_sha256": "a" * 64},
+                "attempt_ledger_pre_result_ref": logical_ref,
+            },
+        ),
+    )
+    events = []
+    previous = None
+    for sequence, (kind, refs) in enumerate(event_payloads):
+        event = seal_pathless_projection(
+            contract_version="benchmark_v2_runner_event_verified_projection_v1",
+            semantic_payload={
+                "partition": "regression",
+                "event_kind": kind,
+                "sequence": sequence,
+                "attempt_ref": attempt_ref,
+                "previous_event_projection_ref": previous,
+                "raw_event_sha256": hashlib.sha256(kind.encode()).hexdigest(),
+                "load_bearing_refs": refs,
+                "safety": deepcopy(SAFETY),
+            },
+        )
+        events.append(event)
+        previous = pathless_artifact_ref(event)
+    prefix_ref = _ref(f"verified-runner-ledger-prefix/{'b' * 64}")
+    ledger = seal_pathless_projection(
+        contract_version="benchmark_v2_projected_attempt_ledger_v1",
+        semantic_payload={
+            "benchmark_release_id": "release-one",
+            "partition": "regression",
+            "raw_ledger_prefix_verification_ref": prefix_ref,
+            "entries": [
+                {
+                    "sequence": 0,
+                    "attempt_ref": attempt_ref,
+                    "observed_state": "result",
+                    "event_projection_refs": [pathless_artifact_ref(item) for item in events],
+                    "lifecycle_ref": selected_lifecycle_ref,
+                    "selection_eligible": True,
+                }
+            ],
+            "selected_attempt_ref": attempt_ref,
+            "selected_lifecycle_ref": selected_lifecycle_ref,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+    children = order_pathless_envelopes(
+        registry_name="prediction_run_v3",
+        envelopes=[
+            *raw_envelopes,
+            seal_pathless_envelope(automatic),
+            *[seal_pathless_envelope(item) for item in events],
+            seal_pathless_envelope(ledger),
+        ],
+        context={},
+    )
+    manifest_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+        "relative_path": "benchmark-v2-provider-manifest.json",
+        "file_sha256": "c" * 64,
+    }
+    corpus_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": "d" * 64,
+        "content_sha256": "e" * 64,
+        "source_parent_ref": deepcopy(PARENT_REF),
+    }
+    run = seal_pathless_projection(
+        contract_version="benchmark_v2_prediction_run_v3",
+        semantic_payload={
+            "benchmark_release_id": "release-one",
+            "partition": "regression",
+            "corpus_parent_ref": deepcopy(PARENT_REF),
+            "provider_manifest_ref": manifest_ref,
+            "provider_corpus_ref": corpus_ref,
+            "attempt_ref": attempt_ref,
+            "projected_attempt_ledger_ref": pathless_artifact_ref(ledger),
+            "raw_ledger_prefix_verification_ref": prefix_ref,
+            "automatic_prediction_ref": pathless_artifact_ref(automatic),
+            "selected_lifecycle_ref": selected_lifecycle_ref,
+            "sealed_artifact_envelopes": children,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+    external = _prediction_external_refs(
+        prediction_run=run,
+        automatic=automatic,
+        artifacts=[],
+        runner_and_ledger_envelopes=[
+            *[seal_pathless_envelope(item) for item in events],
+            seal_pathless_envelope(ledger),
+        ],
+    )
+    result = validate_pathless_recursive(
+        registry_name="prediction_run_v3",
+        roots=[pathless_artifact_ref(run)],
+        envelopes=[seal_pathless_envelope(run), *children],
+        external_refs=external,
+        context={
+            "provider_groups": groups,
+            "cases": cases,
+            "actual_body_projection_ref": body_ref,
+            "attempt_ref": attempt_ref,
+            "raw_ledger_prefix_verification_ref": prefix_ref,
+            "projected_attempt_ledger_ref": pathless_artifact_ref(ledger),
+            "selected_lifecycle_ref": selected_lifecycle_ref,
+        },
+    )
+    assert len(result) == 43
+    swapped_groups = deepcopy(groups)
+    swapped_groups["provider-00"]["capture_ref"] = deepcopy(
+        groups["provider-01"]["capture_ref"]
+    )
+    with pytest.raises(ValueError, match="dependency.*authoritative|group.*context"):
+        validate_pathless_recursive(
+            registry_name="prediction_run_v3",
+            roots=[pathless_artifact_ref(run)],
+            envelopes=[seal_pathless_envelope(run), *children],
+            external_refs=external,
+            context={
+                "provider_groups": swapped_groups,
+                "cases": cases,
+                "actual_body_projection_ref": body_ref,
+                "attempt_ref": attempt_ref,
+                "raw_ledger_prefix_verification_ref": prefix_ref,
+                "projected_attempt_ledger_ref": pathless_artifact_ref(ledger),
+                "selected_lifecycle_ref": selected_lifecycle_ref,
+            },
+        )
+
+    by_ref = {}
+    for envelope in [seal_pathless_envelope(run), *children]:
+        _, item, _, _ = _decode_envelope(envelope)
+        by_ref[_canonical(envelope["ref"])] = (item, envelope)
+
+    detached_events = deepcopy(events)
+    detached_events[1]["sequence"] = 2
+    detached_events[2]["sequence"] = 3
+    detached_events[3]["sequence"] = 4
+    detached_by_ref = deepcopy(by_ref)
+    for original, changed in zip(events, detached_events, strict=True):
+        detached_by_ref[_canonical(pathless_artifact_ref(original))] = (changed, {})
+    with pytest.raises(ValueError, match="contiguous|previous|prefix"):
+        _validate_projected_ledger_graph(
+            ledger, detached_by_ref, allow_external_lifecycle=True
+        )
+
+    wrong_predecessor = deepcopy(events)
+    wrong_predecessor[2]["previous_event_projection_ref"] = pathless_artifact_ref(
+        events[0]
+    )
+    predecessor_by_ref = deepcopy(by_ref)
+    predecessor_by_ref[_canonical(pathless_artifact_ref(events[2]))] = (
+        wrong_predecessor[2],
+        {},
+    )
+    with pytest.raises(ValueError, match="previous|predecessor|prefix"):
+        _validate_projected_ledger_graph(
+            ledger, predecessor_by_ref, allow_external_lifecycle=True
+        )
+
+    automatic_key = _canonical(pathless_artifact_ref(automatic))
+    fabricated_by_ref = deepcopy(by_ref)
+    fabricated = deepcopy(automatic)
+    fabricated["rows"][0]["case_id"] = "fabricated-case"
+    fabricated_by_ref[automatic_key] = (fabricated, {})
+    context = {
+        "provider_groups": groups,
+        "cases": cases,
+        "actual_body_projection_ref": body_ref,
+        "attempt_ref": attempt_ref,
+        "raw_ledger_prefix_verification_ref": prefix_ref,
+        "projected_attempt_ledger_ref": pathless_artifact_ref(ledger),
+        "selected_lifecycle_ref": selected_lifecycle_ref,
+    }
+    with pytest.raises(ValueError, match="case.*authoritative|key set|multiset"):
+        _validate_prediction_graph(run, fabricated_by_ref, context)
+
+
 def test_prediction_registry_rejects_contract_version_only_raw_provider_object() -> None:
     invalid = seal_immutable(
         {"contract_version": "hybrid_omni_inventory_v1", "capture_identity": {}}
@@ -497,6 +890,138 @@ def test_prediction_registry_rejects_contract_version_only_raw_provider_object()
     with pytest.raises(ValueError, match="Omni inventory.*closed"):
         order_pathless_envelopes(
             registry_name="prediction_run_v3", envelopes=[envelope], context={}
+        )
+
+
+def test_prediction_registry_rejects_legacy_automatic_prediction_v2() -> None:
+    legacy = {
+        "contract_version": "automatic_prediction_v2",
+        "artifact_id": "automatic/legacy",
+        "prediction_id": "prediction/legacy",
+        "source_parent_ref": _ref("body/legacy"),
+        "partition": "regression",
+        "release_id": "release-one",
+        "rows": [
+            {
+                "case_id": "case-one",
+                "arm_id": "qwen_only",
+                "selection_status": "missing",
+                "eligibility": "INELIGIBLE",
+                "failure_reason": "target_not_present_pre_vista",
+            }
+        ],
+        "safety": deepcopy(SAFETY),
+    }
+    envelope = _raw_envelope(legacy, prefix="automatic", domain=b"")
+
+    with pytest.raises(ValueError, match="automatic_prediction_v2|legacy|not allowed"):
+        order_pathless_envelopes(
+            registry_name="prediction_run_v3", envelopes=[envelope], context={}
+        )
+
+
+def test_automatic_prediction_v3_requires_frozen_identity_and_row_order() -> None:
+    source_parent_ref = _ref(f"verified-actual-body/{'a' * 64}")
+    dependencies = [
+        {
+            "actual_screen_group_ref": _ref(f"screen-{index:02d}"),
+            "provider_group_ref": _ref(f"provider-{index:02d}"),
+            "capture_ref": _ref(f"capture-{index:02d}"),
+            "pre_vista_evidence_ref": _ref(f"pre-vista-evidence/{index:064x}"),
+            "omni_inventory_ref": _ref(f"omni-inventory/{index:064x}"),
+            "qwen_bindings_ref": _ref(f"qwen-bindings/{index:064x}"),
+            "fusion_result_ref": _ref(f"fusion-result/{index:064x}"),
+            "submitted_vista_request_refs": [],
+        }
+        for index in range(12)
+    ]
+    rows = [
+        {
+            "case_id": f"case-{case_index:03d}",
+            "arm_id": arm,
+            "selection_status": "missing",
+            "eligibility": "INELIGIBLE",
+            "failure_reason": "target_not_present_pre_vista",
+        }
+        for case_index in range(60)
+        for arm in ("qwen_only", "omni_only_discovery", "omni_to_qwen", "omni_to_qwen_vista")
+    ]
+    semantic_without_prediction_id = {
+        "benchmark_release_id": "release-one",
+        "partition": "regression",
+        "source_parent_ref": source_parent_ref,
+        "case_arm_multiset_sha256": "b" * 64,
+        "provider_group_dependencies": dependencies,
+        "rows": rows,
+        "safety": deepcopy(SAFETY),
+    }
+    prediction_id = "prediction/" + hashlib.sha256(
+        b"benchmark-v2-automatic-prediction-v3\0"
+        + json.dumps(
+            semantic_without_prediction_id,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    automatic = seal_pathless_projection(
+        contract_version="automatic_prediction_v3",
+        semantic_payload={
+            "prediction_id": prediction_id,
+            **semantic_without_prediction_id,
+        },
+    )
+
+    expected_artifact_id = "automatic/" + hashlib.sha256(
+        b"automatic_prediction_v3\0"
+        + json.dumps(
+            {"prediction_id": prediction_id, **semantic_without_prediction_id},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    assert automatic["artifact_id"] == expected_artifact_id
+
+    reordered = deepcopy({"prediction_id": prediction_id, **semantic_without_prediction_id})
+    reordered["rows"] = list(reversed(reordered["rows"]))
+    with pytest.raises(ValueError, match="row.*order|prediction identity"):
+        seal_pathless_projection(
+            contract_version="automatic_prediction_v3", semantic_payload=reordered
+        )
+
+
+def test_prediction_run_v3_task10_refs_are_typed_and_path_literals_are_frozen() -> None:
+    from app.learn.hybrid.benchmark_v2_contracts import PARENT_REF
+
+    manifest_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+        "relative_path": "benchmark-v2-provider-manifest.json",
+        "file_sha256": "b" * 64,
+    }
+    corpus_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": "c" * 64,
+        "content_sha256": "d" * 64,
+        "source_parent_ref": deepcopy(PARENT_REF),
+    }
+    context = {"contract_version": "benchmark_v2_prediction_run_v3"}
+    assert validate_pathless_ref(
+        role="corpus_parent_ref", value=PARENT_REF, context=context
+    ) == PARENT_REF
+    assert validate_pathless_ref(
+        role="provider_manifest_ref", value=manifest_ref, context=context
+    ) == manifest_ref
+    assert validate_pathless_ref(
+        role="provider_corpus_ref", value=corpus_ref, context=context
+    ) == corpus_ref
+
+    changed = deepcopy(corpus_ref)
+    changed["relative_path"] = "../provider-corpus.v2.json"
+    with pytest.raises(ValueError, match="logical identity|invalid"):
+        validate_pathless_ref(
+            role="provider_corpus_ref", value=changed, context=context
         )
 
 
