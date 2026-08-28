@@ -4,6 +4,7 @@ import base64
 from copy import deepcopy
 import hashlib
 import json
+import re
 from typing import Any, Mapping
 
 SAFETY={"artifact_is_authorization":False,"execute_binding_enabled":False,"display_only":True}
@@ -16,6 +17,17 @@ def canonical_bytes(value: object) -> bytes:
     return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")
 
 def artifact_ref(artifact: Mapping[str,object]) -> dict[str,str]:
+    if artifact.get("contract_version") in {
+        "benchmark_v2_nested_provider_evidence_ref_v1",
+        "sealed_prediction_source_parent_v1",
+        "sealed_prediction_bbox_v1",
+        "sealed_target_binding_v4",
+        "sealed_vista_request_v4",
+    }:
+        return {
+            "id": str(artifact["artifact_id"]),
+            "content_sha256": str(artifact["content_sha256"]),
+        }
     raw=canonical_bytes(artifact)
     return {"id":str(artifact["artifact_id"]),"content_sha256":hashlib.sha256(raw).hexdigest()}
 
@@ -27,6 +39,564 @@ def exact_ref(value: object,name: str) -> dict[str,str]:
     if not isinstance(value,Mapping) or set(value)!={"id","content_sha256"}: raise ValueError(f"{name} must be exact ref")
     result=dict(value)
     if not isinstance(result["id"],str) or not result["id"] or not isinstance(result["content_sha256"],str) or len(result["content_sha256"])!=64: raise ValueError(f"{name} invalid")
+    return result
+
+
+_GOAL_RE = re.compile(r"Select the ([a-z]+) labeled '([^'\r\n]+)'")
+_ROLE_ALIASES = {
+    "button": {"button"},
+    "checkbox": {"checkbox"},
+    "combobox": {"combobox", "select", "dropdown"},
+    "link": {"link", "hyperlink"},
+    "menuitem": {"menuitem", "menu_item"},
+    "tab": {"tab", "tab_item"},
+    "textbox": {"textbox", "input", "text_input", "search_box", "search_input", "edit"},
+}
+_RAW_REF_FORMULAS = {
+    "omni_inventory": ("omni-inventory", b"benchmark-v2-omni-inventory\0"),
+    "qwen_bindings": ("qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+    "fusion_result": ("fusion-result", b"benchmark-v2-fusion-result\0"),
+    "submitted_vista_request": ("submitted-vista-request", b"benchmark-v2-submitted-vista-request\0"),
+}
+
+
+def _normalized_text(value: object, name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be text")
+    normalized = " ".join(value.split())
+    if not normalized:
+        raise ValueError(f"{name} must be non-empty")
+    return normalized
+
+
+def _public_identifier(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError(f"{name} public identifier is invalid")
+    lowered = value.lower()
+    segments = value.split("/")
+    if (
+        value.startswith(("/", "\\"))
+        or re.match(r"^[a-zA-Z]:[\\/]", value) is not None
+        or lowered.startswith("file:")
+        or "\\" in value
+        or "%" in value
+        or any(ord(character) < 32 for character in value)
+        or any(segment in {"", ".", "..", "~"} or segment != segment.strip() for segment in segments)
+    ):
+        raise ValueError(f"{name} public identifier cannot contain a filesystem path or alias escape")
+    return value
+
+
+def parse_benchmark_v2_goal(goal: object) -> tuple[str, str]:
+    """解析冻结的 Benchmark-v2 目标语法，不做大小写或模糊归一化。"""
+
+    if not isinstance(goal, str):
+        raise ValueError("benchmark goal grammar is invalid")
+    match = _GOAL_RE.fullmatch(goal)
+    if match is None or match.group(1) not in _ROLE_ALIASES:
+        raise ValueError("benchmark goal grammar is invalid")
+    return match.group(1), _normalized_text(match.group(2), "benchmark goal label")
+
+
+def _s12_ref(value: object, name: str) -> dict[str, str]:
+    result = exact_ref(value, name)
+    result["id"] = _public_identifier(result["id"], name)
+    digest = result["content_sha256"]
+    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError(f"{name} invalid")
+    return result
+
+
+def _sealed_projection(contract_version: str, prefix: str, fields: Mapping[str, object]) -> dict[str, object]:
+    semantic = {"contract_version": contract_version, **deepcopy(dict(fields))}
+    semantic_sha = hashlib.sha256(
+        contract_version.encode("utf-8") + b"\0" + canonical_bytes(semantic)
+    ).hexdigest()
+    result = {**semantic, "artifact_id": f"{prefix}/{semantic_sha}"}
+    # 字段顺序不参与 canonical JSON，但返回值按合同顺序重建。
+    result = {
+        "contract_version": result.pop("contract_version"),
+        "artifact_id": result.pop("artifact_id"),
+        **result,
+    }
+    result["content_sha256"] = hashlib.sha256(canonical_bytes(result)).hexdigest()
+    return result
+
+
+def _projection_ref(value: Mapping[str, object]) -> dict[str, str]:
+    return {
+        "id": str(value["artifact_id"]),
+        "content_sha256": str(value["content_sha256"]),
+    }
+
+
+def _validate_projection_identity(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError("sealed prediction artifact is invalid")
+    item = deepcopy(dict(value))
+    contracts = {
+        "benchmark_v2_nested_provider_evidence_ref_v1": ("nested-provider-evidence", {"contract_version", "artifact_id", "evidence_kind", "case_ref", "actual_screen_group_ref", "canonical_value_sha256", "safety", "content_sha256"}),
+        "sealed_prediction_source_parent_v1": ("prediction-source-parent", {"contract_version", "artifact_id", "case_ref", "arm_scope", "source_kind", "evidence_refs", "actual_screen_group_ref", "capture_ref", "safety", "content_sha256"}),
+        "sealed_prediction_bbox_v1": ("prediction-bbox", {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "coordinate_space", "xyxy", "capture_ref", "source_parent_ref", "safety", "content_sha256"}),
+        "sealed_target_binding_v4": ("target-binding", {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "source_parent_ref", "capture_ref", "bbox_ref", "safety", "content_sha256"}),
+        "sealed_vista_request_v4": ("vista-request", {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "target_binding_ref", "source_parent_ref", "capture_ref", "bbox_ref", "submitted_request_ref", "submission_status", "safety", "content_sha256"}),
+    }
+    contract = item.get("contract_version")
+    if contract not in contracts:
+        raise ValueError("sealed prediction artifact contract is unknown")
+    prefix, fields = contracts[str(contract)]
+    if set(item) != fields or item.get("safety") != SAFETY:
+        raise ValueError("sealed prediction artifact is not closed")
+    declared_content = item.pop("content_sha256")
+    if declared_content != hashlib.sha256(canonical_bytes(item)).hexdigest():
+        raise ValueError("sealed prediction artifact content identity mismatch")
+    artifact_id = item.pop("artifact_id")
+    semantic_sha = hashlib.sha256(str(contract).encode("utf-8") + b"\0" + canonical_bytes(item)).hexdigest()
+    if artifact_id != f"{prefix}/{semantic_sha}":
+        raise ValueError("sealed prediction artifact semantic identity mismatch")
+    return deepcopy(dict(value))
+
+
+def _raw_class_ref(value: object, evidence_class: str) -> dict[str, str]:
+    try:
+        prefix, domain = _RAW_REF_FORMULAS[evidence_class]
+    except KeyError as exc:
+        raise ValueError("unknown provider evidence class") from exc
+    raw = canonical_bytes(value)
+    return {
+        "id": f"{prefix}/{hashlib.sha256(domain + raw).hexdigest()}",
+        "content_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def _nested_evidence(
+    *,
+    evidence_kind: str,
+    canonical_value: object,
+    case_ref: Mapping[str, str],
+    actual_screen_group_ref: Mapping[str, str],
+) -> dict[str, object]:
+    return _sealed_projection(
+        "benchmark_v2_nested_provider_evidence_ref_v1",
+        "nested-provider-evidence",
+        {
+            "evidence_kind": evidence_kind,
+            "case_ref": deepcopy(dict(case_ref)),
+            "actual_screen_group_ref": deepcopy(dict(actual_screen_group_ref)),
+            "canonical_value_sha256": hashlib.sha256(canonical_bytes(canonical_value)).hexdigest(),
+            "safety": deepcopy(SAFETY),
+        },
+    )
+
+
+def _xyxy(value: object, name: str) -> list[int]:
+    if isinstance(value, Mapping):
+        if not {"x", "y", "w", "h"}.issubset(value):
+            raise ValueError(f"{name} is invalid")
+        components = [value["x"], value["y"], value["w"], value["h"]]
+        if any(isinstance(item, bool) or not isinstance(item, int) for item in components):
+            raise ValueError(f"{name} is invalid")
+        raw = [components[0], components[1], components[0] + components[2], components[1] + components[3]]
+    else:
+        raw = value
+    if (
+        not isinstance(raw, list)
+        or len(raw) != 4
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in raw)
+        or raw[2] <= raw[0]
+        or raw[3] <= raw[1]
+    ):
+        raise ValueError(f"{name} is invalid")
+    return list(raw)
+
+
+def _matches_target(value: Mapping[str, object], *, role_field: str, label_field: str, goal_role: str, goal_label: str) -> bool:
+    raw_role = value.get(role_field)
+    raw_label = value.get(label_field)
+    if not isinstance(raw_role, str) or not isinstance(raw_label, str):
+        return False
+    role = " ".join(raw_role.split())
+    label = " ".join(raw_label.split())
+    if not role or not label:
+        return False
+    return role in _ROLE_ALIASES[goal_role] and label == goal_label
+
+
+def _unique_semantic_match(
+    values: object,
+    *,
+    role_field: str,
+    label_field: str,
+    goal_role: str,
+    goal_label: str,
+    name: str,
+) -> Mapping[str, object] | None:
+    if not isinstance(values, list):
+        raise ValueError(f"{name} must be a list")
+    matches = []
+    for item in values:
+        if not isinstance(item, Mapping):
+            raise ValueError(f"{name} item is invalid")
+        if _matches_target(item, role_field=role_field, label_field=label_field, goal_role=goal_role, goal_label=goal_label):
+            matches.append(item)
+    if len(matches) > 1:
+        raise ValueError(f"duplicate {name} target is ambiguous")
+    return matches[0] if matches else None
+
+
+def _source_parent(
+    *,
+    case_ref: Mapping[str, str],
+    arm_scope: list[str],
+    source_kind: str,
+    evidence_refs: Mapping[str, Mapping[str, str]],
+    actual_screen_group_ref: Mapping[str, str],
+    capture_ref: Mapping[str, str],
+) -> dict[str, object]:
+    required = {
+        "incumbent_qwen_action": {"incumbent_response_ref", "available_action_ref"},
+        "omni_inventory_item": {"omni_inventory_ref", "omni_item_ref"},
+        "hybrid_bound_fusion_candidate": {"omni_inventory_ref", "qwen_bindings_ref", "fusion_result_ref", "fusion_candidate_ref"},
+    }
+    if source_kind not in required or set(evidence_refs) != required[source_kind]:
+        raise ValueError("source parent evidence refs are not closed")
+    refs = {key: _s12_ref(value, key) for key, value in evidence_refs.items()}
+    return _sealed_projection(
+        "sealed_prediction_source_parent_v1",
+        "prediction-source-parent",
+        {
+            "case_ref": deepcopy(dict(case_ref)),
+            "arm_scope": list(arm_scope),
+            "source_kind": source_kind,
+            "evidence_refs": refs,
+            "actual_screen_group_ref": deepcopy(dict(actual_screen_group_ref)),
+            "capture_ref": deepcopy(dict(capture_ref)),
+            "safety": deepcopy(SAFETY),
+        },
+    )
+
+
+def _selection_artifacts(
+    *,
+    case_id: str,
+    arm_scope: list[str],
+    candidate_id: str,
+    bbox: list[int],
+    capture_ref: Mapping[str, str],
+    source_parent: Mapping[str, object],
+    submitted_request_ref: Mapping[str, str] | None = None,
+) -> list[dict[str, object]]:
+    candidate_id = _public_identifier(candidate_id, "candidate")
+    parent_ref = _projection_ref(source_parent)
+    bbox_artifact = _sealed_projection(
+        "sealed_prediction_bbox_v1",
+        "prediction-bbox",
+        {
+            "case_id": case_id,
+            "arm_scope": list(arm_scope),
+            "candidate_id": candidate_id,
+            "coordinate_space": "capture_pixel_xyxy",
+            "xyxy": list(bbox),
+            "capture_ref": deepcopy(dict(capture_ref)),
+            "source_parent_ref": parent_ref,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+    bbox_ref = _projection_ref(bbox_artifact)
+    binding = _sealed_projection(
+        "sealed_target_binding_v4",
+        "target-binding",
+        {
+            "case_id": case_id,
+            "arm_scope": list(arm_scope),
+            "candidate_id": candidate_id,
+            "source_parent_ref": parent_ref,
+            "capture_ref": deepcopy(dict(capture_ref)),
+            "bbox_ref": bbox_ref,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+    result = [deepcopy(dict(source_parent)), bbox_artifact, binding]
+    if submitted_request_ref is not None:
+        if arm_scope != ["omni_to_qwen", "omni_to_qwen_vista"]:
+            raise ValueError("only the paired hybrid scope may create a VISTA request")
+        request = _sealed_projection(
+            "sealed_vista_request_v4",
+            "vista-request",
+            {
+                "case_id": case_id,
+                "arm_scope": list(arm_scope),
+                "candidate_id": candidate_id,
+                "target_binding_ref": _projection_ref(binding),
+                "source_parent_ref": parent_ref,
+                "capture_ref": deepcopy(dict(capture_ref)),
+                "bbox_ref": bbox_ref,
+                "submitted_request_ref": deepcopy(dict(submitted_request_ref)),
+                "submission_status": "SUBMITTED",
+                "safety": deepcopy(SAFETY),
+            },
+        )
+        result.append(request)
+    return result
+
+
+def _selected_row(case_id: str, arm_id: str, artifacts: list[Mapping[str, object]]) -> dict[str, object]:
+    source, bbox, binding = artifacts[:3]
+    row = {
+        "case_id": case_id,
+        "arm_id": arm_id,
+        "selection_status": "selected",
+        "eligibility": "ELIGIBLE",
+        "candidate_id": binding["candidate_id"],
+        "source_parent_ref": _projection_ref(source),
+        "bbox_ref": _projection_ref(bbox),
+        "target_binding_ref": _projection_ref(binding),
+    }
+    if len(artifacts) == 4:
+        row["vista_request_ref"] = _projection_ref(artifacts[3])
+    return row
+
+
+def _missing_row(case_id: str, arm_id: str, reason: str) -> dict[str, object]:
+    return {"case_id": case_id, "arm_id": arm_id, "selection_status": "missing", "eligibility": "INELIGIBLE", "failure_reason": reason}
+
+
+def select_pre_vista_prediction_rows(
+    *,
+    provider_case: Mapping[str, object],
+    incumbent_response: Mapping[str, object],
+    omni_inventory: Mapping[str, object],
+    qwen_bindings: Mapping[str, object],
+    fusion_result: Mapping[str, object],
+    submitted_vista_requests: list[Mapping[str, object]],
+    actual_screen_group_ref: Mapping[str, str],
+    capture_ref: Mapping[str, str],
+) -> dict[str, object]:
+    """只用 pre-VISTA 原始证据确定四臂目标；VISTA 结果不能参与选择。"""
+
+    if not isinstance(provider_case, Mapping) or set(provider_case) != {"case_id", "partition", "screen_group", "goal", "image", "layout"}:
+        raise ValueError("provider case is not closed")
+    case_id = _public_identifier(provider_case.get("case_id"), "provider case")
+    goal_role, goal_label = parse_benchmark_v2_goal(provider_case.get("goal"))
+    case_ref = {"case_id": case_id, "case_content_sha256": hashlib.sha256(canonical_bytes(provider_case)).hexdigest()}
+    group_ref = _s12_ref(actual_screen_group_ref, "actual screen group ref")
+    capture = _s12_ref(capture_ref, "capture ref")
+    artifacts: list[dict[str, object]] = []
+    rows: list[dict[str, object]] = []
+
+    if not isinstance(submitted_vista_requests, list):
+        raise ValueError("submitted VISTA requests must be a list")
+    request_ids = [_public_identifier(item.get("candidate_id"), "submitted VISTA request candidate") for item in submitted_vista_requests if isinstance(item, Mapping)]
+    if (
+        len(request_ids) != len(submitted_vista_requests)
+        or len(set(request_ids)) != len(request_ids)
+        or any(item.get("submission_status") != "SUBMITTED" for item in submitted_vista_requests)
+    ):
+        raise ValueError("duplicate or invalid submitted VISTA request")
+    fusion_candidates = fusion_result.get("candidates") if isinstance(fusion_result, Mapping) else None
+    if not isinstance(fusion_candidates, list):
+        raise ValueError("fusion result is incomplete")
+    fusion_ids = [_public_identifier(item.get("candidate_id"), "fusion candidate") for item in fusion_candidates if isinstance(item, Mapping)]
+    if (
+        len(fusion_ids) != len(fusion_candidates)
+        or len(set(fusion_ids)) != len(fusion_ids)
+    ):
+        raise ValueError("duplicate fusion candidate identity")
+
+    if not isinstance(incumbent_response, Mapping):
+        raise ValueError("incumbent response is missing")
+    screen = incumbent_response.get("screen_reading")
+    inventory_view = screen.get("screen_inventory") if isinstance(screen, Mapping) else None
+    actions = inventory_view.get("available_actions") if isinstance(inventory_view, Mapping) else None
+    if not isinstance(actions, list):
+        raise ValueError("incumbent available actions are missing")
+    action_ids = [_public_identifier(item.get("id"), "incumbent action") for item in actions if isinstance(item, Mapping)]
+    if len(action_ids) != len(actions) or len(set(action_ids)) != len(action_ids):
+        raise ValueError("duplicate incumbent action identity")
+    action = _unique_semantic_match(actions, role_field="role", label_field="label", goal_role=goal_role, goal_label=goal_label, name="incumbent action")
+    if action is None:
+        rows.append(_missing_row(case_id, "qwen_only", "target_not_present_pre_vista"))
+    else:
+        response_nested = _nested_evidence(evidence_kind="incumbent_response", canonical_value=incumbent_response, case_ref=case_ref, actual_screen_group_ref=group_ref)
+        action_nested = _nested_evidence(evidence_kind="incumbent_available_action", canonical_value=action, case_ref=case_ref, actual_screen_group_ref=group_ref)
+        artifacts.extend([response_nested, action_nested])
+        parent = _source_parent(case_ref=case_ref, arm_scope=["qwen_only"], source_kind="incumbent_qwen_action", evidence_refs={"incumbent_response_ref": _projection_ref(response_nested), "available_action_ref": _projection_ref(action_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
+        selected = _selection_artifacts(case_id=case_id, arm_scope=["qwen_only"], candidate_id=str(action["id"]), bbox=_xyxy(action.get("bbox"), "incumbent action bbox"), capture_ref=capture, source_parent=parent)
+        artifacts.extend(selected); rows.append(_selected_row(case_id, "qwen_only", selected))
+
+    if not isinstance(omni_inventory, Mapping):
+        raise ValueError("Omni inventory is missing")
+    provider_result = omni_inventory.get("provider_result")
+    items = provider_result.get("items") if isinstance(provider_result, Mapping) else None
+    candidates = omni_inventory.get("candidates")
+    if not isinstance(items, list) or not isinstance(candidates, list):
+        raise ValueError("Omni inventory is incomplete")
+    source_ids = [item.get("source_item_id") for item in items if isinstance(item, Mapping)]
+    candidate_ids = [_public_identifier(item.get("candidate_id"), "Omni candidate") for item in candidates if isinstance(item, Mapping)]
+    if len(source_ids) != len(items) or len(set(source_ids)) != len(source_ids) or len(candidate_ids) != len(candidates) or len(set(candidate_ids)) != len(candidate_ids):
+        raise ValueError("duplicate Omni candidate identity")
+    omni_item = _unique_semantic_match(items, role_field="safe_role", label_field="safe_text", goal_role=goal_role, goal_label=goal_label, name="Omni item")
+    omni_candidate = None
+    if omni_item is not None:
+        joined = [candidate for candidate in candidates if candidate.get("source_item_id") == omni_item.get("source_item_id")]
+        if len(joined) != 1:
+            raise ValueError("conflicting Omni item/candidate join")
+        omni_candidate = joined[0]
+        item_bbox = _xyxy(omni_item.get("capture_bbox"), "Omni item bbox")
+        candidate_bbox = _xyxy(omni_candidate.get("bbox_original"), "Omni candidate bbox")
+        if item_bbox != candidate_bbox or omni_candidate.get("coordinate_space") != "capture_pixel_xyxy":
+            raise ValueError("conflicting Omni candidate geometry")
+    if omni_item is None:
+        rows.append(_missing_row(case_id, "omni_only_discovery", "target_not_present_pre_vista"))
+    else:
+        item_nested = _nested_evidence(evidence_kind="omni_inventory_item", canonical_value=omni_item, case_ref=case_ref, actual_screen_group_ref=group_ref)
+        artifacts.append(item_nested)
+        parent = _source_parent(case_ref=case_ref, arm_scope=["omni_only_discovery"], source_kind="omni_inventory_item", evidence_refs={"omni_inventory_ref": _raw_class_ref(omni_inventory, "omni_inventory"), "omni_item_ref": _projection_ref(item_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
+        selected = _selection_artifacts(case_id=case_id, arm_scope=["omni_only_discovery"], candidate_id=str(omni_candidate["candidate_id"]), bbox=_xyxy(omni_candidate.get("bbox_original"), "Omni candidate bbox"), capture_ref=capture, source_parent=parent)
+        artifacts.extend(selected); rows.append(_selected_row(case_id, "omni_only_discovery", selected))
+
+    if not isinstance(qwen_bindings, Mapping) or not isinstance(qwen_bindings.get("bindings"), list) or not isinstance(qwen_bindings.get("ambiguity_sets"), list):
+        raise ValueError("Qwen bindings are incomplete")
+    bindings = qwen_bindings["bindings"]
+    binding_ids = [_public_identifier(item.get("candidate_id"), "Qwen binding candidate") for item in bindings if isinstance(item, Mapping)]
+    if len(binding_ids) != len(bindings) or len(set(binding_ids)) != len(binding_ids):
+        raise ValueError("duplicate Qwen binding candidate")
+    memberships: set[str] = set()
+    declared_sets: set[tuple[str, ...]] = set()
+    for raw_set in qwen_bindings["ambiguity_sets"]:
+        ids = raw_set.get("candidate_ids") if isinstance(raw_set, Mapping) else None
+        if not isinstance(ids, list) or len(ids) < 2 or any(not isinstance(item, str) or not item for item in ids) or len(set(ids)) != len(ids):
+            raise ValueError("ambiguous Qwen set is non-unique")
+        identity = tuple(ids)
+        if identity in declared_sets or memberships.intersection(ids):
+            raise ValueError("ambiguous Qwen set is duplicated")
+        declared_sets.add(identity); memberships.update(ids)
+    qwen_binding = _unique_semantic_match(bindings, role_field="role", label_field="label", goal_role=goal_role, goal_label=goal_label, name="Qwen binding")
+    if qwen_binding is None:
+        rows.extend([_missing_row(case_id, arm, "target_not_present_pre_vista") for arm in ("omni_to_qwen", "omni_to_qwen_vista")])
+    else:
+        hybrid_candidate_id = qwen_binding.get("candidate_id")
+        if qwen_binding.get("ambiguity") is not None or hybrid_candidate_id in memberships:
+            raise ValueError("matching Qwen binding is ambiguous")
+        matching_fusion = [item for item in fusion_candidates if item.get("candidate_id") == hybrid_candidate_id]
+        if len(matching_fusion) != 1:
+            raise ValueError("conflicting Qwen/fusion candidate join")
+        fusion_candidate = matching_fusion[0]
+        joined_omni = [candidate for candidate in candidates if candidate.get("candidate_id") == hybrid_candidate_id]
+        if len(joined_omni) != 1:
+            raise ValueError("conflicting fusion/Omni candidate join")
+        if _xyxy(fusion_candidate.get("bbox_original"), "fusion bbox") != _xyxy(joined_omni[0].get("bbox_original"), "Omni bbox"):
+            raise ValueError("conflicting fusion candidate geometry")
+        if fusion_candidate.get("state") != "BOUND":
+            rows.extend([_missing_row(case_id, arm, "fusion_not_bound") for arm in ("omni_to_qwen", "omni_to_qwen_vista")])
+        else:
+            selected_requests = [item for item in submitted_vista_requests if item.get("candidate_id") == hybrid_candidate_id]
+            if len(selected_requests) != 1 or selected_requests[0].get("submission_status") != "SUBMITTED":
+                raise ValueError("conflicting submitted VISTA request coverage")
+            submitted = selected_requests[0]
+            request_bbox = submitted.get("candidate_bbox_ref")
+            if isinstance(request_bbox, Mapping) and "xyxy" in request_bbox and _xyxy(request_bbox.get("xyxy"), "submitted request bbox") != _xyxy(fusion_candidate.get("bbox_original"), "fusion bbox"):
+                raise ValueError("conflicting submitted request geometry")
+            fusion_nested = _nested_evidence(evidence_kind="hybrid_fusion_candidate", canonical_value=fusion_candidate, case_ref=case_ref, actual_screen_group_ref=group_ref)
+            artifacts.append(fusion_nested)
+            scope = ["omni_to_qwen", "omni_to_qwen_vista"]
+            parent = _source_parent(case_ref=case_ref, arm_scope=scope, source_kind="hybrid_bound_fusion_candidate", evidence_refs={"omni_inventory_ref": _raw_class_ref(omni_inventory, "omni_inventory"), "qwen_bindings_ref": _raw_class_ref(qwen_bindings, "qwen_bindings"), "fusion_result_ref": _raw_class_ref(fusion_result, "fusion_result"), "fusion_candidate_ref": _projection_ref(fusion_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
+            selected = _selection_artifacts(case_id=case_id, arm_scope=scope, candidate_id=str(hybrid_candidate_id), bbox=_xyxy(fusion_candidate.get("bbox_original"), "fusion bbox"), capture_ref=capture, source_parent=parent, submitted_request_ref=_raw_class_ref(submitted, "submitted_vista_request"))
+            artifacts.extend(selected)
+            rows.extend([_selected_row(case_id, arm, selected) for arm in ("omni_to_qwen", "omni_to_qwen_vista")])
+
+    by_id: dict[str, dict[str, object]] = {}
+    for artifact in artifacts:
+        prior = by_id.get(str(artifact["artifact_id"]))
+        if prior is not None and prior != artifact:
+            raise ValueError("conflicting sealed artifact identity")
+        by_id[str(artifact["artifact_id"])] = artifact
+    return {"rows": rows, "sealed_artifacts": list(by_id.values())}
+
+
+def attach_vista_outcomes(selection: Mapping[str, object], vista_proposals: list[Mapping[str, object]]) -> dict[str, object]:
+    """把 VISTA 结果附到已选行；不允许重选 candidate 或重铸任何父引用。"""
+
+    if not isinstance(selection, Mapping) or set(selection) != {"rows", "sealed_artifacts"}:
+        raise ValueError("pre-VISTA selection bundle is invalid")
+    result = deepcopy(dict(selection))
+    if not isinstance(result["rows"], list) or not isinstance(result["sealed_artifacts"], list) or not isinstance(vista_proposals, list):
+        raise ValueError("VISTA outcome inputs are invalid")
+    validated_artifacts = [_validate_projection_identity(item) for item in result["sealed_artifacts"]]
+    artifacts = {(item["artifact_id"], item["content_sha256"]): item for item in validated_artifacts}
+    if len(artifacts) != len(validated_artifacts):
+        raise ValueError("duplicate sealed prediction artifact")
+    vista_rows = [row for row in result["rows"] if isinstance(row, Mapping) and row.get("arm_id") == "omni_to_qwen_vista" and row.get("selection_status") == "selected"]
+    if len(vista_rows) > 1:
+        raise ValueError("duplicate selected VISTA row")
+    if not vista_rows:
+        return result
+    row = vista_rows[0]
+    request_ref = _s12_ref(row.get("vista_request_ref"), "selected VISTA request ref")
+    request = artifacts.get((request_ref["id"], request_ref["content_sha256"]))
+    binding_ref = _s12_ref(row.get("target_binding_ref"), "selected target binding ref")
+    bbox_ref = _s12_ref(row.get("bbox_ref"), "selected bbox ref")
+    bbox_artifact = artifacts.get((bbox_ref["id"], bbox_ref["content_sha256"]))
+    if not isinstance(request, Mapping) or request.get("contract_version") != "sealed_vista_request_v4" or not isinstance(bbox_artifact, Mapping):
+        raise ValueError("selected VISTA lineage is unresolved")
+    if (
+        request.get("candidate_id") != row.get("candidate_id")
+        or request.get("target_binding_ref") != binding_ref
+        or request.get("bbox_ref") != bbox_ref
+        or request.get("submission_status") != "SUBMITTED"
+        or bbox_artifact.get("candidate_id") != row.get("candidate_id")
+    ):
+        raise ValueError("selected VISTA lineage is conflicting")
+    baseline_rows = [candidate for candidate in result["rows"] if isinstance(candidate, Mapping) and candidate.get("arm_id") == "omni_to_qwen"]
+    if len(baseline_rows) != 1 or any(baseline_rows[0].get(name) != row.get(name) for name in ("candidate_id", "source_parent_ref", "bbox_ref", "target_binding_ref", "vista_request_ref")):
+        raise ValueError("paired hybrid selection lineage is conflicting")
+    submitted_ref = request.get("submitted_request_ref")
+    candidate_id = row.get("candidate_id")
+    matches = []
+    for proposal in vista_proposals:
+        if not isinstance(proposal, Mapping):
+            raise ValueError("VISTA proposal is invalid")
+        proposal_request_ref = proposal.get("submitted_request_ref")
+        if proposal_request_ref is None and proposal.get("contract_version") == "hybrid_vista_refinement_proposal_v1":
+            proposal_bbox = proposal.get("candidate_bbox_ref")
+            proposal_request_ref = submitted_ref if isinstance(proposal_bbox, Mapping) and proposal_bbox.get("xyxy") == bbox_artifact.get("xyxy") else None
+        same_request = proposal_request_ref == submitted_ref
+        same_candidate = proposal.get("candidate_id") == candidate_id
+        if same_request != same_candidate:
+            raise ValueError("VISTA result refers to a different candidate or request")
+        if same_request:
+            matches.append(proposal)
+    if len(matches) > 1:
+        raise ValueError("multiple VISTA results for selected request")
+    outcome: dict[str, object] = {"request_ref": request_ref, "target_binding_ref": binding_ref}
+    if not matches:
+        outcome["status"] = "missing"
+    else:
+        proposal = matches[0]
+        status = proposal.get("status")
+        if status == "PROPOSED":
+            point = proposal.get("canonical_point")
+            if not isinstance(point, Mapping) or point.get("coordinate_space") != "capture_pixel_xyxy":
+                raise ValueError("VISTA proposed point is not canonical")
+            xy = point.get("xy")
+            bbox = _xyxy(bbox_artifact.get("xyxy"), "selected bbox")
+            if not isinstance(xy, list) or len(xy) != 2 or any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in xy) or not (bbox[0] <= xy[0] <= bbox[2] and bbox[1] <= xy[1] <= bbox[3]):
+                raise ValueError("VISTA proposed point is outside the selected bbox")
+            outcome["status"] = "validated"
+            outcome["canonical_capture_pixel_point"] = deepcopy(xy)
+        elif status == "VISTA_FAILED":
+            raw_provider = proposal.get("raw_provider_result")
+            failure_category = proposal.get("failure_category")
+            if failure_category is None and isinstance(raw_provider, Mapping):
+                failure_category = raw_provider.get("failure_category")
+            outcome["status"] = "timeout" if failure_category == "request_timeout" else "failed"
+        elif status == "VISTA_OUT_OF_BOUNDS":
+            outcome["status"] = "out_of_bounds"
+        elif status == "TRANSFORM_INVALID":
+            outcome["status"] = "failed"
+        else:
+            raise ValueError("unknown VISTA proposal state")
+    row["vista_result"] = outcome
     return result
 
 def seal_target_binding(*,artifact_id:str,case_id:str,candidate_id:str,fusion_ref:Mapping[str,str],capture_ref:Mapping[str,str],bbox_ref:Mapping[str,str],bbox:list[int],source_parent_ref:Mapping[str,str])->dict[str,object]:

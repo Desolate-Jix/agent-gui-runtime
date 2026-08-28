@@ -4,7 +4,7 @@ from copy import deepcopy
 import inspect
 from pathlib import Path
 import pytest
-from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, canonical_bytes, prediction_record_ref, seal_automatic_prediction, seal_review_decision, seal_target_binding, seal_vista_request, sealed_artifact_envelope
+from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, attach_vista_outcomes, canonical_bytes, parse_benchmark_v2_goal, prediction_record_ref, seal_automatic_prediction, seal_review_decision, seal_target_binding, seal_vista_request, sealed_artifact_envelope, select_pre_vista_prediction_rows
 import app.learn.hybrid.benchmark_scorer_v2 as scorer_v2
 from app.learn.hybrid.benchmark_scorer_v2 import _score_private_child, _verified_config_snapshot, config_ref, run_private_scorer
 
@@ -360,7 +360,7 @@ def test_real_nonproduction_launcher_without_exact_os_boundary_fails(tmp_path:Pa
 
 def test_gate_release_and_import_graph_are_closed()->None:
     gate=json.loads(GATE.read_text()); assert gate["contract_version"]=="portfolio_hybrid_v1_1_automatic_gate_v2" and gate["benchmark_release_id"]==RELEASE and gate["safety"]==SAFETY
-    tree=ast.parse((ROOT/"app/learn/hybrid/benchmark_v2_predictions.py").read_text()); imports={n.module for n in ast.walk(tree) if isinstance(n,ast.ImportFrom)}; assert "app.learn.hybrid.benchmark_scorer_v2" not in imports
+    tree=ast.parse((ROOT/"app/learn/hybrid/benchmark_v2_predictions.py").read_text(encoding="utf-8")); imports={n.module for n in ast.walk(tree) if isinstance(n,ast.ImportFrom)}; assert "app.learn.hybrid.benchmark_scorer_v2" not in imports
     assert "click_point" not in GATE.read_text().casefold()
 
 def test_same_threshold_alternate_gate_ref_is_rejected(tmp_path:Path)->None:
@@ -427,3 +427,238 @@ def test_downstream_requires_exact_production_launch_cleanup_chain(tmp_path:Path
     else: changed["content_sha256"]="0"*64
     with pytest.raises(ValueError,match="scorer"):
         validate_private_scorer_public_ref(changed)
+
+
+def _s12_inputs(*, goal: str = "Select the button labeled 'Apply now'") -> dict[str, object]:
+    case = {
+        "case_id": "a" * 64,
+        "partition": "regression",
+        "screen_group": "b" * 64,
+        "goal": goal,
+        "image": {"path": "screenshots/regression/a.png", "sha256": "c" * 64, "width": 1280, "height": 720},
+        "layout": {"layout_id": "layout-a", "title": "A", "surface": "web", "density": "normal", "precision_case": False, "source_kind": "synthetic"},
+    }
+    action = {"contract_version": "available_action_v1", "id": "incumbent-action/apply-now", "label": "Apply now", "role": "button", "bbox": {"x": 10, "y": 20, "w": 40, "h": 20}}
+    incumbent = {"screen_reading": {"screen_inventory": {"available_actions": [action]}}}
+    item = {"source_item_id": "omni-item/apply-now", "safe_text": "Apply now", "safe_role": "button", "capture_bbox": [12, 22, 52, 42]}
+    inventory = {
+        "contract_version": "hybrid_omni_inventory_v1",
+        "provider_result": {"items": [item]},
+        "candidates": [{"candidate_id": "candidate/apply-now", "source_item_id": "omni-item/apply-now", "bbox_original": [12, 22, 52, 42], "coordinate_space": "capture_pixel_xyxy"}],
+    }
+    bindings = {
+        "contract_version": "hybrid_qwen_bindings_v1",
+        "bindings": [{"candidate_id": "candidate/apply-now", "role": "button", "label": "Apply now", "ambiguity": None}],
+        "ambiguity_sets": [],
+    }
+    fusion = {
+        "contract_version": "hybrid_fusion_result_v1",
+        "candidates": [{"candidate_id": "candidate/apply-now", "bbox_original": [12, 22, 52, 42], "coordinate_space": "capture_pixel_xyxy", "state": "BOUND"}],
+    }
+    request = {"contract_version": "hybrid_vista_refinement_request_v1", "candidate_id": "candidate/apply-now", "submission_status": "SUBMITTED", "candidate_bbox_ref": {"xyxy": [12, 22, 52, 42]}}
+    return {
+        "provider_case": case,
+        "incumbent_response": incumbent,
+        "omni_inventory": inventory,
+        "qwen_bindings": bindings,
+        "fusion_result": fusion,
+        "submitted_vista_requests": [request],
+        "actual_screen_group_ref": ref("actual-screen-group/one"),
+        "capture_ref": ref("capture/one"),
+    }
+
+
+def _s12_select(inputs: dict[str, object]) -> dict[str, object]:
+    return select_pre_vista_prediction_rows(**inputs)
+
+
+@pytest.mark.parametrize(
+    ("goal_role", "provider_role"),
+    [("button", "button"), ("checkbox", "checkbox"), ("combobox", "select"), ("combobox", "dropdown"), ("link", "hyperlink"), ("menuitem", "menu_item"), ("tab", "tab_item"), ("textbox", "search_input"), ("textbox", "edit")],
+)
+def test_s12_strict_goal_grammar_and_exact_role_aliases(goal_role: str, provider_role: str) -> None:
+    inputs = _s12_inputs(goal=f"Select the {goal_role} labeled 'Apply   now'")
+    inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"][0]["role"] = provider_role
+    inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"][0]["label"] = " Apply now "
+    inputs["omni_inventory"]["provider_result"]["items"][0]["safe_role"] = provider_role
+    inputs["qwen_bindings"]["bindings"][0]["role"] = provider_role
+    assert parse_benchmark_v2_goal(inputs["provider_case"]["goal"]) == (goal_role, "Apply now")
+    assert all(row["selection_status"] == "selected" for row in _s12_select(inputs)["rows"])
+
+
+@pytest.mark.parametrize("goal", ["select the button labeled 'Apply now'", " Select the button labeled 'Apply now'", "Select the Button labeled 'Apply now'", "Select the button labelled 'Apply now'", "Select the button labeled \"Apply now\"", "Select the button labeled ''", "Select the unknown labeled 'Apply now'"])
+def test_s12_goal_grammar_rejects_non_frozen_forms(goal: str) -> None:
+    with pytest.raises(ValueError, match="goal grammar"):
+        parse_benchmark_v2_goal(goal)
+
+
+def test_s12_arm_aware_artifacts_are_closed_and_do_not_fabricate_fusion() -> None:
+    selected = _s12_select(_s12_inputs())
+    rows = {row["arm_id"]: row for row in selected["rows"]}
+    artifacts = {item["artifact_id"]: item for item in selected["sealed_artifacts"]}
+    assert list(rows) == ["qwen_only", "omni_only_discovery", "omni_to_qwen", "omni_to_qwen_vista"]
+    assert rows["qwen_only"]["candidate_id"] == "incumbent-action/apply-now"
+    assert rows["omni_only_discovery"]["candidate_id"] == "candidate/apply-now"
+    assert rows["omni_to_qwen"]["target_binding_ref"] == rows["omni_to_qwen_vista"]["target_binding_ref"]
+    assert rows["omni_to_qwen"]["vista_request_ref"] == rows["omni_to_qwen_vista"]["vista_request_ref"]
+    source_parents = [item for item in artifacts.values() if item["contract_version"] == "sealed_prediction_source_parent_v1"]
+    by_kind = {item["source_kind"]: item for item in source_parents}
+    assert set(by_kind["incumbent_qwen_action"]["evidence_refs"]) == {"incumbent_response_ref", "available_action_ref"}
+    assert set(by_kind["omni_inventory_item"]["evidence_refs"]) == {"omni_inventory_ref", "omni_item_ref"}
+    assert set(by_kind["hybrid_bound_fusion_candidate"]["evidence_refs"]) == {"omni_inventory_ref", "qwen_bindings_ref", "fusion_result_ref", "fusion_candidate_ref"}
+    assert "fusion_ref" not in by_kind["incumbent_qwen_action"]["evidence_refs"]
+    assert "fusion_ref" not in by_kind["omni_inventory_item"]["evidence_refs"]
+    inputs = _s12_inputs()
+    for raw, key, prefix, domain in (
+        (inputs["omni_inventory"], "omni_inventory_ref", "omni-inventory", b"benchmark-v2-omni-inventory\0"),
+        (inputs["qwen_bindings"], "qwen_bindings_ref", "qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        (inputs["fusion_result"], "fusion_result_ref", "fusion-result", b"benchmark-v2-fusion-result\0"),
+    ):
+        raw_bytes = canonical_bytes(raw)
+        assert by_kind["hybrid_bound_fusion_candidate"]["evidence_refs"][key] == {"id": f"{prefix}/{hashlib.sha256(domain + raw_bytes).hexdigest()}", "content_sha256": hashlib.sha256(raw_bytes).hexdigest()}
+    request_artifact = next(item for item in artifacts.values() if item["contract_version"] == "sealed_vista_request_v4")
+    submitted_bytes = canonical_bytes(inputs["submitted_vista_requests"][0])
+    submitted_identity = hashlib.sha256(b"benchmark-v2-submitted-vista-request\0" + submitted_bytes).hexdigest()
+    assert request_artifact["submitted_request_ref"] == {"id": f"submitted-vista-request/{submitted_identity}", "content_sha256": hashlib.sha256(submitted_bytes).hexdigest()}
+    assert request_artifact["arm_scope"] == ["omni_to_qwen", "omni_to_qwen_vista"]
+    expected_fields = {
+        "sealed_prediction_source_parent_v1": {"contract_version", "artifact_id", "case_ref", "arm_scope", "source_kind", "evidence_refs", "actual_screen_group_ref", "capture_ref", "safety", "content_sha256"},
+        "sealed_prediction_bbox_v1": {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "coordinate_space", "xyxy", "capture_ref", "source_parent_ref", "safety", "content_sha256"},
+        "sealed_target_binding_v4": {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "source_parent_ref", "capture_ref", "bbox_ref", "safety", "content_sha256"},
+        "sealed_vista_request_v4": {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "target_binding_ref", "source_parent_ref", "capture_ref", "bbox_ref", "submitted_request_ref", "submission_status", "safety", "content_sha256"},
+    }
+    for item in artifacts.values():
+        if item["contract_version"] not in expected_fields:
+            continue
+        assert set(item) == expected_fields[item["contract_version"]]
+        without_content = {key: value for key, value in item.items() if key != "content_sha256"}
+        assert item["content_sha256"] == hashlib.sha256(canonical_bytes(without_content)).hexdigest()
+        semantic = {key: value for key, value in item.items() if key not in {"artifact_id", "content_sha256"}}
+        semantic_sha = hashlib.sha256(item["contract_version"].encode() + b"\0" + canonical_bytes(semantic)).hexdigest()
+        assert item["artifact_id"].endswith(semantic_sha)
+
+
+def test_s12_zero_matches_emit_missing_without_any_binding() -> None:
+    inputs = _s12_inputs()
+    inputs["provider_case"]["goal"] = "Select the button labeled 'Absent'"
+    selected = _s12_select(inputs)
+    assert selected["sealed_artifacts"] == []
+    assert all(row == {"case_id": "a" * 64, "arm_id": row["arm_id"], "selection_status": "missing", "eligibility": "INELIGIBLE", "failure_reason": "target_not_present_pre_vista"} for row in selected["rows"])
+
+
+@pytest.mark.parametrize("mutation", ["duplicate_qwen_action", "ambiguous_qwen_binding", "duplicate_request", "conflicting_fusion_bbox"])
+def test_s12_ambiguity_duplicate_and_conflicting_lineage_are_fatal(mutation: str) -> None:
+    inputs = _s12_inputs()
+    if mutation == "duplicate_qwen_action":
+        actions = inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"]
+        actions.append(deepcopy(actions[0])); actions[-1]["id"] = "incumbent-action/duplicate"
+    elif mutation == "ambiguous_qwen_binding": inputs["qwen_bindings"]["bindings"][0]["ambiguity"] = "duplicate semantic target"
+    elif mutation == "duplicate_request": inputs["submitted_vista_requests"].append(deepcopy(inputs["submitted_vista_requests"][0]))
+    else: inputs["fusion_result"]["candidates"][0]["bbox_original"] = [13, 22, 52, 42]
+    with pytest.raises(ValueError, match="duplicate|ambiguous|conflicting"):
+        _s12_select(inputs)
+
+
+def test_s12_non_bound_hybrid_is_missing_and_not_repaired_by_vista() -> None:
+    inputs = _s12_inputs(); inputs["fusion_result"]["candidates"][0]["state"] = "UNBOUND"; inputs["submitted_vista_requests"] = []
+    rows = {row["arm_id"]: row for row in _s12_select(inputs)["rows"]}
+    assert rows["qwen_only"]["selection_status"] == "selected" and rows["omni_only_discovery"]["selection_status"] == "selected"
+    for arm in ("omni_to_qwen", "omni_to_qwen_vista"):
+        assert rows[arm]["selection_status"] == "missing" and rows[arm]["failure_reason"] == "fusion_not_bound"
+
+
+@pytest.mark.parametrize(("proposal", "expected"), [
+    ({"status": "PROPOSED", "candidate_id": "candidate/apply-now", "canonical_point": {"coordinate_space": "capture_pixel_xyxy", "xy": [20, 30]}}, "validated"),
+    ({"status": "VISTA_FAILED", "candidate_id": "candidate/apply-now", "failure_category": "request_timeout"}, "timeout"),
+    ({"status": "VISTA_FAILED", "candidate_id": "candidate/apply-now", "failure_category": "provider_error"}, "failed"),
+    ({"status": "VISTA_OUT_OF_BOUNDS", "candidate_id": "candidate/apply-now"}, "out_of_bounds"),
+    ({"status": "TRANSFORM_INVALID", "candidate_id": "candidate/apply-now"}, "failed"),
+])
+def test_s12_attach_vista_outcome_cannot_change_pre_vista_selection(proposal: dict[str, object], expected: str) -> None:
+    selected = _s12_select(_s12_inputs()); before = deepcopy(selected)
+    vista_row = next(row for row in selected["rows"] if row["arm_id"] == "omni_to_qwen_vista")
+    request_artifact = next(item for item in selected["sealed_artifacts"] if {"id": item["artifact_id"], "content_sha256": item["content_sha256"]} == vista_row["vista_request_ref"])
+    proposal["submitted_request_ref"] = deepcopy(request_artifact["submitted_request_ref"])
+    attached = attach_vista_outcomes(selected, [proposal])
+    assert attached["sealed_artifacts"] == before["sealed_artifacts"]
+    for old, new in zip(before["rows"], attached["rows"], strict=True):
+        for field in ("candidate_id", "source_parent_ref", "bbox_ref", "target_binding_ref", "vista_request_ref"):
+            assert new.get(field) == old.get(field)
+    attached_vista = next(row for row in attached["rows"] if row["arm_id"] == "omni_to_qwen_vista")
+    assert attached_vista["vista_result"]["status"] == expected
+    assert "vista_result" not in next(row for row in attached["rows"] if row["arm_id"] == "omni_to_qwen")
+
+
+def test_s12_attach_missing_and_mismatched_vista_results_fail_closed() -> None:
+    selected = _s12_select(_s12_inputs())
+    attached = attach_vista_outcomes(selected, [])
+    assert next(row for row in attached["rows"] if row["arm_id"] == "omni_to_qwen_vista")["vista_result"]["status"] == "missing"
+    selected_row = next(row for row in selected["rows"] if row["arm_id"] == "omni_to_qwen_vista")
+    request_artifact = next(item for item in selected["sealed_artifacts"] if {"id": item["artifact_id"], "content_sha256": item["content_sha256"]} == selected_row["vista_request_ref"])
+    wrong = {"status": "PROPOSED", "candidate_id": "candidate/wrong", "submitted_request_ref": request_artifact["submitted_request_ref"], "canonical_point": {"coordinate_space": "capture_pixel_xyxy", "xy": [20, 30]}}
+    with pytest.raises(ValueError, match="different candidate"):
+        attach_vista_outcomes(selected, [wrong])
+
+
+def test_s12_attach_rejects_unknown_and_duplicate_selected_results() -> None:
+    selected = _s12_select(_s12_inputs())
+    row = next(item for item in selected["rows"] if item["arm_id"] == "omni_to_qwen_vista")
+    request = next(item for item in selected["sealed_artifacts"] if artifact_ref(item) == row["vista_request_ref"])
+    proposal = {"status": "UNKNOWN", "candidate_id": row["candidate_id"], "submitted_request_ref": request["submitted_request_ref"]}
+    with pytest.raises(ValueError, match="unknown VISTA"):
+        attach_vista_outcomes(selected, [proposal])
+    proposal["status"] = "VISTA_FAILED"
+    with pytest.raises(ValueError, match="multiple VISTA"):
+        attach_vista_outcomes(selected, [proposal, deepcopy(proposal)])
+
+
+def test_s12_attach_accepts_validated_native_proposal_without_fabricating_request_ref() -> None:
+    selected = _s12_select(_s12_inputs())
+    native = {
+        "contract_version": "hybrid_vista_refinement_proposal_v1",
+        "status": "VISTA_FAILED",
+        "candidate_id": "candidate/apply-now",
+        "candidate_bbox_ref": {"xyxy": [12, 22, 52, 42]},
+        "raw_provider_result": {"failure_category": "request_timeout"},
+    }
+    result = attach_vista_outcomes(selected, [native])
+    assert next(row for row in result["rows"] if row["arm_id"] == "omni_to_qwen_vista")["vista_result"]["status"] == "timeout"
+
+
+def test_s12_attach_rejects_reminted_selection_artifact() -> None:
+    selected = _s12_select(_s12_inputs())
+    selected["sealed_artifacts"][0]["content_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="content identity"):
+        attach_vista_outcomes(selected, [])
+
+
+def test_s12_selector_requires_incumbent_response_and_cannot_accept_vista_results() -> None:
+    signature = inspect.signature(select_pre_vista_prediction_rows)
+    assert signature.parameters["incumbent_response"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert signature.parameters["incumbent_response"].default is inspect.Parameter.empty
+    assert not {"vista_proposals", "vista_results", "vista_result"} & set(signature.parameters)
+
+
+@pytest.mark.parametrize(("safe_role", "safe_text"), [(None, "decorative flourish"), ("text", ""), (None, "")])
+def test_s12_non_target_omni_items_without_semantics_do_not_block_selection(safe_role: object, safe_text: object) -> None:
+    inputs = _s12_inputs()
+    inputs["omni_inventory"]["provider_result"]["items"].append({"source_item_id": "omni-item/decorative", "safe_text": safe_text, "safe_role": safe_role, "capture_bbox": [100, 100, 120, 120]})
+    inputs["omni_inventory"]["candidates"].append({"candidate_id": "candidate/decorative", "source_item_id": "omni-item/decorative", "bbox_original": [100, 100, 120, 120], "coordinate_space": "capture_pixel_xyxy"})
+    assert all(row["selection_status"] == "selected" for row in _s12_select(inputs)["rows"])
+
+
+@pytest.mark.parametrize("unsafe_id", [r"C:\Users\tester\capture.json", "/tmp/capture.json", "file:///tmp/capture.json", "capture/../escape", r"capture\..\escape"])
+@pytest.mark.parametrize("boundary", ["actual_screen_group_ref", "capture_ref", "action_id", "candidate_id"])
+def test_s12_public_identifiers_reject_filesystem_and_alias_escape(unsafe_id: str, boundary: str) -> None:
+    inputs = _s12_inputs()
+    if boundary in {"actual_screen_group_ref", "capture_ref"}:
+        inputs[boundary]["id"] = unsafe_id
+    elif boundary == "action_id":
+        inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"][0]["id"] = unsafe_id
+    else:
+        inputs["omni_inventory"]["candidates"][0]["candidate_id"] = unsafe_id
+        inputs["qwen_bindings"]["bindings"][0]["candidate_id"] = unsafe_id
+        inputs["fusion_result"]["candidates"][0]["candidate_id"] = unsafe_id
+        inputs["submitted_vista_requests"][0]["candidate_id"] = unsafe_id
+    with pytest.raises(ValueError, match="public identifier"):
+        _s12_select(inputs)
