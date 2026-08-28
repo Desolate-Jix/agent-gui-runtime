@@ -3103,6 +3103,7 @@ def test_hybrid_calibration_continues_only_to_managed_review_projection() -> Non
     assert projection["review_status"] == "REVIEW_REQUIRED"
     assert projection["automatic_acceptance"] is False
     assert projection["proposals"][0]["raw_provider_result"] == raw
+    assert review_response["orchestration"]["hybrid_vista_requests"] == [request]
 
 
 def test_hybrid_persistence_driver_uses_all_managed_fake_provider_boundaries(

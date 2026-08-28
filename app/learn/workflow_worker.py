@@ -2125,6 +2125,10 @@ def execute_learning_stage_worker_task(
                 execution_payload,
                 cancellation_event=cancellation_event,
             )
+            assert isinstance(orchestration, dict)
+            orchestration["hybrid_vista_requests"] = deepcopy(
+                execution_payload["hybrid_vista_requests"]
+            )
         elif normalized_kind == "panel_learning_recognition_trial":
             response = recognition_result_to_legacy_response(
                 run_recognition_task(
