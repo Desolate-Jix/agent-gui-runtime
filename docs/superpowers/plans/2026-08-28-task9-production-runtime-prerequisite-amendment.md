@@ -256,12 +256,13 @@ Each incumbent start also requires a durable intent/result pair and recovery thr
 
 - [x] Add the narrow public actual-screen-group facade with hybrid and incumbent U2 lookup-before-start recovery, exact active group/attempt/window binding, WorkflowService-owned stable-zero attestation, and create-only durable projection replay.
 - [x] Prove journal fsync failure, stale attempt, missing dispatch/cleanup evidence, and different-content replay fail closed without real GUI/provider/model resources.
-- [ ] Replace the temporary production-blocked tests with failing tests proving dry-run, actual, probes, and cleanup delegate through the real facade without fake injection.
-- [ ] Remove `_ProductionRuntime._unavailable` and the early `RunnerProductionBlocked` branches; preserve fail-closed validation errors.
-- [ ] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py`.
-- [ ] Run `uv run python -m py_compile scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py` and `git diff --check`.
-- [ ] Obtain one independent read-only review of runner inputs, public seam usage, dispatch timing, recovery, and zero-action evidence.
-- [ ] Commit `feat(benchmark-v2): add service-bound benchmark runner`.
+- [x] Replace the temporary production-blocked tests with failing tests proving dry-run, actual, probes, and cleanup delegate through the real facade without fake injection.
+  - Production runner has no runtime/fake injection parameter; deterministic tests patch only the sole getter at the public port seam because real resources are forbidden in U3.
+- [x] Remove `_ProductionRuntime._unavailable` and the early `RunnerProductionBlocked` branches; preserve fail-closed validation errors.
+- [x] Run `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py`.
+- [x] Run `uv run python -m py_compile scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py` and `git diff --check`.
+- [x] Obtain one independent read-only review of runner inputs, public seam usage, dispatch timing, recovery, and zero-action evidence.
+- [x] Commit `feat(benchmark-v2): add service-bound benchmark runner`.
 
 ## Dependency DAG and stop condition
 
