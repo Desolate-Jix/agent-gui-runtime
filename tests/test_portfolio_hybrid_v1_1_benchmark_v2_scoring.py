@@ -159,7 +159,7 @@ def task10_release_inputs(tmp_path_factory:pytest.TempPathFactory)->dict[str,Pat
     from app.learn.hybrid.benchmark_v2_private_release import derive_private_scoring_cases, validate_task10_private_release_bundle
     release=validate_task10_private_release_bundle(private_manifest_path=private_path); private_cases=derive_private_scoring_cases(validated_release=release,partition="regression")
     _selected_accepted_input(accepted_path,provider_corpus["cases"],private_cases,release)
-    return {"private":private_path,"accepted":accepted_path}
+    return {"private":private_path,"accepted":accepted_path,"provider":provider_path,"corpus":provider_path.parent/provider_manifest["provider_corpus_ref"]["relative_path"]}
 
 def files(tmp:Path,private:dict,run:dict,bundle:dict)->dict[str,Path]:
     paths={k:tmp/f"{k}.json" for k in ("private","run","lifecycle","output","public")}
@@ -703,6 +703,149 @@ def test_s3_public_v3_rejects_fully_reminted_status_or_recursive_leakage(tmp_pat
     reminted=_content_bound({"contract_version":"private_scorer_public_ref_v3","status":public["status"],"score_ref":f"private-score-final/{final_binding['content_sha256']}","score_input_binding":deepcopy(binding),"binding":final_binding,"launch_receipt":launch_env,"cleanup_receipt":cleanup_env,"safety":deepcopy(SAFETY)})
     with pytest.raises(ValueError,match="scorer"):
         validate_private_scorer_public_ref(reminted)
+
+
+def test_public_score_boundary_owns_full_v3_validation_and_scorer_alias(tmp_path:Path,task10_release_inputs:dict[str,Path],monkeypatch:pytest.MonkeyPatch)->None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+    output=tmp_path/"score.json"; public_path=tmp_path/"public.json"
+    summary=run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=task10_release_inputs["accepted"],private_output_path=output,public_ref_path=public_path)
+    public=json.loads(public_path.read_text(encoding="utf-8")); validated=public_score.validate_private_scorer_public_ref_v3(public)
+    assert validated==public and summary=={key:public[key] for key in ("status","score_ref","content_sha256")}
+    assert scorer_v2.validate_private_scorer_public_ref is public_score.validate_private_scorer_public_ref_v3
+    assert public_score.validate_private_scorer_input_binding_v1(public["score_input_binding"])==public["score_input_binding"]
+    noncanonical=deepcopy(public); encoded=noncanonical["launch_receipt"]["canonical_bytes_b64"]; alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; position=-3 if encoded.endswith("==") else -2
+    changed=encoded[:position]+alphabet[alphabet.index(encoded[position])+1]+encoded[position+1:]
+    assert base64.b64decode(changed,validate=True)==base64.b64decode(encoded,validate=True) and changed!=encoded
+    noncanonical["launch_receipt"]["canonical_bytes_b64"]=changed; noncanonical["content_sha256"]=public_score.content_sha256({key:value for key,value in noncanonical.items() if key!="content_sha256"})
+    monkeypatch.setattr(public_score,"scan_benchmark_v2_public_value",lambda value:None)
+    with pytest.raises(ValueError,match="receipt encoding"):
+        public_score.validate_private_scorer_public_ref_v3(noncanonical)
+    tree=ast.parse((ROOT/"app/learn/hybrid/benchmark_v2_public_score.py").read_text(encoding="utf-8"))
+    assert {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node,ast.ImportFrom) and node.module} <= {"__future__","collections","typing","urllib"}
+    assert {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node,ast.Import) for alias in node.names} <= {"base64","binascii","hashlib","json","re"}
+
+
+def test_public_score_boundary_exports_task11_task12_authority()->None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+    assert callable(public_score.validate_private_scorer_input_binding_v1)
+    assert callable(public_score.validate_private_scorer_public_ref_v3)
+    assert callable(public_score.scan_benchmark_v2_public_value)
+
+
+def test_public_score_scanner_accepts_only_internally_derived_provider_corpus_image_paths(task10_release_inputs:dict[str,Path])->None:
+    from app.learn.hybrid.benchmark_v2_public_score import scan_benchmark_v2_public_value
+    manifest=json.loads(task10_release_inputs["provider"].read_text(encoding="utf-8")); corpus=json.loads(task10_release_inputs["corpus"].read_text(encoding="utf-8")); exact=corpus["cases"][0]["image"]["path"]
+    scan_benchmark_v2_public_value(manifest)
+    scan_benchmark_v2_public_value(corpus)
+    outside=deepcopy(corpus); outside["copied_image"] = exact
+    with pytest.raises(ValueError,match="leakage"):
+        scan_benchmark_v2_public_value(outside)
+    with pytest.raises(TypeError):
+        scan_benchmark_v2_public_value(corpus,allowed_paths={exact})
+
+
+@pytest.mark.parametrize("mutation",["projection","parent_lineage"])
+def test_public_score_scanner_matches_authoritative_provider_snapshot_rejection(task10_release_inputs:dict[str,Path],mutation:str)->None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes, sha256_bytes
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_preloaded_provider_corpus, validate_provider_manifest
+    manifest=json.loads(task10_release_inputs["provider"].read_text(encoding="utf-8")); corpus=json.loads(task10_release_inputs["corpus"].read_text(encoding="utf-8"))
+    if mutation=="projection":
+        manifest["evaluation_projection"]={"provider_policy":{},"estimand":{},"gate":{}}
+        with pytest.raises(ValueError): validate_provider_manifest(manifest)
+        changed=manifest
+    else:
+        corpus["source_parent_ref"]["artifact_id"]="forged-parent"; corpus["content_sha256"]=public_score.content_sha256({key:value for key,value in corpus.items() if key!="content_sha256"})
+        raw=canonical_json_bytes(corpus,pretty=True)
+        with pytest.raises(ValueError): validate_preloaded_provider_corpus(raw=raw,expected_sha256=sha256_bytes(raw))
+        changed=corpus
+    with pytest.raises(ValueError,match="leakage"):
+        public_score.scan_benchmark_v2_public_value(changed)
+
+
+@pytest.mark.parametrize("value",[
+    {"contract_version":"portfolio_hybrid_v1_1_provider_corpus_v2","cases":[{"partition":"regression","image":{"path":"tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png"}}]},
+    {"contract_version":"portfolio_hybrid_v1_1_provider_manifest_v2_1","sealed_runtime":{"code_refs":[{"relative_path":"app/learn/hybrid/benchmark_v2_provider_sandbox.py"}],"release_code_refs":[],"profile_refs":[]}},
+    {"junk":{"provider_manifest_ref":{"relative_path":"benchmark-v2-provider-manifest.json"}}},
+    {"junk":{"provider_corpus_ref":{"relative_path":"provider-corpus.v2.json"}}},
+])
+def test_public_score_scanner_rejects_unvalidated_snapshot_or_junk_ref_path_exceptions(value:object)->None:
+    from app.learn.hybrid.benchmark_v2_public_score import scan_benchmark_v2_public_value
+    with pytest.raises(ValueError,match="leakage"):
+        scan_benchmark_v2_public_value(value)
+
+
+@pytest.mark.parametrize("mutation",["unlisted","case_drift","backslash","dot","parent","partition_mismatch"])
+def test_public_score_scanner_rejects_provider_corpus_image_path_aliases(task10_release_inputs:dict[str,Path],mutation:str)->None:
+    from app.learn.hybrid.benchmark_v2_public_score import scan_benchmark_v2_public_value
+    corpus=json.loads(task10_release_inputs["corpus"].read_text(encoding="utf-8")); case=corpus["cases"][0]; path=case["image"]["path"]
+    if mutation=="unlisted": corpus["unlisted_image"]="tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-999.png"
+    elif mutation=="case_drift": case["image"]["path"]=path.upper()
+    elif mutation=="backslash": case["image"]["path"]=path.replace("/","\\")
+    elif mutation=="dot": case["image"]["path"]=path.replace("/corpus/","/corpus/./")
+    elif mutation=="parent": case["image"]["path"]=path.replace("/corpus/","/corpus/x/../")
+    else: case["partition"]="holdout" if case["partition"]=="regression" else "regression"
+    with pytest.raises(ValueError,match="leakage"):
+        scan_benchmark_v2_public_value(corpus)
+
+
+@pytest.mark.parametrize("value",[
+    {"private_output":"x"},
+    {"value":"GOLD.V1.JSON"},
+    {"value":r"C:\private\score.json"},
+    {"payload_bytes_b64":"%%%"},
+    {"canonical_bytes_b64":base64.b64encode(b'{"value":"ok"} trailing').decode("ascii")},
+])
+def test_public_score_scanner_fails_closed_on_recursive_leakage_and_invalid_envelopes(value:object)->None:
+    from app.learn.hybrid.benchmark_v2_public_score import scan_benchmark_v2_public_value
+    with pytest.raises(ValueError,match="leakage"):
+        scan_benchmark_v2_public_value(value)
+
+
+@pytest.mark.parametrize("mutation",["percent_once","percent_deep","percent_bound","pad_bits_ze","pad_bits_zb"])
+def test_public_score_scanner_rejects_percent_aliases_and_noncanonical_base64(mutation:str)->None:
+    from app.learn.hybrid.benchmark_v2_public_score import scan_benchmark_v2_public_value
+    if mutation=="percent_once": encoded={"value":"gold%2Ev1%2Ejson"}
+    elif mutation in {"percent_deep","percent_bound"}:
+        text="gold%2Ev1%2Ejson"
+        for _ in range(9 if mutation=="percent_deep" else 33): text=text.replace("%","%25")
+        encoded={"value":text}
+    else: encoded={"payload_bytes_b64":"ZE==" if mutation=="pad_bits_ze" else "ZB=="}
+    with pytest.raises(ValueError,match="leakage"):
+        scan_benchmark_v2_public_value(encoded)
+
+
+def test_public_score_scanner_freezes_bounds_and_nested_decode_depth()->None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+    assert (public_score.MAX_CONTAINER_DEPTH,public_score.MAX_VISITED_NODES,public_score.MAX_STRING_UTF8_BYTES,public_score.MAX_BASE64_DECODE_DEPTH,public_score.MAX_DECODED_BYTES)==(32,100000,16777216,8,67108864)
+    value:object={"value":"ok"}
+    for _ in range(8): value={"canonical_bytes_b64":base64.b64encode(public_score.canonical_bytes(value)).decode("ascii")}
+    public_score.scan_benchmark_v2_public_value(value)
+    value={"canonical_bytes_b64":base64.b64encode(public_score.canonical_bytes(value)).decode("ascii")}
+    with pytest.raises(ValueError,match="leakage"):
+        public_score.scan_benchmark_v2_public_value(value)
+
+
+def test_public_score_scanner_container_depth_root_convention_and_practical_bounds(monkeypatch:pytest.MonkeyPatch)->None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+    def nested(count:int)->object:
+        value:object="ok"
+        for _ in range(count): value={"value":value}
+        return {"root":value}
+    public_score.scan_benchmark_v2_public_value(nested(32))
+    with pytest.raises(ValueError,match="leakage"):
+        public_score.scan_benchmark_v2_public_value(nested(33))
+    monkeypatch.setattr(public_score,"MAX_VISITED_NODES",3)
+    with pytest.raises(ValueError,match="node"):
+        public_score.scan_benchmark_v2_public_value({"a":"a","b":"b"})
+    monkeypatch.setattr(public_score,"MAX_VISITED_NODES",100000)
+    monkeypatch.setattr(public_score,"MAX_STRING_UTF8_BYTES",3)
+    with pytest.raises(ValueError,match="string"):
+        public_score.scan_benchmark_v2_public_value({"value":"four"})
+    monkeypatch.setattr(public_score,"MAX_STRING_UTF8_BYTES",16777216)
+    monkeypatch.setattr(public_score,"MAX_DECODED_BYTES",1)
+    with pytest.raises(ValueError,match="decoded byte"):
+        public_score.scan_benchmark_v2_public_value({"payload_bytes_b64":base64.b64encode(b"{} ").decode("ascii")})
 
 
 def test_s3_private_score_v3_rejects_reminted_status_and_recursive_leakage(tmp_path:Path,task10_release_inputs:dict[str,Path])->None:

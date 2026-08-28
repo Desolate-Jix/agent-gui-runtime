@@ -18,6 +18,10 @@ from app.learn.hybrid.benchmark_v2_private_release import (
     derive_private_scoring_cases,
     validate_task10_private_release_bundle,
 )
+from app.learn.hybrid.benchmark_v2_public_score import (
+    validate_private_scorer_input_binding_v1,
+    validate_private_scorer_public_ref_v3,
+)
 
 ROOT=Path(__file__).resolve().parents[3]
 GATE_PATH=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json"
@@ -344,19 +348,8 @@ def _production_rows(automatic:Mapping[str,object],index:Mapping[bytes,tuple[dic
         result.append(row)
     return result
 
-def _validate_score_input_binding(value:object)->dict[str,object]:
-    fields={"contract_version","benchmark_release_id","partition","private_manifest_ref","corpus_parent_ref","provider_manifest_ref","provider_corpus_ref","accepted_run_ref","attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref","estimand_ref","gate_ref","safety"}
-    binding=_closed(value,fields,"private scorer input binding")
-    if binding["contract_version"]!="private_scorer_input_binding_v1" or binding["benchmark_release_id"]!=RELEASE or binding["partition"]!="regression" or binding["safety"]!=SAFETY: raise ValueError("private scorer input binding invalid")
-    schemas=(("private_manifest_ref",{"contract_version","file_sha256","content_sha256"}),("corpus_parent_ref",{"contract_version","artifact_id","file_sha256","content_sha256"}),("provider_manifest_ref",{"contract_version","relative_path","file_sha256"}),("provider_corpus_ref",{"contract_version","relative_path","file_sha256","content_sha256","source_parent_ref"}),("accepted_run_ref",{"contract_version","file_sha256","content_sha256"}),("estimand_ref",{"contract_version","file_sha256"}),("gate_ref",{"contract_version","file_sha256"}))
-    for name,schema in schemas:
-        if not isinstance(binding[name],Mapping) or set(binding[name])!=schema: raise ValueError("private scorer input binding ref invalid")
-        for key,child in binding[name].items():
-            if key.endswith("sha256") and not _is_sha(child): raise ValueError("private scorer input binding SHA invalid")
-    if binding["accepted_run_ref"]["contract_version"]!="benchmark_v2_accepted_regression_score_input_v2": raise ValueError("private scorer accepted ref invalid")
-    for name in ("attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref"): exact_ref(binding[name],name)
-    _reject_score_leakage(binding)
-    return binding
+_validate_score_input_binding=validate_private_scorer_input_binding_v1
+validate_private_scorer_public_ref=validate_private_scorer_public_ref_v3
 
 def _validate_private_score_artifact(value:object)->dict[str,object]:
     fields={"contract_version","benchmark_release_id","partition","automatic","point_metric","gate","score_input_binding","automatic_prediction_ref","selected_lifecycle_ref","estimand_ref","gate_ref","safety","content_sha256"}
@@ -730,30 +723,5 @@ def run_private_scorer(*,private_manifest_path:Path,prediction_run_ref_path:Path
     try: temporary.write_bytes(canonical_bytes(final_public)+b"\n"); temporary.replace(final_path)
     finally:
         if temporary.exists(): temporary.unlink()
-    return validate_private_scorer_public_ref(final_public)
-
-def validate_private_scorer_public_ref(public:object)->dict[str,str]:
-    fields={"status","score_ref","content_sha256","contract_version","score_input_binding","binding","launch_receipt","cleanup_receipt","safety"}
-    _reject_score_leakage(public)
-    if not isinstance(public,Mapping) or set(public)!=fields or public["contract_version"]!="private_scorer_public_ref_v3" or public.get("status") not in {"PASS","FAIL"} or public["safety"]!=SAFETY or not _is_sha(public.get("content_sha256")) or public["content_sha256"]!=hashlib.sha256(canonical_bytes({k:v for k,v in public.items() if k!="content_sha256"})).hexdigest(): raise ValueError("private scorer public chain invalid")
-    decoded=[]
-    for name,contract,kind in (("launch_receipt","private_scorer_launch_receipt_v2","private-scorer-launch"),("cleanup_receipt","private_scorer_cleanup_receipt_v1","private-scorer-cleanup")):
-        env=public[name]
-        if not isinstance(env,Mapping) or set(env)!={"ref","canonical_bytes_b64"}: raise ValueError("private scorer receipt envelope invalid")
-        try: raw=base64.b64decode(env["canonical_bytes_b64"],validate=True); value=json.loads(raw.decode("utf-8"))
-        except (ValueError,UnicodeDecodeError,base64.binascii.Error) as error: raise ValueError("private scorer receipt encoding invalid") from error
-        _reject_score_leakage(value)
-        digest=value.get("content_sha256") if name=="launch_receipt" else hashlib.sha256(raw).hexdigest()
-        if canonical_bytes(value)!=raw or env["ref"]!={"id":f"{kind}/{digest}","content_sha256":digest} or value.get("contract_version")!=contract or value.get("safety")!=SAFETY: raise ValueError("private scorer receipt invalid")
-        if name=="launch_receipt" and digest!=hashlib.sha256(canonical_bytes({k:v for k,v in value.items() if k!="content_sha256"})).hexdigest(): raise ValueError("private scorer receipt invalid")
-        decoded.append(value)
-    launch,cleanup=decoded; binding=public["binding"]
-    score_input_binding=_validate_score_input_binding(public["score_input_binding"])
-    child_score=binding.get("child_score_ref") if isinstance(binding,Mapping) else None
-    launch_fields={"contract_version","launcher_process_id","launcher_process_identity","child_process_id","child_process_identity","pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256","child_score_ref","score_input_binding","safety","content_sha256"}; cleanup_fields={"contract_version","launch_receipt_ref","child_returncode","job_active_processes_after","job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed","safety"}
-    sha_fields=("pipe_capability_sha256","argv_sha256","env_sha256","cwd_sha256","job_identity_sha256","child_execution_receipt_sha256")
-    binding_fields={"contract_version","child_score_ref","score_input_binding","launch_receipt_ref","cleanup_receipt_ref","safety","content_sha256"}
-    if set(launch)!=launch_fields or set(cleanup)!=cleanup_fields or not isinstance(launch.get("launcher_process_id"),int) or not isinstance(launch.get("child_process_id"),int) or launch["launcher_process_id"]<=0 or launch["child_process_id"]<=0 or launch["launcher_process_id"]==launch["child_process_id"] or any(not _is_sha(launch.get(key)) for key in sha_fields) or not isinstance(child_score,Mapping) or set(child_score)!={"status","score_ref","content_sha256"} or child_score.get("status") not in {"PASS","FAIL"} or not _is_sha(child_score.get("content_sha256")) or not isinstance(child_score.get("score_ref"),str) or re.fullmatch(r"private-score/[0-9a-f]{64}",child_score["score_ref"]) is None or launch["child_score_ref"]!=child_score or not isinstance(binding,Mapping) or set(binding)!=binding_fields or binding.get("contract_version")!="private_scorer_final_binding_v2" or binding.get("child_score_ref")!=child_score or binding.get("score_input_binding")!=score_input_binding or launch.get("score_input_binding")!=score_input_binding or binding.get("launch_receipt_ref")!=public["launch_receipt"]["ref"] or binding.get("cleanup_receipt_ref")!=public["cleanup_receipt"]["ref"] or binding.get("safety")!=SAFETY or not _is_sha(binding.get("content_sha256")) or binding.get("content_sha256")!=hashlib.sha256(canonical_bytes({k:v for k,v in binding.items() if k!="content_sha256"})).hexdigest() or cleanup.get("launch_receipt_ref")!=public["launch_receipt"]["ref"] or cleanup.get("child_returncode")!=0 or cleanup.get("job_active_processes_after")!=0 or any(cleanup.get(key) is not True for key in ("job_stable_zero","pipe_handles_closed","process_pipes_closed","job_handle_closed")): raise ValueError("private scorer launch/cleanup chain invalid")
-    result={"status":binding["child_score_ref"]["status"],"score_ref":f"private-score-final/{binding['content_sha256']}","content_sha256":public["content_sha256"]}
-    if any(public[key]!=value for key,value in result.items()): raise ValueError("private scorer final ref invalid")
-    return result
+    validated=validate_private_scorer_public_ref(final_public)
+    return {key:validated[key] for key in ("status","score_ref","content_sha256")}
