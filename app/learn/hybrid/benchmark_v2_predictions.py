@@ -7,31 +7,38 @@ import json
 import re
 from typing import Any, Mapping
 
+from app.learn.hybrid.benchmark_v2_pathless import (
+    pathless_artifact_ref,
+    seal_pathless_envelope,
+    seal_pathless_projection,
+    validate_pathless_ref,
+)
+
 SAFETY={"artifact_is_authorization":False,"execute_binding_enabled":False,"display_only":True}
 ARMS=("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista")
 STATUSES={"selected","missing","failed"}
 ELIGIBILITY={"selected":"ELIGIBLE","missing":"INELIGIBLE","failed":"INELIGIBLE"}
+_PATHLESS_PROJECTION_CONTRACTS = {
+    "benchmark_v2_nested_provider_evidence_ref_v1",
+    "sealed_prediction_source_parent_v1",
+    "sealed_prediction_bbox_v1",
+    "sealed_target_binding_v4",
+    "sealed_vista_request_v4",
+}
 
 
 def canonical_bytes(value: object) -> bytes:
     return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")
 
 def artifact_ref(artifact: Mapping[str,object]) -> dict[str,str]:
-    if artifact.get("contract_version") in {
-        "benchmark_v2_nested_provider_evidence_ref_v1",
-        "sealed_prediction_source_parent_v1",
-        "sealed_prediction_bbox_v1",
-        "sealed_target_binding_v4",
-        "sealed_vista_request_v4",
-    }:
-        return {
-            "id": str(artifact["artifact_id"]),
-            "content_sha256": str(artifact["content_sha256"]),
-        }
+    if artifact.get("contract_version") in _PATHLESS_PROJECTION_CONTRACTS:
+        return pathless_artifact_ref(artifact)
     raw=canonical_bytes(artifact)
     return {"id":str(artifact["artifact_id"]),"content_sha256":hashlib.sha256(raw).hexdigest()}
 
 def sealed_artifact_envelope(artifact: Mapping[str,object]) -> dict[str,object]:
+    if artifact.get("contract_version") in _PATHLESS_PROJECTION_CONTRACTS:
+        return seal_pathless_envelope(artifact)
     raw=canonical_bytes(artifact)
     return {"ref":artifact_ref(artifact),"canonical_bytes_b64":base64.b64encode(raw).decode("ascii")}
 
@@ -107,56 +114,6 @@ def _s12_ref(value: object, name: str) -> dict[str, str]:
     return result
 
 
-def _sealed_projection(contract_version: str, prefix: str, fields: Mapping[str, object]) -> dict[str, object]:
-    semantic = {"contract_version": contract_version, **deepcopy(dict(fields))}
-    semantic_sha = hashlib.sha256(
-        contract_version.encode("utf-8") + b"\0" + canonical_bytes(semantic)
-    ).hexdigest()
-    result = {**semantic, "artifact_id": f"{prefix}/{semantic_sha}"}
-    # 字段顺序不参与 canonical JSON，但返回值按合同顺序重建。
-    result = {
-        "contract_version": result.pop("contract_version"),
-        "artifact_id": result.pop("artifact_id"),
-        **result,
-    }
-    result["content_sha256"] = hashlib.sha256(canonical_bytes(result)).hexdigest()
-    return result
-
-
-def _projection_ref(value: Mapping[str, object]) -> dict[str, str]:
-    return {
-        "id": str(value["artifact_id"]),
-        "content_sha256": str(value["content_sha256"]),
-    }
-
-
-def _validate_projection_identity(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        raise ValueError("sealed prediction artifact is invalid")
-    item = deepcopy(dict(value))
-    contracts = {
-        "benchmark_v2_nested_provider_evidence_ref_v1": ("nested-provider-evidence", {"contract_version", "artifact_id", "evidence_kind", "case_ref", "actual_screen_group_ref", "canonical_value_sha256", "safety", "content_sha256"}),
-        "sealed_prediction_source_parent_v1": ("prediction-source-parent", {"contract_version", "artifact_id", "case_ref", "arm_scope", "source_kind", "evidence_refs", "actual_screen_group_ref", "capture_ref", "safety", "content_sha256"}),
-        "sealed_prediction_bbox_v1": ("prediction-bbox", {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "coordinate_space", "xyxy", "capture_ref", "source_parent_ref", "safety", "content_sha256"}),
-        "sealed_target_binding_v4": ("target-binding", {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "source_parent_ref", "capture_ref", "bbox_ref", "safety", "content_sha256"}),
-        "sealed_vista_request_v4": ("vista-request", {"contract_version", "artifact_id", "case_id", "arm_scope", "candidate_id", "target_binding_ref", "source_parent_ref", "capture_ref", "bbox_ref", "submitted_request_ref", "submission_status", "safety", "content_sha256"}),
-    }
-    contract = item.get("contract_version")
-    if contract not in contracts:
-        raise ValueError("sealed prediction artifact contract is unknown")
-    prefix, fields = contracts[str(contract)]
-    if set(item) != fields or item.get("safety") != SAFETY:
-        raise ValueError("sealed prediction artifact is not closed")
-    declared_content = item.pop("content_sha256")
-    if declared_content != hashlib.sha256(canonical_bytes(item)).hexdigest():
-        raise ValueError("sealed prediction artifact content identity mismatch")
-    artifact_id = item.pop("artifact_id")
-    semantic_sha = hashlib.sha256(str(contract).encode("utf-8") + b"\0" + canonical_bytes(item)).hexdigest()
-    if artifact_id != f"{prefix}/{semantic_sha}":
-        raise ValueError("sealed prediction artifact semantic identity mismatch")
-    return deepcopy(dict(value))
-
-
 def _raw_class_ref(value: object, evidence_class: str) -> dict[str, str]:
     try:
         prefix, domain = _RAW_REF_FORMULAS[evidence_class]
@@ -176,10 +133,9 @@ def _nested_evidence(
     case_ref: Mapping[str, str],
     actual_screen_group_ref: Mapping[str, str],
 ) -> dict[str, object]:
-    return _sealed_projection(
-        "benchmark_v2_nested_provider_evidence_ref_v1",
-        "nested-provider-evidence",
-        {
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_nested_provider_evidence_ref_v1",
+        semantic_payload={
             "evidence_kind": evidence_kind,
             "case_ref": deepcopy(dict(case_ref)),
             "actual_screen_group_ref": deepcopy(dict(actual_screen_group_ref)),
@@ -261,10 +217,9 @@ def _source_parent(
     if source_kind not in required or set(evidence_refs) != required[source_kind]:
         raise ValueError("source parent evidence refs are not closed")
     refs = {key: _s12_ref(value, key) for key, value in evidence_refs.items()}
-    return _sealed_projection(
-        "sealed_prediction_source_parent_v1",
-        "prediction-source-parent",
-        {
+    return seal_pathless_projection(
+        contract_version="sealed_prediction_source_parent_v1",
+        semantic_payload={
             "case_ref": deepcopy(dict(case_ref)),
             "arm_scope": list(arm_scope),
             "source_kind": source_kind,
@@ -287,11 +242,14 @@ def _selection_artifacts(
     submitted_request_ref: Mapping[str, str] | None = None,
 ) -> list[dict[str, object]]:
     candidate_id = _public_identifier(candidate_id, "candidate")
-    parent_ref = _projection_ref(source_parent)
-    bbox_artifact = _sealed_projection(
-        "sealed_prediction_bbox_v1",
-        "prediction-bbox",
-        {
+    parent_ref = validate_pathless_ref(
+        role="source_parent_ref",
+        value=pathless_artifact_ref(source_parent),
+        context={"contract_version": "sealed_prediction_bbox_v1"},
+    )
+    bbox_artifact = seal_pathless_projection(
+        contract_version="sealed_prediction_bbox_v1",
+        semantic_payload={
             "case_id": case_id,
             "arm_scope": list(arm_scope),
             "candidate_id": candidate_id,
@@ -302,11 +260,10 @@ def _selection_artifacts(
             "safety": deepcopy(SAFETY),
         },
     )
-    bbox_ref = _projection_ref(bbox_artifact)
-    binding = _sealed_projection(
-        "sealed_target_binding_v4",
-        "target-binding",
-        {
+    bbox_ref = pathless_artifact_ref(bbox_artifact)
+    binding = seal_pathless_projection(
+        contract_version="sealed_target_binding_v4",
+        semantic_payload={
             "case_id": case_id,
             "arm_scope": list(arm_scope),
             "candidate_id": candidate_id,
@@ -320,14 +277,13 @@ def _selection_artifacts(
     if submitted_request_ref is not None:
         if arm_scope != ["omni_to_qwen", "omni_to_qwen_vista"]:
             raise ValueError("only the paired hybrid scope may create a VISTA request")
-        request = _sealed_projection(
-            "sealed_vista_request_v4",
-            "vista-request",
-            {
+        request = seal_pathless_projection(
+            contract_version="sealed_vista_request_v4",
+            semantic_payload={
                 "case_id": case_id,
                 "arm_scope": list(arm_scope),
                 "candidate_id": candidate_id,
-                "target_binding_ref": _projection_ref(binding),
+                "target_binding_ref": pathless_artifact_ref(binding),
                 "source_parent_ref": parent_ref,
                 "capture_ref": deepcopy(dict(capture_ref)),
                 "bbox_ref": bbox_ref,
@@ -348,12 +304,12 @@ def _selected_row(case_id: str, arm_id: str, artifacts: list[Mapping[str, object
         "selection_status": "selected",
         "eligibility": "ELIGIBLE",
         "candidate_id": binding["candidate_id"],
-        "source_parent_ref": _projection_ref(source),
-        "bbox_ref": _projection_ref(bbox),
-        "target_binding_ref": _projection_ref(binding),
+        "source_parent_ref": pathless_artifact_ref(source),
+        "bbox_ref": pathless_artifact_ref(bbox),
+        "target_binding_ref": pathless_artifact_ref(binding),
     }
     if len(artifacts) == 4:
-        row["vista_request_ref"] = _projection_ref(artifacts[3])
+        row["vista_request_ref"] = pathless_artifact_ref(artifacts[3])
     return row
 
 
@@ -420,7 +376,7 @@ def select_pre_vista_prediction_rows(
         response_nested = _nested_evidence(evidence_kind="incumbent_response", canonical_value=incumbent_response, case_ref=case_ref, actual_screen_group_ref=group_ref)
         action_nested = _nested_evidence(evidence_kind="incumbent_available_action", canonical_value=action, case_ref=case_ref, actual_screen_group_ref=group_ref)
         artifacts.extend([response_nested, action_nested])
-        parent = _source_parent(case_ref=case_ref, arm_scope=["qwen_only"], source_kind="incumbent_qwen_action", evidence_refs={"incumbent_response_ref": _projection_ref(response_nested), "available_action_ref": _projection_ref(action_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
+        parent = _source_parent(case_ref=case_ref, arm_scope=["qwen_only"], source_kind="incumbent_qwen_action", evidence_refs={"incumbent_response_ref": pathless_artifact_ref(response_nested), "available_action_ref": pathless_artifact_ref(action_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
         selected = _selection_artifacts(case_id=case_id, arm_scope=["qwen_only"], candidate_id=str(action["id"]), bbox=_xyxy(action.get("bbox"), "incumbent action bbox"), capture_ref=capture, source_parent=parent)
         artifacts.extend(selected); rows.append(_selected_row(case_id, "qwen_only", selected))
 
@@ -451,7 +407,7 @@ def select_pre_vista_prediction_rows(
     else:
         item_nested = _nested_evidence(evidence_kind="omni_inventory_item", canonical_value=omni_item, case_ref=case_ref, actual_screen_group_ref=group_ref)
         artifacts.append(item_nested)
-        parent = _source_parent(case_ref=case_ref, arm_scope=["omni_only_discovery"], source_kind="omni_inventory_item", evidence_refs={"omni_inventory_ref": _raw_class_ref(omni_inventory, "omni_inventory"), "omni_item_ref": _projection_ref(item_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
+        parent = _source_parent(case_ref=case_ref, arm_scope=["omni_only_discovery"], source_kind="omni_inventory_item", evidence_refs={"omni_inventory_ref": _raw_class_ref(omni_inventory, "omni_inventory"), "omni_item_ref": pathless_artifact_ref(item_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
         selected = _selection_artifacts(case_id=case_id, arm_scope=["omni_only_discovery"], candidate_id=str(omni_candidate["candidate_id"]), bbox=_xyxy(omni_candidate.get("bbox_original"), "Omni candidate bbox"), capture_ref=capture, source_parent=parent)
         artifacts.extend(selected); rows.append(_selected_row(case_id, "omni_only_discovery", selected))
 
@@ -500,7 +456,7 @@ def select_pre_vista_prediction_rows(
             fusion_nested = _nested_evidence(evidence_kind="hybrid_fusion_candidate", canonical_value=fusion_candidate, case_ref=case_ref, actual_screen_group_ref=group_ref)
             artifacts.append(fusion_nested)
             scope = ["omni_to_qwen", "omni_to_qwen_vista"]
-            parent = _source_parent(case_ref=case_ref, arm_scope=scope, source_kind="hybrid_bound_fusion_candidate", evidence_refs={"omni_inventory_ref": _raw_class_ref(omni_inventory, "omni_inventory"), "qwen_bindings_ref": _raw_class_ref(qwen_bindings, "qwen_bindings"), "fusion_result_ref": _raw_class_ref(fusion_result, "fusion_result"), "fusion_candidate_ref": _projection_ref(fusion_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
+            parent = _source_parent(case_ref=case_ref, arm_scope=scope, source_kind="hybrid_bound_fusion_candidate", evidence_refs={"omni_inventory_ref": _raw_class_ref(omni_inventory, "omni_inventory"), "qwen_bindings_ref": _raw_class_ref(qwen_bindings, "qwen_bindings"), "fusion_result_ref": _raw_class_ref(fusion_result, "fusion_result"), "fusion_candidate_ref": pathless_artifact_ref(fusion_nested)}, actual_screen_group_ref=group_ref, capture_ref=capture)
             selected = _selection_artifacts(case_id=case_id, arm_scope=scope, candidate_id=str(hybrid_candidate_id), bbox=_xyxy(fusion_candidate.get("bbox_original"), "fusion bbox"), capture_ref=capture, source_parent=parent, submitted_request_ref=_raw_class_ref(submitted, "submitted_vista_request"))
             artifacts.extend(selected)
             rows.extend([_selected_row(case_id, arm, selected) for arm in ("omni_to_qwen", "omni_to_qwen_vista")])
@@ -522,7 +478,12 @@ def attach_vista_outcomes(selection: Mapping[str, object], vista_proposals: list
     result = deepcopy(dict(selection))
     if not isinstance(result["rows"], list) or not isinstance(result["sealed_artifacts"], list) or not isinstance(vista_proposals, list):
         raise ValueError("VISTA outcome inputs are invalid")
-    validated_artifacts = [_validate_projection_identity(item) for item in result["sealed_artifacts"]]
+    validated_artifacts = []
+    for item in result["sealed_artifacts"]:
+        if not isinstance(item, Mapping):
+            raise ValueError("sealed prediction artifact is invalid")
+        pathless_artifact_ref(item)
+        validated_artifacts.append(deepcopy(dict(item)))
     artifacts = {(item["artifact_id"], item["content_sha256"]): item for item in validated_artifacts}
     if len(artifacts) != len(validated_artifacts):
         raise ValueError("duplicate sealed prediction artifact")

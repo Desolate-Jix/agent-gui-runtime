@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
+import json
 from pathlib import Path
 import struct
 
@@ -13,12 +14,17 @@ import pytest
 from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
 from app.learn.hybrid import benchmark_v2_window_owner as window_owner
 from app.learn.hybrid import benchmark_v2_worker_binding as worker_binding
+from app.learn.hybrid.benchmark_v2_contracts import (
+    canonical_json_bytes as benchmark_canonical_json_bytes,
+)
+from app.learn.hybrid.vista_refinement import build_vista_requests
 from app.learn import workflow_worker
 from app.learn.hybrid.benchmark_v2_lifecycle import (
     collect_raw_gpu_sample,
     verify_lifecycle_from_raw,
 )
 from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
+from tests.test_learn_hybrid_vista_refinement import _authoritative_inputs
 
 
 SHA0 = "0" * 64
@@ -2013,6 +2019,14 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
         "append_benchmark_v2_attempt_event",
         "collect_raw_gpu_sample",
         "compose_benchmark_v2_attempt_cleanup_receipt",
+        "compose_benchmark_v2_lifecycle_bundle_v3",
+        "derive_benchmark_v2_cleanup_receipt_ref",
+        "project_benchmark_v2_cleanup_lifecycle",
+        "project_benchmark_v2_attempt_journal_terminal_event",
+        "project_benchmark_v2_screen_group_lifecycles",
+        "project_benchmark_v2_runner_events",
+        "project_benchmark_v2_attempt_lifecycle",
+        "project_benchmark_v2_attempt_ledger",
         "read_benchmark_v2_attempt_journal",
         "verify_lifecycle_from_raw",
     ]
@@ -2613,3 +2627,1661 @@ def test_path_alias_duplicate_and_noncanonical_json_are_rejected(tmp_path: Path)
     assert duplicate["status"] == "failed"
     samples[0].write_bytes(samples[0].read_bytes() + b"\n")
     assert _verify(parents, samples, probes)["status"] == "failed"
+
+
+def _s13_attempt(*, attempt_id: str = "attempt-regression-1") -> dict[str, object]:
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_attempt_ref_v1",
+            "attempt_id": attempt_id,
+            "partition": "regression",
+            "mode": "actual_models",
+            "provider_id": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _s13_cleanup(attempt: dict[str, object]) -> dict[str, object]:
+    return lifecycle.compose_benchmark_v2_attempt_cleanup_receipt(
+        attempt_ref=attempt,
+        reason="benchmark_v2_actual_runner_finished",
+        service_terminal_ref=seal_immutable({"kind": "service-terminal"}),
+        window_cleanup_ref=seal_immutable({"kind": "window-cleanup"}),
+        provider_cleanup_refs=[seal_immutable({"kind": "provider-cleanup"})],
+        resource_counts={
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        },
+    )
+
+
+def test_s13_cleanup_receipt_ref_and_projection_are_opaque_and_pathless() -> None:
+    attempt = _s13_attempt()
+    cleanup = _s13_cleanup(attempt)
+
+    cleanup_ref = lifecycle.derive_benchmark_v2_cleanup_receipt_ref(
+        cleanup_receipt=cleanup
+    )
+    compact = canonical_json_bytes(cleanup)
+    assert cleanup_ref == {
+        "id": "attempt-cleanup-receipt/"
+        + hashlib.sha256(
+            b"benchmark-v2-attempt-cleanup-receipt\0" + compact
+        ).hexdigest(),
+        "content_sha256": hashlib.sha256(compact).hexdigest(),
+    }
+
+    projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+    )
+    assert projection["contract_version"] == "benchmark_v2_lifecycle_verified_projection_v1"
+    assert projection["lifecycle_kind"] == "cleanup"
+    assert projection["terminal_status"] == "stable_zero"
+    assert projection["cleanup_stable_zero"] is True
+    assert projection["resource_counts"] == cleanup["resource_counts"]
+    assert projection["started_request_count"] == 0
+    assert projection["terminal_or_unknown_request_count"] == 0
+    assert projection["parent_refs"] == {"cleanup_receipt_ref": cleanup_ref}
+    serialized = canonical_json_bytes(projection)
+    assert b"path" not in serialized.lower()
+    assert b"benchmark_v2_actual_runner_finished" not in serialized
+
+
+def test_s13_cleanup_projection_rejects_tampered_raw_parent() -> None:
+    attempt = _s13_attempt()
+    cleanup = _s13_cleanup(attempt)
+    cleanup["reason"] = "tampered"
+    with pytest.raises(ValueError, match="cleanup receipt"):
+        lifecycle.project_benchmark_v2_cleanup_lifecycle(
+            attempt_ref=attempt,
+            cleanup_receipt=cleanup,
+        )
+
+
+def _s13_journal(
+    *, attempt: dict[str, object], cleanup: dict[str, object]
+) -> list[dict[str, object]]:
+    prepared = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_attempt_resource_event_v1",
+            "sequence": 1,
+            "attempt_ref": attempt,
+            "phase": "prepared",
+            "event_kind": "attempt_prepared",
+            "provider_id": None,
+            "probe_kind": None,
+            "resource_ref": None,
+            "predecessor_content_sha256": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    resource = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runtime_resource_ref_v1",
+            "resource_kind": "attempt_cleanup_receipt",
+            "value": {"cleanup_receipt": cleanup},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    terminal = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_attempt_resource_event_v1",
+            "sequence": 2,
+            "attempt_ref": attempt,
+            "phase": "terminal",
+            "event_kind": "attempt_terminal",
+            "provider_id": None,
+            "probe_kind": None,
+            "resource_ref": resource,
+            "predecessor_content_sha256": prepared["content_sha256"],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    return [prepared, terminal]
+
+
+def test_s13_journal_terminal_projection_consumes_exact_cleanup_parent() -> None:
+    attempt = _s13_attempt()
+    cleanup = _s13_cleanup(attempt)
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+
+    projection = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+
+    assert projection["phase"] == "terminal"
+    assert projection["event_kind"] == "attempt_terminal"
+    assert projection["sequence"] == 2
+    assert projection["predecessor_content_sha256"] == journal[0]["content_sha256"]
+    assert projection["raw_event_sha256"] == hashlib.sha256(
+        canonical_json_bytes(journal[-1])
+    ).hexdigest()
+    assert projection["cleanup_receipt_ref"] == lifecycle.derive_benchmark_v2_cleanup_receipt_ref(
+        cleanup_receipt=cleanup
+    )
+    assert projection["cleanup_projection_ref"] == {
+        "id": cleanup_projection["artifact_id"],
+        "content_sha256": cleanup_projection["content_sha256"],
+    }
+    assert b"reason" not in canonical_json_bytes(projection)
+
+
+def test_s13_journal_terminal_projection_rejects_cleanup_byte_drift() -> None:
+    attempt = _s13_attempt()
+    embedded = _s13_cleanup(attempt)
+    supplied = lifecycle.compose_benchmark_v2_attempt_cleanup_receipt(
+        attempt_ref=attempt,
+        reason="different-valid-receipt",
+        service_terminal_ref=seal_immutable({"kind": "service-terminal"}),
+        window_cleanup_ref=seal_immutable({"kind": "window-cleanup"}),
+        provider_cleanup_refs=[seal_immutable({"kind": "provider-cleanup"})],
+        resource_counts=dict(embedded["resource_counts"]),
+    )
+    supplied_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=supplied
+    )
+    with pytest.raises(ValueError, match="terminal cleanup receipt differs"):
+        lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+            attempt_ref=attempt,
+            journal_events=_s13_journal(attempt=attempt, cleanup=embedded),
+            cleanup_receipt=supplied,
+            cleanup_projection=supplied_projection,
+        )
+
+
+def _s13_screen_projection(
+    *, attempt: dict[str, object], screen_group: str
+) -> dict[str, object]:
+    def ref(name: str) -> dict[str, str]:
+        return {
+            "id": name,
+            "content_sha256": hashlib.sha256(name.encode("utf-8")).hexdigest(),
+        }
+
+    def raw_envelope(
+        value: dict[str, object], *, id_prefix: str, domain: bytes
+    ) -> dict[str, object]:
+        raw = benchmark_canonical_json_bytes(value)
+        return {
+            "ref": {
+                "id": f"{id_prefix}/{hashlib.sha256(domain + raw).hexdigest()}",
+                "content_sha256": hashlib.sha256(raw).hexdigest(),
+            },
+            "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+        }
+
+    provider_group_ref = {
+        "id": screen_group,
+        "content_sha256": hashlib.sha256(screen_group.encode("utf-8")).hexdigest(),
+    }
+    request_ref = ref(f"request/{screen_group}")
+    window_binding_ref = ref(f"binding/{screen_group}")
+    capture_ref = ref(f"capture/{screen_group}")
+    case_refs = [
+        {
+            "case_id": f"{screen_group}-case-{index}",
+            "case_content_sha256": hashlib.sha256(
+                f"case:{screen_group}:{index}".encode()
+            ).hexdigest(),
+        }
+        for index in range(5)
+    ]
+    operations = [
+        seal_immutable(
+            {
+                "mode": "hybrid_v1_1",
+                "operation_id": f"{screen_group}-hybrid",
+                "status": "complete",
+                "request_ref": request_ref,
+                "window_binding_ref": window_binding_ref,
+                "capture_ref": capture_ref,
+            }
+        ),
+        *[
+            seal_immutable(
+                {
+                    "mode": "incumbent_qwen_only",
+                    "operation_id": f"{screen_group}-incumbent-{index}",
+                    "status": "complete",
+                    "request_ref": {
+                        "id": case["case_id"],
+                        "content_sha256": case["case_content_sha256"],
+                    },
+                    "window_binding_ref": window_binding_ref,
+                    "capture_ref": capture_ref,
+                }
+            )
+            for index, case in enumerate(case_refs)
+        ],
+    ]
+    executions = [
+        {
+            "id": f"{operation['mode']}/{operation['operation_id']}",
+            "content_sha256": operation["content_sha256"],
+        }
+        for operation in operations
+    ]
+    close_ref = seal_immutable(
+        {
+            "contract_version": "portfolio_hybrid_benchmark_v2_window_cleanup_v1",
+            "owner_id": f"owner/{screen_group}",
+            "reason": "screen_group_complete",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 10, "create_time_ns": 20},
+            "cleanup_subject_kind": "ready_window",
+            "finalization_intent_sha256": "1" * 64,
+            "process_event_sha256": "2" * 64,
+            "ready_event_sha256": "3" * 64,
+            "publication_content_sha256": "4" * 64,
+            "cleanup_status": "verified",
+            "shutdown_event_name": f"shutdown-{screen_group}",
+            "shutdown_event_signaled": True,
+            "shutdown_event_error_code": 0,
+            "shutdown_event_handle_closed": True,
+            "enum_windows_exact_hwnd_absent": True,
+            "matching_owned_windows_after": [],
+            "member_pids_after": [],
+            "stable_zero_observations": 3,
+            "scope_absent_after_owner_close": True,
+            "process_handle_closed": True,
+            "job_handle_closed": True,
+            "active_listeners_after": [],
+            "listener_or_lease_residue": [],
+            "outer_owner_python_finally_observed": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    service_stable = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_actual_operations_stable_zero_v1",
+            "operation_refs": operations,
+            "cleanup_entries": [
+                {
+                    "operation_ref_sha256": operation["content_sha256"],
+                    "terminal_receipt_ref": seal_immutable(
+                        {"kind": "terminal", "index": index}
+                    ),
+                    "worker_cleanup_ref": seal_immutable(
+                        {"kind": "worker-cleanup", "index": index}
+                    ),
+                    "provider_cleanup_ref": seal_immutable(
+                        {"kind": "provider-cleanup", "index": index}
+                    ),
+                }
+                for index, operation in enumerate(operations)
+            ],
+            "window_binding_ref": window_binding_ref,
+            "capture_ref": capture_ref,
+            "cleanup_status": "stable_zero",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    stable = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_actual_stable_zero_v1",
+            "attempt_ref": attempt,
+            "provider_group_ref": provider_group_ref,
+            "window_binding_ref": window_binding_ref,
+            "execution_refs": executions,
+            "window_close_ref": close_ref,
+            "service_stable_zero_attestation": service_stable,
+            "diagnostic_resource_counts": {
+                "service_operations": 0,
+                "windows": 0,
+                "providers": 0,
+                "listeners": 0,
+                "leases": 0,
+            },
+            "cleanup_status": "stable_zero",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    fusion, capture_bundle, omni, qwen, qwen_cleanup = _authoritative_inputs()
+    vista_requests = build_vista_requests(
+        fusion,
+        capture_bundle,
+        omni_inventory=omni,
+        qwen_bindings=qwen,
+        qwen_cleanup_receipt=qwen_cleanup,
+        expected_workflow_revision=capture_bundle["workflow_revision"],
+    )
+    shared = {
+        "screen_group_ref": provider_group_ref,
+        "hybrid_capture_bundle_ref": vista_requests[0]["authoritative_parent_refs"][
+            "capture_bundle"
+        ],
+        "window_binding_ref": window_binding_ref,
+        "capture_ref": capture_ref,
+        "owner_journal_ref": seal_immutable(
+            {"kind": "owner-journal", "screen_group": screen_group}
+        ),
+        "expected_uia_root_ref": seal_immutable(
+            {"kind": "expected-uia-root", "screen_group": screen_group}
+        ),
+    }
+    provider_sets = {
+        "qwen_only": ("qwen",),
+        "omni_only_discovery": ("omni",),
+        "omni_to_qwen": ("omni", "qwen"),
+        "omni_to_qwen_vista": ("omni", "qwen", "vista"),
+    }
+    rows = []
+    for case_index, case in enumerate(case_refs):
+        for arm_id in (
+            "qwen_only",
+            "omni_only_discovery",
+            "omni_to_qwen",
+            "omni_to_qwen_vista",
+        ):
+            rows.append(
+                {
+                    "case_ref": case,
+                    "arm_id": arm_id,
+                    "observation": {
+                        "provider_dispatch_receipt_refs": [
+                            {
+                                "provider": provider,
+                                "content_sha256": hashlib.sha256(
+                                    f"{screen_group}:{case_index}:{arm_id}:{provider}".encode()
+                                ).hexdigest(),
+                            }
+                            for provider in provider_sets[arm_id]
+                        ]
+                    },
+                    "execution_ref": (
+                        executions[case_index + 1]
+                        if arm_id == "qwen_only"
+                        else executions[0]
+                    ),
+                    "shared_parent_refs": shared,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+    pre_vista = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_actual_pre_vista_evidence_v1",
+            "provider_group_ref": provider_group_ref,
+            "omni_inventory_envelope": raw_envelope(
+                omni,
+                id_prefix="omni-inventory",
+                domain=b"benchmark-v2-omni-inventory\0",
+            ),
+            "qwen_bindings_envelope": raw_envelope(
+                qwen,
+                id_prefix="qwen-bindings",
+                domain=b"benchmark-v2-qwen-bindings\0",
+            ),
+            "fusion_result_envelope": raw_envelope(
+                fusion,
+                id_prefix="fusion-result",
+                domain=b"benchmark-v2-fusion-result\0",
+            ),
+            "submitted_vista_request_envelopes": [
+                raw_envelope(
+                    request,
+                    id_prefix="submitted-vista-request",
+                    domain=b"benchmark-v2-submitted-vista-request\0",
+                )
+                for request in vista_requests
+            ],
+            "safety": {
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            },
+        }
+    )
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_actual_screen_group_projection_v1",
+            "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            "partition": "regression",
+            "screen_group": screen_group,
+            "request_ref": request_ref,
+            "shared_parent_refs": shared,
+            "pre_vista_evidence": pre_vista,
+            "rows": rows,
+            "execution_refs": executions,
+            "window_close_ref": close_ref,
+            "lifecycle_ref": stable,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def test_s13_screen_group_lifecycle_projection_uses_unique_unicode_order() -> None:
+    attempt = _s13_attempt()
+    ids = [
+        "screen-中",
+        "screen-ä",
+        "screen-z",
+        "screen-a",
+        "screen-09",
+        "screen-10",
+        "screen-B",
+        "screen-b",
+        "screen-é",
+        "screen-Ω",
+        "screen-あ",
+        "screen-😀",
+    ]
+    raw = [_s13_screen_projection(attempt=attempt, screen_group=item) for item in ids]
+
+    projections = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=list(reversed(raw)),
+    )
+
+    assert len(projections) == 12
+    ordered_ids = [
+        item["parent_refs"]["actual_screen_group_ref"]["id"] for item in projections
+    ]
+    assert ordered_ids == sorted(ids)
+    assert len(set(ordered_ids)) == 12
+    for projection in projections:
+        assert projection["lifecycle_kind"] == "screen_group"
+        assert projection["resource_counts"] == {
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        }
+        assert projection["parent_refs"]["actual_screen_group_ref"]["id"] == projection[
+            "parent_refs"
+        ]["provider_group_ref"]["id"]
+        assert (
+            projection["parent_refs"]["actual_screen_group_ref"]["content_sha256"]
+            != projection["parent_refs"]["provider_group_ref"]["content_sha256"]
+        )
+
+
+def test_s13_screen_group_lifecycle_rejects_duplicate_and_cross_group_lineage() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    with pytest.raises(ValueError, match="12 unique"):
+        lifecycle.project_benchmark_v2_screen_group_lifecycles(
+            attempt_ref=attempt,
+            screen_group_projections=[*raw[:-1], raw[0]],
+        )
+
+    tampered = deepcopy(raw)
+    tampered[0]["pre_vista_evidence"]["provider_group_ref"] = {
+        "id": "other",
+        "content_sha256": "f" * 64,
+    }
+    tampered[0]["pre_vista_evidence"]["content_sha256"] = lifecycle.content_sha256(
+        tampered[0]["pre_vista_evidence"]
+    )
+    tampered[0]["content_sha256"] = lifecycle.content_sha256(tampered[0])
+    with pytest.raises(ValueError, match="provider group"):
+        lifecycle.project_benchmark_v2_screen_group_lifecycles(
+            attempt_ref=attempt,
+            screen_group_projections=tampered,
+        )
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "release",
+        "case_arm_multiset",
+        "qwen_capture_lineage",
+        "fusion_semantics",
+        "vista_parent_lineage",
+        "vista_cleanup_lineage",
+        "service_capture",
+        "window_close_status",
+        "attempt_lineage",
+    ),
+)
+def test_s13_screen_group_lifecycle_rejects_reminted_raw_parent_tamper(
+    fault: str,
+) -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    target = raw[0]
+
+    def remint_pre_vista_envelope(
+        field: str,
+        mutate: object,
+        *,
+        id_prefix: str,
+        domain: bytes,
+    ) -> None:
+        evidence = target["pre_vista_evidence"]
+        envelope = evidence[field]
+        if isinstance(envelope, list):
+            envelope = envelope[0]
+        decoded = json.loads(
+            base64.b64decode(envelope["canonical_bytes_b64"], validate=True)
+        )
+        assert callable(mutate)
+        mutate(decoded)
+        decoded["content_sha256"] = lifecycle.content_sha256(decoded)
+        encoded = benchmark_canonical_json_bytes(decoded)
+        envelope["canonical_bytes_b64"] = base64.b64encode(encoded).decode("ascii")
+        envelope["ref"] = {
+            "id": f"{id_prefix}/{hashlib.sha256(domain + encoded).hexdigest()}",
+            "content_sha256": hashlib.sha256(encoded).hexdigest(),
+        }
+        evidence["content_sha256"] = lifecycle.content_sha256(evidence)
+
+    def tamper_cleanup_lineage(decoded: dict[str, object]) -> None:
+        cleanup = decoded["qwen_cleanup_receipt"]
+        cleanup["cleanup_status"] = "unverified"
+        cleanup["content_sha256"] = lifecycle.content_sha256(cleanup)
+
+    if fault == "release":
+        target["benchmark_release_id"] = "other-release"
+    elif fault == "case_arm_multiset":
+        target["rows"][-1]["arm_id"] = "qwen_only"
+    elif fault == "qwen_capture_lineage":
+        remint_pre_vista_envelope(
+            "qwen_bindings_envelope",
+            lambda decoded: decoded["capture_identity"].__setitem__(
+                "capture_id", "capture/reminted-other"
+            ),
+            id_prefix="qwen-bindings",
+            domain=b"benchmark-v2-qwen-bindings\0",
+        )
+    elif fault == "fusion_semantics":
+        remint_pre_vista_envelope(
+            "fusion_result_envelope",
+            lambda decoded: decoded["candidates"][0].__setitem__(
+                "vista_eligible", False
+            ),
+            id_prefix="fusion-result",
+            domain=b"benchmark-v2-fusion-result\0",
+        )
+    elif fault == "vista_parent_lineage":
+        remint_pre_vista_envelope(
+            "submitted_vista_request_envelopes",
+            lambda decoded: decoded["authoritative_parent_refs"][
+                "qwen_bindings"
+            ].__setitem__("content_sha256", "f" * 64),
+            id_prefix="submitted-vista-request",
+            domain=b"benchmark-v2-submitted-vista-request\0",
+        )
+    elif fault == "vista_cleanup_lineage":
+        remint_pre_vista_envelope(
+            "submitted_vista_request_envelopes",
+            tamper_cleanup_lineage,
+            id_prefix="submitted-vista-request",
+            domain=b"benchmark-v2-submitted-vista-request\0",
+        )
+    elif fault == "service_capture":
+        stable = target["lifecycle_ref"]
+        service = stable["service_stable_zero_attestation"]
+        service["capture_ref"] = {
+            "id": "capture/other",
+            "content_sha256": "f" * 64,
+        }
+        service["content_sha256"] = lifecycle.content_sha256(service)
+        stable["content_sha256"] = lifecycle.content_sha256(stable)
+    elif fault == "window_close_status":
+        close = target["window_close_ref"]
+        close["cleanup_status"] = "indeterminate"
+        close["content_sha256"] = lifecycle.content_sha256(close)
+        target["lifecycle_ref"]["window_close_ref"] = close
+        target["lifecycle_ref"]["content_sha256"] = lifecycle.content_sha256(
+            target["lifecycle_ref"]
+        )
+    else:
+        target["lifecycle_ref"]["attempt_ref"] = _s13_attempt(
+            attempt_id="attempt-regression-reminted-other"
+        )
+        target["lifecycle_ref"]["content_sha256"] = lifecycle.content_sha256(
+            target["lifecycle_ref"]
+        )
+    target["content_sha256"] = lifecycle.content_sha256(target)
+
+    with pytest.raises(ValueError, match="benchmark v2"):
+        lifecycle.project_benchmark_v2_screen_group_lifecycles(
+            attempt_ref=attempt,
+            screen_group_projections=raw,
+        )
+
+
+def _s13_file_ref(*, name: str, value: dict[str, object]) -> dict[str, str]:
+    return {
+        "path": f"C:\\private\\benchmark\\{name}.json",
+        "file_sha256": hashlib.sha256(
+            canonical_json_bytes(value) + b"\n"
+        ).hexdigest(),
+        "content_sha256": str(value["content_sha256"]),
+    }
+
+
+def _s13_runner_payload(
+    *,
+    attempt: dict[str, object],
+    status: str,
+    contract_version: str,
+    output_ref: dict[str, str] | None = None,
+    cleanup_receipt_ref: dict[str, str] | None = None,
+) -> dict[str, object]:
+    body: dict[str, object] = {
+        "contract_version": contract_version,
+        "attempt_ref": attempt,
+        "attempt_dir": f"C:\\private\\benchmark\\{attempt['attempt_id']}",
+        "mode": "actual_models",
+        "provider_id": None,
+        "status": status,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    if cleanup_receipt_ref is not None:
+        body["cleanup_receipt_ref"] = cleanup_receipt_ref
+        body["resource_counts"] = {
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        }
+    else:
+        body["output_ref"] = output_ref
+    return seal_immutable(body)
+
+
+def _s13_runner_ledger(
+    *,
+    attempt: dict[str, object],
+    body: dict[str, object],
+    cleanup: dict[str, object],
+    result: dict[str, object],
+) -> list[dict[str, object]]:
+    payloads = [
+        (
+            "regression_attempt",
+            _s13_runner_payload(
+                attempt=attempt,
+                status="opened",
+                contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+            ),
+        ),
+        (
+            "regression_attempt",
+            _s13_runner_payload(
+                attempt=attempt,
+                status="body_complete",
+                contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+                output_ref=_s13_file_ref(name="body", value=body),
+            ),
+        ),
+        (
+            "cleanup",
+            _s13_runner_payload(
+                attempt=attempt,
+                status="terminal",
+                contract_version="benchmark_v2_runner_cleanup_payload_v1",
+                cleanup_receipt_ref=_s13_file_ref(name="cleanup", value=cleanup),
+            ),
+        ),
+        (
+            "result",
+            _s13_runner_payload(
+                attempt=attempt,
+                status="terminal",
+                contract_version="benchmark_v2_runner_result_payload_v1",
+                output_ref=_s13_file_ref(name="result", value=result),
+            ),
+        ),
+    ]
+    ledger: list[dict[str, object]] = []
+    previous = "0" * 64
+    for sequence, (event_type, payload) in enumerate(payloads):
+        event = {
+            "partition": "regression",
+            "sequence": sequence,
+            "event_type": event_type,
+            "previous_envelope_sha256": previous,
+            "event_payload": payload,
+        }
+        envelope = {
+            "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v2",
+            "event": event,
+            "event_sha256": hashlib.sha256(canonical_json_bytes(event)).hexdigest(),
+        }
+        ledger.append(envelope)
+        previous = hashlib.sha256(canonical_json_bytes(envelope)).hexdigest()
+    return ledger
+
+
+def _s13_runner_inputs() -> tuple[
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    dict[str, object],
+    list[dict[str, object]],
+]:
+    attempt = _s13_attempt()
+    cleanup = _s13_cleanup(attempt)
+    screen_groups = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    body = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_actual_body_v1",
+            "attempt_ref": attempt,
+            "partition": "regression",
+            "screen_group_results": screen_groups,
+            "body_status": "complete",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    provisional_result = {
+        "contract_version": "benchmark_v2_runner_actual_result_v2",
+        "attempt_ref": attempt,
+        "attempt_dir": "C:\\private\\benchmark\\attempt-regression-1",
+        "body_ref": _s13_file_ref(name="body", value=body),
+        "cleanup_receipt_ref": _s13_file_ref(name="cleanup", value=cleanup),
+        "attempt_ledger_pre_result_ref": {
+            "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
+            "id": "runner-ledger-pre-result/" + "6" * 64,
+            "attempt_ref": attempt,
+            "terminal_sequence": 2,
+            "terminal_envelope_sha256": "7" * 64,
+            "prefix_sha256": "8" * 64,
+        },
+        "screen_group_count": 12,
+        "status": "terminal",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    temporary = seal_immutable(provisional_result)
+    preliminary_ledger = _s13_runner_ledger(
+        attempt=attempt, body=body, cleanup=cleanup, result=temporary
+    )
+    raw_prefix = b"".join(
+        canonical_json_bytes(item) + b"\n" for item in preliminary_ledger[:3]
+    )
+    provisional_result["attempt_ledger_pre_result_ref"] = {
+        "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
+        "id": "runner-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-runner-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": attempt,
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": hashlib.sha256(
+            canonical_json_bytes(preliminary_ledger[2])
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+    result = seal_immutable(provisional_result)
+    ledger = _s13_runner_ledger(attempt=attempt, body=body, cleanup=cleanup, result=result)
+    return attempt, body, cleanup, result, ledger
+
+
+def test_s13_runner_event_projections_are_ordered_discriminated_and_pathless() -> None:
+    attempt, body, cleanup, result, ledger = _s13_runner_inputs()
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+
+    projections = lifecycle.project_benchmark_v2_runner_events(
+        partition="regression",
+        runner_ledger_events=ledger,
+        actual_body=body,
+        actual_result=result,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+
+    assert [item["sequence"] for item in projections] == [0, 1, 2, 3]
+    assert [item["event_kind"] for item in projections] == [
+        "opened",
+        "body_complete",
+        "cleanup",
+        "result",
+    ]
+    assert projections[0]["previous_event_projection_ref"] is None
+    for previous, current in zip(projections[:-1], projections[1:], strict=True):
+        assert current["previous_event_projection_ref"] == {
+            "id": previous["artifact_id"],
+            "content_sha256": previous["content_sha256"],
+        }
+    assert set(projections[0]["load_bearing_refs"]) == {"attempt_ref"}
+    assert set(projections[1]["load_bearing_refs"]) == {"body_file_ref"}
+    assert set(projections[2]["load_bearing_refs"]) == {
+        "cleanup_receipt_ref",
+        "cleanup_projection_ref",
+    }
+    assert set(projections[3]["load_bearing_refs"]) == {
+        "result_file_ref",
+        "attempt_ledger_pre_result_ref",
+    }
+    serialized = canonical_json_bytes(projections)
+    assert b"C:\\\\private" not in serialized
+    assert b'"path"' not in serialized
+
+
+def test_s13_runner_event_projection_rejects_hash_chain_drift() -> None:
+    attempt, body, cleanup, result, ledger = _s13_runner_inputs()
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    ledger[2]["event"]["previous_envelope_sha256"] = "f" * 64
+    ledger[2]["event_sha256"] = hashlib.sha256(
+        canonical_json_bytes(ledger[2]["event"])
+    ).hexdigest()
+    with pytest.raises(ValueError, match="hash chain"):
+        lifecycle.project_benchmark_v2_runner_events(
+            partition="regression",
+            runner_ledger_events=ledger,
+            actual_body=body,
+            actual_result=result,
+            cleanup_receipt=cleanup,
+            cleanup_projection=cleanup_projection,
+        )
+
+
+def _s13_journal_projection(
+    *,
+    attempt: dict[str, object],
+    journal: list[dict[str, object]],
+    terminal_projection: dict[str, object],
+    cleanup_projection: dict[str, object],
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+
+    raw = b"".join(canonical_json_bytes(item) + b"\n" for item in journal)
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_attempt_journal_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": {
+                "id": f"runner-attempt/{attempt['attempt_id']}",
+                "content_sha256": attempt["content_sha256"],
+            },
+            "raw_journal_sha256": hashlib.sha256(raw).hexdigest(),
+            "terminal_event_ref": {
+                "id": terminal_projection["artifact_id"],
+                "content_sha256": terminal_projection["content_sha256"],
+            },
+            "started_request_count": 0,
+            "terminal_or_unknown_request_count": 0,
+            "cleanup_projection_ref": {
+                "id": cleanup_projection["artifact_id"],
+                "content_sha256": cleanup_projection["content_sha256"],
+            },
+            "verified": True,
+            "safety": {
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "display_only": True,
+            },
+        },
+    )
+
+
+def test_s13_attempt_lifecycle_closes_journal_cleanup_terminal_and_12_screens() -> None:
+    attempt, body, cleanup, _result, _ledger = _s13_runner_inputs()
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+    terminal = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = _s13_journal_projection(
+        attempt=attempt,
+        journal=journal,
+        terminal_projection=terminal,
+        cleanup_projection=cleanup_projection,
+    )
+    screen_projections = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=body["screen_group_results"],
+    )
+
+    projection = lifecycle.project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=attempt,
+        journal_events=journal,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=cleanup_projection,
+        terminal_event_projection=terminal,
+        screen_group_lifecycle_projections=screen_projections,
+    )
+
+    assert projection["lifecycle_kind"] == "attempt"
+    assert projection["terminal_status"] == "terminal"
+    assert projection["cleanup_stable_zero"] is True
+    assert projection["started_request_count"] == 0
+    assert projection["terminal_or_unknown_request_count"] == 0
+    assert set(projection["parent_refs"]) == {
+        "attempt_journal_projection_ref",
+        "cleanup_projection_ref",
+        "terminal_event_ref",
+        "screen_group_lifecycle_projection_refs",
+    }
+    resolved_ids = [
+        item["parent_refs"]["actual_screen_group_ref"]["id"]
+        for item in screen_projections
+    ]
+    assert resolved_ids == sorted(resolved_ids)
+
+
+def test_s13_attempt_lifecycle_rejects_provider_request_events_in_frozen_v1() -> None:
+    attempt, body, cleanup, _result, _ledger = _s13_runner_inputs()
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+    request = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_attempt_resource_event_v1",
+            "sequence": 2,
+            "attempt_ref": attempt,
+            "phase": "request_in_flight",
+            "event_kind": "provider_request_in_flight",
+            "provider_id": "qwen",
+            "probe_kind": "timeout",
+            "resource_ref": seal_immutable({"kind": "request"}),
+            "predecessor_content_sha256": journal[0]["content_sha256"],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    journal[-1]["sequence"] = 3
+    journal[-1]["predecessor_content_sha256"] = request["content_sha256"]
+    journal[-1]["content_sha256"] = lifecycle.content_sha256(journal[-1])
+    journal = [journal[0], request, journal[-1]]
+    terminal = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = _s13_journal_projection(
+        attempt=attempt,
+        journal=journal,
+        terminal_projection=terminal,
+        cleanup_projection=cleanup_projection,
+    )
+    screens = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=body["screen_group_results"],
+    )
+    with pytest.raises(ValueError, match="journal chain"):
+        lifecycle.project_benchmark_v2_attempt_lifecycle(
+            attempt_ref=attempt,
+            journal_events=journal,
+            attempt_journal_projection=journal_projection,
+            cleanup_projection=cleanup_projection,
+            terminal_event_projection=terminal,
+            screen_group_lifecycle_projections=screens,
+        )
+
+
+def _s13_runner_prefix_projection(
+    *,
+    ledger: list[dict[str, object]],
+    events: list[dict[str, object]],
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+
+    raw_prefix = b"".join(canonical_json_bytes(item) + b"\n" for item in ledger)
+    selected_attempt = events[-1]["attempt_ref"]
+    selected_events = [
+        item for item in events if item["attempt_ref"] == selected_attempt
+    ]
+    by_kind = {str(item["event_kind"]): item for item in selected_events}
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+        semantic_payload={
+            "partition": "regression",
+            "raw_prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+            "attempt_ledger_pre_result_ref": events[-1]["load_bearing_refs"][
+                "attempt_ledger_pre_result_ref"
+            ],
+            "through_result_terminal_sequence": events[-1]["sequence"],
+            "through_result_terminal_envelope_sha256": hashlib.sha256(
+                canonical_json_bytes(ledger[-1])
+            ).hexdigest(),
+            "attempt_ref": selected_attempt,
+            "body_file_ref": by_kind["body_complete"]["load_bearing_refs"][
+                "body_file_ref"
+            ],
+            "cleanup_event_projection_ref": {
+                "id": by_kind["cleanup"]["artifact_id"],
+                "content_sha256": by_kind["cleanup"]["content_sha256"],
+            },
+            "result_file_ref": by_kind["result"]["load_bearing_refs"][
+                "result_file_ref"
+            ],
+            "result_event_projection_ref": {
+                "id": by_kind["result"]["artifact_id"],
+                "content_sha256": by_kind["result"]["content_sha256"],
+            },
+            "verified": True,
+            "safety": {
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "display_only": True,
+            },
+        },
+    )
+
+
+def _s13_complete_graph() -> dict[str, object]:
+    attempt, body, cleanup, result, ledger = _s13_runner_inputs()
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+    terminal = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = _s13_journal_projection(
+        attempt=attempt,
+        journal=journal,
+        terminal_projection=terminal,
+        cleanup_projection=cleanup_projection,
+    )
+    screens = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=body["screen_group_results"],
+    )
+    attempt_lifecycle = lifecycle.project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=attempt,
+        journal_events=journal,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=cleanup_projection,
+        terminal_event_projection=terminal,
+        screen_group_lifecycle_projections=screens,
+    )
+    events = lifecycle.project_benchmark_v2_runner_events(
+        partition="regression",
+        runner_ledger_events=ledger,
+        actual_body=body,
+        actual_result=result,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    prefix = _s13_runner_prefix_projection(ledger=ledger, events=events)
+    return {
+        "attempt": attempt,
+        "body": body,
+        "cleanup": cleanup,
+        "result": result,
+        "ledger": ledger,
+        "cleanup_projection": cleanup_projection,
+        "journal": journal,
+        "terminal": terminal,
+        "journal_projection": journal_projection,
+        "screens": screens,
+        "attempt_lifecycle": attempt_lifecycle,
+        "events": events,
+        "prefix": prefix,
+    }
+
+
+def test_s13_projected_attempt_ledger_selects_first_complete_actual_attempt() -> None:
+    graph = _s13_complete_graph()
+    projected = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=graph["ledger"],
+        runner_event_projections=graph["events"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+    )
+
+    assert projected["contract_version"] == "benchmark_v2_projected_attempt_ledger_v1"
+    assert projected["entries"] == [
+        {
+            "sequence": 0,
+            "attempt_ref": graph["events"][0]["attempt_ref"],
+            "observed_state": "result",
+            "event_projection_refs": [
+                {"id": item["artifact_id"], "content_sha256": item["content_sha256"]}
+                for item in graph["events"]
+            ],
+            "lifecycle_ref": {
+                "id": graph["attempt_lifecycle"]["artifact_id"],
+                "content_sha256": graph["attempt_lifecycle"]["content_sha256"],
+            },
+            "selection_eligible": True,
+        }
+    ]
+    assert projected["selected_attempt_ref"] == graph["events"][0]["attempt_ref"]
+
+
+def test_s13_projected_attempt_ledger_rejects_reordered_projected_events() -> None:
+    graph = _s13_complete_graph()
+    reordered = deepcopy(graph["events"])
+    reordered[1], reordered[2] = reordered[2], reordered[1]
+    with pytest.raises(ValueError, match="event projection order"):
+        lifecycle.project_benchmark_v2_attempt_ledger(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            partition="regression",
+            runner_ledger_events=graph["ledger"],
+            runner_event_projections=reordered,
+            raw_ledger_prefix_projection=graph["prefix"],
+            attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+        )
+
+
+def test_s13_lifecycle_bundle_v3_is_exact_ranked_closed_and_pathless() -> None:
+    import json
+
+    graph = _s13_complete_graph()
+    ledger = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=graph["ledger"],
+        runner_event_projections=graph["events"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+    )
+    bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        attempt_ref=graph["attempt"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        projected_attempt_ledger=ledger,
+        selected_attempt_lifecycle_projection=graph["attempt_lifecycle"],
+        cleanup_lifecycle_projection=graph["cleanup_projection"],
+        journal_terminal_event_projection=graph["terminal"],
+        attempt_journal_projection=graph["journal_projection"],
+        screen_group_lifecycle_projections=graph["screens"],
+        runner_event_projections=graph["events"],
+        cleanup_receipt=graph["cleanup"],
+    )
+
+    decoded = [
+        json.loads(base64.b64decode(item["canonical_bytes_b64"]).decode("utf-8"))
+        for item in bundle["sealed_artifact_envelopes"]
+    ]
+    assert [item["lifecycle_kind"] for item in decoded[:12]] == [
+        "screen_group"
+    ] * 12
+    assert decoded[12]["lifecycle_kind"] == "cleanup"
+    assert decoded[13]["contract_version"] == (
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1"
+    )
+    assert decoded[14]["lifecycle_kind"] == "attempt"
+    assert [item["event_kind"] for item in decoded[15:19]] == [
+        "opened",
+        "body_complete",
+        "cleanup",
+        "result",
+    ]
+    assert decoded[19]["contract_version"] == "benchmark_v2_projected_attempt_ledger_v1"
+    assert bundle["screen_group_lifecycle_projection_refs"] == [
+        {"id": item["artifact_id"], "content_sha256": item["content_sha256"]}
+        for item in graph["screens"]
+    ]
+    serialized = canonical_json_bytes(bundle)
+    assert b'"path"' not in serialized
+    assert b"C:\\\\private" not in serialized
+    assert b"benchmark_v2_actual_runner_finished" not in serialized
+
+
+def test_s13_lifecycle_bundle_v3_rejects_missing_screen_and_orphan_envelope() -> None:
+    graph = _s13_complete_graph()
+    ledger = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=graph["ledger"],
+        runner_event_projections=graph["events"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+    )
+    with pytest.raises(ValueError, match="12 screen-group"):
+        lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            partition="regression",
+            attempt_ref=graph["attempt"],
+            raw_ledger_prefix_projection=graph["prefix"],
+            projected_attempt_ledger=ledger,
+            selected_attempt_lifecycle_projection=graph["attempt_lifecycle"],
+            cleanup_lifecycle_projection=graph["cleanup_projection"],
+            journal_terminal_event_projection=graph["terminal"],
+            attempt_journal_projection=graph["journal_projection"],
+            screen_group_lifecycle_projections=graph["screens"][:-1],
+            runner_event_projections=graph["events"],
+            cleanup_receipt=graph["cleanup"],
+        )
+
+
+def _s13_append_runner_event(
+    ledger: list[dict[str, object]],
+    *,
+    event_type: str,
+    payload: dict[str, object],
+) -> None:
+    previous = (
+        hashlib.sha256(canonical_json_bytes(ledger[-1])).hexdigest()
+        if ledger
+        else "0" * 64
+    )
+    event = {
+        "partition": "regression",
+        "sequence": len(ledger),
+        "event_type": event_type,
+        "previous_envelope_sha256": previous,
+        "event_payload": payload,
+    }
+    ledger.append(
+        {
+            "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v2",
+            "event": event,
+            "event_sha256": hashlib.sha256(canonical_json_bytes(event)).hexdigest(),
+        }
+    )
+
+
+def _s13_complete_attempt_artifacts(
+    ledger: list[dict[str, object]], *, attempt_id: str
+) -> dict[str, object]:
+    attempt = _s13_attempt(attempt_id=attempt_id)
+    cleanup = _s13_cleanup(attempt)
+    body = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_actual_body_v1",
+            "attempt_ref": attempt,
+            "partition": "regression",
+            "screen_group_results": [
+                _s13_screen_projection(
+                    attempt=attempt, screen_group=f"{attempt_id}-screen-{index:02d}"
+                )
+                for index in range(12)
+            ],
+            "body_status": "complete",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="opened",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+        ),
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="body_complete",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+            output_ref=_s13_file_ref(name=f"{attempt_id}-body", value=body),
+        ),
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="cleanup",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="terminal",
+            contract_version="benchmark_v2_runner_cleanup_payload_v1",
+            cleanup_receipt_ref=_s13_file_ref(
+                name=f"{attempt_id}-cleanup", value=cleanup
+            ),
+        ),
+    )
+    raw_prefix = b"".join(canonical_json_bytes(item) + b"\n" for item in ledger)
+    cleanup_event = ledger[-1]
+    pre_result_ref = {
+        "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
+        "id": "runner-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-runner-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": attempt,
+        "terminal_sequence": cleanup_event["event"]["sequence"],
+        "terminal_envelope_sha256": hashlib.sha256(
+            canonical_json_bytes(cleanup_event)
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+    result = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_actual_result_v2",
+            "attempt_ref": attempt,
+            "attempt_dir": f"C:\\private\\benchmark\\{attempt_id}",
+            "body_ref": _s13_file_ref(name=f"{attempt_id}-body", value=body),
+            "cleanup_receipt_ref": _s13_file_ref(
+                name=f"{attempt_id}-cleanup", value=cleanup
+            ),
+            "attempt_ledger_pre_result_ref": pre_result_ref,
+            "screen_group_count": 12,
+            "status": "terminal",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="result",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="terminal",
+            contract_version="benchmark_v2_runner_result_payload_v1",
+            output_ref=_s13_file_ref(name=f"{attempt_id}-result", value=result),
+        ),
+    )
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+    terminal = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = _s13_journal_projection(
+        attempt=attempt,
+        journal=journal,
+        terminal_projection=terminal,
+        cleanup_projection=cleanup_projection,
+    )
+    screens = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=body["screen_group_results"],
+    )
+    attempt_lifecycle = lifecycle.project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=attempt,
+        journal_events=journal,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=cleanup_projection,
+        terminal_event_projection=terminal,
+        screen_group_lifecycle_projections=screens,
+    )
+    return {
+        "attempt": attempt,
+        "body": body,
+        "cleanup": cleanup,
+        "result": result,
+        "cleanup_projection": cleanup_projection,
+        "terminal": terminal,
+        "journal_projection": journal_projection,
+        "screens": screens,
+        "attempt_lifecycle": attempt_lifecycle,
+    }
+
+
+def _s13_project_multi_attempt_events(
+    *, ledger: list[dict[str, object]], complete: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    return lifecycle.project_benchmark_v2_runner_events(
+        partition="regression",
+        runner_ledger_events=ledger,
+        actual_body=[item["body"] for item in complete],
+        actual_result=[item["result"] for item in complete],
+        cleanup_receipt=[item["cleanup"] for item in complete],
+        cleanup_projection=[item["cleanup_projection"] for item in complete],
+    )
+
+
+def test_s13_projected_ledger_keeps_prior_incomplete_attempt_before_later_complete() -> None:
+    ledger: list[dict[str, object]] = []
+    incomplete = _s13_attempt(attempt_id="attempt-regression-incomplete")
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=incomplete,
+            status="opened",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+        ),
+    )
+    complete = _s13_complete_attempt_artifacts(
+        ledger, attempt_id="attempt-regression-complete"
+    )
+    events = _s13_project_multi_attempt_events(ledger=ledger, complete=[complete])
+    prefix = _s13_runner_prefix_projection(ledger=ledger, events=events)
+
+    projected = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=ledger,
+        runner_event_projections=events,
+        raw_ledger_prefix_projection=prefix,
+        attempt_lifecycle_projections=[complete["attempt_lifecycle"]],
+    )
+
+    assert [item["observed_state"] for item in projected["entries"]] == [
+        "opened",
+        "result",
+    ]
+    assert [item["selection_eligible"] for item in projected["entries"]] == [
+        False,
+        True,
+    ]
+    assert projected["selected_attempt_ref"] == events[1]["attempt_ref"]
+    assert [item["sequence"] for item in events] == [0, 1, 2, 3, 4]
+    bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        attempt_ref=complete["attempt"],
+        raw_ledger_prefix_projection=prefix,
+        projected_attempt_ledger=projected,
+        selected_attempt_lifecycle_projection=complete["attempt_lifecycle"],
+        cleanup_lifecycle_projection=complete["cleanup_projection"],
+        journal_terminal_event_projection=complete["terminal"],
+        attempt_journal_projection=complete["journal_projection"],
+        screen_group_lifecycle_projections=complete["screens"],
+        runner_event_projections=events,
+        cleanup_receipt=complete["cleanup"],
+    )
+    decoded = [
+        json.loads(base64.b64decode(item["canonical_bytes_b64"]).decode("utf-8"))
+        for item in bundle["sealed_artifact_envelopes"]
+    ]
+    assert [item["event_kind"] for item in decoded[15:20]] == [
+        "opened",
+        "opened",
+        "body_complete",
+        "cleanup",
+        "result",
+    ]
+    assert decoded[20]["contract_version"] == "benchmark_v2_projected_attempt_ledger_v1"
+
+
+def test_s13_bundle_closes_prior_cleaned_incomplete_attempt_before_selected_complete() -> None:
+    incomplete = _s13_complete_attempt_artifacts(
+        [], attempt_id="attempt-regression-cleaned-incomplete"
+    )
+    ledger: list[dict[str, object]] = []
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=incomplete["attempt"],
+            status="opened",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+        ),
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=incomplete["attempt"],
+            status="body_complete",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+            output_ref=_s13_file_ref(
+                name="cleaned-incomplete-body", value=incomplete["body"]
+            ),
+        ),
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="cleanup",
+        payload=_s13_runner_payload(
+            attempt=incomplete["attempt"],
+            status="terminal",
+            contract_version="benchmark_v2_runner_cleanup_payload_v1",
+            cleanup_receipt_ref=_s13_file_ref(
+                name="cleaned-incomplete-cleanup", value=incomplete["cleanup"]
+            ),
+        ),
+    )
+    complete = _s13_complete_attempt_artifacts(
+        ledger, attempt_id="attempt-regression-selected-after-cleanup"
+    )
+    events = lifecycle.project_benchmark_v2_runner_events(
+        partition="regression",
+        runner_ledger_events=ledger,
+        actual_body=[incomplete["body"], complete["body"]],
+        actual_result=[complete["result"]],
+        cleanup_receipt=[incomplete["cleanup"], complete["cleanup"]],
+        cleanup_projection=[
+            incomplete["cleanup_projection"],
+            complete["cleanup_projection"],
+        ],
+    )
+    prefix = _s13_runner_prefix_projection(ledger=ledger, events=events)
+    projected = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=ledger,
+        runner_event_projections=events,
+        raw_ledger_prefix_projection=prefix,
+        attempt_lifecycle_projections=[complete["attempt_lifecycle"]],
+    )
+
+    assert [item["observed_state"] for item in projected["entries"]] == [
+        "cleanup",
+        "result",
+    ]
+    assert [item["selection_eligible"] for item in projected["entries"]] == [
+        False,
+        True,
+    ]
+    bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        attempt_ref=complete["attempt"],
+        raw_ledger_prefix_projection=prefix,
+        projected_attempt_ledger=projected,
+        selected_attempt_lifecycle_projection=complete["attempt_lifecycle"],
+        cleanup_lifecycle_projection=complete["cleanup_projection"],
+        cleanup_lifecycle_projections=[
+            incomplete["cleanup_projection"],
+            complete["cleanup_projection"],
+        ],
+        journal_terminal_event_projection=complete["terminal"],
+        attempt_journal_projection=complete["journal_projection"],
+        screen_group_lifecycle_projections=complete["screens"],
+        runner_event_projections=events,
+        cleanup_receipt=complete["cleanup"],
+    )
+    decoded = [
+        json.loads(base64.b64decode(item["canonical_bytes_b64"]).decode("utf-8"))
+        for item in bundle["sealed_artifact_envelopes"]
+    ]
+    cleanup_items = [
+        item
+        for item in decoded
+        if item.get("contract_version")
+        == "benchmark_v2_lifecycle_verified_projection_v1"
+        and item.get("lifecycle_kind") == "cleanup"
+    ]
+    assert len(cleanup_items) == 2
+    assert [item["attempt_ref"] for item in cleanup_items] == [
+        events[0]["attempt_ref"],
+        events[3]["attempt_ref"],
+    ]
+
+
+def test_s13_two_complete_attempts_select_first_open_and_do_not_publish_later_suffix() -> None:
+    ledger: list[dict[str, object]] = []
+    first = _s13_complete_attempt_artifacts(
+        ledger, attempt_id="attempt-regression-first"
+    )
+    second = _s13_complete_attempt_artifacts(
+        ledger, attempt_id="attempt-regression-second"
+    )
+    events = _s13_project_multi_attempt_events(
+        ledger=ledger, complete=[first, second]
+    )
+    selected_prefix = ledger[:4]
+    prefix = _s13_runner_prefix_projection(
+        ledger=selected_prefix, events=events[:4]
+    )
+
+    projected = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=ledger,
+        runner_event_projections=events,
+        raw_ledger_prefix_projection=prefix,
+        attempt_lifecycle_projections=[
+            second["attempt_lifecycle"],
+            first["attempt_lifecycle"],
+        ],
+    )
+
+    assert len(events) == 8
+    assert len(projected["entries"]) == 1
+    assert projected["selected_attempt_ref"] == events[0]["attempt_ref"]
+    assert projected["entries"][0]["event_projection_refs"] == [
+        {"id": item["artifact_id"], "content_sha256": item["content_sha256"]}
+        for item in events[:4]
+    ]
+    bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        attempt_ref=first["attempt"],
+        raw_ledger_prefix_projection=prefix,
+        projected_attempt_ledger=projected,
+        selected_attempt_lifecycle_projection=first["attempt_lifecycle"],
+        cleanup_lifecycle_projection=first["cleanup_projection"],
+        journal_terminal_event_projection=first["terminal"],
+        attempt_journal_projection=first["journal_projection"],
+        screen_group_lifecycle_projections=first["screens"],
+        runner_event_projections=events,
+        cleanup_receipt=first["cleanup"],
+    )
+    decoded = [
+        json.loads(base64.b64decode(item["canonical_bytes_b64"]).decode("utf-8"))
+        for item in bundle["sealed_artifact_envelopes"]
+    ]
+    assert [item["event_kind"] for item in decoded[15:19]] == [
+        "opened",
+        "body_complete",
+        "cleanup",
+        "result",
+    ]
+    assert len(decoded) == 20

@@ -271,14 +271,14 @@ Lifecycle-bundle-v3 uses exactly these ranks:
 
 ```text
 1  exactly 12 screen-group lifecycle projections
-2  exactly one cleanup lifecycle projection
+2  one or more cleanup lifecycle projections: exactly one for every cleanup runner event in the immutable prefix, ordered by that attempt's first-open position
 3  exactly one attempt-journal terminal-event projection
 4  exactly one selected attempt lifecycle projection
 5  runner-event projections through selected result, by ledger sequence
 6  exactly one benchmark_v2_projected_attempt_ledger_v1
 ```
 
-The runner-event envelopes must have identical refs, canonical bytes, and order across both v3 bundles; the projected-ledger envelope must also be byte-identical. Verified-parent projections are not copied into either v3 list. Every internal child ref resolves exactly once, every envelope is reachable from a declared v3 root, and no missing child, orphan, duplicate, extra class, reminted copy, or child reference to an outer v3/accepted root is allowed.
+The bundle's singular `attempt_cleanup_projection_ref` identifies only the selected attempt's cleanup projection. Earlier attempts that reached cleanup but not result remain ineligible, but their cleanup runner events must resolve to their own additional cleanup lifecycle projections in rank 2. No prior cleanup may be substituted for the selected cleanup, and every cleanup event in the published prefix has exactly one same-attempt cleanup projection. The runner-event envelopes must have identical refs, canonical bytes, and order across both v3 bundles; the projected-ledger envelope must also be byte-identical. Verified-parent projections are not copied into either v3 list. Every internal child ref resolves exactly once, every envelope is reachable from a declared v3 root, and no missing child, orphan, duplicate, extra class, reminted copy, or child reference to an outer v3/accepted root is allowed.
 
 Create shared `app/learn/hybrid/benchmark_v2_pathless.py`; S1-S4 producers and scorer validators must use it rather than local generic `artifact_ref` or hash-only fallbacks. Freeze its public API:
 
@@ -303,7 +303,7 @@ The graph closes without a hash cycle as follows:
 1. Validate all local raw bytes, fixed paths, hashes, aliases, runner events through cleanup/result, and attempt journals; recompute `attempt_ledger_pre_result_ref` and require exact equality with raw `actual_result_v2`.
 2. Derive class-specific raw refs, including the one opaque cleanup receipt ref, only from canonical bytes that passed their raw validator.
 3. Build and order the 12 screen-group lifecycle projections.
-4. Build the cleanup lifecycle projection with the opaque receipt ref as its only parent and no event/journal back-edge.
+4. Build every cleanup lifecycle projection in the immutable prefix, in attempt first-open order, each with its own opaque receipt ref as the only parent and no event/journal back-edge; separately identify the selected attempt's cleanup ref.
 5. Build the attempt-journal terminal-event projection.
 6. Build the generic journal verified-parent projection that refers to that terminal event.
 7. Build the selected attempt lifecycle projection from the journal, cleanup, terminal event, and exact ordered 12-screen list; it does not refer to a projected ledger or outer bundle.
