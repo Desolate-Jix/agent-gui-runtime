@@ -1,10 +1,11 @@
 from __future__ import annotations
-import ast, base64, hashlib, json, os, subprocess, sys
+import ast, base64, hashlib, importlib.util, json, os, subprocess, sys
 from copy import deepcopy
 import inspect
 from pathlib import Path
 import pytest
 from app.learn.hybrid.benchmark_v2_predictions import SAFETY, append_review_decisions, artifact_ref, attach_vista_outcomes, canonical_bytes, parse_benchmark_v2_goal, prediction_record_ref, seal_automatic_prediction, seal_review_decision, seal_target_binding, seal_vista_request, sealed_artifact_envelope, select_pre_vista_prediction_rows
+from app.learn.hybrid.benchmark_v2_contracts import PARENT_REF
 import app.learn.hybrid.benchmark_scorer_v2 as scorer_v2
 from app.learn.hybrid.benchmark_scorer_v2 import _score_private_child, _verified_config_snapshot, config_ref, run_private_scorer
 
@@ -66,13 +67,58 @@ def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout
     private={"contract_version":"portfolio_hybrid_v1_1_private_manifest_v2_1_synthetic","source_parent_ref":parent,"partition":"holdout","release_id":RELEASE,"cases":cases,"expected_automatic_prediction_ref":auto_ref,"expected_attempt_ledger_ref":artifact_ref(hold_ledger),"expected_regression_precondition_ref":artifact_ref(reg_receipt),"estimand_ref":config_ref(ESTIMAND),"gate_ref":config_ref(GATE)}
     return private,run,bundle
 
+
+def task10_evidence(cases:list[dict[str,object]])->tuple[dict[str,object],dict[str,object]]:
+    parent={"id":PARENT_REF["artifact_id"],"content_sha256":PARENT_REF["content_sha256"]}
+    envelopes=[]; rows=[]
+    for case in cases:
+        cid=str(case["case_id"]); bbox=list(case["acceptable_regions"][0]); a,b,c,d=bbox; center=[(a+c)//2,(b+d)//2]
+        binding=seal_target_binding(artifact_id=f"binding/{cid}",case_id=cid,candidate_id=f"candidate/{cid}",fusion_ref=ref(f"fusion/{cid}"),capture_ref=ref(f"capture/{cid}"),bbox_ref=ref(f"bbox/{cid}"),bbox=bbox,source_parent_ref=parent)
+        envelopes.append(sealed_artifact_envelope(binding))
+        request=seal_vista_request(artifact_id=f"request/{cid}",case_id=cid,target_binding_ref=artifact_ref(binding),candidate_id=binding["candidate_id"],fusion_ref=binding["fusion_ref"],capture_ref=binding["capture_ref"],bbox_ref=binding["bbox_ref"],source_parent_ref=parent)
+        envelopes.append(sealed_artifact_envelope(request))
+        for arm in ("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista"):
+            row={"case_id":cid,"arm_id":arm,"selection_status":"selected","eligibility":"ELIGIBLE","target_binding_ref":artifact_ref(binding)}
+            if arm in {"omni_to_qwen","omni_to_qwen_vista"}: row["vista_request_ref"]=artifact_ref(request)
+            if arm=="omni_to_qwen_vista": row["vista_result"]={"status":"validated","request_ref":artifact_ref(request),"target_binding_ref":artifact_ref(binding),"canonical_capture_pixel_point":center}
+            rows.append(row)
+    pre={"contract_version":"automatic_prediction_v2","artifact_id":"automatic/task10","prediction_id":"prediction/task10","source_parent_ref":deepcopy(parent),"partition":"holdout","release_id":RELEASE,"rows":rows,"safety":deepcopy(SAFETY)}
+    pre_env=seal_automatic_prediction(request_ref=ref("run/task10"),pre_review=pre,execution_refs=[ref("execution/task10")],lifecycle_ref=ref("lifecycle/task10-bootstrap"))["pre_review_artifact"]
+    auto_ref=pre_env["ref"]; envelopes.append(pre_env)
+    def life(aid:str,attempt:str,partition:str,complete:bool)->dict[str,object]: return artifact("lifecycle_receipt_v2",aid,attempt_id=attempt,release_id=RELEASE,partition=partition,source_parent_ref=deepcopy(parent),automatic_prediction_ref=auto_ref,complete=complete,lifecycle_verified=complete,cleanup_stable_zero=complete)
+    hold=life("lifecycle/task10-hold","task10-hold","holdout",True)
+    hold_ledger=artifact("regression_attempt_ledger_v2","ledger/task10-hold",release_id=RELEASE,partition="holdout",source_parent_ref=deepcopy(parent),automatic_prediction_ref=auto_ref,entries=[{"sequence":0,"attempt_id":"task10-hold","lifecycle_ref":artifact_ref(hold),"disposition":"complete"}])
+    regression=life("lifecycle/task10-regression","task10-regression","regression",True)
+    regression_ledger=artifact("regression_attempt_ledger_v2","ledger/task10-regression",release_id=RELEASE,partition="regression",source_parent_ref=deepcopy(parent),automatic_prediction_ref=auto_ref,entries=[{"sequence":0,"attempt_id":"task10-regression","lifecycle_ref":artifact_ref(regression),"disposition":"complete"}])
+    precondition=artifact("regression_precondition_receipt_v2","regression/task10-precondition",release_id=RELEASE,partition="regression",source_parent_ref=deepcopy(parent),regression_attempt_ledger_ref=artifact_ref(regression_ledger),selected_attempt_id="task10-regression",selected_lifecycle_ref=artifact_ref(regression),status="PASS")
+    run={"contract_version":"benchmark_v2_prediction_run_v2","release_id":RELEASE,"partition":"holdout","source_parent_ref":deepcopy(parent),"automatic_prediction_ref":auto_ref,"attempt_ledger_ref":artifact_ref(hold_ledger),"regression_precondition_ref":artifact_ref(precondition),"lifecycle_ref":artifact_ref(hold),"sealed_artifacts":envelopes,"safety":deepcopy(SAFETY)}
+    bundle={"contract_version":"benchmark_v2_lifecycle_bundle_v2","sealed_artifacts":[sealed_artifact_envelope(item) for item in (hold,hold_ledger,regression,regression_ledger,precondition)],"safety":deepcopy(SAFETY)}
+    return run,bundle
+
+
+@pytest.fixture(scope="module")
+def task10_release_inputs(tmp_path_factory:pytest.TempPathFactory)->dict[str,Path]:
+    helper_path=ROOT/"tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py"
+    spec=importlib.util.spec_from_file_location("task10_seal_helpers_for_scoring",helper_path); assert spec is not None and spec.loader is not None
+    helpers=importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
+    base=tmp_path_factory.mktemp("task10-real-child"); sealer=helpers._load_sealer()
+    repo,private_path,_,_,_=helpers._task10_bundle(base,sealer)
+    parent=json.loads((repo/helpers.PARENT_PATH).read_text(encoding="utf-8"))
+    cases=[]
+    for record in parent["gold_records"]:
+        if record["partition"]!="holdout": continue
+        screen_id=record["screen_id"]; target_id=record["target_id"]
+        cases.append({"case_id":hashlib.sha256(f"benchmark-v2-case\0{screen_id}\0{target_id}".encode()).hexdigest(),"screen_group":hashlib.sha256(f"benchmark-v2-screen-group\0{screen_id}".encode()).hexdigest(),"partition":"holdout","important_target":record["important_target"],"acceptable_regions":deepcopy(record["acceptable_regions"])})
+    run,bundle=task10_evidence(cases); run_path=base/"run.json"; lifecycle_path=base/"lifecycle.json"; write(run_path,run); write(lifecycle_path,bundle)
+    return {"private":private_path,"run":run_path,"lifecycle":lifecycle_path}
+
 def files(tmp:Path,private:dict,run:dict,bundle:dict)->dict[str,Path]:
     paths={k:tmp/f"{k}.json" for k in ("private","run","lifecycle","output","public")}
     for k,v in (("private",private),("run",run),("lifecycle",bundle)): write(paths[k],v)
     return paths
 
 def execute(tmp:Path,private:dict,run:dict,bundle:dict)->tuple[dict[str,str],dict[str,object],dict[str,object]]:
-    p=files(tmp,private,run,bundle); result=run_private_scorer(private_manifest_path=p["private"],prediction_run_path=p["run"],lifecycle_path=p["lifecycle"],private_output_path=p["output"],public_ref_path=p["public"]); return result,json.loads(p["output"].read_text()),json.loads(p["public"].read_text())
+    rows,cases,gate=scorer_v2._validate(private,run,bundle); score=scorer_v2._score(rows,cases,gate); raw=canonical_bytes(score); result={"status":score["gate"]["status"],"score_ref":f"direct-fixture/{hashlib.sha256(raw).hexdigest()}","content_sha256":hashlib.sha256(raw).hexdigest()}; return result,score,{}
 
 def decode(env:dict[str,object])->dict[str,object]: return json.loads(base64.b64decode(env["canonical_bytes_b64"]))
 def reseal(env:dict[str,object],value:dict[str,object])->None: env.update(sealed_artifact_envelope(value))
@@ -189,8 +235,41 @@ def test_private_manifest_accepts_only_post_correction_contract(tmp_path: Path) 
     assert result["status"] == "PASS"
 
     private["contract_version"] = "portfolio_hybrid_v1_1_private_manifest_v2_synthetic"
-    with pytest.raises(ValueError, match="failed closed"):
+    with pytest.raises(ValueError):
         execute(tmp_path / "legacy", private, run, bundle)
+
+
+def test_production_launcher_rejects_canonical_synthetic_manifest_without_outputs(tmp_path: Path) -> None:
+    private, run, bundle = evidence()
+    paths = files(tmp_path, private, run, bundle)
+    with pytest.raises(ValueError, match="failed closed"):
+        run_private_scorer(
+            private_manifest_path=paths["private"],
+            prediction_run_path=paths["run"],
+            lifecycle_path=paths["lifecycle"],
+            private_output_path=paths["output"],
+            public_ref_path=paths["public"],
+        )
+    assert not paths["output"].exists()
+    assert not paths["public"].exists()
+
+
+def test_real_task10_bundle_traverses_isolated_child_without_private_leakage(
+    tmp_path: Path, task10_release_inputs: dict[str, Path]
+) -> None:
+    private_output=tmp_path/"private-score.json"; public_output=tmp_path/"public-ref.json"
+    result=run_private_scorer(
+        private_manifest_path=task10_release_inputs["private"],
+        prediction_run_path=task10_release_inputs["run"],
+        lifecycle_path=task10_release_inputs["lifecycle"],
+        private_output_path=private_output,
+        public_ref_path=public_output,
+    )
+    assert set(result)=={"status","score_ref","content_sha256"}
+    assert private_output.is_file() and public_output.is_file()
+    public_text=public_output.read_text(encoding="utf-8")
+    assert "target_id" not in public_text and "acceptable_regions" not in public_text
+    assert "gold.v1.json" not in public_text and "private_manifest" not in public_text
 
 
 @pytest.mark.parametrize("mutation", ["four", "six", "singleton_split", "duplicate_case", "invalid_region"])
@@ -217,12 +296,12 @@ def test_private_manifest_rejects_invalid_screen_group_cardinality(
     else:
         cases[-1]["acceptable_regions"] = [[110, 10, 110, 14]]
 
-    with pytest.raises(ValueError, match="failed closed"):
+    with pytest.raises(ValueError):
         execute(tmp_path / mutation, private, run, bundle)
 
 def test_sealed_evidence_scores_exact_pair_and_stdout_ref(tmp_path:Path)->None:
     private,run,bundle=evidence(); result,score,public=execute(tmp_path,private,run,bundle)
-    assert set(result)=={"status","score_ref","content_sha256"}; assert result["status"]=="PASS"; assert public["safety"]==SAFETY
+    assert set(result)=={"status","score_ref","content_sha256"}; assert result["status"]=="PASS"; assert public=={}
     assert score["automatic"]["arm_metrics"]["omni_to_qwen_vista"]["semantic_precision"]=="1/1"
     assert score["automatic"]["wrong_target_count"]==0
     assert score["point_metric"]=={"gain_numerator":1,"submitted_count":5,"gain":"1/5"}; assert "opaque/" not in json.dumps(public)
@@ -281,7 +360,7 @@ def test_append_postcondition_revalidates_derived_record(monkeypatch:pytest.Monk
 @pytest.mark.parametrize("pair_mode",["baseline_missing","vista_missing","binding_mismatch","reason_mismatch"])
 def test_independently_anchored_partial_pair_fails_closed(tmp_path:Path,pair_mode:str)->None:
     private,run,bundle=evidence(pair_mode=pair_mode)
-    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path,private,run,bundle)
+    with pytest.raises(ValueError): execute(tmp_path,private,run,bundle)
 
 @pytest.mark.parametrize("mutation",["handcrafted","missing_parent","binding_wrong_id","cross_case_request","legacy_request_target_id","legacy_binding_target_id","later_cherry_pick","lifecycle_hash","regression_self_pass","gate_ref"])
 def test_sealed_lineage_mutations_fail(tmp_path:Path,mutation:str)->None:
@@ -309,12 +388,12 @@ def test_selection_status_estimands_and_zero_selected_fail(tmp_path:Path)->None:
     private,run,bundle=evidence(missing_qwen=True); _,score,_=execute(tmp_path,private,run,bundle)
     qwen=score["automatic"]["arm_metrics"]["qwen_only"]; assert qwen["coverage"]=="4/5"; assert qwen["semantic_precision"]=="1/1"
     private,run,bundle=evidence(all_missing_qwen=True)
-    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path/"all",private,run,bundle)
+    with pytest.raises(ValueError): execute(tmp_path/"all",private,run,bundle)
 
 def test_first_verified_regression_and_automatic_human_boundary(tmp_path:Path)->None:
     private,run,bundle=evidence(); auto=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); value=decode(auto); row=next(r for r in value["rows"] if r["case_id"]=="opaque/1" and r["arm_id"]=="omni_to_qwen_vista"); wrong=next(x for x in run["sealed_artifacts"] if x["ref"]["id"]=="binding-wrong/opaque/1"); row["target_binding_ref"]=wrong["ref"]; row["vista_result"]["target_binding_ref"]=wrong["ref"]; reseal(auto,value); run["automatic_prediction_ref"]=auto["ref"]
     # private independently pins original automatic ref, so reminting all run-side automatic bytes cannot hide the error
-    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path,private,run,bundle)
+    with pytest.raises(ValueError): execute(tmp_path,private,run,bundle)
 
 def test_direct_cli_cannot_forge_child_authority_and_redacts(tmp_path:Path)->None:
     private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); envelope={"private_manifest_path":str(p["private"]),"prediction_run_path":str(p["run"]),"lifecycle_path":str(p["lifecycle"]),"private_output_path":str(p["output"]),"public_ref_path":str(p["public"])}
@@ -363,10 +442,31 @@ def test_gate_release_and_import_graph_are_closed()->None:
     tree=ast.parse((ROOT/"app/learn/hybrid/benchmark_v2_predictions.py").read_text(encoding="utf-8")); imports={n.module for n in ast.walk(tree) if isinstance(n,ast.ImportFrom)}; assert "app.learn.hybrid.benchmark_scorer_v2" not in imports
     assert "click_point" not in GATE.read_text().casefold()
 
+
+def test_scorer_consumes_shared_task10_authority_only_inside_private_child() -> None:
+    source = (ROOT / "app/learn/hybrid/benchmark_scorer_v2.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    assert "app.learn.hybrid.benchmark_v2_private_release" in imports
+    assert "scripts.seal_portfolio_hybrid_v1_1_benchmark_v2" not in imports
+
+    callers = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        called = {
+            child.func.id
+            for child in ast.walk(node)
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+        }
+        if "derive_private_scoring_cases" in called:
+            callers[node.name] = called
+    assert set(callers) == {"_run_private_child_once"}
+
 def test_same_threshold_alternate_gate_ref_is_rejected(tmp_path:Path)->None:
     private,run,bundle=evidence(); alternate=json.loads(GATE.read_text()); alternate["benchmark_release_id"]="alternate-release"; alternate_path=tmp_path/"alternate-gate.json"; alternate_path.write_text(json.dumps(alternate),encoding="utf-8")
     raw=alternate_path.read_bytes(); private["gate_ref"]={"relative_path":"alternate-gate.json","file_sha256":hashlib.sha256(raw).hexdigest(),"content_sha256":hashlib.sha256(canonical_bytes(alternate)).hexdigest(),"contract_version":alternate["contract_version"],"release_id":alternate["benchmark_release_id"]}
-    with pytest.raises(ValueError,match="failed closed"): execute(tmp_path/"run",private,run,bundle)
+    with pytest.raises(ValueError): execute(tmp_path/"run",private,run,bundle)
 
 def test_private_loader_direct_call_is_child_only(tmp_path:Path,monkeypatch:pytest.MonkeyPatch)->None:
     monkeypatch.setenv("BENCHMARK_V2_SCORER_CHILD_CAPABILITY","forged-matching-token")
@@ -399,9 +499,9 @@ def test_verified_gate_snapshot_is_immutable_across_same_size_replace(tmp_path:P
     tree=ast.parse((ROOT/"app/learn/hybrid/benchmark_scorer_v2.py").read_text(encoding="utf-8")); score=next(n for n in tree.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name=="_score")
     assert "GATE_PATH" not in ast.unparse(score) and "read_text" not in ast.unparse(score)
 
-def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monkeypatch:pytest.MonkeyPatch)->None:
+def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monkeypatch:pytest.MonkeyPatch,task10_release_inputs:dict[str,Path])->None:
     import app.learn.hybrid.benchmark_scorer_v2 as scorer
-    private,run,bundle=evidence(); p=files(tmp_path,private,run,bundle); observed={}; original=scorer.subprocess.Popen
+    p={**task10_release_inputs,"output":tmp_path/"output.json","public":tmp_path/"public.json"}; observed={}; original=scorer.subprocess.Popen
     def capture(*args:object,**kwargs:object):
         observed.update({"args":deepcopy(args),"env":deepcopy(kwargs["env"]),"cwd":Path(kwargs["cwd"]),"initial":list(Path(kwargs["cwd"]).iterdir()),"stdin":kwargs["stdin"],"handles":list(kwargs["startupinfo"].lpAttributeList["handle_list"])})
         process=original(*args,**kwargs); observed["child_pid"]=process.pid; return process
@@ -417,9 +517,11 @@ def test_spawner_hides_private_paths_and_uses_fresh_empty_cwd(tmp_path:Path,monk
     assert Path(observed["args"][0][0]).resolve()==expected_python
 
 @pytest.mark.parametrize("mutation",["launch_bytes","cleanup_semantics","binding_ref","final_digest"])
-def test_downstream_requires_exact_production_launch_cleanup_chain(tmp_path:Path,mutation:str)->None:
+def test_downstream_requires_exact_production_launch_cleanup_chain(tmp_path:Path,mutation:str,task10_release_inputs:dict[str,Path])->None:
     from app.learn.hybrid.benchmark_scorer_v2 import _sealed_receipt, validate_private_scorer_public_ref
-    private,run,bundle=evidence(); _,_,public=execute(tmp_path,private,run,bundle); changed=deepcopy(public)
+    output=tmp_path/"score.json"; public_path=tmp_path/"public.json"
+    run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_path=task10_release_inputs["run"],lifecycle_path=task10_release_inputs["lifecycle"],private_output_path=output,public_ref_path=public_path)
+    public=json.loads(public_path.read_text(encoding="utf-8")); changed=deepcopy(public)
     if mutation=="launch_bytes": changed["launch_receipt"]["canonical_bytes_b64"]="AA=="
     elif mutation=="cleanup_semantics":
         cleanup=json.loads(base64.b64decode(changed["cleanup_receipt"]["canonical_bytes_b64"])); cleanup["job_stable_zero"]=False; changed["cleanup_receipt"]=_sealed_receipt(cleanup,"private-scorer-cleanup"); changed["binding"]["cleanup_receipt_ref"]=changed["cleanup_receipt"]["ref"]

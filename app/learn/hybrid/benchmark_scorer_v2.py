@@ -5,6 +5,10 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Mapping
 from app.learn.hybrid.benchmark_v2_predictions import SAFETY, ARMS, artifact_ref, canonical_bytes, exact_ref, _validate_pre
+from app.learn.hybrid.benchmark_v2_private_release import (
+    derive_private_scoring_cases,
+    validate_task10_private_release_bundle,
+)
 
 ROOT=Path(__file__).resolve().parents[3]
 GATE_PATH=ROOT/"configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json"
@@ -141,9 +145,11 @@ def _validate_lifecycle(bundle:object,run:Mapping[str,object],private:Mapping[st
     if run["lifecycle_ref"]!=entry["lifecycle_ref"]: raise ValueError("run cherry-picked a later lifecycle")
     return life
 
-def _validate(private:object,run:object,lifecycle_bundle:object)->tuple[list[dict[str,Any]],dict[str,dict[str,Any]],dict[str,Any]]:
+def _validate(private:object,run:object,lifecycle_bundle:object,*,_task10_release:bool=False)->tuple[list[dict[str,Any]],dict[str,dict[str,Any]],dict[str,Any]]:
     private=_closed(private,{"contract_version","source_parent_ref","partition","release_id","cases","expected_automatic_prediction_ref","expected_attempt_ledger_ref","expected_regression_precondition_ref","estimand_ref","gate_ref"},"private manifest")
-    if private["contract_version"]!="portfolio_hybrid_v1_1_private_manifest_v2_1_synthetic" or private["release_id"]!=RELEASE or private["partition"]!="holdout": raise ValueError("private manifest invalid")
+    expected_private_contract=("task10_private_release_scoring_projection_v1" if _task10_release else "portfolio_hybrid_v1_1_private_manifest_v2_1_synthetic")
+    allowed_partitions=({"regression","holdout"} if _task10_release else {"holdout"})
+    if private["contract_version"]!=expected_private_contract or private["release_id"]!=RELEASE or private["partition"] not in allowed_partitions: raise ValueError("private manifest invalid")
     exact_ref(private["source_parent_ref"],"parent")
     estimand=_verified_config_snapshot(ESTIMAND_PATH,private["estimand_ref"]); gate=_verified_config_snapshot(GATE_PATH,private["gate_ref"])
     if estimand["contract_version"]!="portfolio_hybrid_v1_1_estimand_v2_1" or estimand["benchmark_release_id"]!=RELEASE or gate["contract_version"]!="portfolio_hybrid_v1_1_automatic_gate_v2" or gate["benchmark_release_id"]!=RELEASE: raise ValueError("estimand/gate release lineage mismatch")
@@ -324,8 +330,24 @@ def execute_closed_child_envelope(handle_value:int)->dict[str,object]:
     return _run_private_child_once(nonce=nonce,pipe_capability=capability,launcher_process_id=launcher_pid,launcher_process_identity=str(envelope["launcher_process_identity"]),process_identity=str(envelope["expected_process_identity"]),job_identity_sha256=str(envelope["job_identity_sha256"]),argv_sha256=str(envelope["expected_argv_sha256"]),env_sha256=str(envelope["expected_env_sha256"]),cwd_sha256=str(envelope["expected_cwd_sha256"]),**paths)
 
 def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:int,launcher_process_identity:str,process_identity:str,job_identity_sha256:str,argv_sha256:str,env_sha256:str,cwd_sha256:str,private_manifest_path:Path,prediction_run_path:Path,lifecycle_path:Path,private_output_path:Path,public_ref_path:Path)->dict[str,object]:
-    private,run,bundle=_load(private_manifest_path),_load(prediction_run_path),_load(lifecycle_path)
-    rows,cases,gate=_validate(private,run,bundle)
+    run,bundle=_load(prediction_run_path),_load(lifecycle_path)
+    release=validate_task10_private_release_bundle(private_manifest_path=Path(private_manifest_path))
+    partition=run.get("partition") if isinstance(run,Mapping) else None
+    derived=derive_private_scoring_cases(validated_release=release,partition=partition)
+    score_parent_ref={"id":release["corpus_parent_ref"]["artifact_id"],"content_sha256":release["corpus_parent_ref"]["content_sha256"]}
+    private={
+        "contract_version":"task10_private_release_scoring_projection_v1",
+        "source_parent_ref":score_parent_ref,
+        "partition":partition,
+        "release_id":release["private_manifest"]["benchmark_release_id"],
+        "cases":[{key:value for key,value in case.items() if key!="partition"} for case in derived],
+        "expected_automatic_prediction_ref":run.get("automatic_prediction_ref"),
+        "expected_attempt_ledger_ref":run.get("attempt_ledger_ref"),
+        "expected_regression_precondition_ref":run.get("regression_precondition_ref"),
+        "estimand_ref":config_ref(ESTIMAND_PATH),
+        "gate_ref":config_ref(GATE_PATH),
+    }
+    rows,cases,gate=_validate(private,run,bundle,_task10_release=True)
     result=_score(rows,cases,gate); private_result={"contract_version":"portfolio_hybrid_v1_1_private_score_v2",**result,"source_parent_ref":private["source_parent_ref"],"automatic_prediction_ref":run["automatic_prediction_ref"],"estimand_ref":private["estimand_ref"],"gate_ref":private["gate_ref"],"safety":dict(SAFETY)}
     raw=canonical_bytes(private_result)+b"\n"; digest=hashlib.sha256(raw).hexdigest(); receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"job_identity_sha256":job_identity_sha256,"argv_sha256":argv_sha256,"env_sha256":env_sha256,"cwd_sha256":cwd_sha256,"safety":dict(SAFETY)}; public={"status":private_result["gate"]["status"],"score_ref":f"private-score/{digest}","content_sha256":digest,"execution_receipt":receipt,"safety":dict(SAFETY)}
     for path,payload in ((Path(private_output_path),raw),(Path(public_ref_path),canonical_bytes(public)+b"\n")):

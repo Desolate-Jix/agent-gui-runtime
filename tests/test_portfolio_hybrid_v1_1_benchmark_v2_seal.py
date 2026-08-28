@@ -7,6 +7,7 @@ import inspect
 import json
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 import subprocess
 import sys
 
@@ -28,12 +29,15 @@ SEALER_PATH = ROOT / "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py"
 PARENT_PATH = "tests/fixtures/portfolio_hybrid_v1_1/corpus-manifest.v1.json"
 TEMPLATE_PATH = "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-manifest.template.json"
 PROVIDER_PATH = "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/provider-corpus.candidate.json"
+PRIVATE_RELEASE_PATH = ROOT / "app/learn/hybrid/benchmark_v2_private_release.py"
 
 CODE_PATHS = (
     "app/api/panel.py",
     "app/core/model_server.py",
     "app/learn/calibration_sequence.py",
     "app/learn/hybrid/benchmark_scorer_v2.py",
+    "app/learn/hybrid/benchmark_v2_private_release.py",
+    "app/learn/hybrid/benchmark_v2_pathless.py",
     "app/learn/hybrid/benchmark_v2_actual.py",
     "app/learn/hybrid/benchmark_v2_contracts.py",
     "app/learn/hybrid/benchmark_v2_dispatch_attestation.py",
@@ -55,11 +59,8 @@ CODE_PATHS = (
     "app/learn/workflow_service.py",
     "app/learn/workflow_worker.py",
     "app/operation/observe/screen_reader.py",
-    "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
-    "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
     "scripts/portfolio_hybrid_v1_1_test_window_v2.py",
     "scripts/project_portfolio_hybrid_v1_1_provider_corpus_v2.py",
-    "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
     "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py",
     "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py",
@@ -81,8 +82,8 @@ TEST_PATHS = (
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent_recovery.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_isolation.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py",
+    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime_recovery.py",
@@ -91,14 +92,13 @@ TEST_PATHS = (
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py",
-    "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py",
     "tests/test_uei_v1_projections.py",
 )
 FUTURE_PATHS = (
     "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
+    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py",
 )
 BOOT_REFS = (
@@ -135,6 +135,15 @@ RELEASE_REFS = (
 def _load_sealer():
     assert SEALER_PATH.is_file(), "Task 10 split sealer has not been implemented"
     spec = importlib.util.spec_from_file_location("benchmark_v2_split_sealer", SEALER_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_private_release():
+    assert PRIVATE_RELEASE_PATH.is_file(), "shared Task 10 private release authority is missing"
+    spec = importlib.util.spec_from_file_location("benchmark_v2_private_release_test", PRIVATE_RELEASE_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -218,11 +227,7 @@ def _make_repo(tmp_path: Path) -> Path:
     source_paths.update(item["path"] for item in parent["screenshots"])
     for relative in sorted(source_paths):
         target = repo / relative
-        if relative in FUTURE_PATHS:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(f"future-placeholder:{relative}\n".encode("utf-8"))
-        else:
-            _copy(ROOT / relative, target)
+        _copy(ROOT / relative, target)
     provider_path = repo / PROVIDER_PATH
     provider_path.parent.mkdir(parents=True, exist_ok=True)
     provider_path.write_bytes(canonical_json_bytes(_provider_corpus(parent), pretty=True))
@@ -258,6 +263,164 @@ def _rewrite(path: Path, value: object) -> None:
     path.write_bytes(canonical_json_bytes(value, pretty=True))
 
 
+def test_shared_private_release_module_exists_with_only_frozen_public_api() -> None:
+    release = _load_private_release()
+    assert release.__all__ == [
+        "validate_task10_private_release_manifest",
+        "validate_task10_private_release_bundle",
+        "derive_private_scoring_cases",
+    ]
+    for name in release.__all__:
+        assert callable(getattr(release, name))
+
+
+def _task10_bundle(tmp_path: Path, sealer):
+    repo = _make_repo(tmp_path)
+    bundle = repo / "bundle"
+    private_path = bundle / "benchmark-v2-private-manifest.json"
+    provider_path = bundle / "benchmark-v2-provider-manifest.json"
+    private, provider = sealer.seal_split_manifests(
+        template_path=repo / TEMPLATE_PATH,
+        provider_corpus_path=repo / PROVIDER_PATH,
+        private_output_path=private_path,
+        provider_output_path=provider_path,
+        _root=repo,
+    )
+    _copy(repo / PROVIDER_PATH, bundle / "provider-corpus.v2.json")
+    return repo, private_path, provider_path, private, provider
+
+
+def test_shared_authority_validates_manifest_and_derives_only_private_scoring_projection(
+    tmp_path: Path, sealer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = _load_private_release()
+    repo, private_path, _, private, _ = _task10_bundle(tmp_path, sealer)
+    monkeypatch.setattr(release, "ROOT", repo)
+
+    assert release.validate_task10_private_release_manifest(
+        manifest_bytes=private_path.read_bytes()
+    ) == private
+    validated = release.validate_task10_private_release_bundle(
+        private_manifest_path=private_path
+    )
+    provider = json.loads((private_path.parent / "provider-corpus.v2.json").read_text(encoding="utf-8"))
+    forbidden_values = {
+        str(value)
+        for record in json.loads((repo / PARENT_PATH).read_text(encoding="utf-8"))["gold_records"]
+        for key, value in record.items()
+        if key in {"target_id", "label", "goal", "reviewer_identity_hash", "annotator_identity_hash"}
+    }
+
+    for partition in ("regression", "holdout"):
+        cases = release.derive_private_scoring_cases(
+            validated_release=validated,
+            partition=partition,
+        )
+        assert len(cases) == 60
+        assert all(
+            set(case)
+            == {"case_id", "screen_group", "partition", "important_target", "acceptable_regions"}
+            for case in cases
+        )
+        groups = {case["screen_group"] for case in cases}
+        assert len(groups) == 12
+        assert {sum(case["screen_group"] == group for case in cases) for group in groups} == {5}
+        assert sorted(case["case_id"] for case in cases) == sorted(
+            case["case_id"] for case in provider["cases"] if case["partition"] == partition
+        )
+        projection = json.dumps(cases, ensure_ascii=False, sort_keys=True)
+        assert not any(value in projection for value in forbidden_values)
+        assert not any(
+            token in projection.casefold()
+            for token in ("target_id", "label", "goal", "screenshot", "reviewer", "inventory", "private")
+        )
+
+
+@pytest.mark.parametrize("mutation", ("noncanonical", "extra_field", "inventory_sha", "inventory_alias"))
+def test_shared_manifest_authority_fails_closed_on_schema_or_inventory_drift(
+    tmp_path: Path, sealer, mutation: str
+) -> None:
+    release = _load_private_release()
+    _, private_path, _, private, _ = _task10_bundle(tmp_path, sealer)
+    if mutation == "noncanonical":
+        raw = private_path.read_bytes() + b" "
+    else:
+        changed = deepcopy(private)
+        if mutation == "extra_field":
+            changed["unexpected"] = False
+        elif mutation == "inventory_sha":
+            path = next(iter(changed["artifact_inventory"]["code_sha256_by_path"]))
+            changed["artifact_inventory"]["code_sha256_by_path"][path] = "0" * 64
+        else:
+            inventory = changed["artifact_inventory"]["code_sha256_by_path"]
+            path = next(iter(inventory))
+            inventory[f"app/../{path}"] = inventory.pop(path)
+        changed["content_sha256"] = content_sha256(changed)
+        raw = canonical_json_bytes(changed, pretty=True)
+    with pytest.raises(ValueError):
+        release.validate_task10_private_release_manifest(manifest_bytes=raw)
+
+
+@pytest.mark.parametrize("mutation", ("gold", "provider_manifest", "provider_corpus"))
+def test_shared_bundle_authority_fails_closed_on_private_or_provider_sibling_drift(
+    tmp_path: Path, sealer, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    release = _load_private_release()
+    repo, private_path, provider_path, _, _ = _task10_bundle(tmp_path, sealer)
+    monkeypatch.setattr(release, "ROOT", repo)
+    path = {
+        "gold": repo / "tests/fixtures/portfolio_hybrid_v1_1/gold.v1.json",
+        "provider_manifest": provider_path,
+        "provider_corpus": private_path.parent / "provider-corpus.v2.json",
+    }[mutation]
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(ValueError):
+        release.validate_task10_private_release_bundle(private_manifest_path=private_path)
+
+
+@pytest.mark.parametrize("reparse_target", ("manifest_parent", "provider_sibling"))
+def test_shared_bundle_rejects_non_symlink_windows_reparse_components_before_read(
+    tmp_path: Path,
+    sealer,
+    monkeypatch: pytest.MonkeyPatch,
+    reparse_target: str,
+) -> None:
+    release = _load_private_release()
+    repo, private_path, provider_path, _, _ = _task10_bundle(tmp_path, sealer)
+    monkeypatch.setattr(release, "ROOT", repo)
+    marked = private_path.parent if reparse_target == "manifest_parent" else provider_path
+    real_lstat = release.os.lstat
+
+    def lstat_with_reparse(path: object):
+        observed = real_lstat(path)
+        attributes = getattr(observed, "st_file_attributes", 0)
+        if Path(path) == marked:
+            attributes |= getattr(release.stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        return SimpleNamespace(
+            **{
+                name: getattr(observed, name)
+                for name in dir(observed)
+                if name.startswith("st_") and name != "st_file_attributes"
+            },
+            st_file_attributes=attributes,
+        )
+
+    # Junction creation is privilege-dependent; patch the lstat boundary deterministically.
+    monkeypatch.setattr(release.os, "lstat", lstat_with_reparse)
+    real_read_bytes = Path.read_bytes
+    reads: list[Path] = []
+
+    def recorded_read_bytes(path: Path) -> bytes:
+        reads.append(path)
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", recorded_read_bytes)
+    with pytest.raises(ValueError, match="ordinary|reparse"):
+        release.validate_task10_private_release_bundle(private_manifest_path=private_path)
+    blocked_file = private_path if reparse_target == "manifest_parent" else provider_path
+    assert blocked_file not in reads
+
+
 def test_generation_is_canonical_closed_idempotent_and_verifiable(sealed, sealer) -> None:
     repo, private_path, provider_path, private, provider = sealed
     assert set(provider) == {
@@ -288,9 +451,9 @@ def test_generation_is_canonical_closed_idempotent_and_verifiable(sealed, sealer
     assert private["provider_corpus_ref"] == provider["provider_corpus_ref"]
     assert private["provider_manifest_ref"]["relative_path"] == "benchmark-v2-provider-manifest.json"
     assert private["provider_manifest_ref"]["file_sha256"] == hashlib.sha256(provider_path.read_bytes()).hexdigest()
-    assert len(private["artifact_inventory"]["code_sha256_by_path"]) == 33
+    assert len(private["artifact_inventory"]["code_sha256_by_path"]) == 32
     assert len(private["artifact_inventory"]["config_sha256_by_path"]) == 3
-    assert len(private["artifact_inventory"]["test_sha256_by_path"]) == 23
+    assert len(private["artifact_inventory"]["test_sha256_by_path"]) == 22
     assert provider["sealed_runtime"]["code_refs"] == [
         {"role": role, "relative_path": path, "file_sha256": hashlib.sha256((repo / path).read_bytes()).hexdigest()}
         for role, path in BOOT_REFS
@@ -344,21 +507,11 @@ def test_both_seals_are_non_authorizing_and_provider_has_no_private_paths(sealed
         assert forbidden.casefold() not in text
 
 
-@pytest.mark.parametrize("relative", FUTURE_PATHS)
-def test_missing_future_artifact_fails_before_either_output(tmp_path: Path, sealer, relative: str) -> None:
-    repo = _make_repo(tmp_path)
-    (repo / relative).unlink()
-    private_path = repo / "out/private.json"
-    provider_path = repo / "out/provider.json"
-    with pytest.raises(ValueError, match="required file is missing"):
-        sealer.seal_split_manifests(
-            template_path=repo / TEMPLATE_PATH,
-            provider_corpus_path=repo / PROVIDER_PATH,
-            private_output_path=private_path,
-            provider_output_path=provider_path,
-            _root=repo,
-        )
-    assert not private_path.exists() and not provider_path.exists()
+def test_unimplemented_future_artifacts_are_not_presealed(sealed) -> None:
+    _, _, _, private, _ = sealed
+    inventory = private["artifact_inventory"]
+    sealed_paths = set(inventory["code_sha256_by_path"]) | set(inventory["test_sha256_by_path"])
+    assert sealed_paths.isdisjoint(FUTURE_PATHS)
 
 
 @pytest.mark.parametrize("relative", CODE_PATHS + CONFIG_PATHS + TEST_PATHS)

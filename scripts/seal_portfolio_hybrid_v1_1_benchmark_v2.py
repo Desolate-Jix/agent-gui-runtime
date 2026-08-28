@@ -35,125 +35,29 @@ from app.learn.hybrid.benchmark_v2_provider_corpus import (
     validate_preloaded_provider_corpus,
     validate_provider_manifest,
 )
+from app.learn.hybrid import benchmark_v2_private_release as _private_release
+from app.learn.hybrid.benchmark_v2_private_release import (
+    validate_task10_private_release_manifest,
+)
 from scripts.seal_portfolio_hybrid_v1_1_corpus import load_and_verify_corpus_seal
 
 
-PRIVATE_CONTRACT = "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1"
+PRIVATE_CONTRACT = _private_release._PRIVATE_CONTRACT
 TEMPLATE_CONTRACT = "portfolio_hybrid_v1_1_benchmark_v2_manifest_template_v1"
-PARENT_CONTRACT = "portfolio_hybrid_v1_1_corpus_manifest_v1"
-PARENT_PATH = "tests/fixtures/portfolio_hybrid_v1_1/corpus-manifest.v1.json"
+PARENT_CONTRACT = _private_release._PARENT_CONTRACT
+PARENT_PATH = _private_release._PARENT_PATH
 TEMPLATE_PATH = "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-manifest.template.json"
 PROVIDER_CANDIDATE_PATH = (
     "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/provider-corpus.candidate.json"
 )
-PROVIDER_LOGICAL_PATH = "provider-corpus.v2.json"
-PROVIDER_MANIFEST_LOGICAL_PATH = "benchmark-v2-provider-manifest.json"
-
-CODE_PATHS = (
-    "app/api/panel.py",
-    "app/core/model_server.py",
-    "app/learn/calibration_sequence.py",
-    "app/learn/hybrid/benchmark_scorer_v2.py",
-    "app/learn/hybrid/benchmark_v2_actual.py",
-    "app/learn/hybrid/benchmark_v2_contracts.py",
-    "app/learn/hybrid/benchmark_v2_dispatch_attestation.py",
-    "app/learn/hybrid/benchmark_v2_durable_claim.py",
-    "app/learn/hybrid/benchmark_v2_holdout.py",
-    "app/learn/hybrid/benchmark_v2_incumbent_operation.py",
-    "app/learn/hybrid/benchmark_v2_lifecycle.py",
-    "app/learn/hybrid/benchmark_v2_predictions.py",
-    "app/learn/hybrid/benchmark_v2_privileged_projector.py",
-    "app/learn/hybrid/benchmark_v2_provider_corpus.py",
-    "app/learn/hybrid/benchmark_v2_provider_sandbox.py",
-    "app/learn/hybrid/benchmark_v2_runtime.py",
-    "app/learn/hybrid/benchmark_v2_window_owner.py",
-    "app/learn/hybrid/benchmark_v2_worker_binding.py",
-    "app/learn/hybrid/windows_process_scope.py",
-    "app/learn/recognition/uei/builtin_learning_projection.py",
-    "app/learn/recognition/uei/omniparser_shadow_adapter.py",
-    "app/learn/recognition/uei/projections.py",
-    "app/learn/workflow_service.py",
-    "app/learn/workflow_worker.py",
-    "app/operation/observe/screen_reader.py",
-    "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
-    "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
-    "scripts/portfolio_hybrid_v1_1_test_window_v2.py",
-    "scripts/project_portfolio_hybrid_v1_1_provider_corpus_v2.py",
-    "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
-    "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
-    "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py",
-    "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py",
-)
-CONFIG_PATHS = (
-    "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json",
-    "configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json",
-    TEMPLATE_PATH,
-)
-TEST_PATHS = (
-    "tests/test_learn_hybrid_windows_process_scope.py",
-    "tests/test_learning_workflow_stage_execution.py",
-    "tests/test_learning_workflow_stage_worker.py",
-    "tests/test_model_request_cancellation.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_estimand.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent_recovery.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_isolation.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime_recovery.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py",
-    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py",
-    "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py",
-    "tests/test_uei_v1_projections.py",
-)
-RELEASE_CODE_REFS = (
-    ("panel_service", "app/api/panel.py"),
-    ("model_server", "app/core/model_server.py"),
-    ("calibration_sequence", "app/learn/calibration_sequence.py"),
-    ("benchmark_actual", "app/learn/hybrid/benchmark_v2_actual.py"),
-    ("dispatch_attestation", "app/learn/hybrid/benchmark_v2_dispatch_attestation.py"),
-    ("durable_claim", "app/learn/hybrid/benchmark_v2_durable_claim.py"),
-    ("holdout_ledger", "app/learn/hybrid/benchmark_v2_holdout.py"),
-    ("incumbent_operation", "app/learn/hybrid/benchmark_v2_incumbent_operation.py"),
-    ("lifecycle", "app/learn/hybrid/benchmark_v2_lifecycle.py"),
-    ("predictions", "app/learn/hybrid/benchmark_v2_predictions.py"),
-    ("benchmark_runtime", "app/learn/hybrid/benchmark_v2_runtime.py"),
-    ("window_owner", "app/learn/hybrid/benchmark_v2_window_owner.py"),
-    ("worker_binding", "app/learn/hybrid/benchmark_v2_worker_binding.py"),
-    ("windows_process_scope", "app/learn/hybrid/windows_process_scope.py"),
-    (
-        "builtin_learning_projection",
-        "app/learn/recognition/uei/builtin_learning_projection.py",
-    ),
-    (
-        "omniparser_shadow_adapter",
-        "app/learn/recognition/uei/omniparser_shadow_adapter.py",
-    ),
-    ("uei_projections", "app/learn/recognition/uei/projections.py"),
-    ("workflow_service", "app/learn/workflow_service.py"),
-    ("workflow_worker", "app/learn/workflow_worker.py"),
-    ("screen_reader", "app/operation/observe/screen_reader.py"),
-    ("test_window", "scripts/portfolio_hybrid_v1_1_test_window_v2.py"),
-    ("benchmark_runner", "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py"),
-)
-PROFILE_REFS = (
-    ("estimand", "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"),
-)
-PRIVATE_SCORER_REFS = (
-    ("private_scorer_module", "app/learn/hybrid/benchmark_scorer_v2.py"),
-    (
-        "private_scorer_entrypoint",
-        "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py",
-    ),
-)
+PROVIDER_LOGICAL_PATH = _private_release._PROVIDER_CORPUS_NAME
+PROVIDER_MANIFEST_LOGICAL_PATH = _private_release._PROVIDER_MANIFEST_NAME
+CODE_PATHS = _private_release._CODE_PATHS
+CONFIG_PATHS = _private_release._CONFIG_PATHS
+TEST_PATHS = _private_release._TEST_PATHS
+RELEASE_CODE_REFS = _private_release._RELEASE_CODE_REFS
+PROFILE_REFS = _private_release._PROFILE_REFS
+PRIVATE_SCORER_REFS = _private_release._PRIVATE_SCORER_REFS
 
 _TEMPLATE = {
     "benchmark_release_id": BENCHMARK_RELEASE_ID,
@@ -166,11 +70,7 @@ _TEMPLATE = {
     "provider_corpus_output": PROVIDER_CANDIDATE_PATH,
     "safety": dict(SAFETY),
 }
-_PRIVATE_SAFETY = {
-    **SAFETY,
-    "real_action_allowed": False,
-    "publish_allowed": False,
-}
+_PRIVATE_SAFETY = _private_release._PRIVATE_SAFETY
 _PRIVATE_PATH_FRAGMENTS = (
     "corpus-manifest.v1.json",
     "gold.v1.json",
@@ -509,25 +409,6 @@ def _build_private_manifest(
     return manifest
 
 
-def _verify_private_inventory(
-    manifest: Mapping[str, Any],
-    code_hashes: Mapping[str, str],
-    config_hashes: Mapping[str, str],
-    test_hashes: Mapping[str, str],
-) -> None:
-    inventory = manifest["artifact_inventory"]
-    if inventory != {
-        "code_sha256_by_path": dict(code_hashes),
-        "config_sha256_by_path": dict(config_hashes),
-        "test_sha256_by_path": dict(test_hashes),
-    }:
-        raise ValueError("private artifact inventory mismatch")
-    if manifest["private_scorer_refs"] != _ref_list(PRIVATE_SCORER_REFS, code_hashes):
-        raise ValueError("private scorer refs mismatch the inventory")
-    if manifest.get("content_sha256") != content_sha256(manifest):
-        raise ValueError("private manifest content SHA mismatch")
-
-
 def _build_pair(
     *, template_path: Path, provider_corpus_path: Path, root: Path
 ) -> tuple[dict[str, object], dict[str, object], bytes, bytes]:
@@ -556,8 +437,8 @@ def _build_pair(
         config_hashes=config_hashes,
         test_hashes=test_hashes,
     )
-    _verify_private_inventory(private, code_hashes, config_hashes, test_hashes)
     private_raw = _canonical_pretty_bytes(private)
+    private = validate_task10_private_release_manifest(manifest_bytes=private_raw)
     if private["provider_corpus_ref"] != provider["provider_corpus_ref"]:
         raise ValueError("private/provider corpus refs mismatch")
     if private["benchmark_release_id"] != provider["benchmark_release_id"]:
@@ -629,7 +510,8 @@ def verify_split_manifests(
     provider_path = _checked_input(provider_manifest_path, root, "provider manifest")
     private_path = _checked_input(private_manifest_path, root, "private manifest")
     provider = _load_canonical_json(provider_path, "provider manifest")
-    private = _load_canonical_json(private_path, "private manifest")
+    private_raw = private_path.read_bytes()
+    private = validate_task10_private_release_manifest(manifest_bytes=private_raw)
     provider = validate_provider_manifest(provider)
     if provider != expected_provider:
         raise ValueError("provider manifest mismatch")
@@ -637,12 +519,6 @@ def verify_split_manifests(
         raise ValueError("private manifest mismatch")
     if private["provider_manifest_ref"]["file_sha256"] != _file_sha256(provider_path):
         raise ValueError("private provider manifest file SHA mismatch")
-    _verify_private_inventory(
-        private,
-        expected_private["artifact_inventory"]["code_sha256_by_path"],
-        expected_private["artifact_inventory"]["config_sha256_by_path"],
-        expected_private["artifact_inventory"]["test_sha256_by_path"],
-    )
     return private, provider
 
 
