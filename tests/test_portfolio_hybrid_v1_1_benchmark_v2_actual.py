@@ -31,6 +31,182 @@ SHA_A = "a" * 64
 SHA_B = "b" * 64
 
 
+def _offline_file_bytes(value: Mapping[str, object]) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def _offline_fixed_raw_graph(
+    source: Mapping[str, object],
+    *,
+    cleanup_receipt: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle import (
+        _s13_append_runner_event,
+        _s13_journal,
+        _s13_journal_projection,
+        _s13_runner_payload,
+        _s13_runner_prefix_projection,
+    )
+
+    attempt = deepcopy(source["attempt"])
+    body = deepcopy(source["body"])
+    cleanup = deepcopy(cleanup_receipt or source["cleanup"])
+    attempt_dir = Path(
+        f"C:\\private\\benchmark\\{attempt['attempt_id']}"
+    ).resolve()
+    body_bytes = _offline_file_bytes(body)
+    cleanup_bytes = _offline_file_bytes(cleanup)
+    body_ref = {
+        "path": str((attempt_dir / "body.json").resolve()),
+        "file_sha256": hashlib.sha256(body_bytes).hexdigest(),
+        "content_sha256": body["content_sha256"],
+    }
+    cleanup_ref = {
+        "path": str((attempt_dir / "cleanup.json").resolve()),
+        "file_sha256": hashlib.sha256(cleanup_bytes).hexdigest(),
+        "content_sha256": cleanup["content_sha256"],
+    }
+    ledger: list[dict[str, object]] = []
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="opened",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+        ),
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="body_complete",
+            contract_version="benchmark_v2_runner_regression_attempt_payload_v1",
+            output_ref=body_ref,
+        ),
+    )
+    _s13_append_runner_event(
+        ledger,
+        event_type="cleanup",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="terminal",
+            contract_version="benchmark_v2_runner_cleanup_payload_v1",
+            cleanup_receipt_ref=cleanup_ref,
+        ),
+    )
+    raw_prefix = b"".join(canonical_json_bytes(item) + b"\n" for item in ledger)
+    pre_result_ref = {
+        "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
+        "id": "runner-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-runner-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": attempt,
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": hashlib.sha256(
+            canonical_json_bytes(ledger[-1])
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+    result = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_actual_result_v2",
+            "attempt_ref": attempt,
+            "attempt_dir": str(attempt_dir),
+            "body_ref": body_ref,
+            "cleanup_receipt_ref": cleanup_ref,
+            "attempt_ledger_pre_result_ref": pre_result_ref,
+            "screen_group_count": 12,
+            "status": "terminal",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    result_bytes = _offline_file_bytes(result)
+    _s13_append_runner_event(
+        ledger,
+        event_type="result",
+        payload=_s13_runner_payload(
+            attempt=attempt,
+            status="terminal",
+            contract_version="benchmark_v2_runner_result_payload_v1",
+            output_ref={
+                "path": str((attempt_dir / "result.json").resolve()),
+                "file_sha256": hashlib.sha256(result_bytes).hexdigest(),
+                "content_sha256": result["content_sha256"],
+            },
+        ),
+    )
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+    terminal = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = _s13_journal_projection(
+        attempt=attempt,
+        journal=journal,
+        terminal_projection=terminal,
+        cleanup_projection=cleanup_projection,
+    )
+    screens = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=body["screen_group_results"],
+    )
+    attempt_lifecycle = lifecycle.project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=attempt,
+        journal_events=journal,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=cleanup_projection,
+        terminal_event_projection=terminal,
+        screen_group_lifecycle_projections=screens,
+    )
+    events = lifecycle.project_benchmark_v2_runner_events(
+        partition="regression",
+        runner_ledger_events=ledger,
+        actual_body=body,
+        actual_result=result,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    prefix = _s13_runner_prefix_projection(ledger=ledger, events=events)
+    return {
+        "attempt": attempt,
+        "body": body,
+        "cleanup": cleanup,
+        "result": result,
+        "ledger": ledger,
+        "cleanup_projection": cleanup_projection,
+        "journal": journal,
+        "terminal": terminal,
+        "journal_projection": journal_projection,
+        "screens": screens,
+        "attempt_lifecycle": attempt_lifecycle,
+        "events": events,
+        "prefix": prefix,
+        "attempt_dir": attempt_dir,
+        "body_bytes": body_bytes,
+        "cleanup_bytes": cleanup_bytes,
+        "result_bytes": result_bytes,
+    }
+
+
 def test_prediction_run_v3_materializer_is_byte_only_and_rejects_legacy_body() -> None:
     signature = inspect.signature(materialize_prediction_run_v3)
     assert list(signature.parameters) == [
@@ -81,7 +257,7 @@ def _offline_c3_inputs(monkeypatch):
         _s13_complete_graph,
     )
 
-    graph = _s13_complete_graph()
+    graph = _offline_fixed_raw_graph(_s13_complete_graph())
     ledger = lifecycle.project_benchmark_v2_attempt_ledger(
         benchmark_release_id=BENCHMARK_RELEASE_ID,
         partition="regression",
@@ -114,8 +290,15 @@ def _offline_c3_inputs(monkeypatch):
     case_context = {}
     provider_cases = {}
     multiset = []
-    for screen in body["screen_group_results"]:
+    group_images = {}
+    for group_index, screen in enumerate(body["screen_group_results"]):
         group_id = str(screen["screen_group"])
+        group_images[group_id] = {
+            "path": f"artifacts/benchmark/offline-{group_index:02d}.png",
+            "sha256": f"{group_index + 1:064x}",
+            "width": 1280,
+            "height": 720,
+        }
         seen = set()
         for row in screen["rows"]:
             case_ref = row["case_ref"]
@@ -132,7 +315,7 @@ def _offline_c3_inputs(monkeypatch):
                 "partition": "regression",
                 "screen_group": group_id,
                 "goal": "Select the button labeled 'missing'",
-                "image": {},
+                "image": deepcopy(group_images[group_id]),
                 "layout": {},
             }
             for arm_id in ARM_ORDER:
@@ -158,7 +341,19 @@ def _offline_c3_inputs(monkeypatch):
     material_by_group = {}
     for group_index, screen in enumerate(body["screen_group_results"]):
         group_id = str(screen["screen_group"])
-        capture_identity = {"capture_id": f"offline-capture-{group_index:02d}"}
+        capture_ref = deepcopy(screen["shared_parent_refs"]["capture_ref"])
+        capture_identity = {
+            "capture_id": capture_ref["id"],
+            "capture_lineage_ref": {
+                "id": capture_ref["id"],
+                "content_sha256": capture_ref["content_sha256"],
+            },
+            "screenshot_sha256": group_images[group_id]["sha256"],
+            "image_size": {
+                "width": group_images[group_id]["width"],
+                "height": group_images[group_id]["height"],
+            },
+        }
         raw_values = {
             "omni": seal_immutable(
                 {
@@ -213,19 +408,27 @@ def _offline_c3_inputs(monkeypatch):
             ),
         }
         provider_group_ref = deepcopy(screen["pre_vista_evidence"]["provider_group_ref"])
+        pre_vista_evidence = seal_immutable(
+            {
+                "contract_version": "benchmark_v2_actual_pre_vista_evidence_v1",
+                "provider_group_ref": provider_group_ref,
+                "omni_inventory_envelope": envelopes["omni"],
+                "qwen_bindings_envelope": envelopes["qwen"],
+                "fusion_result_envelope": envelopes["fusion"],
+                "submitted_vista_request_envelopes": [],
+                "safety": deepcopy(predictions.SAFETY),
+            }
+        )
         dependency = {
             "actual_screen_group_ref": {
                 "id": group_id,
                 "content_sha256": str(screen["content_sha256"]),
             },
             "provider_group_ref": provider_group_ref,
-            "capture_ref": deepcopy(screen["shared_parent_refs"]["capture_ref"]),
-            "pre_vista_evidence_ref": {
-                "id": f"pre-vista-evidence/{group_index:064x}",
-                "content_sha256": hashlib.sha256(
-                    f"pre:{group_index}".encode()
-                ).hexdigest(),
-            },
+            "capture_ref": capture_ref,
+            "pre_vista_evidence_ref": predictions._pre_vista_evidence_ref(
+                pre_vista_evidence
+            ),
             "omni_inventory_ref": deepcopy(envelopes["omni"]["ref"]),
             "qwen_bindings_ref": deepcopy(envelopes["qwen"]["ref"]),
             "fusion_result_ref": deepcopy(envelopes["fusion"]["ref"]),
@@ -263,11 +466,20 @@ def _offline_c3_inputs(monkeypatch):
         "content_sha256": "d" * 64,
         "source_parent_ref": deepcopy(PARENT_REF),
     }
-    monkeypatch.setattr(
-        predictions,
-        "_parse_provider_inputs",
-        lambda **_kwargs: ({}, {}, manifest_ref, corpus_ref),
-    )
+    def parse_provider_inputs(**inputs):
+        if (
+            inputs.get("provider_manifest_bytes") != b"offline-manifest"
+            or inputs.get("provider_corpus_bytes") != b"offline-corpus"
+        ):
+            raise ValueError("trusted provider bytes differ")
+        return (
+            {},
+            {"cases": [deepcopy(item) for item in provider_cases.values()]},
+            manifest_ref,
+            corpus_ref,
+        )
+
+    monkeypatch.setattr(predictions, "_parse_provider_inputs", parse_provider_inputs)
     monkeypatch.setattr(
         predictions,
         "_provider_case_index",
@@ -283,11 +495,11 @@ def _offline_c3_inputs(monkeypatch):
     )
     monkeypatch.setattr(
         "app.learn.hybrid.contracts.validate_qwen_bindings",
-        lambda value, _inventory: value,
+        lambda value, _inventory, **_kwargs: value,
     )
     monkeypatch.setattr(
         "app.learn.hybrid.contracts.validate_fusion_result",
-        lambda value, _inventory, _bindings: value,
+        lambda value, _inventory, _bindings, **_kwargs: value,
     )
     public_attempt_ref = lifecycle._s13_public_attempt_ref(graph["attempt"])
     projection = seal_pathless_projection(
@@ -313,11 +525,11 @@ def _offline_c3_inputs(monkeypatch):
         "provider_corpus_bytes": b"offline-corpus",
         "actual_body_verified_projection": projection,
         "lifecycle_bundle_v3": bundle,
-    }, body
+    }, body, graph
 
 
 def test_prediction_run_v3_materializer_succeeds_deterministically_offline(monkeypatch) -> None:
-    kwargs, _ = _offline_c3_inputs(monkeypatch)
+    kwargs, _, _ = _offline_c3_inputs(monkeypatch)
     first = materialize_prediction_run_v3(**kwargs)
     second = materialize_prediction_run_v3(**kwargs)
     assert first == second
@@ -330,7 +542,7 @@ def test_prediction_run_v3_materializer_succeeds_deterministically_offline(monke
 
 
 def test_prediction_run_v3_rejects_resealed_body_not_bound_to_lifecycle(monkeypatch) -> None:
-    kwargs, body = _offline_c3_inputs(monkeypatch)
+    kwargs, body, _ = _offline_c3_inputs(monkeypatch)
     changed = deepcopy(body)
     changed_screen = changed["screen_group_results"][0]
     changed_screen["request_ref"] = {
@@ -376,6 +588,593 @@ def test_prediction_run_v3_rejects_resealed_body_not_bound_to_lifecycle(monkeypa
                 "actual_body_bytes": changed_bytes,
                 "actual_body_verified_projection": changed_projection,
             }
+        )
+
+
+def test_c4_accepted_regression_materializer_api_is_available() -> None:
+    from app.learn.hybrid.benchmark_v2_predictions import (
+        materialize_benchmark_v2_accepted_regression_score_input_v2,
+        project_benchmark_v2_actual_body,
+        project_benchmark_v2_actual_result,
+        validate_benchmark_v2_accepted_regression_score_input_v2,
+    )
+
+    assert callable(project_benchmark_v2_actual_body)
+    assert callable(project_benchmark_v2_actual_result)
+    assert callable(validate_benchmark_v2_accepted_regression_score_input_v2)
+    assert callable(materialize_benchmark_v2_accepted_regression_score_input_v2)
+
+
+def _offline_actual_result_projection(kwargs, graph):
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        pathless_artifact_ref,
+        seal_pathless_projection,
+    )
+    from app.learn.hybrid.benchmark_v2_predictions import SAFETY
+
+    prefix = graph["prefix"]
+    result_event = next(
+        item for item in graph["events"] if item["event_kind"] == "result"
+    )
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_actual_result_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": deepcopy(prefix["attempt_ref"]),
+            "result_contract_version": "benchmark_v2_runner_actual_result_v2",
+            "raw_file_sha256": prefix["result_file_ref"]["file_sha256"],
+            "result_content_sha256": prefix["result_file_ref"]["content_sha256"],
+            "body_projection_ref": pathless_artifact_ref(
+                kwargs["actual_body_verified_projection"]
+            ),
+            "cleanup_projection_ref": pathless_artifact_ref(
+                graph["cleanup_projection"]
+            ),
+            "attempt_ledger_pre_result_ref": deepcopy(
+                prefix["attempt_ledger_pre_result_ref"]
+            ),
+            "runner_ledger_prefix_projection_ref": pathless_artifact_ref(prefix),
+            "result_event_projection_ref": pathless_artifact_ref(result_event),
+            "verified": True,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+
+
+def test_c4_accepted_regression_materializes_deterministically_offline(monkeypatch) -> None:
+    from app.learn.hybrid.benchmark_v2_predictions import (
+        materialize_benchmark_v2_accepted_regression_score_input_v2,
+        validate_benchmark_v2_accepted_regression_score_input_v2,
+    )
+
+    kwargs, _, graph = _offline_c3_inputs(monkeypatch)
+    accepted_kwargs = {
+        "actual_body_bytes": kwargs["actual_body_bytes"],
+        "actual_result_bytes": graph["result_bytes"],
+        "cleanup_receipt_bytes": graph["cleanup_bytes"],
+        "expected_attempt_dir": graph["attempt_dir"],
+        "provider_manifest_bytes": kwargs["provider_manifest_bytes"],
+        "provider_corpus_bytes": kwargs["provider_corpus_bytes"],
+        "runner_ledger_prefix_projection": graph["prefix"],
+        "attempt_journal_projection": graph["journal_projection"],
+        "actual_body_projection": kwargs["actual_body_verified_projection"],
+        "actual_result_projection": _offline_actual_result_projection(kwargs, graph),
+        "lifecycle_bundle_v3": kwargs["lifecycle_bundle_v3"],
+    }
+    first = materialize_benchmark_v2_accepted_regression_score_input_v2(
+        **accepted_kwargs
+    )
+    second = materialize_benchmark_v2_accepted_regression_score_input_v2(
+        **accepted_kwargs
+    )
+    assert first == second
+    assert (
+        validate_benchmark_v2_accepted_regression_score_input_v2(
+            first,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+        == first
+    )
+    assert set(first) == {
+        "contract_version", "content_sha256", "benchmark_release_id", "partition",
+        "corpus_parent_ref", "provider_manifest_ref", "provider_corpus_ref",
+        "selection_policy", "attempt_ref", "attempt_ledger_ref",
+        "automatic_prediction_ref", "selected_lifecycle_ref",
+        "verified_parent_projections", "prediction_run_envelope",
+        "lifecycle_bundle_envelope", "safety",
+    }
+    serialized = json.dumps(first, ensure_ascii=False, sort_keys=True)
+    assert "C:\\private" not in serialized
+    assert '"path"' not in serialized
+
+    legacy = deepcopy(first)
+    legacy["contract_version"] = "benchmark_v2_accepted_regression_score_input_v1"
+    with pytest.raises(ValueError, match="accepted regression score input contract"):
+        validate_benchmark_v2_accepted_regression_score_input_v2(
+            legacy,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+    wrong_hash = deepcopy(first)
+    wrong_hash["content_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="accepted regression score input contract"):
+        validate_benchmark_v2_accepted_regression_score_input_v2(
+            wrong_hash,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+    leaked = deepcopy(first)
+    leaked["path"] = "C:\\private\\body.json"
+    with pytest.raises(ValueError, match="accepted regression score input contract"):
+        validate_benchmark_v2_accepted_regression_score_input_v2(
+            leaked,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_envelope
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle import (
+        _s13_complete_attempt_artifacts,
+        _s13_project_multi_attempt_events,
+    )
+
+    alternate_ledger = []
+    alternate = _s13_complete_attempt_artifacts(
+        alternate_ledger, attempt_id="attempt-regression-shared-drift"
+    )
+    alternate_events = _s13_project_multi_attempt_events(
+        ledger=alternate_ledger, complete=[alternate]
+    )
+    alternate_materialized = lifecycle.materialize_benchmark_v2_attempt_ledger_projections(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=alternate_ledger,
+        runner_event_projections=alternate_events,
+        attempt_lifecycle_projections=[alternate["attempt_lifecycle"]],
+    )
+    alternate_bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        attempt_ref=alternate["attempt"],
+        raw_ledger_prefix_projection=alternate_materialized.runner_ledger_prefix_projection,
+        projected_attempt_ledger=alternate_materialized.projected_attempt_ledger,
+        selected_attempt_lifecycle_projection=alternate["attempt_lifecycle"],
+        cleanup_lifecycle_projection=alternate["cleanup_projection"],
+        journal_terminal_event_projection=alternate["terminal"],
+        attempt_journal_projection=alternate["journal_projection"],
+        screen_group_lifecycle_projections=alternate["screens"],
+        runner_event_projections=alternate_events,
+        cleanup_receipt=alternate["cleanup"],
+    )
+    drifted = deepcopy(first)
+    drifted["lifecycle_bundle_envelope"] = seal_pathless_envelope(alternate_bundle)
+    drifted["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in drifted.items() if key != "content_sha256"},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(ValueError, match="shared closure differs"):
+        validate_benchmark_v2_accepted_regression_score_input_v2(
+            drifted,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+
+
+def test_c4_persisted_accepted_revalidates_authoritative_prediction_graph(
+    monkeypatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        order_pathless_envelopes,
+        pathless_artifact_ref,
+        seal_pathless_envelope,
+        seal_pathless_projection,
+    )
+
+    kwargs, _, graph = _offline_c3_inputs(monkeypatch)
+    accepted = predictions.materialize_benchmark_v2_accepted_regression_score_input_v2(
+        actual_body_bytes=kwargs["actual_body_bytes"],
+        actual_result_bytes=graph["result_bytes"],
+        cleanup_receipt_bytes=graph["cleanup_bytes"],
+        expected_attempt_dir=graph["attempt_dir"],
+        provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+        provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        runner_ledger_prefix_projection=graph["prefix"],
+        attempt_journal_projection=graph["journal_projection"],
+        actual_body_projection=kwargs["actual_body_verified_projection"],
+        actual_result_projection=_offline_actual_result_projection(kwargs, graph),
+        lifecycle_bundle_v3=kwargs["lifecycle_bundle_v3"],
+    )
+
+    run_envelope = deepcopy(accepted["prediction_run_envelope"])
+    run = json.loads(
+        base64.b64decode(run_envelope["canonical_bytes_b64"], validate=True)
+    )
+    children = deepcopy(run["sealed_artifact_envelopes"])
+    automatic_index = next(
+        index
+        for index, envelope in enumerate(children)
+        if json.loads(
+            base64.b64decode(envelope["canonical_bytes_b64"], validate=True)
+        ).get("contract_version")
+        == "automatic_prediction_v3"
+    )
+    automatic = json.loads(
+        base64.b64decode(
+            children[automatic_index]["canonical_bytes_b64"], validate=True
+        )
+    )
+    changed_rows = deepcopy(automatic["rows"])
+    replaced_case = changed_rows[0]["case_id"]
+    for row in changed_rows:
+        if row["case_id"] == replaced_case:
+            row["case_id"] = "fabricated-missing-case"
+    arm_rank = {
+        arm: index
+        for index, arm in enumerate(
+            ("qwen_only", "omni_only_discovery", "omni_to_qwen", "omni_to_qwen_vista")
+        )
+    }
+    changed_rows.sort(key=lambda row: (row["case_id"], arm_rank[row["arm_id"]]))
+    changed_automatic = predictions._seal_automatic_prediction_v3(
+        benchmark_release_id=automatic["benchmark_release_id"],
+        partition=automatic["partition"],
+        source_parent_ref=automatic["source_parent_ref"],
+        case_arm_multiset_sha256=automatic["case_arm_multiset_sha256"],
+        provider_group_dependencies=automatic["provider_group_dependencies"],
+        rows=changed_rows,
+    )
+    children[automatic_index] = seal_pathless_envelope(changed_automatic)
+    children = order_pathless_envelopes(
+        registry_name="prediction_run_v3", envelopes=children, context={}
+    )
+    changed_run_semantic = {
+        key: deepcopy(value)
+        for key, value in run.items()
+        if key not in {"contract_version", "artifact_id", "content_sha256"}
+    }
+    changed_run_semantic["automatic_prediction_ref"] = pathless_artifact_ref(
+        changed_automatic
+    )
+    changed_run_semantic["sealed_artifact_envelopes"] = children
+    changed_run = seal_pathless_projection(
+        contract_version="benchmark_v2_prediction_run_v3",
+        semantic_payload=changed_run_semantic,
+    )
+    changed = deepcopy(accepted)
+    changed["automatic_prediction_ref"] = pathless_artifact_ref(changed_automatic)
+    changed["prediction_run_envelope"] = seal_pathless_envelope(changed_run)
+    changed["content_sha256"] = hashlib.sha256(
+        json.dumps(
+            {key: value for key, value in changed.items() if key != "content_sha256"},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    with pytest.raises(ValueError, match="authoritative|case|multiset|prediction"):
+        predictions.validate_benchmark_v2_accepted_regression_score_input_v2(
+            changed,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+
+    with pytest.raises(ValueError, match="provider|trusted"):
+        predictions.validate_benchmark_v2_accepted_regression_score_input_v2(
+            accepted,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            provider_manifest_bytes=b"drifted-manifest",
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+
+
+def test_c4_persisted_accepted_rejects_coherently_reminted_result_graph(
+    monkeypatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID
+
+    kwargs, _, original = _offline_c3_inputs(monkeypatch)
+    changed_cleanup = deepcopy(original["cleanup"])
+    changed_cleanup.pop("content_sha256")
+    changed_cleanup["reason"] = "coherently reminted cleanup"
+    changed_cleanup = seal_immutable(changed_cleanup)
+    reminted = _offline_fixed_raw_graph(
+        original, cleanup_receipt=changed_cleanup
+    )
+    projected = lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        runner_ledger_events=reminted["ledger"],
+        runner_event_projections=reminted["events"],
+        raw_ledger_prefix_projection=reminted["prefix"],
+        attempt_lifecycle_projections=[reminted["attempt_lifecycle"]],
+    )
+    reminted_bundle = lifecycle.compose_benchmark_v2_lifecycle_bundle_v3(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        partition="regression",
+        attempt_ref=reminted["attempt"],
+        raw_ledger_prefix_projection=reminted["prefix"],
+        projected_attempt_ledger=projected,
+        selected_attempt_lifecycle_projection=reminted["attempt_lifecycle"],
+        cleanup_lifecycle_projection=reminted["cleanup_projection"],
+        journal_terminal_event_projection=reminted["terminal"],
+        attempt_journal_projection=reminted["journal_projection"],
+        screen_group_lifecycle_projections=reminted["screens"],
+        runner_event_projections=reminted["events"],
+        cleanup_receipt=reminted["cleanup"],
+    )
+    reminted_result_projection = predictions.project_benchmark_v2_actual_result(
+        actual_result_bytes=reminted["result_bytes"],
+        cleanup_receipt_bytes=reminted["cleanup_bytes"],
+        expected_attempt_dir=reminted["attempt_dir"],
+        actual_body_projection=kwargs["actual_body_verified_projection"],
+        cleanup_projection=reminted["cleanup_projection"],
+        runner_ledger_prefix_projection=reminted["prefix"],
+        result_event_projection=next(
+            item for item in reminted["events"] if item["event_kind"] == "result"
+        ),
+    )
+    accepted = predictions.materialize_benchmark_v2_accepted_regression_score_input_v2(
+        actual_body_bytes=kwargs["actual_body_bytes"],
+        actual_result_bytes=reminted["result_bytes"],
+        cleanup_receipt_bytes=reminted["cleanup_bytes"],
+        expected_attempt_dir=reminted["attempt_dir"],
+        provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+        provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        runner_ledger_prefix_projection=reminted["prefix"],
+        attempt_journal_projection=reminted["journal_projection"],
+        actual_body_projection=kwargs["actual_body_verified_projection"],
+        actual_result_projection=reminted_result_projection,
+        lifecycle_bundle_v3=reminted_bundle,
+    )
+    with pytest.raises(ValueError, match="result|cleanup|trusted|projection"):
+        predictions.validate_benchmark_v2_accepted_regression_score_input_v2(
+            accepted,
+            actual_body_bytes=kwargs["actual_body_bytes"],
+            actual_result_bytes=original["result_bytes"],
+            cleanup_receipt_bytes=original["cleanup_bytes"],
+            expected_attempt_dir=original["attempt_dir"],
+            provider_manifest_bytes=kwargs["provider_manifest_bytes"],
+            provider_corpus_bytes=kwargs["provider_corpus_bytes"],
+        )
+
+
+def test_c4_actual_result_projection_closes_raw_body_prefix_and_event(tmp_path, monkeypatch) -> None:
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        pathless_artifact_ref,
+        seal_pathless_projection,
+    )
+    from app.learn.hybrid.benchmark_v2_predictions import (
+        project_benchmark_v2_actual_result,
+    )
+
+    kwargs, _, graph = _offline_c3_inputs(monkeypatch)
+    body_projection = kwargs["actual_body_verified_projection"]
+    attempt_dir = (tmp_path / str(graph["attempt"]["attempt_id"])).resolve()
+    cleanup_receipt_bytes = (
+        json.dumps(
+            graph["cleanup"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    public_pre_result = deepcopy(graph["prefix"]["attempt_ledger_pre_result_ref"])
+    native_pre_result = deepcopy(public_pre_result)
+    native_pre_result["attempt_ref"] = deepcopy(graph["attempt"])
+    result = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_runner_actual_result_v2",
+            "attempt_ref": deepcopy(graph["attempt"]),
+            "attempt_dir": str(attempt_dir),
+            "body_ref": {
+                "path": str((attempt_dir / "body.json").resolve()),
+                "file_sha256": body_projection["raw_file_sha256"],
+                "content_sha256": body_projection["body_content_sha256"],
+            },
+            "cleanup_receipt_ref": {
+                "path": str((attempt_dir / "cleanup.json").resolve()),
+                "file_sha256": hashlib.sha256(cleanup_receipt_bytes).hexdigest(),
+                "content_sha256": graph["cleanup"]["content_sha256"],
+            },
+            "attempt_ledger_pre_result_ref": native_pre_result,
+            "screen_group_count": 12,
+            "status": "terminal",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    result_bytes = (
+        json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+    )
+    result_file_ref = {
+        "file_sha256": hashlib.sha256(result_bytes).hexdigest(),
+        "content_sha256": result["content_sha256"],
+    }
+    result_event = seal_pathless_projection(
+        contract_version="benchmark_v2_runner_event_verified_projection_v1",
+        semantic_payload={
+            key: deepcopy(value)
+            for key, value in next(
+                item for item in graph["events"] if item["event_kind"] == "result"
+            ).items()
+            if key not in {"contract_version", "artifact_id", "content_sha256", "load_bearing_refs"}
+        }
+        | {
+            "load_bearing_refs": {
+                "result_file_ref": result_file_ref,
+                "attempt_ledger_pre_result_ref": public_pre_result,
+            }
+        },
+    )
+    prefix_semantic = {
+        key: deepcopy(value)
+        for key, value in graph["prefix"].items()
+        if key not in {"contract_version", "artifact_id", "content_sha256"}
+    }
+    prefix_semantic["result_file_ref"] = result_file_ref
+    prefix_semantic["result_event_projection_ref"] = pathless_artifact_ref(result_event)
+    prefix = seal_pathless_projection(
+        contract_version="benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+        semantic_payload=prefix_semantic,
+    )
+    projected = project_benchmark_v2_actual_result(
+        actual_result_bytes=result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=attempt_dir,
+        actual_body_projection=body_projection,
+        cleanup_projection=graph["cleanup_projection"],
+        runner_ledger_prefix_projection=prefix,
+        result_event_projection=result_event,
+    )
+    assert projected["result_event_projection_ref"] == pathless_artifact_ref(result_event)
+    assert projected["runner_ledger_prefix_projection_ref"] == pathless_artifact_ref(prefix)
+
+    changed = bytearray(result_bytes)
+    changed[-2] = ord(" ")
+    with pytest.raises(ValueError, match="canonical|lineage|UTF-8"):
+        project_benchmark_v2_actual_result(
+            actual_result_bytes=bytes(changed),
+            cleanup_receipt_bytes=cleanup_receipt_bytes,
+            expected_attempt_dir=attempt_dir,
+            actual_body_projection=body_projection,
+            cleanup_projection=graph["cleanup_projection"],
+            runner_ledger_prefix_projection=prefix,
+            result_event_projection=result_event,
+        )
+    swapped_event = deepcopy(result_event)
+    swapped_event["load_bearing_refs"]["attempt_ledger_pre_result_ref"]["prefix_sha256"] = "f" * 64
+    swapped_event = seal_pathless_projection(
+        contract_version="benchmark_v2_runner_event_verified_projection_v1",
+        semantic_payload={
+            key: deepcopy(value)
+            for key, value in swapped_event.items()
+            if key not in {"contract_version", "artifact_id", "content_sha256"}
+        },
+    )
+    with pytest.raises(ValueError, match="verified parent lineage"):
+        project_benchmark_v2_actual_result(
+            actual_result_bytes=result_bytes,
+            cleanup_receipt_bytes=cleanup_receipt_bytes,
+            expected_attempt_dir=attempt_dir,
+            actual_body_projection=body_projection,
+            cleanup_projection=graph["cleanup_projection"],
+            runner_ledger_prefix_projection=prefix,
+            result_event_projection=swapped_event,
+        )
+
+    changed_cleanup = deepcopy(graph["cleanup"])
+    changed_cleanup.pop("content_sha256")
+    changed_cleanup["reason"] = "resealed foreign cleanup"
+    changed_cleanup = seal_immutable(changed_cleanup)
+    changed_cleanup_bytes = (
+        json.dumps(
+            changed_cleanup,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    changed_result = deepcopy(result)
+    changed_result.pop("content_sha256")
+    changed_result["cleanup_receipt_ref"] = {
+        "path": str((attempt_dir / "cleanup.json").resolve()),
+        "file_sha256": hashlib.sha256(changed_cleanup_bytes).hexdigest(),
+        "content_sha256": changed_cleanup["content_sha256"],
+    }
+    changed_result = seal_immutable(changed_result)
+    changed_result_bytes = (
+        json.dumps(
+            changed_result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        + b"\n"
+    )
+    changed_result_file_ref = {
+        "file_sha256": hashlib.sha256(changed_result_bytes).hexdigest(),
+        "content_sha256": changed_result["content_sha256"],
+    }
+    changed_result_event = seal_pathless_projection(
+        contract_version="benchmark_v2_runner_event_verified_projection_v1",
+        semantic_payload={
+            key: deepcopy(value)
+            for key, value in result_event.items()
+            if key
+            not in {
+                "contract_version",
+                "artifact_id",
+                "content_sha256",
+                "load_bearing_refs",
+            }
+        }
+        | {
+            "load_bearing_refs": {
+                "result_file_ref": changed_result_file_ref,
+                "attempt_ledger_pre_result_ref": public_pre_result,
+            }
+        },
+    )
+    changed_prefix_semantic = {
+        key: deepcopy(value)
+        for key, value in prefix.items()
+        if key not in {"contract_version", "artifact_id", "content_sha256"}
+    }
+    changed_prefix_semantic["result_file_ref"] = changed_result_file_ref
+    changed_prefix_semantic["result_event_projection_ref"] = pathless_artifact_ref(
+        changed_result_event
+    )
+    changed_prefix = seal_pathless_projection(
+        contract_version="benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+        semantic_payload=changed_prefix_semantic,
+    )
+    with pytest.raises(ValueError, match="cleanup"):
+        project_benchmark_v2_actual_result(
+            actual_result_bytes=changed_result_bytes,
+            cleanup_receipt_bytes=changed_cleanup_bytes,
+            expected_attempt_dir=attempt_dir,
+            actual_body_projection=body_projection,
+            cleanup_projection=graph["cleanup_projection"],
+            runner_ledger_prefix_projection=changed_prefix,
+            result_event_projection=changed_result_event,
         )
 
 

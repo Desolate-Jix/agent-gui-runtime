@@ -2016,13 +2016,16 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
         "actual_mode",
     ]
     assert lifecycle.__all__ == [
+        "BenchmarkV2AttemptLedgerProjectionMaterialization",
         "append_benchmark_v2_attempt_event",
         "collect_raw_gpu_sample",
         "compose_benchmark_v2_attempt_cleanup_receipt",
         "compose_benchmark_v2_lifecycle_bundle_v3",
         "derive_benchmark_v2_cleanup_receipt_ref",
+        "materialize_benchmark_v2_attempt_ledger_projections",
         "project_benchmark_v2_cleanup_lifecycle",
         "project_benchmark_v2_attempt_journal_terminal_event",
+        "project_benchmark_v2_attempt_journal",
         "project_benchmark_v2_screen_group_lifecycles",
         "project_benchmark_v2_runner_events",
         "project_benchmark_v2_attempt_lifecycle",
@@ -4252,6 +4255,18 @@ def test_s13_two_complete_attempts_select_first_open_and_do_not_publish_later_su
             first["attempt_lifecycle"],
         ],
     )
+    materialized = lifecycle.materialize_benchmark_v2_attempt_ledger_projections(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=ledger,
+        runner_event_projections=events,
+        attempt_lifecycle_projections=[
+            second["attempt_lifecycle"],
+            first["attempt_lifecycle"],
+        ],
+    )
+    assert materialized.runner_ledger_prefix_projection == prefix
+    assert materialized.projected_attempt_ledger == projected
 
     assert len(events) == 8
     assert len(projected["entries"]) == 1
@@ -4285,3 +4300,56 @@ def test_s13_two_complete_attempts_select_first_open_and_do_not_publish_later_su
         "result",
     ]
     assert len(decoded) == 20
+
+
+def test_c4_runner_prefix_wrapper_uses_existing_first_complete_selector() -> None:
+    graph = _s13_complete_graph()
+    materialized = lifecycle.materialize_benchmark_v2_attempt_ledger_projections(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=graph["ledger"],
+        runner_event_projections=graph["events"],
+        attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+    )
+    assert materialized.runner_ledger_prefix_projection == graph["prefix"]
+    assert materialized.projected_attempt_ledger == lifecycle.project_benchmark_v2_attempt_ledger(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        partition="regression",
+        runner_ledger_events=graph["ledger"],
+        runner_event_projections=graph["events"],
+        raw_ledger_prefix_projection=graph["prefix"],
+        attempt_lifecycle_projections=[graph["attempt_lifecycle"]],
+    )
+
+
+def test_c4_attempt_journal_projection_rejects_terminal_cleanup_swap() -> None:
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+
+    graph = _s13_complete_graph()
+    projected = lifecycle.project_benchmark_v2_attempt_journal(
+        attempt_ref=graph["attempt"],
+        journal_events=graph["journal"],
+        terminal_event_projection=graph["terminal"],
+        cleanup_projection=graph["cleanup_projection"],
+    )
+    assert projected == graph["journal_projection"]
+    semantic = {
+        key: deepcopy(value)
+        for key, value in graph["terminal"].items()
+        if key not in {"contract_version", "artifact_id", "content_sha256"}
+    }
+    semantic["cleanup_projection_ref"] = {
+        "id": "verified-lifecycle/" + "f" * 64,
+        "content_sha256": "e" * 64,
+    }
+    swapped = seal_pathless_projection(
+        contract_version="benchmark_v2_attempt_journal_terminal_event_verified_projection_v1",
+        semantic_payload=semantic,
+    )
+    with pytest.raises(ValueError, match="journal parent lineage"):
+        lifecycle.project_benchmark_v2_attempt_journal(
+            attempt_ref=graph["attempt"],
+            journal_events=graph["journal"],
+            terminal_event_projection=swapped,
+            cleanup_projection=graph["cleanup_projection"],
+        )

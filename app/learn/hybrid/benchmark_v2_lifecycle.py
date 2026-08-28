@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -4533,6 +4534,61 @@ def project_benchmark_v2_attempt_journal_terminal_event(
     )
 
 
+def project_benchmark_v2_attempt_journal(
+    *,
+    attempt_ref: Mapping[str, object],
+    journal_events: Sequence[Mapping[str, object]],
+    terminal_event_projection: Mapping[str, object],
+    cleanup_projection: Mapping[str, object],
+) -> dict[str, object]:
+    """将已验证的固定 attempt journal 投影为无路径父证据。"""
+
+    public_attempt_ref = _s13_public_attempt_ref(attempt_ref)
+    events = _s13_attempt_journal_events(
+        journal_events,
+        attempt_ref=attempt_ref,
+        forbid_provider_events=True,
+    )
+    terminal_ref = _s13_pathless_projection_ref(
+        terminal_event_projection,
+        contract_version="benchmark_v2_attempt_journal_terminal_event_verified_projection_v1",
+    )
+    cleanup_ref = _s13_pathless_projection_ref(
+        cleanup_projection,
+        contract_version="benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    cleanup_parents = cleanup_projection.get("parent_refs")
+    if (
+        terminal_event_projection.get("attempt_ref") != public_attempt_ref
+        or terminal_event_projection.get("sequence") != events[-1]["sequence"]
+        or terminal_event_projection.get("raw_event_sha256")
+        != hashlib.sha256(canonical_json_bytes(events[-1])).hexdigest()
+        or terminal_event_projection.get("cleanup_projection_ref") != cleanup_ref
+        or not isinstance(cleanup_parents, Mapping)
+        or cleanup_parents.get("cleanup_receipt_ref")
+        != terminal_event_projection.get("cleanup_receipt_ref")
+        or cleanup_projection.get("attempt_ref") != public_attempt_ref
+        or cleanup_projection.get("lifecycle_kind") != "cleanup"
+    ):
+        raise ValueError("benchmark v2 attempt journal parent lineage differs")
+    raw_journal = b"".join(canonical_json_bytes(item) + b"\n" for item in events)
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_attempt_journal_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": public_attempt_ref,
+            "raw_journal_sha256": hashlib.sha256(raw_journal).hexdigest(),
+            "terminal_event_ref": terminal_ref,
+            "started_request_count": 0,
+            "terminal_or_unknown_request_count": 0,
+            "cleanup_projection_ref": cleanup_ref,
+            "verified": True,
+            "safety": deepcopy(_S13_SAFETY),
+        },
+    )
+
+
 def _s13_exact_ref(value: object, name: str) -> dict[str, str]:
     if (
         not isinstance(value, Mapping)
@@ -5748,15 +5804,15 @@ def project_benchmark_v2_attempt_lifecycle(
     )
 
 
-def project_benchmark_v2_attempt_ledger(
+def _project_benchmark_v2_attempt_ledger_core(
     *,
     benchmark_release_id: str,
     partition: str,
     runner_ledger_events: Sequence[Mapping[str, object]],
     runner_event_projections: Sequence[Mapping[str, object]],
-    raw_ledger_prefix_projection: Mapping[str, object],
+    raw_ledger_prefix_projection: Mapping[str, object] | None,
     attempt_lifecycle_projections: Sequence[Mapping[str, object]],
-) -> dict[str, object]:
+) -> tuple[dict[str, object], dict[str, object]]:
     """按 raw ledger 首次 open 顺序折叠 attempts，并只选择首个完整 lifecycle。"""
 
     if partition != "regression" or not isinstance(benchmark_release_id, str) or not benchmark_release_id:
@@ -5908,10 +5964,6 @@ def project_benchmark_v2_attempt_ledger(
         raise ValueError("benchmark v2 selected attempt prefix is incomplete")
     selected_entry["lifecycle_ref"] = selected_lifecycle_ref
     selected_entry["selection_eligible"] = True
-    prefix_ref = _s13_pathless_projection_ref(
-        raw_ledger_prefix_projection,
-        contract_version="benchmark_v2_runner_ledger_prefix_verified_projection_v1",
-    )
     raw_prefix = b"".join(
         canonical_json_bytes(item) + b"\n" for item in selected_prefix_ledger
     )
@@ -5945,10 +5997,18 @@ def project_benchmark_v2_attempt_ledger(
         "verified": True,
         "safety": _S13_SAFETY,
     }
-    if any(raw_ledger_prefix_projection.get(key) != value for key, value in expected_prefix.items()):
+    derived_prefix = seal_pathless_projection(
+        contract_version="benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+        semantic_payload=expected_prefix,
+    )
+    if (
+        raw_ledger_prefix_projection is not None
+        and dict(raw_ledger_prefix_projection) != derived_prefix
+    ):
         raise ValueError("benchmark v2 raw ledger prefix projection differs")
+    prefix_ref = pathless_artifact_ref(derived_prefix)
     entries = [prefix_entries[key] for key in prefix_order]
-    return seal_pathless_projection(
+    projected = seal_pathless_projection(
         contract_version="benchmark_v2_projected_attempt_ledger_v1",
         semantic_payload={
             "benchmark_release_id": benchmark_release_id,
@@ -5960,6 +6020,59 @@ def project_benchmark_v2_attempt_ledger(
             "safety": deepcopy(_S13_SAFETY),
         },
     )
+    return derived_prefix, projected
+
+
+@dataclass(frozen=True)
+class BenchmarkV2AttemptLedgerProjectionMaterialization:
+    runner_ledger_prefix_projection: dict[str, object]
+    projected_attempt_ledger: dict[str, object]
+
+
+def materialize_benchmark_v2_attempt_ledger_projections(
+    *,
+    benchmark_release_id: str,
+    partition: str,
+    runner_ledger_events: Sequence[Mapping[str, object]],
+    runner_event_projections: Sequence[Mapping[str, object]],
+    attempt_lifecycle_projections: Sequence[Mapping[str, object]],
+) -> BenchmarkV2AttemptLedgerProjectionMaterialization:
+    """由唯一 first-complete 选择算法同时派生 raw-prefix 与 projected ledger。"""
+
+    prefix, projected = _project_benchmark_v2_attempt_ledger_core(
+        benchmark_release_id=benchmark_release_id,
+        partition=partition,
+        runner_ledger_events=runner_ledger_events,
+        runner_event_projections=runner_event_projections,
+        raw_ledger_prefix_projection=None,
+        attempt_lifecycle_projections=attempt_lifecycle_projections,
+    )
+    return BenchmarkV2AttemptLedgerProjectionMaterialization(
+        runner_ledger_prefix_projection=prefix,
+        projected_attempt_ledger=projected,
+    )
+
+
+def project_benchmark_v2_attempt_ledger(
+    *,
+    benchmark_release_id: str,
+    partition: str,
+    runner_ledger_events: Sequence[Mapping[str, object]],
+    runner_event_projections: Sequence[Mapping[str, object]],
+    raw_ledger_prefix_projection: Mapping[str, object],
+    attempt_lifecycle_projections: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """验证 caller prefix，并保持既有 projected-ledger API。"""
+
+    _, projected = _project_benchmark_v2_attempt_ledger_core(
+        benchmark_release_id=benchmark_release_id,
+        partition=partition,
+        runner_ledger_events=runner_ledger_events,
+        runner_event_projections=runner_event_projections,
+        raw_ledger_prefix_projection=raw_ledger_prefix_projection,
+        attempt_lifecycle_projections=attempt_lifecycle_projections,
+    )
+    return projected
 
 
 def compose_benchmark_v2_lifecycle_bundle_v3(
@@ -6350,13 +6463,16 @@ def compose_benchmark_v2_lifecycle_bundle_v3(
 
 
 __all__ = [
+    "BenchmarkV2AttemptLedgerProjectionMaterialization",
     "append_benchmark_v2_attempt_event",
     "collect_raw_gpu_sample",
     "compose_benchmark_v2_attempt_cleanup_receipt",
     "compose_benchmark_v2_lifecycle_bundle_v3",
     "derive_benchmark_v2_cleanup_receipt_ref",
+    "materialize_benchmark_v2_attempt_ledger_projections",
     "project_benchmark_v2_cleanup_lifecycle",
     "project_benchmark_v2_attempt_journal_terminal_event",
+    "project_benchmark_v2_attempt_journal",
     "project_benchmark_v2_screen_group_lifecycles",
     "project_benchmark_v2_runner_events",
     "project_benchmark_v2_attempt_lifecycle",

@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
+from pathlib import Path
 import re
 from typing import Any, Mapping
 
@@ -1135,6 +1136,784 @@ def materialize_prediction_run_v3(
         automatic_prediction=automatic,
         prediction_run=prediction_run,
         prediction_run_envelope=prediction_run_envelope,
+    )
+
+
+def project_benchmark_v2_actual_body(
+    *,
+    actual_body_bytes: bytes,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+) -> dict[str, object]:
+    """从 canonical production body 与 Task 10 provider bytes 派生无路径投影。"""
+
+    from app.learn.hybrid.benchmark_v2_lifecycle import _s13_public_attempt_ref
+
+    body = _parse_actual_body_bytes(actual_body_bytes)
+    _, corpus, _, _ = _parse_provider_inputs(
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    provider_cases, case_context, corpus_digest = _provider_case_index(corpus)
+    raw_attempt_ref = body.get("attempt_ref")
+    if not isinstance(raw_attempt_ref, Mapping):
+        raise ValueError("actual body attempt ref is invalid")
+    dependencies: list[dict[str, object]] = []
+    row_count = 0
+    screens = body.get("screen_group_results")
+    assert isinstance(screens, list)
+    for screen in screens:
+        if not isinstance(screen, Mapping):
+            raise ValueError("actual body screen group is invalid")
+        dependency, rows, _, _ = _screen_group_material(
+            screen=screen,
+            raw_attempt_ref=raw_attempt_ref,
+            provider_cases=provider_cases,
+            case_context=case_context,
+        )
+        dependencies.append(dependency)
+        row_count += len(rows)
+    dependencies.sort(key=lambda item: str(item["provider_group_ref"]["id"]))
+    if (
+        len(dependencies) != 12
+        or len({str(item["provider_group_ref"]["id"]) for item in dependencies}) != 12
+        or row_count != 240
+    ):
+        raise ValueError("actual body dependency/row multiset differs")
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_actual_body_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": _s13_public_attempt_ref(raw_attempt_ref),
+            "body_contract_version": "benchmark_v2_runner_actual_body_v1",
+            "raw_file_sha256": hashlib.sha256(actual_body_bytes).hexdigest(),
+            "body_content_sha256": str(body["content_sha256"]),
+            "screen_group_count": 12,
+            "case_arm_multiset_sha256": corpus_digest,
+            "pre_vista_evidence_refs": [
+                deepcopy(item["pre_vista_evidence_ref"]) for item in dependencies
+            ],
+            "verified": True,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+
+
+def _parse_actual_result_bytes(
+    actual_result_bytes: bytes, *, expected_attempt_dir: Path
+) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    if not isinstance(actual_result_bytes, bytes):
+        raise ValueError("actual result bytes are required")
+    try:
+        decoded = json.loads(actual_result_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("actual result is not UTF-8 JSON") from exc
+    if (
+        not isinstance(decoded, Mapping)
+        or actual_result_bytes != canonical_bytes(decoded) + b"\n"
+    ):
+        raise ValueError("actual result bytes are not canonical")
+    result = deepcopy(dict(decoded))
+    expected = {
+        "contract_version",
+        "attempt_ref",
+        "attempt_dir",
+        "body_ref",
+        "cleanup_receipt_ref",
+        "attempt_ledger_pre_result_ref",
+        "screen_group_count",
+        "status",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    attempt_dir = Path(expected_attempt_dir).resolve()
+    if (
+        set(result) != expected
+        or result.get("contract_version") != "benchmark_v2_runner_actual_result_v2"
+        or result.get("attempt_dir") != str(attempt_dir)
+        or result.get("screen_group_count") != 12
+        or result.get("status") != "terminal"
+        or result.get("artifact_is_authorization") is not False
+        or result.get("execute_binding_enabled") is not False
+        or result.get("content_sha256") != content_sha256(result)
+    ):
+        raise ValueError("actual result contract is invalid")
+    for name, filename in (("body_ref", "body.json"), ("cleanup_receipt_ref", "cleanup.json")):
+        ref = result.get(name)
+        if (
+            not isinstance(ref, Mapping)
+            or set(ref) != {"path", "file_sha256", "content_sha256"}
+            or ref.get("path") != str((attempt_dir / filename).resolve())
+            or any(
+                not isinstance(ref.get(field), str)
+                or re.fullmatch(r"[0-9a-f]{64}", str(ref[field])) is None
+                for field in ("file_sha256", "content_sha256")
+            )
+        ):
+            raise ValueError(f"actual result {name} is invalid")
+    return result
+
+
+def project_benchmark_v2_actual_result(
+    *,
+    actual_result_bytes: bytes,
+    cleanup_receipt_bytes: bytes,
+    expected_attempt_dir: Path,
+    actual_body_projection: Mapping[str, object],
+    cleanup_projection: Mapping[str, object],
+    runner_ledger_prefix_projection: Mapping[str, object],
+    result_event_projection: Mapping[str, object],
+) -> dict[str, object]:
+    """投影固定 result.json，并闭合 body/cleanup/prefix/result-event 链。"""
+
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        _s13_cleanup_receipt,
+        _s13_public_attempt_ref,
+        derive_benchmark_v2_cleanup_receipt_ref,
+    )
+
+    result = _parse_actual_result_bytes(
+        actual_result_bytes, expected_attempt_dir=expected_attempt_dir
+    )
+    raw_attempt_ref = result.get("attempt_ref")
+    if not isinstance(raw_attempt_ref, Mapping):
+        raise ValueError("actual result attempt ref is invalid")
+    if not isinstance(cleanup_receipt_bytes, bytes):
+        raise ValueError("cleanup receipt bytes are required")
+    try:
+        raw_cleanup_receipt = json.loads(cleanup_receipt_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("cleanup receipt is not UTF-8 JSON") from exc
+    if (
+        not isinstance(raw_cleanup_receipt, Mapping)
+        or cleanup_receipt_bytes
+        != canonical_bytes(raw_cleanup_receipt) + b"\n"
+    ):
+        raise ValueError("cleanup receipt bytes are not canonical")
+    cleanup_receipt = _s13_cleanup_receipt(
+        raw_cleanup_receipt, attempt_ref=raw_attempt_ref
+    )
+    attempt_ref = _s13_public_attempt_ref(raw_attempt_ref)
+    body_ref = pathless_artifact_ref(actual_body_projection)
+    cleanup_ref = pathless_artifact_ref(cleanup_projection)
+    prefix_ref = pathless_artifact_ref(runner_ledger_prefix_projection)
+    event_ref = pathless_artifact_ref(result_event_projection)
+    native_pre_result = result.get("attempt_ledger_pre_result_ref")
+    if not isinstance(native_pre_result, Mapping):
+        raise ValueError("actual result pre-result ref is invalid")
+    public_pre_result = deepcopy(dict(native_pre_result))
+    public_pre_result["attempt_ref"] = attempt_ref
+    event_parents = result_event_projection.get("load_bearing_refs")
+    raw_body_ref = result["body_ref"]
+    assert isinstance(raw_body_ref, Mapping)
+    expected_body_file_ref = {
+        "file_sha256": raw_body_ref["file_sha256"],
+        "content_sha256": raw_body_ref["content_sha256"],
+    }
+    expected_result_file_ref = {
+        "file_sha256": hashlib.sha256(actual_result_bytes).hexdigest(),
+        "content_sha256": result["content_sha256"],
+    }
+    expected_cleanup_file_ref = {
+        "path": str((Path(expected_attempt_dir).resolve() / "cleanup.json").resolve()),
+        "file_sha256": hashlib.sha256(cleanup_receipt_bytes).hexdigest(),
+        "content_sha256": cleanup_receipt["content_sha256"],
+    }
+    cleanup_parents = cleanup_projection.get("parent_refs")
+    expected_cleanup_parent = derive_benchmark_v2_cleanup_receipt_ref(
+        cleanup_receipt=cleanup_receipt
+    )
+    if (
+        result.get("cleanup_receipt_ref") != expected_cleanup_file_ref
+        or cleanup_projection.get("attempt_ref") != attempt_ref
+        or cleanup_projection.get("lifecycle_kind") != "cleanup"
+        or not isinstance(cleanup_parents, Mapping)
+        or set(cleanup_parents) != {"cleanup_receipt_ref"}
+        or cleanup_parents.get("cleanup_receipt_ref") != expected_cleanup_parent
+    ):
+        raise ValueError("actual result cleanup receipt lineage differs")
+    if (
+        native_pre_result.get("attempt_ref") != raw_attempt_ref
+        or actual_body_projection.get("attempt_ref") != attempt_ref
+        or actual_body_projection.get("raw_file_sha256") != expected_body_file_ref["file_sha256"]
+        or actual_body_projection.get("body_content_sha256")
+        != expected_body_file_ref["content_sha256"]
+        or runner_ledger_prefix_projection.get("attempt_ref") != attempt_ref
+        or runner_ledger_prefix_projection.get("body_file_ref") != expected_body_file_ref
+        or runner_ledger_prefix_projection.get("result_file_ref") != expected_result_file_ref
+        or runner_ledger_prefix_projection.get("attempt_ledger_pre_result_ref")
+        != public_pre_result
+        or runner_ledger_prefix_projection.get("result_event_projection_ref") != event_ref
+        or result_event_projection.get("attempt_ref") != attempt_ref
+        or result_event_projection.get("event_kind") != "result"
+        or not isinstance(event_parents, Mapping)
+        or event_parents.get("result_file_ref") != expected_result_file_ref
+        or event_parents.get("attempt_ledger_pre_result_ref") != public_pre_result
+    ):
+        raise ValueError("actual result verified parent lineage differs")
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_actual_result_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": attempt_ref,
+            "result_contract_version": "benchmark_v2_runner_actual_result_v2",
+            "raw_file_sha256": hashlib.sha256(actual_result_bytes).hexdigest(),
+            "result_content_sha256": str(result["content_sha256"]),
+            "body_projection_ref": body_ref,
+            "cleanup_projection_ref": cleanup_ref,
+            "attempt_ledger_pre_result_ref": public_pre_result,
+            "runner_ledger_prefix_projection_ref": prefix_ref,
+            "result_event_projection_ref": event_ref,
+            "verified": True,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+
+
+def _accepted_envelope(value: object, *, name: str) -> tuple[dict[str, object], dict[str, object]]:
+    decoded, raw = _decode_canonical_envelope(value, name=name)
+    raw_classes = {
+        "hybrid_omni_inventory_v1": ("omni-inventory", b"benchmark-v2-omni-inventory\0"),
+        "hybrid_qwen_bindings_v1": ("qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        "hybrid_fusion_result_v1": ("fusion-result", b"benchmark-v2-fusion-result\0"),
+        "hybrid_vista_refinement_request_v1": (
+            "submitted-vista-request",
+            b"benchmark-v2-submitted-vista-request\0",
+        ),
+    }
+    raw_spec = raw_classes.get(str(decoded.get("contract_version")))
+    if raw_spec is None:
+        ref = pathless_artifact_ref(decoded)
+    else:
+        prefix, domain = raw_spec
+        ref = {
+            "id": prefix + "/" + hashlib.sha256(domain + raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+    if not isinstance(value, Mapping) or value.get("ref") != ref:
+        raise ValueError(f"{name} envelope ref differs")
+    return decoded, ref
+
+
+def _accepted_closure_index(
+    outer: Mapping[str, object], *, name: str
+) -> tuple[dict[bytes, tuple[dict[str, object], dict[str, object]]], list[dict[str, object]]]:
+    envelopes = outer.get("sealed_artifact_envelopes")
+    if not isinstance(envelopes, list):
+        raise ValueError(f"{name} closure is unavailable")
+    by_ref: dict[bytes, tuple[dict[str, object], dict[str, object]]] = {}
+    ordered: list[dict[str, object]] = []
+    for index, envelope in enumerate(envelopes):
+        decoded, ref = _accepted_envelope(envelope, name=f"{name} child {index}")
+        key = canonical_bytes(ref)
+        if key in by_ref:
+            raise ValueError(f"{name} closure ref is duplicated")
+        by_ref[key] = (decoded, deepcopy(dict(envelope)))
+        ordered.append(decoded)
+    return by_ref, ordered
+
+
+def _accepted_prediction_validation_material(
+    *,
+    prediction: Mapping[str, object],
+    prediction_by_ref: Mapping[
+        bytes, tuple[dict[str, object], dict[str, object]]
+    ],
+    automatic: Mapping[str, object],
+    body_projection: Mapping[str, object],
+    actual_body_bytes: bytes,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+) -> dict[str, object]:
+    """从可信原始 body/provider 字节重建 prediction graph 的权威上下文。"""
+
+    from app.learn.hybrid.benchmark_v2_lifecycle import _s13_public_attempt_ref
+
+    body = _parse_actual_body_bytes(actual_body_bytes)
+    _, corpus, manifest_ref, corpus_ref = _parse_provider_inputs(
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    provider_cases, case_context, corpus_digest = _provider_case_index(corpus)
+    derived_body_projection = project_benchmark_v2_actual_body(
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    if dict(body_projection) != derived_body_projection:
+        raise ValueError("accepted actual body projection differs from trusted bytes")
+    if (
+        prediction.get("provider_manifest_ref") != manifest_ref
+        or prediction.get("provider_corpus_ref") != corpus_ref
+        or automatic.get("case_arm_multiset_sha256") != corpus_digest
+    ):
+        raise ValueError("accepted trusted provider lineage differs")
+    raw_attempt_ref = body.get("attempt_ref")
+    if not isinstance(raw_attempt_ref, Mapping):
+        raise ValueError("accepted actual body attempt ref is invalid")
+    public_attempt_ref = _s13_public_attempt_ref(raw_attempt_ref)
+    if prediction.get("attempt_ref") != public_attempt_ref:
+        raise ValueError("accepted actual body attempt lineage differs")
+
+    dependencies: list[dict[str, object]] = []
+    rows: list[dict[str, object]] = []
+    trusted_raw_envelopes: list[dict[str, object]] = []
+    screens = body.get("screen_group_results")
+    if not isinstance(screens, list):
+        raise ValueError("accepted actual body screen groups are unavailable")
+    for screen in screens:
+        if not isinstance(screen, Mapping):
+            raise ValueError("accepted actual body screen group is invalid")
+        dependency, group_rows, _, material = _screen_group_material(
+            screen=screen,
+            raw_attempt_ref=raw_attempt_ref,
+            provider_cases=provider_cases,
+            case_context=case_context,
+        )
+        dependencies.append(dependency)
+        rows.extend(group_rows)
+        trusted_raw_envelopes.extend(material["raw_envelopes"])
+    dependencies.sort(key=lambda item: str(item["provider_group_ref"]["id"]))
+    arm_rank = {arm: index for index, arm in enumerate(ARMS)}
+    rows.sort(key=lambda item: (str(item["case_id"]), arm_rank[str(item["arm_id"])]))
+    expected_automatic = _seal_automatic_prediction_v3(
+        benchmark_release_id=str(prediction["benchmark_release_id"]),
+        partition=str(prediction["partition"]),
+        source_parent_ref=pathless_artifact_ref(derived_body_projection),
+        case_arm_multiset_sha256=corpus_digest,
+        provider_group_dependencies=dependencies,
+        rows=rows,
+    )
+    if dict(automatic) != expected_automatic:
+        raise ValueError("accepted prediction differs from trusted actual body evidence")
+    for envelope in trusted_raw_envelopes:
+        decoded, ref = _accepted_envelope(
+            envelope, name="trusted actual body provider evidence"
+        )
+        resolved = prediction_by_ref.get(canonical_bytes(ref))
+        if resolved is None or resolved[0] != decoded or resolved[1] != envelope:
+            raise ValueError("accepted prediction raw provider closure differs from body")
+    return {
+        "provider_groups": {
+            str(item["provider_group_ref"]["id"]): deepcopy(item)
+            for item in dependencies
+        },
+        "cases": deepcopy(case_context),
+        "actual_body_projection_ref": pathless_artifact_ref(
+            derived_body_projection
+        ),
+        "attempt_ref": public_attempt_ref,
+        "raw_ledger_prefix_verification_ref": deepcopy(
+            prediction["raw_ledger_prefix_verification_ref"]
+        ),
+        "projected_attempt_ledger_ref": deepcopy(
+            prediction["projected_attempt_ledger_ref"]
+        ),
+        "selected_lifecycle_ref": deepcopy(
+            prediction["selected_lifecycle_ref"]
+        ),
+    }
+
+
+def validate_benchmark_v2_accepted_regression_score_input_v2(
+    value: object,
+    *,
+    actual_body_bytes: bytes,
+    actual_result_bytes: bytes,
+    cleanup_receipt_bytes: bytes,
+    expected_attempt_dir: Path,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+) -> dict[str, object]:
+    """验证 scorer 可消费的无路径 accepted regression 根。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID, PARENT_REF
+
+    if not isinstance(value, Mapping):
+        raise ValueError("accepted regression score input must be an object")
+    accepted = deepcopy(dict(value))
+    expected = {
+        "contract_version", "content_sha256", "benchmark_release_id", "partition",
+        "corpus_parent_ref", "provider_manifest_ref", "provider_corpus_ref",
+        "selection_policy", "attempt_ref", "attempt_ledger_ref",
+        "automatic_prediction_ref", "selected_lifecycle_ref",
+        "verified_parent_projections", "prediction_run_envelope",
+        "lifecycle_bundle_envelope", "safety",
+    }
+    if (
+        set(accepted) != expected
+        or accepted.get("contract_version")
+        != "benchmark_v2_accepted_regression_score_input_v2"
+        or accepted.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
+        or accepted.get("partition") != "regression"
+        or accepted.get("selection_policy")
+        != "first_complete_lifecycle_verified_attempt"
+        or accepted.get("corpus_parent_ref") != PARENT_REF
+        or accepted.get("safety") != SAFETY
+        or accepted.get("content_sha256")
+        != hashlib.sha256(
+            canonical_bytes({k: v for k, v in accepted.items() if k != "content_sha256"})
+        ).hexdigest()
+    ):
+        raise ValueError("accepted regression score input contract is invalid")
+    prediction, prediction_ref = _accepted_envelope(
+        accepted["prediction_run_envelope"], name="accepted prediction run"
+    )
+    lifecycle, lifecycle_ref = _accepted_envelope(
+        accepted["lifecycle_bundle_envelope"], name="accepted lifecycle bundle"
+    )
+    del lifecycle_ref
+    if (
+        prediction.get("contract_version") != "benchmark_v2_prediction_run_v3"
+        or lifecycle.get("contract_version") != "benchmark_v2_lifecycle_bundle_v3"
+    ):
+        raise ValueError("accepted regression v3 bundle contract differs")
+    prediction_by_ref, prediction_children = _accepted_closure_index(
+        prediction, name="accepted prediction run"
+    )
+    lifecycle_by_ref, lifecycle_children = _accepted_closure_index(
+        lifecycle, name="accepted lifecycle bundle"
+    )
+    shared_versions = {
+        "benchmark_v2_runner_event_verified_projection_v1",
+        "benchmark_v2_projected_attempt_ledger_v1",
+    }
+    prediction_shared = {
+        key: envelope
+        for key, (item, envelope) in prediction_by_ref.items()
+        if item.get("contract_version") in shared_versions
+    }
+    lifecycle_shared = {
+        key: envelope
+        for key, (item, envelope) in lifecycle_by_ref.items()
+        if item.get("contract_version") in shared_versions
+    }
+    if prediction_shared != lifecycle_shared:
+        raise ValueError("accepted prediction/lifecycle shared closure differs")
+    parents = accepted.get("verified_parent_projections")
+    parent_fields = {
+        "runner_ledger_prefix_projection_envelope",
+        "attempt_journal_projection_envelope",
+        "actual_body_projection_envelope",
+        "actual_result_projection_envelope",
+    }
+    if not isinstance(parents, Mapping) or set(parents) != parent_fields:
+        raise ValueError("accepted verified parent projection set differs")
+    decoded_parents: dict[str, dict[str, object]] = {}
+    parent_refs: dict[str, dict[str, object]] = {}
+    expected_contracts = {
+        "runner_ledger_prefix_projection_envelope": "benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+        "attempt_journal_projection_envelope": "benchmark_v2_attempt_journal_verified_projection_v1",
+        "actual_body_projection_envelope": "benchmark_v2_actual_body_verified_projection_v1",
+        "actual_result_projection_envelope": "benchmark_v2_actual_result_verified_projection_v1",
+    }
+    for field, contract in expected_contracts.items():
+        decoded, ref = _accepted_envelope(parents[field], name=field)
+        if decoded.get("contract_version") != contract:
+            raise ValueError("accepted verified parent contract differs")
+        decoded_parents[field] = decoded
+        parent_refs[field] = ref
+    prefix = decoded_parents["runner_ledger_prefix_projection_envelope"]
+    journal = decoded_parents["attempt_journal_projection_envelope"]
+    body = decoded_parents["actual_body_projection_envelope"]
+    result = decoded_parents["actual_result_projection_envelope"]
+    validate_pathless_recursive(
+        registry_name="verified_parents_v1",
+        roots=[
+            parent_refs["attempt_journal_projection_envelope"],
+            parent_refs["actual_result_projection_envelope"],
+        ],
+        envelopes=[deepcopy(dict(parents[field])) for field in expected_contracts],
+        external_refs={
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.attempt_ledger_pre_result_ref": prefix["attempt_ledger_pre_result_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.attempt_ref": prefix["attempt_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.body_file_ref": prefix["body_file_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.cleanup_event_projection_ref": prefix["cleanup_event_projection_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.result_file_ref": prefix["result_file_ref"],
+            "benchmark_v2_runner_ledger_prefix_verified_projection_v1.result_event_projection_ref": prefix["result_event_projection_ref"],
+            "benchmark_v2_attempt_journal_verified_projection_v1.attempt_ref": journal["attempt_ref"],
+            "benchmark_v2_attempt_journal_verified_projection_v1.terminal_event_ref": journal["terminal_event_ref"],
+            "benchmark_v2_attempt_journal_verified_projection_v1.cleanup_projection_ref": journal["cleanup_projection_ref"],
+            "benchmark_v2_actual_body_verified_projection_v1.attempt_ref": body["attempt_ref"],
+            "benchmark_v2_actual_body_verified_projection_v1.pre_vista_evidence_refs": body["pre_vista_evidence_refs"],
+            "benchmark_v2_actual_result_verified_projection_v1.attempt_ref": result["attempt_ref"],
+            "benchmark_v2_actual_result_verified_projection_v1.cleanup_projection_ref": result["cleanup_projection_ref"],
+            "benchmark_v2_actual_result_verified_projection_v1.attempt_ledger_pre_result_ref": result["attempt_ledger_pre_result_ref"],
+            "benchmark_v2_actual_result_verified_projection_v1.result_event_projection_ref": result["result_event_projection_ref"],
+        },
+        context={},
+    )
+    attempt_ref = accepted.get("attempt_ref")
+    projected_ledger_ref = accepted.get("attempt_ledger_ref")
+    automatic_ref = accepted.get("automatic_prediction_ref")
+    selected_lifecycle_ref = accepted.get("selected_lifecycle_ref")
+    if (
+        prediction.get("benchmark_release_id") != accepted["benchmark_release_id"]
+        or lifecycle.get("benchmark_release_id") != accepted["benchmark_release_id"]
+        or prediction.get("partition") != "regression"
+        or lifecycle.get("partition") != "regression"
+        or prediction.get("corpus_parent_ref") != accepted["corpus_parent_ref"]
+        or prediction.get("provider_manifest_ref") != accepted["provider_manifest_ref"]
+        or prediction.get("provider_corpus_ref") != accepted["provider_corpus_ref"]
+        or prediction.get("attempt_ref") != attempt_ref
+        or lifecycle.get("attempt_ref") != attempt_ref
+        or prediction.get("projected_attempt_ledger_ref") != projected_ledger_ref
+        or lifecycle.get("projected_attempt_ledger_ref") != projected_ledger_ref
+        or prediction.get("automatic_prediction_ref") != automatic_ref
+        or prediction.get("selected_lifecycle_ref") != selected_lifecycle_ref
+        or lifecycle.get("selected_lifecycle_ref") != selected_lifecycle_ref
+        or prediction.get("raw_ledger_prefix_verification_ref")
+        != parent_refs["runner_ledger_prefix_projection_envelope"]
+        or lifecycle.get("raw_ledger_prefix_verification_ref")
+        != parent_refs["runner_ledger_prefix_projection_envelope"]
+        or any(item.get("attempt_ref") != attempt_ref for item in (prefix, journal, body, result))
+        or result.get("body_projection_ref")
+        != parent_refs["actual_body_projection_envelope"]
+        or result.get("runner_ledger_prefix_projection_ref")
+        != parent_refs["runner_ledger_prefix_projection_envelope"]
+        or result.get("result_event_projection_ref") != prefix.get("result_event_projection_ref")
+        or result.get("attempt_ledger_pre_result_ref") != prefix.get("attempt_ledger_pre_result_ref")
+        or result.get("cleanup_projection_ref") != journal.get("cleanup_projection_ref")
+        or prefix.get("body_file_ref")
+        != {"file_sha256": body.get("raw_file_sha256"), "content_sha256": body.get("body_content_sha256")}
+        or prefix.get("result_file_ref")
+        != {"file_sha256": result.get("raw_file_sha256"), "content_sha256": result.get("result_content_sha256")}
+    ):
+        raise ValueError("accepted regression top-level or verified-parent lineage differs")
+
+    def resolve(index: Mapping[bytes, tuple[dict[str, object], dict[str, object]]], ref: object, contract: str) -> dict[str, object]:
+        if not isinstance(ref, Mapping):
+            raise ValueError("accepted child ref is invalid")
+        found = index.get(canonical_bytes(ref))
+        if found is None or found[0].get("contract_version") != contract:
+            raise ValueError("accepted child ref is unresolved")
+        return found[0]
+
+    automatic = resolve(
+        prediction_by_ref, automatic_ref, "automatic_prediction_v3"
+    )
+    ledger = resolve(
+        prediction_by_ref, projected_ledger_ref, "benchmark_v2_projected_attempt_ledger_v1"
+    )
+    prediction_context = _accepted_prediction_validation_material(
+        prediction=prediction,
+        prediction_by_ref=prediction_by_ref,
+        automatic=automatic,
+        body_projection=body,
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    prediction_child_envelopes = prediction.get("sealed_artifact_envelopes")
+    if not isinstance(prediction_child_envelopes, list):
+        raise ValueError("accepted prediction closure is unavailable")
+    runner_and_ledger_envelopes = [
+        deepcopy(dict(envelope))
+        for envelope, item in zip(
+            prediction_child_envelopes, prediction_children, strict=True
+        )
+        if item.get("contract_version")
+        in {
+            "benchmark_v2_runner_event_verified_projection_v1",
+            "benchmark_v2_projected_attempt_ledger_v1",
+        }
+    ]
+    prediction_external_refs = _prediction_external_refs(
+        prediction_run=prediction,
+        automatic=automatic,
+        artifacts=prediction_children,
+        runner_and_ledger_envelopes=runner_and_ledger_envelopes,
+    )
+    validate_pathless_recursive(
+        registry_name="prediction_run_v3",
+        roots=[prediction_ref],
+        envelopes=[
+            deepcopy(dict(accepted["prediction_run_envelope"])),
+            *[deepcopy(dict(item)) for item in prediction_child_envelopes],
+        ],
+        external_refs=prediction_external_refs,
+        context=prediction_context,
+    )
+    selected_lifecycle = resolve(
+        lifecycle_by_ref, selected_lifecycle_ref, "benchmark_v2_lifecycle_verified_projection_v1"
+    )
+    result_event = resolve(
+        lifecycle_by_ref,
+        result["result_event_projection_ref"],
+        "benchmark_v2_runner_event_verified_projection_v1",
+    )
+    cleanup_event = resolve(
+        lifecycle_by_ref,
+        prefix["cleanup_event_projection_ref"],
+        "benchmark_v2_runner_event_verified_projection_v1",
+    )
+    terminal_event = resolve(
+        lifecycle_by_ref,
+        journal["terminal_event_ref"],
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1",
+    )
+    cleanup = resolve(
+        lifecycle_by_ref,
+        result["cleanup_projection_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    derived_result_projection = project_benchmark_v2_actual_result(
+        actual_result_bytes=actual_result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=expected_attempt_dir,
+        actual_body_projection=body,
+        cleanup_projection=cleanup,
+        runner_ledger_prefix_projection=prefix,
+        result_event_projection=result_event,
+    )
+    if result != derived_result_projection:
+        raise ValueError(
+            "accepted actual result projection differs from trusted raw bytes"
+        )
+    event_refs = result_event.get("load_bearing_refs")
+    cleanup_event_refs = cleanup_event.get("load_bearing_refs")
+    cleanup_parents = cleanup.get("parent_refs")
+    lifecycle_parents = selected_lifecycle.get("parent_refs")
+    if (
+        automatic.get("source_parent_ref") != parent_refs["actual_body_projection_envelope"]
+        or ledger.get("selected_attempt_ref") != attempt_ref
+        or ledger.get("selected_lifecycle_ref") != selected_lifecycle_ref
+        or ledger.get("raw_ledger_prefix_verification_ref")
+        != parent_refs["runner_ledger_prefix_projection_envelope"]
+        or not isinstance(lifecycle_parents, Mapping)
+        or lifecycle_parents.get("attempt_journal_projection_ref")
+        != parent_refs["attempt_journal_projection_envelope"]
+        or lifecycle_parents.get("cleanup_projection_ref") != result["cleanup_projection_ref"]
+        or cleanup.get("attempt_ref") != attempt_ref
+        or cleanup.get("lifecycle_kind") != "cleanup"
+        or terminal_event.get("cleanup_projection_ref") != result["cleanup_projection_ref"]
+        or not isinstance(cleanup_event_refs, Mapping)
+        or cleanup_event_refs.get("cleanup_projection_ref")
+        != result["cleanup_projection_ref"]
+        or not isinstance(cleanup_parents, Mapping)
+        or cleanup_event_refs.get("cleanup_receipt_ref")
+        != cleanup_parents.get("cleanup_receipt_ref")
+        or terminal_event.get("cleanup_receipt_ref")
+        != cleanup_parents.get("cleanup_receipt_ref")
+        or not isinstance(event_refs, Mapping)
+        or event_refs.get("result_file_ref") != prefix.get("result_file_ref")
+        or event_refs.get("attempt_ledger_pre_result_ref")
+        != prefix.get("attempt_ledger_pre_result_ref")
+    ):
+        raise ValueError("accepted regression transitive lineage differs")
+    del lifecycle_children
+    return accepted
+
+
+def materialize_benchmark_v2_accepted_regression_score_input_v2(
+    *,
+    actual_body_bytes: bytes,
+    actual_result_bytes: bytes,
+    cleanup_receipt_bytes: bytes,
+    expected_attempt_dir: Path,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+    runner_ledger_prefix_projection: Mapping[str, object],
+    attempt_journal_projection: Mapping[str, object],
+    actual_body_projection: Mapping[str, object],
+    actual_result_projection: Mapping[str, object],
+    lifecycle_bundle_v3: Mapping[str, object],
+) -> dict[str, object]:
+    """最后构造 accepted regression root；prediction identity 仅由 C3 派生。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID
+
+    derived_body_projection = project_benchmark_v2_actual_body(
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    if derived_body_projection != dict(actual_body_projection):
+        raise ValueError("accepted actual body projection differs from raw bytes")
+    prediction = materialize_prediction_run_v3(
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+        actual_body_verified_projection=derived_body_projection,
+        lifecycle_bundle_v3=lifecycle_bundle_v3,
+    )
+    prediction_run = prediction.prediction_run
+    lifecycle_by_ref, _ = _accepted_closure_index(
+        lifecycle_bundle_v3, name="accepted materializer lifecycle bundle"
+    )
+
+    def resolve_lifecycle_child(
+        ref: object, contract_version: str
+    ) -> dict[str, object]:
+        if not isinstance(ref, Mapping):
+            raise ValueError("accepted materializer lifecycle ref is invalid")
+        resolved = lifecycle_by_ref.get(canonical_bytes(ref))
+        if (
+            resolved is None
+            or resolved[0].get("contract_version") != contract_version
+        ):
+            raise ValueError("accepted materializer lifecycle ref is unresolved")
+        return resolved[0]
+
+    result_event_projection = resolve_lifecycle_child(
+        runner_ledger_prefix_projection.get("result_event_projection_ref"),
+        "benchmark_v2_runner_event_verified_projection_v1",
+    )
+    selected_lifecycle = resolve_lifecycle_child(
+        lifecycle_bundle_v3.get("selected_lifecycle_ref"),
+        "benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    selected_parents = selected_lifecycle.get("parent_refs")
+    if not isinstance(selected_parents, Mapping):
+        raise ValueError("accepted materializer selected lifecycle parents are invalid")
+    cleanup_projection = resolve_lifecycle_child(
+        selected_parents.get("cleanup_projection_ref"),
+        "benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    derived_result_projection = project_benchmark_v2_actual_result(
+        actual_result_bytes=actual_result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=expected_attempt_dir,
+        actual_body_projection=derived_body_projection,
+        cleanup_projection=cleanup_projection,
+        runner_ledger_prefix_projection=runner_ledger_prefix_projection,
+        result_event_projection=result_event_projection,
+    )
+    if derived_result_projection != dict(actual_result_projection):
+        raise ValueError("accepted actual result projection differs from raw bytes")
+    parents = {
+        "runner_ledger_prefix_projection_envelope": seal_pathless_envelope(runner_ledger_prefix_projection),
+        "attempt_journal_projection_envelope": seal_pathless_envelope(attempt_journal_projection),
+        "actual_body_projection_envelope": seal_pathless_envelope(derived_body_projection),
+        "actual_result_projection_envelope": seal_pathless_envelope(actual_result_projection),
+    }
+    body: dict[str, object] = {
+        "contract_version": "benchmark_v2_accepted_regression_score_input_v2",
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "partition": "regression",
+        "corpus_parent_ref": deepcopy(prediction_run["corpus_parent_ref"]),
+        "provider_manifest_ref": deepcopy(prediction_run["provider_manifest_ref"]),
+        "provider_corpus_ref": deepcopy(prediction_run["provider_corpus_ref"]),
+        "selection_policy": "first_complete_lifecycle_verified_attempt",
+        "attempt_ref": deepcopy(prediction_run["attempt_ref"]),
+        "attempt_ledger_ref": deepcopy(prediction_run["projected_attempt_ledger_ref"]),
+        "automatic_prediction_ref": deepcopy(prediction_run["automatic_prediction_ref"]),
+        "selected_lifecycle_ref": deepcopy(prediction_run["selected_lifecycle_ref"]),
+        "verified_parent_projections": parents,
+        "prediction_run_envelope": deepcopy(prediction.prediction_run_envelope),
+        "lifecycle_bundle_envelope": seal_pathless_envelope(lifecycle_bundle_v3),
+        "safety": deepcopy(SAFETY),
+    }
+    body["content_sha256"] = hashlib.sha256(canonical_bytes(body)).hexdigest()
+    return validate_benchmark_v2_accepted_regression_score_input_v2(
+        body,
+        actual_body_bytes=actual_body_bytes,
+        actual_result_bytes=actual_result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=expected_attempt_dir,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
     )
 
 def seal_target_binding(*,artifact_id:str,case_id:str,candidate_id:str,fusion_ref:Mapping[str,str],capture_ref:Mapping[str,str],bbox_ref:Mapping[str,str],bbox:list[int],source_parent_ref:Mapping[str,str])->dict[str,object]:

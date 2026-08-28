@@ -188,6 +188,8 @@ actual_result_projection_envelope
 
 Each field is exactly `{ref, canonical_bytes_b64}`, but the decoded bytes are a new pathless verified projection, never the raw ledger, journal, body, result, cleanup receipt, or lifecycle artifact. The materializer reads those raw files locally, validates their canonical bytes, absolute path fields, file/content hashes, hash chains, aliases, and transitive refs, and then discards the raw bytes before constructing accepted output. Raw files may contain `attempt_dir`, owner-journal roots, screenshot paths, or other absolute paths and therefore must never be embedded, logged, printed, or passed to the scorer.
 
+The authoritative accepted-input validator is not a hash-only parser. It receives the canonical selected `actual_body_bytes`, `actual_result_bytes`, `cleanup_receipt_bytes`, trusted fixed `expected_attempt_dir`, and the exact Task 10 provider-manifest and provider-corpus bytes as local validation inputs. It re-derives the actual-body and actual-result projections, fixed `body.json`/`cleanup.json` refs, 12 provider-group dependencies, 60-case context, 240 ordered rows, raw-provider closure, and `automatic_prediction_v3`, and then runs the complete `prediction_run_v3` recursive graph validator. Those raw bytes and paths remain local and are never copied into the accepted artifact. A caller that supplies only a reminted accepted envelope, or supplies body/result/cleanup/provider bytes that do not reproduce it exactly, is rejected.
+
 Using the S1.1 identity rule, the projection contracts and exact fields are:
 
 | Contract | Exact fields |
