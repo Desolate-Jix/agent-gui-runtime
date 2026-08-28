@@ -85,13 +85,13 @@ submitted VISTA req:  id = "submitted-vista-request/" + sha256(UTF8("benchmark-v
 all four:             content_sha256 = sha256(B)
 ```
 
-The envelope position determines which formula is legal; a generic `artifact_ref()` that reads a nonexistent `artifact_id` is forbidden. `submitted_vista_request_envelopes` is candidate-ID sorted and must equal, neither omit nor add to, the exact requests returned by the existing `build_vista_requests` call for all and only `BOUND` fusion candidates. Capture this evidence at the existing calibration step; do not change the common workflow supervisor.
+The envelope position determines which formula is legal; a generic `artifact_ref()` that reads a nonexistent `artifact_id` is forbidden. `submitted_vista_request_envelopes` is candidate-ID sorted and must equal, neither omit nor add to, the exact requests returned by the existing `build_vista_requests` call for all and only `BOUND` fusion candidates. Capture this evidence at the existing calibration step. The managed review worker must preserve that exact existing list under final orchestration field `hybrid_vista_requests`; it must not rebuild, rename, or reinterpret the list. The actual projector validates the propagated Omni/Qwen/fusion/request objects with their existing closed validators and may call `build_vista_requests` only as a deterministic validator for canonical byte equality. Published envelopes always contain the propagated validated objects, never a reconstructed fallback. The Runtime persistence/replay boundary must require the complete `pre_vista_evidence` contract and reject the old projection shape.
 
 Use one nonrecursive identity rule for every new sealed projection in S1-S4. Let `semantic_payload` be the closed object without `artifact_id` and `content_sha256`; let `semantic_sha256 = sha256(UTF8("<contract-version>\0") || canonical_json(semantic_payload))`; set `artifact_id = "<artifact-prefix>/" + semantic_sha256`; then set `content_sha256 = sha256(canonical_json(object_without_content_sha256))`. Its public ref is exactly `{id: artifact_id, content_sha256}`. Validators recompute both hashes and reject a caller-supplied ID. Existing contracts retain their existing formula unless this amendment explicitly versions them.
 
 The final review/VISTA proposal is deliberately outside this contract. Materialization has two pure phases:
 
-1. `select_pre_vista_prediction_rows(...)` receives the provider case, Omni inventory, Qwen bindings, fusion result, and submitted VISTA requests. Its signature must not accept VISTA proposals/results.
+1. `select_pre_vista_prediction_rows(...)` receives the provider case, target-specific provider-safe incumbent response, Omni inventory, Qwen bindings, fusion result, and submitted VISTA requests. Its signature must not accept VISTA proposals/results. The incumbent response is mandatory because `qwen_only` is selected from its `screen_reading.screen_inventory.available_actions`; Qwen bindings are not a substitute for that raw source.
 2. `attach_vista_outcomes(...)` receives the already selected rows and final VISTA proposals, and may only attach an outcome to the row's already bound `candidate_id`, `target_binding_ref`, and `vista_request_ref`.
 
 A proposal/result mutation must leave candidate selection and all sealed binding/request refs byte-identical.
@@ -284,8 +284,10 @@ Resolve the ledger and attempt directories beneath their supplied roots, require
 - Modify `app/learn/hybrid/benchmark_v2_actual.py`.
 - Modify `app/learn/hybrid/benchmark_v2_predictions.py`.
 - Modify `app/learn/hybrid/benchmark_v2_lifecycle.py`.
+- Modify `app/learn/hybrid/benchmark_v2_runtime.py` only for the mandatory persistence/replay validator.
+- Modify `app/learn/workflow_worker.py` only to preserve the exact existing `hybrid_vista_requests` list in final orchestration.
 - Modify `scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py`.
-- Modify only the focused tests `tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`, and `tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py`.
+- Modify only the focused tests `tests/test_learning_workflow_stage_execution.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`, and `tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py`.
 
 **RED tests:** exact goal grammar/role aliases; zero/duplicate/ambiguous matches; all four raw-class ref formulas; arm-aware source/bbox/binding/request formulas; Qwen/Omni rejection of fabricated fusion; non-`BOUND` handling; VISTA-result non-selection; exact submitted-request coverage; local raw-parent tamper/remint; any raw byte or absolute path in accepted output; v1 result/ledger and v2 run/lifecycle rejection; exact pre-result ref shape/formula; duplicate/reordered projected events; wrong event-kind/load-bearing refs; missing/extra/different event projections across the two v3 envelopes; transitive result/cleanup/event mismatch; projected-ledger/raw-verification ref conflation; missing/stale cleanup; later-complete cherry-pick; arbitrary path/alias rejection; noncanonical bytes; and a real Task 9 body/result-to-accepted-input producer test. A test-only handcrafted accepted envelope is not production evidence.
 

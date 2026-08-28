@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
+from hashlib import sha256
 import time
 from typing import Any, Mapping, Protocol
 
@@ -15,6 +17,16 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     validate_benchmark_v2_hybrid_screen_group_start,
     validate_benchmark_v2_workflow_service_step,
     validate_benchmark_v2_workflow_window_binding,
+)
+from app.learn.hybrid.contracts import (
+    validate_fusion_result,
+    validate_qwen_bindings,
+)
+from app.learn.hybrid.omni_candidates import validate_current_capture_bundle
+from app.learn.hybrid.qwen_binding import validate_sealed_omni_inventory
+from app.learn.hybrid.vista_refinement import build_vista_requests
+from app.learn.recognition.uei.canonical import (
+    content_sha256 as uei_content_sha256,
 )
 
 
@@ -476,7 +488,10 @@ def _compose_screen_group_projection(
 ) -> dict[str, Any]:
     if len(incumbent_terminals) != len(group["case_refs"]):
         raise ValueError("incumbent terminal target multiset is incomplete")
-    hybrid_evidence = _extract_hybrid_evidence(hybrid_terminal, group=group)
+    hybrid_evidence, pre_vista_evidence = _extract_hybrid_evidence(
+        hybrid_terminal,
+        group=group,
+    )
     shared_parent_refs = {
         "screen_group_ref": {
             "id": str(group["screen_group"]),
@@ -540,6 +555,7 @@ def _compose_screen_group_projection(
         "screen_group": str(group["screen_group"]),
         "request_ref": deepcopy(group["request_ref"]),
         "shared_parent_refs": shared_parent_refs,
+        "pre_vista_evidence": pre_vista_evidence,
         "rows": rows,
         "execution_refs": [
             _execution_ref(hybrid_terminal["operation_ref"]),
@@ -561,7 +577,7 @@ def _extract_hybrid_evidence(
     terminal: Mapping[str, object],
     *,
     group: Mapping[str, object],
-) -> dict[str, dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     projection = terminal.get("adopted_result_projection")
     response = projection.get("response") if isinstance(projection, Mapping) else None
     if not isinstance(response, Mapping):
@@ -582,8 +598,79 @@ def _extract_hybrid_evidence(
         raise ValueError("Hybrid terminal response lost its server projection")
     if orchestration.get("hybrid_capture_bundle_ref") != group[
         "hybrid_capture_bundle_ref"
-    ] or orchestration.get("capture_bundle") != group["capture_bundle"]:
+    ]:
         raise ValueError("Hybrid terminal capture parents are stale")
+    capture_bundle = validate_current_capture_bundle(
+        _mapping(orchestration.get("capture_bundle"), "capture bundle")
+    )
+    if canonical_json_bytes(capture_bundle) != canonical_json_bytes(
+        group["capture_bundle"]
+    ):
+        raise ValueError("Hybrid terminal capture parents are stale")
+    omni = _mapping(orchestration.get("omni_inventory"), "Omni inventory")
+    validated_omni = validate_sealed_omni_inventory(omni)
+    qwen = _mapping(orchestration.get("qwen_bindings"), "Qwen bindings")
+    validated_qwen = validate_qwen_bindings(
+        _unseal_for_closed_validator(qwen, "Qwen bindings"),
+        validated_omni,
+    )
+    fusion = _mapping(orchestration.get("fusion_result"), "fusion result")
+    validate_fusion_result(
+        _unseal_for_closed_validator(fusion, "fusion result"),
+        validated_omni,
+        validated_qwen,
+    )
+    from app.core.model_server import validate_qwen_cleanup_receipt
+
+    qwen_cleanup_receipt = validate_qwen_cleanup_receipt(
+        _mapping(
+            orchestration.get("qwen_cleanup_receipt"),
+            "Qwen cleanup receipt",
+        )
+    )
+    workflow_revision = orchestration.get("workflow_revision")
+    if (
+        isinstance(workflow_revision, bool)
+        or not isinstance(workflow_revision, int)
+        or workflow_revision != capture_bundle["workflow_revision"]
+    ):
+        raise ValueError("Hybrid workflow revision is stale")
+    raw_vista_requests = orchestration.get("hybrid_vista_requests")
+    if not isinstance(raw_vista_requests, list):
+        raise ValueError("Hybrid exact submitted VISTA requests are missing")
+    submitted_vista_requests = [
+        _mapping(item, "submitted VISTA request") for item in raw_vista_requests
+    ]
+    expected_vista_requests = build_vista_requests(
+        fusion,
+        capture_bundle,
+        omni_inventory=omni,
+        qwen_bindings=qwen,
+        qwen_cleanup_receipt=qwen_cleanup_receipt,
+        expected_workflow_revision=workflow_revision,
+    )
+    if len(submitted_vista_requests) != len(expected_vista_requests) or any(
+        canonical_json_bytes(propagated) != canonical_json_bytes(expected)
+        for propagated, expected in zip(
+            submitted_vista_requests,
+            expected_vista_requests,
+            strict=True,
+        )
+    ):
+        raise ValueError(
+            "Hybrid propagated VISTA requests differ from exact calibration output"
+        )
+    _require_exact_bound_request_coverage(
+        fusion=fusion,
+        submitted_vista_requests=submitted_vista_requests,
+    )
+    pre_vista_evidence = _compose_pre_vista_evidence(
+        group=group,
+        omni_inventory=omni,
+        qwen_bindings=qwen,
+        fusion_result=fusion,
+        submitted_vista_requests=submitted_vista_requests,
+    )
     if (
         review.get("outcome") != "completed"
         or review.get("review_status") != "REVIEW_REQUIRED"
@@ -593,9 +680,6 @@ def _extract_hybrid_evidence(
         or not isinstance(review.get("proposals"), list)
     ):
         raise ValueError("Hybrid terminal review projection is invalid")
-    omni = _mapping(orchestration.get("omni_inventory"), "Omni inventory")
-    qwen = _mapping(orchestration.get("qwen_bindings"), "Qwen bindings")
-    fusion = _mapping(orchestration.get("fusion_result"), "fusion result")
     dispatch_refs = _dispatch_receipt_refs(
         orchestration.get("benchmark_v2_provider_dispatch_receipt_refs"),
         expected_providers={"omni", "qwen", "vista"},
@@ -604,7 +688,7 @@ def _extract_hybrid_evidence(
     omni_qwen_refs = [
         item for item in dispatch_refs if item["provider"] in {"omni", "qwen"}
     ]
-    return {
+    arms = {
         "omni_only_discovery": {
             "omni_inventory": omni,
             "provider_dispatch_receipt_refs": omni_refs,
@@ -623,6 +707,117 @@ def _extract_hybrid_evidence(
             "provider_dispatch_receipt_refs": dispatch_refs,
         },
     }
+    return arms, pre_vista_evidence
+
+
+def _require_exact_bound_request_coverage(
+    *,
+    fusion: Mapping[str, object],
+    submitted_vista_requests: list[Mapping[str, object]],
+) -> None:
+    candidates = fusion.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("Hybrid fusion candidates are missing")
+    bound_ids: list[str] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            raise ValueError("Hybrid fusion candidate is invalid")
+        if candidate.get("state") == "BOUND":
+            candidate_id = candidate.get("candidate_id")
+            if not isinstance(candidate_id, str) or not candidate_id:
+                raise ValueError("Hybrid BOUND candidate identity is missing")
+            bound_ids.append(candidate_id)
+    request_ids: list[str] = []
+    for request in submitted_vista_requests:
+        candidate_id = request.get("candidate_id")
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or request.get("submission_status") != "SUBMITTED"
+        ):
+            raise ValueError("Hybrid submitted VISTA request is invalid")
+        request_ids.append(candidate_id)
+    if (
+        len(set(bound_ids)) != len(bound_ids)
+        or len(set(request_ids)) != len(request_ids)
+        or sorted(request_ids) != sorted(bound_ids)
+    ):
+        raise ValueError("Hybrid submitted VISTA requests do not cover exact BOUND candidates")
+
+
+def _compose_pre_vista_evidence(
+    *,
+    group: Mapping[str, object],
+    omni_inventory: Mapping[str, object],
+    qwen_bindings: Mapping[str, object],
+    fusion_result: Mapping[str, object],
+    submitted_vista_requests: list[Mapping[str, object]],
+) -> dict[str, Any]:
+    sorted_requests = sorted(
+        (deepcopy(dict(item)) for item in submitted_vista_requests),
+        key=lambda item: str(item["candidate_id"]),
+    )
+    body = {
+        "contract_version": "benchmark_v2_actual_pre_vista_evidence_v1",
+        "provider_group_ref": {
+            "id": str(group["screen_group"]),
+            "content_sha256": str(group["content_sha256"]),
+        },
+        "omni_inventory_envelope": _raw_class_envelope(
+            omni_inventory,
+            id_prefix="omni-inventory",
+            domain=b"benchmark-v2-omni-inventory\0",
+        ),
+        "qwen_bindings_envelope": _raw_class_envelope(
+            qwen_bindings,
+            id_prefix="qwen-bindings",
+            domain=b"benchmark-v2-qwen-bindings\0",
+        ),
+        "fusion_result_envelope": _raw_class_envelope(
+            fusion_result,
+            id_prefix="fusion-result",
+            domain=b"benchmark-v2-fusion-result\0",
+        ),
+        "submitted_vista_request_envelopes": [
+            _raw_class_envelope(
+                request,
+                id_prefix="submitted-vista-request",
+                domain=b"benchmark-v2-submitted-vista-request\0",
+            )
+            for request in sorted_requests
+        ],
+        "safety": deepcopy(_SAFETY),
+    }
+    result = deepcopy(body)
+    result["content_sha256"] = content_sha256(result)
+    return result
+
+
+def _raw_class_envelope(
+    value: Mapping[str, object],
+    *,
+    id_prefix: str,
+    domain: bytes,
+) -> dict[str, object]:
+    canonical_bytes = canonical_json_bytes(dict(value))
+    return {
+        "ref": {
+            "id": f"{id_prefix}/{sha256(domain + canonical_bytes).hexdigest()}",
+            "content_sha256": sha256(canonical_bytes).hexdigest(),
+        },
+        "canonical_bytes_b64": base64.b64encode(canonical_bytes).decode("ascii"),
+    }
+
+
+def _unseal_for_closed_validator(
+    value: Mapping[str, object],
+    name: str,
+) -> dict[str, Any]:
+    sealed = deepcopy(dict(value))
+    declared = sealed.pop("content_sha256", None)
+    if not isinstance(declared, str) or declared != uei_content_sha256(dict(value)):
+        raise ValueError(f"Hybrid {name} content_sha256 is invalid")
+    return sealed
 
 
 def _dispatch_receipt_refs(

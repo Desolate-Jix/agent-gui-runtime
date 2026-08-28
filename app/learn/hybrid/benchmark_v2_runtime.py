@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 from hashlib import sha256
 import json
@@ -148,6 +149,23 @@ _ACTUAL_LIFECYCLE_CONTRACT = "benchmark_v2_actual_stable_zero_v1"
 _ACTUAL_PROJECTION_RECORD_CONTRACT = "benchmark_v2_actual_projection_record_v1"
 _ACTUAL_CALL_INTENT_CONTRACT = "benchmark_v2_actual_service_call_intent_v1"
 _ACTUAL_CALL_RESULT_CONTRACT = "benchmark_v2_actual_service_call_result_v1"
+_PRE_VISTA_EVIDENCE_CONTRACT = "benchmark_v2_actual_pre_vista_evidence_v1"
+_PRE_VISTA_EVIDENCE_FIELDS = {
+    "contract_version",
+    "provider_group_ref",
+    "omni_inventory_envelope",
+    "qwen_bindings_envelope",
+    "fusion_result_envelope",
+    "submitted_vista_request_envelopes",
+    "safety",
+    "content_sha256",
+}
+_PRE_VISTA_ENVELOPE_FIELDS = {"ref", "canonical_bytes_b64"}
+_PRE_VISTA_REF_FIELDS = {"id", "content_sha256"}
+_PRE_VISTA_SAFETY = {
+    "artifact_is_authorization": False,
+    "execute_binding_enabled": False,
+}
 
 
 class BenchmarkV2ScreenGroupIterator(Iterator[Mapping[str, object]], Protocol):
@@ -2699,6 +2717,10 @@ def _validate_actual_projection(
         raise ValueError("benchmark actual projection cleanup lineage is stale")
     if projection.get("execution_refs") != stable.get("execution_refs"):
         raise ValueError("benchmark actual projection execution lineage is stale")
+    _validate_pre_vista_evidence(
+        projection.get("pre_vista_evidence"),
+        group=group,
+    )
     rows = projection.get("rows")
     expected_pairs = {
         (str(case["case_id"]), arm)
@@ -2736,6 +2758,172 @@ def _validate_actual_projection(
     if observed_pairs != expected_pairs:
         raise ValueError("benchmark actual projection target multiset is stale")
     return projection
+
+
+def _validate_pre_vista_evidence(
+    value: object,
+    *,
+    group: Mapping[str, object],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != _PRE_VISTA_EVIDENCE_FIELDS:
+        raise ValueError("benchmark actual pre-VISTA evidence shape is invalid")
+    evidence = _sealed_parent(value, name="benchmark actual pre-VISTA evidence")
+    if evidence["contract_version"] != _PRE_VISTA_EVIDENCE_CONTRACT:
+        raise ValueError("benchmark actual pre-VISTA evidence contract is stale")
+    expected_group_ref = {
+        "id": str(group["screen_group"]),
+        "content_sha256": str(group["content_sha256"]),
+    }
+    if (
+        not isinstance(evidence["provider_group_ref"], Mapping)
+        or set(evidence["provider_group_ref"]) != _PRE_VISTA_REF_FIELDS
+        or evidence["provider_group_ref"] != expected_group_ref
+    ):
+        raise ValueError("benchmark actual pre-VISTA provider group lineage is stale")
+    if evidence["safety"] != _PRE_VISTA_SAFETY:
+        raise ValueError("benchmark actual pre-VISTA evidence safety is invalid")
+
+    _validate_pre_vista_envelope(
+        evidence["omni_inventory_envelope"],
+        name="Omni inventory",
+        id_prefix="omni-inventory",
+        domain=b"benchmark-v2-omni-inventory\0",
+    )
+    _validate_pre_vista_envelope(
+        evidence["qwen_bindings_envelope"],
+        name="Qwen bindings",
+        id_prefix="qwen-bindings",
+        domain=b"benchmark-v2-qwen-bindings\0",
+    )
+    fusion = _validate_pre_vista_envelope(
+        evidence["fusion_result_envelope"],
+        name="fusion result",
+        id_prefix="fusion-result",
+        domain=b"benchmark-v2-fusion-result\0",
+    )
+    raw_requests = evidence["submitted_vista_request_envelopes"]
+    if not isinstance(raw_requests, list):
+        raise ValueError("benchmark actual pre-VISTA request envelopes are invalid")
+    requests = [
+        _validate_pre_vista_envelope(
+            item,
+            name="submitted VISTA request",
+            id_prefix="submitted-vista-request",
+            domain=b"benchmark-v2-submitted-vista-request\0",
+        )
+        for item in raw_requests
+    ]
+    _validate_pre_vista_request_coverage(fusion=fusion, requests=requests)
+    return evidence
+
+
+def _validate_pre_vista_envelope(
+    value: object,
+    *,
+    name: str,
+    id_prefix: str,
+    domain: bytes,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != _PRE_VISTA_ENVELOPE_FIELDS:
+        raise ValueError(f"benchmark actual pre-VISTA {name} envelope is invalid")
+    ref = value["ref"]
+    encoded = value["canonical_bytes_b64"]
+    if not isinstance(ref, Mapping) or set(ref) != _PRE_VISTA_REF_FIELDS:
+        raise ValueError(f"benchmark actual pre-VISTA {name} ref is invalid")
+    if not isinstance(encoded, str) or not encoded:
+        raise ValueError(f"benchmark actual pre-VISTA {name} bytes are invalid")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError):
+        raise ValueError(
+            f"benchmark actual pre-VISTA {name} bytes are invalid"
+        ) from None
+    if (
+        len(raw) > int(_SAFE_LIMITS["max_json_bytes"])
+        or base64.b64encode(raw).decode("ascii") != encoded
+    ):
+        raise ValueError(f"benchmark actual pre-VISTA {name} bytes are invalid")
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+        if canonical_json_bytes(decoded) != raw:
+            raise ValueError
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        raise ValueError(
+            f"benchmark actual pre-VISTA {name} bytes are not compact canonical JSON"
+        ) from None
+    if not isinstance(decoded, dict):
+        raise ValueError(f"benchmark actual pre-VISTA {name} must decode to an object")
+    _validate_pathless_exact_json(decoded, name=name)
+    expected_content_sha = sha256(raw).hexdigest()
+    expected_ref_id = f"{id_prefix}/{sha256(domain + raw).hexdigest()}"
+    if ref != {
+        "id": expected_ref_id,
+        "content_sha256": expected_content_sha,
+    }:
+        raise ValueError(f"benchmark actual pre-VISTA {name} ref is stale")
+    return deepcopy(decoded)
+
+
+def _validate_pathless_exact_json(value: object, *, name: str) -> None:
+    if type(value) is dict:
+        for key, nested in value.items():
+            if type(key) is not str:
+                raise ValueError(
+                    f"benchmark actual pre-VISTA {name} requires JSON string keys"
+                )
+            _validate_pathless_exact_json(nested, name=name)
+        return
+    if type(value) is list:
+        for nested in value:
+            _validate_pathless_exact_json(nested, name=name)
+        return
+    if isinstance(value, str):
+        lowered = value.casefold()
+        if (
+            Path(value).is_absolute()
+            or value.startswith(("/", "\\"))
+            or lowered.startswith("file:")
+        ):
+            raise ValueError(f"benchmark actual pre-VISTA {name} contains an absolute path")
+        return
+    if value is not None and type(value) not in {int, bool, float}:
+        raise ValueError(f"benchmark actual pre-VISTA {name} contains a non-JSON value")
+
+
+def _validate_pre_vista_request_coverage(
+    *,
+    fusion: Mapping[str, object],
+    requests: list[Mapping[str, object]],
+) -> None:
+    candidates = fusion.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("benchmark actual pre-VISTA fusion candidates are missing")
+    bound_ids: list[str] = []
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            raise ValueError("benchmark actual pre-VISTA fusion candidate is invalid")
+        if candidate.get("state") == "BOUND":
+            candidate_id = candidate.get("candidate_id")
+            if not isinstance(candidate_id, str) or not candidate_id:
+                raise ValueError("benchmark actual pre-VISTA BOUND candidate is invalid")
+            bound_ids.append(candidate_id)
+    request_ids: list[str] = []
+    for request in requests:
+        candidate_id = request.get("candidate_id")
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or request.get("submission_status") != "SUBMITTED"
+        ):
+            raise ValueError("benchmark actual pre-VISTA submitted request is invalid")
+        request_ids.append(candidate_id)
+    if (
+        len(bound_ids) != len(set(bound_ids))
+        or len(request_ids) != len(set(request_ids))
+        or request_ids != sorted(request_ids)
+        or request_ids != sorted(bound_ids)
+    ):
+        raise ValueError("benchmark actual pre-VISTA request coverage is stale")
 
 
 def _read_actual_projection_record(
@@ -2777,7 +2965,11 @@ def _read_actual_projection_record(
         or projection.get("request_ref") != group["request_ref"]
     ):
         raise ValueError("benchmark actual projection replay lineage is stale")
-    return projection
+    return _validate_actual_projection(
+        projection,
+        group=group,
+        lifecycle_ref=projection.get("lifecycle_ref"),
+    )
 
 
 def _sealed_parent(value: Mapping[str, object], *, name: str) -> dict[str, Any]:

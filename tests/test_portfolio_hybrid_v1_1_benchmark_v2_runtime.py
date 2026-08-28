@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 import hashlib
 import inspect
@@ -109,6 +110,72 @@ def _sealed(value: dict[str, object]) -> dict[str, object]:
     result = deepcopy(value)
     result["content_sha256"] = content_sha256(result)
     return result
+
+
+def _raw_evidence_envelope(
+    value: dict[str, object], *, id_prefix: str, domain: bytes
+) -> dict[str, object]:
+    canonical = canonical_json_bytes(value)
+    return {
+        "ref": {
+            "id": f"{id_prefix}/{hashlib.sha256(domain + canonical).hexdigest()}",
+            "content_sha256": hashlib.sha256(canonical).hexdigest(),
+        },
+        "canonical_bytes_b64": base64.b64encode(canonical).decode("ascii"),
+    }
+
+
+def _pre_vista_evidence(provider_group: Mapping[str, object]) -> dict[str, object]:
+    omni = {"items": [{"candidate_id": "candidate-a"}, {"candidate_id": "candidate-b"}]}
+    qwen = {
+        "bindings": [{"candidate_id": "candidate-a"}, {"candidate_id": "candidate-b"}]
+    }
+    fusion = {
+        "candidates": [
+            {"candidate_id": "candidate-a", "state": "BOUND"},
+            {"candidate_id": "candidate-b", "state": "BOUND"},
+        ]
+    }
+    requests = [
+        {"candidate_id": "candidate-a", "submission_status": "SUBMITTED"},
+        {"candidate_id": "candidate-b", "submission_status": "SUBMITTED"},
+    ]
+    return _sealed(
+        {
+            "contract_version": "benchmark_v2_actual_pre_vista_evidence_v1",
+            "provider_group_ref": {
+                "id": provider_group["screen_group"],
+                "content_sha256": provider_group["content_sha256"],
+            },
+            "omni_inventory_envelope": _raw_evidence_envelope(
+                omni,
+                id_prefix="omni-inventory",
+                domain=b"benchmark-v2-omni-inventory\0",
+            ),
+            "qwen_bindings_envelope": _raw_evidence_envelope(
+                qwen,
+                id_prefix="qwen-bindings",
+                domain=b"benchmark-v2-qwen-bindings\0",
+            ),
+            "fusion_result_envelope": _raw_evidence_envelope(
+                fusion,
+                id_prefix="fusion-result",
+                domain=b"benchmark-v2-fusion-result\0",
+            ),
+            "submitted_vista_request_envelopes": [
+                _raw_evidence_envelope(
+                    request,
+                    id_prefix="submitted-vista-request",
+                    domain=b"benchmark-v2-submitted-vista-request\0",
+                )
+                for request in requests
+            ],
+            "safety": {
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            },
+        }
+    )
 
 
 def _write_fixture(root: Path) -> tuple[Path, dict[str, object]]:
@@ -967,6 +1034,7 @@ def _actual_adapter(
                 "partition": provider_group["partition"],
                 "screen_group": provider_group["screen_group"],
                 "request_ref": deepcopy(provider_group["request_ref"]),
+                "pre_vista_evidence": _pre_vista_evidence(provider_group),
                 "rows": rows,
                 "execution_refs": execution_refs,
                 "window_close_ref": deepcopy(close_ref),
@@ -1142,6 +1210,55 @@ def test_actual_facade_identical_replay_is_idempotent_and_changed_group_fails_cl
     iterator.close()
 
 
+def test_actual_facade_rejects_legacy_replay_without_pre_vista_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-legacy-projection"})
+    attempt_dir = (tmp_path / "attempt-legacy-projection").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    calls: list[dict[str, object]] = []
+    service = _ActualService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    monkeypatch.setattr(
+        runtime_module.benchmark_v2_actual,
+        "run_screen_group",
+        _actual_adapter([], calls),
+    )
+    runtime.run_actual_screen_group(
+        provider_group=group,
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    path = next((attempt_dir / "actual-screen-groups").glob("*.projection.json"))
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["projection"].pop("pre_vista_evidence")
+    record["projection"]["content_sha256"] = content_sha256(record["projection"])
+    record["content_sha256"] = content_sha256(record)
+    path.write_bytes(canonical_json_bytes(record, pretty=True))
+
+    with pytest.raises(ValueError, match="pre-VISTA evidence"):
+        runtime.run_actual_screen_group(
+            provider_group=group,
+            attempt_ref=attempt_ref,
+            attempt_dir=attempt_dir,
+        )
+
+    assert len(calls) == 1
+    iterator.close()
+
+
 def test_actual_facade_rejects_stale_attempt_before_task8_or_service(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1267,6 +1384,128 @@ def test_actual_facade_rejects_missing_dispatch_evidence(
         missing_dispatch,
     )
     with pytest.raises(ValueError, match="dispatch evidence"):
+        runtime.run_actual_screen_group(
+            provider_group=group,
+            attempt_ref=attempt_ref,
+            attempt_dir=attempt_dir,
+        )
+
+    assert not list((attempt_dir / "actual-screen-groups").glob("*.projection.json"))
+    iterator.close()
+    assert windows.active == 0
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    (
+        "missing",
+        "extra",
+        "stale_group",
+        "self_hash",
+        "envelope_extra",
+        "wrong_class_ref",
+        "noncanonical_bytes",
+        "invalid_base64",
+        "absolute_path",
+        "unsorted_requests",
+        "incomplete_requests",
+        "unsafe",
+    ),
+)
+def test_actual_facade_rejects_invalid_pre_vista_evidence_before_persistence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    runtime_module, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": f"attempt-pre-vista-{corruption}"})
+    attempt_dir = (tmp_path / str(attempt_ref["attempt_id"])).resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    service = _ActualService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    valid = _actual_adapter([], [])
+
+    def corrupting_adapter(**kwargs):
+        sink = kwargs["prediction_sink"]
+        written: list[dict[str, object]] = []
+
+        class CorruptingSink:
+            def write_screen_group(self, *, projection):
+                changed = deepcopy(dict(projection))
+                if corruption == "missing":
+                    changed.pop("pre_vista_evidence")
+                else:
+                    evidence = deepcopy(changed["pre_vista_evidence"])
+                    if corruption == "extra":
+                        evidence["unexpected"] = True
+                    elif corruption == "stale_group":
+                        evidence["provider_group_ref"]["id"] = "stale-group"
+                    elif corruption == "self_hash":
+                        evidence["content_sha256"] = "0" * 64
+                    elif corruption == "envelope_extra":
+                        evidence["omni_inventory_envelope"]["unexpected"] = True
+                    elif corruption == "wrong_class_ref":
+                        evidence["omni_inventory_envelope"]["ref"]["id"] = (
+                            "qwen-bindings/" + "0" * 64
+                        )
+                    elif corruption == "noncanonical_bytes":
+                        raw = base64.b64decode(
+                            evidence["omni_inventory_envelope"]["canonical_bytes_b64"]
+                        )
+                        noncanonical = b" " + raw
+                        evidence["omni_inventory_envelope"] = {
+                            "ref": {
+                                "id": "omni-inventory/"
+                                + hashlib.sha256(
+                                    b"benchmark-v2-omni-inventory\0" + noncanonical
+                                ).hexdigest(),
+                                "content_sha256": hashlib.sha256(noncanonical).hexdigest(),
+                            },
+                            "canonical_bytes_b64": base64.b64encode(noncanonical).decode(
+                                "ascii"
+                            ),
+                        }
+                    elif corruption == "invalid_base64":
+                        evidence["omni_inventory_envelope"]["canonical_bytes_b64"] = "%%%"
+                    elif corruption == "absolute_path":
+                        evidence["omni_inventory_envelope"] = _raw_evidence_envelope(
+                            {"capture_path": "C:\\private\\capture.png"},
+                            id_prefix="omni-inventory",
+                            domain=b"benchmark-v2-omni-inventory\0",
+                        )
+                    elif corruption == "unsorted_requests":
+                        evidence["submitted_vista_request_envelopes"].reverse()
+                    elif corruption == "incomplete_requests":
+                        evidence["submitted_vista_request_envelopes"].pop()
+                    elif corruption == "unsafe":
+                        evidence["safety"]["execute_binding_enabled"] = True
+                    if corruption != "self_hash":
+                        evidence["content_sha256"] = content_sha256(evidence)
+                    changed["pre_vista_evidence"] = evidence
+                changed["content_sha256"] = content_sha256(changed)
+                written.append(deepcopy(changed))
+                return sink.write_screen_group(projection=changed)
+
+        valid(**{**kwargs, "prediction_sink": CorruptingSink()})
+        return written[0]
+
+    monkeypatch.setattr(
+        runtime_module.benchmark_v2_actual,
+        "run_screen_group",
+        corrupting_adapter,
+    )
+
+    with pytest.raises(ValueError, match="pre-VISTA|evidence|canonical|path|lineage"):
         runtime.run_actual_screen_group(
             provider_group=group,
             attempt_ref=attempt_ref,

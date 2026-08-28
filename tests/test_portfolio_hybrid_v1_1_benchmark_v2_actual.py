@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+import base64
 from copy import deepcopy
+import hashlib
 import inspect
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -15,6 +18,9 @@ from app.learn.hybrid.benchmark_v2_actual import (
     run_screen_group,
 )
 from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+from app.learn.hybrid.vista_refinement import build_vista_requests
+from app.learn.recognition.uei.canonical import seal_immutable
+from tests.test_learn_hybrid_vista_refinement import _authoritative_inputs
 
 
 SHA_A = "a" * 64
@@ -32,6 +38,7 @@ def _sealed_parent(kind: str, digest: str = SHA_A) -> dict[str, object]:
 
 
 def _provider_group() -> dict[str, object]:
+    _, capture_bundle, _, _, _ = _authoritative_inputs()
     return incumbent.compose_benchmark_v2_hybrid_screen_group_start(
         attempt_ref=_sealed_parent("attempt"),
         partition="regression",
@@ -47,7 +54,7 @@ def _provider_group() -> dict[str, object]:
         manifest_ref=_identity("manifest-1"),
         capture_image_path="artifacts/benchmark/screen-group-1.png",
         hybrid_config={"mode": "hybrid_v1_1"},
-        capture_bundle={"bundle_id": "capture-bundle", "capture_parent": SHA_A},
+        capture_bundle=capture_bundle,
     )
 
 
@@ -266,6 +273,17 @@ class _FakeWorkflowService:
 
     def _hybrid_response(self) -> dict[str, object]:
         assert self.provider_group is not None
+        fusion, capture_bundle, inventory, bindings, cleanup_receipt = (
+            _authoritative_inputs()
+        )
+        vista_requests = build_vista_requests(
+            fusion,
+            capture_bundle,
+            omni_inventory=inventory,
+            qwen_bindings=bindings,
+            qwen_cleanup_receipt=cleanup_receipt,
+            expected_workflow_revision=int(capture_bundle["workflow_revision"]),
+        )
         return {
             "contract_version": "learning_hybrid_managed_stage_result_v1",
             "learning_pipeline_mode": "hybrid_v1_1",
@@ -277,8 +295,11 @@ class _FakeWorkflowService:
                 "review_status": "REVIEW_REQUIRED",
                 "automatic_acceptance": False,
                 "proposals": [
-                    {"candidate_id": f"candidate-{index}", "status": "validated"}
-                    for index in range(5)
+                    {
+                        "candidate_id": request["candidate_id"],
+                        "status": "validated",
+                    }
+                    for request in vista_requests
                 ],
                 "execute_binding_enabled": False,
                 "no_live_click_authorization": True,
@@ -287,10 +308,13 @@ class _FakeWorkflowService:
                 "hybrid_capture_bundle_ref": deepcopy(
                     self.provider_group["hybrid_capture_bundle_ref"]
                 ),
-                "capture_bundle": deepcopy(self.provider_group["capture_bundle"]),
-                "omni_inventory": {"provider": "omni", "candidates": [1, 2, 3]},
-                "qwen_bindings": {"provider": "qwen", "bindings": [1, 2, 3]},
-                "fusion_result": {"fusion": "hybrid", "candidates": [1, 2, 3]},
+                "capture_bundle": deepcopy(capture_bundle),
+                "omni_inventory": deepcopy(inventory),
+                "qwen_bindings": deepcopy(bindings),
+                "fusion_result": deepcopy(fusion),
+                "qwen_cleanup_receipt": deepcopy(cleanup_receipt),
+                "workflow_revision": capture_bundle["workflow_revision"],
+                "hybrid_vista_requests": deepcopy(vista_requests),
                 "benchmark_v2_provider_dispatch_receipt_refs": [
                     {"provider": "omni", "content_sha256": "1" * 64},
                     {"provider": "qwen", "content_sha256": "2" * 64},
@@ -773,6 +797,291 @@ def test_run_screen_group_uses_one_hybrid_cascade_and_five_incumbent_operations(
         "owner_journal_ref": _window_binding()["owner_journal_ref"],
         "expected_uia_root_ref": _window_binding()["expected_uia_root_ref"],
     }
+
+
+def test_actual_projection_seals_exact_pre_vista_evidence_with_class_specific_refs() -> None:
+    events, service, owner, lifecycle, sink = _ports()
+
+    result = run_screen_group(
+        provider_group=_provider_group(),
+        service=service,
+        window_owner=owner,
+        lifecycle=lifecycle,
+        prediction_sink=sink,
+    )
+
+    evidence = result["pre_vista_evidence"]
+    assert set(evidence) == {
+        "contract_version",
+        "provider_group_ref",
+        "omni_inventory_envelope",
+        "qwen_bindings_envelope",
+        "fusion_result_envelope",
+        "submitted_vista_request_envelopes",
+        "safety",
+        "content_sha256",
+    }
+    assert evidence["contract_version"] == "benchmark_v2_actual_pre_vista_evidence_v1"
+    assert evidence["provider_group_ref"] == {
+        "id": "screen-group-1",
+        "content_sha256": _provider_group()["content_sha256"],
+    }
+    assert evidence["safety"] == {
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    assert evidence["content_sha256"] == content_sha256(evidence)
+
+    expected_prefixes = (
+        ("omni_inventory_envelope", "omni-inventory", b"benchmark-v2-omni-inventory\0"),
+        ("qwen_bindings_envelope", "qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        ("fusion_result_envelope", "fusion-result", b"benchmark-v2-fusion-result\0"),
+    )
+    for field, id_prefix, domain in expected_prefixes:
+        envelope = evidence[field]
+        assert set(envelope) == {"ref", "canonical_bytes_b64"}
+        raw = base64.b64decode(envelope["canonical_bytes_b64"], validate=True)
+        assert raw == json.dumps(
+            json.loads(raw.decode("utf-8")),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        assert envelope["ref"] == {
+            "id": f"{id_prefix}/" + hashlib.sha256(domain + raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+    request_envelopes = evidence["submitted_vista_request_envelopes"]
+    decoded_requests = [
+        json.loads(base64.b64decode(item["canonical_bytes_b64"], validate=True))
+        for item in request_envelopes
+    ]
+    assert [item["candidate_id"] for item in decoded_requests] == sorted(
+        item["candidate_id"] for item in decoded_requests
+    )
+    for envelope in request_envelopes:
+        assert set(envelope) == {"ref", "canonical_bytes_b64"}
+        raw = base64.b64decode(envelope["canonical_bytes_b64"], validate=True)
+        assert envelope["ref"] == {
+            "id": "submitted-vista-request/"
+            + hashlib.sha256(b"benchmark-v2-submitted-vista-request\0" + raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+
+    fusion, capture_bundle, inventory, bindings, cleanup_receipt = (
+        _authoritative_inputs()
+    )
+    assert decoded_requests == sorted(
+        build_vista_requests(
+            fusion,
+            capture_bundle,
+            omni_inventory=inventory,
+            qwen_bindings=bindings,
+            qwen_cleanup_receipt=cleanup_receipt,
+            expected_workflow_revision=int(capture_bundle["workflow_revision"]),
+        ),
+        key=lambda item: item["candidate_id"],
+    )
+
+
+@pytest.mark.parametrize("confidence", (1.0, 0.0, -0.0, 1e-7))
+def test_uei_jcs_sealed_legal_floats_pass_closed_validators_and_actual_projection(
+    confidence: float,
+) -> None:
+    _, service, owner, lifecycle, sink = _ports()
+    original_response = service._hybrid_response
+
+    def legal_float_response() -> dict[str, object]:
+        response = original_response()
+        orchestration = response["orchestration"]
+        qwen = deepcopy(orchestration["qwen_bindings"])
+        qwen.pop("content_sha256")
+        qwen["bindings"][0]["semantic_confidence"] = confidence
+        qwen = seal_immutable(qwen)
+        orchestration["qwen_bindings"] = qwen
+        orchestration["hybrid_vista_requests"] = build_vista_requests(
+            orchestration["fusion_result"],
+            orchestration["capture_bundle"],
+            omni_inventory=orchestration["omni_inventory"],
+            qwen_bindings=qwen,
+            qwen_cleanup_receipt=orchestration["qwen_cleanup_receipt"],
+            expected_workflow_revision=int(orchestration["workflow_revision"]),
+        )
+        return response
+
+    service._hybrid_response = legal_float_response
+    projection = run_screen_group(
+        provider_group=_provider_group(),
+        service=service,
+        window_owner=owner,
+        lifecycle=lifecycle,
+        prediction_sink=sink,
+    )
+
+    evidence = projection["pre_vista_evidence"]
+    qwen_bytes = base64.b64decode(
+        evidence["qwen_bindings_envelope"]["canonical_bytes_b64"],
+        validate=True,
+    )
+    decoded = json.loads(qwen_bytes.decode("utf-8"))
+    assert decoded["bindings"][0]["semantic_confidence"] == confidence
+    assert evidence["content_sha256"] == content_sha256(evidence)
+    assert projection["content_sha256"] == content_sha256(projection)
+
+
+def test_final_review_proposal_mutation_cannot_change_pre_vista_evidence() -> None:
+    _, service_a, owner_a, lifecycle_a, sink_a = _ports()
+    baseline = run_screen_group(
+        provider_group=_provider_group(),
+        service=service_a,
+        window_owner=owner_a,
+        lifecycle=lifecycle_a,
+        prediction_sink=sink_a,
+    )["pre_vista_evidence"]
+
+    _, service_b, owner_b, lifecycle_b, sink_b = _ports()
+    original_response = service_b._hybrid_response
+
+    def mutated_response() -> dict[str, object]:
+        response = original_response()
+        response["result"]["proposals"] = [
+            {"candidate_id": "proposal-only-mutation", "status": "failed"}
+        ]
+        return response
+
+    service_b._hybrid_response = mutated_response
+    mutated = run_screen_group(
+        provider_group=_provider_group(),
+        service=service_b,
+        window_owner=owner_b,
+        lifecycle=lifecycle_b,
+        prediction_sink=sink_b,
+    )["pre_vista_evidence"]
+
+    assert mutated == baseline
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ("missing", "non_list", "duplicate", "omitted", "foreign_candidate"),
+)
+def test_invalid_propagated_pre_vista_requests_fail_closed_and_still_clean_up(
+    fault: str,
+) -> None:
+    events, service, owner, lifecycle, sink = _ports()
+    original_response = service._hybrid_response
+
+    def invalid_requests_response() -> dict[str, object]:
+        response = original_response()
+        requests = response["orchestration"]["hybrid_vista_requests"]
+        if fault == "missing":
+            response["orchestration"].pop("hybrid_vista_requests")
+        elif fault == "non_list":
+            response["orchestration"]["hybrid_vista_requests"] = {"invalid": True}
+        elif fault == "duplicate":
+            response["orchestration"]["hybrid_vista_requests"] = [
+                deepcopy(requests[0]),
+                deepcopy(requests[0]),
+            ]
+        elif fault == "omitted":
+            response["orchestration"]["hybrid_vista_requests"] = []
+        else:
+            foreign = deepcopy(requests[0])
+            foreign["candidate_id"] = "foreign-candidate"
+            response["orchestration"]["hybrid_vista_requests"] = [foreign]
+        return response
+
+    service._hybrid_response = invalid_requests_response
+    with pytest.raises(ValueError, match="VISTA request"):
+        run_screen_group(
+            provider_group=_provider_group(),
+            service=service,
+            window_owner=owner,
+            lifecycle=lifecycle,
+            prediction_sink=sink,
+        )
+
+    assert not sink.values
+    assert events[-2:] == ["window-close", "lifecycle-stable-zero"]
+    assert not service.active_ops
+    assert not service.active_workers
+    assert not owner.active_windows
+
+
+@pytest.mark.parametrize(
+    "parent_name",
+    ("omni_inventory", "qwen_bindings", "fusion_result"),
+)
+def test_pre_vista_parent_closed_validators_reject_absolute_path_extra_field(
+    parent_name: str,
+) -> None:
+    events, service, owner, lifecycle, sink = _ports()
+    original_response = service._hybrid_response
+
+    def tampered_response() -> dict[str, object]:
+        response = original_response()
+        parent = deepcopy(response["orchestration"][parent_name])
+        parent.pop("content_sha256")
+        parent["debug_path"] = r"C:\private\benchmark\raw.json"
+        response["orchestration"][parent_name] = seal_immutable(parent)
+        return response
+
+    service._hybrid_response = tampered_response
+    with pytest.raises(ValueError, match="inventory|Qwen|fusion"):
+        run_screen_group(
+            provider_group=_provider_group(),
+            service=service,
+            window_owner=owner,
+            lifecycle=lifecycle,
+            prediction_sink=sink,
+        )
+
+    assert not sink.values
+    assert events[-2:] == ["window-close", "lifecycle-stable-zero"]
+    assert not service.active_ops
+    assert not service.active_workers
+    assert not owner.active_windows
+
+
+@pytest.mark.parametrize("fault", ("absolute_path_extra", "source_revision"))
+def test_propagated_vista_request_must_byte_match_closed_rebuild(fault: str) -> None:
+    events, service, owner, lifecycle, sink = _ports()
+    original_response = service._hybrid_response
+
+    def tampered_response() -> dict[str, object]:
+        response = original_response()
+        request = deepcopy(
+            response["orchestration"]["hybrid_vista_requests"][0]
+        )
+        request.pop("content_sha256")
+        if fault == "absolute_path_extra":
+            request["raw_path"] = r"C:\private\benchmark\request.json"
+        else:
+            request["source_revision"] = "f" * 64
+        response["orchestration"]["hybrid_vista_requests"] = [
+            seal_immutable(request)
+        ]
+        return response
+
+    service._hybrid_response = tampered_response
+    with pytest.raises(
+        ValueError,
+        match="differ from exact calibration output",
+    ):
+        run_screen_group(
+            provider_group=_provider_group(),
+            service=service,
+            window_owner=owner,
+            lifecycle=lifecycle,
+            prediction_sink=sink,
+        )
+
+    assert not sink.values
+    assert events[-2:] == ["window-close", "lifecycle-stable-zero"]
+    assert not service.active_ops
+    assert not service.active_workers
+    assert not owner.active_windows
 
 
 def test_duplicate_public_reads_do_not_duplicate_hybrid_or_incumbent_producers() -> None:
