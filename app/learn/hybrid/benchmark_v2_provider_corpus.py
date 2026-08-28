@@ -11,6 +11,7 @@ from typing import Any, Mapping
 from app.learn.hybrid.benchmark_v2_contracts import (
     ARM_ORDER,
     BENCHMARK_RELEASE_ID,
+    EVALUATION_PROJECTION,
     PROVIDER_CORPUS_CONTRACT,
     PROVIDER_CODE_REFS,
     PROVIDER_MANIFEST_CONTRACT,
@@ -55,6 +56,10 @@ _FORBIDDEN_PATH_PARTS = (
     "/gold/",
     "benchmark_scorer",
 )
+_ROLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RELEASE_PATH_FORBIDDEN_COMPONENTS = ("private", "gold", "scorer")
+_PROJECTION_PATH_FORBIDDEN_COMPONENTS = (*_RELEASE_PATH_FORBIDDEN_COMPONENTS, "host")
+_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:[/\\]")
 
 _PROVIDER_CORPUS_FILE_REF_CONTRACT = "benchmark_v2_provider_corpus_file_ref_v1"
 _PRODUCTION_PROVIDER_CASE_RESOLVER: _OpaqueProviderCaseResolver | None = None
@@ -79,6 +84,63 @@ def _reject_private_content(value: object) -> None:
         normalized = value.casefold().replace("\\", "/")
         if any(token in normalized for token in _FORBIDDEN_PATH_PARTS):
             raise ValueError("provider object contains a private or Gold path")
+
+
+def _reject_projection_path_leaks(value: object) -> None:
+    if isinstance(value, Mapping):
+        for nested in value.values():
+            _reject_projection_path_leaks(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _reject_projection_path_leaks(nested)
+    elif isinstance(value, str):
+        normalized = value.replace("\\", "/")
+        lowered = normalized.casefold()
+        components = tuple(part for part in lowered.split("/") if part)
+        if (
+            value.startswith(("/", "\\"))
+            or _DRIVE_PATH_RE.match(value) is not None
+            or lowered.startswith("file:")
+            or any(token in value for token in ("%", "$", "~"))
+            or any(
+                forbidden in component
+                for component in components
+                for forbidden in _PROJECTION_PATH_FORBIDDEN_COMPONENTS
+            )
+        ):
+            raise ValueError("provider evaluation projection contains a path leak")
+
+
+def _require_exact_json_types(value: object) -> None:
+    if type(value) is dict:
+        for key, nested in value.items():
+            if type(key) is not str:
+                raise ValueError("provider evaluation projection requires JSON string keys")
+            _require_exact_json_types(nested)
+    elif type(value) is list:
+        for nested in value:
+            _require_exact_json_types(nested)
+    elif value is not None and type(value) not in {str, int, bool, float}:
+        raise ValueError("provider evaluation projection requires exact JSON value types")
+
+
+def _validate_release_code_path(value: object) -> str:
+    path = require_relative_posix_path(value, "provider release code path")
+    lowered = path.casefold()
+    components = lowered.split("/")
+    if (
+        not (path.startswith("app/") or path.startswith("scripts/"))
+        or not path.endswith(".py")
+        or ":" in path
+        or any(token in path for token in ("%", "$", "~"))
+        or any(
+            forbidden in component
+            for component in components
+            for forbidden in _RELEASE_PATH_FORBIDDEN_COMPONENTS
+        )
+    ):
+        raise ValueError("provider release code path is not provider-safe Python")
+    return path
 
 
 def _validate_case(value: object) -> dict[str, Any]:
@@ -265,6 +327,8 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
             "contract_version",
             "benchmark_release_id",
             "provider_corpus_ref",
+            "holdout_partition",
+            "evaluation_projection",
             "sealed_runtime",
             "workload",
             "arm_order",
@@ -272,11 +336,62 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
         },
         "provider manifest",
     )
-    _reject_private_content(manifest)
+    private_checked = deepcopy(manifest)
+    private_checked.pop("evaluation_projection")
+    _reject_private_content(private_checked)
     if manifest["contract_version"] != PROVIDER_MANIFEST_CONTRACT:
         raise ValueError("provider manifest contract_version is invalid")
     if manifest["benchmark_release_id"] != BENCHMARK_RELEASE_ID:
         raise ValueError("provider manifest release is invalid")
+    if manifest["holdout_partition"] != "holdout":
+        raise ValueError("provider manifest holdout partition is invalid")
+    projection = closed_mapping(
+        manifest["evaluation_projection"],
+        {"provider_policy", "estimand", "gate"},
+        "provider manifest evaluation projection",
+    )
+    _require_exact_json_types(projection)
+    _reject_projection_path_leaks(projection)
+    provider_policy = closed_mapping(
+        projection["provider_policy"],
+        {
+            "provider_revisions",
+            "provider_revisions_sha256",
+            "shared_budget",
+            "shared_budget_sha256",
+            "shared_context_policy",
+            "shared_context_policy_sha256",
+        },
+        "provider manifest provider policy",
+    )
+    for field in (
+        "provider_revisions",
+        "shared_budget",
+        "shared_context_policy",
+    ):
+        require_sha256(
+            provider_policy[f"{field}_sha256"],
+            f"provider manifest {field} SHA",
+        )
+        if provider_policy[f"{field}_sha256"] != content_sha256(
+            {field: provider_policy[field]}
+        ):
+            raise ValueError("provider manifest provider policy SHA is invalid")
+    projection["provider_policy"] = provider_policy
+    try:
+        submitted_projection_bytes = canonical_json_bytes(projection)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("provider manifest evaluation projection is not exact JSON") from exc
+    if submitted_projection_bytes != canonical_json_bytes(EVALUATION_PROJECTION):
+        raise ValueError("provider manifest evaluation projection is invalid")
+    projection = deepcopy(EVALUATION_PROJECTION)
+    estimand_arms = projection["estimand"]["arms"]
+    if (
+        estimand_arms["arm_ids"] != list(ARM_ORDER)
+        or estimand_arms["statistical_arm_count"] != len(ARM_ORDER)
+        or estimand_arms["release_arm"] not in estimand_arms["arm_ids"]
+    ):
+        raise ValueError("provider manifest estimand arm projection is inconsistent")
     ref = closed_mapping(
         manifest["provider_corpus_ref"],
         {
@@ -298,7 +413,7 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
     ref["source_parent_ref"] = validate_parent_ref(ref["source_parent_ref"])
     runtime = closed_mapping(
         manifest["sealed_runtime"],
-        {"code_refs", "profile_refs"},
+        {"code_refs", "release_code_refs", "profile_refs"},
         "provider sealed runtime",
     )
     code_refs = runtime["code_refs"]
@@ -316,10 +431,38 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
         require_relative_posix_path(code["relative_path"], "provider code path")
         require_sha256(code["file_sha256"], "provider code file SHA")
         validated_code.append(code)
+    release_code_refs = runtime["release_code_refs"]
+    if not isinstance(release_code_refs, list) or len(release_code_refs) < 2:
+        raise ValueError("provider manifest release code refs are incomplete")
+    validated_release_code: list[dict[str, Any]] = []
+    seen_release_roles: set[str] = set()
+    seen_release_paths: set[str] = set()
+    boot_paths = {relative_path for _, relative_path in PROVIDER_CODE_REFS}
+    for item in release_code_refs:
+        code = closed_mapping(
+            item,
+            {"role", "relative_path", "file_sha256"},
+            "provider release code ref",
+        )
+        role = code["role"]
+        if not isinstance(role, str) or _ROLE_RE.fullmatch(role) is None:
+            raise ValueError("provider release code role is invalid")
+        path = _validate_release_code_path(code["relative_path"])
+        if (
+            role in seen_release_roles
+            or path in seen_release_paths
+            or path in boot_paths
+        ):
+            raise ValueError("provider release code refs must be unique and boot-disjoint")
+        require_sha256(code["file_sha256"], "provider release code file SHA")
+        seen_release_roles.add(role)
+        seen_release_paths.add(path)
+        validated_release_code.append(code)
     profile_refs = runtime["profile_refs"]
     if not isinstance(profile_refs, list) or not 1 <= len(profile_refs) <= 16:
         raise ValueError("provider manifest profile refs are invalid")
     validated_profiles: list[dict[str, Any]] = []
+    seen_profile_roles: set[str] = set()
     seen_profiles: set[str] = set()
     for item in profile_refs:
         profile = closed_mapping(
@@ -335,13 +478,16 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
             or not path.endswith(".json")
             or path in seen_profiles
             or not isinstance(profile["role"], str)
-            or not profile["role"]
+            or _ROLE_RE.fullmatch(profile["role"]) is None
+            or profile["role"] in seen_profile_roles
         ):
             raise ValueError("provider profile ref is invalid")
         require_sha256(profile["file_sha256"], "provider profile file SHA")
+        seen_profile_roles.add(profile["role"])
         seen_profiles.add(path)
         validated_profiles.append(profile)
     runtime["code_refs"] = validated_code
+    runtime["release_code_refs"] = validated_release_code
     runtime["profile_refs"] = validated_profiles
     workload = closed_mapping(
         manifest["workload"],
@@ -365,6 +511,7 @@ def validate_provider_manifest(value: Mapping[str, object]) -> dict[str, object]
     if manifest["safety"] != SAFETY:
         raise ValueError("provider manifest safety boundary is invalid")
     manifest["provider_corpus_ref"] = ref
+    manifest["evaluation_projection"] = projection
     manifest["sealed_runtime"] = runtime
     manifest["workload"] = workload
     return manifest

@@ -442,6 +442,8 @@ def _prevalidate_boot_manifest(
         "contract_version",
         "benchmark_release_id",
         "provider_corpus_ref",
+        "holdout_partition",
+        "evaluation_projection",
         "sealed_runtime",
         "workload",
         "arm_order",
@@ -449,7 +451,11 @@ def _prevalidate_boot_manifest(
     }:
         raise ValueError("provider boot manifest is not a closed object")
     runtime = value.get("sealed_runtime")
-    if not isinstance(runtime, dict) or set(runtime) != {"code_refs", "profile_refs"}:
+    if not isinstance(runtime, dict) or set(runtime) != {
+        "code_refs",
+        "release_code_refs",
+        "profile_refs",
+    }:
         raise ValueError("provider boot runtime seal is invalid")
     refs = runtime.get("code_refs")
     expected = tuple(_CODE_PATHS.items())

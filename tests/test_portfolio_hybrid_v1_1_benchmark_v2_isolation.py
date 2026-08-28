@@ -28,6 +28,11 @@ PROVIDER_CODE_REFS = (
     ("corpus_loader", "app/learn/hybrid/benchmark_v2_provider_corpus.py"),
 )
 PROFILE_PATH = PROJECT_ROOT / "configs" / "benchmarks" / "portfolio_hybrid_v1_1_estimand.v2.json"
+GATE_PATH = PROJECT_ROOT / "configs" / "benchmarks" / "portfolio_hybrid_v1_1_gate.v2.json"
+RELEASE_CODE_REFS = (
+    ("benchmark_runtime", "app/learn/hybrid/benchmark_v2_runtime.py"),
+    ("benchmark_runner", "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py"),
+)
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -63,7 +68,7 @@ def _file_sha(path: Path) -> str:
 
 def _provider_manifest_value(child: dict[str, Any], file_sha: str) -> dict[str, Any]:
     return {
-        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2",
+        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
         "benchmark_release_id": RELEASE_ID,
         "provider_corpus_ref": {
             "contract_version": child["contract_version"],
@@ -71,6 +76,82 @@ def _provider_manifest_value(child: dict[str, Any], file_sha: str) -> dict[str, 
             "file_sha256": file_sha,
             "content_sha256": child["content_sha256"],
             "source_parent_ref": deepcopy(child["source_parent_ref"]),
+        },
+        "holdout_partition": "holdout",
+        "evaluation_projection": {
+            "provider_policy": {
+                "provider_revisions": {
+                    "omni": "PINNED_OMNI_REVISION",
+                    "qwen": "PINNED_QWEN_REVISION",
+                    "vista": "PINNED_VISTA_REVISION",
+                },
+                "provider_revisions_sha256": "25ff2b06d0f5c3fa24809b9e3b046994f3a1d3a472fecffd252238aaa0a0e1c4",
+                "shared_budget": {
+                    "max_provider_calls_per_case": 3,
+                    "max_output_tokens_per_case": 2048,
+                    "max_wall_time_ms_per_case": 120000,
+                },
+                "shared_budget_sha256": "ee15ff899063c6e6ce6de50d635886699b2bc4c3962ca441f3ea2cbf23028932",
+                "shared_context_policy": {
+                    "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+                    "uia": "same_capture_optional",
+                    "ocr": "same_capture_optional",
+                },
+                "shared_context_policy_sha256": "a02c7efbb9c639d1c45c8e621be5f24a474a85aa34205e46a5b654d84eb1d31e",
+            },
+            "estimand": {
+                "file_sha256": _file_sha(PROFILE_PATH),
+                "contract_version": "portfolio_hybrid_v1_1_estimand_v2_1",
+                "arms": {
+                    "arm_ids": [
+                        "qwen_only",
+                        "omni_only_discovery",
+                        "omni_to_qwen",
+                        "omni_to_qwen_vista",
+                    ],
+                    "release_arm": "omni_to_qwen_vista",
+                    "statistical_arm_count": 4,
+                },
+                "execution_units": {
+                    "hybrid_arms": [
+                        "omni_only_discovery",
+                        "omni_to_qwen",
+                        "omni_to_qwen_vista",
+                    ],
+                    "hybrid_invocation_unit": "screen_group",
+                    "hybrid_invocations_per_screen_group": 1,
+                    "incumbent_arm": "qwen_only",
+                    "incumbent_invocation_unit": "target",
+                    "targets_per_screen_group": 5,
+                    "call_count_reports": [
+                        "unique_invocation_count",
+                        "amortized_per_target_count",
+                    ],
+                },
+                "point_metric": {
+                    "denominator": "submitted_count",
+                    "gain_numerator": "sum(refined_hit-baseline_hit)",
+                    "gain": "gain_numerator/submitted_count",
+                    "comparison_arithmetic": "exact_rational_no_rounding",
+                    "min_vista_submitted_count": 1,
+                    "required_gain_numerator": ">0",
+                },
+            },
+            "gate": {
+                "file_sha256": _file_sha(GATE_PATH),
+                "contract_version": "portfolio_hybrid_v1_1_automatic_gate_v2",
+                "automatic_split": "pre_review",
+                "holdout_role": "automatic_gate",
+                "regression_role": "precondition_only",
+                "thresholds": {
+                    "min_coverage": "1/5",
+                    "min_important_target_correct_coverage_delta": "1/20",
+                    "min_semantic_precision_delta": "0/1",
+                    "min_vista_submitted_count": 1,
+                    "required_vista_gain_numerator": ">0",
+                    "wrong_target_count": 0,
+                },
+            },
         },
         "sealed_runtime": {
             "code_refs": [
@@ -80,6 +161,14 @@ def _provider_manifest_value(child: dict[str, Any], file_sha: str) -> dict[str, 
                     "file_sha256": _file_sha(PROJECT_ROOT / relative),
                 }
                 for role, relative in PROVIDER_CODE_REFS
+            ],
+            "release_code_refs": [
+                {
+                    "role": role,
+                    "relative_path": relative,
+                    "file_sha256": _file_sha(PROJECT_ROOT / relative),
+                }
+                for role, relative in RELEASE_CODE_REFS
             ],
             "profile_refs": [
                 {
@@ -435,6 +524,17 @@ def test_provider_manifest_is_closed_and_parent_bound(
     value = _provider_manifest_value(child, file_sha)
     assert validate_provider_manifest(value) == value
     for mutation in (
+        lambda item: item.update(
+            {"contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2"}
+        ),
+        lambda item: item.pop("holdout_partition"),
+        lambda item: item.update({"holdout_partition": "regression"}),
+        lambda item: item["evaluation_projection"]["estimand"]["execution_units"].update(
+            {"hybrid_invocations_per_screen_group": 5}
+        ),
+        lambda item: item["evaluation_projection"]["gate"]["thresholds"].update(
+            {"min_coverage": "1/4"}
+        ),
         lambda item: item["provider_corpus_ref"]["source_parent_ref"].update(
             {"artifact_id": "wrong-lineage"}
         ),
@@ -453,6 +553,156 @@ def test_provider_manifest_is_closed_and_parent_bound(
         mutation(changed)
         with pytest.raises(ValueError):
             validate_provider_manifest(changed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda policy: policy.pop("shared_budget"),
+        lambda policy: policy.update({"extra": False}),
+        lambda policy: policy["provider_revisions"].update({"qwen": "CALLER_CHOSEN"}),
+        lambda policy: policy.update({"provider_revisions_sha256": "0" * 64}),
+        lambda policy: policy["shared_budget"].update({"max_provider_calls_per_case": 4}),
+        lambda policy: policy.update({"shared_budget_sha256": "1" * 64}),
+        lambda policy: policy["shared_context_policy"].update({"ocr": "disabled"}),
+        lambda policy: policy.update({"shared_context_policy_sha256": "2" * 64}),
+    ),
+)
+def test_provider_manifest_provider_policy_is_closed_and_parent_frozen(
+    projected_child: tuple[Path, dict[str, Any], str], mutation: Any
+) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    _, child, file_sha = projected_child
+    changed = _provider_manifest_value(child, file_sha)
+    mutation(changed["evaluation_projection"]["provider_policy"])
+    with pytest.raises(ValueError):
+        validate_provider_manifest(changed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda projection: projection["provider_policy"]["shared_budget"].update(
+            {"max_provider_calls_per_case": 3.0}
+        ),
+        lambda projection: projection["estimand"]["arms"].update(
+            {"statistical_arm_count": 4.0}
+        ),
+        lambda projection: projection["estimand"]["execution_units"].update(
+            {"hybrid_invocations_per_screen_group": True}
+        ),
+        lambda projection: projection["estimand"]["point_metric"].update(
+            {"min_vista_submitted_count": True}
+        ),
+        lambda projection: projection["gate"]["thresholds"].update(
+            {"min_vista_submitted_count": True}
+        ),
+        lambda projection: projection["gate"]["thresholds"].update(
+            {"wrong_target_count": False}
+        ),
+        lambda projection: projection["estimand"]["execution_units"].update(
+            {"hybrid_arms": tuple(projection["estimand"]["execution_units"]["hybrid_arms"])}
+        ),
+    ),
+)
+def test_provider_manifest_evaluation_projection_requires_exact_json_types(
+    projected_child: tuple[Path, dict[str, Any], str], mutation: Any
+) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    _, child, file_sha = projected_child
+    changed = _provider_manifest_value(child, file_sha)
+    mutation(changed["evaluation_projection"])
+    with pytest.raises(ValueError):
+        validate_provider_manifest(changed)
+
+
+@pytest.mark.parametrize(
+    "leak",
+    (
+        r"C:\\provider\\manifest.json",
+        r"\\\\server\\share\\manifest.json",
+        "/var/tmp/manifest.json",
+        "file:///tmp/manifest.json",
+        "%LOCALAPPDATA%/manifest.json",
+        "$HOME/manifest.json",
+        "~/manifest.json",
+        "private/manifest.json",
+        "Gold/manifest.json",
+        "app/learn/hybrid/benchmark_scorer_v2.py",
+        "host/path/manifest.json",
+    ),
+)
+def test_provider_manifest_evaluation_projection_rejects_path_or_private_leaks(
+    projected_child: tuple[Path, dict[str, Any], str], leak: str
+) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    _, child, file_sha = projected_child
+    changed = _provider_manifest_value(child, file_sha)
+    changed["evaluation_projection"]["provider_policy"]["provider_revisions"]["qwen"] = leak
+    with pytest.raises(ValueError):
+        validate_provider_manifest(changed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda refs, runtime: refs.pop(),
+        lambda refs, runtime: refs[1].update({"role": refs[0]["role"]}),
+        lambda refs, runtime: refs[1].update({"relative_path": refs[0]["relative_path"]}),
+        lambda refs, runtime: refs[0].update({"role": "not-a-role"}),
+        lambda refs, runtime: refs[0].update({"file_sha256": "A" * 64}),
+        lambda refs, runtime: refs[0].update({"extra": False}),
+        lambda refs, runtime: refs[0].update({"relative_path": "../scripts/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": r"scripts\\run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "C:/scripts/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "//server/share/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "%ROOT%/scripts/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "~/scripts/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "file:///scripts/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "app/private/run.py"}),
+        lambda refs, runtime: refs[0].update({"relative_path": "app/Gold/run.py"}),
+        lambda refs, runtime: refs[0].update(
+            {"relative_path": "app/learn/hybrid/benchmark_scorer_v2.py"}
+        ),
+        lambda refs, runtime: refs[0].update(
+            {"relative_path": runtime["code_refs"][0]["relative_path"]}
+        ),
+    ),
+)
+def test_provider_manifest_release_code_refs_fail_closed(
+    projected_child: tuple[Path, dict[str, Any], str], mutation: Any
+) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    _, child, file_sha = projected_child
+    changed = _provider_manifest_value(child, file_sha)
+    runtime = changed["sealed_runtime"]
+    mutation(runtime["release_code_refs"], runtime)
+    with pytest.raises(ValueError):
+        validate_provider_manifest(changed)
+
+
+@pytest.mark.parametrize("duplicate", ("role", "relative_path"))
+def test_provider_manifest_profile_roles_and_paths_are_unique(
+    projected_child: tuple[Path, dict[str, Any], str], duplicate: str
+) -> None:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    _, child, file_sha = projected_child
+    changed = _provider_manifest_value(child, file_sha)
+    first = changed["sealed_runtime"]["profile_refs"][0]
+    second = {
+        "role": "gate",
+        "relative_path": GATE_PATH.relative_to(PROJECT_ROOT).as_posix(),
+        "file_sha256": _file_sha(GATE_PATH),
+    }
+    second[duplicate] = first[duplicate]
+    changed["sealed_runtime"]["profile_refs"].append(second)
+    with pytest.raises(ValueError):
+        validate_provider_manifest(changed)
 
 
 def test_provider_import_graph_excludes_privileged_and_private_scorer() -> None:

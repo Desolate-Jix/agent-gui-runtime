@@ -28,6 +28,83 @@ from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 
+ESTIMAND_FILE_SHA256 = "c123a09b48ae144b6869c2d1a0d6e87db81948f6212a8bb686ad863826ad4eeb"
+GATE_FILE_SHA256 = "677a5bb7f8f97468b811332bf0811333c793790b4098e2b21fc7068aa7136861"
+
+
+def _evaluation_projection() -> dict[str, object]:
+    return {
+        "provider_policy": {
+            "provider_revisions": {
+                "omni": "PINNED_OMNI_REVISION",
+                "qwen": "PINNED_QWEN_REVISION",
+                "vista": "PINNED_VISTA_REVISION",
+            },
+            "provider_revisions_sha256": "25ff2b06d0f5c3fa24809b9e3b046994f3a1d3a472fecffd252238aaa0a0e1c4",
+            "shared_budget": {
+                "max_provider_calls_per_case": 3,
+                "max_output_tokens_per_case": 2048,
+                "max_wall_time_ms_per_case": 120000,
+            },
+            "shared_budget_sha256": "ee15ff899063c6e6ce6de50d635886699b2bc4c3962ca441f3ea2cbf23028932",
+            "shared_context_policy": {
+                "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+                "uia": "same_capture_optional",
+                "ocr": "same_capture_optional",
+            },
+            "shared_context_policy_sha256": "a02c7efbb9c639d1c45c8e621be5f24a474a85aa34205e46a5b654d84eb1d31e",
+        },
+        "estimand": {
+            "file_sha256": ESTIMAND_FILE_SHA256,
+            "contract_version": "portfolio_hybrid_v1_1_estimand_v2_1",
+            "arms": {
+                "arm_ids": list(ARM_ORDER),
+                "release_arm": "omni_to_qwen_vista",
+                "statistical_arm_count": 4,
+            },
+            "execution_units": {
+                "hybrid_arms": [
+                    "omni_only_discovery",
+                    "omni_to_qwen",
+                    "omni_to_qwen_vista",
+                ],
+                "hybrid_invocation_unit": "screen_group",
+                "hybrid_invocations_per_screen_group": 1,
+                "incumbent_arm": "qwen_only",
+                "incumbent_invocation_unit": "target",
+                "targets_per_screen_group": 5,
+                "call_count_reports": [
+                    "unique_invocation_count",
+                    "amortized_per_target_count",
+                ],
+            },
+            "point_metric": {
+                "denominator": "submitted_count",
+                "gain_numerator": "sum(refined_hit-baseline_hit)",
+                "gain": "gain_numerator/submitted_count",
+                "comparison_arithmetic": "exact_rational_no_rounding",
+                "min_vista_submitted_count": 1,
+                "required_gain_numerator": ">0",
+            },
+        },
+        "gate": {
+            "file_sha256": GATE_FILE_SHA256,
+            "contract_version": "portfolio_hybrid_v1_1_automatic_gate_v2",
+            "automatic_split": "pre_review",
+            "holdout_role": "automatic_gate",
+            "regression_role": "precondition_only",
+            "thresholds": {
+                "min_coverage": "1/5",
+                "min_important_target_correct_coverage_delta": "1/20",
+                "min_semantic_precision_delta": "0/1",
+                "min_vista_submitted_count": 1,
+                "required_vista_gain_numerator": ">0",
+                "wrong_target_count": 0,
+            },
+        },
+    }
+
+
 def _sealed(value: dict[str, object]) -> dict[str, object]:
     result = deepcopy(value)
     result["content_sha256"] = content_sha256(result)
@@ -109,6 +186,8 @@ def _write_fixture(root: Path) -> tuple[Path, dict[str, object]]:
             "content_sha256": corpus["content_sha256"],
             "source_parent_ref": deepcopy(corpus["source_parent_ref"]),
         },
+        "holdout_partition": "holdout",
+        "evaluation_projection": _evaluation_projection(),
         "sealed_runtime": {
             "code_refs": [
                 {
@@ -117,6 +196,18 @@ def _write_fixture(root: Path) -> tuple[Path, dict[str, object]]:
                     "file_sha256": hashlib.sha256(relative.encode()).hexdigest(),
                 }
                 for role, relative in PROVIDER_CODE_REFS
+            ],
+            "release_code_refs": [
+                {
+                    "role": "benchmark_runtime",
+                    "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
+                    "file_sha256": "c" * 64,
+                },
+                {
+                    "role": "benchmark_runner",
+                    "relative_path": "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+                    "file_sha256": "d" * 64,
+                },
             ],
             "profile_refs": [
                 {
