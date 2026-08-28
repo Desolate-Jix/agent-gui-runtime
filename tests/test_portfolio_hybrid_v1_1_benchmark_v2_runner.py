@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
@@ -40,6 +41,38 @@ def _read_json(path: Path) -> dict[str, object]:
 
 def _read_chain(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _rewrite_chain(path: Path, values: list[dict[str, object]]) -> None:
+    previous = ZERO
+    encoded: list[bytes] = []
+    for sequence, source in enumerate(values):
+        envelope = deepcopy(source)
+        event = envelope["event"]
+        event["sequence"] = sequence
+        event["previous_envelope_sha256"] = previous
+        envelope["event_sha256"] = hashlib.sha256(_canonical(event)).hexdigest()
+        raw = _canonical(envelope)
+        encoded.append(raw)
+        previous = hashlib.sha256(raw).hexdigest()
+    path.write_bytes(b"\n".join(encoded) + b"\n")
+
+
+def _pre_result_ref(raw_prefix: bytes, chain: list[dict[str, object]]) -> dict[str, object]:
+    cleanup_envelope = chain[-2]
+    return {
+        "contract_version": "benchmark_v2_runner_ledger_pre_result_ref_v1",
+        "id": "runner-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-runner-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": cleanup_envelope["event"]["event_payload"]["attempt_ref"],
+        "terminal_sequence": cleanup_envelope["event"]["sequence"],
+        "terminal_envelope_sha256": hashlib.sha256(
+            _canonical(cleanup_envelope)
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
 
 
 class _OwnedGroups:
@@ -388,23 +421,77 @@ def test_actual_reserves_unique_attempts_before_dispatch_and_preserves_both_chai
     assert Path(first["attempt_dir"]).is_dir()
     assert Path(second["attempt_dir"]).is_dir()
     chain = _read_chain(ledger)
-    assert [item["event"]["sequence"] for item in chain] == list(range(6))
+    assert [item["contract_version"] for item in chain] == [
+        "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v2"
+    ] * 8
+    assert [item["event"]["sequence"] for item in chain] == list(range(8))
     assert [item["event"]["event_type"] for item in chain] == [
         "regression_attempt",
         "regression_attempt",
         "cleanup",
+        "result",
         "regression_attempt",
         "regression_attempt",
         "cleanup",
+        "result",
     ]
     assert [item["event"]["event_payload"]["status"] for item in chain] == [
         "opened",
         "body_complete",
         "terminal",
+        "terminal",
         "opened",
         "body_complete",
         "terminal",
+        "terminal",
     ]
+    for result, start in ((first, 0), (second, 4)):
+        attempt_dir = Path(result["attempt_dir"])
+        body_path = attempt_dir / "body.json"
+        cleanup_path = attempt_dir / "cleanup.json"
+        result_path = attempt_dir / "result.json"
+        assert cleanup_path.is_file()
+        assert result_path.is_file()
+        assert result == _read_json(result_path)
+        assert result["contract_version"] == "benchmark_v2_runner_actual_result_v2"
+        assert set(result) == {
+            "contract_version",
+            "attempt_ref",
+            "attempt_dir",
+            "body_ref",
+            "cleanup_receipt_ref",
+            "attempt_ledger_pre_result_ref",
+            "screen_group_count",
+            "status",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        body = _read_json(body_path)
+        cleanup = _read_json(cleanup_path)
+        assert result["body_ref"] == {
+            "path": str(body_path.resolve()),
+            "file_sha256": hashlib.sha256(body_path.read_bytes()).hexdigest(),
+            "content_sha256": body["content_sha256"],
+        }
+        assert result["cleanup_receipt_ref"] == {
+            "path": str(cleanup_path.resolve()),
+            "file_sha256": hashlib.sha256(cleanup_path.read_bytes()).hexdigest(),
+            "content_sha256": cleanup["content_sha256"],
+        }
+        prefix = b"".join(
+            _canonical(item) + b"\n" for item in chain[: start + 3]
+        )
+        assert result["attempt_ledger_pre_result_ref"] == _pre_result_ref(
+            prefix, chain[: start + 4]
+        )
+        result_event = chain[start + 3]["event"]["event_payload"]
+        assert result_event["contract_version"] == "benchmark_v2_runner_result_payload_v1"
+        assert result_event["output_ref"] == {
+            "path": str(result_path.resolve()),
+            "file_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
+            "content_sha256": result["content_sha256"],
+        }
     assert all(group.closed for group in runtime.owned_groups)
     assert all(value == 0 for value in runtime.resource_counts().values())
 
@@ -436,6 +523,343 @@ def test_actual_consumer_failure_closes_owner_then_cleans_and_remains_fail_close
     assert names.index("run_actual_screen_group") < names.index("cleanup_attempt")
     assert _read_chain(ledger)[-1]["event"]["event_type"] == "cleanup"
     assert all(value == 0 for value in runtime.resource_counts().values())
+
+
+def test_cleanup_receipt_is_create_new_or_byte_identical_before_ledger_append(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _DeterministicRuntime()
+    ledger = tmp_path / "ledger" / "events.jsonl"
+    attempt, attempt_dir = runner._reserve_attempt(
+        ledger_path=ledger,
+        output_root=tmp_path / "attempts",
+        mode="actual_models",
+        provider_id=None,
+    )
+    original_append = runner._append_ledger_event
+
+    def _fail_cleanup_append(path, *, event_type, payload):
+        if event_type == "cleanup":
+            raise OSError("simulated append interruption")
+        return original_append(path, event_type=event_type, payload=payload)
+
+    monkeypatch.setattr(runner, "_append_ledger_event", _fail_cleanup_append)
+    with pytest.raises(OSError, match="append interruption"):
+        runner._finish_attempt(
+            runtime,
+            ledger_path=ledger,
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            reason="benchmark_v2_actual_runner_finished",
+            require_effect_refs=True,
+        )
+
+    cleanup_path = attempt_dir / "cleanup.json"
+    first_bytes = cleanup_path.read_bytes()
+    assert first_bytes.endswith(b"\n")
+    monkeypatch.setattr(runner, "_append_ledger_event", original_append)
+
+    cleanup = runner._finish_attempt(
+        runtime,
+        ledger_path=ledger,
+        attempt_ref=attempt,
+        attempt_dir=attempt_dir,
+        reason="benchmark_v2_actual_runner_finished",
+        require_effect_refs=True,
+    )
+
+    assert cleanup_path.read_bytes() == first_bytes
+    assert cleanup == _read_json(cleanup_path)
+    cleanup_payload = _read_chain(ledger)[-1]["event"]["event_payload"]
+    assert cleanup_payload["cleanup_receipt_ref"] == {
+        "path": str(cleanup_path.resolve()),
+        "file_sha256": hashlib.sha256(first_bytes).hexdigest(),
+        "content_sha256": cleanup["content_sha256"],
+    }
+
+
+def test_cleanup_receipt_rejects_preexisting_different_bytes(
+    tmp_path: Path,
+) -> None:
+    runtime = _DeterministicRuntime()
+    ledger = tmp_path / "ledger" / "events.jsonl"
+    attempt, attempt_dir = runner._reserve_attempt(
+        ledger_path=ledger,
+        output_root=tmp_path / "attempts",
+        mode="actual_models",
+        provider_id=None,
+    )
+    cleanup_path = attempt_dir / "cleanup.json"
+    cleanup_path.write_bytes(b"{}\n")
+
+    with pytest.raises(ValueError, match="cleanup.json.*differs"):
+        runner._finish_attempt(
+            runtime,
+            ledger_path=ledger,
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            reason="benchmark_v2_actual_runner_finished",
+            require_effect_refs=True,
+        )
+
+    assert cleanup_path.read_bytes() == b"{}\n"
+    assert [item["event"]["event_payload"]["status"] for item in _read_chain(ledger)] == [
+        "opened"
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation", ["indeterminate", "nonzero", "missing_effect_refs"]
+)
+def test_ledger_rejects_reminted_non_authoritative_cleanup_receipt(
+    tmp_path: Path, mutation: str
+) -> None:
+    runtime = _DeterministicRuntime()
+    ledger = tmp_path / "ledger" / "events.jsonl"
+    attempt, attempt_dir = runner._reserve_attempt(
+        ledger_path=ledger,
+        output_root=tmp_path / "attempts",
+        mode="actual_models",
+        provider_id=None,
+    )
+    body = _sealed(
+        {
+            "contract_version": "test_actual_body_v1",
+            "attempt_ref": attempt,
+            **SAFETY,
+        }
+    )
+    body_path = attempt_dir / "body.json"
+    body_path.write_bytes(_canonical(body) + b"\n")
+    runner._append_ledger_event(
+        ledger,
+        event_type="regression_attempt",
+        payload=runner._attempt_payload(
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            status="body_complete",
+            output_ref=runner._file_ref(body_path, body),
+        ),
+    )
+    runner._finish_attempt(
+        runtime,
+        ledger_path=ledger,
+        attempt_ref=attempt,
+        attempt_dir=attempt_dir,
+        reason="benchmark_v2_actual_runner_finished",
+        require_effect_refs=True,
+    )
+    cleanup_path = attempt_dir / "cleanup.json"
+    cleanup = _read_json(cleanup_path)
+    if mutation == "indeterminate":
+        cleanup["cleanup_status"] = "indeterminate"
+    elif mutation == "nonzero":
+        cleanup["resource_counts"]["providers"] = 1
+    else:
+        cleanup["service_terminal_ref"] = None
+        cleanup["window_cleanup_ref"] = None
+        cleanup["provider_cleanup_refs"] = []
+    cleanup = _sealed(
+        {name: value for name, value in cleanup.items() if name != "content_sha256"}
+    )
+    cleanup_path.write_bytes(_canonical(cleanup) + b"\n")
+    chain = _read_chain(ledger)
+    payload = chain[-1]["event"]["event_payload"]
+    payload["cleanup_receipt_ref"] = {
+        "path": str(cleanup_path.resolve()),
+        "file_sha256": hashlib.sha256(cleanup_path.read_bytes()).hexdigest(),
+        "content_sha256": cleanup["content_sha256"],
+    }
+    chain[-1]["event"]["event_payload"] = _sealed(
+        {name: value for name, value in payload.items() if name != "content_sha256"}
+    )
+    _rewrite_chain(ledger, chain)
+
+    with pytest.raises(ValueError, match="authoritative cleanup receipt"):
+        runner._read_ledger(ledger)
+
+
+def test_cleanup_open_attempts_recovers_after_cleanup_file_fsync_before_append(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _DeterministicRuntime()
+    _install_runtime(monkeypatch, runtime)
+    ledger_root = tmp_path / "ledger-root"
+    ledger = ledger_root / "regression" / "events.jsonl"
+    attempts_root = tmp_path / "attempts"
+    original_append = runner._append_ledger_event
+    failed = False
+
+    def _fail_first_cleanup_append(path, *, event_type, payload):
+        nonlocal failed
+        if event_type == "cleanup" and not failed:
+            failed = True
+            raise OSError("simulated cleanup ledger append interruption")
+        return original_append(path, event_type=event_type, payload=payload)
+
+    monkeypatch.setattr(runner, "_append_ledger_event", _fail_first_cleanup_append)
+    with pytest.raises(OSError, match="cleanup ledger append interruption"):
+        runner.run_cli(
+            [
+                "--provider-manifest",
+                str(_manifest(tmp_path)),
+                "--partition",
+                "regression",
+                "--actual-models",
+                "--attempt-ledger",
+                str(ledger),
+                "--output-root",
+                str(attempts_root),
+            ]
+        )
+    attempt_dir = next(path for path in attempts_root.iterdir() if path.is_dir())
+    cleanup_path = attempt_dir / "cleanup.json"
+    cleanup_bytes = cleanup_path.read_bytes()
+    assert [item["event"]["event_payload"]["status"] for item in _read_chain(ledger)] == [
+        "opened",
+        "body_complete",
+    ]
+    monkeypatch.setattr(runner, "_append_ledger_event", original_append)
+
+    summary = runner.run_cli(
+        [
+            "--cleanup-open-attempts",
+            "--partition",
+            "regression",
+            "--ledger-root",
+            str(ledger_root),
+            "--output-root",
+            str(tmp_path / "cleanup-output"),
+        ]
+    )
+
+    assert summary["cleaned_attempt_count"] == 1
+    assert cleanup_path.read_bytes() == cleanup_bytes
+    assert [item["event"]["event_payload"]["status"] for item in _read_chain(ledger)] == [
+        "opened",
+        "body_complete",
+        "terminal",
+    ]
+    cleanup_calls = [
+        value for name, value in runtime.calls if name == "cleanup_attempt"
+    ]
+    assert len(cleanup_calls) == 2
+    assert cleanup_calls[0][1] == cleanup_calls[1][1]
+    assert all(value == 0 for value in runtime.resource_counts().values())
+
+
+@pytest.mark.parametrize("mutation", ["v1", "noncanonical", "torn"])
+def test_ledger_v2_rejects_old_noncanonical_or_torn_jsonl(
+    tmp_path: Path, mutation: str
+) -> None:
+    ledger = tmp_path / f"{mutation}.jsonl"
+    runner._reserve_attempt(
+        ledger_path=ledger,
+        output_root=tmp_path / f"attempts-{mutation}",
+        mode="actual_models",
+        provider_id=None,
+    )
+    envelope = _read_chain(ledger)[0]
+    if mutation == "v1":
+        envelope["contract_version"] = (
+            "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v1"
+        )
+        ledger.write_bytes(_canonical(envelope) + b"\n")
+    elif mutation == "noncanonical":
+        ledger.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
+    else:
+        ledger.write_bytes(ledger.read_bytes()[:-1])
+
+    with pytest.raises(ValueError, match="canonical|envelope"):
+        runner._read_ledger(ledger)
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "reordered", "cross_ref"])
+def test_ledger_v2_rejects_duplicate_reordered_or_cross_referenced_events(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    runtime = _DeterministicRuntime()
+    _install_runtime(monkeypatch, runtime)
+    ledger = tmp_path / "ledger" / "events.jsonl"
+    runner.run_cli(
+        [
+            "--provider-manifest",
+            str(_manifest(tmp_path)),
+            "--partition",
+            "regression",
+            "--actual-models",
+            "--attempt-ledger",
+            str(ledger),
+            "--output-root",
+            str(tmp_path / "attempts"),
+        ]
+    )
+    chain = _read_chain(ledger)
+    if mutation == "duplicate":
+        chain.insert(1, deepcopy(chain[0]))
+    elif mutation == "reordered":
+        chain[0], chain[1] = chain[1], chain[0]
+    else:
+        payload = chain[-1]["event"]["event_payload"]
+        payload["output_ref"] = deepcopy(
+            chain[1]["event"]["event_payload"]["output_ref"]
+        )
+        chain[-1]["event"]["event_payload"] = _sealed(
+            {name: value for name, value in payload.items() if name != "content_sha256"}
+        )
+    _rewrite_chain(ledger, chain)
+
+    with pytest.raises(ValueError, match="state|duplicate|lineage|result"):
+        runner._read_ledger(ledger)
+
+
+def test_ledger_v2_rejects_old_actual_result_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _DeterministicRuntime()
+    _install_runtime(monkeypatch, runtime)
+    ledger = tmp_path / "ledger" / "events.jsonl"
+    result = runner.run_cli(
+        [
+            "--provider-manifest",
+            str(_manifest(tmp_path)),
+            "--partition",
+            "regression",
+            "--actual-models",
+            "--attempt-ledger",
+            str(ledger),
+            "--output-root",
+            str(tmp_path / "attempts"),
+        ]
+    )
+    result_path = Path(result["attempt_dir"]) / "result.json"
+    old_result = _sealed(
+        {
+            name: value
+            for name, value in result.items()
+            if name not in {"contract_version", "content_sha256"}
+        }
+        | {"contract_version": "benchmark_v2_runner_actual_result_v1"}
+    )
+    result_path.write_bytes(_canonical(old_result) + b"\n")
+    chain = _read_chain(ledger)
+    result_payload = chain[-1]["event"]["event_payload"]
+    result_payload["output_ref"] = {
+        "path": str(result_path.resolve()),
+        "file_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(),
+        "content_sha256": old_result["content_sha256"],
+    }
+    chain[-1]["event"]["event_payload"] = _sealed(
+        {
+            name: value
+            for name, value in result_payload.items()
+            if name != "content_sha256"
+        }
+    )
+    _rewrite_chain(ledger, chain)
+
+    with pytest.raises(ValueError, match="actual result lineage"):
+        runner._read_ledger(ledger)
 
 
 @pytest.mark.parametrize(
@@ -639,7 +1063,7 @@ def test_cleanup_recovers_open_attempt_from_ledger_when_output_is_missing(
         "event_payload": payload,
     }
     envelope = {
-        "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v1",
+        "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v2",
         "event": event,
         "event_sha256": hashlib.sha256(_canonical(event)).hexdigest(),
     }
@@ -706,7 +1130,7 @@ def test_cleanup_open_attempts_rejects_mismatched_authoritative_receipt(
         "event_payload": payload,
     }
     envelope = {
-        "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v1",
+        "contract_version": "portfolio_hybrid_benchmark_v2_ledger_event_envelope_v2",
         "event": event,
         "event_sha256": hashlib.sha256(_canonical(event)).hexdigest(),
     }
