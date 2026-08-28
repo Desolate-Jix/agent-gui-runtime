@@ -192,12 +192,23 @@ Using the S1.1 identity rule, the projection contracts and exact fields are:
 
 | Contract | Exact fields |
 |---|---|
-| `benchmark_v2_runner_ledger_prefix_verified_projection_v1` | `contract_version, artifact_id, partition, raw_prefix_sha256, attempt_ledger_pre_result_ref, through_result_terminal_sequence, through_result_terminal_envelope_sha256, attempt_ref, body_file_ref, cleanup_receipt_ref, result_file_ref, result_event_projection_ref, verified, safety, content_sha256` |
+| `benchmark_v2_runner_ledger_prefix_verified_projection_v1` | `contract_version, artifact_id, partition, raw_prefix_sha256, attempt_ledger_pre_result_ref, through_result_terminal_sequence, through_result_terminal_envelope_sha256, attempt_ref, body_file_ref, cleanup_event_projection_ref, result_file_ref, result_event_projection_ref, verified, safety, content_sha256` |
 | `benchmark_v2_attempt_journal_verified_projection_v1` | `contract_version, artifact_id, attempt_ref, raw_journal_sha256, terminal_event_ref, started_request_count, terminal_or_unknown_request_count, cleanup_projection_ref, verified, safety, content_sha256` |
 | `benchmark_v2_actual_body_verified_projection_v1` | `contract_version, artifact_id, attempt_ref, body_contract_version, raw_file_sha256, body_content_sha256, screen_group_count, case_arm_multiset_sha256, pre_vista_evidence_refs, verified, safety, content_sha256` |
 | `benchmark_v2_actual_result_verified_projection_v1` | `contract_version, artifact_id, attempt_ref, result_contract_version, raw_file_sha256, result_content_sha256, body_projection_ref, cleanup_projection_ref, attempt_ledger_pre_result_ref, runner_ledger_prefix_projection_ref, result_event_projection_ref, verified, safety, content_sha256` |
 
-Projection prefixes are respectively `verified-runner-ledger-prefix`, `verified-attempt-journal`, `verified-actual-body`, and `verified-actual-result`; every `verified` is literal `true`. Raw byte SHA fields are hashes only, not refs to retrievable bytes. `body_file_ref` and `result_file_ref` are pathless exact `{file_sha256, content_sha256}`; `attempt_ref` is `{id:"runner-attempt/" + attempt_id, content_sha256:raw_attempt_ref.content_sha256}`. The journal and result projections reference pathless cleanup/lifecycle projections from the new lifecycle bundle below.
+Projection prefixes are respectively `verified-runner-ledger-prefix`, `verified-attempt-journal`, `verified-actual-body`, and `verified-actual-result`; every `verified` is literal `true`. Raw byte SHA fields are hashes only, not refs to retrievable bytes. `body_file_ref` and `result_file_ref` are pathless exact `{file_sha256, content_sha256}`; `attempt_ref` is `{id:"runner-attempt/" + attempt_id, content_sha256:raw_attempt_ref.content_sha256}`. The journal projection's `terminal_event_ref` resolves only to the journal terminal-event projection frozen in S1.3.1, never to a runner result event, cleanup lifecycle, or opaque receipt ref.
+
+Let `C` be the compact-canonical bytes, with no trailing newline, of the locally validated complete raw cleanup receipt. Its only public-safe identity is the opaque two-field ref:
+
+```text
+cleanup_receipt_ref = {
+  id: "attempt-cleanup-receipt/" + sha256(UTF8("benchmark-v2-attempt-cleanup-receipt\0") || C),
+  content_sha256: sha256(C)
+}
+```
+
+This ref does not publish an envelope, raw bytes, path, receipt fields, or a resolvable artifact. It may occur only in three roles: a cleanup runner event's `load_bearing_refs.cleanup_receipt_ref`, the journal terminal-event projection's `cleanup_receipt_ref`, and the cleanup lifecycle projection's `parent_refs.cleanup_receipt_ref`. The runner-prefix projection uses `cleanup_event_projection_ref` instead; the actual-result projection continues to carry only `cleanup_projection_ref` and closes the raw receipt chain indirectly through that projection's parent plus its result event, the preceding cleanup event, and the journal terminal-event/journal projections. No accepted-input or v3 top-level, non-cleanup lifecycle, projected-ledger, score, or report field may copy the opaque receipt ref.
 
 ### S1.3.1 New production run and lifecycle contracts
 
@@ -209,9 +220,12 @@ Do not reuse or silently reinterpret the scorer's existing synthetic `benchmark_
 | `benchmark_v2_lifecycle_bundle_v3` | `contract_version, artifact_id, benchmark_release_id, partition, attempt_ref, projected_attempt_ledger_ref, raw_ledger_prefix_verification_ref, selected_lifecycle_ref, attempt_cleanup_projection_ref, screen_group_lifecycle_projection_refs, sealed_artifact_envelopes, safety, content_sha256` |
 | `benchmark_v2_projected_attempt_ledger_v1` | `contract_version, artifact_id, benchmark_release_id, partition, raw_ledger_prefix_verification_ref, entries, selected_attempt_ref, selected_lifecycle_ref, safety, content_sha256` |
 | `benchmark_v2_runner_event_verified_projection_v1` | `contract_version, artifact_id, partition, event_kind, sequence, attempt_ref, previous_event_projection_ref, raw_event_sha256, load_bearing_refs, safety, content_sha256` |
+| `benchmark_v2_attempt_journal_terminal_event_verified_projection_v1` | `contract_version, artifact_id, attempt_ref, sequence, phase, event_kind, raw_event_sha256, predecessor_content_sha256, cleanup_receipt_ref, cleanup_projection_ref, safety, content_sha256` |
 | `benchmark_v2_lifecycle_verified_projection_v1` | `contract_version, artifact_id, attempt_ref, lifecycle_kind, raw_evidence_sha256, terminal_status, cleanup_stable_zero, resource_counts, started_request_count, terminal_or_unknown_request_count, parent_refs, safety, content_sha256` |
 
-Their S1.1 prefixes are `prediction-run`, `lifecycle-bundle`, `projected-attempt-ledger`, `verified-runner-event`, and `verified-lifecycle`, respectively. `lifecycle_kind` is one of `attempt`, `screen_group`, or `cleanup`; `resource_counts` is the existing exact closed zero-count map, not an extensible dictionary.
+Their S1.1 prefixes are `prediction-run`, `lifecycle-bundle`, `projected-attempt-ledger`, `verified-runner-event`, `verified-attempt-journal-terminal-event`, and `verified-lifecycle`, respectively. `lifecycle_kind` is one of `attempt`, `screen_group`, or `cleanup`; `resource_counts` is always the exact closed map `{service_operations:0, windows:0, providers:0, listeners:0, leases:0}`, never an extensible dictionary.
+
+The journal-terminal projection has literal `phase=terminal` and `event_kind=attempt_terminal`; `raw_event_sha256 = sha256(canonical_json(raw terminal attempt-journal event))`. Its S1.1 identity is therefore `artifact_id = "verified-attempt-journal-terminal-event/" + sha256(UTF8("benchmark_v2_attempt_journal_terminal_event_verified_projection_v1\0") || canonical_json(semantic_payload))`, followed by the normal excluding-self `content_sha256` formula. Local validation requires `raw terminal event.resource_ref.resource_kind=attempt_cleanup_receipt` and `raw terminal event.resource_ref.value.cleanup_receipt` to be byte-equal to the validated `cleanup.json`. The generic journal projection's `terminal_event_ref` must resolve to this exact projection. This terminal envelope appears only in the lifecycle bundle; it is not a runner event and cannot be substituted by a cleanup projection or opaque receipt ref.
 
 For `benchmark_v2_runner_event_verified_projection_v1`, raw `event_type=regression_attempt,status=opened/body_complete` maps to `event_kind=opened/body_complete`, while raw `event_type=cleanup/result` maps directly to `cleanup/result`. `sequence` is the original ledger sequence; `previous_event_projection_ref` is `null` only for sequence zero and otherwise resolves to the immediately prior projected event. `raw_event_sha256` hashes the locally validated complete raw event envelope's compact-canonical bytes, but those bytes are not published. `load_bearing_refs` is a closed discriminated object:
 
@@ -224,17 +238,84 @@ result:        {result_file_ref, attempt_ledger_pre_result_ref}
 
 All file/receipt refs above are pathless. Its exact formula is `artifact_id = "verified-runner-event/" + sha256(UTF8("benchmark_v2_runner_event_verified_projection_v1\0") || canonical_json(semantic_payload))`, where `semantic_payload` is the closed object without `artifact_id` and `content_sha256`; `content_sha256 = sha256(canonical_json(object_without_content_sha256))`. No raw event `artifact_id` is assumed.
 
-`benchmark_v2_prediction_run_v3.sealed_artifact_envelopes` contains only provider-safe pathless artifacts: `automatic_prediction_v2`, the projected ledger, every runner-event projection through the selected result, source parents, bboxes, bindings, requests, and pre-VISTA evidence. `benchmark_v2_lifecycle_bundle_v3.sealed_artifact_envelopes` contains the byte-identical projected ledger and complete runner-event projection set plus pathless lifecycle/cleanup projections. No raw runtime bytes appear in either. Validators require exact event-ref set equality across both v3 envelopes; no missing, extra, or reminted copy is allowed.
+The five load-bearing lifecycle fields are derived, never caller-selected, by this closed discriminator:
+
+| `lifecycle_kind` | Exact derivation |
+|---|---|
+| `cleanup` | `terminal_status=stable_zero`, `cleanup_stable_zero=true`, the exact zero `resource_counts` copied from the validated receipt, both request counts `0`, and exact `parent_refs={cleanup_receipt_ref}`. Those request zeroes are the child-cleanup N/A representation, not a claim that the whole attempt launched no provider. The parent receipt ref is the same opaque ref as the cleanup runner event and journal terminal projection. This projection must not refer back to either event. |
+| `screen_group` | `terminal_status=stable_zero`, `cleanup_stable_zero=true`, the exact zero `resource_counts` rederived from raw `benchmark_v2_actual_stable_zero_v1.diagnostic_resource_counts`, both request counts `0`, and exact `parent_refs={actual_screen_group_ref,provider_group_ref}`. These count zeroes are likewise child-projection N/A. Validation additionally binds the raw stable-zero cleanup status, attempt, provider group, window binding, execution multiset, and window-close lineage to the raw screen-group projection. |
+| `attempt` | Only a projection whose locally validated raw attempt has literal `mode=actual_models` is selectable. `terminal_status=terminal`, `cleanup_stable_zero=true`, and `resource_counts` byte-equal the cleanup lifecycle projection. `started_request_count` is the count of unique raw attempt-journal `provider_request_in_flight` identities; `terminal_or_unknown_request_count` is the count of those same identities resolving to exactly one verified terminal-or-unknown outcome, and must equal started. Exact `parent_refs={attempt_journal_projection_ref,cleanup_projection_ref,terminal_event_ref,screen_group_lifecycle_projection_refs}`. For this frozen v1 actual-model chain, `provider_request_in_flight`, `probe_triggered`, and `provider_body_complete` attempt-journal events are forbidden, so both counts must be zero; adding those events requires a new contract version rather than reinterpreting v1. |
+
+For each `screen_group` lifecycle projection, freeze the two parent refs independently. `actual_screen_group_ref` is exactly `{id: raw screen_group_results[i].screen_group, content_sha256: raw screen_group_results[i].content_sha256}`. `provider_group_ref` has exact shape `{id,content_sha256}`, is byte-equal to `raw screen_group_results[i].pre_vista_evidence.provider_group_ref`, and simultaneously equals `shared_parent_refs.screen_group_ref`. Validators must rederive both from the same locally validated raw screen-group projection and reject any swap, coercion, remint, or use of one ref in the other's role.
+
+`screen_group_lifecycle_projection_refs` contains exactly 12 unique refs. Resolve each one, sort by the decoded projection's `parent_refs.actual_screen_group_ref.id` in Unicode code-point order, require the IDs to be unique, and require the list and lifecycle envelopes to use that exact order. Missing, extra, duplicate, or reordered refs are fatal.
+
+Both v3 envelope lists are exact class-ranked closures, not bags. Within a normal class sort by `(ref.id, ref.content_sha256)` ascending; the runner-event class instead follows validated ledger `sequence`, and the screen-group class follows the 12-group order above. Prediction-run-v3 uses exactly these ranks:
+
+```text
+1  Omni raw-evidence envelopes
+2  Qwen-binding raw-evidence envelopes
+3  fusion-result raw-evidence envelopes
+4  submitted-VISTA-request raw-evidence envelopes
+5  benchmark_v2_nested_provider_evidence_ref_v1
+6  sealed_prediction_source_parent_v1
+7  sealed_prediction_bbox_v1
+8  sealed_target_binding_v4
+9  sealed_vista_request_v4
+10 exactly one automatic_prediction_v2
+11 runner-event projections through selected result, by ledger sequence
+12 exactly one benchmark_v2_projected_attempt_ledger_v1
+```
+
+Lifecycle-bundle-v3 uses exactly these ranks:
+
+```text
+1  exactly 12 screen-group lifecycle projections
+2  exactly one cleanup lifecycle projection
+3  exactly one attempt-journal terminal-event projection
+4  exactly one selected attempt lifecycle projection
+5  runner-event projections through selected result, by ledger sequence
+6  exactly one benchmark_v2_projected_attempt_ledger_v1
+```
+
+The runner-event envelopes must have identical refs, canonical bytes, and order across both v3 bundles; the projected-ledger envelope must also be byte-identical. Verified-parent projections are not copied into either v3 list. Every internal child ref resolves exactly once, every envelope is reachable from a declared v3 root, and no missing child, orphan, duplicate, extra class, reminted copy, or child reference to an outer v3/accepted root is allowed.
+
+Create shared `app/learn/hybrid/benchmark_v2_pathless.py`; S1-S4 producers and scorer validators must use it rather than local generic `artifact_ref` or hash-only fallbacks. Freeze its public API:
+
+```python
+seal_pathless_projection(*, contract_version: str, semantic_payload: Mapping[str, object]) -> dict[str, object]
+pathless_artifact_ref(value: Mapping[str, object]) -> dict[str, str]
+seal_pathless_envelope(value: Mapping[str, object]) -> dict[str, object]
+validate_pathless_ref(*, role: str, value: Mapping[str, object], context: Mapping[str, object]) -> dict[str, str]
+validate_pathless_envelope(*, role: str, envelope: Mapping[str, object], context: Mapping[str, object]) -> dict[str, object]
+validate_pathless_recursive(*, registry_name: str, roots: Sequence[Mapping[str, object]], envelopes: Sequence[Mapping[str, object]], external_refs: Mapping[str, object], context: Mapping[str, object]) -> list[dict[str, object]]
+order_pathless_envelopes(*, registry_name: str, envelopes: Sequence[Mapping[str, object]], context: Mapping[str, object]) -> list[dict[str, object]]
+```
+
+The module owns one immutable registry entry per contract with exact `contract_version`, `artifact_prefix`, exact semantic field set, contract-specific `semantic_validator`, closed `ref_role_schema`, internal-versus-external child roles, allowed registry names, class rank, and semantic sort key. Ref roles are typed (`exact_ref`, `pathless_public_id`, `sha256`, `closed_enum`, `nonnegative_integer`, `zero_resource_count_map`, `ordered_exact_ref_list`, `closed_parent_refs`, `opaque_raw_ref`, or `safety_literal`); unknown contract, role, caller prefix/ID, or untyped string fails closed. `seal` performs semantic validation before hashing. `validate` verifies exact shape and both hashes, then reruns the same semantic validator, including lifecycle derivation, count equality, receipt role confinement, event chaining, class membership, and exact ordering.
+
+Recursive validation resolves every internal ref to exactly one byte-identical envelope of the registered role, verifies the whole reachable graph, and rejects cycles, orphans, duplicate refs, missing/extra children, class drift, and an internal ref presented as external. External roles must equal the explicitly accepted raw-parent verification refs and can never be resolved from caller-added envelopes. Recursively reject noncanonical JSON types, `Path`, keys `path`, `*_path`, `attempt_dir`, or `owner_journal*`, and any absolute/drive/UNC/backslash/`file:`/percent-escaped/control-character or `.`, `..`, `~` path segment. A provider-public logical `relative_path` is allowed only for a contract whose semantic validator explicitly owns it. `opaque_raw_ref` accepts only canonical bytes already validated by its class-specific raw validator. These checks apply to nested objects and arrays, not merely the envelope root.
 
 Each projected-ledger entry is exact `{sequence, attempt_ref, observed_state, event_projection_refs, lifecycle_ref, selection_eligible}`. `sequence` is first-open order; `observed_state` is one of `opened`, `body_complete`, `cleanup`, or `result`; `event_projection_refs` is the ordered nonempty list of pathless event refs; `lifecycle_ref` is an exact ref or `null`; `selection_eligible` is boolean. Mapping is deterministic: replay raw v2 ledger locally, collapse each deduplicated attempt through its last observed state, project raw events without paths, and mark eligible only after result plus stable-zero lifecycle validation. `selected_attempt_ref`/`selected_lifecycle_ref` identify the first eligible entry.
 
 The graph closes without a hash cycle as follows:
 
-1. Validate raw events locally through cleanup and recompute `attempt_ledger_pre_result_ref`; require exact equality with the ref inside raw `actual_result_v2`.
-2. Require body-complete event `body_file_ref`, cleanup event `cleanup_receipt_ref`, raw result `body_ref`/`cleanup_receipt_ref`, and result event `result_file_ref` to resolve to the same locally validated body, cleanup, and result hashes.
-3. Project events in sequence. The cleanup event's `cleanup_projection_ref` resolves to the lifecycle bundle's cleanup projection. The result event carries the result file ref plus pre-result ref, but does not reference the result projection.
-4. Build the result projection afterward; its `result_event_projection_ref` resolves to that result event and its `attempt_ledger_pre_result_ref` is byte-equal to the event's load-bearing ref. This one-way edge avoids self-reference.
-5. Require the runner-prefix projection's terminal event ref, every projected-ledger `event_projection_refs` entry, and both v3 envelope event sets to resolve to the same projected event objects. The selected ledger entry ends at the result-event projection ref and carries the selected stable-zero lifecycle ref; the separate actual-result projection resolves that same terminal event.
+1. Validate all local raw bytes, fixed paths, hashes, aliases, runner events through cleanup/result, and attempt journals; recompute `attempt_ledger_pre_result_ref` and require exact equality with raw `actual_result_v2`.
+2. Derive class-specific raw refs, including the one opaque cleanup receipt ref, only from canonical bytes that passed their raw validator.
+3. Build and order the 12 screen-group lifecycle projections.
+4. Build the cleanup lifecycle projection with the opaque receipt ref as its only parent and no event/journal back-edge.
+5. Build the attempt-journal terminal-event projection.
+6. Build the generic journal verified-parent projection that refers to that terminal event.
+7. Build the selected attempt lifecycle projection from the journal, cleanup, terminal event, and exact ordered 12-screen list; it does not refer to a projected ledger or outer bundle.
+8. Build runner-event projections in validated ledger sequence. Require body-complete `body_file_ref`, the cleanup event's opaque receipt/cleanup projection pair, raw result `body_ref`/`cleanup_receipt_ref`, and result-event `result_file_ref` to resolve to the same validated body, receipt, cleanup, and result chain. The result event carries the result file and pre-result refs but no result projection.
+9. Build the runner-prefix projection using `cleanup_event_projection_ref`, not the opaque receipt ref.
+10. Build the projected attempt ledger from runner events plus selected lifecycle; no lifecycle child points back to it.
+11. Build actual-body and actual-result verified projections. The actual-result projection's `result_event_projection_ref` resolves the terminal result event and its pre-result ref matches the event; it carries only `cleanup_projection_ref`, whose cleanup parent, cleanup runner event, and journal terminal event all resolve to the same opaque receipt ref.
+12. Build the automatic-prediction dependency closure from validated pre-VISTA raw evidence, followed only by outcome attachment.
+13. Apply the frozen class ranks and semantic sort keys, build prediction-run-v3 and lifecycle-bundle-v3, and verify their byte-identical shared event/ledger envelopes and recursive exact closures.
+14. Build `benchmark_v2_accepted_regression_score_input_v2` last.
+
+The fixed edge direction is cleanup lifecycle <- journal terminal event <- journal projection <- selected attempt lifecycle <- projected ledger, while runner result event <- actual-result projection. No child may reference an object built later in those chains, and no cleanup/lifecycle/journal child may reference the projected ledger, an outer v3 bundle, or the accepted root.
 
 The two ledger refs are intentionally distinct: top-level accepted `attempt_ledger_ref` equals `prediction_run.projected_attempt_ledger_ref`, while `raw_ledger_prefix_verification_ref` equals `verified_parent_projections.runner_ledger_prefix_projection_envelope.ref`. Both v3 contracts must carry both refs, and the projected ledger must point to the raw verification projection. `actual_result_v2.attempt_ledger_pre_result_ref` remains a local raw through-cleanup hash input; its validated value is represented only in the pathless ledger projection fields.
 
@@ -283,18 +364,19 @@ Resolve the ledger and attempt directories beneath their supplied roots, require
 
 **Allowed files:**
 
+- Create `app/learn/hybrid/benchmark_v2_pathless.py`.
 - Modify `app/learn/hybrid/benchmark_v2_actual.py`.
 - Modify `app/learn/hybrid/benchmark_v2_predictions.py`.
 - Modify `app/learn/hybrid/benchmark_v2_lifecycle.py`.
 - Modify `app/learn/hybrid/benchmark_v2_runtime.py` only for the mandatory persistence/replay validator.
 - Modify `app/learn/workflow_worker.py` only to preserve the exact existing `hybrid_vista_requests` list in final orchestration.
 - Modify `scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py`.
-- Modify only the focused tests `tests/test_learning_workflow_stage_execution.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`, and `tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py`.
+- Create `tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py`; otherwise modify only the focused tests `tests/test_learning_workflow_stage_execution.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py`, `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`, and `tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py`.
 
-**RED tests:** exact goal grammar/role aliases; zero/duplicate/ambiguous matches; all four raw-class ref formulas; arm-aware source/bbox/binding/request formulas; Qwen/Omni rejection of fabricated fusion; non-`BOUND` handling; VISTA-result non-selection; exact submitted-request coverage; local raw-parent tamper/remint; any raw byte or absolute path in accepted output; v1 result/ledger and v2 run/lifecycle rejection; exact pre-result ref shape/formula; duplicate/reordered projected events; wrong event-kind/load-bearing refs; missing/extra/different event projections across the two v3 envelopes; transitive result/cleanup/event mismatch; projected-ledger/raw-verification ref conflation; missing/stale cleanup; later-complete cherry-pick; arbitrary path/alias rejection; noncanonical bytes; and a real Task 9 body/result-to-accepted-input producer test. A test-only handcrafted accepted envelope is not production evidence.
+**RED tests:** exact goal grammar/role aliases; zero/duplicate/ambiguous matches; all four raw-class ref formulas; arm-aware source/bbox/binding/request formulas; Qwen/Omni rejection of fabricated fusion; non-`BOUND` handling; VISTA-result non-selection; exact submitted-request coverage; local raw-parent tamper/remint; any raw byte or absolute path in accepted output; v1 result/ledger and v2 run/lifecycle rejection; exact pre-result ref shape/formula; opaque receipt formula and rejection outside its three roles; journal terminal-event shape/formula and raw cleanup equality; all three lifecycle derivations including the fixed five fields and current zero-request rule; swapped/reminted/mismatched `actual_screen_group_ref` and `provider_group_ref`; missing/duplicate/reordered 12-screen lifecycle refs; duplicate/reordered projected events; wrong event-kind/load-bearing refs; wrong v3 class/rank/order or missing/extra/orphan/duplicate/cyclic closure; cross-bundle event/ledger byte drift; recursive nested path/path-key leakage; unknown contract/ref role and semantic-invalid-but-hash-valid projections; transitive result/cleanup/event mismatch; projected-ledger/raw-verification ref conflation; missing/stale cleanup; later-complete cherry-pick; arbitrary path/alias rejection; noncanonical bytes; and a real Task 9 body/result-to-accepted-input producer test. A test-only handcrafted accepted envelope is not production evidence.
 
 ```powershell
-uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py
+uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py
 ```
 
 **GREEN acceptance:** the same command passes; a proposal-only mutation leaves selection refs identical; the exact CLI rematerializes byte-identically from an offline fixture; provider/service/model launch counters remain zero; cleanup assertion reports no process, Job, pipe, handle, lease, window, or temporary-path residue.
@@ -321,7 +403,7 @@ derive_private_scoring_cases(*, validated_release: Mapping[str, object], partiti
 
 The manifest-only function supports sealing without requiring not-yet-published siblings. The bundle function reads the private manifest once, requires exact pretty-canonical bytes and self hash, resolves only fixed ordinary siblings `benchmark-v2-provider-manifest.json` and `provider-corpus.v2.json`, and returns validated private state without Gold-derived public data.
 
-Both functions require exact code/config/test inventory key sets, rehash every entry beneath compile-time repository `ROOT`, reject absolute/`..`/symlink/reparse/noncanonical aliases, and require `private_scorer_refs` to equal the scorer module and entrypoint entries in the verified inventory. The bundle validator also verifies frozen parent file/content hashes, canonical parent and Gold, Gold approval/reviewer state, all 24 screenshots and dimensions, exactly 120 targets, zero sealed predictions, provider corpus/manifest lineage, arm order, estimand/gate/profile/code refs, release, and non-authorizing safety.
+Both functions require exact code/config/test inventory key sets, including `app/learn/hybrid/benchmark_v2_pathless.py` and `tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py`, rehash every entry beneath compile-time repository `ROOT`, reject absolute/`..`/symlink/reparse/noncanonical aliases, and require `private_scorer_refs` to equal the scorer module and entrypoint entries in the verified inventory. The bundle validator also verifies frozen parent file/content hashes, canonical parent and Gold, Gold approval/reviewer state, all 24 screenshots and dimensions, exactly 120 targets, zero sealed predictions, provider corpus/manifest lineage, arm order, estimand/gate/profile/code refs, release, and non-authorizing safety.
 
 ### S2.2 Child-only Gold derivation
 
@@ -674,7 +756,7 @@ uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py tests/
 
 If Tasks 11/12 have not created their two test files, implement those canonical tasks first; do not weaken this command or seal an incomplete inventory.
 
-**GREEN acceptance:** the full command passes with test-owned file/registry roots only; the Task 11A genesis/claim chain remains unchanged; only runner typed appenders mutate the fixed attempt chain; recovery chains cannot materialize or score; a corrupt ledger remains byte-identical and permanently ineligible while cleanup-only still proves stable zero through detached evidence; no public projection contains a native authorization path/raw pre-result ref; actual, cleanup, and materializer converge on the one compile-time authorized root before side effects; the sealer's shared private-release inventory authority includes every S1-S4 implementation/test file (including runner, holdout, durable-claim, predictions, scorer, and focused tests), and any missing/drifted file prevents final seal. No real authorization, claim, anchor, model, window, service, process, or score artifact is produced by this slice.
+**GREEN acceptance:** the full command passes with test-owned file/registry roots only; the Task 11A genesis/claim chain remains unchanged; only runner typed appenders mutate the fixed attempt chain; recovery chains cannot materialize or score; a corrupt ledger remains byte-identical and permanently ineligible while cleanup-only still proves stable zero through detached evidence; no public projection contains a native authorization path/raw pre-result ref; actual, cleanup, and materializer converge on the one compile-time authorized root before side effects; the sealer's shared private-release inventory authority includes every S1-S4 implementation/test file (including the shared pathless registry and test, runner, holdout, durable-claim, predictions, scorer, and focused tests), and any missing/drifted file prevents final seal. No real authorization, claim, anchor, model, window, service, process, or score artifact is produced by this slice.
 
 ---
 
@@ -682,7 +764,7 @@ If Tasks 11/12 have not created their two test files, implement those canonical 
 
 ### Must exist now, before Task 13 final seal
 
-- All S1-S4 contracts, pure validators/materializers, CLI parsing, scorer/authorizer/report consumers, closed public v3 validators, and focused RED/GREEN tests.
+- All S1-S4 contracts, the shared semantic pathless registry/recursive validator, pure validators/materializers, CLI parsing, scorer/authorizer/report consumers, closed public v3 validators, and focused RED/GREEN tests.
 - The fixed holdout attempt-event path, typed runner-only appenders, closed FSM validator, recovery-cleanup ineligibility, and distinct holdout projection contracts must be code-complete before sealing; no runtime attempt-events file exists yet.
 - Exact Task 10 inventory entries and hashes for the complete Task 11/12 plus S1-S4 code/test set.
 - Deterministic projection/seal tests and independent review of provider/private boundary, first-complete replay, holdout one-claim rule, leakage, and cleanup assertions.
@@ -716,8 +798,8 @@ This plan ends before step 1. S1-S4 may make only their four named per-slice cod
 After all four GREEN checkpoints, run only deterministic code checks:
 
 ```powershell
-uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py tests/test_portfolio_hybrid_v1_1_release_gate_v2.py
-uv run python -m py_compile app/learn/hybrid/benchmark_v2_actual.py app/learn/hybrid/benchmark_v2_predictions.py app/learn/hybrid/benchmark_v2_lifecycle.py app/learn/hybrid/benchmark_v2_private_release.py app/learn/hybrid/benchmark_scorer_v2.py app/learn/hybrid/benchmark_v2_holdout.py app/learn/hybrid/benchmark_v2_durable_claim.py scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py
+uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py tests/test_portfolio_hybrid_v1_1_release_gate_v2.py
+uv run python -m py_compile app/learn/hybrid/benchmark_v2_pathless.py app/learn/hybrid/benchmark_v2_actual.py app/learn/hybrid/benchmark_v2_predictions.py app/learn/hybrid/benchmark_v2_lifecycle.py app/learn/hybrid/benchmark_v2_private_release.py app/learn/hybrid/benchmark_scorer_v2.py app/learn/hybrid/benchmark_v2_holdout.py app/learn/hybrid/benchmark_v2_durable_claim.py scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py
 git diff --check
 ```
 
