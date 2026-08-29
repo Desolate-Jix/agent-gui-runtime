@@ -50,6 +50,17 @@ _FORBIDDEN_TEXT = (
     "benchmark_v2_privileged_projector.py",
 )
 _INPUT_BINDING_FIELDS = {"contract_version", "benchmark_release_id", "partition", "private_manifest_ref", "corpus_parent_ref", "provider_manifest_ref", "provider_corpus_ref", "accepted_run_ref", "attempt_ref", "attempt_ledger_ref", "automatic_prediction_ref", "selected_lifecycle_ref", "estimand_ref", "gate_ref", "safety"}
+_HOLDOUT_INPUT_BINDING_FIELDS = _INPUT_BINDING_FIELDS | {
+    "regression_score_precondition_ref",
+    "holdout_authorization_ref",
+    "holdout_claim_ref",
+}
+_HOLDOUT_SHARED_REF_PREFIXES = {
+    "attempt_ref": "holdout-runner-attempt",
+    "attempt_ledger_ref": "projected-holdout-attempt-ledger",
+    "automatic_prediction_ref": "automatic",
+    "selected_lifecycle_ref": "verified-lifecycle",
+}
 _PUBLIC_SCORE_FIELDS = {"status", "score_ref", "content_sha256", "contract_version", "score_input_binding", "binding", "launch_receipt", "cleanup_receipt", "safety"}
 _PROVIDER_CODE_REFS = (
     ("bootstrap", "app/learn/hybrid/benchmark_v2_provider_sandbox.py"),
@@ -261,16 +272,91 @@ def _provider_path_exceptions(value: object) -> dict[tuple[object, ...], str]:
 
 
 def _binding_shape_valid(value: object) -> bool:
-    if not isinstance(value, Mapping) or set(value) != _INPUT_BINDING_FIELDS or value.get("contract_version") != "private_scorer_input_binding_v1" or value.get("benchmark_release_id") != BENCHMARK_RELEASE_ID or value.get("partition") != "regression" or value.get("safety") != SAFETY:
+    if not isinstance(value, Mapping):
+        return False
+    regression = (
+        set(value) == _INPUT_BINDING_FIELDS
+        and value.get("contract_version") == "private_scorer_input_binding_v1"
+        and value.get("partition") == "regression"
+    )
+    holdout = (
+        set(value) == _HOLDOUT_INPUT_BINDING_FIELDS
+        and value.get("contract_version")
+        == "private_scorer_holdout_input_binding_v1"
+        and value.get("partition") == "holdout"
+    )
+    if not (regression or holdout) or value.get("benchmark_release_id") != BENCHMARK_RELEASE_ID or value.get("safety") != SAFETY:
         return False
     schemas = (("private_manifest_ref", {"contract_version", "file_sha256", "content_sha256"}), ("corpus_parent_ref", {"contract_version", "artifact_id", "file_sha256", "content_sha256"}), ("provider_manifest_ref", {"contract_version", "relative_path", "file_sha256"}), ("provider_corpus_ref", {"contract_version", "relative_path", "file_sha256", "content_sha256", "source_parent_ref"}), ("accepted_run_ref", {"contract_version", "file_sha256", "content_sha256"}), ("estimand_ref", {"contract_version", "file_sha256"}), ("gate_ref", {"contract_version", "file_sha256"}))
     for name, fields in schemas:
         ref = value.get(name)
         if not isinstance(ref, Mapping) or set(ref) != fields or any(key.endswith("sha256") and not _is_sha(child) for key, child in ref.items()):
             return False
-    if value["provider_manifest_ref"].get("relative_path") != "benchmark-v2-provider-manifest.json" or value["provider_corpus_ref"].get("relative_path") != "provider-corpus.v2.json" or value["accepted_run_ref"].get("contract_version") != "benchmark_v2_accepted_regression_score_input_v2":
+    expected_accepted_contract = (
+        "benchmark_v2_accepted_holdout_score_input_v1"
+        if holdout
+        else "benchmark_v2_accepted_regression_score_input_v2"
+    )
+    if value["provider_manifest_ref"].get("relative_path") != "benchmark-v2-provider-manifest.json" or value["provider_corpus_ref"].get("relative_path") != "provider-corpus.v2.json" or value["accepted_run_ref"].get("contract_version") != expected_accepted_contract:
         return False
-    return all(_exact_ref_shape(value.get(name)) for name in ("attempt_ref", "attempt_ledger_ref", "automatic_prediction_ref", "selected_lifecycle_ref"))
+    if not all(_exact_ref_shape(value.get(name)) for name in ("attempt_ref", "attempt_ledger_ref", "automatic_prediction_ref", "selected_lifecycle_ref")):
+        return False
+    if not holdout:
+        return True
+    if any(
+        re.fullmatch(
+            re.escape(prefix) + r"/[0-9a-f]{64}",
+            str(value[name].get("id") or ""),
+        )
+        is None
+        or not _is_sha(value[name].get("content_sha256"))
+        for name, prefix in _HOLDOUT_SHARED_REF_PREFIXES.items()
+    ):
+        return False
+    precondition = value.get("regression_score_precondition_ref")
+    authorization = value.get("holdout_authorization_ref")
+    claim = value.get("holdout_claim_ref")
+    authorization_id = (
+        authorization.get("authorization_id")
+        if isinstance(authorization, Mapping)
+        else None
+    )
+    authorization_envelope_sha256 = (
+        authorization.get("envelope_sha256")
+        if isinstance(authorization, Mapping)
+        else None
+    )
+    authorization_match = (
+        re.fullmatch(r"holdout-authorization/([0-9a-f]{64})", authorization_id)
+        if isinstance(authorization_id, str)
+        else None
+    )
+    claim_id = authorization_match.group(1) if authorization_match is not None else ""
+    expected_attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + str(authorization_envelope_sha256 or "")
+        ).encode("utf-8")
+    ).hexdigest()
+    return (
+        isinstance(precondition, Mapping)
+        and set(precondition) == {"contract_version", "file_sha256", "content_sha256"}
+        and precondition.get("contract_version") == "private_scorer_public_ref_v3"
+        and _is_sha(precondition.get("file_sha256"))
+        and _is_sha(precondition.get("content_sha256"))
+        and isinstance(authorization, Mapping)
+        and set(authorization) == {"authorization_id", "envelope_sha256"}
+        and authorization_match is not None
+        and _is_sha(authorization_envelope_sha256)
+        and isinstance(claim, Mapping)
+        and set(claim) == {"id", "envelope_sha256"}
+        and claim.get("id") == "holdout-claim/" + claim_id
+        and _is_sha(claim.get("envelope_sha256"))
+        and value["attempt_ref"].get("id")
+        == "holdout-runner-attempt/" + expected_attempt_id
+    )
 
 
 def _exact_ref_shape(value: object) -> bool:
@@ -471,6 +557,31 @@ def validate_private_scorer_input_binding_v1(value: object) -> dict[str, object]
     return binding
 
 
+def validate_private_scorer_holdout_input_binding_v1(
+    value: object,
+) -> dict[str, object]:
+    binding = _closed(
+        value,
+        _HOLDOUT_INPUT_BINDING_FIELDS,
+        "private scorer holdout input binding",
+    )
+    if not _binding_shape_valid(binding):
+        raise ValueError("private scorer holdout input binding invalid")
+    _reject_s3_score_leakage(binding)
+    scan_benchmark_v2_public_value(binding)
+    return binding
+
+
+def _validate_private_scorer_input_binding(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        pair = (value.get("contract_version"), value.get("partition"))
+        if pair == ("private_scorer_input_binding_v1", "regression"):
+            return validate_private_scorer_input_binding_v1(value)
+        if pair == ("private_scorer_holdout_input_binding_v1", "holdout"):
+            return validate_private_scorer_holdout_input_binding_v1(value)
+    raise ValueError("private scorer input binding contract/partition mismatch")
+
+
 def validate_private_scorer_public_ref_v3(public: object) -> dict[str, object]:
     fields = {"status", "score_ref", "content_sha256", "contract_version", "score_input_binding", "binding", "launch_receipt", "cleanup_receipt", "safety"}
     _reject_s3_score_leakage(public)
@@ -501,13 +612,15 @@ def validate_private_scorer_public_ref_v3(public: object) -> dict[str, object]:
         decoded.append(receipt)
     launch, cleanup = decoded
     binding = public["binding"]
-    score_input_binding = validate_private_scorer_input_binding_v1(public["score_input_binding"])
+    score_input_binding = _validate_private_scorer_input_binding(
+        public["score_input_binding"]
+    )
     child_score = binding.get("child_score_ref") if isinstance(binding, Mapping) else None
     launch_fields = {"contract_version", "launcher_process_id", "launcher_process_identity", "child_process_id", "child_process_identity", "pipe_capability_sha256", "argv_sha256", "env_sha256", "cwd_sha256", "job_identity_sha256", "child_execution_receipt_sha256", "child_score_ref", "score_input_binding", "safety", "content_sha256"}
     cleanup_fields = {"contract_version", "launch_receipt_ref", "child_returncode", "job_active_processes_after", "job_stable_zero", "pipe_handles_closed", "process_pipes_closed", "job_handle_closed", "safety"}
     sha_fields = ("pipe_capability_sha256", "argv_sha256", "env_sha256", "cwd_sha256", "job_identity_sha256", "child_execution_receipt_sha256")
     binding_fields = {"contract_version", "child_score_ref", "score_input_binding", "launch_receipt_ref", "cleanup_receipt_ref", "safety", "content_sha256"}
-    if set(launch) != launch_fields or set(cleanup) != cleanup_fields or not isinstance(launch.get("launcher_process_id"), int) or not isinstance(launch.get("child_process_id"), int) or launch["launcher_process_id"] <= 0 or launch["child_process_id"] <= 0 or launch["launcher_process_id"] == launch["child_process_id"] or any(not _is_sha(launch.get(key)) for key in sha_fields) or not isinstance(child_score, Mapping) or set(child_score) != {"status", "score_ref", "content_sha256"} or child_score.get("status") not in {"PASS", "FAIL"} or not _is_sha(child_score.get("content_sha256")) or not isinstance(child_score.get("score_ref"), str) or re.fullmatch(r"private-score/[0-9a-f]{64}", child_score["score_ref"]) is None or launch["child_score_ref"] != child_score or not isinstance(binding, Mapping) or set(binding) != binding_fields or binding.get("contract_version") != "private_scorer_final_binding_v2" or binding.get("child_score_ref") != child_score or binding.get("score_input_binding") != score_input_binding or launch.get("score_input_binding") != score_input_binding or binding.get("launch_receipt_ref") != public["launch_receipt"]["ref"] or binding.get("cleanup_receipt_ref") != public["cleanup_receipt"]["ref"] or binding.get("safety") != SAFETY or not _is_sha(binding.get("content_sha256")) or binding.get("content_sha256") != content_sha256({key: child for key, child in binding.items() if key != "content_sha256"}) or cleanup.get("launch_receipt_ref") != public["launch_receipt"]["ref"] or cleanup.get("child_returncode") != 0 or cleanup.get("job_active_processes_after") != 0 or any(cleanup.get(key) is not True for key in ("job_stable_zero", "pipe_handles_closed", "process_pipes_closed", "job_handle_closed")):
+    if set(launch) != launch_fields or set(cleanup) != cleanup_fields or type(launch.get("launcher_process_id")) is not int or type(launch.get("child_process_id")) is not int or launch["launcher_process_id"] <= 0 or launch["child_process_id"] <= 0 or launch["launcher_process_id"] == launch["child_process_id"] or any(not _is_sha(launch.get(key)) for key in sha_fields) or not isinstance(child_score, Mapping) or set(child_score) != {"status", "score_ref", "content_sha256"} or child_score.get("status") not in {"PASS", "FAIL"} or not _is_sha(child_score.get("content_sha256")) or not isinstance(child_score.get("score_ref"), str) or re.fullmatch(r"private-score/[0-9a-f]{64}", child_score["score_ref"]) is None or launch["child_score_ref"] != child_score or not isinstance(binding, Mapping) or set(binding) != binding_fields or binding.get("contract_version") != "private_scorer_final_binding_v2" or binding.get("child_score_ref") != child_score or binding.get("score_input_binding") != score_input_binding or launch.get("score_input_binding") != score_input_binding or binding.get("launch_receipt_ref") != public["launch_receipt"]["ref"] or binding.get("cleanup_receipt_ref") != public["cleanup_receipt"]["ref"] or binding.get("safety") != SAFETY or not _is_sha(binding.get("content_sha256")) or binding.get("content_sha256") != content_sha256({key: child for key, child in binding.items() if key != "content_sha256"}) or cleanup.get("launch_receipt_ref") != public["launch_receipt"]["ref"] or type(cleanup.get("child_returncode")) is not int or cleanup["child_returncode"] != 0 or type(cleanup.get("job_active_processes_after")) is not int or cleanup["job_active_processes_after"] != 0 or any(cleanup.get(key) is not True for key in ("job_stable_zero", "pipe_handles_closed", "process_pipes_closed", "job_handle_closed")):
         raise ValueError("private scorer launch/cleanup chain invalid")
     expected = {"status": binding["child_score_ref"]["status"], "score_ref": f"private-score-final/{binding['content_sha256']}", "content_sha256": public["content_sha256"]}
     if any(public[key] != child for key, child in expected.items()):

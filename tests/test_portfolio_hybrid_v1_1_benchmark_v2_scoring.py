@@ -97,12 +97,12 @@ def task10_evidence(cases:list[dict[str,object]])->tuple[dict[str,object],dict[s
     return run,bundle
 
 
-def _selected_accepted_input(path:Path,provider_cases:list[dict[str,object]],private_cases:list[dict[str,object]],release:dict[str,object])->None:
+def _selected_accepted_input(path:Path,provider_cases:list[dict[str,object]],private_cases:list[dict[str,object]],release:dict[str,object],*,partition:str="regression")->None:
     from app.learn.hybrid import benchmark_v2_predictions as predictions
     accepted=json.loads(path.read_text(encoding="utf-8")); run=json.loads(base64.b64decode(accepted["prediction_run_envelope"]["canonical_bytes_b64"],validate=True))
     children=deepcopy(run["sealed_artifact_envelopes"]); automatic_index=next(index for index,envelope in enumerate(children) if json.loads(base64.b64decode(envelope["canonical_bytes_b64"],validate=True)).get("contract_version")=="automatic_prediction_v3")
     automatic=json.loads(base64.b64decode(children[automatic_index]["canonical_bytes_b64"],validate=True))
-    provider=sorted((case for case in provider_cases if case["partition"]=="regression"),key=lambda case:str(case["case_id"]))[0]
+    provider=sorted((case for case in provider_cases if case["partition"]==partition),key=lambda case:str(case["case_id"]))[0]
     private=next(case for case in private_cases if case["case_id"]==provider["case_id"])
     dependency=next(item for item in automatic["provider_group_dependencies"] if item["provider_group_ref"]["id"]==provider["screen_group"])
     case_ref={"case_id":provider["case_id"],"case_content_sha256":content_sha256(provider)}; actual_ref=dependency["actual_screen_group_ref"]; capture_ref=dependency["capture_ref"]
@@ -1270,6 +1270,553 @@ def test_h5_public_authority_rejects_reminted_bool_file_anchor_size(
 
     with pytest.raises(ValueError, match="authority lineage"):
         predictions.validate_benchmark_v2_accepted_holdout_score_input_v1(changed)
+
+
+def _h6_regression_precondition_envelope(
+    release: dict[str, object],
+    *,
+    status: str = "PASS",
+    drift: str | None = None,
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_scorer_v2 import _content_bound, _sealed_receipt
+
+    source = _h5_regression_pass_envelope()
+    public = decode(source)
+    binding = deepcopy(public["score_input_binding"])
+    binding.update(
+        {
+            "benchmark_release_id": RELEASE,
+            "private_manifest_ref": deepcopy(release["private_manifest_ref"]),
+            "corpus_parent_ref": deepcopy(release["corpus_parent_ref"]),
+            "provider_manifest_ref": deepcopy(release["provider_manifest_ref"]),
+            "provider_corpus_ref": deepcopy(release["provider_corpus_ref"]),
+            "estimand_ref": deepcopy(release["estimand_ref"]),
+            "gate_ref": deepcopy(release["gate_ref"]),
+        }
+    )
+    if drift == "release":
+        binding["benchmark_release_id"] = "cross-release"
+    elif drift in {
+        "private_manifest_ref",
+        "corpus_parent_ref",
+        "provider_manifest_ref",
+        "provider_corpus_ref",
+        "estimand_ref",
+        "gate_ref",
+    }:
+        binding[drift] = deepcopy(binding[drift])
+        sha_field = next(key for key in binding[drift] if key.endswith("sha256"))
+        binding[drift][sha_field] = "0" * 64
+
+    launch = decode(public["launch_receipt"])
+    child = deepcopy(launch["child_score_ref"])
+    child["status"] = status
+    launch.update({"child_score_ref": child, "score_input_binding": binding})
+    launch.pop("content_sha256")
+    launch_envelope = _sealed_receipt(
+        _content_bound(launch), "private-scorer-launch"
+    )
+    cleanup = decode(public["cleanup_receipt"])
+    cleanup["launch_receipt_ref"] = deepcopy(launch_envelope["ref"])
+    cleanup_envelope = _sealed_receipt(cleanup, "private-scorer-cleanup")
+    final_binding = _content_bound(
+        {
+            "contract_version": "private_scorer_final_binding_v2",
+            "child_score_ref": child,
+            "score_input_binding": binding,
+            "launch_receipt_ref": deepcopy(launch_envelope["ref"]),
+            "cleanup_receipt_ref": deepcopy(cleanup_envelope["ref"]),
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    reminted = _content_bound(
+        {
+            "contract_version": "private_scorer_public_ref_v3",
+            "status": status,
+            "score_ref": "private-score-final/" + final_binding["content_sha256"],
+            "score_input_binding": binding,
+            "binding": final_binding,
+            "launch_receipt": launch_envelope,
+            "cleanup_receipt": cleanup_envelope,
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    raw = canonical_bytes(reminted)
+    return {
+        "ref": {
+            "contract_version": "private_scorer_public_ref_v3",
+            "file_sha256": hashlib.sha256(raw + b"\n").hexdigest(),
+            "content_sha256": reminted["content_sha256"],
+        },
+        "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+    }
+
+
+def _h6_holdout_binding(
+    accepted: dict[str, object], release: dict[str, object]
+) -> dict[str, object]:
+    precondition = accepted["regression_score_precondition_envelope"]
+    return {
+        "contract_version": "private_scorer_holdout_input_binding_v1",
+        "benchmark_release_id": RELEASE,
+        "partition": "holdout",
+        "private_manifest_ref": deepcopy(release["private_manifest_ref"]),
+        "corpus_parent_ref": deepcopy(accepted["corpus_parent_ref"]),
+        "provider_manifest_ref": deepcopy(accepted["provider_manifest_ref"]),
+        "provider_corpus_ref": deepcopy(accepted["provider_corpus_ref"]),
+        "accepted_run_ref": {
+            "contract_version": "benchmark_v2_accepted_holdout_score_input_v1",
+            "file_sha256": hashlib.sha256(canonical_bytes(accepted) + b"\n").hexdigest(),
+            "content_sha256": accepted["content_sha256"],
+        },
+        "attempt_ref": deepcopy(accepted["attempt_ref"]),
+        "attempt_ledger_ref": deepcopy(accepted["attempt_ledger_ref"]),
+        "automatic_prediction_ref": deepcopy(accepted["automatic_prediction_ref"]),
+        "selected_lifecycle_ref": deepcopy(accepted["selected_lifecycle_ref"]),
+        "estimand_ref": deepcopy(release["estimand_ref"]),
+        "gate_ref": deepcopy(release["gate_ref"]),
+        "regression_score_precondition_ref": deepcopy(precondition["ref"]),
+        "holdout_authorization_ref": deepcopy(accepted["holdout_authorization_ref"]),
+        "holdout_claim_ref": deepcopy(accepted["holdout_claim_ref"]),
+        "safety": deepcopy(SAFETY),
+    }
+
+
+def _h6_public_v3_for_binding(
+    binding: dict[str, object],
+    *,
+    launch_overrides: dict[str, object] | None = None,
+    cleanup_overrides: dict[str, object] | None = None,
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_scorer_v2 import _content_bound, _sealed_receipt
+
+    child = {
+        "status": "PASS",
+        "score_ref": "private-score/" + "2" * 64,
+        "content_sha256": "3" * 64,
+    }
+    launch = {
+        "contract_version": "private_scorer_launch_receipt_v2",
+        "launcher_process_id": 201,
+        "launcher_process_identity": "process-201",
+        "child_process_id": 202,
+        "child_process_identity": "process-202",
+        "pipe_capability_sha256": "4" * 64,
+        "argv_sha256": "5" * 64,
+        "env_sha256": "6" * 64,
+        "cwd_sha256": "7" * 64,
+        "job_identity_sha256": "8" * 64,
+        "child_execution_receipt_sha256": "9" * 64,
+        "child_score_ref": deepcopy(child),
+        "score_input_binding": deepcopy(binding),
+        "safety": deepcopy(SAFETY),
+    }
+    launch.update(launch_overrides or {})
+    launch_envelope = _sealed_receipt(
+        _content_bound(launch), "private-scorer-launch"
+    )
+    cleanup = {
+        "contract_version": "private_scorer_cleanup_receipt_v1",
+        "launch_receipt_ref": deepcopy(launch_envelope["ref"]),
+        "child_returncode": 0,
+        "job_active_processes_after": 0,
+        "job_stable_zero": True,
+        "pipe_handles_closed": True,
+        "process_pipes_closed": True,
+        "job_handle_closed": True,
+        "safety": deepcopy(SAFETY),
+    }
+    cleanup.update(cleanup_overrides or {})
+    cleanup_envelope = _sealed_receipt(cleanup, "private-scorer-cleanup")
+    final_binding = _content_bound(
+        {
+            "contract_version": "private_scorer_final_binding_v2",
+            "child_score_ref": deepcopy(child),
+            "score_input_binding": deepcopy(binding),
+            "launch_receipt_ref": deepcopy(launch_envelope["ref"]),
+            "cleanup_receipt_ref": deepcopy(cleanup_envelope["ref"]),
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    return _content_bound(
+        {
+            "contract_version": "private_scorer_public_ref_v3",
+            "status": "PASS",
+            "score_ref": "private-score-final/" + final_binding["content_sha256"],
+            "score_input_binding": deepcopy(binding),
+            "binding": final_binding,
+            "launch_receipt": launch_envelope,
+            "cleanup_receipt": cleanup_envelope,
+            "safety": deepcopy(SAFETY),
+        }
+    )
+
+
+@pytest.fixture(scope="module")
+def h6_accepted_holdout(
+    h5_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    task10_release_inputs: dict[str, Path],
+) -> tuple[dict[str, object], dict[str, object]]:
+    from app.learn.hybrid.benchmark_v2_private_release import (
+        validate_task10_private_release_bundle,
+    )
+
+    accepted, _ = h5_accepted_holdout
+    release = validate_task10_private_release_bundle(
+        private_manifest_path=task10_release_inputs["private"]
+    )
+    changed = deepcopy(accepted)
+    changed["regression_score_precondition_envelope"] = (
+        _h6_regression_precondition_envelope(release)
+    )
+    changed["content_sha256"] = hashlib.sha256(
+        canonical_bytes(
+            {key: value for key, value in changed.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+    return changed, release
+
+
+def test_h6_holdout_binding_and_public_v3_propagate_three_exact_refs(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    accepted, release = h6_accepted_holdout
+    binding = _h6_holdout_binding(accepted, release)
+    assert public_score.validate_private_scorer_holdout_input_binding_v1(binding) == binding
+    public = _h6_public_v3_for_binding(binding)
+
+    assert public_score.validate_private_scorer_public_ref_v3(public) == public
+    launch_value = decode(public["launch_receipt"])
+    for field in (
+        "regression_score_precondition_ref",
+        "holdout_authorization_ref",
+        "holdout_claim_ref",
+    ):
+        assert binding[field] == launch_value["score_input_binding"][field]
+        assert binding[field] == public["binding"]["score_input_binding"][field]
+        assert binding[field] == public["score_input_binding"][field]
+
+
+@pytest.mark.parametrize(
+    ("contract_version", "partition"),
+    (
+        ("private_scorer_input_binding_v1", "holdout"),
+        ("private_scorer_holdout_input_binding_v1", "regression"),
+    ),
+)
+def test_h6_public_binding_rejects_cross_contract_partition(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    contract_version: str,
+    partition: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    accepted, release = h6_accepted_holdout
+    binding = _h6_holdout_binding(accepted, release)
+    binding.update({"contract_version": contract_version, "partition": partition})
+    with pytest.raises(ValueError):
+        public_score._validate_private_scorer_input_binding(binding)
+
+
+def test_h6_public_binding_rejects_native_authorization_path_leakage(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    accepted, release = h6_accepted_holdout
+    binding = _h6_holdout_binding(accepted, release)
+    binding["holdout_authorization_ref"] = {
+        **binding["holdout_authorization_ref"],
+        "fixed_authorization_path": r"C:\private\authorization.json",
+    }
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_holdout_input_binding_v1(binding)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "attempt_ref",
+        "attempt_ledger_ref",
+        "automatic_prediction_ref",
+        "selected_lifecycle_ref",
+    ),
+)
+def test_h6_holdout_binding_rejects_nonhex_shared_ref_content_sha_after_remint(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    field: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    accepted, release = h6_accepted_holdout
+    binding = _h6_holdout_binding(accepted, release)
+    binding[field]["content_sha256"] = "G" * 64
+    public = _h6_public_v3_for_binding(binding)
+
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_holdout_input_binding_v1(binding)
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_public_ref_v3(public)
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_prefix"),
+    (
+        ("attempt_ref", "runner-attempt"),
+        ("attempt_ledger_ref", "projected-attempt-ledger"),
+        ("automatic_prediction_ref", "prediction-run"),
+        ("selected_lifecycle_ref", "lifecycle-bundle"),
+    ),
+)
+def test_h6_holdout_binding_rejects_wrong_h5_shared_ref_prefix_after_remint(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    field: str,
+    wrong_prefix: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    accepted, release = h6_accepted_holdout
+    binding = _h6_holdout_binding(accepted, release)
+    binding[field]["id"] = wrong_prefix + "/" + "a" * 64
+    public = _h6_public_v3_for_binding(binding)
+
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_holdout_input_binding_v1(binding)
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_public_ref_v3(public)
+
+
+@pytest.mark.parametrize("substitution", ("authorization", "claim", "attempt"))
+def test_h6_holdout_binding_rejects_authority_attempt_substitution_after_remint(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    substitution: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    accepted, release = h6_accepted_holdout
+    binding = _h6_holdout_binding(accepted, release)
+    if substitution == "authorization":
+        original = binding["holdout_authorization_ref"]["authorization_id"].rsplit(
+            "/", 1
+        )[1]
+        binding["holdout_authorization_ref"]["authorization_id"] = (
+            "holdout-authorization/"
+            + ("0" if original[0] != "0" else "1")
+            + original[1:]
+        )
+    elif substitution == "claim":
+        original = binding["holdout_claim_ref"]["id"].rsplit("/", 1)[1]
+        binding["holdout_claim_ref"]["id"] = (
+            "holdout-claim/"
+            + ("0" if original[0] != "0" else "1")
+            + original[1:]
+        )
+    else:
+        original = binding["attempt_ref"]["id"].rsplit("/", 1)[1]
+        binding["attempt_ref"]["id"] = (
+            "holdout-runner-attempt/"
+            + ("0" if original[0] != "0" else "1")
+            + original[1:]
+        )
+    public = _h6_public_v3_for_binding(binding)
+
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_holdout_input_binding_v1(binding)
+    with pytest.raises(ValueError):
+        public_score.validate_private_scorer_public_ref_v3(public)
+
+
+@pytest.mark.parametrize(
+    ("receipt", "field"),
+    (
+        ("launch", "launcher_process_id"),
+        ("launch", "child_process_id"),
+        ("cleanup", "child_returncode"),
+        ("cleanup", "job_active_processes_after"),
+    ),
+)
+def test_h6_public_v3_rejects_fully_reminted_bool_numeric_alias(
+    receipt: str, field: str
+) -> None:
+    from app.learn.hybrid import benchmark_v2_public_score as public_score
+
+    regression = decode(_h5_regression_pass_envelope())
+    kwargs = {
+        "launch_overrides": {field: True},
+        "cleanup_overrides": {},
+    }
+    if receipt == "cleanup":
+        kwargs = {
+            "launch_overrides": {},
+            "cleanup_overrides": {field: False},
+        }
+    reminted = _h6_public_v3_for_binding(
+        regression["score_input_binding"], **kwargs
+    )
+
+    with pytest.raises(ValueError, match="launch/cleanup chain"):
+        public_score.validate_private_scorer_public_ref_v3(reminted)
+
+
+@pytest.mark.parametrize(
+    ("contract_version", "partition"),
+    (
+        ("benchmark_v2_accepted_regression_score_input_v2", "holdout"),
+        ("benchmark_v2_accepted_holdout_score_input_v1", "regression"),
+    ),
+)
+def test_h6_private_acceptance_rejects_cross_contract_partition(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    contract_version: str,
+    partition: str,
+) -> None:
+    accepted, release = h6_accepted_holdout
+    changed = deepcopy(accepted)
+    changed.update({"contract_version": contract_version, "partition": partition})
+    changed["content_sha256"] = hashlib.sha256(
+        canonical_bytes(
+            {key: value for key, value in changed.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+    with pytest.raises(ValueError, match="contract/partition mismatch"):
+        scorer_v2._validate_accepted_score_input(
+            changed,
+            raw=canonical_bytes(changed) + b"\n",
+            release=release,
+        )
+
+
+def test_h6_private_acceptance_validates_exact_holdout_12x5x4_graph(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    accepted, release = h6_accepted_holdout
+    validated, automatic, _ = scorer_v2._validate_accepted_score_input(
+        accepted,
+        raw=canonical_bytes(accepted) + b"\n",
+        release=release,
+    )
+    rows = automatic["rows"]
+    assert validated["partition"] == "holdout"
+    assert len(rows) == 240
+    assert len({row["case_id"] for row in rows}) == 60
+    assert len({(row["case_id"], row["arm_id"]) for row in rows}) == 240
+    assert len(automatic["provider_group_dependencies"]) == 12
+
+
+def test_h6_private_child_scores_holdout_and_carries_identical_binding(
+    tmp_path: Path,
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    task10_release_inputs: dict[str, Path],
+) -> None:
+    from app.learn.hybrid.benchmark_v2_private_release import (
+        derive_private_scoring_cases,
+    )
+
+    accepted, release = h6_accepted_holdout
+    accepted_path = tmp_path / "accepted-holdout.json"
+    write(accepted_path, accepted)
+    private_cases = derive_private_scoring_cases(
+        validated_release=release, partition="holdout"
+    )
+    _selected_accepted_input(
+        accepted_path,
+        release["provider_corpus"]["cases"],
+        private_cases,
+        release,
+        partition="holdout",
+    )
+    private_output = tmp_path / "private-score.json"
+    child_public_path = tmp_path / "child-public.json"
+    child_public = scorer_v2._run_private_child_once(
+        nonce="1" * 64,
+        pipe_capability="2" * 64,
+        launcher_process_id=101,
+        launcher_process_identity="process-101",
+        process_identity="process-child",
+        job_identity_sha256="3" * 64,
+        argv_sha256="4" * 64,
+        env_sha256="5" * 64,
+        cwd_sha256="6" * 64,
+        private_manifest_path=task10_release_inputs["private"],
+        prediction_run_ref_path=accepted_path,
+        private_output_path=private_output,
+        public_ref_path=child_public_path,
+    )
+    private_score = json.loads(private_output.read_text(encoding="utf-8"))
+    binding = private_score["score_input_binding"]
+    assert private_score["partition"] == "holdout"
+    assert binding == child_public["score_input_binding"]
+    for field in (
+        "regression_score_precondition_ref",
+        "holdout_authorization_ref",
+        "holdout_claim_ref",
+    ):
+        assert binding[field] == _h6_holdout_binding(
+            json.loads(accepted_path.read_text(encoding="utf-8")), release
+        )[field]
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "release",
+        "private_manifest_ref",
+        "corpus_parent_ref",
+        "provider_manifest_ref",
+        "provider_corpus_ref",
+        "estimand_ref",
+        "gate_ref",
+    ),
+)
+def test_h6_private_acceptance_rejects_regression_precondition_drift(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    drift: str,
+) -> None:
+    accepted, release = h6_accepted_holdout
+    changed = deepcopy(accepted)
+    changed["regression_score_precondition_envelope"] = (
+        _h6_regression_precondition_envelope(release, drift=drift)
+    )
+    changed["content_sha256"] = hashlib.sha256(
+        canonical_bytes(
+            {key: value for key, value in changed.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+    with pytest.raises(ValueError):
+        scorer_v2._validate_accepted_score_input(
+            changed,
+            raw=canonical_bytes(changed) + b"\n",
+            release=release,
+        )
+
+
+def test_h6_private_acceptance_rejects_regression_fail_and_ref_mismatch(
+    h6_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    accepted, release = h6_accepted_holdout
+    mutations = []
+    failed = deepcopy(accepted)
+    failed["regression_score_precondition_envelope"] = (
+        _h6_regression_precondition_envelope(release, status="FAIL")
+    )
+    mutations.append(failed)
+    mismatch = deepcopy(accepted)
+    mismatch["regression_score_precondition_envelope"]["ref"]["file_sha256"] = "0" * 64
+    mutations.append(mismatch)
+    for changed in mutations:
+        changed["content_sha256"] = hashlib.sha256(
+            canonical_bytes(
+                {key: value for key, value in changed.items() if key != "content_sha256"}
+            )
+        ).hexdigest()
+        with pytest.raises(ValueError):
+            scorer_v2._validate_accepted_score_input(
+                changed,
+                raw=canonical_bytes(changed) + b"\n",
+                release=release,
+            )
 
 
 def test_public_score_scanner_accepts_only_internally_derived_provider_corpus_image_paths(task10_release_inputs:dict[str,Path])->None:

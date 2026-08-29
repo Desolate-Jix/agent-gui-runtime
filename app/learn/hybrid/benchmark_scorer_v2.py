@@ -19,6 +19,7 @@ from app.learn.hybrid.benchmark_v2_private_release import (
     validate_task10_private_release_bundle,
 )
 from app.learn.hybrid.benchmark_v2_public_score import (
+    _validate_private_scorer_input_binding,
     validate_private_scorer_input_binding_v1,
     validate_private_scorer_public_ref_v3,
 )
@@ -121,13 +122,18 @@ _PATHLESS_FIELDS={
     "benchmark_v2_attempt_journal_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","raw_journal_sha256","terminal_event_ref","started_request_count","terminal_or_unknown_request_count","cleanup_projection_ref","verified","safety","content_sha256"},
     "benchmark_v2_actual_body_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","body_contract_version","raw_file_sha256","body_content_sha256","screen_group_count","case_arm_multiset_sha256","pre_vista_evidence_refs","verified","safety","content_sha256"},
     "benchmark_v2_actual_result_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","result_contract_version","raw_file_sha256","result_content_sha256","body_projection_ref","cleanup_projection_ref","attempt_ledger_pre_result_ref","runner_ledger_prefix_projection_ref","result_event_projection_ref","verified","safety","content_sha256"},
+    "benchmark_v2_holdout_runner_event_verified_projection_v1":{"contract_version","artifact_id","partition","event_kind","sequence","attempt_ref","authorization_ref","claim_ref","previous_event_projection_ref","raw_event_sha256","load_bearing_refs","safety","content_sha256"},
+    "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1":{"contract_version","artifact_id","partition","attempt_ref","authorization_ref","claim_ref","raw_pre_result_ref_sha256","raw_prefix_sha256","terminal_sequence","terminal_envelope_sha256","cleanup_event_projection_ref","verified","safety","content_sha256"},
+    "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1":{"contract_version","artifact_id","partition","authorization_ref","claim_ref","attempt_ref","raw_prefix_sha256","pre_result_verification_ref","terminal_sequence","terminal_event_projection_ref","event_projection_refs","selection_eligible","safety","content_sha256"},
+    "benchmark_v2_holdout_projected_attempt_ledger_v1":{"contract_version","artifact_id","benchmark_release_id","partition","authorization_ref","claim_ref","raw_ledger_prefix_verification_ref","pre_result_verification_ref","entries","selected_attempt_ref","selected_lifecycle_ref","safety","content_sha256"},
+    "benchmark_v2_holdout_actual_result_verified_projection_v1":{"contract_version","artifact_id","attempt_ref","result_contract_version","raw_file_sha256","result_content_sha256","body_projection_ref","cleanup_projection_ref","pre_result_verification_ref","runner_ledger_prefix_projection_ref","result_event_projection_ref","verified","safety","content_sha256"},
     "benchmark_v2_nested_provider_evidence_ref_v1":{"contract_version","artifact_id","evidence_kind","case_ref","actual_screen_group_ref","canonical_value_sha256","safety","content_sha256"},
     "sealed_prediction_source_parent_v1":{"contract_version","artifact_id","case_ref","arm_scope","source_kind","evidence_refs","actual_screen_group_ref","capture_ref","safety","content_sha256"},
     "sealed_prediction_bbox_v1":{"contract_version","artifact_id","case_id","arm_scope","candidate_id","coordinate_space","xyxy","capture_ref","source_parent_ref","safety","content_sha256"},
     "sealed_target_binding_v4":{"contract_version","artifact_id","case_id","arm_scope","candidate_id","source_parent_ref","capture_ref","bbox_ref","safety","content_sha256"},
     "sealed_vista_request_v4":{"contract_version","artifact_id","case_id","arm_scope","candidate_id","target_binding_ref","source_parent_ref","capture_ref","bbox_ref","submitted_request_ref","submission_status","safety","content_sha256"},
 }
-_PATHLESS_PREFIXES={"benchmark_v2_prediction_run_v3":"prediction-run","benchmark_v2_lifecycle_bundle_v3":"lifecycle-bundle","automatic_prediction_v3":"automatic","benchmark_v2_projected_attempt_ledger_v1":"projected-attempt-ledger","benchmark_v2_runner_event_verified_projection_v1":"verified-runner-event","benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":"verified-attempt-journal-terminal-event","benchmark_v2_lifecycle_verified_projection_v1":"verified-lifecycle","benchmark_v2_runner_ledger_prefix_verified_projection_v1":"verified-runner-ledger-prefix","benchmark_v2_attempt_journal_verified_projection_v1":"verified-attempt-journal","benchmark_v2_actual_body_verified_projection_v1":"verified-actual-body","benchmark_v2_actual_result_verified_projection_v1":"verified-actual-result","benchmark_v2_nested_provider_evidence_ref_v1":"nested-provider-evidence","sealed_prediction_source_parent_v1":"prediction-source-parent","sealed_prediction_bbox_v1":"prediction-bbox","sealed_target_binding_v4":"target-binding","sealed_vista_request_v4":"vista-request"}
+_PATHLESS_PREFIXES={"benchmark_v2_prediction_run_v3":"prediction-run","benchmark_v2_lifecycle_bundle_v3":"lifecycle-bundle","automatic_prediction_v3":"automatic","benchmark_v2_projected_attempt_ledger_v1":"projected-attempt-ledger","benchmark_v2_runner_event_verified_projection_v1":"verified-runner-event","benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":"verified-attempt-journal-terminal-event","benchmark_v2_lifecycle_verified_projection_v1":"verified-lifecycle","benchmark_v2_runner_ledger_prefix_verified_projection_v1":"verified-runner-ledger-prefix","benchmark_v2_attempt_journal_verified_projection_v1":"verified-attempt-journal","benchmark_v2_actual_body_verified_projection_v1":"verified-actual-body","benchmark_v2_actual_result_verified_projection_v1":"verified-actual-result","benchmark_v2_holdout_runner_event_verified_projection_v1":"verified-holdout-runner-event","benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1":"verified-holdout-pre-result","benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1":"verified-holdout-attempt-ledger-prefix","benchmark_v2_holdout_projected_attempt_ledger_v1":"projected-holdout-attempt-ledger","benchmark_v2_holdout_actual_result_verified_projection_v1":"verified-holdout-actual-result","benchmark_v2_nested_provider_evidence_ref_v1":"nested-provider-evidence","sealed_prediction_source_parent_v1":"prediction-source-parent","sealed_prediction_bbox_v1":"prediction-bbox","sealed_target_binding_v4":"target-binding","sealed_vista_request_v4":"vista-request"}
 
 def _light_envelope(value:object,*,name:str)->tuple[dict[str,object],dict[str,object]]:
     env=_closed(value,{"ref","canonical_bytes_b64"},name)
@@ -278,7 +284,7 @@ def _validate_shared_pathless_graphs(
         context={},
     )
 
-def _validate_accepted_score_input(value:object,*,raw:bytes,release:Mapping[str,object])->tuple[dict[str,object],dict[str,object],dict[bytes,tuple[dict[str,object],dict[str,object]]]]:
+def _validate_accepted_regression_score_input(value:object,*,raw:bytes,release:Mapping[str,object])->tuple[dict[str,object],dict[str,object],dict[bytes,tuple[dict[str,object],dict[str,object]]]]:
     accepted=_closed(value,{"contract_version","content_sha256","benchmark_release_id","partition","corpus_parent_ref","provider_manifest_ref","provider_corpus_ref","selection_policy","attempt_ref","attempt_ledger_ref","automatic_prediction_ref","selected_lifecycle_ref","verified_parent_projections","prediction_run_envelope","lifecycle_bundle_envelope","safety"},"accepted regression score input")
     if raw!=canonical_bytes(accepted)+b"\n" or accepted["contract_version"]!="benchmark_v2_accepted_regression_score_input_v2" or accepted["benchmark_release_id"]!=RELEASE or accepted["partition"]!="regression" or accepted["selection_policy"]!="first_complete_lifecycle_verified_attempt" or accepted["safety"]!=SAFETY or accepted["content_sha256"]!=hashlib.sha256(canonical_bytes({k:v for k,v in accepted.items() if k!="content_sha256"})).hexdigest(): raise ValueError("accepted regression score input contract invalid")
     if accepted["corpus_parent_ref"]!=release["corpus_parent_ref"] or accepted["provider_manifest_ref"]!=release["provider_manifest_ref"] or accepted["provider_corpus_ref"]!=release["provider_corpus_ref"]: raise ValueError("accepted regression release lineage differs")
@@ -337,6 +343,45 @@ def _validate_accepted_score_input(value:object,*,raw:bytes,release:Mapping[str,
     if result.get("body_projection_ref")!=refs["actual_body_projection_envelope"] or result.get("runner_ledger_prefix_projection_ref")!=refs["runner_ledger_prefix_projection_envelope"] or result.get("result_event_projection_ref")!=prefix.get("result_event_projection_ref") or result.get("attempt_ledger_pre_result_ref")!=prefix.get("attempt_ledger_pre_result_ref") or result.get("cleanup_projection_ref")!=journal.get("cleanup_projection_ref"): raise ValueError("accepted verified parent transitive lineage differs")
     return accepted,automatic,prediction_by_ref
 
+def _validate_accepted_holdout_score_input(value:object,*,raw:bytes,release:Mapping[str,object])->tuple[dict[str,object],dict[str,object],dict[bytes,tuple[dict[str,object],dict[str,object]]]]:
+    from app.learn.hybrid.benchmark_v2_predictions import (
+        validate_benchmark_v2_accepted_holdout_score_input_v1,
+    )
+    accepted=validate_benchmark_v2_accepted_holdout_score_input_v1(value)
+    if raw!=canonical_bytes(accepted)+b"\n": raise ValueError("accepted holdout score input bytes invalid")
+    if accepted["benchmark_release_id"]!=RELEASE or accepted["partition"]!="holdout" or accepted["corpus_parent_ref"]!=release["corpus_parent_ref"] or accepted["provider_manifest_ref"]!=release["provider_manifest_ref"] or accepted["provider_corpus_ref"]!=release["provider_corpus_ref"]: raise ValueError("accepted holdout release lineage differs")
+    precondition_envelope=accepted["regression_score_precondition_envelope"]
+    if not isinstance(precondition_envelope,Mapping) or set(precondition_envelope)!={"ref","canonical_bytes_b64"}: raise ValueError("holdout regression precondition envelope invalid")
+    try:
+        precondition_raw=base64.b64decode(precondition_envelope["canonical_bytes_b64"],validate=True)
+        precondition=json.loads(precondition_raw.decode("utf-8"))
+    except (ValueError,UnicodeDecodeError,base64.binascii.Error,json.JSONDecodeError) as error:
+        raise ValueError("holdout regression precondition encoding invalid") from error
+    precondition=validate_private_scorer_public_ref_v3(precondition)
+    expected_precondition_ref={"contract_version":"private_scorer_public_ref_v3","file_sha256":hashlib.sha256(precondition_raw+b"\n").hexdigest(),"content_sha256":precondition["content_sha256"]}
+    regression_binding=precondition["score_input_binding"]
+    if precondition.get("status")!="PASS" or precondition_envelope["ref"]!=expected_precondition_ref or regression_binding.get("benchmark_release_id")!=RELEASE or regression_binding.get("partition")!="regression" or regression_binding.get("private_manifest_ref")!=release["private_manifest_ref"] or regression_binding.get("corpus_parent_ref")!=release["corpus_parent_ref"] or regression_binding.get("provider_manifest_ref")!=release["provider_manifest_ref"] or regression_binding.get("provider_corpus_ref")!=release["provider_corpus_ref"] or regression_binding.get("estimand_ref")!=release["estimand_ref"] or regression_binding.get("gate_ref")!=release["gate_ref"]: raise ValueError("holdout regression precondition lineage differs")
+    prediction,prediction_ref=_light_envelope(accepted["prediction_run_envelope"],name="accepted holdout prediction run")
+    if prediction.get("contract_version")!="benchmark_v2_prediction_run_v3" or prediction.get("partition")!="holdout" or prediction.get("benchmark_release_id")!=RELEASE or prediction.get("attempt_ref")!=accepted["attempt_ref"] or prediction.get("projected_attempt_ledger_ref")!=accepted["attempt_ledger_ref"] or prediction.get("automatic_prediction_ref")!=accepted["automatic_prediction_ref"] or prediction.get("selected_lifecycle_ref")!=accepted["selected_lifecycle_ref"]: raise ValueError("accepted holdout prediction lineage differs")
+    prediction_by_ref,_=_light_closure_index(prediction,name="accepted holdout prediction run")
+    automatic=_resolve_pathless(prediction_by_ref,accepted["automatic_prediction_ref"],"automatic_prediction_v3")
+    _,case_context,case_digest=_provider_case_index(release["provider_corpus"],partition="holdout")
+    dependencies=automatic.get("provider_group_dependencies"); rows=automatic.get("rows")
+    groups={str(item["provider_group_ref"]["id"]):dict(item) for item in dependencies if isinstance(item,Mapping) and isinstance(item.get("provider_group_ref"),Mapping)} if isinstance(dependencies,list) else {}
+    expected_groups={str(item["provider_group_id"]) for item in case_context.values()}; expected_rows={(case_id,arm) for case_id in case_context for arm in ARMS}
+    if automatic.get("partition")!="holdout" or set(groups)!=expected_groups or len(groups)!=12 or not isinstance(rows,list) or len(rows)!=240 or len({(row.get("case_id"),row.get("arm_id")) for row in rows if isinstance(row,Mapping)})!=240 or {(row.get("case_id"),row.get("arm_id")) for row in rows if isinstance(row,Mapping)}!=expected_rows or automatic.get("case_arm_multiset_sha256")!=case_digest: raise ValueError("accepted holdout authoritative 12x5x4 graph differs")
+    del prediction_ref
+    return accepted,automatic,prediction_by_ref
+
+def _validate_accepted_score_input(value:object,*,raw:bytes,release:Mapping[str,object])->tuple[dict[str,object],dict[str,object],dict[bytes,tuple[dict[str,object],dict[str,object]]]]:
+    if not isinstance(value,Mapping): raise ValueError("accepted score input must be an object")
+    pair=(value.get("contract_version"),value.get("partition"))
+    if pair==("benchmark_v2_accepted_regression_score_input_v2","regression"):
+        return _validate_accepted_regression_score_input(value,raw=raw,release=release)
+    if pair==("benchmark_v2_accepted_holdout_score_input_v1","holdout"):
+        return _validate_accepted_holdout_score_input(value,raw=raw,release=release)
+    raise ValueError("accepted score input contract/partition mismatch")
+
 def _production_rows(automatic:Mapping[str,object],index:Mapping[bytes,tuple[dict[str,object],dict[str,object]]])->list[dict[str,Any]]:
     rows=automatic.get("rows")
     if not isinstance(rows,list): raise ValueError("accepted automatic rows invalid")
@@ -348,7 +393,7 @@ def _production_rows(automatic:Mapping[str,object],index:Mapping[bytes,tuple[dic
         result.append(row)
     return result
 
-_validate_score_input_binding=validate_private_scorer_input_binding_v1
+_validate_score_input_binding=_validate_private_scorer_input_binding
 validate_private_scorer_public_ref=validate_private_scorer_public_ref_v3
 
 def _validate_private_score_artifact(value:object)->dict[str,object]:
@@ -357,7 +402,7 @@ def _validate_private_score_artifact(value:object)->dict[str,object]:
     _reject_score_leakage(score)
     binding=_validate_score_input_binding(score["score_input_binding"])
     gate=score.get("gate")
-    if score.get("contract_version")!="portfolio_hybrid_v1_1_private_score_v3" or score.get("benchmark_release_id")!=RELEASE or score.get("partition")!="regression" or score.get("safety")!=SAFETY or not _is_sha(score.get("content_sha256")) or score["content_sha256"]!=hashlib.sha256(canonical_bytes({key:item for key,item in score.items() if key!="content_sha256"})).hexdigest() or not isinstance(gate,Mapping) or gate.get("status") not in {"PASS","FAIL"} or score.get("automatic_prediction_ref")!=binding["automatic_prediction_ref"] or score.get("selected_lifecycle_ref")!=binding["selected_lifecycle_ref"] or score.get("estimand_ref")!=binding["estimand_ref"] or score.get("gate_ref")!=binding["gate_ref"]:
+    if score.get("contract_version")!="portfolio_hybrid_v1_1_private_score_v3" or score.get("benchmark_release_id")!=RELEASE or score.get("partition")!=binding["partition"] or score.get("safety")!=SAFETY or not _is_sha(score.get("content_sha256")) or score["content_sha256"]!=hashlib.sha256(canonical_bytes({key:item for key,item in score.items() if key!="content_sha256"})).hexdigest() or not isinstance(gate,Mapping) or gate.get("status") not in {"PASS","FAIL"} or score.get("automatic_prediction_ref")!=binding["automatic_prediction_ref"] or score.get("selected_lifecycle_ref")!=binding["selected_lifecycle_ref"] or score.get("estimand_ref")!=binding["estimand_ref"] or score.get("gate_ref")!=binding["gate_ref"]:
         raise ValueError("private scorer score artifact invalid")
     return score
 def _hit(point:tuple[Fraction,Fraction],regions:list[list[int]])->int:
@@ -635,19 +680,26 @@ def _run_private_child_once(*,nonce:str,pipe_capability:str,launcher_process_id:
     release=validate_task10_private_release_bundle(private_manifest_path=Path(private_manifest_path))
     accepted_raw=Path(prediction_run_ref_path).read_bytes(); accepted_value=json.loads(accepted_raw.decode("utf-8"))
     accepted,automatic,index=_validate_accepted_score_input(accepted_value,raw=accepted_raw,release=release)
-    derived=derive_private_scoring_cases(validated_release=release,partition="regression")
+    partition=str(accepted["partition"])
+    derived=derive_private_scoring_cases(validated_release=release,partition=partition)
     cases=_validated_private_cases([{key:value for key,value in case.items() if key!="partition"} for case in derived])
     rows=_production_rows(automatic,index); result=_score(rows,cases,release["gate"])
     binding={
-        "contract_version":"private_scorer_input_binding_v1","benchmark_release_id":RELEASE,"partition":"regression",
+        "contract_version":("private_scorer_holdout_input_binding_v1" if partition=="holdout" else "private_scorer_input_binding_v1"),"benchmark_release_id":RELEASE,"partition":partition,
         "private_manifest_ref":dict(release["private_manifest_ref"]),"corpus_parent_ref":dict(release["corpus_parent_ref"]),
         "provider_manifest_ref":dict(release["provider_manifest_ref"]),"provider_corpus_ref":dict(release["provider_corpus_ref"]),
-        "accepted_run_ref":{"contract_version":"benchmark_v2_accepted_regression_score_input_v2","file_sha256":hashlib.sha256(accepted_raw).hexdigest(),"content_sha256":accepted["content_sha256"]},
+        "accepted_run_ref":{"contract_version":str(accepted["contract_version"]),"file_sha256":hashlib.sha256(accepted_raw).hexdigest(),"content_sha256":accepted["content_sha256"]},
         "attempt_ref":dict(accepted["attempt_ref"]),"attempt_ledger_ref":dict(accepted["attempt_ledger_ref"]),"automatic_prediction_ref":dict(accepted["automatic_prediction_ref"]),"selected_lifecycle_ref":dict(accepted["selected_lifecycle_ref"]),
         "estimand_ref":dict(release["estimand_ref"]),"gate_ref":dict(release["gate_ref"]),"safety":dict(SAFETY),
     }
+    if partition=="holdout":
+        binding.update({
+            "regression_score_precondition_ref":dict(accepted["regression_score_precondition_envelope"]["ref"]),
+            "holdout_authorization_ref":dict(accepted["holdout_authorization_ref"]),
+            "holdout_claim_ref":dict(accepted["holdout_claim_ref"]),
+        })
     _validate_score_input_binding(binding)
-    private_result=_content_bound({"contract_version":"portfolio_hybrid_v1_1_private_score_v3","benchmark_release_id":RELEASE,"partition":"regression",**result,"score_input_binding":binding,"automatic_prediction_ref":dict(accepted["automatic_prediction_ref"]),"selected_lifecycle_ref":dict(accepted["selected_lifecycle_ref"]),"estimand_ref":dict(release["estimand_ref"]),"gate_ref":dict(release["gate_ref"]),"safety":dict(SAFETY)})
+    private_result=_content_bound({"contract_version":"portfolio_hybrid_v1_1_private_score_v3","benchmark_release_id":RELEASE,"partition":partition,**result,"score_input_binding":binding,"automatic_prediction_ref":dict(accepted["automatic_prediction_ref"]),"selected_lifecycle_ref":dict(accepted["selected_lifecycle_ref"]),"estimand_ref":dict(release["estimand_ref"]),"gate_ref":dict(release["gate_ref"]),"safety":dict(SAFETY)})
     raw=canonical_bytes(private_result)+b"\n"; receipt={"contract_version":"private_scorer_child_receipt_v2","nonce":nonce,"pipe_capability_sha256":hashlib.sha256(pipe_capability.encode("ascii")).hexdigest(),"launcher_process_id":launcher_process_id,"launcher_process_identity":launcher_process_identity,"process_id":os.getpid(),"process_identity":process_identity,"job_identity_sha256":job_identity_sha256,"argv_sha256":argv_sha256,"env_sha256":env_sha256,"cwd_sha256":cwd_sha256,"safety":dict(SAFETY)}
     public=_content_bound({"contract_version":"private_scorer_child_public_ref_v1","status":private_result["gate"]["status"],"score_ref":f"private-score/{private_result['content_sha256']}","private_score_file_sha256":hashlib.sha256(raw).hexdigest(),"score_input_binding":binding,"execution_receipt":receipt,"safety":dict(SAFETY)})
     for path,payload in ((Path(private_output_path),raw),(Path(public_ref_path),canonical_bytes(public)+b"\n")):
