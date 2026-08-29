@@ -619,6 +619,8 @@ uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py
 
 ## S4. Holdout scoring contract before final seal
 
+**Authoritative stop-loss correction:** `2026-08-30-benchmark-v2-s4-stop-loss-contract-amendment.md` supersedes only this S4 section's conflicting owner-journal authority, cleanup-only/detached-recovery, S4.4 allowlist, Task 12 dependency-manifest, and final private-inventory clauses. In particular, S4 must not reopen B1/runtime supervision or create detached recovery evidence/a general process supervisor. All other S4 scoring, projection, selection, leakage, safety, and normal-chain clauses below remain authoritative.
+
 **Depends on:** S1-S3 and the Task 11/12 code contracts; runtime use additionally depends on an actual regression `PASS` and Task 11 authorization.
 **Produces now:** holdout schema, validators, consumers, tests, and seal inventory only.
 **Commit after GREEN:** `feat(benchmark-v2): freeze holdout scoring before final seal`
