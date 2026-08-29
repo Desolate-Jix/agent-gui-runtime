@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -19,6 +20,7 @@ from app.learn.hybrid.benchmark_v2_durable_claim import (
     _production_backend,
     _production_ledger_root_is_exact,
     _recover_with_backend,
+    _verify_claim_anchors_read_only,
     authorization_envelope,
     canonical_bytes,
     claim_id,
@@ -26,6 +28,55 @@ from app.learn.hybrid.benchmark_v2_durable_claim import (
 
 
 _ZERO = "0" * 64
+_AUTHORITY_PROJECTION_SPECS = {
+    "benchmark_v2_holdout_authorization_public_projection_v1": (
+        "holdout-authorization-public-projection"
+    ),
+    "benchmark_v2_holdout_claim_public_projection_v1": (
+        "holdout-claim-public-projection"
+    ),
+    "benchmark_v2_holdout_file_anchor_public_projection_v1": (
+        "holdout-file-anchor-public-projection"
+    ),
+    "benchmark_v2_holdout_registry_anchor_public_projection_v1": (
+        "holdout-registry-anchor-public-projection"
+    ),
+}
+
+
+def _seal_authority_projection(
+    *, contract_version: str, semantic_fields: Mapping[str, object]
+) -> dict[str, object]:
+    prefix = _AUTHORITY_PROJECTION_SPECS.get(contract_version)
+    if prefix is None:
+        raise ValueError("unknown holdout authority projection contract")
+    semantic_payload = {
+        "contract_version": contract_version,
+        **dict(semantic_fields),
+    }
+    semantic_sha256 = hashlib.sha256(
+        contract_version.encode("utf-8")
+        + b"\0"
+        + canonical_bytes(semantic_payload)
+    ).hexdigest()
+    without_content = {
+        "contract_version": contract_version,
+        "artifact_id": f"{prefix}/{semantic_sha256}",
+        **dict(semantic_fields),
+    }
+    projection = {
+        **without_content,
+        "content_sha256": hashlib.sha256(canonical_bytes(without_content)).hexdigest(),
+    }
+    return {
+        "ref": {
+            "id": projection["artifact_id"],
+            "content_sha256": projection["content_sha256"],
+        },
+        "canonical_bytes_b64": base64.b64encode(canonical_bytes(projection)).decode(
+            "ascii"
+        ),
+    }
 
 
 def _chain(path: Path) -> list[dict[str, object]]:
@@ -163,10 +214,10 @@ def _validate_genesis_ref(
     authorization_ref: Mapping[str, str],
 ) -> None:
     root = Path(ledger_root)
-    if not root.is_absolute() or str(root) != str(root.resolve()):
+    if not root.is_absolute() or str(root) != os.path.abspath(str(root)):
         raise ValueError("holdout ledger root is not canonical absolute")
     claim_root = Path(file_root)
-    if not claim_root.is_absolute() or str(claim_root) != str(claim_root.resolve()):
+    if not claim_root.is_absolute() or str(claim_root) != os.path.abspath(str(claim_root)):
         raise ValueError("holdout claim root is not canonical absolute")
     cid = claim_id(IDENTITY)
     expected = {
@@ -262,7 +313,7 @@ def _authorize_holdout_genesis(
 ) -> dict[str, object]:
     if dict(claim_identity) != IDENTITY:
         raise ValueError("holdout genesis authority invalid")
-    root = Path(ledger_root).resolve()
+    root = Path(ledger_root)
     _validate_genesis_ref(
         file_root=Path(file_root),
         ledger_root=root,
@@ -314,6 +365,114 @@ def claim_holdout_once(
     return _claim_with_backend(backend=backend, authorization=wrapped["payload"])
 
 
+def verify_holdout_claim_anchors_for_public_projection(
+    *, authorization_ref: Mapping[str, object], ledger_root: Path
+) -> dict[str, object]:
+    """只读验证 Task 11A 锚点并仅返回无路径公开投影。"""
+
+    import win32security
+
+    try:
+        if not isinstance(authorization_ref, Mapping):
+            raise ValueError("holdout authorization ref must be an object")
+        native_authorization_ref = dict(authorization_ref)
+        if set(native_authorization_ref) != {
+            "authorization_id",
+            "envelope_sha256",
+            "fixed_authorization_path",
+        } or any(
+            not isinstance(native_authorization_ref[field], str)
+            for field in native_authorization_ref
+        ):
+            raise ValueError("holdout authorization ref is not exact")
+        backend = _production_backend()
+        wrapped = _validate_production_authorization_ref(
+            backend, native_authorization_ref
+        )
+        verified = _verify_claim_anchors_read_only(
+            backend=backend,
+            authorization=wrapped["payload"],
+            authorization_ref=native_authorization_ref,
+            ledger_root=Path(ledger_root),
+        )
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        KeyError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        win32security.error,
+    ):
+        raise ValueError("holdout anchor verification failed closed") from None
+
+    authorization_projection = _seal_authority_projection(
+        contract_version="benchmark_v2_holdout_authorization_public_projection_v1",
+        semantic_fields={
+            "authorization_id": verified["authorization_ref"]["authorization_id"],
+            "envelope_sha256": verified["authorization_ref"]["envelope_sha256"],
+            "claim_id": verified["claim_id"],
+            "safety": dict(SAFETY),
+        },
+    )
+    claim_projection = _seal_authority_projection(
+        contract_version="benchmark_v2_holdout_claim_public_projection_v1",
+        semantic_fields={
+            "claim_ref": dict(verified["claim_ref"]),
+            "claim_id": verified["claim_id"],
+            "attempt_id": verified["attempt_id"],
+            "authorization_projection_ref": dict(authorization_projection["ref"]),
+            "state": "consumed",
+            "safety": dict(SAFETY),
+        },
+    )
+    file_projection = _seal_authority_projection(
+        contract_version="benchmark_v2_holdout_file_anchor_public_projection_v1",
+        semantic_fields={
+            "anchor_kind": "win32_zero_byte_claim_sentinel",
+            "claim_id": verified["claim_id"],
+            "authorization_envelope_sha256": verified["authorization_ref"][
+                "envelope_sha256"
+            ],
+            "size_bytes": 0,
+            "verified": True,
+            "safety": dict(SAFETY),
+        },
+    )
+    registry_projection = _seal_authority_projection(
+        contract_version="benchmark_v2_holdout_registry_anchor_public_projection_v1",
+        semantic_fields={
+            "anchor_kind": "hkcu_claim_registry_envelope",
+            "claim_id": verified["claim_id"],
+            "authorization_envelope_sha256": verified["authorization_ref"][
+                "envelope_sha256"
+            ],
+            "claim_ref": dict(verified["claim_ref"]),
+            "envelope_verified": True,
+            "state": "consumed",
+            "safety": dict(SAFETY),
+        },
+    )
+    without_content = {
+        "contract_version": "benchmark_v2_holdout_anchor_verification_result_v1",
+        "authorization_ref": dict(verified["authorization_ref"]),
+        "claim_ref": dict(verified["claim_ref"]),
+        "attempt_id": verified["attempt_id"],
+        "authority_projection_envelopes": {
+            "authorization_public_projection_envelope": authorization_projection,
+            "claim_public_projection_envelope": claim_projection,
+            "file_anchor_public_projection_envelope": file_projection,
+            "registry_anchor_public_projection_envelope": registry_projection,
+        },
+        "safety": dict(SAFETY),
+    }
+    return {
+        **without_content,
+        "content_sha256": hashlib.sha256(canonical_bytes(without_content)).hexdigest(),
+    }
+
+
 def recover_claim(*, claim_identity: Mapping[str, str]) -> dict[str, object]:
     if dict(claim_identity) != IDENTITY:
         raise ValueError("production holdout identity is fixed")
@@ -334,4 +493,5 @@ __all__ = [
     "authorize_holdout_genesis",
     "claim_holdout_once",
     "recover_claim",
+    "verify_holdout_claim_anchors_for_public_projection",
 ]

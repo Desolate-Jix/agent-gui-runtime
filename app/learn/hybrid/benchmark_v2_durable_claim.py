@@ -77,6 +77,7 @@ _SYNCHRONIZE = 0x100000
 _FILE_SHARE_READ = 0x1
 _CREATE_NEW = 1
 _FILE_ATTRIBUTE_READONLY = 0x1
+_FILE_ATTRIBUTE_DIRECTORY = 0x10
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _FILE_FLAG_WRITE_THROUGH = 0x80000000
 _INVALID_HANDLE = ctypes.c_void_p(-1).value
@@ -557,7 +558,11 @@ def _file_anchor_exact(path: Path, *, size: int, raw: bytes | None = None) -> bo
     attributes = int(kernel.GetFileAttributesW(str(path)))
     if attributes == 0xFFFFFFFF:
         return False
-    if not attributes & _FILE_ATTRIBUTE_READONLY or attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
+    if (
+        not attributes & _FILE_ATTRIBUTE_READONLY
+        or attributes & _FILE_ATTRIBUTE_DIRECTORY
+        or attributes & _FILE_ATTRIBUTE_REPARSE_POINT
+    ):
         return False
     try:
         if path.stat().st_size != size:
@@ -920,7 +925,9 @@ def _registry_read(backend: _Backend, cid: str) -> dict[str, object] | None:
         while True:
             try:
                 name, value, kind = winreg.EnumValue(key, index)
-            except OSError:
+            except OSError as error:
+                if getattr(error, "winerror", None) != 259:
+                    raise
                 break
             found[name] = (value, kind)
             index += 1
@@ -929,6 +936,34 @@ def _registry_read(backend: _Backend, cid: str) -> dict[str, object] | None:
         ):
             raise ValueError("permanent_refusal: registry schema mismatch")
         return {key: found[key][0] for key in found}
+    finally:
+        winreg.CloseKey(key)
+
+
+def _registry_subkey_names(path: str) -> tuple[str, ...] | None:
+    import winreg
+
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            path,
+            0,
+            winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+        )
+    except FileNotFoundError:
+        return None
+    try:
+        found: list[str] = []
+        index = 0
+        while True:
+            try:
+                found.append(winreg.EnumKey(key, index))
+            except OSError as error:
+                if getattr(error, "winerror", None) != 259:
+                    raise
+                break
+            index += 1
+        return tuple(found)
     finally:
         winreg.CloseKey(key)
 
@@ -1214,6 +1249,143 @@ def _expected_claim_values(
         "ClaimEnvelopeSha256": claim_digest,
     }
     return auth_ref, payload, claim_wrapped, claim_digest, expected
+
+
+def _verify_claim_anchors_read_only(
+    *,
+    backend: _Backend,
+    authorization: Mapping[str, object],
+    authorization_ref: Mapping[str, object],
+    ledger_root: Path,
+) -> dict[str, object]:
+    """只读验证已消费的双锚点与精确创世链，不执行恢复或补写。"""
+
+    from app.learn.hybrid.benchmark_v2_holdout import _chain
+
+    raw_ledger_root = Path(ledger_root)
+    try:
+        resolved_ledger_root = raw_ledger_root.resolve()
+    except RuntimeError:
+        raise ValueError("holdout verification ledger root is ambiguous") from None
+    if (
+        not raw_ledger_root.is_absolute()
+        or str(raw_ledger_root) != str(resolved_ledger_root)
+        or str(raw_ledger_root) != str(backend.ledger_root)
+    ):
+        raise ValueError("holdout verification ledger root is not exact")
+    _validate_authorization_for_backend(backend, authorization)
+    wrapped, digest = authorization_envelope(authorization)
+    expected_authorization_ref = _authorization_ref(backend, wrapped, digest)
+    if dict(authorization_ref) != expected_authorization_ref:
+        raise ValueError("holdout verification authorization ref is not exact")
+
+    authorization_path = Path(expected_authorization_ref["fixed_authorization_path"])
+    raw_authorization = canonical_bytes(wrapped)
+    if not _file_anchor_exact(
+        authorization_path,
+        size=len(raw_authorization),
+        raw=raw_authorization,
+    ):
+        raise ValueError("holdout verification authorization object is invalid")
+
+    auth_ref, claim_payload, claim_wrapped, claim_digest, expected_registry = (
+        _expected_claim_values(backend, authorization)
+    )
+    if auth_ref != expected_authorization_ref:
+        raise ValueError("holdout verification authorization identity is ambiguous")
+    cid = claim_id(IDENTITY)
+    claim_ref = {
+        "id": f"holdout-claim/{cid}",
+        "envelope_sha256": claim_digest,
+    }
+
+    sentinels = tuple(backend.file_root.glob("*.claim"))
+    expected_sentinel = (
+        backend.file_root / f"{cid}--{auth_ref['envelope_sha256']}.claim"
+    )
+    if (
+        len(sentinels) != 1
+        or sentinels[0] != expected_sentinel
+        or sentinels[0].name != expected_sentinel.name
+        or not _file_anchor_exact(expected_sentinel, size=0, raw=b"")
+    ):
+        raise ValueError("holdout verification file anchor is not exact")
+
+    root_subkeys = _registry_subkey_names(backend.registry_root)
+    leaf_subkeys = _registry_subkey_names(backend.registry_root + "\\" + cid)
+    registry = _registry_read(backend, cid)
+    if (
+        root_subkeys is None
+        or set(root_subkeys) != {cid}
+        or len(root_subkeys) != 1
+        or leaf_subkeys != ()
+        or registry != expected_registry
+    ):
+        raise ValueError("holdout verification registry anchor is not exact")
+    raw_claim = registry.get("ClaimEnvelope")
+    if not isinstance(raw_claim, bytes):
+        raise ValueError("holdout verification claim envelope type is invalid")
+    try:
+        parsed_claim = json.loads(raw_claim.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("holdout verification claim envelope is invalid") from error
+    if canonical_bytes(parsed_claim) != raw_claim or parsed_claim != claim_wrapped:
+        raise ValueError("holdout verification claim envelope does not match authority")
+    if (
+        claim_payload.get("claim_id") != cid
+        or claim_payload.get("authorization_ref") != auth_ref
+        or claim_payload.get("provider_manifest_sha256")
+        != authorization.get("provider_manifest_sha256")
+        or claim_payload.get("absolute_owner_journal_root")
+        != authorization.get("absolute_owner_journal_root")
+        or claim_payload.get("state") != "consumed"
+    ):
+        raise ValueError("holdout verification consumed claim payload is invalid")
+
+    ledger_path = raw_ledger_root / "holdout" / "events.jsonl"
+    chain = _chain(ledger_path)
+    if ledger_path.read_bytes() != b"".join(
+        canonical_bytes(item) + b"\n" for item in chain
+    ):
+        raise ValueError("holdout verification ledger bytes are not exact")
+    expected_genesis_event = {
+        "partition": "holdout",
+        "sequence": 0,
+        "event_type": "authorized_genesis",
+        "previous_envelope_sha256": "0" * 64,
+        "event_payload": {
+            "claim_id": cid,
+            "authorization_ref": dict(auth_ref),
+            "safety": dict(SAFETY),
+        },
+    }
+    if len(chain) != 2 or chain[0].get("event") != expected_genesis_event:
+        raise ValueError("holdout verification exact genesis-to-claim ledger is missing")
+    expected_claim_event = {
+        "partition": "holdout",
+        "sequence": 1,
+        "event_type": "claim_consumed",
+        "previous_envelope_sha256": hashlib.sha256(
+            canonical_bytes(chain[0])
+        ).hexdigest(),
+        "event_payload": {
+            "claim_ref": dict(claim_ref),
+            "safety": dict(SAFETY),
+        },
+    }
+    if chain[1].get("event") != expected_claim_event:
+        raise ValueError("holdout verification exact consumed-claim ledger is invalid")
+
+    return {
+        "authorization_ref": {
+            "authorization_id": auth_ref["authorization_id"],
+            "envelope_sha256": auth_ref["envelope_sha256"],
+        },
+        "claim_ref": claim_ref,
+        "claim_id": cid,
+        "attempt_id": claim_payload["attempt_id"],
+        "state": "consumed",
+    }
 
 
 def _claim_with_backend(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -7,9 +8,11 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 import winreg
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 
@@ -1482,6 +1485,44 @@ def test_concurrent_holdout_genesis_has_one_exact_record(test_backend, tmp_path:
         _finish_scope(scope, name, processes)
 
 
+def test_concurrent_holdout_genesis_does_not_reresolve_wrapper_bound_roots(
+    test_backend, monkeypatch
+) -> None:
+    payload = authorization(test_backend)
+    _, digest = authorization_envelope(payload)
+    ref = {
+        "authorization_id": f"holdout-authorization/{claim_id(IDENTITY)}",
+        "envelope_sha256": digest,
+        "fixed_authorization_path": payload["fixed_authorization_path"],
+    }
+    assert not test_backend.file_root.parent.exists()
+    original_resolve = Path.resolve
+    wrapper_bound_roots = {test_backend.file_root, test_backend.ledger_root}
+
+    def resolve_without_root_revalidation(path: Path, *args, **kwargs) -> Path:
+        if path in wrapper_bound_roots:
+            raise RuntimeError("wrapper-bound root was re-resolved")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve_without_root_revalidation)
+    start = threading.Barrier(2)
+
+    def authorize_once() -> dict[str, object]:
+        start.wait(timeout=5)
+        return _authorize_holdout_genesis_for_test(
+            backend=test_backend,
+            claim_identity=IDENTITY,
+            authorization_ref=ref,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(authorize_once) for _ in range(2)]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert results[0] == results[1]
+    assert len(_chain(test_backend.ledger_root / "holdout/events.jsonl")) == 1
+
+
 def test_concurrent_recovery_mirrors_one_claim_record(test_backend, tmp_path: Path) -> None:
     payload = prepared(test_backend)
     _claim_with_backend_for_test(backend=test_backend, authorization=payload)
@@ -1815,6 +1856,639 @@ def test_provider_change_and_authorization_byte_drift_are_permanent(test_backend
     )["state"] == "permanent_refusal"
 
 
+_AUTHORITY_PROJECTION_SPECS = {
+    "authorization_public_projection_envelope": (
+        "benchmark_v2_holdout_authorization_public_projection_v1",
+        "holdout-authorization-public-projection",
+        {
+            "contract_version",
+            "artifact_id",
+            "authorization_id",
+            "envelope_sha256",
+            "claim_id",
+            "safety",
+            "content_sha256",
+        },
+    ),
+    "claim_public_projection_envelope": (
+        "benchmark_v2_holdout_claim_public_projection_v1",
+        "holdout-claim-public-projection",
+        {
+            "contract_version",
+            "artifact_id",
+            "claim_ref",
+            "claim_id",
+            "attempt_id",
+            "authorization_projection_ref",
+            "state",
+            "safety",
+            "content_sha256",
+        },
+    ),
+    "file_anchor_public_projection_envelope": (
+        "benchmark_v2_holdout_file_anchor_public_projection_v1",
+        "holdout-file-anchor-public-projection",
+        {
+            "contract_version",
+            "artifact_id",
+            "anchor_kind",
+            "claim_id",
+            "authorization_envelope_sha256",
+            "size_bytes",
+            "verified",
+            "safety",
+            "content_sha256",
+        },
+    ),
+    "registry_anchor_public_projection_envelope": (
+        "benchmark_v2_holdout_registry_anchor_public_projection_v1",
+        "holdout-registry-anchor-public-projection",
+        {
+            "contract_version",
+            "artifact_id",
+            "anchor_kind",
+            "claim_id",
+            "authorization_envelope_sha256",
+            "claim_ref",
+            "envelope_verified",
+            "state",
+            "safety",
+            "content_sha256",
+        },
+    ),
+}
+
+
+def _path_snapshot(path: Path) -> tuple[bytes, int, int] | None:
+    if not path.exists():
+        return None
+    state = path.stat()
+    return (
+        path.read_bytes(),
+        state.st_size,
+        state.st_file_attributes,
+    )
+
+
+def _registry_values_snapshot(value) -> tuple[tuple[str, object, int], ...] | None:
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            value.registry_root + "\\" + claim_id(IDENTITY),
+            0,
+            winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+        )
+    except FileNotFoundError:
+        return None
+    try:
+        entries = []
+        index = 0
+        while True:
+            try:
+                entries.append(winreg.EnumValue(key, index))
+            except OSError:
+                break
+            index += 1
+        return tuple(sorted(entries, key=lambda item: item[0]))
+    finally:
+        winreg.CloseKey(key)
+
+
+def _registry_subkeys_snapshot(value) -> tuple[str, ...] | None:
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            value.registry_root,
+            0,
+            winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+        )
+    except FileNotFoundError:
+        return None
+    try:
+        entries = []
+        index = 0
+        while True:
+            try:
+                entries.append(winreg.EnumKey(key, index))
+            except OSError:
+                break
+            index += 1
+        return tuple(sorted(entries))
+    finally:
+        winreg.CloseKey(key)
+
+
+def _anchor_verification_snapshot(value) -> dict[str, object]:
+    cid = claim_id(IDENTITY)
+    authorization_path = value.file_root / f"{cid}.authorization.json"
+    sentinel_paths = sorted(value.file_root.glob("*.claim"), key=lambda path: path.name)
+    ledger_path = value.ledger_root / "holdout" / "events.jsonl"
+    base = value.file_root.parent
+    directory_entries = ()
+    if base.exists():
+        directory_entries = tuple(
+            sorted(
+                (
+                    str(path.relative_to(base)),
+                    "directory" if path.is_dir() else "file",
+                )
+                for path in base.rglob("*")
+            )
+        )
+    return {
+        "authorization": _path_snapshot(authorization_path),
+        "sentinels": tuple(
+            (path.name, _path_snapshot(path)) for path in sentinel_paths
+        ),
+        "registry_values": _registry_values_snapshot(value),
+        "registry_subkeys": _registry_subkeys_snapshot(value),
+        "ledger_bytes": ledger_path.read_bytes() if ledger_path.exists() else None,
+        "directory_entries": directory_entries,
+    }
+
+
+def _decode_authority_projection(
+    envelope: object, *, contract_version: str, artifact_prefix: str, fields: set[str]
+) -> dict[str, object]:
+    assert isinstance(envelope, dict)
+    assert set(envelope) == {"ref", "canonical_bytes_b64"}
+    raw = base64.b64decode(envelope["canonical_bytes_b64"], validate=True)
+    projection = json.loads(raw.decode("utf-8"))
+    assert canonical_bytes(projection) == raw
+    assert set(projection) == fields
+    assert projection["contract_version"] == contract_version
+    semantic = {
+        key: deepcopy(value)
+        for key, value in projection.items()
+        if key not in {"artifact_id", "content_sha256"}
+    }
+    semantic_sha256 = hashlib.sha256(
+        contract_version.encode("utf-8") + b"\0" + canonical_bytes(semantic)
+    ).hexdigest()
+    assert projection["artifact_id"] == f"{artifact_prefix}/{semantic_sha256}"
+    without_content = dict(projection)
+    declared = without_content.pop("content_sha256")
+    assert declared == hashlib.sha256(canonical_bytes(without_content)).hexdigest()
+    assert envelope["ref"] == {
+        "id": projection["artifact_id"],
+        "content_sha256": declared,
+    }
+    return projection
+
+
+def _nested_strings(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, dict):
+        return tuple(
+            item
+            for key, child in value.items()
+            for item in (*_nested_strings(key), *_nested_strings(child))
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(item for child in value for item in _nested_strings(child))
+    return ()
+
+
+def _forbid_verify_mutations(monkeypatch) -> None:
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("verify-only API reached a mutation or repair primitive")
+
+    for module, names in (
+        (
+            holdout,
+            (
+                "recover_claim",
+                "_recover_with_backend",
+                "claim_holdout_once",
+                "_claim_with_backend",
+                "authorize_holdout_genesis",
+                "_authorize_holdout_genesis",
+                "_append_locked",
+            ),
+        ),
+        (
+            durable,
+            (
+                "_recover_with_backend",
+                "_recover_with_backend_for_test",
+                "recover_with_backend_for_test",
+                "_mirror_claim",
+                "_claim_with_backend",
+                "_claim_with_backend_for_test",
+                "_publish_authorization",
+                "_create_authorization",
+                "_write_secure_new_file",
+                "_registry_create",
+                "_sentinel_create",
+            ),
+        ),
+    ):
+        for name in names:
+            monkeypatch.setattr(module, name, forbidden)
+
+
+def test_verify_holdout_claim_anchors_returns_closed_pathless_projections_without_mutation(
+    test_backend, monkeypatch
+) -> None:
+    payload = prepared(test_backend)
+    claim = _claim_with_backend_for_test(
+        backend=test_backend, authorization=payload
+    )
+    native_authorization_ref = json.loads(
+        _authorization_output_path(test_backend).read_text(encoding="utf-8")
+    )
+    before = _anchor_verification_snapshot(test_backend)
+    monkeypatch.setattr(holdout, "_production_backend", lambda: test_backend)
+    _forbid_verify_mutations(monkeypatch)
+
+    result = holdout.verify_holdout_claim_anchors_for_public_projection(
+        authorization_ref=native_authorization_ref,
+        ledger_root=test_backend.ledger_root,
+    )
+
+    assert _anchor_verification_snapshot(test_backend) == before
+    assert set(result) == {
+        "contract_version",
+        "authorization_ref",
+        "claim_ref",
+        "attempt_id",
+        "authority_projection_envelopes",
+        "safety",
+        "content_sha256",
+    }
+    assert result["contract_version"] == "benchmark_v2_holdout_anchor_verification_result_v1"
+    assert result["authorization_ref"] == {
+        "authorization_id": native_authorization_ref["authorization_id"],
+        "envelope_sha256": native_authorization_ref["envelope_sha256"],
+    }
+    assert result["claim_ref"] == claim["claim_ref"]
+    assert result["attempt_id"] == claim["attempt_id"]
+    assert result["safety"] == durable.SAFETY
+    result_without_content = dict(result)
+    declared_result_sha256 = result_without_content.pop("content_sha256")
+    assert declared_result_sha256 == hashlib.sha256(
+        canonical_bytes(result_without_content)
+    ).hexdigest()
+
+    envelopes = result["authority_projection_envelopes"]
+    assert isinstance(envelopes, dict)
+    assert set(envelopes) == set(_AUTHORITY_PROJECTION_SPECS)
+    projections = {
+        name: _decode_authority_projection(
+            envelopes[name],
+            contract_version=spec[0],
+            artifact_prefix=spec[1],
+            fields=spec[2],
+        )
+        for name, spec in _AUTHORITY_PROJECTION_SPECS.items()
+    }
+    cid = claim_id(IDENTITY)
+    authorization_projection = projections["authorization_public_projection_envelope"]
+    assert authorization_projection == {
+        "contract_version": "benchmark_v2_holdout_authorization_public_projection_v1",
+        "artifact_id": authorization_projection["artifact_id"],
+        "authorization_id": native_authorization_ref["authorization_id"],
+        "envelope_sha256": native_authorization_ref["envelope_sha256"],
+        "claim_id": cid,
+        "safety": durable.SAFETY,
+        "content_sha256": authorization_projection["content_sha256"],
+    }
+    claim_projection = projections["claim_public_projection_envelope"]
+    assert claim_projection == {
+        "contract_version": "benchmark_v2_holdout_claim_public_projection_v1",
+        "artifact_id": claim_projection["artifact_id"],
+        "claim_ref": claim["claim_ref"],
+        "claim_id": cid,
+        "attempt_id": claim["attempt_id"],
+        "authorization_projection_ref": envelopes[
+            "authorization_public_projection_envelope"
+        ]["ref"],
+        "state": "consumed",
+        "safety": durable.SAFETY,
+        "content_sha256": claim_projection["content_sha256"],
+    }
+    file_projection = projections["file_anchor_public_projection_envelope"]
+    assert file_projection["anchor_kind"] == "win32_zero_byte_claim_sentinel"
+    assert file_projection["claim_id"] == cid
+    assert file_projection["authorization_envelope_sha256"] == native_authorization_ref[
+        "envelope_sha256"
+    ]
+    assert file_projection["size_bytes"] == 0
+    assert file_projection["verified"] is True
+    registry_projection = projections["registry_anchor_public_projection_envelope"]
+    assert registry_projection["anchor_kind"] == "hkcu_claim_registry_envelope"
+    assert registry_projection["claim_ref"] == claim["claim_ref"]
+    assert registry_projection["envelope_verified"] is True
+    assert registry_projection["state"] == "consumed"
+
+    public_strings = _nested_strings(result) + tuple(
+        item for projection in projections.values() for item in _nested_strings(projection)
+    )
+    for forbidden in (
+        str(test_backend.file_root.parent),
+        test_backend.registry_root,
+        str(test_backend.owner_journal_root),
+        "fixed_authorization_path",
+        "ClaimEnvelope",
+    ):
+        assert all(forbidden not in value for value in public_strings)
+
+
+def test_verify_holdout_claim_anchors_fails_closed_when_registry_enumeration_access_fails(
+    test_backend, monkeypatch
+) -> None:
+    payload = prepared(test_backend)
+    _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    native_authorization_ref = json.loads(
+        _authorization_output_path(test_backend).read_text(encoding="utf-8")
+    )
+    before = _anchor_verification_snapshot(test_backend)
+    monkeypatch.setattr(holdout, "_production_backend", lambda: test_backend)
+    _forbid_verify_mutations(monkeypatch)
+    enum_value = winreg.EnumValue
+    observed_indices = []
+
+    def access_denied_after_expected_values(key, index):
+        observed_indices.append(index)
+        if index == 5:
+            raise PermissionError(5, "registry enumeration access denied")
+        return enum_value(key, index)
+
+    monkeypatch.setattr(winreg, "EnumValue", access_denied_after_expected_values)
+    try:
+        with pytest.raises(ValueError, match="holdout anchor verification failed closed"):
+            holdout.verify_holdout_claim_anchors_for_public_projection(
+                authorization_ref=native_authorization_ref,
+                ledger_root=test_backend.ledger_root,
+            )
+    finally:
+        monkeypatch.setattr(winreg, "EnumValue", enum_value)
+
+    assert observed_indices == [0, 1, 2, 3, 4, 5]
+    assert _anchor_verification_snapshot(test_backend) == before
+
+
+def test_verify_holdout_claim_anchors_normalizes_registry_security_api_failure(
+    test_backend, monkeypatch
+) -> None:
+    import pywintypes
+    import win32security
+
+    payload = prepared(test_backend)
+    _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    native_authorization_ref = json.loads(
+        _authorization_output_path(test_backend).read_text(encoding="utf-8")
+    )
+    before = _anchor_verification_snapshot(test_backend)
+    monkeypatch.setattr(holdout, "_production_backend", lambda: test_backend)
+    _forbid_verify_mutations(monkeypatch)
+    get_security_info = win32security.GetSecurityInfo
+    observed_calls = 0
+
+    def access_denied_security_info(*_args, **_kwargs):
+        nonlocal observed_calls
+        observed_calls += 1
+        raise pywintypes.error(5, "GetSecurityInfo", "Access is denied.")
+
+    monkeypatch.setattr(
+        win32security, "GetSecurityInfo", access_denied_security_info
+    )
+    try:
+        with pytest.raises(ValueError, match="holdout anchor verification failed closed"):
+            holdout.verify_holdout_claim_anchors_for_public_projection(
+                authorization_ref=native_authorization_ref,
+                ledger_root=test_backend.ledger_root,
+            )
+    finally:
+        monkeypatch.setattr(win32security, "GetSecurityInfo", get_security_info)
+
+    assert observed_calls == 1
+    assert _anchor_verification_snapshot(test_backend) == before
+
+
+def test_verify_holdout_claim_anchors_normalizes_junction_loop_path_ambiguity(
+    test_backend, tmp_path: Path, monkeypatch
+) -> None:
+    payload = prepared(test_backend)
+    _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    native_authorization_ref = json.loads(
+        _authorization_output_path(test_backend).read_text(encoding="utf-8")
+    )
+    before = _anchor_verification_snapshot(test_backend)
+    loop_a = (tmp_path / "ledger-loop-a").absolute()
+    loop_b = (tmp_path / "ledger-loop-b").absolute()
+    assert loop_a.parent == tmp_path and loop_b.parent == tmp_path
+    created = []
+    try:
+        for link, target in ((loop_a, loop_b), (loop_b, loop_a)):
+            result = subprocess.run(
+                ["cmd.exe", "/d", "/c", "mklink", "/J", str(link), str(target)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            assert result.returncode == 0, result.stderr.decode(errors="replace")
+            created.append(link)
+        with pytest.raises(RuntimeError, match="loop"):
+            loop_a.resolve()
+
+        monkeypatch.setattr(holdout, "_production_backend", lambda: test_backend)
+        _forbid_verify_mutations(monkeypatch)
+        with pytest.raises(ValueError, match="holdout anchor verification failed closed") as error:
+            holdout.verify_holdout_claim_anchors_for_public_projection(
+                authorization_ref=native_authorization_ref,
+                ledger_root=loop_a,
+            )
+        assert str(loop_a) not in str(error.value)
+        assert str(loop_b) not in str(error.value)
+        assert _anchor_verification_snapshot(test_backend) == before
+    finally:
+        for link in reversed(created):
+            os.rmdir(link)
+
+    assert not os.path.lexists(loop_a)
+    assert not os.path.lexists(loop_b)
+
+
+@pytest.mark.parametrize("ambiguity", ("backend_owner_root", "fixed_authorization"))
+def test_verify_holdout_claim_anchors_normalizes_all_private_path_resolution_ambiguity(
+    test_backend, tmp_path: Path, monkeypatch, ambiguity: str
+) -> None:
+    payload = prepared(test_backend)
+    _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    native_authorization_ref = json.loads(
+        _authorization_output_path(test_backend).read_text(encoding="utf-8")
+    )
+    before = _anchor_verification_snapshot(test_backend)
+    private_loop = tmp_path / f"{ambiguity}-loop"
+    resolve = Path.resolve
+    if ambiguity == "backend_owner_root":
+        monkeypatch.setattr(
+            holdout,
+            "_production_backend",
+            lambda: (_ for _ in ()).throw(
+                RuntimeError(f"Symlink loop from '{private_loop}'")
+            ),
+        )
+    else:
+        authorization_path = Path(native_authorization_ref["fixed_authorization_path"])
+        monkeypatch.setattr(holdout, "_production_backend", lambda: test_backend)
+
+        def resolve_with_fixed_authorization_ambiguity(path, *args, **kwargs):
+            if path == authorization_path:
+                raise RuntimeError(f"Symlink loop from '{private_loop}'")
+            return resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", resolve_with_fixed_authorization_ambiguity)
+    _forbid_verify_mutations(monkeypatch)
+    try:
+        with pytest.raises(ValueError, match="holdout anchor verification failed closed") as error:
+            holdout.verify_holdout_claim_anchors_for_public_projection(
+                authorization_ref=native_authorization_ref,
+                ledger_root=test_backend.ledger_root,
+            )
+    finally:
+        if ambiguity == "fixed_authorization":
+            monkeypatch.setattr(Path, "resolve", resolve)
+
+    assert str(private_loop) not in str(error.value)
+    assert _anchor_verification_snapshot(test_backend) == before
+
+
+@pytest.mark.parametrize(
+    "failure",
+    (
+        "native_ref_extra_field",
+        "authorization_drift",
+        "missing_sentinel",
+        "sentinel_name_case_drift",
+        "duplicate_sentinel",
+        "missing_registry",
+        "duplicate_registry_claim_key",
+        "registry_drift",
+        "registry_access_denied",
+        "extra_ledger_event",
+        "ledger_terminal_newline_drift",
+        "noncanonical_ledger_root",
+    ),
+)
+def test_verify_holdout_claim_anchors_fails_closed_without_repair_or_mutation(
+    test_backend, monkeypatch, failure: str
+) -> None:
+    payload = prepared(test_backend)
+    _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    native_authorization_ref = json.loads(
+        _authorization_output_path(test_backend).read_text(encoding="utf-8")
+    )
+    ledger_root = test_backend.ledger_root
+    cid = claim_id(IDENTITY)
+    extra_registry_key = None
+    if failure == "native_ref_extra_field":
+        native_authorization_ref["path_alias"] = native_authorization_ref[
+            "fixed_authorization_path"
+        ]
+    elif failure == "authorization_drift":
+        path = Path(payload["fixed_authorization_path"])
+        path.chmod(stat.S_IWRITE)
+        path.write_bytes(path.read_bytes() + b" ")
+    elif failure == "missing_sentinel":
+        sentinel = next(test_backend.file_root.glob("*.claim"))
+        sentinel.chmod(stat.S_IWRITE)
+        sentinel.unlink()
+    elif failure == "sentinel_name_case_drift":
+        sentinel = next(test_backend.file_root.glob("*.claim"))
+        temporary = sentinel.with_name("rename-in-progress.tmp")
+        sentinel.chmod(stat.S_IWRITE)
+        sentinel.rename(temporary)
+        renamed = sentinel.with_name(sentinel.name.upper())
+        temporary.rename(renamed)
+        renamed.chmod(stat.S_IREAD)
+    elif failure == "duplicate_sentinel":
+        alternate = "f" * 64
+        if alternate == native_authorization_ref["envelope_sha256"]:
+            alternate = "e" * 64
+        assert _sentinel_create(
+            test_backend.file_root / f"{cid}--{alternate}.claim", None
+        )
+    elif failure == "missing_registry":
+        winreg.DeleteKeyEx(
+            winreg.HKEY_CURRENT_USER,
+            test_backend.registry_root + "\\" + cid,
+            winreg.KEY_WOW64_64KEY,
+            0,
+        )
+    elif failure == "duplicate_registry_claim_key":
+        extra_registry_key = test_backend.registry_root + "\\" + "f" * 64
+        key = winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER,
+            extra_registry_key,
+            0,
+            winreg.KEY_READ | winreg.KEY_WRITE | winreg.KEY_WOW64_64KEY,
+        )
+        winreg.CloseKey(key)
+    elif failure == "registry_drift":
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            test_backend.registry_root + "\\" + cid,
+            0,
+            winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
+        )
+        try:
+            winreg.SetValueEx(key, "ClaimEnvelopeSha256", 0, winreg.REG_SZ, "f" * 64)
+        finally:
+            winreg.CloseKey(key)
+    elif failure == "extra_ledger_event":
+        ledger_path = test_backend.ledger_root / "holdout" / "events.jsonl"
+        chain = _chain(ledger_path)
+        _append_for_test(
+            ledger_path,
+            {
+                "partition": "holdout",
+                "sequence": 2,
+                "event_type": "claim_consumed",
+                "previous_envelope_sha256": hashlib.sha256(
+                    canonical_bytes(chain[-1])
+                ).hexdigest(),
+                "event_payload": deepcopy(chain[-1]["event"]["event_payload"]),
+            },
+        )
+    elif failure == "ledger_terminal_newline_drift":
+        ledger_path = test_backend.ledger_root / "holdout" / "events.jsonl"
+        raw_ledger = ledger_path.read_bytes()
+        assert raw_ledger.endswith(b"\n")
+        ledger_path.write_bytes(raw_ledger[:-1])
+    elif failure == "noncanonical_ledger_root":
+        ledger_root = test_backend.ledger_root / ".." / test_backend.ledger_root.name
+
+    before = _anchor_verification_snapshot(test_backend)
+    monkeypatch.setattr(holdout, "_production_backend", lambda: test_backend)
+    _forbid_verify_mutations(monkeypatch)
+    if failure == "registry_access_denied":
+        monkeypatch.setattr(
+            durable,
+            "_registry_read",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("denied")),
+        )
+
+    try:
+        with pytest.raises(ValueError, match="holdout anchor verification failed closed"):
+            holdout.verify_holdout_claim_anchors_for_public_projection(
+                authorization_ref=native_authorization_ref,
+                ledger_root=ledger_root,
+            )
+
+        assert _anchor_verification_snapshot(test_backend) == before
+    finally:
+        if extra_registry_key is not None:
+            winreg.DeleteKeyEx(
+                winreg.HKEY_CURRENT_USER,
+                extra_registry_key,
+                winreg.KEY_WOW64_64KEY,
+                0,
+            )
+
+
 def test_public_surface_has_no_reset_delete_override() -> None:
     import app.learn.hybrid.benchmark_v2_holdout as holdout
 
@@ -1823,6 +2497,7 @@ def test_public_surface_has_no_reset_delete_override() -> None:
         "authorize_holdout_genesis",
         "claim_holdout_once",
         "recover_claim",
+        "verify_holdout_claim_anchors_for_public_projection",
     }
     assert not any(
         token in name.casefold()
