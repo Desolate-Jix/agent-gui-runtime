@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11, canonical UTF-8 JSON/JSONL, SHA-256 refs, pytest, the existing Windows Job/capability-pipe scorer isolation, and the existing benchmark-v2 lifecycle/claim validators.
 
-**Spec:** This amendment is subordinate to `docs/superpowers/plans/2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan.md` and incorporates the accepted decisions in `.superpowers/sdd/2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan/task-11b-design.md`. Where this amendment freezes a previously missing scoring-bridge field, action, or ordering rule, this amendment controls that bridge only. The Task 11/12 public-validation and dependency-evidence boundary is authoritatively completed by `docs/superpowers/plans/2026-08-29-benchmark-v2-task11-task12-evidence-boundary-amendment.md`; that later amendment supersedes only conflicting Task 11/12 evidence-boundary details and leaves all unrelated contracts here intact.
+**Spec:** This amendment is subordinate to `docs/superpowers/plans/2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan.md` and incorporates the accepted decisions in `.superpowers/sdd/2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan/task-11b-design.md`. Where this amendment freezes a previously missing scoring-bridge field, action, or ordering rule, this amendment controls that bridge only. The Task 11/12 public-validation and dependency-evidence boundary is authoritatively completed by `docs/superpowers/plans/2026-08-29-benchmark-v2-task11-task12-evidence-boundary-amendment.md`; `docs/superpowers/plans/2026-08-29-benchmark-v2-probe-authority-bridge-amendment.md` additionally supersedes conflicting probe-authority, Task 11/12 probe-input, authorization-version, and DAG clauses. All unrelated contracts here remain intact.
 
 ---
 
@@ -29,14 +29,14 @@ Task 9 U0-U3 prerequisite
   -> S2 shared Task 10 private-release validator and child-only Gold derivation
   -> S3 four-flag scorer bridge and public v3 regression binding
   -> public-safe score validator/scanner boundary
+  -> P0 genuine production probe receipts and monotonic timeout proof
+  -> P1 pathless six-cell probe authority
   -> Task 11 leakage review and holdout-authorization code
   -> Task 12 dependency evidence and public-report code
   -> S4a preserve Task 11A genesis/claim and add verify-only anchors plus fixed holdout attempt chain
   -> S4b holdout pathless accepted-input/scoring contracts and consumers
   -> deterministic integration
-  -> STOP before Task 13 --actual-models
-  -> Task 13 fresh pre-final-seal dependency receipts/reviews and final seal
-  -> actual regression, then authorized single holdout, then public report
+  -> STOP before actual models
 ```
 
 S1-S4 are code/schema work and stop before Task 13 final sealing and before `--actual-models`. They do not add a model, provider, supervisor, service, process type, panel route, or action executor. Existing four arms and frozen estimand/gate semantics remain unchanged.

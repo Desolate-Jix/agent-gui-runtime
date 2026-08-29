@@ -2,7 +2,7 @@
 
 **Goal:** Close the public-validation, leakage-review, and dependency-evidence contracts that block Tasks 11 and 12 before S4, without redesigning the existing B1 supervision/cleanup machinery.
 
-**Authority and supersession:** This amendment is subordinate to `2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan.md` and `2026-08-28-benchmark-v2-scoring-bridge-prerequisite-amendment.md`. It supersedes those documents **only** where their Task 11/12 public evidence boundary, leakage-review shape, dependency-evidence shape, or ordering conflicts with this document. All unrelated canonical plan text, S1-S4 contracts, Task 11A durable-claim rules, B1 infrastructure, estimand, gates, safety rules, and actual-run rules remain authoritative.
+**Authority and supersession:** This amendment is subordinate to `2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan.md` and `2026-08-28-benchmark-v2-scoring-bridge-prerequisite-amendment.md`. It supersedes those documents **only** where their Task 11/12 public evidence boundary, leakage-review shape, dependency-evidence shape, or ordering conflicts with this document. `2026-08-29-benchmark-v2-probe-authority-bridge-amendment.md` authoritatively supersedes this document's conflicting Task 11 probe/profile clauses, Task 11/12 probe inputs, authorization version, and DAG placement. All unrelated canonical plan text, S1-S4 contracts, Task 11A durable-claim rules, B1 infrastructure, estimand, gates, safety rules, and actual-run rules remain authoritative.
 
 ---
 
@@ -13,11 +13,13 @@ The only authorized implementation order is:
 ```text
 S3
   -> public boundary
+  -> P0 genuine probe evidence
+  -> P1 public probe authority
   -> Task 11
   -> Task 12
   -> S4
   -> deterministic integration
-  -> STOP before Task 13 --actual-models
+  -> STOP before actual models
 ```
 
 Task 13 may later perform the no-model pre-final-seal work needed to mint fresh dependency result/review receipts, build the release dependency manifest, update the final seal, and only then proceed to actual models. This amendment and its implementation slices do not run a provider or model, acquire a GPU, open or control a GUI, create a real authorization/claim/anchor, seal production fixtures, or make an empirical claim that Hybrid was selected or is superior.
@@ -149,6 +151,8 @@ On successful creation/identical replay, stdout is exactly one compact-canonical
 No path is printed. Errors go to stderr and produce no success object.
 
 ### 3.2 Profile binding
+
+**Superseded for provider probe profiles:** `2026-08-29-benchmark-v2-probe-authority-bridge-amendment.md` replaces the provider-profile interpretation below. `sealed_runtime.profile_refs` remains release configuration authority only. Task 11 must derive Omni/Qwen/VISTA `profile_sha256_by_id` while independently rebuilding the public probe projection from production receipt-v2 and dispatch/runtime-attestation lineage; the bundle itself adds no profile map. The following legacy map must not authorize provider profiles.
 
 After the shared provider-manifest validator succeeds, Task 11 computes the authorization profile map exactly as:
 
@@ -347,6 +351,8 @@ git diff --check
 
 ### Task 11
 
+**Probe-authority correction:** The exact P0, P1, Task 11 allowlists/tests/commits and required `--probe-authority` input are frozen by `2026-08-29-benchmark-v2-probe-authority-bridge-amendment.md`. Where they conflict with this subsection, the probe-authority amendment controls; the leakage-review clauses here remain authoritative.
+
 **Allowed files only:**
 
 - Create `scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py`.
@@ -372,6 +378,8 @@ git diff --check
 **Commit:** `feat(benchmark-v2): validate leakage before authorization`
 
 ### Task 12
+
+**Probe-authority correction:** Task 12 must also bind the exact pathless `regression_probe_authority_ref` as frozen by `2026-08-29-benchmark-v2-probe-authority-bridge-amendment.md`. Its dependency result/review and dependency-manifest v1 clauses below remain unchanged.
 
 **Allowed files only:**
 
