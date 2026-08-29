@@ -28,8 +28,11 @@ P0-C contains exactly these requirements:
 
 P0-C must not create a general durable process supervisor, modify B1, add a
 provider model, retain provider raw output, change `WorkflowService` or
-`LearningStageWorkerRegistry`, or change runner/deadline semantics. P0-D is a
-separate follow-up for monotonic deadlines and runner semantics.
+`LearningStageWorkerRegistry`, or change runner/deadline semantics. P0-D is the
+separate follow-up defined by Section 2 of
+`2026-08-29-benchmark-v2-probe-authority-bridge-amendment.md`, including its
+authoritative `one_requested_attempt_per_provider` / `status="terminal"`
+correction. P0-D must not reopen or expand B1 supervision.
 
 ## Slice 1: durable pre-cancel trigger intent
 

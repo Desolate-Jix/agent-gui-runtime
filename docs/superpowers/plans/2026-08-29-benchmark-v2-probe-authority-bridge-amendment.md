@@ -10,7 +10,7 @@
 
 **Spec:** This amendment is subordinate to `docs/superpowers/plans/2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan.md` and supersedes only conflicting probe-authority, Task 11 profile-binding, Task 11/12 ordering, and canonical CLI clauses in the 2026-08-28 scoring-bridge and 2026-08-29 Task 11/12 evidence-boundary amendments. All unrelated estimand, scoring, leakage, durable-claim, holdout, B1, S1-S4, and safety contracts remain authoritative.
 
-**Authoritative P0 correction:** `docs/superpowers/plans/2026-08-29-benchmark-v2-probe-raw-evidence-plumbing-amendment.md` supersedes this plan only for P0 raw-parent production/revalidation and P0 runner-summary semantics. In particular, P0 records `collection_policy="one_requested_attempt_per_provider"` and `status="terminal"` and makes no first-complete claim; `first_complete_verified_attempt_per_cell` remains exclusively the P1 canonical-ledger rebuild/public-bundle rule. The existing public bundle field set and all unrelated clauses below remain unchanged.
+**Authoritative P0-D correction:** the narrow P0-C contract in `docs/superpowers/plans/2026-08-29-benchmark-v2-probe-raw-evidence-plumbing-amendment.md` is complete and does not define runner/deadline behavior. Section 2 of this plan is now the canonical P0-D contract, subject to this correction: P0 records `collection_policy="one_requested_attempt_per_provider"` and `status="terminal"` and makes no first-complete claim; `first_complete_verified_attempt_per_cell` remains exclusively the P1 canonical-ledger rebuild/public-bundle rule. P0-D must not reopen B1 supervision, create a general durable process supervisor, or revive the superseded raw-evidence expansion. The existing public bundle field set and all unrelated clauses below remain unchanged.
 
 ## Global constraints
 
@@ -93,7 +93,7 @@ body_completion_observation = {
 
 termination_observation = {
   outcome,
-  process_identity,
+  process_identities,
   evidence_ref
 }
 
@@ -111,6 +111,18 @@ observer_identity = {
   content_sha256
 }
 ```
+
+`process_identities` is the exact ordered non-empty `{pid,create_time_ns}` list
+fixed by the durable P0-C trigger intent. It is never collapsed to one process,
+and every identity must have a matching fail-closed live absence observation.
+
+`stable_zero_observation.evidence_ref` resolves one sealed local
+`benchmark_v2_probe_stable_zero_evidence_v1` parent. That parent joins the same
+attempt and cleanup receipt and contains at least three ordered samples taken
+after cleanup. Every sample carries a strictly increasing
+`observed_monotonic_ns` plus the complete `resource_counts` object; every count
+must be zero. A single cleanup result, three copies of one observation, or a
+runner-authored count cannot satisfy this requirement.
 
 For timeout only, `deadline_expiration_ref` resolves a sealed local `benchmark_v2_probe_monotonic_deadline_expiration_v1` parent with exactly:
 
@@ -137,7 +149,7 @@ For both kinds, `partition="regression"`, `status="PASS"`, `artifact_is_authoriz
 - request, trigger, body, termination, stable-zero, cleanup, attempt, and operation parents all join to this one probe attempt;
 - the request was observed `request_in_flight` before the trigger;
 - `body_completion_observation.state == "not_complete"` after the trigger;
-- `termination_observation.outcome == "same_incarnation_exited"` for the exact locally validated process incarnation;
+- `termination_observation.outcome == "same_incarnations_exited"` for the exact ordered P0-C process-identity list;
 - `job_members`, `active_listeners`, and `active_leases` are empty and `stable_zero_observations >= 3`;
 - cleanup is terminal stable zero and binds the same attempt.
 
@@ -203,7 +215,7 @@ contract_version
 benchmark_release_id
 partition
 probe_kind
-selection_policy
+collection_policy
 attempts
 status
 artifact_is_authorization
@@ -211,7 +223,7 @@ execute_binding_enabled
 content_sha256
 ```
 
-`selection_policy` is exactly `first_complete_verified_attempt_per_cell`. `attempts` is exactly three embedded, validated result-v2 objects in provider order `omni,qwen,vista`, one for the summary's kind. `status="PASS"` only when all three results and receipts are terminal PASS. The cancel and timeout summaries use their existing canonical runtime paths:
+`collection_policy` is exactly `one_requested_attempt_per_provider`. `attempts` contains exactly one newly requested, validated result-v2 object for each provider requested by this runner invocation, preserving the validated request order. `status` is exactly `terminal`; P0-D does not select a prior attempt, claim PASS, scan the canonical ledgers for first-complete evidence, or mint public authority. First-complete selection remains a P1-only rule. The cancel and timeout summaries use their existing canonical runtime paths:
 
 ```text
 runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/cancel-probes/cancel-probes.json
