@@ -68,6 +68,7 @@ _ATTEMPT_EVENT_PHASE = {
     "service_started": "prepared",
     "service_recovered": "prepared",
     "provider_request_in_flight": "request_in_flight",
+    "probe_trigger_intent": "request_in_flight",
     "probe_triggered": "request_in_flight",
     "provider_body_complete": "body_complete",
     "attempt_cleanup_prepared": "body_complete",
@@ -4090,6 +4091,7 @@ def _validate_benchmark_v2_attempt_event(value: object) -> dict[str, Any]:
     probe_kind = event["probe_kind"]
     provider_event = kind in {
         "provider_request_in_flight",
+        "probe_trigger_intent",
         "probe_triggered",
         "provider_body_complete",
     }
@@ -4188,6 +4190,24 @@ def append_benchmark_v2_attempt_event(
             "probe_kind": probe_kind,
             "resource_ref": normalized_resource,
         }
+        if event_kind == "probe_trigger_intent":
+            prior_intents = [
+                event
+                for event in events
+                if event["event_kind"] == "probe_trigger_intent"
+                and event["provider_id"] == provider_id
+                and event["probe_kind"] == probe_kind
+            ]
+            if len(prior_intents) > 1:
+                raise ValueError("benchmark probe trigger intent is not unique")
+            if prior_intents:
+                existing_intent = prior_intents[0]
+                if all(
+                    existing_intent[name] == value
+                    for name, value in idempotency.items()
+                ):
+                    return deepcopy(existing_intent)
+                raise ValueError("benchmark probe trigger intent conflicts")
         if events:
             last = events[-1]
             if all(last[name] == value for name, value in idempotency.items()):

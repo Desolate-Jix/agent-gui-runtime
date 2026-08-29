@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterator, Mapping, Protocol
 
 from app.core.ocr_service import ocr_service
 from app.learn.hybrid import benchmark_v2_actual
+from app.learn.hybrid import benchmark_v2_dispatch_attestation
 from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes,
     content_sha256,
@@ -98,6 +99,7 @@ _PROBE_MAX_CONTINUES = 4096
 _PROBE_CONTEXT_CONTRACT = "benchmark_v2_probe_context_v1"
 _PROBE_REQUEST_CONTRACT = "benchmark_v2_probe_request_in_flight_v1"
 _PROBE_TRIGGER_CONTRACT = "benchmark_v2_probe_trigger_receipt_v1"
+_PROBE_TRIGGER_INTENT_CONTRACT = "benchmark_v2_probe_trigger_intent_v1"
 _PROBE_CONTEXT_FIELDS = {
     "contract_version",
     "attempt_ref",
@@ -124,6 +126,21 @@ _PROBE_REQUEST_FIELDS = {
     "dispatch_receipt_ref",
     "provider_runtime_attestation_ref",
     "attempt_event_ref",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_PROBE_TRIGGER_INTENT_FIELDS = {
+    "contract_version",
+    "attempt_ref",
+    "provider_id",
+    "probe_kind",
+    "operation_ref",
+    "request_in_flight_ref",
+    "dispatch_receipt_ref",
+    "dispatch_runtime_parent_ref",
+    "process_identities",
+    "evidence_scope",
     "artifact_is_authorization",
     "execute_binding_enabled",
     "content_sha256",
@@ -1334,19 +1351,16 @@ class _BenchmarkV2ProductionRuntime:
         context_projection = validate_benchmark_v2_provider_dispatch_context_projection(
             context["provider_dispatch_context_projection"]
         )
-        journal_path = _benchmark_v2_dispatch_journal_path_for_operation(
-            project_root=self._project_root,
-            operation_ref=operation,
-        )
         deadline = time.monotonic() + _PROBE_DEADLINE_SECONDS
         receipt: dict[str, Any] | None = None
         while receipt is None:
-            receipt = _read_exact_dispatch_receipt(
-                journal_path=journal_path,
+            evidence = _read_committed_probe_dispatch_evidence(
+                project_root=self._project_root,
                 provider=context["provider_id"],
                 context_projection=context_projection,
             )
-            if receipt is not None:
+            if evidence is not None:
+                receipt = evidence["receipt"]
                 break
             if time.monotonic() >= deadline:
                 raise TimeoutError("benchmark provider request journal was not observed")
@@ -1419,6 +1433,26 @@ class _BenchmarkV2ProductionRuntime:
         existing = state.get("trigger_receipt")
         if isinstance(existing, Mapping):
             return _validate_probe_trigger(existing)
+        trigger_intent = _compose_probe_trigger_intent(
+            project_root=self._project_root,
+            context=context,
+            request=request,
+        )
+        append_benchmark_v2_attempt_event(
+            journal_path=_benchmark_v2_attempt_journal_path(
+                project_root=self._project_root,
+                attempt_ref=context["attempt_ref"],
+            ),
+            attempt_ref=context["attempt_ref"],
+            phase="request_in_flight",
+            event_kind="probe_trigger_intent",
+            provider_id=str(context["provider_id"]),
+            probe_kind=kind,
+            resource_ref=_runtime_resource_ref(
+                "probe_trigger_intent",
+                {"trigger_intent": trigger_intent},
+            ),
+        )
         service_terminal = state.get("service_terminal")
         if not isinstance(service_terminal, Mapping):
             service_terminal = state["service"].cancel_operation(
@@ -3200,6 +3234,202 @@ def _validate_probe_request(value: object) -> dict[str, Any]:
     return request
 
 
+def _read_committed_probe_dispatch_evidence(
+    *,
+    project_root: Path,
+    provider: str,
+    context_projection: Mapping[str, object],
+    expected_dispatch_receipt_ref: Mapping[str, object] | None = None,
+    expected_runtime_identity_ref: Mapping[str, object] | None = None,
+) -> dict[str, Any] | None:
+    root = Path(project_root).resolve()
+    if Path(benchmark_v2_dispatch_attestation.PROJECT_ROOT).resolve() != root:
+        raise ValueError("benchmark dispatch fixed root differs from probe runtime")
+    projection = validate_benchmark_v2_provider_dispatch_context_projection(
+        context_projection
+    )
+    if projection["provider"] != provider:
+        raise ValueError("benchmark probe dispatch context provider is stale")
+    operation = projection["operation_ref"]
+    journal_path = benchmark_v2_dispatch_attestation._fixed_dispatch_journal_path(
+        operation
+    )
+    records = benchmark_v2_dispatch_attestation._read_committed_dispatch_records(
+        journal_path
+    )
+    matches = [
+        receipt
+        for receipt in records
+        if receipt["provider"] == provider and receipt["operation_ref"] == operation
+    ]
+    if not matches:
+        return None
+    if len(matches) != 1 or matches[0]["dispatch_index"] != 1:
+        raise ValueError("benchmark probe did not observe one committed first dispatch")
+    receipt = matches[0]
+    if receipt["predecessor_content_sha256"] != projection["context_content_sha256"]:
+        raise ValueError("benchmark probe first dispatch predecessor context is stale")
+    if expected_dispatch_receipt_ref is not None and receipt["content_sha256"] != _sealed_parent(
+        expected_dispatch_receipt_ref, name="probe trigger expected dispatch receipt"
+    )["content_sha256"]:
+        raise ValueError("benchmark probe dispatch receipt differs from request")
+    if (
+        expected_runtime_identity_ref is not None
+        and receipt["provider_runtime_attestation_ref"]
+        != _sealed_parent(
+            expected_runtime_identity_ref,
+            name="probe trigger expected runtime identity",
+        )
+    ):
+        raise ValueError("benchmark probe runtime identity differs from request")
+    parent_path = benchmark_v2_dispatch_attestation._dispatch_artifact_path(
+        operation, provider, 1, "runtime-parent"
+    )
+    marker_path = benchmark_v2_dispatch_attestation._dispatch_artifact_path(
+        operation, provider, 1, "commit-marker"
+    )
+    parent = benchmark_v2_dispatch_attestation._read_canonical_artifact(
+        parent_path,
+        benchmark_v2_dispatch_attestation._validate_dispatch_runtime_parent,
+        "benchmark dispatch runtime parent",
+    )
+    marker = benchmark_v2_dispatch_attestation._read_canonical_artifact(
+        marker_path,
+        benchmark_v2_dispatch_attestation._validate_dispatch_commit_marker,
+        "benchmark dispatch commit marker",
+    )
+    if (
+        parent["provider"] != provider
+        or parent["operation_ref"] != operation
+        or parent["dispatch_receipt_ref"] != {"content_sha256": receipt["content_sha256"]}
+        or receipt["provider_runtime_attestation_ref"]
+        != {"content_sha256": parent["runtime_identity"]["content_sha256"]}
+        or marker["provider"] != provider
+        or marker["operation_ref"] != operation
+        or marker["dispatch_receipt_ref"] != parent["dispatch_receipt_ref"]
+        or marker["runtime_parent_ref"] != {"content_sha256": parent["content_sha256"]}
+    ):
+        raise ValueError("benchmark probe committed dispatch joins differ")
+    return {"receipt": receipt, "runtime_parent": parent}
+
+
+def _exact_ordered_process_identities(
+    dispatch_runtime_parent: Mapping[str, object],
+) -> list[dict[str, int]]:
+    parent = _sealed_parent(
+        dispatch_runtime_parent,
+        name="probe trigger dispatch runtime parent",
+    )
+    runtime_identity = parent.get("runtime_identity")
+    if not isinstance(runtime_identity, Mapping):
+        raise ValueError("benchmark probe exact process identities are unavailable")
+    identities = runtime_identity.get("process_identities")
+    if not isinstance(identities, list) or not identities:
+        raise ValueError("benchmark probe exact process identities are unavailable")
+    normalized: list[dict[str, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for raw in identities:
+        if not isinstance(raw, Mapping) or set(raw) != {"pid", "create_time_ns"}:
+            raise ValueError("benchmark probe exact process identities are invalid")
+        pid = raw.get("pid")
+        create_time_ns = raw.get("create_time_ns")
+        if (
+            isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or pid <= 0
+            or isinstance(create_time_ns, bool)
+            or not isinstance(create_time_ns, int)
+            or create_time_ns <= 0
+            or (pid, create_time_ns) in seen
+        ):
+            raise ValueError("benchmark probe exact process identities are invalid")
+        seen.add((pid, create_time_ns))
+        normalized.append({"pid": pid, "create_time_ns": create_time_ns})
+    return normalized
+
+
+def _compose_probe_trigger_intent(
+    *,
+    project_root: Path,
+    context: Mapping[str, object],
+    request: Mapping[str, object],
+) -> dict[str, Any]:
+    probe_context = _validate_probe_context(context)
+    in_flight = _validate_probe_request(request)
+    if (
+        in_flight["attempt_ref"] != probe_context["attempt_ref"]
+        or in_flight["provider_id"] != probe_context["provider_id"]
+        or in_flight["probe_kind"] != probe_context["probe_kind"]
+        or in_flight["operation_ref"] != probe_context["operation_ref"]
+    ):
+        raise ValueError("benchmark probe trigger intent lineage is stale")
+    evidence = _read_committed_probe_dispatch_evidence(
+        project_root=project_root,
+        provider=probe_context["provider_id"],
+        context_projection=probe_context["provider_dispatch_context_projection"],
+        expected_dispatch_receipt_ref=in_flight["dispatch_receipt_ref"],
+        expected_runtime_identity_ref=in_flight["provider_runtime_attestation_ref"],
+    )
+    if evidence is None:
+        raise ValueError("benchmark probe committed dispatch receipt is unavailable")
+    parent = evidence["runtime_parent"]
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_TRIGGER_INTENT_CONTRACT,
+        "attempt_ref": deepcopy(probe_context["attempt_ref"]),
+        "provider_id": probe_context["provider_id"],
+        "probe_kind": probe_context["probe_kind"],
+        "operation_ref": deepcopy(probe_context["operation_ref"]),
+        "request_in_flight_ref": _content_ref(
+            in_flight, name="probe trigger request"
+        ),
+        "dispatch_receipt_ref": deepcopy(in_flight["dispatch_receipt_ref"]),
+        "dispatch_runtime_parent_ref": _sealed_parent(
+            parent, name="probe trigger dispatch runtime parent"
+        ),
+        "process_identities": _exact_ordered_process_identities(parent),
+        "evidence_scope": "benchmark_probe_only_non_authorizing",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_probe_trigger_intent(body)
+
+
+def _validate_probe_trigger_intent(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != _PROBE_TRIGGER_INTENT_FIELDS:
+        raise ValueError("benchmark probe trigger intent is not closed")
+    intent = deepcopy(dict(value))
+    if (
+        intent["contract_version"] != _PROBE_TRIGGER_INTENT_CONTRACT
+        or intent["evidence_scope"] != "benchmark_probe_only_non_authorizing"
+        or intent["artifact_is_authorization"] is not False
+        or intent["execute_binding_enabled"] is not False
+        or intent["content_sha256"] != content_sha256(intent)
+    ):
+        raise ValueError("benchmark probe trigger intent is invalid")
+    intent["attempt_ref"] = _sealed_parent(
+        intent["attempt_ref"], name="probe trigger intent attempt ref"
+    )
+    intent["provider_id"] = _probe_provider(intent["provider_id"])
+    intent["probe_kind"] = _probe_kind(intent["probe_kind"])
+    intent["operation_ref"] = validate_benchmark_v2_workflow_service_operation_ref(
+        intent["operation_ref"]
+    )
+    for name in (
+        "request_in_flight_ref",
+        "dispatch_receipt_ref",
+        "dispatch_runtime_parent_ref",
+    ):
+        intent[name] = _sealed_parent(
+            intent[name], name=f"probe trigger intent {name}"
+        )
+    expected = _exact_ordered_process_identities(intent["dispatch_runtime_parent_ref"])
+    if intent["process_identities"] != expected:
+        raise ValueError("benchmark probe exact process identities are stale")
+    intent["process_identities"] = expected
+    return intent
+
+
 def _validate_probe_trigger(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != _PROBE_TRIGGER_FIELDS:
         raise ValueError("benchmark probe trigger receipt is not closed")
@@ -3313,98 +3543,6 @@ def _validate_probe_operation_lineage(
         raise ValueError("benchmark probe WorkflowService window lineage is stale")
     if current["request_ref"] != request_ref:
         raise ValueError("benchmark probe WorkflowService request lineage is stale")
-
-
-def _read_exact_dispatch_receipt(
-    *,
-    journal_path: Path,
-    provider: str,
-    context_projection: Mapping[str, object],
-) -> dict[str, Any] | None:
-    if not journal_path.exists():
-        return None
-    raw = journal_path.read_bytes()
-    if not raw or not raw.endswith(b"\n"):
-        raise ValueError("benchmark dispatch journal is incomplete")
-    projection = validate_benchmark_v2_provider_dispatch_context_projection(
-        context_projection
-    )
-    if projection["provider"] != provider:
-        raise ValueError("benchmark probe dispatch context provider is stale")
-    expected_operation = projection["operation_ref"]
-    matches: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    provider_rows = 0
-    for raw_line in raw.splitlines():
-        try:
-            decoded = json.loads(raw_line.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise ValueError("benchmark dispatch journal is corrupt") from error
-        if canonical_json_bytes(decoded) != raw_line or not isinstance(decoded, Mapping):
-            raise ValueError("benchmark dispatch journal is not canonical")
-        receipt = deepcopy(dict(decoded))
-        required = {
-            "contract_version",
-            "provider",
-            "dispatch_index",
-            "operation_ref",
-            "window_attestation_ref",
-            "provider_runtime_attestation_ref",
-            "predecessor_content_sha256",
-            "artifact_is_authorization",
-            "execute_binding_enabled",
-            "content_sha256",
-        }
-        if set(receipt) != required or (
-            receipt["contract_version"]
-            != "benchmark_v2_provider_dispatch_receipt_v1"
-            or receipt["artifact_is_authorization"] is not False
-            or receipt["execute_binding_enabled"] is not False
-            or receipt["content_sha256"] != content_sha256(receipt)
-        ):
-            raise ValueError("benchmark dispatch receipt is invalid")
-        index = receipt["dispatch_index"]
-        predecessor = receipt["predecessor_content_sha256"]
-        if (
-            isinstance(index, bool)
-            or not isinstance(index, int)
-            or index < 1
-            or not isinstance(predecessor, str)
-            or len(predecessor) != 64
-        ):
-            raise ValueError("benchmark dispatch receipt sequence is invalid")
-        receipt["window_attestation_ref"] = _sealed_parent(
-            receipt["window_attestation_ref"], name="dispatch window attestation"
-        )
-        receipt["provider_runtime_attestation_ref"] = _sealed_parent(
-            receipt["provider_runtime_attestation_ref"],
-            name="dispatch provider runtime attestation",
-        )
-        digest = str(receipt["content_sha256"])
-        if digest in seen:
-            raise ValueError("benchmark dispatch journal contains duplicate receipts")
-        seen.add(digest)
-        if receipt["provider"] == provider:
-            provider_rows += 1
-            if receipt["operation_ref"] != expected_operation:
-                raise ValueError(
-                    "benchmark probe dispatch receipt operation lineage is stale"
-                )
-            matches.append(receipt)
-    if not matches:
-        if provider_rows:
-            raise ValueError("benchmark probe provider receipt was not usable")
-        return None
-    if len(matches) != 1:
-        raise ValueError("benchmark probe provider already dispatched more than once")
-    if matches[0]["dispatch_index"] != 1:
-        raise ValueError("benchmark probe did not observe the first provider dispatch")
-    if (
-        matches[0]["predecessor_content_sha256"]
-        != projection["context_content_sha256"]
-    ):
-        raise ValueError("benchmark probe first dispatch predecessor context is stale")
-    return matches[0]
 
 
 def _service_start_intent_from_events(

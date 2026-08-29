@@ -360,44 +360,116 @@ def _write_dispatch_journal(
     *,
     runtime_module: object,
     project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
     context: dict[str, object],
     provider: str,
     pid: int,
     service: _ProbeService | None = None,
 ) -> dict[str, object]:
-    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch
 
+    del runtime_module
+    monkeypatch.setattr(dispatch, "PROJECT_ROOT", project_root.resolve())
     projection = context["provider_dispatch_context_projection"]
-    journal = runtime_module._benchmark_v2_dispatch_journal_path_for_operation(
-        project_root=project_root,
-        operation_ref=context["operation_ref"],
-    )
-    journal.parent.mkdir(parents=True, exist_ok=True)
     dispatch_operation = deepcopy(projection["operation_ref"])
-    runtime_identity: dict[str, object]
+    identity = {"pid": pid, "create_time_ns": 5000}
     if provider == "omni":
-        runtime_identity = {
-            "provider": "omni",
-            "process_identity": {"pid": pid, "create_time_ns": 5000},
-            "job_member_pids": [pid],
+        snapshot = _sealed(
+            {
+                "contract_version": "omniparser_installed_configuration_snapshot_v1",
+                "profile_id": "omni-test-profile",
+                "interpreter_path": str((project_root / "omni-python.exe").resolve()),
+                "worker_script_path": str((project_root / "omni-worker.py").resolve()),
+                "code_path": str((project_root / "omni-code").resolve()),
+                "weights_path": str((project_root / "omni-weights").resolve()),
+                "cache_path": str((project_root / "omni-cache").resolve()),
+                "minimum_free_gpu_gib": 0,
+                "is_available": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        runtime_identity = dispatch.compose_benchmark_provider_runtime_identity(
+            provider="omni",
+            lease_identity=None,
+            profile_ref=None,
+            listener_owner=None,
+            process_identities=[identity],
+            process_scope={
+                "scope_name": f"scope-omni-{pid}",
+                "member_pids": [pid],
+                "process_identities": [identity],
+            },
+        )
+        runtime_attestation = {
+            "runtime_identity": runtime_identity,
+            "profile": {
+                "profile_id": snapshot["profile_id"],
+                "profile_sha256": snapshot["content_sha256"],
+                "profile_payload_sha256": snapshot["content_sha256"],
+            },
+            "installed_configuration_snapshot": snapshot,
         }
     elif provider == "qwen":
-        runtime_identity = {
-            "provider": "qwen",
-            "lease_id": f"qwen-lease-{pid}",
-            "incarnation_id": f"qwen-incarnation-{pid}",
-            "profile_ref": _identity("qwen-profile", "c"),
-            "socket_ref": _identity("qwen-socket", "d"),
-            "process_identity": {"pid": pid, "create_time_ns": 5000},
+        profile_sha = "c" * 64
+        runtime_identity = dispatch.compose_benchmark_provider_runtime_identity(
+            provider="qwen",
+            lease_identity={
+                "lease_id": f"qwen-lease-{pid}",
+                "incarnation_id": f"qwen-incarnation-{pid}",
+                "owner_request_id": f"qwen-request-{pid}",
+            },
+            profile_ref={"content_sha256": profile_sha},
+            listener_owner={
+                "host": "127.0.0.1",
+                "port": 18000 + (pid % 1000),
+                "process_identities": [identity],
+            },
+            process_identities=[identity],
+            process_scope={
+                "scope_name": f"scope-qwen-{pid}",
+                "member_pids": [pid],
+                "process_identities": [identity],
+            },
+        )
+        runtime_attestation = {
+            "runtime_identity": runtime_identity,
+            "profile": {
+                "profile_id": "qwen-test-profile",
+                "profile_sha256": profile_sha,
+                "profile_payload_sha256": profile_sha,
+            },
+            "installed_configuration_snapshot": None,
         }
     else:
-        runtime_identity = {
-            "provider": "vista",
-            "lease_id": f"vista-lease-{pid}",
-            "incarnation_id": f"vista-incarnation-{pid}",
-            "profile_ref": _identity("vista-profile", "e"),
-            "socket_ref": _identity("vista-socket", "f"),
-            "process_identity": {"pid": pid, "create_time_ns": 5000},
+        profile_sha = "e" * 64
+        runtime_identity = dispatch.compose_benchmark_provider_runtime_identity(
+            provider="vista",
+            lease_identity={
+                "incarnation_id": f"vista-incarnation-{pid}",
+                "lease_content_sha256": "f" * 64,
+            },
+            profile_ref={"content_sha256": profile_sha},
+            listener_owner={
+                "host": "127.0.0.1",
+                "port": 19000 + (pid % 1000),
+                "process_identities": [identity],
+            },
+            process_identities=[identity],
+            process_scope={
+                "scope_name": f"scope-vista-{pid}",
+                "member_pids": [pid],
+                "process_identities": [identity],
+            },
+        )
+        runtime_attestation = {
+            "runtime_identity": runtime_identity,
+            "profile": {
+                "profile_id": "vista-test-profile",
+                "profile_sha256": profile_sha,
+                "profile_payload_sha256": profile_sha,
+            },
+            "installed_configuration_snapshot": None,
         }
     receipt = _sealed(
         {
@@ -405,14 +477,26 @@ def _write_dispatch_journal(
             "provider": provider,
             "dispatch_index": 1,
             "operation_ref": dispatch_operation,
-            "window_attestation_ref": _sealed({"status": "exact"}),
-            "provider_runtime_attestation_ref": _sealed(runtime_identity),
+            "window_attestation_ref": {"content_sha256": "a" * 64},
+            "provider_runtime_attestation_ref": {
+                "content_sha256": runtime_identity["content_sha256"]
+            },
             "predecessor_content_sha256": projection["context_content_sha256"],
             "artifact_is_authorization": False,
             "execute_binding_enabled": False,
         }
     )
-    journal.write_bytes(canonical_json_bytes(receipt) + b"\n")
+    parent = dispatch._compose_dispatch_runtime_parent(
+        provider=provider,
+        operation_ref=dispatch_operation,
+        receipt=receipt,
+        runtime_attestation=runtime_attestation,
+    )
+    dispatch._commit_dispatch_transaction(
+        journal_path=dispatch._fixed_dispatch_journal_path(dispatch_operation),
+        receipt=receipt,
+        runtime_parent=parent,
+    )
     if service is not None:
         service.dispatch_receipt = deepcopy(receipt)
     return receipt
@@ -558,6 +642,120 @@ def test_attempt_resource_journal_is_closed_durable_and_idempotent(
         )
 
 
+def test_probe_trigger_intent_replay_is_journal_wide_idempotent(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        append_benchmark_v2_attempt_event,
+        read_benchmark_v2_attempt_journal,
+    )
+
+    attempt = _sealed({"attempt_id": "attempt-trigger-intent-replay"})
+    journal = (tmp_path / "attempt.jsonl").resolve()
+    append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="prepared",
+        event_kind="attempt_prepared",
+        resource_ref=_sealed({"attempt_dir": str(tmp_path.resolve())}),
+    )
+    intent_resource = _sealed({"intent": "first"})
+    intent = append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="probe_trigger_intent",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=intent_resource,
+    )
+    append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="provider_request_in_flight",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=_sealed({"request": "in-flight"}),
+    )
+
+    replay = append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="probe_trigger_intent",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=intent_resource,
+    )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=journal,
+        attempt_ref=attempt,
+    )
+
+    assert replay == intent
+    assert [event["event_kind"] for event in events] == [
+        "attempt_prepared",
+        "probe_trigger_intent",
+        "provider_request_in_flight",
+    ]
+
+
+def test_probe_trigger_intent_rejects_different_journal_wide_replay(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        append_benchmark_v2_attempt_event,
+        read_benchmark_v2_attempt_journal,
+    )
+
+    attempt = _sealed({"attempt_id": "attempt-trigger-intent-conflict"})
+    journal = (tmp_path / "attempt.jsonl").resolve()
+    append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="prepared",
+        event_kind="attempt_prepared",
+        resource_ref=_sealed({"attempt_dir": str(tmp_path.resolve())}),
+    )
+    append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="probe_trigger_intent",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=_sealed({"intent": "first"}),
+    )
+    append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="provider_request_in_flight",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=_sealed({"request": "in-flight"}),
+    )
+
+    with pytest.raises(ValueError, match="trigger intent"):
+        append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="request_in_flight",
+            event_kind="probe_trigger_intent",
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"intent": "different"}),
+        )
+
+    assert len(
+        read_benchmark_v2_attempt_journal(
+            journal_path=journal,
+            attempt_ref=attempt,
+        )
+    ) == 3
+
+
 def test_attempt_journal_rejects_phase_regression_and_short_write(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -669,6 +867,7 @@ def test_probe_uses_public_workflow_cascade_and_idempotent_cleanup(
     provider: str,
     expected_continues: int,
 ) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch_module
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
     from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
 
@@ -707,6 +906,7 @@ def test_probe_uses_public_workflow_cascade_and_idempotent_cleanup(
     _write_dispatch_journal(
         runtime_module=runtime_module,
         project_root=tmp_path,
+        monkeypatch=monkeypatch,
         context=context,
         provider=provider,
         pid=4000 + expected_continues,
@@ -735,6 +935,152 @@ def test_probe_uses_public_workflow_cascade_and_idempotent_cleanup(
         "listeners": 0,
         "leases": 0,
     }
+
+
+def test_probe_persists_exact_non_authorizing_trigger_intent_before_cancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch_module
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        read_benchmark_v2_attempt_journal,
+    )
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-trigger-intent", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-trigger-intent").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4512,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+    dispatch_parent_path = dispatch_module._dispatch_artifact_path(
+        context["provider_dispatch_context_projection"]["operation_ref"],
+        "omni",
+        1,
+        "runtime-parent",
+    )
+    dispatch_parent = dispatch_module._read_canonical_artifact(
+        dispatch_parent_path,
+        dispatch_module._validate_dispatch_runtime_parent,
+        "benchmark dispatch runtime parent",
+    )
+    original_cancel = service.cancel_operation
+
+    def require_durable_intent(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        events = read_benchmark_v2_attempt_journal(
+            journal_path=journal_path, attempt_ref=attempt
+        )
+        intent_event = next(
+            event
+            for event in events
+            if event["event_kind"] == "probe_trigger_intent"
+        )
+        intent = intent_event["resource_ref"]["value"]["trigger_intent"]
+        assert intent["attempt_ref"] == attempt
+        assert intent["provider_id"] == "omni"
+        assert intent["probe_kind"] == "cancel"
+        assert intent["operation_ref"] == context["operation_ref"]
+        assert intent["request_in_flight_ref"] == request
+        assert intent["dispatch_receipt_ref"] == request["dispatch_receipt_ref"]
+        assert intent["dispatch_runtime_parent_ref"] == dispatch_parent
+        assert intent["process_identities"] == dispatch_parent["runtime_identity"][
+            "process_identities"
+        ]
+        assert intent["evidence_scope"] == "benchmark_probe_only_non_authorizing"
+        assert intent["artifact_is_authorization"] is False
+        assert intent["execute_binding_enabled"] is False
+        return original_cancel(operation_ref=context["operation_ref"])
+
+    monkeypatch.setattr(service, "cancel_operation", require_durable_intent)
+    trigger = runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+
+    assert trigger["outcome"] == "safe_stopped"
+    assert service.cancel_calls == 1
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="trigger_intent_test"
+    )["cleanup_status"] == "stable_zero"
+
+
+def test_probe_read_rejects_uncommitted_dispatch_before_cancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch_module
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-uncommitted-dispatch", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-uncommitted-dispatch").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4513,
+        service=service,
+    )
+    marker_path = dispatch_module._dispatch_artifact_path(
+        context["provider_dispatch_context_projection"]["operation_ref"],
+        "omni",
+        1,
+        "commit-marker",
+    )
+    marker_path.unlink()
+
+    with pytest.raises(ValueError, match="uncommitted|commit marker"):
+        runtime.read_server_journal(probe_context=context)
+
+    assert service.cancel_calls == 0
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="uncommitted_dispatch_test"
+    )["cleanup_status"] == "stable_zero"
 
 
 @pytest.mark.parametrize(
@@ -780,6 +1126,7 @@ def test_probe_trigger_rejects_non_safe_or_unbound_terminal_before_success_event
     _write_dispatch_journal(
         runtime_module=runtime_module,
         project_root=tmp_path,
+        monkeypatch=monkeypatch,
         context=context,
         provider="omni",
         pid=4660,
@@ -815,15 +1162,15 @@ def test_probe_trigger_rejects_non_safe_or_unbound_terminal_before_success_event
         ("vista", 3, "incarnation"),
     ],
 )
-def test_probe_trigger_rejects_dispatch_cleanup_from_different_provider_incarnation(
+def test_probe_read_rejects_tampered_committed_dispatch_before_cancel(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     provider: str,
     expected_continues: int,
     mutation: str,
 ) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch_module
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
-    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
     from app.learn.hybrid.benchmark_v2_lifecycle import (
         read_benchmark_v2_attempt_journal,
     )
@@ -838,7 +1185,7 @@ def test_probe_trigger_rejects_dispatch_cleanup_from_different_provider_incarnat
     )
     attempt = _sealed(
         {
-            "attempt_id": f"attempt-cross-incarnation-{provider}",
+            "attempt_id": f"attempt-tampered-dispatch-{provider}",
             "partition": "regression",
         }
     )
@@ -847,39 +1194,30 @@ def test_probe_trigger_rejects_dispatch_cleanup_from_different_provider_incarnat
         probe_kind="cancel",
         provider_manifest=manifest,
         attempt_ref=attempt,
-        attempt_dir=(tmp_path / f"attempt-cross-incarnation-{provider}").resolve(),
+        attempt_dir=(tmp_path / f"attempt-tampered-dispatch-{provider}").resolve(),
     )
     assert service.continue_calls == expected_continues
     receipt = _write_dispatch_journal(
         runtime_module=runtime_module,
         project_root=tmp_path,
+        monkeypatch=monkeypatch,
         context=context,
         provider=provider,
         pid=4900 + expected_continues,
         service=service,
     )
-    attestation = receipt["provider_runtime_attestation_ref"]
-    if mutation == "create_time":
-        attestation["process_identity"]["create_time_ns"] += 1
-    elif mutation == "lease":
-        attestation["lease_id"] = "qwen-lease-from-another-incarnation"
-    else:
-        attestation["incarnation_id"] = "vista-incarnation-from-another-lease"
-    attestation["content_sha256"] = content_sha256(attestation)
+    receipt["provider_runtime_attestation_ref"] = {
+        "content_sha256": {"create_time": "1", "lease": "2", "incarnation": "3"}[mutation]
+        * 64
+    }
     receipt["content_sha256"] = content_sha256(receipt)
-    journal = runtime_module._benchmark_v2_dispatch_journal_path_for_operation(
-        project_root=tmp_path,
-        operation_ref=context["operation_ref"],
+    journal = dispatch_module._fixed_dispatch_journal_path(
+        context["provider_dispatch_context_projection"]["operation_ref"]
     )
-    journal.write_bytes(canonical_json_bytes(receipt) + b"\n")
-    request = runtime.read_server_journal(probe_context=context)
+    journal.write_bytes(runtime_module.canonical_json_bytes(receipt) + b"\n")
 
-    with pytest.raises(ValueError, match="runtime.owner|incarnation|provider cleanup"):
-        runtime.trigger_probe(
-            probe_context=context,
-            probe_kind="cancel",
-            request_in_flight_journal=request,
-        )
+    with pytest.raises(ValueError, match="corrupt|join differs|uncommitted"):
+        runtime.read_server_journal(probe_context=context)
 
     events = read_benchmark_v2_attempt_journal(
         journal_path=runtime_module._benchmark_v2_attempt_journal_path(
@@ -889,7 +1227,8 @@ def test_probe_trigger_rejects_dispatch_cleanup_from_different_provider_incarnat
         attempt_ref=attempt,
     )
     assert "probe_triggered" not in [event["event_kind"] for event in events]
-    repaired = runtime.cleanup_attempt(attempt=attempt, reason="cross_incarnation")
+    assert service.cancel_calls == 0
+    repaired = runtime.cleanup_attempt(attempt=attempt, reason="tampered_dispatch")
     assert repaired["cleanup_status"] == "stable_zero"
     assert windows.active == 0
 
@@ -947,6 +1286,7 @@ def test_probe_receipt_rejects_stale_or_returned_service_revision_instead_of_iss
     monkeypatch: pytest.MonkeyPatch,
     revision_delta: int,
 ) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch_module
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
     from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
 
@@ -970,6 +1310,7 @@ def test_probe_receipt_rejects_stale_or_returned_service_revision_instead_of_iss
     receipt = _write_dispatch_journal(
         runtime_module=runtime_module,
         project_root=tmp_path,
+        monkeypatch=monkeypatch,
         context=context,
         provider="qwen",
         pid=4770,
@@ -980,13 +1321,12 @@ def test_probe_receipt_rejects_stale_or_returned_service_revision_instead_of_iss
         receipt["operation_ref"]
     )
     receipt["content_sha256"] = content_sha256(receipt)
-    journal = runtime_module._benchmark_v2_dispatch_journal_path_for_operation(
-        project_root=tmp_path,
-        operation_ref=context["operation_ref"],
+    journal = dispatch_module._fixed_dispatch_journal_path(
+        context["provider_dispatch_context_projection"]["operation_ref"]
     )
     journal.write_bytes(runtime_module.canonical_json_bytes(receipt) + b"\n")
 
-    with pytest.raises(ValueError, match="operation lineage is stale"):
+    with pytest.raises(ValueError, match="operation|parent|marker"):
         runtime.read_server_journal(probe_context=context)
 
     cleaned = runtime.cleanup_attempt(attempt=attempt, reason="stale_revision")
@@ -1772,6 +2112,7 @@ def test_probe_lost_trigger_response_uses_durable_reconciliation_without_retry(
     _write_dispatch_journal(
         runtime_module=runtime_module,
         project_root=tmp_path,
+        monkeypatch=monkeypatch,
         context=context,
         provider="qwen",
         pid=4555,
