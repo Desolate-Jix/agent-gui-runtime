@@ -2244,9 +2244,12 @@ def test_runner_production_import_surface_is_explicit_and_provider_safe() -> Non
             "app.learn.hybrid.benchmark_v2_holdout",
             (
                 "AUTHORIZED_HOLDOUT_OUTPUT_ROOT",
+                "_classify_holdout_attempt_events_structure_read_only",
+                "_derive_holdout_cleanup_authority_read_only",
                 "append_holdout_attempt_body_complete",
                 "append_holdout_attempt_cleanup",
                 "append_holdout_attempt_opened",
+                "append_holdout_attempt_recovery_cleanup",
                 "append_holdout_attempt_result",
                 "claim_holdout_once",
                 "holdout_attempt_events_path",
@@ -3201,3 +3204,417 @@ def test_holdout_h3_result_failures_are_closed_without_retry_or_alternate_direct
         assert [item["event"]["event_kind"] for item in chain] == [
             "opened", "body_complete", "cleanup"
         ]
+
+
+def _holdout_h4_input_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[list[str], dict[str, str], dict[str, Path]]:
+    _, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    return (
+        [
+            "--cleanup-only",
+            "--holdout-authorization",
+            "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json",
+            "--ledger-root",
+            "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
+        ],
+        native_ref,
+        paths,
+    )
+
+
+def _install_holdout_h4_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runtime: _HoldoutH3Runtime,
+    *,
+    tail: str = "opened",
+    structure: str = "canonical",
+) -> tuple[list[str], dict[str, Path], list[dict[str, object]], dict[str, object]]:
+    argv, native_ref, paths = _holdout_h4_input_fixture(monkeypatch, tmp_path)
+    claim_id = hashlib.sha256(_canonical(runner.IDENTITY)).hexdigest()
+    claim_ref = {
+        "id": f"holdout-claim/{claim_id}",
+        "envelope_sha256": "b" * 64,
+    }
+    attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + native_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    attempt_dir = paths["output_root"] / attempt_id
+    attempt_dir.mkdir(parents=True)
+    _, attempt_ref, opened_envelope = _expected_holdout_h2_open(
+        authorization_ref=native_ref,
+        claim_id=claim_id,
+        claim_ref=claim_ref,
+        attempt_dir=attempt_dir,
+    )
+    chain = [opened_envelope]
+
+    def add(kind: str, payload: Mapping[str, object]) -> dict[str, object]:
+        event = {
+            "partition": "holdout",
+            "sequence": len(chain),
+            "event_kind": kind,
+            "previous_envelope_sha256": hashlib.sha256(_canonical(chain[-1])).hexdigest(),
+            "event_payload": deepcopy(dict(payload)),
+        }
+        envelope = {
+            "contract_version": "benchmark_v2_holdout_attempt_event_envelope_v1",
+            "event": event,
+            "event_sha256": hashlib.sha256(_canonical(event)).hexdigest(),
+        }
+        chain.append(envelope)
+        return envelope
+
+    if tail == "body_complete":
+        add(
+            "body_complete",
+            _sealed(
+                {
+                    "contract_version": "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+                    "attempt_ref": attempt_ref,
+                    "attempt_dir": str(attempt_dir),
+                    "status": "body_complete",
+                    "body_file_ref": {
+                        "path": str(attempt_dir / "body.json"),
+                        "file_sha256": "c" * 64,
+                        "content_sha256": "d" * 64,
+                    },
+                    "safety": deepcopy(runner.HOLDOUT_SAFETY),
+                }
+            ),
+        )
+    elif tail in {"cleanup", "result", "recovery_cleanup"}:
+        if tail != "recovery_cleanup":
+            add(
+                "body_complete",
+                _sealed(
+                    {
+                        "contract_version": "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+                        "attempt_ref": attempt_ref,
+                        "attempt_dir": str(attempt_dir),
+                        "status": "body_complete",
+                        "body_file_ref": {
+                            "path": str(attempt_dir / "body.json"),
+                            "file_sha256": "c" * 64,
+                            "content_sha256": "d" * 64,
+                        },
+                        "safety": deepcopy(runner.HOLDOUT_SAFETY),
+                    }
+                ),
+            )
+        add(
+            tail,
+            _sealed(
+                {
+                    "contract_version": f"benchmark_v2_holdout_attempt_{tail}_payload_v1",
+                    "attempt_ref": attempt_ref,
+                    "attempt_dir": str(attempt_dir),
+                    "status": tail,
+                    **(
+                        {
+                            "cleanup_receipt_ref": {"content_sha256": "e" * 64},
+                            "resource_counts": deepcopy(runner._ZERO_COUNTS),
+                            "recovery_reason": "cleanup_only_after_interrupted_holdout_attempt",
+                        }
+                        if tail == "recovery_cleanup"
+                        else {}
+                    ),
+                    "safety": deepcopy(runner.HOLDOUT_SAFETY),
+                }
+            ),
+        )
+
+    ledger = paths["ledger_root"] / "holdout" / "attempt-events.jsonl"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_bytes(b"".join(_canonical(item) + b"\n" for item in chain))
+    calls: list[str] = []
+    authority = {
+        "authorization_ref": native_ref,
+        "claim_ref": claim_ref,
+        "attempt_ref": attempt_ref,
+        "attempt_dir": attempt_dir,
+    }
+
+    def derive(**kwargs: object) -> dict[str, object]:
+        calls.append("derive")
+        assert kwargs == {
+            "ledger_root": paths["ledger_root"],
+            "authorization_ref": native_ref,
+        }
+        return deepcopy(authority)
+
+    def validate(**kwargs: object) -> list[dict[str, object]]:
+        calls.append("validate")
+        assert kwargs["authorization_ref"] == native_ref
+        assert kwargs["claim_ref"] == claim_ref
+        return deepcopy(chain)
+
+    def append_recovery(**kwargs: object) -> dict[str, object]:
+        calls.append("append_recovery")
+        payload = deepcopy(kwargs["event_payload"])
+        assert payload["attempt_ref"] == attempt_ref
+        assert payload["attempt_dir"] == str(attempt_dir)
+        assert payload["status"] == "recovery_cleanup"
+        assert payload["recovery_reason"] == "cleanup_only_after_interrupted_holdout_attempt"
+        if chain[-1]["event"]["event_kind"] == "recovery_cleanup":
+            assert chain[-1]["event"]["event_payload"] == payload
+            return deepcopy(chain[-1])
+        appended = add("recovery_cleanup", payload)
+        ledger.write_bytes(b"".join(_canonical(item) + b"\n" for item in chain))
+        return deepcopy(appended)
+
+    monkeypatch.setattr(
+        runner,
+        "_derive_holdout_cleanup_authority_read_only",
+        derive,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_classify_holdout_attempt_events_structure_read_only",
+        lambda **_kwargs: structure,
+        raising=False,
+    )
+    monkeypatch.setattr(runner, "validate_holdout_attempt_events", validate)
+    monkeypatch.setattr(
+        runner,
+        "append_holdout_attempt_recovery_cleanup",
+        append_recovery,
+        raising=False,
+    )
+    monkeypatch.setattr(runner, "holdout_attempt_events_path", lambda **_kwargs: ledger)
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: calls.append("runtime_getter") or runtime,
+    )
+    paths["attempt_dir"] = attempt_dir
+    paths["attempt_ledger"] = ledger
+    runtime.h4_calls = calls
+    return argv, paths, chain, authority
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda argv: argv[:-1],
+        lambda argv: argv + ["--partition", "holdout"],
+        lambda argv: [*argv[1:3], argv[0], *argv[3:]],
+    ],
+)
+def test_holdout_h4_cleanup_only_exact_tokens_fail_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutate
+) -> None:
+    argv, _, _ = _holdout_h4_input_fixture(monkeypatch, tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: calls.append("runtime"),
+    )
+
+    with pytest.raises((ValueError, SystemExit)):
+        runner.run_cli(mutate(argv))
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("tail", ["opened", "body_complete"])
+def test_holdout_h4_cleanup_only_recovers_exact_authority_and_appends_terminal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tail: str
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    argv, paths, chain, authority = _install_holdout_h4_boundary(
+        monkeypatch, tmp_path, runtime, tail=tail
+    )
+
+    result = runner.run_cli(argv)
+
+    assert result == {"status": "recovery_cleanup"}
+    assert [item["event"]["event_kind"] for item in chain][-1] == "recovery_cleanup"
+    cleanup_call = next(value for name, value in runtime.calls if name == "cleanup_attempt")
+    assert cleanup_call == (
+        authority["attempt_ref"]["attempt_id"],
+        "cleanup_only_after_interrupted_holdout_attempt",
+    )
+    assert (paths["attempt_dir"] / "cleanup.json").is_file()
+    assert runtime.h4_calls.index("derive") < runtime.h4_calls.index("runtime_getter")
+    assert runtime.h4_calls.count("append_recovery") == 1
+
+
+def test_holdout_h4_reinvocation_keeps_attempt_ledger_byte_identical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    argv, paths, chain, _ = _install_holdout_h4_boundary(monkeypatch, tmp_path, runtime)
+    runner.run_cli(argv)
+    first = paths["attempt_ledger"].read_bytes()
+    chain[:] = deepcopy(chain)
+
+    runner.run_cli(argv)
+
+    assert paths["attempt_ledger"].read_bytes() == first
+    assert [item["event"]["event_kind"] for item in chain] == [
+        "opened", "recovery_cleanup"
+    ]
+
+
+@pytest.mark.parametrize("tail", ["cleanup", "result"])
+def test_holdout_h4_normal_terminal_tails_refuse_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tail: str
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    argv, _, _, _ = _install_holdout_h4_boundary(
+        monkeypatch, tmp_path, runtime, tail=tail
+    )
+
+    with pytest.raises(ValueError, match="terminal"):
+        runner.run_cli(argv)
+
+    assert not any(name == "cleanup_attempt" for name, _ in runtime.calls)
+
+
+@pytest.mark.parametrize("failure", ["authority", "event"])
+def test_holdout_h4_authority_or_event_mismatch_refuses_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    argv, _, _, _ = _install_holdout_h4_boundary(monkeypatch, tmp_path, runtime)
+    target = (
+        "_derive_holdout_cleanup_authority_read_only"
+        if failure == "authority"
+        else "validate_holdout_attempt_events"
+    )
+    monkeypatch.setattr(
+        runner,
+        target,
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("authority mismatch")),
+    )
+
+    with pytest.raises(ValueError, match="authority mismatch"):
+        runner.run_cli(argv)
+
+    assert not any(name == "cleanup_attempt" for name, _ in runtime.calls)
+
+
+@pytest.mark.parametrize("mutation", ["reason", "attempt", "nonzero", "error"])
+def test_holdout_h4_cleanup_failure_blocks_event_and_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    if mutation in {"reason", "attempt"}:
+        original = runtime.cleanup_attempt
+        def cleanup(**kwargs: object) -> Mapping[str, object]:
+            receipt = dict(original(**kwargs))
+            if mutation == "reason":
+                receipt["reason"] = "wrong_reason"
+            else:
+                receipt["attempt_ref"] = _sealed({"attempt_id": "wrong"})
+            receipt["content_sha256"] = runner._content_sha256(receipt)
+            return receipt
+        runtime.cleanup_attempt = cleanup
+    elif mutation == "nonzero":
+        runtime.resource_counts = lambda: {**runner._ZERO_COUNTS, "providers": 1}
+    else:
+        runtime.cleanup_attempt = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("cleanup API failed"))
+    argv, paths, chain, _ = _install_holdout_h4_boundary(monkeypatch, tmp_path, runtime)
+
+    with pytest.raises((ValueError, RuntimeError)):
+        runner.run_cli(argv)
+
+    assert [item["event"]["event_kind"] for item in chain] == ["opened"]
+    assert not (paths["attempt_dir"] / "result.json").exists()
+
+
+@pytest.mark.parametrize("structure", ["missing", "partial", "noncanonical", "hash_invalid"])
+def test_holdout_h4_damaged_ledger_cleanup_is_nonreleasing_and_preserves_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, structure: str
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    argv, paths, chain, _ = _install_holdout_h4_boundary(
+        monkeypatch, tmp_path, runtime, structure=structure
+    )
+    if structure == "missing":
+        paths["attempt_ledger"].unlink()
+        before = None
+    else:
+        damaged = {
+            "partial": b'{"partial":',
+            "noncanonical": b'{}\n',
+            "hash_invalid": b'{"event_sha256":"bad"}\n',
+        }[structure]
+        paths["attempt_ledger"].write_bytes(damaged)
+        before = damaged
+
+    result = runner.run_cli(argv)
+
+    assert result == {"status": "cleanup_indeterminate"}
+    assert (
+        not paths["attempt_ledger"].exists()
+        if before is None
+        else paths["attempt_ledger"].read_bytes() == before
+    )
+    assert chain == [chain[0]]
+    assert not (paths["attempt_dir"] / "cleanup.json").exists()
+    assert not (paths["attempt_dir"] / "result.json").exists()
+
+
+def test_holdout_h4_nonfinite_json_ledger_runs_exact_cleanup_without_repair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.learn.hybrid import benchmark_v2_holdout as holdout
+
+    runtime = _HoldoutH3Runtime()
+    argv, paths, chain, authority = _install_holdout_h4_boundary(
+        monkeypatch, tmp_path, runtime, structure="noncanonical"
+    )
+    damaged = b'{"contract_version":NaN}\n'
+    paths["attempt_ledger"].write_bytes(damaged)
+    monkeypatch.setattr(
+        runner,
+        "_classify_holdout_attempt_events_structure_read_only",
+        lambda **_kwargs: holdout._classify_holdout_attempt_events_structure(
+            paths["attempt_ledger"]
+        ),
+    )
+
+    result = runner.run_cli(argv)
+
+    assert result == {"status": "cleanup_indeterminate"}
+    assert paths["attempt_ledger"].read_bytes() == damaged
+    assert chain == [chain[0]]
+    assert runtime.h4_calls.count("runtime_getter") == 1
+    assert next(value for name, value in runtime.calls if name == "cleanup_attempt") == (
+        authority["attempt_ref"]["attempt_id"],
+        "cleanup_only_after_interrupted_holdout_attempt",
+    )
+    assert "append_recovery" not in runtime.h4_calls
+    assert not (paths["attempt_dir"] / "cleanup.json").exists()
+    assert not (paths["attempt_dir"] / "result.json").exists()
+
+
+def test_holdout_h4_damaged_ledger_without_independent_runtime_proof_is_indeterminate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _HoldoutH3Runtime()
+    runtime.cleanup_attempt = lambda **_kwargs: (_ for _ in ()).throw(
+        RuntimeError("journal proof unavailable")
+    )
+    argv, paths, chain, _ = _install_holdout_h4_boundary(
+        monkeypatch, tmp_path, runtime, structure="partial"
+    )
+    damaged = b'{"partial":'
+    paths["attempt_ledger"].write_bytes(damaged)
+
+    with pytest.raises(RuntimeError, match="cleanup_indeterminate"):
+        runner.run_cli(argv)
+
+    assert paths["attempt_ledger"].read_bytes() == damaged
+    assert chain == [chain[0]]
+    assert not (paths["attempt_dir"] / "cleanup.json").exists()

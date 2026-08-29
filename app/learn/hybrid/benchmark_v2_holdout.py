@@ -325,6 +325,96 @@ def _verified_attempt_authority(
     }
 
 
+def _derive_holdout_cleanup_authority(
+    *,
+    backend: object,
+    authorization_ref: Mapping[str, str],
+) -> dict[str, object]:
+    authorization = _native_authorization_ref(authorization_ref)
+    path = Path(authorization["fixed_authorization_path"])
+    try:
+        raw = path.read_bytes()
+        wrapped = json.loads(raw.decode("utf-8"))
+        candidate, digest = authorization_envelope(wrapped["payload"])
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise ValueError("holdout cleanup authorization anchor is invalid") from error
+    if canonical_bytes(wrapped) != raw or wrapped != candidate or digest != authorization["envelope_sha256"]:
+        raise ValueError("holdout cleanup authorization anchor differs")
+    verified = _verify_claim_anchors_read_only(
+        backend=backend,
+        authorization=wrapped["payload"],
+        authorization_ref=authorization,
+        ledger_root=Path(backend.ledger_root),
+    )
+    claim_ref = verified.get("claim_ref")
+    if not isinstance(claim_ref, Mapping):
+        raise ValueError("holdout cleanup claim anchor is invalid")
+    authority = _verified_attempt_authority(
+        backend=backend,
+        authorization_ref=authorization,
+        claim_ref=claim_ref,
+    )
+    if authority["attempt_id"] != verified.get("attempt_id"):
+        raise ValueError("holdout cleanup attempt identity differs")
+    attempt_ref_without_content = {
+        "contract_version": "benchmark_v2_holdout_attempt_ref_v1",
+        "attempt_id": authority["attempt_id"],
+        "authorization_ref": dict(authority["authorization_ref"]),
+        "claim_ref": dict(authority["claim_ref"]),
+        "partition": "holdout",
+        "mode": "actual_models",
+        "provider_id": None,
+        "safety": dict(SAFETY),
+    }
+    attempt_ref = {
+        **attempt_ref_without_content,
+        "content_sha256": hashlib.sha256(
+            canonical_bytes(attempt_ref_without_content)
+        ).hexdigest(),
+    }
+    return {
+        "authorization_ref": dict(authority["authorization_ref"]),
+        "claim_ref": dict(authority["claim_ref"]),
+        "attempt_ref": attempt_ref,
+        "attempt_dir": str(authority["attempt_dir"]),
+    }
+
+
+def _derive_holdout_cleanup_authority_read_only(
+    *, ledger_root: Path, authorization_ref: Mapping[str, str]
+) -> dict[str, object]:
+    backend = _production_backend()
+    if (
+        not _production_ledger_root_is_exact(Path(ledger_root))
+        or Path(ledger_root) != Path(backend.ledger_root)
+    ):
+        raise ValueError("production holdout cleanup ledger root is fixed")
+    _validate_production_authorization_ref(backend, authorization_ref)
+    return _derive_holdout_cleanup_authority(
+        backend=backend,
+        authorization_ref=authorization_ref,
+    )
+
+
+def _derive_holdout_cleanup_authority_for_test(
+    *, backend: object, authorization_ref: Mapping[str, str]
+) -> dict[str, object]:
+    if getattr(backend, "test_capability", None) is None:
+        raise ValueError("explicit test backend capability required")
+    exact = _test_backend(
+        file_root=Path(backend.file_root),
+        registry_root=str(backend.registry_root),
+        ledger_root=Path(backend.ledger_root),
+        capability=str(backend.test_capability),
+    )
+    if exact != backend:
+        raise ValueError("test holdout backend differs from exact reconstruction")
+    return _derive_holdout_cleanup_authority(
+        backend=exact,
+        authorization_ref=authorization_ref,
+    )
+
+
 def _holdout_attempt_ref(
     value: object, *, authorization_ref: Mapping[str, str], claim_ref: Mapping[str, str]
 ) -> dict[str, object]:
@@ -535,6 +625,92 @@ def _read_holdout_attempt_chain(
         state = str(kind)
         result.append(dict(envelope))
     return result
+
+
+def _classify_holdout_attempt_events_structure(path: Path) -> str:
+    ledger = Path(path)
+    if not ledger.exists():
+        return "missing"
+    try:
+        raw = ledger.read_bytes()
+    except OSError as error:
+        raise RuntimeError("cleanup_indeterminate") from error
+    if not raw or b"\r" in raw:
+        return "noncanonical"
+    if not raw.endswith(b"\n"):
+        return "partial"
+    lines = raw.split(b"\n")[:-1]
+    if not lines or any(not line for line in lines):
+        return "noncanonical"
+
+    def reject_nonfinite_json(value: str) -> object:
+        raise ValueError(f"non-finite JSON constant: {value}")
+
+    previous = _ZERO
+    for sequence, line in enumerate(lines):
+        try:
+            envelope = json.loads(
+                line.decode("utf-8"),
+                parse_constant=reject_nonfinite_json,
+            )
+            canonical = canonical_bytes(envelope)
+        except (UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+            return "noncanonical"
+        if (
+            not isinstance(envelope, Mapping)
+            or canonical != line
+            or set(envelope) != {"contract_version", "event", "event_sha256"}
+            or envelope.get("contract_version") != _HOLDOUT_ATTEMPT_ENVELOPE
+        ):
+            return "noncanonical"
+        event = envelope.get("event")
+        if not isinstance(event, Mapping) or set(event) != {
+            "partition",
+            "sequence",
+            "event_kind",
+            "previous_envelope_sha256",
+            "event_payload",
+        }:
+            return "noncanonical"
+        if (
+            isinstance(event.get("sequence"), bool)
+            or not isinstance(event.get("sequence"), int)
+            or event.get("sequence") != sequence
+            or event.get("previous_envelope_sha256") != previous
+            or envelope.get("event_sha256")
+            != hashlib.sha256(canonical_bytes(event)).hexdigest()
+        ):
+            return "hash_invalid"
+        previous = hashlib.sha256(canonical_bytes(envelope)).hexdigest()
+    return "canonical"
+
+
+def _classify_holdout_attempt_events_structure_read_only(*, ledger_root: Path) -> str:
+    backend = _production_backend()
+    if (
+        not _production_ledger_root_is_exact(Path(ledger_root))
+        or Path(ledger_root) != Path(backend.ledger_root)
+    ):
+        raise ValueError("production holdout cleanup ledger root is fixed")
+    return _classify_holdout_attempt_events_structure(
+        holdout_attempt_events_path(ledger_root=Path(backend.ledger_root))
+    )
+
+
+def _classify_holdout_attempt_events_structure_for_test(*, backend: object) -> str:
+    if getattr(backend, "test_capability", None) is None:
+        raise ValueError("explicit test backend capability required")
+    exact = _test_backend(
+        file_root=Path(backend.file_root),
+        registry_root=str(backend.registry_root),
+        ledger_root=Path(backend.ledger_root),
+        capability=str(backend.test_capability),
+    )
+    if exact != backend:
+        raise ValueError("test holdout backend differs from exact reconstruction")
+    return _classify_holdout_attempt_events_structure(
+        holdout_attempt_events_path(ledger_root=exact.ledger_root)
+    )
 
 
 def _validate_holdout_chain_artifacts(path: Path, chain: list[dict[str, object]]) -> None:

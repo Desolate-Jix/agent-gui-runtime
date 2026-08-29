@@ -45,9 +45,12 @@ from app.learn.hybrid.benchmark_v2_durable_claim import (
 )
 from app.learn.hybrid.benchmark_v2_holdout import (
     AUTHORIZED_HOLDOUT_OUTPUT_ROOT,
+    _classify_holdout_attempt_events_structure_read_only,
+    _derive_holdout_cleanup_authority_read_only,
     append_holdout_attempt_body_complete,
     append_holdout_attempt_cleanup,
     append_holdout_attempt_opened,
+    append_holdout_attempt_recovery_cleanup,
     append_holdout_attempt_result,
     claim_holdout_once,
     holdout_attempt_events_path,
@@ -64,6 +67,7 @@ _ACTUAL_RESULT_CONTRACT = "benchmark_v2_runner_actual_result_v2"
 _PRE_RESULT_REF_CONTRACT = "benchmark_v2_runner_ledger_pre_result_ref_v1"
 _CLEANUP_RECEIPT_CONTRACT = "benchmark_v2_attempt_cleanup_receipt_v1"
 _HOLDOUT_NORMAL_CLEANUP_REASON = "benchmark_v2_holdout_actual_runner_finished"
+_HOLDOUT_RECOVERY_CLEANUP_REASON = "cleanup_only_after_interrupted_holdout_attempt"
 _ZERO_SHA256 = "0" * 64
 _PROVIDERS = ("omni", "qwen", "vista")
 _ZERO_COUNTS = {
@@ -115,6 +119,23 @@ class _OpenedHoldoutActualModelsAttempt:
     validated: _ValidatedHoldoutActualModelsInput
     attempt_ref: dict[str, object]
     attempt_dir: Path
+
+
+@dataclass(frozen=True)
+class _ValidatedHoldoutCleanupOnlyInput:
+    authorization_ref_path: Path
+    ledger_root: Path
+    authorization_ref: dict[str, str]
+
+
+@dataclass(frozen=True)
+class _PreparedHoldoutCleanupOnly:
+    validated: _ValidatedHoldoutCleanupOnlyInput
+    attempt_ref: dict[str, object]
+    attempt_dir: Path
+    claim_ref: dict[str, str]
+    structure: str
+    chain: list[dict[str, object]] | None
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -253,6 +274,94 @@ def _validate_holdout_actual_models_input(
         output_root=output_root,
         authorization_ref={
             "authorization_id": str(authorization_ref["authorization_id"]),
+            "envelope_sha256": envelope_sha256,
+            "fixed_authorization_path": fixed_path_raw,
+        },
+    )
+
+
+def _validate_holdout_cleanup_only_input(
+    argv: Sequence[str],
+) -> _ValidatedHoldoutCleanupOnlyInput:
+    raw = tuple(argv)
+    expected = (
+        "--cleanup-only",
+        "--holdout-authorization",
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json",
+        "--ledger-root",
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
+    )
+    if raw != expected:
+        raise ValueError("holdout cleanup-only requires the exact raw token vector")
+    project_root = Path(_PROJECT_ROOT)
+    if (
+        not project_root.is_absolute()
+        or project_root.resolve(strict=True) != project_root
+        or _is_reparse(project_root)
+    ):
+        raise ValueError("compile-time project root is not canonical")
+
+    def resolve_token(token: str, *, label: str) -> Path:
+        candidate = project_root.joinpath(*token.split("/"))
+        resolved = candidate.resolve(strict=False)
+        if candidate != resolved:
+            raise ValueError(f"{label} resolves through an alias")
+        return candidate
+
+    authorization_ref_path = _require_ordinary_path(
+        resolve_token(expected[2], label="holdout cleanup authorization ref"),
+        name="holdout cleanup authorization ref",
+        kind="file",
+    )
+    ledger_root = _require_ordinary_path(
+        resolve_token(expected[4], label="holdout cleanup ledger root"),
+        name="holdout cleanup ledger root",
+        kind="directory",
+    )
+    if ledger_root != Path(PRODUCTION_LEDGER_ROOT):
+        raise ValueError("holdout cleanup ledger root is not the fixed production root")
+    try:
+        raw_ref = authorization_ref_path.read_bytes()
+        decoded = json.loads(raw_ref.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("holdout cleanup authorization ref is invalid") from error
+    if (
+        not isinstance(decoded, Mapping)
+        or _canonical_bytes(decoded) != raw_ref
+        or set(decoded)
+        != {"authorization_id", "envelope_sha256", "fixed_authorization_path"}
+    ):
+        raise ValueError("holdout cleanup authorization ref is invalid")
+    claim_id = hashlib.sha256(_canonical_bytes(IDENTITY)).hexdigest()
+    envelope_sha256 = decoded.get("envelope_sha256")
+    fixed_path_raw = decoded.get("fixed_authorization_path")
+    if (
+        decoded.get("authorization_id") != f"holdout-authorization/{claim_id}"
+        or not isinstance(envelope_sha256, str)
+        or len(envelope_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in envelope_sha256)
+        or not isinstance(fixed_path_raw, str)
+        or not fixed_path_raw
+    ):
+        raise ValueError("holdout cleanup authorization ref shape is invalid")
+    fixed_path = Path(fixed_path_raw)
+    if (
+        not fixed_path.is_absolute()
+        or str(fixed_path) != fixed_path_raw
+        or fixed_path.resolve(strict=False) != fixed_path
+        or fixed_path.name != f"{claim_id}.authorization.json"
+    ):
+        raise ValueError("holdout cleanup authorization fixed path is invalid")
+    _require_ordinary_path(
+        fixed_path,
+        name="holdout cleanup authorization fixed path",
+        kind="pending",
+    )
+    return _ValidatedHoldoutCleanupOnlyInput(
+        authorization_ref_path=authorization_ref_path,
+        ledger_root=ledger_root,
+        authorization_ref={
+            "authorization_id": str(decoded["authorization_id"]),
             "envelope_sha256": envelope_sha256,
             "fixed_authorization_path": fixed_path_raw,
         },
@@ -1797,6 +1906,181 @@ def _run_holdout_actual_models(
     return result
 
 
+def _prepare_holdout_cleanup_only(
+    validated: _ValidatedHoldoutCleanupOnlyInput,
+) -> _PreparedHoldoutCleanupOnly:
+    authority = _derive_holdout_cleanup_authority_read_only(
+        ledger_root=validated.ledger_root,
+        authorization_ref=validated.authorization_ref,
+    )
+    if not isinstance(authority, Mapping) or set(authority) != {
+        "authorization_ref",
+        "claim_ref",
+        "attempt_ref",
+        "attempt_dir",
+    }:
+        raise ValueError("holdout cleanup authority is invalid")
+    claim_ref_raw = authority.get("claim_ref")
+    if (
+        authority.get("authorization_ref") != validated.authorization_ref
+        or not isinstance(claim_ref_raw, Mapping)
+        or set(claim_ref_raw) != {"id", "envelope_sha256"}
+    ):
+        raise ValueError("holdout cleanup authority binding differs")
+    claim_ref = {name: str(value) for name, value in claim_ref_raw.items()}
+    attempt_ref = _sealed_mapping(
+        authority.get("attempt_ref"), name="holdout cleanup attempt ref"
+    )
+    expected_attempt_fields = {
+        "contract_version",
+        "attempt_id",
+        "authorization_ref",
+        "claim_ref",
+        "partition",
+        "mode",
+        "provider_id",
+        "safety",
+        "content_sha256",
+    }
+    attempt_id = attempt_ref.get("attempt_id")
+    expected_dir = (
+        Path(AUTHORIZED_HOLDOUT_OUTPUT_ROOT) / str(attempt_id)
+    ).resolve()
+    attempt_dir_raw = authority.get("attempt_dir")
+    if (
+        set(attempt_ref) != expected_attempt_fields
+        or attempt_ref.get("contract_version")
+        != "benchmark_v2_holdout_attempt_ref_v1"
+        or not _valid_lower_sha(attempt_id)
+        or attempt_ref.get("authorization_ref") != validated.authorization_ref
+        or attempt_ref.get("claim_ref") != claim_ref
+        or attempt_ref.get("partition") != "holdout"
+        or attempt_ref.get("mode") != "actual_models"
+        or attempt_ref.get("provider_id") is not None
+        or attempt_ref.get("safety") != HOLDOUT_SAFETY
+        or not isinstance(attempt_dir_raw, (str, Path))
+        or Path(attempt_dir_raw) != expected_dir
+    ):
+        raise ValueError("holdout cleanup derived attempt authority differs")
+    structure = _classify_holdout_attempt_events_structure_read_only(
+        ledger_root=validated.ledger_root
+    )
+    allowed_structures = {
+        "canonical",
+        "missing",
+        "partial",
+        "noncanonical",
+        "hash_invalid",
+    }
+    if structure not in allowed_structures:
+        raise RuntimeError("cleanup_indeterminate")
+    chain: list[dict[str, object]] | None = None
+    if structure == "canonical":
+        chain = validate_holdout_attempt_events(
+            ledger_root=validated.ledger_root,
+            authorization_ref=validated.authorization_ref,
+            claim_ref=claim_ref,
+        )
+        if not chain:
+            raise ValueError("holdout cleanup canonical ledger is empty")
+        tail = chain[-1].get("event", {}).get("event_kind")
+        if tail in {"cleanup", "result"}:
+            raise ValueError("holdout cleanup normal terminal tail is ineligible")
+        if tail not in {"opened", "body_complete", "recovery_cleanup"}:
+            raise ValueError("holdout cleanup attempt tail is ineligible")
+        payload = chain[-1].get("event", {}).get("event_payload")
+        if (
+            not isinstance(payload, Mapping)
+            or payload.get("attempt_ref") != attempt_ref
+            or payload.get("attempt_dir") != str(expected_dir)
+        ):
+            raise ValueError("holdout cleanup event authority differs")
+    return _PreparedHoldoutCleanupOnly(
+        validated=validated,
+        attempt_ref=attempt_ref,
+        attempt_dir=expected_dir,
+        claim_ref=claim_ref,
+        structure=structure,
+        chain=chain,
+    )
+
+
+def _run_holdout_cleanup_only(
+    *, prepared: _PreparedHoldoutCleanupOnly, runtime: object
+) -> dict[str, object]:
+    try:
+        cleanup = _validate_cleanup_receipt(
+            runtime.cleanup_attempt(
+                attempt=deepcopy(prepared.attempt_ref),
+                reason=_HOLDOUT_RECOVERY_CLEANUP_REASON,
+            ),
+            attempt_ref=prepared.attempt_ref,
+            require_effect_refs=False,
+        )
+        if cleanup.get("reason") != _HOLDOUT_RECOVERY_CLEANUP_REASON:
+            raise ValueError("holdout recovery cleanup receipt reason differs")
+        counts = _require_zero_counts(runtime)
+        if cleanup.get("resource_counts") != counts:
+            raise ValueError(
+                "holdout recovery cleanup receipt differs from fresh stable zero"
+            )
+    except BaseException as error:
+        if prepared.structure != "canonical":
+            raise RuntimeError("cleanup_indeterminate") from error
+        raise
+    if prepared.structure != "canonical":
+        return {"status": "cleanup_indeterminate"}
+
+    assert prepared.chain is not None
+    cleanup_path = prepared.attempt_dir / "cleanup.json"
+    _write_json_create_or_identical(cleanup_path, cleanup)
+    payload = _seal(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_recovery_cleanup_payload_v1",
+            "attempt_ref": deepcopy(prepared.attempt_ref),
+            "attempt_dir": str(prepared.attempt_dir),
+            "status": "recovery_cleanup",
+            "cleanup_receipt_ref": _content_ref(
+                cleanup, name="holdout recovery cleanup receipt"
+            ),
+            "resource_counts": counts,
+            "recovery_reason": _HOLDOUT_RECOVERY_CLEANUP_REASON,
+            "safety": deepcopy(HOLDOUT_SAFETY),
+        }
+    )
+    ledger_path = holdout_attempt_events_path(
+        ledger_root=prepared.validated.ledger_root
+    )
+    before = Path(ledger_path).read_bytes()
+    appended = append_holdout_attempt_recovery_cleanup(
+        ledger_root=prepared.validated.ledger_root,
+        authorization_ref=prepared.validated.authorization_ref,
+        claim_ref=prepared.claim_ref,
+        event_payload=payload,
+    )
+    reopened = validate_holdout_attempt_events(
+        ledger_root=prepared.validated.ledger_root,
+        authorization_ref=prepared.validated.authorization_ref,
+        claim_ref=prepared.claim_ref,
+    )
+    prior_kinds = [item["event"]["event_kind"] for item in prepared.chain]
+    expected_kinds = (
+        prior_kinds
+        if prior_kinds[-1] == "recovery_cleanup"
+        else [*prior_kinds, "recovery_cleanup"]
+    )
+    if (
+        [item.get("event", {}).get("event_kind") for item in reopened]
+        != expected_kinds
+        or not reopened
+        or reopened[-1] != appended
+    ):
+        raise ValueError("holdout recovery cleanup was not durably reopened")
+    if prior_kinds[-1] == "recovery_cleanup" and Path(ledger_path).read_bytes() != before:
+        raise ValueError("holdout recovery cleanup reinvocation changed ledger bytes")
+    return {"status": "recovery_cleanup"}
+
+
 def _run_actual(args: argparse.Namespace, runtime: object) -> dict[str, object]:
     if args.partition != "regression":
         raise ValueError("Task 9 actual execution is regression-only; holdout is not authorized")
@@ -2643,6 +2927,14 @@ def _reject(args: argparse.Namespace, *names: str) -> None:
 def run_cli(argv: Sequence[str]) -> dict[str, object]:
     argv_list = list(argv)
     args = _parser().parse_args(argv_list)
+    if args.cleanup_only:
+        validated_cleanup = _validate_holdout_cleanup_only_input(argv_list)
+        prepared_cleanup = _prepare_holdout_cleanup_only(validated_cleanup)
+        cleanup_runtime = get_production_benchmark_v2_runtime()
+        return _run_holdout_cleanup_only(
+            prepared=prepared_cleanup,
+            runtime=cleanup_runtime,
+        )
     if args.actual_models and (
         args.partition == "holdout" or args.holdout_authorization is not None
     ):
@@ -2796,8 +3088,6 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             "holdout_authorization",
         )
         return _cleanup_open_attempts(args, runtime)
-    if args.cleanup_only:
-        raise ValueError("holdout cleanup-only requires the Task 13 authorization boundary")
     raise RuntimeError("runner action selection is unreachable")
 
 

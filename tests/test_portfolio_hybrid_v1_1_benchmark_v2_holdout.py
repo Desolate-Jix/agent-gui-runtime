@@ -286,6 +286,165 @@ def _holdout_payload(contract: str, attempt_ref, attempt_dir: str, status: str, 
     )
 
 
+def test_holdout_h4_derives_cleanup_authority_only_from_verified_test_anchors(
+    test_backend,
+) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(
+        test_backend
+    )
+
+    derived = holdout._derive_holdout_cleanup_authority_for_test(
+        backend=test_backend,
+        authorization_ref=authorization_ref,
+    )
+
+    assert derived == {
+        "authorization_ref": authorization_ref,
+        "claim_ref": claim_ref,
+        "attempt_ref": attempt_ref,
+        "attempt_dir": attempt_dir,
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, "missing"),
+        (b'{"partial":', "partial"),
+        (b'{}\n', "noncanonical"),
+        (b'{"event_sha256":"bad"}\n', "noncanonical"),
+    ],
+)
+def test_holdout_h4_structural_classifier_is_read_only(
+    test_backend, raw: bytes | None, expected: str
+) -> None:
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    if raw is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+    before = None if raw is None else path.read_bytes()
+
+    state = holdout._classify_holdout_attempt_events_structure_for_test(
+        backend=test_backend
+    )
+
+    assert state == expected
+    assert (not path.exists()) if before is None else path.read_bytes() == before
+
+
+def test_holdout_h4_structural_classifier_does_not_promote_semantic_authority(
+    test_backend,
+) -> None:
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "partition": "holdout",
+        "sequence": 0,
+        "event_kind": "semantic_mismatch",
+        "previous_envelope_sha256": "0" * 64,
+        "event_payload": {"untrusted": True},
+    }
+    envelope = {
+        "contract_version": "benchmark_v2_holdout_attempt_event_envelope_v1",
+        "event": event,
+        "event_sha256": hashlib.sha256(canonical_bytes(event)).hexdigest(),
+    }
+    path.write_bytes(canonical_bytes(envelope) + b"\n")
+
+    assert (
+        holdout._classify_holdout_attempt_events_structure_for_test(
+            backend=test_backend
+        )
+        == "canonical"
+    )
+    with pytest.raises(ValueError):
+        _validate_holdout_attempt_events_for_test(
+            backend=test_backend,
+            authorization_ref={
+                "authorization_id": "holdout-authorization/" + claim_id(IDENTITY),
+                "envelope_sha256": "0" * 64,
+                "fixed_authorization_path": str(test_backend.file_root / "wrong.json"),
+            },
+            claim_ref={"id": "holdout-claim/wrong", "envelope_sha256": "0" * 64},
+        )
+
+
+def _forbid_holdout_h4_authority_mutators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("cleanup-only reached a forbidden authority mutator")
+
+    for module, names in (
+        (
+            holdout,
+            (
+                "recover_claim",
+                "_recover_with_backend",
+                "_mirror_claim",
+                "claim_holdout_once",
+                "authorize_holdout_genesis",
+                "_authorize_holdout_genesis",
+                "_claim_with_backend",
+                "_append_locked",
+                "_registry_create",
+                "_sentinel_create",
+            ),
+        ),
+        (
+            durable,
+            (
+                "_recover_with_backend",
+                "_mirror_claim",
+                "_claim_with_backend",
+                "_registry_create",
+                "_sentinel_create",
+            ),
+        ),
+    ):
+        for name in names:
+            monkeypatch.setattr(module, name, forbidden, raising=False)
+
+
+@pytest.mark.parametrize("case", ["success", "failure", "missing_anchor"])
+def test_holdout_h4_authority_derivation_never_mutates_anchor_state(
+    test_backend, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(
+        test_backend
+    )
+    before = _anchor_verification_snapshot(test_backend)
+    _forbid_holdout_h4_authority_mutators(monkeypatch)
+
+    if case == "success":
+        assert holdout._derive_holdout_cleanup_authority_for_test(
+            backend=test_backend,
+            authorization_ref=authorization_ref,
+        ) == {
+            "authorization_ref": authorization_ref,
+            "claim_ref": claim_ref,
+            "attempt_ref": attempt_ref,
+            "attempt_dir": attempt_dir,
+        }
+    else:
+        candidate = deepcopy(authorization_ref)
+        if case == "failure":
+            candidate["envelope_sha256"] = "f" * 64
+        else:
+            candidate["fixed_authorization_path"] = str(
+                test_backend.file_root.parent
+                / "MissingClaims"
+                / Path(authorization_ref["fixed_authorization_path"]).name
+            )
+        with pytest.raises(ValueError):
+            holdout._derive_holdout_cleanup_authority_for_test(
+                backend=test_backend,
+                authorization_ref=candidate,
+            )
+
+    assert _anchor_verification_snapshot(test_backend) == before
+
+
 def test_holdout_attempt_ledger_fixed_path_and_closed_normal_fsm(test_backend) -> None:
     authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
     path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
@@ -2201,14 +2360,28 @@ _AUTHORITY_PROJECTION_SPECS = {
 }
 
 
-def _path_snapshot(path: Path) -> tuple[bytes, int, int] | None:
+def _path_snapshot(path: Path) -> tuple[bytes, int, int, str] | None:
     if not path.exists():
         return None
+    import win32security
+
     state = path.stat()
+    security_information = (
+        win32security.OWNER_SECURITY_INFORMATION
+        | win32security.GROUP_SECURITY_INFORMATION
+        | win32security.DACL_SECURITY_INFORMATION
+    )
+    descriptor = win32security.GetFileSecurity(str(path), security_information)
+    security_sddl = win32security.ConvertSecurityDescriptorToStringSecurityDescriptor(
+        descriptor,
+        win32security.SDDL_REVISION_1,
+        security_information,
+    )
     return (
         path.read_bytes(),
         state.st_size,
         state.st_file_attributes,
+        security_sddl,
     )
 
 
@@ -2278,6 +2451,7 @@ def _anchor_verification_snapshot(value) -> dict[str, object]:
             )
         )
     return {
+        "authorization_ref": _path_snapshot(_authorization_output_path(value)),
         "authorization": _path_snapshot(authorization_path),
         "sentinels": tuple(
             (path.name, _path_snapshot(path)) for path in sentinel_paths
