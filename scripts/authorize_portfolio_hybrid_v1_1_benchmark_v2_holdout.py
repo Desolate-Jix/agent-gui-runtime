@@ -365,8 +365,12 @@ def _validate_score_lineage(
     if score.get("status") != "PASS":
         raise ValueError("regression public score must PASS")
     binding = score.get("score_input_binding")
-    if not isinstance(binding, Mapping):
-        raise ValueError("regression public score binding is missing")
+    if (
+        not isinstance(binding, Mapping)
+        or binding.get("contract_version") != "private_scorer_input_binding_v1"
+        or binding.get("partition") != "regression"
+    ):
+        raise ValueError("regression public score binding is missing or differs")
     private_ref = binding.get("private_manifest_ref")
     if (
         not isinstance(private_ref, Mapping)

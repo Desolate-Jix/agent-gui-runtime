@@ -356,6 +356,8 @@ def test_authorizer_requires_pass_and_exact_public_score_lineage() -> None:
     provider, corpus, accepted = _refs()
     private_sha = _sha("opaque private bytes")
     binding = {
+        "contract_version": "private_scorer_input_binding_v1",
+        "partition": "regression",
         "private_manifest_ref": {"file_sha256": private_sha},
         "corpus_parent_ref": corpus["source_parent_ref"],
         "provider_manifest_ref": provider,
@@ -389,6 +391,20 @@ def test_authorizer_requires_pass_and_exact_public_score_lineage() -> None:
                 provider_corpus_ref=corpus,
                 accepted_run_ref=accepted,
             )
+
+    holdout_score = json.loads(json.dumps(score))
+    holdout_score["score_input_binding"]["contract_version"] = (
+        "private_scorer_holdout_input_binding_v1"
+    )
+    holdout_score["score_input_binding"]["partition"] = "holdout"
+    with pytest.raises(ValueError, match="regression public score"):
+        authorize._validate_score_lineage(
+            score=holdout_score,
+            private_manifest_sha256=private_sha,
+            provider_manifest_ref=provider,
+            provider_corpus_ref=corpus,
+            accepted_run_ref=accepted,
+        )
 
 
 def test_provider_drift_never_changes_stable_claim_namespace(tmp_path: Path) -> None:
@@ -497,6 +513,8 @@ def test_score_binding_requires_every_public_ref(field: str) -> None:
     }
     private_sha = _sha("private")
     binding = {
+        "contract_version": "private_scorer_input_binding_v1",
+        "partition": "regression",
         "private_manifest_ref": {"file_sha256": private_sha},
         "corpus_parent_ref": corpus["source_parent_ref"],
         "provider_manifest_ref": provider,
@@ -871,6 +889,8 @@ def test_probe_authority_consumer_receives_real_pretty_accepted_bytes_once(
     private_path.write_bytes(b"opaque private bytes")
     private_sha = hashlib.sha256(private_path.read_bytes()).hexdigest()
     binding = {
+        "contract_version": "private_scorer_input_binding_v1",
+        "partition": "regression",
         "private_manifest_ref": {"file_sha256": private_sha},
         "corpus_parent_ref": corpus["source_parent_ref"],
         "provider_manifest_ref": manifest_ref,

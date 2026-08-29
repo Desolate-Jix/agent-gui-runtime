@@ -281,6 +281,11 @@ def _probe_bound_public_report_inputs(module):
         "envelope_sha256": "c" * 64,
     }
     claim_ref = {"id": "holdout-claim/" + "b" * 64, "envelope_sha256": "e" * 64}
+    regression_score_ref = {
+        "contract_version": "private_scorer_public_ref_v3",
+        "file_sha256": "1" * 64,
+        "content_sha256": "2" * 64,
+    }
     holdout_run = {
         "contract_version": "benchmark_v2_accepted_holdout_score_input_v1",
         "benchmark_release_id": release,
@@ -301,7 +306,10 @@ def _probe_bound_public_report_inputs(module):
         },
         "prediction_run_envelope": {"ref": {"id": "r/5", "content_sha256": "5" * 64}, "canonical_bytes_b64": "e30="},
         "lifecycle_bundle_envelope": {"ref": {"id": "r/6", "content_sha256": "6" * 64}, "canonical_bytes_b64": "e30="},
-        "regression_score_precondition_envelope": {"ref": {"id": "r/7", "content_sha256": "7" * 64}, "canonical_bytes_b64": "e30="},
+        "regression_score_precondition_envelope": {
+            "ref": deepcopy(regression_score_ref),
+            "canonical_bytes_b64": "e30=",
+        },
         "holdout_authority_evidence": {
             name: {"ref": {"id": f"r/{index}", "content_sha256": f"{index:x}" * 64}, "canonical_bytes_b64": "e30="}
             for index, name in enumerate(
@@ -323,11 +331,6 @@ def _probe_bound_public_report_inputs(module):
         "contract_version": holdout_run["contract_version"],
         "file_sha256": "f" * 64,
         "content_sha256": holdout_run["content_sha256"],
-    }
-    regression_score_ref = {
-        "contract_version": "private_scorer_public_ref_v3",
-        "file_sha256": "1" * 64,
-        "content_sha256": "2" * 64,
     }
     holdout_binding = {
         "contract_version": "private_scorer_holdout_input_binding_v1",
@@ -397,9 +400,17 @@ def _probe_bound_public_report_inputs(module):
     }
 
 
-def test_public_report_propagates_exact_probe_authority_ref_without_private_parents() -> None:
+def test_public_report_propagates_exact_probe_authority_ref_without_private_parents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     module = _module()
     inputs = _probe_bound_public_report_inputs(module)
+    monkeypatch.setattr(
+        module,
+        "_validate_accepted_holdout_public_graph",
+        lambda value: deepcopy(value),
+        raising=False,
+    )
 
     report = module._assemble_probe_bound_public_report(**inputs)
 
@@ -446,9 +457,16 @@ def test_public_report_propagates_exact_probe_authority_ref_without_private_pare
 )
 def test_public_report_rejects_probe_authority_or_authorization_drift(
     mutation: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _module()
     inputs = _probe_bound_public_report_inputs(module)
+    monkeypatch.setattr(
+        module,
+        "_validate_accepted_holdout_public_graph",
+        lambda value: deepcopy(value),
+        raising=False,
+    )
     bundle = inputs["probe_validation"].bundle
     if mutation == "probe_fail":
         bundle["status"] = "FAIL"
@@ -488,6 +506,114 @@ def test_public_report_rejects_probe_authority_or_authorization_drift(
         )
 
     with pytest.raises(ValueError):
+        module._assemble_probe_bound_public_report(**inputs)
+
+
+def test_public_report_uses_h6_scores_and_h5_closed_holdout_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    inputs = _probe_bound_public_report_inputs(module)
+    calls: list[tuple[str, str]] = []
+
+    class PublicScoreModule:
+        @staticmethod
+        def validate_private_scorer_public_ref_v3(value):
+            calls.append(("score", value["score_input_binding"]["partition"]))
+            return value
+
+    class PredictionsModule:
+        @staticmethod
+        def validate_benchmark_v2_accepted_holdout_score_input_v1(value):
+            calls.append(("holdout", value["partition"]))
+            return value
+
+    real_import = importlib.import_module
+    monkeypatch.setattr(
+        module,
+        "import_module",
+        lambda name: (
+            PublicScoreModule
+            if name == "app.learn.hybrid.benchmark_v2_public_score"
+            else PredictionsModule
+            if name == "app.learn.hybrid.benchmark_v2_predictions"
+            else real_import(name)
+        ),
+    )
+
+    regression_score = {
+        "score_input_binding": inputs["regression_score_binding"]
+    }
+    holdout_score = {"score_input_binding": inputs["holdout_score_binding"]}
+    validated_regression, validated_holdout = module._validate_public_score_pair(
+        regression_score, holdout_score
+    )
+    validated_run = module._validate_accepted_holdout_public_graph(
+        inputs["holdout_run"]
+    )
+
+    assert validated_regression is regression_score
+    assert validated_holdout is holdout_score
+    assert validated_run is inputs["holdout_run"]
+    assert calls == [
+        ("score", "regression"),
+        ("score", "holdout"),
+        ("holdout", "holdout"),
+    ]
+
+
+def test_public_report_rejects_reminted_holdout_with_broken_inner_graph() -> None:
+    module = _module()
+    inputs = _probe_bound_public_report_inputs(module)
+    reminted = deepcopy(inputs["holdout_run"])
+    reminted["prediction_run_envelope"]["canonical_bytes_b64"] = (
+        "eyJicm9rZW4iOnRydWV9"
+    )
+    reminted["content_sha256"] = module.content_sha256(reminted)
+
+    with pytest.raises(ValueError):
+        module._validate_holdout_run_for_report(reminted)
+
+
+@pytest.mark.parametrize(
+    "join",
+    ["regression_precondition", "authorization", "claim"],
+)
+def test_public_report_rejects_independently_reminted_holdout_join(
+    join: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    inputs = _probe_bound_public_report_inputs(module)
+    monkeypatch.setattr(
+        module,
+        "_validate_accepted_holdout_public_graph",
+        lambda value: deepcopy(value),
+        raising=False,
+    )
+    if join == "regression_precondition":
+        inputs["holdout_run"]["regression_score_precondition_envelope"]["ref"] = {
+            **inputs["regression_score_ref"],
+            "file_sha256": "0" * 64,
+        }
+    elif join == "authorization":
+        inputs["holdout_run"]["holdout_authorization_ref"] = {
+            **inputs["authorization_ref"],
+            "envelope_sha256": "0" * 64,
+        }
+    else:
+        inputs["holdout_run"]["holdout_claim_ref"] = {
+            **inputs["holdout_score_binding"]["holdout_claim_ref"],
+            "envelope_sha256": "0" * 64,
+        }
+    inputs["holdout_run"]["content_sha256"] = module.content_sha256(
+        inputs["holdout_run"]
+    )
+    inputs["holdout_run_ref"]["content_sha256"] = inputs["holdout_run"][
+        "content_sha256"
+    ]
+
+    with pytest.raises(ValueError, match="join differs"):
         module._assemble_probe_bound_public_report(**inputs)
 
 
@@ -774,6 +900,26 @@ def test_public_report_validates_dependency_manifest_before_probe_authority(
     )
     monkeypatch.setattr(
         module,
+        "_load_canonical_json_artifact",
+        lambda *_args, **_kwargs: calls.append("load:score-or-run"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_validate_public_score_pair",
+        lambda *_args: calls.append("validate:scores"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_load_native_authorization_v2",
+        lambda **_kwargs: calls.append("load:authorization"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_assemble_probe_bound_public_report",
+        lambda **_kwargs: calls.append("assemble:report"),
+    )
+    monkeypatch.setattr(
+        module,
         "write_create_new_or_byte_identical",
         lambda *_args, **_kwargs: calls.append("write:report"),
     )
@@ -793,6 +939,88 @@ def test_public_report_validates_dependency_manifest_before_probe_authority(
         )
 
     assert calls == ["load:dependency manifest", "validate:dependency"]
+
+
+def test_public_report_loads_h7_holdout_run_as_compact_lf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    accepted = {
+        "contract_version": "benchmark_v2_accepted_holdout_score_input_v1",
+        "partition": "holdout",
+    }
+    path = tmp_path / "holdout-run.json"
+    compact_lf = module.compact_json_bytes(accepted) + b"\n"
+    path.write_bytes(compact_lf)
+    loaded, raw = module._load_canonical_json_artifact(
+        path,
+        name="accepted holdout run",
+        encoding="compact_lf",
+    )
+    assert loaded == accepted and raw == compact_lf
+
+    path.write_bytes(module.pretty_json_bytes(accepted))
+    with pytest.raises(ValueError, match="not canonical"):
+        module._load_canonical_json_artifact(
+            path,
+            name="accepted holdout run",
+            encoding="compact_lf",
+        )
+    path.write_bytes(module.compact_json_bytes(accepted))
+    with pytest.raises(ValueError, match="not canonical"):
+        module._load_canonical_json_artifact(
+            path,
+            name="accepted holdout run",
+            encoding="compact_lf",
+        )
+
+    canonical = {
+        flag.removeprefix("--").replace("-", "_"): Path(value)
+        for flag, value in module.FINAL_REPORT_PATH_TOKENS.items()
+    }
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        module,
+        "_validate_production_final_report_paths",
+        lambda **_kwargs: canonical,
+    )
+    monkeypatch.setattr(module, "_load_pretty_artifact", lambda *_args: {})
+    monkeypatch.setattr(
+        module, "validate_dependency_manifest_for_final_report", lambda value: value
+    )
+    monkeypatch.setattr(
+        module, "_validate_probe_authority_candidate_once", lambda **_kwargs: object()
+    )
+
+    def load_artifact(_path, *, name, encoding):
+        calls.append((name, encoding))
+        if name == "accepted holdout run":
+            raise RuntimeError("holdout load observed")
+        return {}, b"{}\n"
+
+    monkeypatch.setattr(module, "_load_canonical_json_artifact", load_artifact)
+    monkeypatch.setattr(module, "_validate_public_score_pair", lambda *_args: ({}, {}))
+
+    with pytest.raises(RuntimeError, match="holdout load observed"):
+        module.assemble_benchmark_v2_public_report(
+            provider_manifest_path=Path("provider.json"),
+            regression_run_ref_path=Path("regression-run.json"),
+            holdout_run_ref_path=Path("holdout-run.json"),
+            regression_score_ref_path=Path("regression-score.json"),
+            probe_authority_path=Path("probe-authority.json"),
+            holdout_score_ref_path=Path("holdout-score.json"),
+            leakage_review_path=Path("leakage-review.json"),
+            dependency_manifest_path=Path("dependency-manifest.json"),
+            ledger_root=Path("ledger"),
+            output_path=Path("report.json"),
+        )
+
+    assert calls == [
+        ("regression public score", "compact_lf"),
+        ("holdout public score", "compact_lf"),
+        ("accepted holdout run", "compact_lf"),
+    ]
 
 
 def test_dependency_manifest_release_mismatch_blocks_public_report_output(

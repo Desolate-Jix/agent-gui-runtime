@@ -1807,27 +1807,28 @@ def _validate_score_binding_for_report(
     return binding
 
 
-def _validate_holdout_run_for_report(value: object) -> Mapping[str, Any]:
-    run = _closed_mapping(value, _HOLDOUT_RUN_FIELDS, "accepted holdout run")
-    if (
-        run.get("contract_version")
-        != "benchmark_v2_accepted_holdout_score_input_v1"
-        or run.get("partition") != "holdout"
-        or run.get("selection_policy") != "unique_claim_bound_holdout_attempt"
-        or run.get("safety") != SAFETY
-        or not _is_sha256(run.get("content_sha256"))
-        or run["content_sha256"] != content_sha256(run)
-    ):
-        raise ValueError("accepted holdout run is invalid")
-    _exact_public_ref(run.get("attempt_ref"), "holdout attempt ref")
-    _exact_public_ref(run.get("attempt_ledger_ref"), "holdout ledger ref")
-    _exact_public_ref(run.get("automatic_prediction_ref"), "holdout prediction ref")
-    _exact_public_ref(run.get("selected_lifecycle_ref"), "holdout lifecycle ref")
-    _exact_authorization_ref(
-        run.get("holdout_authorization_ref"), "holdout run authorization ref"
+def _validate_public_score_pair(
+    regression_score: object,
+    holdout_score: object,
+) -> tuple[dict[str, object], dict[str, object]]:
+    public_score_module = import_module(
+        "app.learn.hybrid.benchmark_v2_public_score"
     )
-    _exact_claim_ref(run.get("holdout_claim_ref"), "holdout run claim ref")
-    return run
+    validator = public_score_module.validate_private_scorer_public_ref_v3
+    return validator(regression_score), validator(holdout_score)
+
+
+def _validate_accepted_holdout_public_graph(value: object) -> dict[str, object]:
+    predictions_module = import_module(
+        "app.learn.hybrid.benchmark_v2_predictions"
+    )
+    return predictions_module.validate_benchmark_v2_accepted_holdout_score_input_v1(
+        value
+    )
+
+
+def _validate_holdout_run_for_report(value: object) -> Mapping[str, Any]:
+    return _validate_accepted_holdout_public_graph(value)
 
 
 def _validate_authorization_payload_for_report(
@@ -2028,6 +2029,10 @@ def _assemble_probe_bound_public_report(
         and regression.get("accepted_run_ref") == accepted_regression_ref
         and holdout.get("accepted_run_ref") == accepted_holdout_ref
         and holdout.get("regression_score_precondition_ref") == regression_score
+        and accepted_holdout.get("regression_score_precondition_envelope", {}).get(
+            "ref"
+        )
+        == regression_score
         and accepted_holdout.get("holdout_authorization_ref")
         == public_authorization_ref
         and holdout.get("holdout_authorization_ref") == public_authorization_ref
@@ -2278,9 +2283,6 @@ def assemble_benchmark_v2_public_report(
         ledger_root=canonical["ledger_root"],
         probe_authority_path=canonical["probe_authority"],
     )
-    public_score_module = import_module(
-        "app.learn.hybrid.benchmark_v2_public_score"
-    )
     regression_score, regression_score_raw = _load_canonical_json_artifact(
         canonical["regression_score_ref"],
         name="regression public score",
@@ -2291,16 +2293,14 @@ def assemble_benchmark_v2_public_report(
         name="holdout public score",
         encoding="compact_lf",
     )
-    regression_score = public_score_module.validate_private_scorer_public_ref_v3(
-        regression_score
-    )
-    holdout_score = public_score_module.validate_private_scorer_public_ref_v3(
-        holdout_score
+    regression_score, holdout_score = _validate_public_score_pair(
+        regression_score,
+        holdout_score,
     )
     holdout_run, holdout_run_raw = _load_canonical_json_artifact(
         canonical["holdout_run_ref"],
         name="accepted holdout run",
-        encoding="pretty_lf",
+        encoding="compact_lf",
     )
     leakage_value, leakage_raw = _load_canonical_json_artifact(
         canonical["leakage_review"],
