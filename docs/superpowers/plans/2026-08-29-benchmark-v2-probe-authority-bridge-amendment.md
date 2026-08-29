@@ -335,7 +335,7 @@ status
 
 All six `attempt_ref`, `run_id`, `operation_id`, and `model_request_id` values are pairwise distinct. Each row joins its provider/kind to one result-v2, one production receipt-v2, one cleanup/stable-zero lineage, its exact pre-result projection, and the matching kind horizon. Timeout requires a non-null `deadline_expiration_ref` resolving the receipt-v2 monotonic-expiration parent. Cancel requires `deadline_expiration_ref=null`; any expiration ref on cancel fails closed.
 
-Every row has `body_completion_state="not_complete"`, `termination_outcome="same_incarnation_exited"`, `stable_zero_observations >= 3`, and `status="PASS"`. Top-level `status="PASS"`, `partition="regression"`, and safety is exactly:
+Every row has `body_completion_state="not_complete"`, `termination_outcome="same_incarnations_exited"`, `stable_zero_observations >= 3`, and `status="PASS"`. Top-level `status="PASS"`, `partition="regression"`, and safety is exactly:
 
 ```json
 {"artifact_is_authorization":false,"execute_binding_enabled":false,"display_only":true}
@@ -378,6 +378,133 @@ uv run python scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py --provider-manif
 The action accepts no explicit probe-ledger path, summary path, output root, provider-selection, model, holdout, authorization, scorer, or private-manifest input. It launches nothing and writes only the create-new-or-byte-identical projection.
 
 Task 14 and Task 12 must call the same rebuilder with their already required `--ledger-root`; neither may trust the projection-only validator result.
+
+### 3.2.1 P1 interpretation freeze
+
+This subsection resolves the remaining machine-checkable P1 ambiguities and
+supersedes only conflicting P1 interpretation elsewhere in this amendment.
+
+1. **Ownership.** `benchmark_v2_lifecycle.py` remains unchanged in P1. Its
+   lifecycle-owned semantic entry point is the already-public
+   `validate_benchmark_v2_lifecycle_probe_receipt_v2`.
+   `benchmark_v2_probe_authority.py` owns ledger and summary parsing, six-cell
+   selection, projection, and reconstruction, and calls that lifecycle
+   validator exactly once for each selected cell with the receipt and its raw
+   parents. Section 2.4 therefore does not require a second six-cell function
+   in `benchmark_v2_lifecycle.py`; Section 3.2 and the P1 allowlist control the
+   orchestration boundary.
+2. **Termination literal.** Public
+   `probe_cells[*].termination_outcome` is exactly
+   `same_incarnations_exited`. The singular spelling is a typo and is
+   rejected. There is no alias, normalization, or v1-to-v2 translation.
+3. **Public attempt ref.** For a validated raw probe attempt, the only public
+   ref is exactly:
+
+   ```text
+   {id: "runner-attempt/" + attempt_id,
+    content_sha256: raw_attempt_ref.content_sha256}
+   ```
+
+4. **Pre-result projection.**
+   `benchmark_v2_probe_ledger_pre_result_verified_projection_v1` has exactly:
+
+   ```text
+   contract_version
+   artifact_id
+   benchmark_release_id
+   partition
+   provider_id
+   probe_kind
+   attempt_ref
+   raw_prefix_sha256
+   through_cleanup_terminal_sequence
+   through_cleanup_terminal_envelope_sha256
+   result_terminal_sequence
+   result_terminal_envelope_sha256
+   verified
+   safety
+   content_sha256
+   ```
+
+   `raw_prefix_sha256` hashes the exact canonical JSONL bytes from byte zero
+   through the selected attempt's cleanup envelope, including that line's LF.
+   Both envelope hashes are SHA-256 over compact-canonical envelope bytes.
+   `verified=true`; `safety` is the exact three-field public safety object from
+   Section 3.1. Apply the S1.1 identity rule with contract string
+   `benchmark_v2_probe_ledger_pre_result_verified_projection_v1` and prefix
+   `verified-probe-pre-result`. The semantic payload contains every field
+   except `artifact_id` and `content_sha256`.
+5. **Horizon projection.**
+   `benchmark_v2_probe_ledger_horizon_verified_projection_v1` has exactly:
+
+   ```text
+   contract_version
+   artifact_id
+   benchmark_release_id
+   partition
+   probe_kind
+   raw_prefix_sha256
+   through_result_terminal_sequence
+   through_result_terminal_envelope_sha256
+   attempts
+   selected_attempt_refs
+   verified
+   safety
+   content_sha256
+   ```
+
+   Each `attempts` row has exactly
+   `attempt_ref,provider_id,observed_state,completion_state,result_terminal_sequence`,
+   is ordered by its opened-event sequence, and reflects state at the cutoff.
+   `observed_state` is one of `opened,body_complete,cleanup,result`;
+   `completion_state` is `complete` exactly when `observed_state=result`, and
+   otherwise is `incomplete`; `result_terminal_sequence` is an integer only
+   for a complete row and otherwise is null. `selected_attempt_refs` is
+   exactly three refs in `omni,qwen,vista` order. `verified=true`; `safety` is
+   the exact three-field public safety object. Apply the S1.1 identity rule
+   with contract string
+   `benchmark_v2_probe_ledger_horizon_verified_projection_v1` and prefix
+   `verified-probe-ledger-horizon`. The semantic payload contains every field
+   except `artifact_id` and `content_sha256`.
+6. **S1.1 hashes.** For either projection:
+
+   ```text
+   semantic_sha256 = sha256(
+     UTF8(contract_version + "\0") || J(semantic_payload)
+   )
+   artifact_id = prefix + "/" + semantic_sha256
+   content_sha256 = sha256(J(object_without_content_sha256))
+   ```
+
+   `J` is the existing compact-canonical UTF-8 serialization. Unknown or
+   missing fields and caller-supplied IDs or hashes fail closed.
+7. **First-complete and cutoff.** Scan validated canonical ledger envelopes in
+   append and sequence order. For each provider, its candidate is the attempt
+   owning the first `result` event for that provider and kind. An attempt with
+   no result event at the horizon is incomplete and may be skipped. Once a
+   result event is encountered, missing or mismatched result bytes, a missing
+   or mismatched receipt, malformed parents, FAIL status, or any lifecycle
+   semantic failure makes that complete candidate invalid and fails the cell
+   immediately. It is never reclassified as incomplete and a later PASS may
+   not replace it. The kind horizon cutoff is the maximum of the three
+   selected result-event sequences: the smallest inclusive prefix containing
+   one candidate for every provider. The horizon raw SHA covers exact JSONL
+   bytes through that envelope including LF; its terminal-envelope SHA covers
+   compact-canonical cutoff-envelope bytes. Events after the cutoff are
+   nonauthoritative and do not change the rebuilt bundle or ref. Every
+   envelope, payload, ref, and file through the cutoff must validate. Later
+   complete attempts before the cutoff are recorded as complete but are not
+   selected.
+8. **Summary-v2 role.** Both fixed canonical summary-v2 files remain required
+   inputs, but are corroborating cohort and integrity inputs only; they are
+   never selectors or public parents. Reconstruction first derives candidates
+   and horizons only from the two raw ledgers. It then validates each summary
+   as canonical and closed with the matching release, regression partition,
+   kind, `one_requested_attempt_per_provider`, terminal status, and exactly
+   `omni,qwen,vista` attempts in that order, and requires each embedded result
+   object to be byte-equal to the selected result-v2 file and object for that
+   cell. A missing, drifted, or reordered summary fails. Summary bytes and refs
+   contribute to no projection field or hash and cannot redirect selection.
 
 ### 3.3 Exact joins
 
