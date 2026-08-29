@@ -46,9 +46,11 @@ CODE_PATHS = (
     "app/learn/hybrid/benchmark_v2_incumbent_operation.py",
     "app/learn/hybrid/benchmark_v2_lifecycle.py",
     "app/learn/hybrid/benchmark_v2_predictions.py",
+    "app/learn/hybrid/benchmark_v2_probe_authority.py",
     "app/learn/hybrid/benchmark_v2_privileged_projector.py",
     "app/learn/hybrid/benchmark_v2_provider_corpus.py",
     "app/learn/hybrid/benchmark_v2_provider_sandbox.py",
+    "app/learn/hybrid/benchmark_v2_public_score.py",
     "app/learn/hybrid/benchmark_v2_runtime.py",
     "app/learn/hybrid/benchmark_v2_window_owner.py",
     "app/learn/hybrid/benchmark_v2_worker_binding.py",
@@ -61,6 +63,9 @@ CODE_PATHS = (
     "app/operation/observe/screen_reader.py",
     "scripts/portfolio_hybrid_v1_1_test_window_v2.py",
     "scripts/project_portfolio_hybrid_v1_1_provider_corpus_v2.py",
+    "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
+    "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
+    "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
     "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
     "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py",
     "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py",
@@ -82,6 +87,7 @@ TEST_PATHS = (
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent_recovery.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_isolation.py",
+    "tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py",
@@ -92,9 +98,12 @@ TEST_PATHS = (
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py",
     "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py",
+    "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py",
     "tests/test_uei_v1_projections.py",
 )
-FUTURE_PATHS = (
+S4_PRIVATE_ONLY_PATHS = (
+    "app/learn/hybrid/benchmark_v2_probe_authority.py",
+    "app/learn/hybrid/benchmark_v2_public_score.py",
     "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
     "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
@@ -451,9 +460,13 @@ def test_generation_is_canonical_closed_idempotent_and_verifiable(sealed, sealer
     assert private["provider_corpus_ref"] == provider["provider_corpus_ref"]
     assert private["provider_manifest_ref"]["relative_path"] == "benchmark-v2-provider-manifest.json"
     assert private["provider_manifest_ref"]["file_sha256"] == hashlib.sha256(provider_path.read_bytes()).hexdigest()
-    assert len(private["artifact_inventory"]["code_sha256_by_path"]) == 32
-    assert len(private["artifact_inventory"]["config_sha256_by_path"]) == 3
-    assert len(private["artifact_inventory"]["test_sha256_by_path"]) == 22
+    assert set(private["artifact_inventory"]["code_sha256_by_path"]) == set(CODE_PATHS)
+    assert set(private["artifact_inventory"]["config_sha256_by_path"]) == set(
+        CONFIG_PATHS
+    )
+    assert set(private["artifact_inventory"]["test_sha256_by_path"]) == set(
+        TEST_PATHS
+    )
     assert provider["sealed_runtime"]["code_refs"] == [
         {"role": role, "relative_path": path, "file_sha256": hashlib.sha256((repo / path).read_bytes()).hexdigest()}
         for role, path in BOOT_REFS
@@ -507,11 +520,17 @@ def test_both_seals_are_non_authorizing_and_provider_has_no_private_paths(sealed
         assert forbidden.casefold() not in text
 
 
-def test_unimplemented_future_artifacts_are_not_presealed(sealed) -> None:
-    _, _, _, private, _ = sealed
+def test_s4_final_sources_are_private_inventory_only(sealed) -> None:
+    _, _, _, private, provider = sealed
     inventory = private["artifact_inventory"]
     sealed_paths = set(inventory["code_sha256_by_path"]) | set(inventory["test_sha256_by_path"])
-    assert sealed_paths.isdisjoint(FUTURE_PATHS)
+    assert set(S4_PRIVATE_ONLY_PATHS) <= sealed_paths
+    public_runtime_paths = {
+        item["relative_path"]
+        for field in ("code_refs", "release_code_refs", "profile_refs")
+        for item in provider["sealed_runtime"][field]
+    }
+    assert public_runtime_paths.isdisjoint(S4_PRIVATE_ONLY_PATHS)
 
 
 @pytest.mark.parametrize("relative", CODE_PATHS + CONFIG_PATHS + TEST_PATHS)
