@@ -2021,7 +2021,9 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
         "append_benchmark_v2_attempt_event",
         "collect_raw_gpu_sample",
         "compose_benchmark_v2_attempt_cleanup_receipt",
+        "compose_benchmark_v2_lifecycle_probe_receipt_v2",
         "compose_benchmark_v2_lifecycle_bundle_v3",
+        "compose_benchmark_v2_probe_stable_zero_evidence_v1",
         "derive_benchmark_v2_cleanup_receipt_ref",
         "materialize_benchmark_v2_attempt_ledger_projections",
         "project_benchmark_v2_cleanup_lifecycle",
@@ -2033,6 +2035,8 @@ def test_lifecycle_public_api_exposes_no_command_observer_or_cleanup_injection()
         "project_benchmark_v2_attempt_ledger",
         "read_benchmark_v2_attempt_journal",
         "select_benchmark_v2_attempt_ledger_horizon",
+        "validate_benchmark_v2_lifecycle_probe_receipt_v2",
+        "validate_benchmark_v2_probe_stable_zero_evidence_v1",
         "verify_lifecycle_from_raw",
     ]
 

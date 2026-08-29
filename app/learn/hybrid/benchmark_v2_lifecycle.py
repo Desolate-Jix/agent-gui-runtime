@@ -26,6 +26,8 @@ from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sh
 _SAMPLE_CONTRACT = "benchmark_v2_raw_gpu_sample_v1"
 _RESULT_CONTRACT = "benchmark_v2_lifecycle_verification_v1"
 _PROBE_CONTRACT = "benchmark_v2_lifecycle_probe_receipt_v1"
+_PROBE_V2_CONTRACT = "benchmark_v2_lifecycle_probe_receipt_v2"
+_PROBE_STABLE_ZERO_CONTRACT = "benchmark_v2_probe_stable_zero_evidence_v1"
 _GPU_OBSERVER_CONTRACT = "benchmark_v2_gpu_observer_identity_v1"
 _PROCESS_SNAPSHOT_CONTRACT = "benchmark_v2_process_identity_snapshot_v1"
 _MAX_STREAM_BYTES = 1024 * 1024
@@ -606,6 +608,61 @@ _STABLE_ZERO_FIELDS = {
     "lease_absence_ref",
 }
 _PROBE_OBSERVER_FIELDS = {"kind", "module_ref", "content_sha256"}
+_PROBE_V2_FIELDS = {
+    "contract_version",
+    "benchmark_release_id",
+    "partition",
+    "probe_id",
+    "attempt_ref",
+    "provider",
+    "probe_kind",
+    "operation_ref",
+    "request_in_flight_ref",
+    "trigger_observation",
+    "body_completion_observation",
+    "termination_observation",
+    "stable_zero_observation",
+    "cleanup_receipt_ref",
+    "observer_identity",
+    "status",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_PROBE_V2_PROVIDER_FIELDS = {
+    "provider_id",
+    "provider_revision",
+    "profile_id",
+    "profile_sha256",
+}
+_PROBE_V2_TRIGGER_FIELDS = {
+    "kind",
+    "action",
+    "request_in_flight_ref",
+    "triggered_monotonic_ns",
+    "deadline_expiration_ref",
+}
+_PROBE_V2_BODY_FIELDS = {"state", "observed_monotonic_ns", "evidence_ref"}
+_PROBE_V2_TERMINATION_FIELDS = {"outcome", "process_identities", "evidence_ref"}
+_PROBE_V2_STABLE_FIELDS = {
+    "job_members",
+    "active_listeners",
+    "active_leases",
+    "stable_zero_observations",
+    "evidence_ref",
+}
+_PROBE_V2_STABLE_PARENT_FIELDS = {
+    "contract_version",
+    "attempt_ref",
+    "cleanup_receipt_ref",
+    "body_completion_observation",
+    "samples",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_PROBE_V2_STABLE_SAMPLE_FIELDS = {"observed_monotonic_ns", "resource_counts"}
+_PROBE_V2_OBSERVER_FIELDS = {"kind", "module_ref", "content_sha256"}
 _PROBE_PROFILE_FIELDS = {
     "contract_version", "provider_id", "profile_id", "attempt_id", "content_sha256",
 }
@@ -4317,6 +4374,494 @@ def append_benchmark_v2_attempt_event(
         return event
 
 
+def _probe_v2_monotonic(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} monotonic value is invalid")
+    return value
+
+
+def _probe_v2_process_identities(value: object) -> list[dict[str, int]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("benchmark probe v2 process identities are unavailable")
+    result: list[dict[str, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for raw in value:
+        if not isinstance(raw, Mapping) or set(raw) != {"pid", "create_time_ns"}:
+            raise ValueError("benchmark probe v2 process identity is not closed")
+        pid = raw.get("pid")
+        created = raw.get("create_time_ns")
+        if (
+            isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or pid <= 0
+            or isinstance(created, bool)
+            or not isinstance(created, int)
+            or created <= 0
+            or (pid, created) in seen
+        ):
+            raise ValueError("benchmark probe v2 process identity is invalid")
+        seen.add((pid, created))
+        result.append({"pid": pid, "create_time_ns": created})
+    return result
+
+
+def _probe_v2_cleanup_receipt(value: object) -> dict[str, Any]:
+    cleanup = _attempt_sealed_parent(value, "benchmark probe cleanup receipt")
+    expected = {
+        "contract_version",
+        "attempt_ref",
+        "reason",
+        "service_terminal_ref",
+        "window_cleanup_ref",
+        "provider_cleanup_refs",
+        "resource_counts",
+        "cleanup_status",
+        "lost_response_policy",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if (
+        set(cleanup) != expected
+        or cleanup.get("contract_version") != _ATTEMPT_CLEANUP_CONTRACT
+        or not isinstance(cleanup.get("reason"), str)
+        or not cleanup["reason"].strip()
+        or cleanup.get("resource_counts") != _S13_ZERO_COUNTS
+        or cleanup.get("cleanup_status") != "stable_zero"
+        or cleanup.get("lost_response_policy")
+        != "fresh_reconcile_safe_stop_no_blind_retry"
+        or cleanup.get("artifact_is_authorization") is not False
+        or cleanup.get("execute_binding_enabled") is not False
+        or not isinstance(cleanup.get("provider_cleanup_refs"), list)
+    ):
+        raise ValueError("benchmark probe cleanup receipt is not exact")
+    _attempt_sealed_parent(cleanup.get("attempt_ref"), "benchmark probe cleanup attempt")
+    for name in ("service_terminal_ref", "window_cleanup_ref"):
+        if cleanup.get(name) is not None:
+            _attempt_sealed_parent(cleanup[name], f"benchmark probe cleanup {name}")
+    for parent in cleanup["provider_cleanup_refs"]:
+        _attempt_sealed_parent(parent, "benchmark probe provider cleanup ref")
+    return cleanup
+
+
+def _probe_v2_observer_identity(module_path: Path) -> dict[str, Any]:
+    if not isinstance(module_path, Path):
+        raise ValueError("benchmark probe observer module must be a trusted Path")
+    path = module_path.resolve(strict=True)
+    if not module_path.is_absolute() or not path.is_file() or path != module_path:
+        raise ValueError("benchmark probe observer module path is invalid")
+    body: dict[str, Any] = {
+        "kind": "production_runtime",
+        "module_ref": {
+            "canonical_path": str(path),
+            "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        },
+    }
+    body["content_sha256"] = content_sha256(body)
+    return body
+
+
+def _probe_v2_terminal_event(
+    value: object,
+    *,
+    attempt_ref: Mapping[str, object],
+    provider_id: str,
+    probe_kind: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    event = _validate_benchmark_v2_attempt_event(value)
+    if (
+        event.get("attempt_ref") != dict(attempt_ref)
+        or event.get("phase") != "body_complete"
+        or event.get("event_kind") != "probe_trigger_terminal"
+        or event.get("provider_id") != provider_id
+        or event.get("probe_kind") != probe_kind
+    ):
+        raise ValueError("benchmark probe terminal event lineage differs")
+    resource = _attempt_sealed_parent(
+        event.get("resource_ref"), "benchmark probe terminal event resource"
+    )
+    if (
+        set(resource)
+        != {
+            "contract_version",
+            "resource_kind",
+            "value",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        or resource.get("contract_version") != "benchmark_v2_runtime_resource_ref_v1"
+        or resource.get("resource_kind") != "probe_trigger_terminal"
+        or resource.get("artifact_is_authorization") is not False
+        or resource.get("execute_binding_enabled") is not False
+        or not isinstance(resource.get("value"), Mapping)
+        or set(resource["value"]) != {"probe_trigger_terminal"}
+    ):
+        raise ValueError("benchmark probe terminal event resource differs")
+    from app.learn.hybrid import benchmark_v2_runtime
+
+    terminal = benchmark_v2_runtime._validate_probe_trigger_terminal(
+        resource["value"]["probe_trigger_terminal"]
+    )
+    return event, terminal
+
+
+def validate_benchmark_v2_probe_stable_zero_evidence_v1(
+    value: object,
+    *,
+    attempt_ref: Mapping[str, object],
+    cleanup_receipt: Mapping[str, object],
+) -> dict[str, Any]:
+    parent = _attempt_sealed_parent(value, "benchmark probe stable-zero parent")
+    if set(parent) != _PROBE_V2_STABLE_PARENT_FIELDS:
+        raise ValueError("benchmark probe stable-zero parent is not closed")
+    attempt = _attempt_sealed_parent(attempt_ref, "benchmark probe attempt ref")
+    cleanup = _probe_v2_cleanup_receipt(cleanup_receipt)
+    if (
+        parent.get("contract_version") != _PROBE_STABLE_ZERO_CONTRACT
+        or parent.get("attempt_ref") != attempt
+        or parent.get("cleanup_receipt_ref")
+        != {"content_sha256": cleanup["content_sha256"]}
+        or parent.get("artifact_is_authorization") is not False
+        or parent.get("execute_binding_enabled") is not False
+    ):
+        raise ValueError("benchmark probe stable-zero lineage is invalid")
+    samples = parent.get("samples")
+    if not isinstance(samples, list) or len(samples) < 3:
+        raise ValueError("benchmark probe stable-zero requires at least three samples")
+    body = parent.get("body_completion_observation")
+    if (
+        not isinstance(body, Mapping)
+        or set(body) != _PROBE_V2_BODY_FIELDS
+        or body.get("state") != "not_complete"
+    ):
+        raise ValueError("benchmark probe stable-zero body observation differs")
+    previous: int | None = _probe_v2_monotonic(
+        body.get("observed_monotonic_ns"), "benchmark probe stable-zero body"
+    )
+    _attempt_sealed_parent(
+        body.get("evidence_ref"), "benchmark probe stable-zero body evidence ref"
+    )
+    for raw in samples:
+        if not isinstance(raw, Mapping) or set(raw) != _PROBE_V2_STABLE_SAMPLE_FIELDS:
+            raise ValueError("benchmark probe stable-zero sample is not closed")
+        observed = _probe_v2_monotonic(
+            raw.get("observed_monotonic_ns"), "benchmark probe stable-zero sample"
+        )
+        counts = raw.get("resource_counts")
+        if (
+            (previous is not None and observed <= previous)
+            or not isinstance(counts, Mapping)
+            or dict(counts) != _S13_ZERO_COUNTS
+        ):
+            raise ValueError("benchmark probe stable-zero sample differs")
+        previous = observed
+    return parent
+
+
+def compose_benchmark_v2_probe_stable_zero_evidence_v1(
+    *,
+    attempt_ref: Mapping[str, object],
+    cleanup_receipt: Mapping[str, object],
+    body_completion_observation: Mapping[str, object],
+    samples: Sequence[Mapping[str, object]],
+) -> dict[str, Any]:
+    cleanup = _probe_v2_cleanup_receipt(cleanup_receipt)
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_STABLE_ZERO_CONTRACT,
+        "attempt_ref": _attempt_sealed_parent(
+            attempt_ref, "benchmark probe attempt ref"
+        ),
+        "cleanup_receipt_ref": {"content_sha256": cleanup["content_sha256"]},
+        "body_completion_observation": deepcopy(
+            dict(body_completion_observation)
+        ),
+        "samples": [deepcopy(dict(sample)) for sample in samples],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return validate_benchmark_v2_probe_stable_zero_evidence_v1(
+        body,
+        attempt_ref=attempt_ref,
+        cleanup_receipt=cleanup,
+    )
+
+
+def validate_benchmark_v2_lifecycle_probe_receipt_v2(
+    value: object,
+    *,
+    stable_zero_evidence: Mapping[str, object],
+    cleanup_receipt: Mapping[str, object],
+    dispatch_runtime_parent: Mapping[str, object],
+    deadline_expiration: Mapping[str, object] | None,
+    probe_trigger_terminal_event: Mapping[str, object],
+    provider_manifest: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation
+    from app.learn.hybrid import benchmark_v2_runtime
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        validate_benchmark_v2_workflow_service_operation_ref,
+    )
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    manifest = validate_provider_manifest(provider_manifest)
+    receipt = _attempt_sealed_parent(value, "benchmark lifecycle probe receipt v2")
+    if set(receipt) != _PROBE_V2_FIELDS:
+        raise ValueError("benchmark lifecycle probe receipt v2 is not closed")
+    if (
+        receipt.get("contract_version") != _PROBE_V2_CONTRACT
+        or receipt.get("partition") != "regression"
+        or receipt.get("status") != "PASS"
+        or receipt.get("artifact_is_authorization") is not False
+        or receipt.get("execute_binding_enabled") is not False
+    ):
+        raise ValueError("benchmark lifecycle probe receipt v2 is invalid")
+    if receipt.get("benchmark_release_id") != manifest.get("benchmark_release_id"):
+        raise ValueError("benchmark lifecycle probe release identity differs")
+    attempt = _attempt_sealed_parent(
+        receipt.get("attempt_ref"), "benchmark lifecycle probe attempt ref"
+    )
+    cleanup = _probe_v2_cleanup_receipt(cleanup_receipt)
+    if (
+        cleanup.get("attempt_ref") != attempt
+        or cleanup.get("cleanup_status") != "stable_zero"
+        or cleanup.get("resource_counts") != _S13_ZERO_COUNTS
+        or receipt.get("cleanup_receipt_ref")
+        != {"content_sha256": cleanup["content_sha256"]}
+    ):
+        raise ValueError("benchmark lifecycle probe cleanup lineage differs")
+    provider = receipt.get("provider")
+    if not isinstance(provider, Mapping) or set(provider) != _PROBE_V2_PROVIDER_FIELDS:
+        raise ValueError("benchmark lifecycle probe provider is not closed")
+    provider_id = provider.get("provider_id")
+    kind = receipt.get("probe_kind")
+    if provider_id not in _PROVIDERS or kind not in _PROBE_KINDS:
+        raise ValueError("benchmark lifecycle probe cell is invalid")
+    if receipt.get("probe_id") != (
+        f"probe/{provider_id}/{kind}/{attempt['content_sha256']}"
+    ):
+        raise ValueError("benchmark lifecycle probe id differs")
+    parent = benchmark_v2_dispatch_attestation._validate_dispatch_runtime_parent(
+        dispatch_runtime_parent
+    )
+    operation = validate_benchmark_v2_workflow_service_operation_ref(
+        receipt.get("operation_ref")
+    )
+    request = benchmark_v2_runtime._validate_probe_request(
+        receipt.get("request_in_flight_ref")
+    )
+    profile = parent.get("profile")
+    runtime_identity = parent.get("runtime_identity")
+    if not isinstance(profile, Mapping) or not isinstance(runtime_identity, Mapping):
+        raise ValueError("benchmark lifecycle probe dispatch parent is invalid")
+    parent_operation = parent.get("operation_ref")
+    request_projection = request.get("provider_dispatch_context_projection")
+    policy = manifest.get("evaluation_projection")
+    policy = policy.get("provider_policy") if isinstance(policy, Mapping) else None
+    revisions = policy.get("provider_revisions") if isinstance(policy, Mapping) else None
+    provider_revision = revisions.get(provider_id) if isinstance(revisions, Mapping) else None
+    if (
+        parent.get("provider") != provider_id
+        or not isinstance(parent_operation, Mapping)
+        or not isinstance(request_projection, Mapping)
+        or request_projection.get("operation_ref") != parent_operation
+        or provider.get("provider_revision") != provider_revision
+        or provider.get("profile_id") != profile.get("profile_id")
+        or provider.get("profile_sha256") != profile.get("profile_sha256")
+    ):
+        raise ValueError("benchmark lifecycle probe provider profile lineage differs")
+    if (
+        request.get("attempt_ref") != attempt
+        or request.get("provider_id") != provider_id
+        or request.get("probe_kind") != kind
+        or request.get("operation_ref") != operation
+        or request.get("request_state") != "request_in_flight"
+    ):
+        raise ValueError("benchmark lifecycle probe request lineage differs")
+    trigger = receipt.get("trigger_observation")
+    if not isinstance(trigger, Mapping) or set(trigger) != _PROBE_V2_TRIGGER_FIELDS:
+        raise ValueError("benchmark lifecycle probe trigger is not closed")
+    triggered = _probe_v2_monotonic(
+        trigger.get("triggered_monotonic_ns"), "benchmark lifecycle probe trigger"
+    )
+    if trigger.get("kind") != kind or trigger.get("request_in_flight_ref") != request:
+        raise ValueError("benchmark lifecycle probe trigger lineage differs")
+    if kind == "cancel":
+        if (
+            trigger.get("action") != "explicit_cancel"
+            or trigger.get("deadline_expiration_ref") is not None
+            or deadline_expiration is not None
+        ):
+            raise ValueError("benchmark cancel receipt has deadline evidence")
+    else:
+        expiration = benchmark_v2_runtime._validate_probe_deadline_expiration(
+            deadline_expiration
+        )
+        if (
+            trigger.get("action") != "monotonic_deadline_expired"
+            or trigger.get("deadline_expiration_ref")
+            != {"content_sha256": expiration["content_sha256"]}
+            or expiration.get("attempt_ref") != attempt
+            or expiration.get("operation_ref") != operation
+            or expiration.get("request_in_flight_ref") != request
+            or expiration.get("expired_monotonic_ns") > triggered
+        ):
+            raise ValueError("benchmark timeout expiration lineage differs")
+    terminal_event, terminal = _probe_v2_terminal_event(
+        probe_trigger_terminal_event,
+        attempt_ref=attempt,
+        provider_id=str(provider_id),
+        probe_kind=str(kind),
+    )
+    body = receipt.get("body_completion_observation")
+    if not isinstance(body, Mapping) or set(body) != _PROBE_V2_BODY_FIELDS:
+        raise ValueError("benchmark lifecycle probe body observation is not closed")
+    if (
+        body.get("state") != "not_complete"
+        or _probe_v2_monotonic(
+            body.get("observed_monotonic_ns"), "benchmark lifecycle probe body"
+        )
+        <= triggered
+    ):
+        raise ValueError("benchmark lifecycle probe body completion differs")
+    if body.get("evidence_ref") != terminal_event:
+        raise ValueError("benchmark probe body evidence is not the exact P0-C terminal")
+    if body != stable_zero_evidence.get("body_completion_observation"):
+        raise ValueError("benchmark lifecycle probe body parent differs")
+    termination = receipt.get("termination_observation")
+    if (
+        not isinstance(termination, Mapping)
+        or set(termination) != _PROBE_V2_TERMINATION_FIELDS
+        or termination.get("outcome") != "same_incarnations_exited"
+    ):
+        raise ValueError("benchmark lifecycle probe termination is invalid")
+    identities = _probe_v2_process_identities(
+        runtime_identity.get("process_identities")
+    )
+    terminal_identities = [
+        {
+            "pid": observation["pid"],
+            "create_time_ns": int(observation["create_time_ns"]),
+        }
+        for observation in terminal["absence_observations"]
+    ]
+    if terminal_identities != identities:
+        raise ValueError(
+            "benchmark probe terminal absence identities differ from dispatch"
+        )
+    if _probe_v2_process_identities(termination.get("process_identities")) != identities:
+        raise ValueError("benchmark lifecycle probe process identities differ")
+    if termination.get("evidence_ref") != terminal_event:
+        raise ValueError(
+            "benchmark probe termination evidence is not the exact P0-C terminal"
+        )
+    stable = validate_benchmark_v2_probe_stable_zero_evidence_v1(
+        stable_zero_evidence,
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+    )
+    projection = receipt.get("stable_zero_observation")
+    if (
+        not isinstance(projection, Mapping)
+        or set(projection) != _PROBE_V2_STABLE_FIELDS
+        or projection.get("job_members") != []
+        or projection.get("active_listeners") != []
+        or projection.get("active_leases") != []
+        or projection.get("stable_zero_observations") != len(stable["samples"])
+        or projection.get("evidence_ref")
+        != {"content_sha256": stable["content_sha256"]}
+    ):
+        raise ValueError("benchmark lifecycle probe stable-zero projection differs")
+    expected_observer = _probe_v2_observer_identity(
+        Path(benchmark_v2_runtime.__file__).resolve(strict=True)
+    )
+    observed_identity = _attempt_sealed_parent(
+        receipt.get("observer_identity"), "benchmark probe observer identity"
+    )
+    if (
+        observed_identity != expected_observer
+        or observed_identity.get("kind") != "production_runtime"
+        or set(observed_identity) != _PROBE_V2_OBSERVER_FIELDS
+        or not isinstance(observed_identity.get("module_ref"), Mapping)
+        or set(observed_identity["module_ref"]) != _FILE_REF_FIELDS
+    ):
+        raise ValueError("benchmark lifecycle probe observer identity differs")
+    return receipt
+
+
+def compose_benchmark_v2_lifecycle_probe_receipt_v2(
+    *,
+    provider_manifest: Mapping[str, object],
+    attempt_ref: Mapping[str, object],
+    provider: Mapping[str, object],
+    probe_kind: str,
+    operation_ref: Mapping[str, object],
+    request_in_flight_ref: Mapping[str, object],
+    trigger_observation: Mapping[str, object],
+    body_completion_observation: Mapping[str, object],
+    termination_observation: Mapping[str, object],
+    stable_zero_evidence: Mapping[str, object],
+    cleanup_receipt: Mapping[str, object],
+    dispatch_runtime_parent: Mapping[str, object],
+    deadline_expiration: Mapping[str, object] | None,
+    probe_trigger_terminal_event: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_provider_corpus import validate_provider_manifest
+
+    manifest = validate_provider_manifest(provider_manifest)
+    stable = _attempt_sealed_parent(
+        stable_zero_evidence, "benchmark probe stable-zero evidence"
+    )
+    attempt = _attempt_sealed_parent(attempt_ref, "benchmark probe attempt ref")
+    provider_id = str(provider.get("provider_id") or "")
+    from app.learn.hybrid import benchmark_v2_runtime
+
+    observer_identity = _probe_v2_observer_identity(
+        Path(benchmark_v2_runtime.__file__).resolve(strict=True)
+    )
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_V2_CONTRACT,
+        "benchmark_release_id": manifest["benchmark_release_id"],
+        "partition": "regression",
+        "probe_id": (
+            f"probe/{provider_id}/{probe_kind}/{attempt['content_sha256']}"
+        ),
+        "attempt_ref": attempt,
+        "provider": deepcopy(dict(provider)),
+        "probe_kind": probe_kind,
+        "operation_ref": deepcopy(dict(operation_ref)),
+        "request_in_flight_ref": deepcopy(dict(request_in_flight_ref)),
+        "trigger_observation": deepcopy(dict(trigger_observation)),
+        "body_completion_observation": deepcopy(dict(body_completion_observation)),
+        "termination_observation": deepcopy(dict(termination_observation)),
+        "stable_zero_observation": {
+            "job_members": [],
+            "active_listeners": [],
+            "active_leases": [],
+            "stable_zero_observations": len(stable.get("samples", [])),
+            "evidence_ref": {"content_sha256": stable["content_sha256"]},
+        },
+        "cleanup_receipt_ref": {
+            "content_sha256": cleanup_receipt["content_sha256"]
+        },
+        "observer_identity": deepcopy(dict(observer_identity)),
+        "status": "PASS",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return validate_benchmark_v2_lifecycle_probe_receipt_v2(
+        body,
+        stable_zero_evidence=stable,
+        cleanup_receipt=cleanup_receipt,
+        dispatch_runtime_parent=dispatch_runtime_parent,
+        deadline_expiration=deadline_expiration,
+        probe_trigger_terminal_event=probe_trigger_terminal_event,
+        provider_manifest=manifest,
+    )
+
+
 def compose_benchmark_v2_attempt_cleanup_receipt(
     *,
     attempt_ref: Mapping[str, object],
@@ -6724,7 +7269,9 @@ __all__ = [
     "append_benchmark_v2_attempt_event",
     "collect_raw_gpu_sample",
     "compose_benchmark_v2_attempt_cleanup_receipt",
+    "compose_benchmark_v2_lifecycle_probe_receipt_v2",
     "compose_benchmark_v2_lifecycle_bundle_v3",
+    "compose_benchmark_v2_probe_stable_zero_evidence_v1",
     "derive_benchmark_v2_cleanup_receipt_ref",
     "materialize_benchmark_v2_attempt_ledger_projections",
     "project_benchmark_v2_cleanup_lifecycle",
@@ -6736,5 +7283,7 @@ __all__ = [
     "project_benchmark_v2_attempt_ledger",
     "read_benchmark_v2_attempt_journal",
     "select_benchmark_v2_attempt_ledger_horizon",
+    "validate_benchmark_v2_lifecycle_probe_receipt_v2",
+    "validate_benchmark_v2_probe_stable_zero_evidence_v1",
     "verify_lifecycle_from_raw",
 ]

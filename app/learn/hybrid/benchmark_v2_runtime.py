@@ -34,7 +34,11 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
 from app.learn.hybrid.benchmark_v2_lifecycle import (
     append_benchmark_v2_attempt_event,
     compose_benchmark_v2_attempt_cleanup_receipt,
+    compose_benchmark_v2_lifecycle_probe_receipt_v2,
+    compose_benchmark_v2_probe_stable_zero_evidence_v1,
     read_benchmark_v2_attempt_journal,
+    validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    validate_benchmark_v2_probe_stable_zero_evidence_v1,
 )
 from app.learn.hybrid.benchmark_v2_provider_corpus import (
     get_production_provider_case_resolver,
@@ -244,6 +248,14 @@ class BenchmarkV2ProductionRuntimePort(Protocol):
         probe_context: Mapping[str, object],
         probe_kind: str,
         request_in_flight_journal: Mapping[str, object],
+    ) -> Mapping[str, object]: ...
+
+    def finalize_probe_lifecycle_receipt(
+        self,
+        *,
+        provider_manifest: Mapping[str, object],
+        attempt_ref: Mapping[str, object],
+        cleanup_receipt: Mapping[str, object],
     ) -> Mapping[str, object]: ...
 
     def cleanup_attempt(
@@ -1673,6 +1685,203 @@ class _BenchmarkV2ProductionRuntime:
         trigger = _validate_probe_trigger(body)
         state["trigger_receipt"] = deepcopy(trigger)
         return trigger
+
+    def finalize_probe_lifecycle_receipt(
+        self,
+        *,
+        provider_manifest: Mapping[str, object],
+        attempt_ref: Mapping[str, object],
+        cleanup_receipt: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        loaded = _loaded_manifest(provider_manifest)
+        attempt = _sealed_parent(attempt_ref, name="probe receipt attempt ref")
+        journal_path = _benchmark_v2_attempt_journal_path(
+            project_root=self._project_root,
+            attempt_ref=attempt,
+        )
+        events = read_benchmark_v2_attempt_journal(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+        )
+        durable_cleanup = _cleanup_receipt_from_terminal(events)
+        cleanup = _sealed_parent(cleanup_receipt, name="probe receipt cleanup")
+        if durable_cleanup is None or cleanup != durable_cleanup:
+            raise ValueError("benchmark probe cleanup differs from terminal journal")
+        if (
+            cleanup.get("attempt_ref") != attempt
+            or cleanup.get("cleanup_status") != "stable_zero"
+            or cleanup.get("resource_counts")
+            != {
+                "service_operations": 0,
+                "windows": 0,
+                "providers": 0,
+                "listeners": 0,
+                "leases": 0,
+            }
+            or cleanup.get("artifact_is_authorization") is not False
+            or cleanup.get("execute_binding_enabled") is not False
+        ):
+            raise ValueError("benchmark probe cleanup receipt is invalid")
+        tuples = _probe_terminal_tuples(events)
+        if len(tuples) != 1:
+            raise ValueError("benchmark probe terminal tuple is unavailable or ambiguous")
+        provider_id, probe_kind = tuples[0]
+        material = _probe_terminal_material(
+            events,
+            provider_id=provider_id,
+            probe_kind=probe_kind,
+        )
+        if material is None:
+            raise ValueError("benchmark probe terminal material is unavailable")
+        context = material["context"]
+        request = material["request"]
+        trigger_material = material["trigger_observation"]
+        trigger_observation = deepcopy(trigger_material["trigger_observation"])
+        dispatch = _read_committed_probe_dispatch_evidence(
+            project_root=self._project_root,
+            provider=provider_id,
+            context_projection=context["provider_dispatch_context_projection"],
+            expected_dispatch_receipt_ref=request["dispatch_receipt_ref"],
+            expected_runtime_identity_ref=request["provider_runtime_attestation_ref"],
+        )
+        if dispatch is None:
+            raise ValueError("benchmark probe committed dispatch parent is unavailable")
+        dispatch_parent = dispatch["runtime_parent"]
+        process_identities = _exact_ordered_process_identities(dispatch_parent)
+        if process_identities != material["intent"]["process_identities"]:
+            raise ValueError("benchmark probe trigger and dispatch process identities differ")
+        _live_absence_observations(process_identities)
+        zero_counts = {
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        }
+        attempt_dir = _actual_attempt_directory_from_events(events)
+        if attempt_dir is None:
+            raise ValueError("benchmark probe attempt directory is unavailable")
+        stable_path = (attempt_dir / "probe-stable-zero-evidence.json").resolve()
+        receipt_path = (attempt_dir / "lifecycle-probe-receipt.json").resolve()
+        if stable_path.parent != attempt_dir or receipt_path.parent != attempt_dir:
+            raise ValueError("benchmark probe receipt path escapes attempt directory")
+        if stable_path.exists() != receipt_path.exists():
+            raise ValueError(
+                "benchmark probe stable-zero parent is orphaned from its receipt"
+            )
+        terminal_evidence = _event_ref(material["terminal_event"])
+        triggered_ns = _monotonic_clock_value(
+            trigger_observation["triggered_monotonic_ns"]
+        )
+        if stable_path.exists():
+            stable_zero = _read_canonical_json(
+                stable_path, name="benchmark probe stable-zero evidence"
+            )
+            stable_zero = validate_benchmark_v2_probe_stable_zero_evidence_v1(
+                stable_zero,
+                attempt_ref=attempt,
+                cleanup_receipt=cleanup,
+            )
+            body_observation = deepcopy(
+                stable_zero["body_completion_observation"]
+            )
+            fresh_after = max(
+                triggered_ns,
+                stable_zero["samples"][-1]["observed_monotonic_ns"],
+            )
+            _collect_probe_runtime_zero_samples(
+                monotonic_ns=self._monotonic_ns,
+                wait_hook=self._wait_hook,
+                resource_counts=self.resource_counts,
+                after=fresh_after,
+                expected_counts=zero_counts,
+            )
+        else:
+            if receipt_path.exists():
+                raise ValueError("benchmark probe receipt lost its stable-zero parent")
+            body_observed = _next_probe_monotonic_observation(
+                monotonic_ns=self._monotonic_ns,
+                wait_hook=self._wait_hook,
+                after=triggered_ns,
+            )
+            body_observation = {
+                "state": "not_complete",
+                "observed_monotonic_ns": body_observed,
+                "evidence_ref": terminal_evidence,
+            }
+            samples = _collect_probe_runtime_zero_samples(
+                monotonic_ns=self._monotonic_ns,
+                wait_hook=self._wait_hook,
+                resource_counts=self.resource_counts,
+                after=body_observed,
+                expected_counts=zero_counts,
+            )
+            stable_zero = compose_benchmark_v2_probe_stable_zero_evidence_v1(
+                attempt_ref=attempt,
+                cleanup_receipt=cleanup,
+                body_completion_observation=body_observation,
+                samples=samples,
+            )
+            _write_create_only_json(stable_path, stable_zero)
+        if body_observation["observed_monotonic_ns"] <= triggered_ns:
+            raise ValueError("benchmark probe body observation did not follow trigger")
+        provider_policy = loaded.get("evaluation_projection")
+        if not isinstance(provider_policy, Mapping):
+            raise ValueError("benchmark provider evaluation projection is unavailable")
+        policy = provider_policy.get("provider_policy")
+        revisions = policy.get("provider_revisions") if isinstance(policy, Mapping) else None
+        if not isinstance(revisions, Mapping):
+            raise ValueError("benchmark provider revisions are unavailable")
+        provider_revision = revisions.get(provider_id)
+        if not isinstance(provider_revision, str) or not provider_revision:
+            raise ValueError("benchmark provider revision is unavailable")
+        profile = dispatch_parent.get("profile")
+        if not isinstance(profile, Mapping):
+            raise ValueError("benchmark dispatch runtime profile is unavailable")
+        receipt = compose_benchmark_v2_lifecycle_probe_receipt_v2(
+            provider_manifest=loaded,
+            attempt_ref=attempt,
+            provider={
+                "provider_id": provider_id,
+                "provider_revision": provider_revision,
+                "profile_id": profile["profile_id"],
+                "profile_sha256": profile["profile_sha256"],
+            },
+            probe_kind=probe_kind,
+            operation_ref=context["operation_ref"],
+            request_in_flight_ref=request,
+            trigger_observation=trigger_observation,
+            body_completion_observation=body_observation,
+            termination_observation={
+                "outcome": "same_incarnations_exited",
+                "process_identities": process_identities,
+                "evidence_ref": terminal_evidence,
+            },
+            stable_zero_evidence=stable_zero,
+            cleanup_receipt=cleanup,
+            dispatch_runtime_parent=dispatch_parent,
+            deadline_expiration=trigger_material["deadline_expiration"],
+            probe_trigger_terminal_event=terminal_evidence,
+        )
+        if receipt_path.exists():
+            existing = _read_canonical_json(
+                receipt_path, name="benchmark lifecycle probe receipt v2"
+            )
+            if existing != receipt:
+                raise ValueError(
+                    "benchmark lifecycle probe receipt has different existing bytes"
+                )
+            return validate_benchmark_v2_lifecycle_probe_receipt_v2(
+                existing,
+                stable_zero_evidence=stable_zero,
+                cleanup_receipt=cleanup,
+                dispatch_runtime_parent=dispatch_parent,
+                deadline_expiration=trigger_material["deadline_expiration"],
+                probe_trigger_terminal_event=terminal_evidence,
+                provider_manifest=loaded,
+            )
+        _write_create_only_json(receipt_path, receipt)
+        return receipt
 
     def cleanup_attempt(
         self, *, attempt: Mapping[str, object], reason: str
@@ -3768,6 +3977,63 @@ def _monotonic_clock_value(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError("benchmark probe monotonic clock value is invalid")
     return value
+
+
+def _next_probe_monotonic_observation(
+    *,
+    monotonic_ns: Callable[[], int],
+    wait_hook: Callable[[], None],
+    after: int,
+) -> int:
+    previous = _monotonic_clock_value(after)
+    observed = _monotonic_clock_value(monotonic_ns())
+    stagnant_reads = 0
+    while observed <= previous:
+        if observed < previous:
+            raise ValueError("benchmark probe monotonic clock regressed")
+        wait_hook()
+        next_value = _monotonic_clock_value(monotonic_ns())
+        if next_value < observed:
+            raise ValueError("benchmark probe monotonic clock regressed")
+        if next_value == observed:
+            stagnant_reads += 1
+            if stagnant_reads >= _PROBE_MAX_STAGNANT_READS:
+                raise ValueError("benchmark probe monotonic clock failed to advance")
+        else:
+            stagnant_reads = 0
+        observed = next_value
+    return observed
+
+
+def _collect_probe_runtime_zero_samples(
+    *,
+    monotonic_ns: Callable[[], int],
+    wait_hook: Callable[[], None],
+    resource_counts: Callable[[], Mapping[str, int]],
+    after: int,
+    expected_counts: Mapping[str, int],
+) -> list[dict[str, object]]:
+    samples: list[dict[str, object]] = []
+    previous = _monotonic_clock_value(after)
+    for _ in range(3):
+        observed = _next_probe_monotonic_observation(
+            monotonic_ns=monotonic_ns,
+            wait_hook=wait_hook,
+            after=previous,
+        )
+        counts = dict(resource_counts())
+        if counts != dict(expected_counts):
+            raise ValueError(
+                "benchmark probe fresh stable-zero sample observed runtime residue"
+            )
+        samples.append(
+            {
+                "observed_monotonic_ns": observed,
+                "resource_counts": counts,
+            }
+        )
+        previous = observed
+    return samples
 
 
 def _deadline_content_ref(value: Mapping[str, object]) -> dict[str, str]:

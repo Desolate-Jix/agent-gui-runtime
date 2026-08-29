@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import inspect
+import json
 from pathlib import Path
 from typing import Mapping
 
@@ -365,6 +366,7 @@ def _write_dispatch_journal(
     provider: str,
     pid: int,
     service: _ProbeService | None = None,
+    process_identities: list[dict[str, int]] | None = None,
 ) -> dict[str, object]:
     from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch
 
@@ -373,6 +375,7 @@ def _write_dispatch_journal(
     projection = context["provider_dispatch_context_projection"]
     dispatch_operation = deepcopy(projection["operation_ref"])
     identity = {"pid": pid, "create_time_ns": 5000}
+    identities = deepcopy(process_identities or [identity])
     if provider == "omni":
         snapshot = _sealed(
             {
@@ -394,11 +397,11 @@ def _write_dispatch_journal(
             lease_identity=None,
             profile_ref=None,
             listener_owner=None,
-            process_identities=[identity],
+            process_identities=identities,
             process_scope={
                 "scope_name": f"scope-omni-{pid}",
-                "member_pids": [pid],
-                "process_identities": [identity],
+                "member_pids": [item["pid"] for item in identities],
+                "process_identities": identities,
             },
         )
         runtime_attestation = {
@@ -423,13 +426,13 @@ def _write_dispatch_journal(
             listener_owner={
                 "host": "127.0.0.1",
                 "port": 18000 + (pid % 1000),
-                "process_identities": [identity],
+                "process_identities": identities,
             },
-            process_identities=[identity],
+            process_identities=identities,
             process_scope={
                 "scope_name": f"scope-qwen-{pid}",
-                "member_pids": [pid],
-                "process_identities": [identity],
+                "member_pids": [item["pid"] for item in identities],
+                "process_identities": identities,
             },
         )
         runtime_attestation = {
@@ -453,13 +456,13 @@ def _write_dispatch_journal(
             listener_owner={
                 "host": "127.0.0.1",
                 "port": 19000 + (pid % 1000),
-                "process_identities": [identity],
+                "process_identities": identities,
             },
-            process_identities=[identity],
+            process_identities=identities,
             process_scope={
                 "scope_name": f"scope-vista-{pid}",
-                "member_pids": [pid],
-                "process_identities": [identity],
+                "member_pids": [item["pid"] for item in identities],
+                "process_identities": identities,
             },
         )
         runtime_attestation = {
@@ -3603,3 +3606,870 @@ def test_timeout_monotonic_deadline_nonadvancing_clock_fails_closed_before_cance
     assert runtime.cleanup_attempt(
         attempt=attempt, reason="nonadvancing_clock_test_cleanup"
     )["cleanup_status"] == "stable_zero"
+
+
+def _materialize_lifecycle_probe_receipt_v2(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    attempt_id: str,
+    probe_kind: str,
+):
+    clock = _DeterministicDeadlineClock()
+    module, runtime, _, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id=attempt_id,
+        probe_kind=probe_kind,
+        clock=clock,
+    )
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind=probe_kind,
+        request_in_flight_journal=request,
+    )
+    cleanup = runtime.cleanup_attempt(
+        attempt=attempt,
+        reason=f"{probe_kind}_receipt_v2_cleanup",
+    )
+    manifest_path = tmp_path / "provider" / "provider-manifest.v2.json"
+    manifest = runtime.load_provider_manifest(path=manifest_path)
+    receipt = runtime.finalize_probe_lifecycle_receipt(
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+    )
+    return module, runtime, manifest, attempt, cleanup, context, request, receipt
+
+
+@pytest.mark.parametrize("probe_kind", ["cancel", "timeout"])
+def test_lifecycle_probe_receipt_v2_materializes_exact_non_authorizing_runtime_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    probe_kind: str,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID
+
+    module, runtime, manifest, attempt, cleanup, context, request, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id=f"attempt-lifecycle-receipt-v2-{probe_kind}",
+            probe_kind=probe_kind,
+        )
+    )
+    attempt_dir = (tmp_path / f"attempt-lifecycle-receipt-v2-{probe_kind}").resolve()
+    stable_path = attempt_dir / "probe-stable-zero-evidence.json"
+    receipt_path = attempt_dir / "lifecycle-probe-receipt.json"
+    stable = json.loads(stable_path.read_text(encoding="utf-8"))
+    events = module.read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    trigger_parent = next(
+        event["resource_ref"]["value"]
+        for event in events
+        if event["event_kind"] == "probe_trigger_observation"
+    )
+
+    assert set(receipt) == {
+        "contract_version",
+        "benchmark_release_id",
+        "partition",
+        "probe_id",
+        "attempt_ref",
+        "provider",
+        "probe_kind",
+        "operation_ref",
+        "request_in_flight_ref",
+        "trigger_observation",
+        "body_completion_observation",
+        "termination_observation",
+        "stable_zero_observation",
+        "cleanup_receipt_ref",
+        "observer_identity",
+        "status",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    assert receipt["contract_version"] == "benchmark_v2_lifecycle_probe_receipt_v2"
+    assert receipt["benchmark_release_id"] == BENCHMARK_RELEASE_ID
+    assert receipt["partition"] == "regression"
+    assert receipt["probe_id"] == (
+        f"probe/omni/{probe_kind}/{attempt['content_sha256']}"
+    )
+    assert receipt["attempt_ref"] == attempt
+    assert receipt["probe_kind"] == probe_kind
+    assert receipt["operation_ref"] == context["operation_ref"]
+    assert receipt["request_in_flight_ref"] == request
+    assert receipt["trigger_observation"] == trigger_parent["trigger_observation"]
+    assert receipt["body_completion_observation"]["state"] == "not_complete"
+    assert (
+        receipt["body_completion_observation"]["observed_monotonic_ns"]
+        > receipt["trigger_observation"]["triggered_monotonic_ns"]
+    )
+    assert receipt["termination_observation"]["outcome"] == (
+        "same_incarnations_exited"
+    )
+    assert receipt["termination_observation"]["process_identities"] == [
+        {"pid": 4980, "create_time_ns": 5000}
+    ]
+    assert receipt["stable_zero_observation"] == {
+        "job_members": [],
+        "active_listeners": [],
+        "active_leases": [],
+        "stable_zero_observations": 3,
+        "evidence_ref": {"content_sha256": stable["content_sha256"]},
+    }
+    assert receipt["cleanup_receipt_ref"] == {
+        "content_sha256": cleanup["content_sha256"]
+    }
+    assert receipt["provider"]["provider_id"] == "omni"
+    assert receipt["provider"]["provider_revision"] == manifest[
+        "evaluation_projection"
+    ]["provider_policy"]["provider_revisions"]["omni"]
+    assert receipt["provider"]["profile_id"] == "omni-test-profile"
+    assert receipt["observer_identity"]["kind"] == "production_runtime"
+    assert Path(receipt["observer_identity"]["module_ref"]["canonical_path"]) == Path(
+        module.__file__
+    ).resolve()
+    assert receipt["status"] == "PASS"
+    assert receipt["artifact_is_authorization"] is False
+    assert receipt["execute_binding_enabled"] is False
+    if probe_kind == "cancel":
+        assert receipt["trigger_observation"]["deadline_expiration_ref"] is None
+        assert trigger_parent["deadline_expiration"] is None
+    else:
+        assert receipt["trigger_observation"]["deadline_expiration_ref"] == {
+            "content_sha256": trigger_parent["deadline_expiration"]["content_sha256"]
+        }
+    assert receipt_path.read_bytes() == module.canonical_json_bytes(receipt, pretty=True)
+    assert stable_path.read_bytes() == module.canonical_json_bytes(stable, pretty=True)
+    observed = [sample["observed_monotonic_ns"] for sample in stable["samples"]]
+    assert len(observed) == len(set(observed)) == 3
+    assert observed == sorted(observed)
+    assert all(
+        sample["resource_counts"]
+        == {
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        }
+        for sample in stable["samples"]
+    )
+    assert runtime.finalize_probe_lifecycle_receipt(
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+    ) == receipt
+
+
+def test_lifecycle_probe_receipt_v2_public_port_accepts_no_runner_authored_facts() -> None:
+    from app.learn.hybrid.benchmark_v2_runtime import BenchmarkV2ProductionRuntimePort
+
+    assert list(
+        inspect.signature(
+            BenchmarkV2ProductionRuntimePort.finalize_probe_lifecycle_receipt
+        ).parameters
+    ) == ["self", "provider_manifest", "attempt_ref", "cleanup_receipt"]
+
+
+def test_lifecycle_probe_receipt_v2_replay_rejects_different_bytes_and_live_ambiguity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, runtime, manifest, attempt, cleanup, _, _, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id="attempt-lifecycle-receipt-v2-replay",
+            probe_kind="cancel",
+        )
+    )
+    receipt_path = (
+        tmp_path
+        / "attempt-lifecycle-receipt-v2-replay"
+        / "lifecycle-probe-receipt.json"
+    ).resolve()
+    original_bytes = receipt_path.read_bytes()
+    assert runtime.finalize_probe_lifecycle_receipt(
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+    ) == receipt
+    assert receipt_path.read_bytes() == original_bytes
+
+    receipt_path.write_bytes(b"{}\n")
+    with pytest.raises(ValueError, match="canonical|receipt"):
+        runtime.finalize_probe_lifecycle_receipt(
+            provider_manifest=manifest,
+            attempt_ref=attempt,
+            cleanup_receipt=cleanup,
+        )
+    receipt_path.write_bytes(original_bytes)
+    monkeypatch.setattr(
+        module.psutil,
+        "Process",
+        lambda pid: (_ for _ in ()).throw(module.psutil.AccessDenied(pid)),
+    )
+    with pytest.raises(ValueError, match="absence.*indeterminate"):
+        runtime.finalize_probe_lifecycle_receipt(
+            provider_manifest=manifest,
+            attempt_ref=attempt,
+            cleanup_receipt=cleanup,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["attempt", "cleanup"])
+def test_lifecycle_probe_receipt_v2_rejects_cross_attempt_or_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    _, runtime, manifest, attempt, cleanup, _, _, _ = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id=f"attempt-lifecycle-receipt-v2-{mutation}",
+            probe_kind="timeout",
+        )
+    )
+    if mutation == "attempt":
+        attempt = _sealed({"attempt_id": "cross-attempt", "partition": "regression"})
+    else:
+        cleanup = deepcopy(cleanup)
+        cleanup["reason"] = "cross-cleanup"
+        cleanup["content_sha256"] = content_sha256(cleanup)
+    with pytest.raises(ValueError):
+        runtime.finalize_probe_lifecycle_receipt(
+            provider_manifest=manifest,
+            attempt_ref=attempt,
+            cleanup_receipt=cleanup,
+        )
+
+
+def _lifecycle_probe_receipt_v2_validator_material(
+    *,
+    module: object,
+    runtime: object,
+    manifest: Mapping[str, object],
+    attempt: Mapping[str, object],
+    cleanup: Mapping[str, object],
+    receipt: Mapping[str, object],
+) -> dict[str, object]:
+    events = module.read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=runtime._project_root,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    provider_id = receipt["provider"]["provider_id"]
+    probe_kind = receipt["probe_kind"]
+    material = module._probe_terminal_material(
+        events,
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+    )
+    dispatch = module._read_committed_probe_dispatch_evidence(
+        project_root=runtime._project_root,
+        provider=provider_id,
+        context_projection=material["context"][
+            "provider_dispatch_context_projection"
+        ],
+        expected_dispatch_receipt_ref=material["request"]["dispatch_receipt_ref"],
+        expected_runtime_identity_ref=material["request"][
+            "provider_runtime_attestation_ref"
+        ],
+    )
+    attempt_dir = module._actual_attempt_directory_from_events(events)
+    stable = json.loads(
+        (attempt_dir / "probe-stable-zero-evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return {
+        "stable_zero_evidence": stable,
+        "cleanup_receipt": cleanup,
+        "dispatch_runtime_parent": dispatch["runtime_parent"],
+        "deadline_expiration": material["trigger_observation"][
+            "deadline_expiration"
+        ],
+        "probe_trigger_terminal_event": material["terminal_event"],
+        "provider_manifest": manifest,
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "attempt",
+        "operation",
+        "request",
+        "provider",
+        "profile",
+        "revision",
+        "cleanup",
+        "timeout_missing_deadline",
+        "body_complete",
+        "body_not_post_trigger",
+    ],
+)
+def test_lifecycle_probe_receipt_v2_validator_rejects_join_or_semantic_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    )
+
+    module, runtime, manifest, attempt, cleanup, _, _, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id=f"attempt-lifecycle-receipt-v2-validator-{mutation}",
+            probe_kind="timeout",
+        )
+    )
+    parents = _lifecycle_probe_receipt_v2_validator_material(
+        module=module,
+        runtime=runtime,
+        manifest=manifest,
+        attempt=attempt,
+        cleanup=cleanup,
+        receipt=receipt,
+    )
+    drifted = deepcopy(receipt)
+    if mutation == "attempt":
+        drifted["attempt_ref"] = _sealed(
+            {"attempt_id": "cross-attempt", "partition": "regression"}
+        )
+    elif mutation == "operation":
+        drifted["operation_ref"]["operation_id"] = "cross-operation"
+        drifted["operation_ref"]["content_sha256"] = content_sha256(
+            drifted["operation_ref"]
+        )
+    elif mutation == "request":
+        drifted["request_in_flight_ref"]["provider_id"] = "qwen"
+        drifted["request_in_flight_ref"]["content_sha256"] = content_sha256(
+            drifted["request_in_flight_ref"]
+        )
+    elif mutation == "provider":
+        drifted["provider"]["provider_id"] = "qwen"
+        drifted["probe_id"] = "probe/qwen/timeout"
+    elif mutation == "profile":
+        drifted["provider"]["profile_id"] = "sealed-runtime-role-is-not-authority"
+    elif mutation == "revision":
+        drifted["provider"]["provider_revision"] = "STALE_REVISION"
+    elif mutation == "cleanup":
+        drifted["cleanup_receipt_ref"] = {"content_sha256": "f" * 64}
+    elif mutation == "timeout_missing_deadline":
+        drifted["trigger_observation"]["deadline_expiration_ref"] = None
+    elif mutation == "body_complete":
+        drifted["body_completion_observation"]["state"] = "complete"
+    else:
+        drifted["body_completion_observation"]["observed_monotonic_ns"] = drifted[
+            "trigger_observation"
+        ]["triggered_monotonic_ns"]
+    drifted["content_sha256"] = content_sha256(drifted)
+    with pytest.raises(ValueError):
+        validate_benchmark_v2_lifecycle_probe_receipt_v2(drifted, **parents)
+
+
+def test_lifecycle_probe_receipt_v2_cancel_rejects_extra_deadline_parent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    )
+
+    module, runtime, manifest, attempt, cleanup, _, _, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id="attempt-lifecycle-receipt-v2-cancel-extra-deadline",
+            probe_kind="cancel",
+        )
+    )
+    parents = _lifecycle_probe_receipt_v2_validator_material(
+        module=module,
+        runtime=runtime,
+        manifest=manifest,
+        attempt=attempt,
+        cleanup=cleanup,
+        receipt=receipt,
+    )
+    drifted = deepcopy(receipt)
+    drifted["trigger_observation"]["deadline_expiration_ref"] = {
+        "content_sha256": "e" * 64
+    }
+    drifted["content_sha256"] = content_sha256(drifted)
+    parents["deadline_expiration"] = _sealed({"kind": "runner-authored-expiry"})
+    with pytest.raises(ValueError, match="cancel.*deadline"):
+        validate_benchmark_v2_lifecycle_probe_receipt_v2(drifted, **parents)
+
+
+@pytest.mark.parametrize("mutation", ["fewer", "repeated", "nonzero"])
+def test_lifecycle_probe_receipt_v2_rejects_insufficient_or_nonzero_stable_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    )
+
+    module, runtime, manifest, attempt, cleanup, _, _, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id=f"attempt-lifecycle-receipt-v2-stable-{mutation}",
+            probe_kind="cancel",
+        )
+    )
+    parents = _lifecycle_probe_receipt_v2_validator_material(
+        module=module,
+        runtime=runtime,
+        manifest=manifest,
+        attempt=attempt,
+        cleanup=cleanup,
+        receipt=receipt,
+    )
+    stable = deepcopy(parents["stable_zero_evidence"])
+    if mutation == "fewer":
+        stable["samples"] = stable["samples"][:2]
+    elif mutation == "repeated":
+        stable["samples"][1]["observed_monotonic_ns"] = stable["samples"][0][
+            "observed_monotonic_ns"
+        ]
+    else:
+        stable["samples"][1]["resource_counts"]["listeners"] = 1
+    stable["content_sha256"] = content_sha256(stable)
+    parents["stable_zero_evidence"] = stable
+    with pytest.raises(ValueError, match="stable-zero"):
+        validate_benchmark_v2_lifecycle_probe_receipt_v2(receipt, **parents)
+
+
+def test_lifecycle_probe_receipt_v2_preserves_exact_ordered_multi_process_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    )
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {
+            "attempt_id": "attempt-lifecycle-receipt-v2-multi-process",
+            "partition": "regression",
+        }
+    )
+    identities = [
+        {"pid": 4980, "create_time_ns": 5000},
+        {"pid": 4981, "create_time_ns": 5001},
+    ]
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / attempt["attempt_id"]).resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4980,
+        service=service,
+        process_identities=identities,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    cleanup = runtime.cleanup_attempt(attempt=attempt, reason="multi_process_cleanup")
+    receipt = runtime.finalize_probe_lifecycle_receipt(
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+    )
+    assert receipt["termination_observation"]["process_identities"] == identities
+    parents = _lifecycle_probe_receipt_v2_validator_material(
+        module=module,
+        runtime=runtime,
+        manifest=manifest,
+        attempt=attempt,
+        cleanup=cleanup,
+        receipt=receipt,
+    )
+    reversed_receipt = deepcopy(receipt)
+    reversed_receipt["termination_observation"]["process_identities"] = list(
+        reversed(identities)
+    )
+    reversed_receipt["content_sha256"] = content_sha256(reversed_receipt)
+    with pytest.raises(ValueError, match="process identities"):
+        validate_benchmark_v2_lifecycle_probe_receipt_v2(
+            reversed_receipt, **parents
+        )
+
+
+def test_lifecycle_probe_receipt_v2_replay_rejects_forged_preexisting_zero_parent_without_three_fresh_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        compose_benchmark_v2_probe_stable_zero_evidence_v1,
+    )
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, _, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-lifecycle-receipt-v2-forged-zero-parent",
+        probe_kind="cancel",
+        clock=clock,
+    )
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    cleanup = runtime.cleanup_attempt(
+        attempt=attempt,
+        reason="forged_zero_parent_cleanup",
+    )
+    manifest = runtime.load_provider_manifest(
+        path=tmp_path / "provider" / "provider-manifest.v2.json"
+    )
+    events = module.read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    terminal = next(
+        event for event in events if event["event_kind"] == "probe_trigger_terminal"
+    )
+    zero = {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+    forged = compose_benchmark_v2_probe_stable_zero_evidence_v1(
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+        body_completion_observation={
+            "state": "not_complete",
+            "observed_monotonic_ns": 1_000,
+            "evidence_ref": terminal,
+        },
+        samples=[
+            {"observed_monotonic_ns": value, "resource_counts": zero}
+            for value in (2_000, 3_000, 4_000)
+        ],
+    )
+    attempt_dir = (tmp_path / "attempt-lifecycle-receipt-v2-forged-zero-parent").resolve()
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    (attempt_dir / "probe-stable-zero-evidence.json").write_bytes(
+        module.canonical_json_bytes(forged, pretty=True)
+    )
+    calls = 0
+
+    def fresh_counts(self: object) -> Mapping[str, int]:
+        nonlocal calls
+        calls += 1
+        result = dict(zero)
+        if calls == 3:
+            result["leases"] = 1
+        return result
+
+    monkeypatch.setattr(type(runtime), "resource_counts", fresh_counts)
+    clock.now = 5_000
+    with pytest.raises(ValueError, match="sample|residue|stable-zero"):
+        runtime.finalize_probe_lifecycle_receipt(
+            provider_manifest=manifest,
+            attempt_ref=attempt,
+            cleanup_receipt=cleanup,
+        )
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["release", "deadline_extra", "cleanup_extra", "dispatch_extra", "observer_forged", "terminal_ref"],
+)
+def test_lifecycle_probe_receipt_v2_rejects_open_or_caller_circular_parents(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    )
+
+    probe_kind = "timeout" if mutation == "deadline_extra" else "cancel"
+    module, runtime, manifest, attempt, cleanup, _, _, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id=f"attempt-lifecycle-receipt-v2-closed-{mutation}",
+            probe_kind=probe_kind,
+        )
+    )
+    parents = _lifecycle_probe_receipt_v2_validator_material(
+        module=module,
+        runtime=runtime,
+        manifest=manifest,
+        attempt=attempt,
+        cleanup=cleanup,
+        receipt=receipt,
+    )
+    drifted = deepcopy(receipt)
+    if mutation == "release":
+        drifted["benchmark_release_id"] = "FORGED_RELEASE"
+    elif mutation == "deadline_extra":
+        expiration = deepcopy(parents["deadline_expiration"])
+        expiration["runner_authored_expired"] = True
+        expiration["content_sha256"] = content_sha256(expiration)
+        parents["deadline_expiration"] = expiration
+        drifted["trigger_observation"]["deadline_expiration_ref"] = {
+            "content_sha256": expiration["content_sha256"]
+        }
+    elif mutation == "cleanup_extra":
+        parent = deepcopy(parents["cleanup_receipt"])
+        parent["runner_note"] = "not-closed"
+        parent["content_sha256"] = content_sha256(parent)
+        parents["cleanup_receipt"] = parent
+        stable = deepcopy(parents["stable_zero_evidence"])
+        stable["cleanup_receipt_ref"] = {
+            "content_sha256": parent["content_sha256"]
+        }
+        stable["content_sha256"] = content_sha256(stable)
+        parents["stable_zero_evidence"] = stable
+        drifted["cleanup_receipt_ref"] = {
+            "content_sha256": parent["content_sha256"]
+        }
+        drifted["stable_zero_observation"]["evidence_ref"] = {
+            "content_sha256": stable["content_sha256"]
+        }
+    elif mutation == "dispatch_extra":
+        parent = deepcopy(parents["dispatch_runtime_parent"])
+        parent["runner_profile_claim"] = "not-closed"
+        parent["content_sha256"] = content_sha256(parent)
+        parents["dispatch_runtime_parent"] = parent
+    elif mutation == "observer_forged":
+        observer = _sealed(
+            {
+                "kind": "production_runtime",
+                "module_ref": {
+                    "canonical_path": str((tmp_path / "forged-runtime.py").resolve()),
+                    "file_sha256": "f" * 64,
+                },
+            }
+        )
+        drifted["observer_identity"] = observer
+    else:
+        forged_event = _sealed({"kind": "not-the-p0c-terminal"})
+        drifted["body_completion_observation"]["evidence_ref"] = forged_event
+        drifted["termination_observation"]["evidence_ref"] = forged_event
+        stable = deepcopy(parents["stable_zero_evidence"])
+        stable["body_completion_observation"]["evidence_ref"] = forged_event
+        stable["content_sha256"] = content_sha256(stable)
+        parents["stable_zero_evidence"] = stable
+        drifted["stable_zero_observation"]["evidence_ref"] = {
+            "content_sha256": stable["content_sha256"]
+        }
+    drifted["content_sha256"] = content_sha256(drifted)
+    with pytest.raises(ValueError):
+        validate_benchmark_v2_lifecycle_probe_receipt_v2(drifted, **parents)
+
+
+def test_lifecycle_probe_receipt_v2_probe_id_is_unique_per_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _materialize_lifecycle_probe_receipt_v2(
+        tmp_path=tmp_path / "first",
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-lifecycle-receipt-v2-unique-first",
+        probe_kind="cancel",
+    )[-1]
+    second = _materialize_lifecycle_probe_receipt_v2(
+        tmp_path=tmp_path / "second",
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-lifecycle-receipt-v2-unique-second",
+        probe_kind="cancel",
+    )[-1]
+    assert first["probe_id"] != second["probe_id"]
+    assert first["probe_id"].endswith(first["attempt_ref"]["content_sha256"])
+    assert second["probe_id"].endswith(second["attempt_ref"]["content_sha256"])
+
+
+def test_lifecycle_probe_receipt_v2_rejects_orphan_stable_parent_even_after_three_fresh_zero_samples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        compose_benchmark_v2_probe_stable_zero_evidence_v1,
+    )
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, _, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-lifecycle-receipt-v2-orphan-zero-parent",
+        probe_kind="cancel",
+        clock=clock,
+    )
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    cleanup = runtime.cleanup_attempt(attempt=attempt, reason="orphan_zero_cleanup")
+    manifest = runtime.load_provider_manifest(
+        path=tmp_path / "provider" / "provider-manifest.v2.json"
+    )
+    events = module.read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    terminal = next(
+        event for event in events if event["event_kind"] == "probe_trigger_terminal"
+    )
+    zero = {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+    orphan = compose_benchmark_v2_probe_stable_zero_evidence_v1(
+        attempt_ref=attempt,
+        cleanup_receipt=cleanup,
+        body_completion_observation={
+            "state": "not_complete",
+            "observed_monotonic_ns": 1_000,
+            "evidence_ref": terminal,
+        },
+        samples=[
+            {"observed_monotonic_ns": value, "resource_counts": zero}
+            for value in (2_000, 3_000, 4_000)
+        ],
+    )
+    attempt_dir = (tmp_path / "attempt-lifecycle-receipt-v2-orphan-zero-parent").resolve()
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    stable_path = attempt_dir / "probe-stable-zero-evidence.json"
+    receipt_path = attempt_dir / "lifecycle-probe-receipt.json"
+    stable_path.write_bytes(module.canonical_json_bytes(orphan, pretty=True))
+    clock.now = 5_000
+    calls = 0
+
+    def fresh_zero(self: object) -> Mapping[str, int]:
+        nonlocal calls
+        calls += 1
+        return dict(zero)
+
+    monkeypatch.setattr(type(runtime), "resource_counts", fresh_zero)
+    with pytest.raises(ValueError, match="orphan|receipt|producer"):
+        runtime.finalize_probe_lifecycle_receipt(
+            provider_manifest=manifest,
+            attempt_ref=attempt,
+            cleanup_receipt=cleanup,
+        )
+    assert calls in {0, 3}
+    assert not receipt_path.exists()
+
+
+@pytest.mark.parametrize("mutation", ["request_extra", "operation_extra", "terminal_absence"])
+def test_lifecycle_probe_receipt_v2_rejects_rehashed_open_request_operation_or_terminal_absence_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        validate_benchmark_v2_lifecycle_probe_receipt_v2,
+    )
+
+    module, runtime, manifest, attempt, cleanup, _, _, receipt = (
+        _materialize_lifecycle_probe_receipt_v2(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+            attempt_id=f"attempt-lifecycle-receipt-v2-open-{mutation}",
+            probe_kind="cancel",
+        )
+    )
+    parents = _lifecycle_probe_receipt_v2_validator_material(
+        module=module,
+        runtime=runtime,
+        manifest=manifest,
+        attempt=attempt,
+        cleanup=cleanup,
+        receipt=receipt,
+    )
+    drifted = deepcopy(receipt)
+    if mutation == "request_extra":
+        request = drifted["request_in_flight_ref"]
+        request["runner_note"] = "open-request"
+        request["content_sha256"] = content_sha256(request)
+        drifted["trigger_observation"]["request_in_flight_ref"] = deepcopy(request)
+    elif mutation == "operation_extra":
+        operation = drifted["operation_ref"]
+        operation["runner_note"] = "open-operation"
+        operation["content_sha256"] = content_sha256(operation)
+        drifted["request_in_flight_ref"]["operation_ref"] = deepcopy(operation)
+        drifted["request_in_flight_ref"]["content_sha256"] = content_sha256(
+            drifted["request_in_flight_ref"]
+        )
+        drifted["trigger_observation"]["request_in_flight_ref"] = deepcopy(
+            drifted["request_in_flight_ref"]
+        )
+    else:
+        event = deepcopy(parents["probe_trigger_terminal_event"])
+        terminal = event["resource_ref"]["value"]["probe_trigger_terminal"]
+        terminal["absence_observations"][0]["pid"] += 100
+        terminal["content_sha256"] = content_sha256(terminal)
+        event["resource_ref"]["content_sha256"] = content_sha256(
+            event["resource_ref"]
+        )
+        event["content_sha256"] = content_sha256(event)
+        parents["probe_trigger_terminal_event"] = event
+        drifted["body_completion_observation"]["evidence_ref"] = event
+        drifted["termination_observation"]["evidence_ref"] = event
+        stable = deepcopy(parents["stable_zero_evidence"])
+        stable["body_completion_observation"]["evidence_ref"] = event
+        stable["content_sha256"] = content_sha256(stable)
+        parents["stable_zero_evidence"] = stable
+        drifted["stable_zero_observation"]["evidence_ref"] = {
+            "content_sha256": stable["content_sha256"]
+        }
+    drifted["content_sha256"] = content_sha256(drifted)
+    with pytest.raises(ValueError):
+        validate_benchmark_v2_lifecycle_probe_receipt_v2(drifted, **parents)
