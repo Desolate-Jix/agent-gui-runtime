@@ -2224,7 +2224,129 @@ def test_runner_production_import_surface_is_explicit_and_provider_safe() -> Non
             ),
         ),
         (
+            "app.learn.hybrid.benchmark_v2_probe_authority",
+            ("materialize_benchmark_v2_regression_probe_authority",),
+        ),
+        (
             "app.learn.hybrid.benchmark_v2_runtime",
             ("get_production_benchmark_v2_runtime",),
         )
     ]
+
+
+def test_probe_authority_cli_uses_exact_offline_arguments_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[dict[str, object]] = []
+    bundle = {
+        "artifact_id": "probe-authority/" + "a" * 64,
+        "content_sha256": "b" * 64,
+    }
+
+    def materialize(**kwargs: object) -> dict[str, object]:
+        calls.append(kwargs)
+        return bundle
+
+    monkeypatch.setattr(
+        runner, "materialize_benchmark_v2_regression_probe_authority", materialize
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("offline action acquired Runtime")),
+    )
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", tmp_path)
+    manifest = tmp_path / "benchmark-v2-provider-manifest.json"
+    accepted = tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json"
+    ledger_root = tmp_path / "ledger"
+    output = tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"
+    result = runner.run_cli(
+        [
+            "--provider-manifest", str(manifest),
+            "--partition", "regression",
+            "--materialize-probe-authority",
+            "--regression-run-ref", str(accepted),
+            "--ledger-root", str(ledger_root),
+            "--output", str(output),
+        ]
+    )
+    assert calls == [
+        {
+            "provider_manifest_path": manifest,
+            "regression_run_ref_path": accepted,
+            "ledger_root": ledger_root,
+            "output_path": output,
+        }
+    ]
+    assert result == {
+        "probe_authority_ref": {
+            "id": bundle["artifact_id"],
+            "content_sha256": bundle["content_sha256"],
+        },
+        "status": "PASS",
+    }
+    assert "path" not in _canonical(result).decode("utf-8").casefold()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--providers", "omni"],
+        ["--attempt-ledger", ""],
+        ["--output-root", "private"],
+        ["--holdout-authorization", "authorization.json"],
+    ],
+)
+def test_probe_authority_cli_rejects_noncanonical_options_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra: list[str]
+) -> None:
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("invalid action acquired Runtime")),
+    )
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "materialize_benchmark_v2_regression_probe_authority",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("invalid action materialized")),
+    )
+    with pytest.raises(ValueError, match="not valid"):
+        runner.run_cli(
+            [
+                "--provider-manifest", str(tmp_path / "benchmark-v2-provider-manifest.json"),
+                "--partition", "regression",
+                "--materialize-probe-authority",
+                "--regression-run-ref", str(tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json"),
+                "--ledger-root", str(tmp_path / "ledger"),
+                "--output", str(tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"),
+                *extra,
+            ]
+        )
+
+
+def test_probe_authority_cli_rejects_holdout_before_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("holdout action acquired Runtime")),
+    )
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "materialize_benchmark_v2_regression_probe_authority",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("holdout action materialized")),
+    )
+    with pytest.raises(ValueError, match="regression"):
+        runner.run_cli(
+            [
+                "--provider-manifest", str(tmp_path / "benchmark-v2-provider-manifest.json"),
+                "--partition", "holdout",
+                "--materialize-probe-authority",
+                "--regression-run-ref", str(tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json"),
+                "--ledger-root", str(tmp_path / "ledger"),
+                "--output", str(tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"),
+            ]
+        )

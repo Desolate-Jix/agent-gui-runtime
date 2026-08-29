@@ -30,6 +30,9 @@ from app.learn.hybrid.benchmark_v2_predictions import (
     project_benchmark_v2_actual_body,
     project_benchmark_v2_actual_result,
 )
+from app.learn.hybrid.benchmark_v2_probe_authority import (
+    materialize_benchmark_v2_regression_probe_authority,
+)
 from app.learn.hybrid.benchmark_v2_runtime import (
     get_production_benchmark_v2_runtime,
 )
@@ -2033,9 +2036,11 @@ def _parser() -> argparse.ArgumentParser:
     action.add_argument("--cleanup-open-attempts", action="store_true")
     action.add_argument("--cleanup-only", action="store_true")
     action.add_argument("--materialize-score-input", action="store_true")
+    action.add_argument("--materialize-probe-authority", action="store_true")
     parser.add_argument("--providers")
     parser.add_argument("--attempt-ledger")
     parser.add_argument("--ledger-root")
+    parser.add_argument("--regression-run-ref")
     parser.add_argument("--output")
     parser.add_argument("--output-root")
     parser.add_argument("--holdout-authorization")
@@ -2066,7 +2071,12 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             "output_root",
             "output",
         )
-        forbidden = ("providers", "ledger_root", "holdout_authorization")
+        forbidden = (
+            "providers",
+            "ledger_root",
+            "regression_run_ref",
+            "holdout_authorization",
+        )
         present = [
             name
             for name in forbidden
@@ -2082,6 +2092,65 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
                 + ", ".join(present)
             )
         return _materialize_score_input(args)
+    if args.materialize_probe_authority:
+        _require(
+            args,
+            "provider_manifest",
+            "partition",
+            "regression_run_ref",
+            "ledger_root",
+            "output",
+        )
+        if args.partition != "regression":
+            raise ValueError("probe authority materialization requires regression")
+        fixed_regression_root = (
+            _PROJECT_ROOT
+            / "runtime_state"
+            / "portfolio-hybrid-v1-1"
+            / "benchmark-v2"
+            / "regression"
+        ).resolve()
+        if Path(args.regression_run_ref).resolve() != (
+            fixed_regression_root / "accepted-run-ref.json"
+        ) or Path(args.output).resolve() != (
+            fixed_regression_root / "probe-authority.json"
+        ):
+            raise ValueError(
+                "probe authority inputs do not match the fixed public paths"
+            )
+        forbidden = (
+            "providers",
+            "attempt_ledger",
+            "output_root",
+            "holdout_authorization",
+        )
+        present = [
+            name
+            for name in forbidden
+            if any(
+                token == "--" + name.replace("_", "-")
+                or token.startswith("--" + name.replace("_", "-") + "=")
+                for token in argv_list
+            )
+        ]
+        if present:
+            raise ValueError(
+                "runner arguments are not valid for this action: "
+                + ", ".join(present)
+            )
+        bundle = materialize_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=Path(args.provider_manifest),
+            regression_run_ref_path=Path(args.regression_run_ref),
+            ledger_root=Path(args.ledger_root),
+            output_path=Path(args.output),
+        )
+        return {
+            "probe_authority_ref": {
+                "id": bundle["artifact_id"],
+                "content_sha256": bundle["content_sha256"],
+            },
+            "status": "PASS",
+        }
     runtime = get_production_benchmark_v2_runtime()
     if args.dry_run:
         _require(args, "provider_manifest", "partition", "output")
@@ -2090,13 +2159,21 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             "providers",
             "attempt_ledger",
             "ledger_root",
+            "regression_run_ref",
             "output_root",
             "holdout_authorization",
         )
         return _dry_run(args, runtime)
     if args.actual_models:
         _require(args, "provider_manifest", "partition", "attempt_ledger", "output_root")
-        _reject(args, "providers", "ledger_root", "output", "holdout_authorization")
+        _reject(
+            args,
+            "providers",
+            "ledger_root",
+            "regression_run_ref",
+            "output",
+            "holdout_authorization",
+        )
         return _run_actual(args, runtime)
     if args.run_cancel_probe or args.run_timeout_probe:
         _require(
@@ -2107,7 +2184,13 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             "attempt_ledger",
             "output_root",
         )
-        _reject(args, "ledger_root", "output", "holdout_authorization")
+        _reject(
+            args,
+            "ledger_root",
+            "regression_run_ref",
+            "output",
+            "holdout_authorization",
+        )
         return _run_probes(
             args,
             runtime,
@@ -2120,6 +2203,7 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             "provider_manifest",
             "providers",
             "attempt_ledger",
+            "regression_run_ref",
             "output",
             "holdout_authorization",
         )

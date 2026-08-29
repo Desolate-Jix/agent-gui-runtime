@@ -4629,3 +4629,1157 @@ def test_c4_attempt_journal_projection_rejects_terminal_cleanup_swap() -> None:
             terminal_event_projection=swapped,
             cleanup_projection=graph["cleanup_projection"],
         )
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+SAFETY = {
+    "artifact_is_authorization": False,
+    "execute_binding_enabled": False,
+}
+
+
+def _sealed(value: dict[str, object]) -> dict[str, object]:
+    return seal_immutable(value)
+
+
+def _probe_authority_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    incomplete_predecessor: bool = False,
+    duplicate_run: bool = False,
+    profile_drift: bool = False,
+    revision_drift: bool = False,
+    operation_id_override: str | None = None,
+) -> dict[str, object]:
+    from app.learn.hybrid import benchmark_v2_probe_authority as authority
+    from scripts import run_portfolio_hybrid_v1_1_benchmark_v2 as probe_runner
+
+    project_root = tmp_path / "project-root"
+    ledger_root = tmp_path / "ledger-root"
+    output_path = project_root / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"
+    accepted_path = tmp_path / "accepted-run-ref.json"
+    manifest_path = tmp_path / "benchmark-v2-provider-manifest.json"
+    manifest_path.write_bytes(b"{}\n")
+    (tmp_path / "provider-corpus.v2.json").write_bytes(b"{}\n")
+    source_ref = {"content_sha256": "1" * 64}
+    manifest_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+        "relative_path": "benchmark-v2-provider-manifest.json",
+        "file_sha256": "2" * 64,
+    }
+    corpus_ref = {
+        "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": "3" * 64,
+        "content_sha256": "4" * 64,
+        "source_parent_ref": source_ref,
+    }
+    revisions = {name: f"{name}-revision-v1" for name in ("omni", "qwen", "vista")}
+    manifest = {
+        "benchmark_release_id": probe_runner.BENCHMARK_RELEASE_ID,
+        "evaluation_projection": {"provider_policy": {"provider_revisions": revisions}},
+    }
+    monkeypatch.setattr(authority, "_PROJECT_ROOT", project_root)
+    monkeypatch.setattr(
+        authority,
+        "_load_provider_inputs",
+        lambda _path: (manifest, {}, manifest_ref, corpus_ref),
+    )
+    accepted = _sealed(
+        {
+            "contract_version": "benchmark_v2_accepted_regression_score_input_v2",
+            "benchmark_release_id": probe_runner.BENCHMARK_RELEASE_ID,
+            "partition": "regression",
+            "corpus_parent_ref": source_ref,
+            "provider_manifest_ref": manifest_ref,
+            "provider_corpus_ref": corpus_ref,
+            "selection_policy": "first_complete_lifecycle_verified_attempt",
+            "attempt_ref": {"id": "runner-attempt/actual-accepted", "content_sha256": "a" * 64},
+            "attempt_ledger_ref": {"id": "ledger/a", "content_sha256": "b" * 64},
+            "automatic_prediction_ref": {"id": "prediction/a", "content_sha256": "c" * 64},
+            "selected_lifecycle_ref": {"id": "lifecycle/a", "content_sha256": "d" * 64},
+            "verified_parent_projections": {},
+            "prediction_run_envelope": {},
+            "lifecycle_bundle_envelope": {},
+            "safety": {**SAFETY, "display_only": True},
+        }
+    )
+    accepted_path.write_bytes(
+        json.dumps(accepted, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    def validate_accepted(
+        path: Path,
+        *,
+        manifest_ref: object,
+        corpus_ref: object,
+        **_kwargs: object,
+    ) -> tuple[dict[str, object], bytes]:
+        raw = Path(path).read_bytes()
+        value = json.loads(raw.decode("utf-8"))
+        if (
+            value.get("benchmark_release_id") != probe_runner.BENCHMARK_RELEASE_ID
+            or value.get("provider_manifest_ref") != manifest_ref
+            or value.get("provider_corpus_ref") != corpus_ref
+            or value.get("corpus_parent_ref")
+            != dict(corpus_ref).get("source_parent_ref")
+        ):
+            raise ValueError("accepted release, manifest, corpus, or source join differs")
+        return value, raw
+
+    monkeypatch.setattr(authority, "_validate_accepted", validate_accepted)
+    parents: dict[str, dict[str, object]] = {}
+    results: dict[str, list[dict[str, object]]] = {"cancel": [], "timeout": []}
+    calls: list[dict[str, object]] = []
+
+    def append_cell(provider: str, kind: str) -> dict[str, object]:
+        ledger = ledger_root / "regression" / f"{kind}-probes.jsonl"
+        attempt, attempt_dir = probe_runner._reserve_attempt(
+            ledger_path=ledger,
+            output_root=tmp_path / "attempts" / kind,
+            mode=f"{kind}_probe",
+            provider_id=provider,
+        )
+        body = probe_runner._seal({"cell": f"{provider}/{kind}", **SAFETY})
+        cleanup = probe_runner._seal(
+            {
+                "contract_version": "benchmark_v2_attempt_cleanup_receipt_v1",
+                "attempt_ref": attempt,
+                "reason": f"benchmark_v2_{kind}_probe_finished",
+                "service_terminal_ref": _sealed({"kind": "service-terminal"}),
+                "window_cleanup_ref": _sealed({"kind": "window-cleanup"}),
+                "provider_cleanup_refs": [_sealed({"kind": "provider-cleanup"})],
+                "cleanup_status": "stable_zero",
+                "lost_response_policy": "fresh_reconcile_safe_stop_no_blind_retry",
+                "resource_counts": {
+                    "service_operations": 0, "windows": 0, "providers": 0,
+                    "listeners": 0, "leases": 0,
+                },
+                **SAFETY,
+            }
+        )
+        body_path = attempt_dir / "body.json"
+        cleanup_path = attempt_dir / "cleanup.json"
+        body_path.write_bytes(_canonical(body) + b"\n")
+        cleanup_path.write_bytes(_canonical(cleanup) + b"\n")
+        probe_runner._append_ledger_event(
+            ledger,
+            event_type="regression_attempt",
+            payload=probe_runner._attempt_payload(
+                attempt_ref=attempt,
+                attempt_dir=attempt_dir,
+                status="body_complete",
+                output_ref=probe_runner._file_ref(body_path, body),
+            ),
+        )
+        probe_runner._append_ledger_event(
+            ledger,
+            event_type="cleanup",
+            payload=probe_runner._cleanup_payload(
+                attempt_ref=attempt,
+                attempt_dir=attempt_dir,
+                cleanup_receipt_ref=probe_runner._file_ref(cleanup_path, cleanup),
+                resource_counts=cleanup["resource_counts"],
+            ),
+        )
+        run_id = (
+            "run-omni-cancel"
+            if duplicate_run and provider == "omni" and kind == "timeout"
+            else f"run-{provider}-{kind}"
+        )
+        profile_id = f"{provider}-profile-v1"
+        profile_sha = hashlib.sha256(profile_id.encode("utf-8")).hexdigest()
+        if profile_drift and provider == "omni" and kind == "timeout":
+            profile_id, profile_sha = "omni-profile-drift", "e" * 64
+        revision = revisions[provider]
+        if revision_drift and provider == "omni" and kind == "timeout":
+            revision = "stale-revision"
+        deadline = None if kind == "cancel" else _sealed({"cell": f"{provider}/{kind}"})
+        stable = _sealed(
+            {
+                "samples": [
+                    {"resource_counts": {key: 0 for key in ("service_operations", "windows", "providers", "listeners", "leases")}}
+                    for _index in range(3)
+                ]
+            }
+        )
+        receipt = _sealed(
+            {
+                "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+                "benchmark_release_id": probe_runner.BENCHMARK_RELEASE_ID,
+                "partition": "regression",
+                "probe_id": f"probe/{provider}/{kind}/{attempt['content_sha256']}",
+                "attempt_ref": attempt,
+                "provider": {
+                    "provider_id": provider,
+                    "provider_revision": revision,
+                    "profile_id": profile_id,
+                    "profile_sha256": profile_sha,
+                },
+                "probe_kind": kind,
+                "operation_ref": {
+                    "run_id": run_id,
+                    "operation_id": (
+                        operation_id_override
+                        if operation_id_override is not None
+                        and provider == "omni"
+                        and kind == "cancel"
+                        else f"operation-{provider}-{kind}"
+                    ),
+                    "worker_ref": {"model_request_id": f"request-{provider}-{kind}"},
+                },
+                "request_in_flight_ref": {"request_state": "request_in_flight"},
+                "trigger_observation": {
+                    "deadline_expiration_ref": (
+                        None if deadline is None else {"content_sha256": deadline["content_sha256"]}
+                    )
+                },
+                "body_completion_observation": {"state": "not_complete"},
+                "termination_observation": {"outcome": "same_incarnations_exited"},
+                "stable_zero_observation": {
+                    "stable_zero_observations": 3,
+                    "evidence_ref": {"content_sha256": stable["content_sha256"]},
+                },
+                "cleanup_receipt_ref": {"content_sha256": cleanup["content_sha256"]},
+                "observer_identity": {"kind": "production_runtime"},
+                "status": "PASS",
+                **SAFETY,
+            }
+        )
+        stable_path = attempt_dir / "probe-stable-zero-evidence.json"
+        receipt_path = attempt_dir / "lifecycle-probe-receipt.json"
+        stable_path.write_bytes(
+            json.dumps(stable, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8") + b"\n"
+        )
+        receipt_bytes = (
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+            + b"\n"
+        )
+        receipt_path.write_bytes(receipt_bytes)
+        result = _sealed(
+            {
+                "contract_version": "benchmark_v2_runner_probe_result_v2",
+                "attempt_ref": attempt,
+                "attempt_dir": str(attempt_dir.resolve()),
+                "provider_id": provider,
+                "probe_kind": kind,
+                "body_ref": {"content_sha256": body["content_sha256"]},
+                "cleanup_receipt_ref": {"content_sha256": cleanup["content_sha256"]},
+                "lifecycle_probe_receipt_ref": {
+                    "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+                    "file_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+                    "content_sha256": receipt["content_sha256"],
+                },
+                "status": "terminal",
+                **SAFETY,
+            }
+        )
+        probe_runner._append_result_file_event(
+            ledger_path=ledger,
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+            result=result,
+        )
+        parents[str(attempt["content_sha256"])] = {
+            "stable_zero_evidence": stable,
+            "cleanup_receipt": cleanup,
+            "dispatch_runtime_parent": {"profile": {"profile_id": profile_id, "profile_sha256": profile_sha}},
+            "deadline_expiration": deadline,
+            "probe_trigger_terminal_event": {"content_sha256": "f" * 64},
+            "provider_manifest": manifest,
+        }
+        return result
+
+    if incomplete_predecessor:
+        probe_runner._reserve_attempt(
+            ledger_path=ledger_root / "regression" / "cancel-probes.jsonl",
+            output_root=tmp_path / "attempts" / "cancel",
+            mode="cancel_probe",
+            provider_id="omni",
+        )
+    for kind in ("cancel", "timeout"):
+        for provider in ("omni", "qwen", "vista"):
+            results[kind].append(append_cell(provider, kind))
+    for kind in ("cancel", "timeout"):
+        summary = _sealed(
+            {
+                "contract_version": "benchmark_v2_runner_probe_summary_v2",
+                "benchmark_release_id": probe_runner.BENCHMARK_RELEASE_ID,
+                "partition": "regression",
+                "probe_kind": kind,
+                "collection_policy": "one_requested_attempt_per_provider",
+                "attempts": results[kind],
+                "status": "terminal",
+                **SAFETY,
+            }
+        )
+        summary_path = project_root / f"runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/{kind}-probes/{kind}-probes.json"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_bytes(_canonical(summary) + b"\n")
+
+    monkeypatch.setattr(
+        authority,
+        "_load_lifecycle_parent_material",
+        lambda *, attempt_ref, **_kwargs: deepcopy(parents[str(attempt_ref["content_sha256"])]),
+    )
+
+    def validate(receipt: object, **_parents: object) -> dict[str, object]:
+        calls.append(deepcopy(dict(receipt)))
+        return deepcopy(dict(receipt))
+
+    monkeypatch.setattr(authority, "validate_benchmark_v2_lifecycle_probe_receipt_v2", validate)
+    return {
+        "authority": authority,
+        "accepted": accepted,
+        "accepted_path": accepted_path,
+        "append_cell": append_cell,
+        "calls": calls,
+        "ledger_root": ledger_root,
+        "manifest_path": manifest_path,
+        "output_path": output_path,
+        "project_root": project_root,
+        "results": results,
+    }
+
+
+def test_probe_authority_exact_bundle_ref_hash_and_projection_schemas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    authority = fixture["authority"]
+    bundle = authority.materialize_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+        output_path=fixture["output_path"],
+    )
+    assert set(bundle) == {
+        "contract_version", "artifact_id", "benchmark_release_id", "partition",
+        "provider_manifest_ref", "provider_corpus_ref", "accepted_run_ref",
+        "selection_policy", "required_matrix", "probe_ledger_horizon_refs",
+        "probe_cells", "status", "safety", "content_sha256",
+    }
+    semantic = {
+        key: value
+        for key, value in bundle.items()
+        if key not in {"artifact_id", "content_sha256"}
+    }
+    semantic_sha = hashlib.sha256(
+        b"benchmark_v2_regression_probe_authority_bundle_v1\0" + _canonical(semantic)
+    ).hexdigest()
+    assert bundle["artifact_id"] == f"probe-authority/{semantic_sha}"
+    assert bundle["content_sha256"] == hashlib.sha256(
+        _canonical(
+            {key: value for key, value in bundle.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+    assert bundle["required_matrix"] == [
+        [provider, kind]
+        for provider in ("omni", "qwen", "vista")
+        for kind in ("cancel", "timeout")
+    ]
+    assert len(fixture["calls"]) == 6
+    for item in authority._LAST_REBUILT_PROJECTIONS:
+        is_pre_result = item["contract_version"].endswith(
+            "pre_result_verified_projection_v1"
+        )
+        assert set(item) == (
+            authority._PRE_RESULT_FIELDS
+            if is_pre_result
+            else authority._HORIZON_FIELDS
+        )
+        semantic = {
+            key: value
+            for key, value in item.items()
+            if key not in {"artifact_id", "content_sha256"}
+        }
+        projection_sha = hashlib.sha256(
+            item["contract_version"].encode("utf-8")
+            + b"\0"
+            + _canonical(semantic)
+        ).hexdigest()
+        prefix = (
+            "verified-probe-pre-result"
+            if is_pre_result
+            else "verified-probe-ledger-horizon"
+        )
+        assert item["artifact_id"] == f"{prefix}/{projection_sha}"
+        assert item["content_sha256"] == hashlib.sha256(
+            _canonical(
+                {key: value for key, value in item.items() if key != "content_sha256"}
+            )
+        ).hexdigest()
+    assert set(bundle["accepted_run_ref"]) == {
+        "contract_version", "file_sha256", "content_sha256"
+    }
+    assert all(
+        cell["termination_outcome"] == "same_incarnations_exited"
+        for cell in bundle["probe_cells"]
+    )
+
+
+def test_first_complete_verified_attempt_per_cell_skips_incomplete_predecessor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(
+        tmp_path, monkeypatch, incomplete_predecessor=True
+    )
+    bundle = fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    selected = fixture["results"]["cancel"][0]["attempt_ref"]
+    assert bundle["probe_cells"][0]["attempt_ref"] == {
+        "id": "runner-attempt/" + selected["attempt_id"],
+        "content_sha256": selected["content_sha256"],
+    }
+
+
+def test_first_complete_verified_attempt_per_cell_never_skips_invalid_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    first = fixture["results"]["cancel"][0]
+    fixture["append_cell"]("omni", "cancel")
+    result_path = Path(first["attempt_dir"]) / "result.json"
+    forged = deepcopy(first)
+    forged["status"] = "FAIL"
+    forged["content_sha256"] = hashlib.sha256(
+        _canonical(
+            {key: value for key, value in forged.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+    result_path.write_bytes(_canonical(forged) + b"\n")
+    with pytest.raises(ValueError, match="first complete|result"):
+        fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+        )
+
+
+def test_probe_authority_cutoff_tail_is_nonauthoritative_and_stable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    first = fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    for kind in ("cancel", "timeout"):
+        ledger = fixture["ledger_root"] / "regression" / f"{kind}-probes.jsonl"
+        ledger.write_bytes(ledger.read_bytes() + b"not-json-tail\n")
+    second = fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    assert second == first
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "drift", "reorder", "missing_cell", "extra", "duplicate"],
+)
+def test_probe_authority_summary_missing_drift_or_reorder_cannot_redirect_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    summary_path = fixture["project_root"] / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/cancel-probes/cancel-probes.json"
+    if mutation == "missing":
+        summary_path.unlink()
+    else:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if mutation == "drift":
+            summary["attempts"][0]["provider_id"] = "qwen"
+        elif mutation == "reorder":
+            summary["attempts"] = list(reversed(summary["attempts"]))
+        elif mutation == "missing_cell":
+            summary["attempts"] = summary["attempts"][:-1]
+        elif mutation == "extra":
+            summary["attempts"].append(deepcopy(summary["attempts"][-1]))
+        else:
+            summary["attempts"][1] = deepcopy(summary["attempts"][0])
+        summary["content_sha256"] = hashlib.sha256(
+            _canonical(
+                {key: value for key, value in summary.items() if key != "content_sha256"}
+            )
+        ).hexdigest()
+        summary_path.write_bytes(_canonical(summary) + b"\n")
+    with pytest.raises((FileNotFoundError, ValueError), match="summary|missing"):
+        fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["release", "provider_manifest", "provider_corpus", "source_parent", "accepted_attempt"],
+)
+def test_probe_authority_rejects_all_accepted_provider_and_source_joins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    accepted = deepcopy(fixture["accepted"])
+    if mutation == "release":
+        accepted["benchmark_release_id"] = "different-release"
+    elif mutation == "provider_manifest":
+        accepted["provider_manifest_ref"]["file_sha256"] = "9" * 64
+    elif mutation == "provider_corpus":
+        accepted["provider_corpus_ref"]["content_sha256"] = "9" * 64
+    elif mutation == "source_parent":
+        accepted["corpus_parent_ref"] = {"content_sha256": "9" * 64}
+    else:
+        probe_attempt = fixture["results"]["cancel"][0]["attempt_ref"]
+        accepted["attempt_ref"] = {
+            "id": "runner-attempt/" + probe_attempt["attempt_id"],
+            "content_sha256": probe_attempt["content_sha256"],
+        }
+    accepted["content_sha256"] = hashlib.sha256(
+        _canonical(
+            {key: value for key, value in accepted.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+    fixture["accepted_path"].write_bytes(
+        json.dumps(accepted, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    with pytest.raises(ValueError, match="accepted|release|manifest|corpus|attempt"):
+        fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+        )
+
+
+@pytest.mark.parametrize("case", ["lineage", "profile", "revision"])
+def test_probe_matrix_distinct_lineage_profile_and_revision_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    fixture = _probe_authority_fixture(
+        tmp_path,
+        monkeypatch,
+        duplicate_run=case == "lineage",
+        profile_drift=case == "profile",
+        revision_drift=case == "revision",
+    )
+    with pytest.raises(ValueError, match="distinct|profile|revision"):
+        fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ["attempt_ref", "run_id", "operation_id", "model_request_id"]
+)
+def test_probe_matrix_distinct_lineage_covers_every_public_identity_class(
+    field: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_probe_authority as authority
+
+    cells = [
+        {
+            "attempt_ref": {
+                "id": f"runner-attempt/probe-{index}",
+                "content_sha256": f"{index + 1:x}" * 64,
+            },
+            "run_id": f"run-{index}",
+            "operation_id": f"operation-{index}",
+            "model_request_id": f"request-{index}",
+        }
+        for index in range(6)
+    ]
+    cells[1][field] = deepcopy(cells[0][field])
+    receipts = {
+        (provider, kind): {
+            "provider": {
+                "profile_id": f"{provider}-profile",
+                "profile_sha256": "a" * 64,
+                "provider_revision": f"{provider}-revision",
+            }
+        }
+        for provider in ("omni", "qwen", "vista")
+        for kind in ("cancel", "timeout")
+    }
+    manifest = {
+        "evaluation_projection": {
+            "provider_policy": {
+                "provider_revisions": {
+                    provider: f"{provider}-revision"
+                    for provider in ("omni", "qwen", "vista")
+                }
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="distinct"):
+        authority._require_global_joins(
+            cells,
+            receipts,
+            accepted_attempt_ref={
+                "id": "runner-attempt/accepted",
+                "content_sha256": "f" * 64,
+            },
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize("case", ["timeout_missing", "cancel_extra", "stable_zero"])
+def test_probe_authority_deadline_and_stable_zero_rules_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    target = fixture["results"]["timeout" if case == "timeout_missing" else "cancel"][0]
+    digest = target["attempt_ref"]["content_sha256"]
+    original = fixture["authority"]._load_lifecycle_parent_material
+
+    def mutate(**kwargs: object) -> dict[str, object]:
+        material = original(**kwargs)
+        if kwargs["attempt_ref"]["content_sha256"] == digest:
+            if case == "timeout_missing":
+                material["deadline_expiration"] = None
+            elif case == "cancel_extra":
+                material["deadline_expiration"] = _sealed({"unexpected": True})
+            else:
+                material["stable_zero_evidence"]["samples"] = material["stable_zero_evidence"]["samples"][:2]
+        return material
+
+    monkeypatch.setattr(fixture["authority"], "_load_lifecycle_parent_material", mutate)
+    with pytest.raises(ValueError, match="deadline|stable-zero|sample"):
+        fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+        )
+
+
+def test_probe_authority_projection_is_pathless_private_free_and_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    authority = fixture["authority"]
+    first = authority.materialize_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+        output_path=fixture["output_path"],
+    )
+    first_bytes = fixture["output_path"].read_bytes()
+    second = authority.materialize_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+        output_path=fixture["output_path"],
+    )
+    raw = _canonical(first).decode("utf-8").casefold()
+    assert first == second
+    assert fixture["output_path"].read_bytes() == first_bytes
+    assert str(tmp_path).casefold() not in raw
+    assert all(token not in raw for token in ("attempt_dir", "private", "observer_identity", "process_identities"))
+    with pytest.raises(ValueError, match="fixed public path"):
+        authority.materialize_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+            output_path=tmp_path / "redirected-probe-authority.json",
+        )
+
+
+def test_probe_authority_rejects_hollow_self_hashed_accepted_regression_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid import benchmark_v2_probe_authority as authority
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_runner import (
+        test_materialize_score_input_true_offline_producer_is_deterministic,
+    )
+
+    test_materialize_score_input_true_offline_producer_is_deterministic(
+        monkeypatch, tmp_path
+    )
+    manifest_path = tmp_path / "benchmark-v2-provider-manifest.json"
+    corpus_path = tmp_path / "provider-corpus.v2.json"
+    accepted_path = tmp_path / "accepted-run-ref.json"
+    accepted = json.loads(accepted_path.read_text(encoding="utf-8"))
+    accepted["verified_parent_projections"] = {}
+    accepted["prediction_run_envelope"] = {}
+    accepted["lifecycle_bundle_envelope"] = {}
+    accepted["content_sha256"] = hashlib.sha256(
+        _canonical(
+            {
+                key: value
+                for key, value in accepted.items()
+                if key != "content_sha256"
+            }
+        )
+    ).hexdigest()
+    accepted_path.write_bytes(
+        json.dumps(accepted, ensure_ascii=False, sort_keys=True, indent=2).encode(
+            "utf-8"
+        )
+        + b"\n"
+    )
+    _manifest, _corpus, manifest_ref, corpus_ref = authority._load_provider_inputs(
+        manifest_path
+    )
+    with pytest.raises(ValueError, match="accepted|projection|envelope|closure"):
+        authority._validate_accepted(
+            accepted_path,
+            manifest_ref=manifest_ref,
+            corpus_ref=corpus_ref,
+            provider_manifest_bytes=manifest_path.read_bytes(),
+            provider_corpus_bytes=corpus_path.read_bytes(),
+        )
+
+
+def test_probe_authority_rejects_native_path_in_public_attempt_identifier() -> None:
+    from app.learn.hybrid import benchmark_v2_probe_authority as authority
+
+    attempt = _sealed(
+        {
+            "contract_version": "benchmark_v2_runner_attempt_ref_v1",
+            "attempt_id": r"attempt-C:\secret\probe",
+            "partition": "regression",
+            "mode": "cancel_probe",
+            "provider_id": "omni",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    with pytest.raises(ValueError, match="attempt|path|identifier"):
+        authority._attempt_ref(attempt, provider="omni", kind="cancel")
+
+
+def test_probe_authority_recursive_public_scan_rejects_private_native_operation_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(
+        tmp_path,
+        monkeypatch,
+        operation_id_override=r"operation-C:\private\Gold\observer-process-socket.json",
+    )
+    with pytest.raises(ValueError, match="path|private|leak|public"):
+        fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+        )
+
+
+def test_probe_authority_p1_scan_rejects_pathless_raw_runtime_identity_tokens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    bundle = fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    bundle["probe_cells"][0]["operation_id"] = (
+        "operation-observer-process-socket-private-gold"
+    )
+    with pytest.raises(ValueError, match="private|runtime identity|leak"):
+        fixture["authority"]._validate_public_probe_authority(bundle)
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        "QzpcXFByaXZhdGVcXEdvbGRcXG9ic2VydmVyLXByb2Nlc3Mtc29ja2V0Lmpzb24=",
+        "QzpcXFByaXZhdGVcXEdvbGRcXG9ic2VydmVyLXByb2Nlc3Mtc29ja2V0Lmpzb24",
+        "QzpcXFByaXZhdGVcXEdvbGRcXG9ic2VydmVyLXByb2Nlc3Mtc29ja2V0Lmpzb24%3D",
+        base64.urlsafe_b64encode(
+            "🚀C:\\Private\\Gold\\observer-process-socket.json!".encode("utf-8")
+        ).decode("ascii"),
+        base64.urlsafe_b64encode(
+            "🚀C:\\Private\\Gold\\observer-process-socket.json!".encode("utf-8")
+        ).decode("ascii").rstrip("="),
+    ],
+)
+def test_probe_authority_p1_scan_rejects_base64_encoded_private_native_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, encoded: str
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    bundle = fixture["authority"].rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    bundle["probe_cells"][0]["operation_id"] = encoded
+    with pytest.raises(ValueError, match="private|runtime identity|leak|path"):
+        fixture["authority"]._validate_public_probe_authority(bundle)
+
+
+def test_probe_authority_p1_scan_fails_closed_on_decoded_byte_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    authority = fixture["authority"]
+    bundle = authority.rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    bundle["probe_cells"][0]["operation_id"] = "c2FmZQ=="
+    monkeypatch.setattr(authority, "MAX_DECODED_BYTES", 1)
+    with pytest.raises(ValueError, match="decoded byte bound"):
+        authority._validate_public_probe_authority(bundle)
+
+
+def test_probe_authority_p1_scan_does_not_decode_remainder_one_malformed_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    authority = fixture["authority"]
+    bundle = authority.rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+    )
+    bundle["probe_cells"][0]["operation_id"] = "abcde"
+    authority._validate_public_probe_authority(bundle)
+
+
+def test_probe_authority_production_boundary_rebuilds_six_real_lifecycle_parent_chains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil
+
+    from app.learn.hybrid import benchmark_v2_probe_authority as authority
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from scripts import run_portfolio_hybrid_v1_1_benchmark_v2 as probe_runner
+    from tests import test_portfolio_hybrid_v1_1_benchmark_v2_runtime_recovery as recovery
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_runner import (
+        test_materialize_score_input_true_offline_producer_is_deterministic,
+    )
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_runtime import (
+        _OCR,
+        _Windows,
+        _install_fakes,
+    )
+
+    test_materialize_score_input_true_offline_producer_is_deterministic(
+        monkeypatch, tmp_path
+    )
+    project_root = tmp_path / "project-root"
+    ledger_root = tmp_path / "ledger"
+    accepted_path = tmp_path / "accepted-run-ref.json"
+    manifest_path = tmp_path / "benchmark-v2-provider-manifest.json"
+    corpus_path = tmp_path / "provider-corpus.v2.json"
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+    for image in {
+        str(case["image"]["path"])
+        for case in corpus["cases"]
+        if case["partition"] == "regression"
+    }:
+        source = Path(__file__).resolve().parents[1] / image
+        destination = project_root / image
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+
+    windows = _Windows()
+    _install_fakes(monkeypatch, runtime_module, corpus, windows, _OCR())
+    clock = recovery._DeterministicDeadlineClock()
+    runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=project_root,
+        authority_root=project_root / "runtime_state" / "binding-authority",
+        monotonic_ns=clock.monotonic_ns,
+        wait_hook=clock.wait,
+    )
+    manifest = runtime.load_provider_manifest(path=manifest_path)
+    monkeypatch.setattr(authority, "_PROJECT_ROOT", project_root)
+    monkeypatch.setattr(probe_runner, "_PROJECT_ROOT", project_root)
+
+    original_operation_ref = recovery._operation_ref
+    results: dict[str, list[dict[str, object]]] = {"cancel": [], "timeout": []}
+    receipts: dict[tuple[str, str], dict[str, object]] = {}
+    for kind in ("cancel", "timeout"):
+        ledger = ledger_root / "regression" / f"{kind}-probes.jsonl"
+        for provider_index, provider in enumerate(("omni", "qwen", "vista")):
+            suffix = f"-{provider}-{kind}"
+
+            def unique_operation_ref(**kwargs: object) -> dict[str, object]:
+                operation = original_operation_ref(**kwargs)
+                worker = deepcopy(operation["worker_ref"])
+                worker.pop("content_sha256")
+                worker["model_request_id"] = str(worker["model_request_id"]) + suffix
+                operation["worker_ref"] = recovery._sealed(worker)
+                operation.pop("content_sha256")
+                return recovery._sealed(operation)
+
+            monkeypatch.setattr(recovery, "_operation_ref", unique_operation_ref)
+            service = recovery._ProbeService()
+            monkeypatch.setattr(
+                runtime_module,
+                "get_production_benchmark_v2_workflow_service",
+                lambda service=service: service,
+            )
+            attempt, attempt_dir = probe_runner._reserve_attempt(
+                ledger_path=ledger,
+                output_root=tmp_path / "probe-attempts" / kind,
+                mode=f"{kind}_probe",
+                provider_id=provider,
+            )
+            context = dict(
+                runtime.begin_probe(
+                    provider_id=provider,
+                    probe_kind=kind,
+                    provider_manifest=manifest,
+                    attempt_ref=attempt,
+                    attempt_dir=attempt_dir,
+                )
+            )
+            recovery._write_dispatch_journal(
+                runtime_module=runtime_module,
+                project_root=project_root,
+                monkeypatch=monkeypatch,
+                context=context,
+                provider=provider,
+                pid=6100 + provider_index * 10 + (kind == "timeout"),
+                service=service,
+            )
+            request = dict(runtime.read_server_journal(probe_context=context))
+            trigger = dict(
+                runtime.trigger_probe(
+                    probe_context=context,
+                    probe_kind=kind,
+                    request_in_flight_journal=request,
+                )
+            )
+            body = probe_runner._seal(
+                {
+                    "contract_version": "benchmark_v2_runner_probe_body_v1",
+                    "attempt_ref": deepcopy(attempt),
+                    "partition": "regression",
+                    "provider_id": provider,
+                    "probe_kind": kind,
+                    "probe_context_ref": {
+                        "content_sha256": context["content_sha256"]
+                    },
+                    "request_in_flight_ref": {
+                        "content_sha256": request["content_sha256"]
+                    },
+                    "trigger_receipt_ref": {
+                        "content_sha256": trigger["content_sha256"]
+                    },
+                    "body_status": "complete",
+                    **SAFETY,
+                }
+            )
+            body_path = attempt_dir / "body.json"
+            body_path.write_bytes(_canonical(body) + b"\n")
+            probe_runner._append_ledger_event(
+                ledger,
+                event_type="regression_attempt",
+                payload=probe_runner._attempt_payload(
+                    attempt_ref=attempt,
+                    attempt_dir=attempt_dir,
+                    status="body_complete",
+                    output_ref=probe_runner._file_ref(body_path, body),
+                ),
+            )
+            cleanup = probe_runner._finish_attempt(
+                runtime,
+                ledger_path=ledger,
+                attempt_ref=attempt,
+                attempt_dir=attempt_dir,
+                reason=f"benchmark_v2_{kind}_probe_finished",
+                require_effect_refs=True,
+            )
+            receipt = dict(
+                runtime.finalize_probe_lifecycle_receipt(
+                    provider_manifest=manifest,
+                    attempt_ref=attempt,
+                    cleanup_receipt=cleanup,
+                )
+            )
+            receipt_path = attempt_dir / "lifecycle-probe-receipt.json"
+            receipt_raw = receipt_path.read_bytes()
+            result = probe_runner._seal(
+                {
+                    "contract_version": "benchmark_v2_runner_probe_result_v2",
+                    "attempt_ref": deepcopy(attempt),
+                    "attempt_dir": str(attempt_dir),
+                    "provider_id": provider,
+                    "probe_kind": kind,
+                    "body_ref": {"content_sha256": body["content_sha256"]},
+                    "cleanup_receipt_ref": {
+                        "content_sha256": cleanup["content_sha256"]
+                    },
+                    "lifecycle_probe_receipt_ref": {
+                        "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+                        "file_sha256": hashlib.sha256(receipt_raw).hexdigest(),
+                        "content_sha256": receipt["content_sha256"],
+                    },
+                    "status": "terminal",
+                    **SAFETY,
+                }
+            )
+            probe_runner._append_result_file_event(
+                ledger_path=ledger,
+                attempt_ref=attempt,
+                attempt_dir=attempt_dir,
+                result=result,
+            )
+            results[kind].append(result)
+            receipts[(provider, kind)] = receipt
+    monkeypatch.setattr(recovery, "_operation_ref", original_operation_ref)
+
+    for kind in ("cancel", "timeout"):
+        summary = probe_runner._seal(
+            {
+                "contract_version": "benchmark_v2_runner_probe_summary_v2",
+                "benchmark_release_id": probe_runner.BENCHMARK_RELEASE_ID,
+                "partition": "regression",
+                "probe_kind": kind,
+                "collection_policy": "one_requested_attempt_per_provider",
+                "attempts": results[kind],
+                "status": "terminal",
+                **SAFETY,
+            }
+        )
+        summary_path = (
+            project_root
+            / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression"
+            / f"{kind}-probes/{kind}-probes.json"
+        )
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_bytes(_canonical(summary) + b"\n")
+
+    bundle = authority.rebuild_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=manifest_path,
+        regression_run_ref_path=accepted_path,
+        ledger_root=ledger_root,
+    )
+    expected_results = {
+        (provider, kind): results[kind][provider_index]
+        for kind in ("cancel", "timeout")
+        for provider_index, provider in enumerate(("omni", "qwen", "vista"))
+    }
+    for cell in bundle["probe_cells"]:
+        key = (cell["provider_id"], cell["probe_kind"])
+        result = expected_results[key]
+        receipt = receipts[key]
+        assert cell["attempt_ref"] == {
+            "id": "runner-attempt/" + result["attempt_ref"]["attempt_id"],
+            "content_sha256": result["attempt_ref"]["content_sha256"],
+        }
+        assert cell["run_id"] == receipt["operation_ref"]["run_id"]
+        assert cell["operation_id"] == receipt["operation_ref"]["operation_id"]
+        assert cell["model_request_id"] == receipt["operation_ref"]["worker_ref"][
+            "model_request_id"
+        ]
+        assert cell["cleanup_receipt_ref"] == receipt["cleanup_receipt_ref"]
+        assert cell["stable_zero_ref"] == receipt["stable_zero_observation"][
+            "evidence_ref"
+        ]
+
+
+def test_probe_authority_consumer_rebuilds_once_and_returns_runtime_profile_map(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    authority = fixture["authority"]
+    expected = authority.materialize_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+        output_path=fixture["output_path"],
+    )
+    fixture["calls"].clear()
+
+    validated = authority.validate_benchmark_v2_regression_probe_authority_candidate(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+        probe_authority_path=fixture["output_path"],
+    )
+
+    assert validated.bundle == expected
+    assert validated.profile_sha256_by_id == {
+        f"{provider}-profile-v1": hashlib.sha256(
+            f"{provider}-profile-v1".encode("utf-8")
+        ).hexdigest()
+        for provider in ("omni", "qwen", "vista")
+    }
+    assert len(fixture["calls"]) == 6
+
+
+def test_probe_authority_consumer_rejects_forged_self_hashed_candidate_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    authority = fixture["authority"]
+    bundle = authority.materialize_benchmark_v2_regression_probe_authority(
+        provider_manifest_path=fixture["manifest_path"],
+        regression_run_ref_path=fixture["accepted_path"],
+        ledger_root=fixture["ledger_root"],
+        output_path=fixture["output_path"],
+    )
+    semantic = {
+        key: deepcopy(value)
+        for key, value in bundle.items()
+        if key not in {"artifact_id", "content_sha256"}
+    }
+    semantic["probe_cells"][0]["operation_id"] = "operation-forged"
+    forged = authority._seal_projection(
+        contract_version="benchmark_v2_regression_probe_authority_bundle_v1",
+        prefix="probe-authority",
+        semantic_payload={
+            key: value for key, value in semantic.items() if key != "contract_version"
+        },
+    )
+    fixture["output_path"].write_bytes(
+        json.dumps(forged, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    fixture["calls"].clear()
+
+    with pytest.raises(ValueError, match="candidate|authoritative|bytes|differs"):
+        authority.validate_benchmark_v2_regression_probe_authority_candidate(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+            probe_authority_path=fixture["output_path"],
+        )
+    assert len(fixture["calls"]) == 6
+
+
+def test_probe_authority_forged_self_hashed_pass_candidate_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _probe_authority_fixture(tmp_path, monkeypatch)
+    forged = _sealed(
+        {
+            "contract_version": "benchmark_v2_regression_probe_authority_bundle_v1",
+            "artifact_id": "probe-authority/" + "f" * 64,
+            "status": "PASS",
+        }
+    )
+    fixture["output_path"].write_bytes(
+        json.dumps(forged, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    before = fixture["output_path"].read_bytes()
+    with pytest.raises(ValueError, match="different|authoritative"):
+        fixture["authority"].materialize_benchmark_v2_regression_probe_authority(
+            provider_manifest_path=fixture["manifest_path"],
+            regression_run_ref_path=fixture["accepted_path"],
+            ledger_root=fixture["ledger_root"],
+            output_path=fixture["output_path"],
+        )
+    assert fixture["output_path"].read_bytes() == before
