@@ -76,7 +76,7 @@ def backend(tmp: Path):
 def authorization(value, provider: str = "1" * 64) -> dict[str, object]:
     cid = claim_id(IDENTITY)
     return {
-        "contract_version": "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v1",
+        "contract_version": "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v2",
         "claim_identity": dict(IDENTITY),
         "claim_id": cid,
         "ledger_identity": {
@@ -94,7 +94,15 @@ def authorization(value, provider: str = "1" * 64) -> dict[str, object]:
             "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json": "5" * 64,
             "configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json": "6" * 64,
         },
-        "profile_sha256_by_id": {"portfolio_hybrid_v1_1_default": "7" * 64},
+        "profile_sha256_by_id": {
+            "omni-runtime": "7" * 64,
+            "qwen-runtime": "8" * 64,
+            "vista-runtime": "9" * 64,
+        },
+        "regression_probe_authority_ref": {
+            "id": "probe-authority/" + "8" * 64,
+            "content_sha256": "9" * 64,
+        },
         "arm_order": list(EXACT_ARM_ORDER),
         "exact_holdout_command": list(EXACT_HOLDOUT_COMMAND),
         "exact_run_order": list(EXACT_RUN_ORDER),
@@ -212,6 +220,107 @@ def test_two_layer_hashes_have_no_self_reference_and_stable_identity(test_backen
     changed["provider_manifest_sha256"] = "9" * 64
     assert claim_id(changed["claim_identity"]) == claim_id(payload["claim_identity"])
     assert authorization_envelope(changed)[1] != digest
+
+
+def test_authorization_payload_v2_is_closed_while_claim_identity_stays_stable(
+    test_backend,
+) -> None:
+    payload = authorization(test_backend)
+    wrapped, _digest = authorization_envelope(payload)
+    assert payload["contract_version"] == (
+        "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v2"
+    )
+    assert set(payload) == {
+        "contract_version",
+        "claim_identity",
+        "claim_id",
+        "ledger_identity",
+        "fixed_authorization_path",
+        "provider_manifest_sha256",
+        "provider_manifest_contract_version",
+        "code_sha256_by_path",
+        "config_sha256_by_path",
+        "profile_sha256_by_id",
+        "regression_probe_authority_ref",
+        "arm_order",
+        "exact_holdout_command",
+        "exact_run_order",
+        "absolute_owner_journal_root",
+    }
+    assert wrapped["contract_version"] == (
+        "portfolio_hybrid_benchmark_v2_holdout_authorization_envelope_v2"
+    )
+    assert wrapped["payload"] == payload
+    assert payload["claim_identity"] == IDENTITY
+    assert payload["claim_id"] == claim_id(IDENTITY)
+    identity_bytes = (
+        b'{"benchmark_release_id":"portfolio_hybrid_v1_1_benchmark_v2_release_1",'
+        b'"corpus_parent_seal_sha256":"8503010496a426893456e903b9d768f2a281ef0509f11230d312b073c0760757",'
+        b'"partition":"holdout"}'
+    )
+    assert canonical_bytes(payload["claim_identity"]) == identity_bytes
+    assert payload["claim_id"] == hashlib.sha256(identity_bytes).hexdigest()
+    assert durable._authorization_ref(test_backend, wrapped, _digest) == {
+        "authorization_id": f"holdout-authorization/{claim_id(IDENTITY)}",
+        "envelope_sha256": _digest,
+        "fixed_authorization_path": str(
+            test_backend.file_root / f"{claim_id(IDENTITY)}.authorization.json"
+        ),
+    }
+
+
+def test_authorization_payload_v2_rejects_v1_and_probe_ref_drift_before_mutation(
+    test_backend,
+) -> None:
+    for mutation in ("v1", "missing", "path", "id", "digest"):
+        payload = authorization(test_backend)
+        if mutation == "v1":
+            payload["contract_version"] = (
+                "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v1"
+            )
+        elif mutation == "missing":
+            del payload["regression_probe_authority_ref"]
+        elif mutation == "path":
+            payload["regression_probe_authority_ref"]["path"] = "private/probe.json"
+        elif mutation == "id":
+            payload["regression_probe_authority_ref"]["id"] = "probe-authority/not-a-sha"
+        else:
+            payload["regression_probe_authority_ref"]["content_sha256"] = "invalid"
+        with pytest.raises(ValueError, match="authorization"):
+            _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+        assert not test_backend.file_root.parent.exists()
+        assert not _registry_leaf_exists(test_backend)
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    [
+        {},
+        {"omni-runtime": "1" * 64},
+        {"omni-runtime": "1" * 64, "qwen-runtime": "2" * 64},
+        {
+            "omni-runtime": "1" * 64,
+            "qwen-runtime": "2" * 64,
+            "vista-runtime": "3" * 64,
+            "fourth-runtime": "4" * 64,
+        },
+        {
+            "omni-runtime": "1" * 64,
+            "qwen-runtime": "not-a-sha",
+            "vista-runtime": "3" * 64,
+        },
+    ],
+)
+def test_authorization_payload_v2_requires_exactly_three_valid_runtime_profiles_before_mutation(
+    test_backend,
+    profiles: dict[str, str],
+) -> None:
+    payload = authorization(test_backend)
+    payload["profile_sha256_by_id"] = profiles
+    with pytest.raises(ValueError, match="authorization profile map"):
+        _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    assert not test_backend.file_root.parent.exists()
+    assert not _registry_leaf_exists(test_backend)
 
 
 def test_authorization_hash_is_calculable_before_genesis(test_backend) -> None:
@@ -552,6 +661,89 @@ def test_partition_ledgers_are_independent_and_holdout_genesis_is_immutable(test
 
 def _authorization_output_path(value) -> Path:
     return value.file_root.parent / "AuthorizationRef" / "holdout-authorization.json"
+
+
+@pytest.mark.parametrize(
+    "legacy_artifact",
+    ["authorization_object", "authorization_ref", "file_anchor", "registry_anchor", "genesis"],
+)
+def test_authorization_payload_v2_permanently_refuses_existing_v1_namespace_artifact(
+    tmp_path: Path,
+    legacy_artifact: str,
+) -> None:
+    value = backend(tmp_path)
+    payload_v2 = authorization(value)
+    payload_v1 = deepcopy(payload_v2)
+    payload_v1["contract_version"] = (
+        "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v1"
+    )
+    del payload_v1["regression_probe_authority_ref"]
+    wrapped_v1, digest_v1 = durable.envelope(
+        "portfolio_hybrid_benchmark_v2_holdout_authorization_envelope_v1",
+        payload_v1,
+    )
+    ref_v1 = durable._authorization_ref(value, wrapped_v1, digest_v1)
+    output_path = _authorization_output_path(value).resolve()
+    cid = claim_id(IDENTITY)
+    try:
+        if legacy_artifact == "authorization_object":
+            Path(ref_v1["fixed_authorization_path"]).parent.mkdir(parents=True)
+            durable._write_secure_new_file(
+                Path(ref_v1["fixed_authorization_path"]),
+                canonical_bytes(wrapped_v1),
+                test_control=None,
+            )
+        elif legacy_artifact == "authorization_ref":
+            output_path.parent.mkdir(parents=True)
+            durable._write_secure_new_file(
+                output_path,
+                canonical_bytes(ref_v1),
+                test_control=None,
+            )
+        elif legacy_artifact == "file_anchor":
+            assert durable._sentinel_create(
+                value.file_root / f"{cid}--{digest_v1}.claim",
+                None,
+            )
+        elif legacy_artifact == "registry_anchor":
+            assert durable._registry_create(
+                value,
+                cid,
+                {
+                    "ContractVersion": "portfolio_hybrid_benchmark_v2_holdout_claim_envelope_v1",
+                    "ClaimId": cid,
+                    "AuthorizationEnvelopeSha256": digest_v1,
+                    "ClaimEnvelope": b"legacy-v1",
+                    "ClaimEnvelopeSha256": "0" * 64,
+                },
+                None,
+            )
+        else:
+            _authorize_holdout_genesis_for_test(
+                backend=value,
+                claim_identity=IDENTITY,
+                authorization_ref=ref_v1,
+            )
+        before = {
+            path: path.read_bytes()
+            for path in value.file_root.parent.rglob("*")
+            if path.is_file()
+        }
+        with pytest.raises(ValueError, match="permanent_refusal"):
+            durable._publish_authorization_for_test(
+                backend=value,
+                authorization=payload_v2,
+                external_ref_path=output_path,
+            )
+        after = {
+            path: path.read_bytes()
+            for path in value.file_root.parent.rglob("*")
+            if path.is_file()
+        }
+        assert after == before
+        assert _registry_leaf_exists(value) is (legacy_artifact == "registry_anchor")
+    finally:
+        cleanup(value)
 
 
 def test_authorization_publication_resumes_only_exact_prefix(tmp_path: Path) -> None:

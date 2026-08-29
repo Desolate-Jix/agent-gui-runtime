@@ -42,12 +42,15 @@ from app.learn.hybrid.benchmark_v2_provider_corpus import (  # noqa: E402
 from app.learn.hybrid.benchmark_v2_public_score import (  # noqa: E402
     validate_private_scorer_public_ref_v3,
 )
+from app.learn.hybrid.benchmark_v2_probe_authority import (  # noqa: E402
+    BenchmarkV2ProbeAuthorityValidation,
+    validate_benchmark_v2_regression_probe_authority_candidate,
+)
 from scripts.review_portfolio_hybrid_v1_1_benchmark_v2_leakage import (  # noqa: E402
     _accepted_run_ref,
     _canonical_bytes,
     _provider_manifest_ref,
     _sha256,
-    _validate_accepted_run,
     validate_leakage_review,
 )
 
@@ -60,6 +63,7 @@ _TASK14_PATH_TOKENS = {
     "regression_run_ref_path": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json",
     "score_ref_path": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/score-ref.json",
     "leakage_review_path": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/leakage-review.json",
+    "probe_authority_path": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json",
     "ledger_root": _LEDGER_ROOT_TOKEN,
     "output_path": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json",
 }
@@ -98,6 +102,7 @@ def _validate_production_task14_paths(**paths: str | Path) -> dict[str, Path]:
         "regression_run_ref_path",
         "score_ref_path",
         "leakage_review_path",
+        "probe_authority_path",
     ):
         target = resolved[name]
         if not target.is_file() or target.is_symlink():
@@ -179,6 +184,8 @@ def build_authorization_payload(
     *,
     validated_provider_manifest: Mapping[str, object],
     provider_manifest_sha256: str,
+    regression_probe_authority_ref: Mapping[str, object],
+    profile_sha256_by_id: Mapping[str, object],
     backend: object,
 ) -> dict[str, object]:
     manifest = deepcopy(dict(validated_provider_manifest))
@@ -207,15 +214,12 @@ def build_authorization_payload(
         code_refs, key_field="relative_path", duplicate_name="code path"
     )
     profile_refs = runtime.get("profile_refs")
-    profile_sha256_by_id = _unique_ref_map(
-        profile_refs, key_field="role", duplicate_name="profile role"
-    )
     config_sha256_by_path = _unique_ref_map(
-        profile_refs, key_field="relative_path", duplicate_name="profile path"
+        profile_refs, key_field="relative_path", duplicate_name="config path"
     )
     cid = claim_id(IDENTITY)
     payload: dict[str, object] = {
-        "contract_version": "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v1",
+        "contract_version": "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v2",
         "claim_identity": dict(IDENTITY),
         "claim_id": cid,
         "ledger_identity": {
@@ -231,7 +235,10 @@ def build_authorization_payload(
         "provider_manifest_contract_version": PROVIDER_MANIFEST_CONTRACT,
         "code_sha256_by_path": code_sha256_by_path,
         "config_sha256_by_path": config_sha256_by_path,
-        "profile_sha256_by_id": profile_sha256_by_id,
+        "profile_sha256_by_id": deepcopy(dict(profile_sha256_by_id)),
+        "regression_probe_authority_ref": deepcopy(
+            dict(regression_probe_authority_ref)
+        ),
         "arm_order": list(EXACT_ARM_ORDER),
         "exact_holdout_command": list(EXACT_HOLDOUT_COMMAND),
         "exact_run_order": list(EXACT_RUN_ORDER),
@@ -239,6 +246,110 @@ def build_authorization_payload(
     }
     _validate_authorization_for_backend(backend, payload)
     return payload
+
+
+def _validate_probe_authority_join(
+    validation: BenchmarkV2ProbeAuthorityValidation,
+    *,
+    provider_manifest_ref: Mapping[str, object],
+    provider_corpus_ref: Mapping[str, object],
+    accepted_run_ref: Mapping[str, object],
+    score: Mapping[str, object],
+    review: Mapping[str, object],
+) -> tuple[dict[str, str], dict[str, str]]:
+    bundle = validation.bundle
+    fields = {
+        "contract_version",
+        "artifact_id",
+        "benchmark_release_id",
+        "partition",
+        "provider_manifest_ref",
+        "provider_corpus_ref",
+        "accepted_run_ref",
+        "selection_policy",
+        "required_matrix",
+        "probe_ledger_horizon_refs",
+        "probe_cells",
+        "status",
+        "safety",
+        "content_sha256",
+    }
+    matrix = [
+        [provider_id, probe_kind]
+        for provider_id in ("omni", "qwen", "vista")
+        for probe_kind in ("cancel", "timeout")
+    ]
+    cells = bundle.get("probe_cells") if isinstance(bundle, Mapping) else None
+    if (
+        not isinstance(bundle, Mapping)
+        or set(bundle) != fields
+        or bundle.get("contract_version")
+        != "benchmark_v2_regression_probe_authority_bundle_v1"
+        or bundle.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
+        or bundle.get("partition") != "regression"
+        or bundle.get("provider_manifest_ref") != dict(provider_manifest_ref)
+        or bundle.get("provider_corpus_ref") != dict(provider_corpus_ref)
+        or bundle.get("accepted_run_ref") != dict(accepted_run_ref)
+        or bundle.get("selection_policy")
+        != "first_complete_verified_attempt_per_cell"
+        or bundle.get("required_matrix") != matrix
+        or bundle.get("status") != "PASS"
+        or not isinstance(cells, list)
+        or len(cells) != len(matrix)
+        or any(
+            not isinstance(cell, Mapping)
+            or [cell.get("provider_id"), cell.get("probe_kind")] != matrix[index]
+            or cell.get("status") != "PASS"
+            for index, cell in enumerate(cells)
+        )
+    ):
+        raise ValueError("probe authority release, parent, matrix, or PASS join differs")
+    artifact_id = bundle.get("artifact_id")
+    content_sha256 = bundle.get("content_sha256")
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id.startswith("probe-authority/")
+        or len(artifact_id) != len("probe-authority/") + _SHA_LENGTH
+        or any(character not in "0123456789abcdef" for character in artifact_id.removeprefix("probe-authority/"))
+        or not isinstance(content_sha256, str)
+        or len(content_sha256) != _SHA_LENGTH
+        or any(character not in "0123456789abcdef" for character in content_sha256)
+    ):
+        raise ValueError("probe authority pathless ref is invalid")
+    profiles = validation.profile_sha256_by_id
+    if (
+        not isinstance(profiles, Mapping)
+        or len(profiles) != 3
+        or any(
+            not isinstance(profile_id, str)
+            or not profile_id
+            or profile_id != profile_id.strip()
+            or not isinstance(digest, str)
+            or len(digest) != _SHA_LENGTH
+            or any(character not in "0123456789abcdef" for character in digest)
+            for profile_id, digest in profiles.items()
+        )
+    ):
+        raise ValueError("probe authority runtime profile map is invalid")
+    binding = score.get("score_input_binding")
+    expected = {
+        "provider_manifest_ref": dict(provider_manifest_ref),
+        "provider_corpus_ref": deepcopy(dict(provider_corpus_ref)),
+        "corpus_parent_ref": deepcopy(provider_corpus_ref.get("source_parent_ref")),
+        "accepted_run_ref": dict(accepted_run_ref),
+    }
+    if (
+        not isinstance(binding, Mapping)
+        or any(binding.get(key) != value for key, value in expected.items())
+        or review.get("provider_manifest_ref") != expected["provider_manifest_ref"]
+        or review.get("provider_corpus_ref") != expected["provider_corpus_ref"]
+        or review.get("accepted_run_ref") != expected["accepted_run_ref"]
+    ):
+        raise ValueError("probe authority score or leakage review join differs")
+    return (
+        {"id": artifact_id, "content_sha256": content_sha256},
+        deepcopy(dict(profiles)),
+    )
 
 
 def _validate_score_lineage(
@@ -295,13 +406,6 @@ def _validate_score_lineage(
                 raise ValueError("regression public score lineage differs")
 
 
-def _require_public_probe_authority(accepted: Mapping[str, object]) -> None:
-    del accepted
-    raise ValueError(
-        "probe authority unavailable: frozen accepted/public score contracts expose no probe receipt ref"
-    )
-
-
 def authorize_holdout(
     *,
     private_manifest_path: Path,
@@ -309,6 +413,7 @@ def authorize_holdout(
     regression_run_ref_path: Path,
     score_ref_path: Path,
     leakage_review_path: Path,
+    probe_authority_path: Path,
     ledger_root: str | Path,
     output_path: Path,
     _backend: object | None = None,
@@ -320,6 +425,7 @@ def authorize_holdout(
             regression_run_ref_path=regression_run_ref_path,
             score_ref_path=score_ref_path,
             leakage_review_path=leakage_review_path,
+            probe_authority_path=probe_authority_path,
             ledger_root=ledger_root,
             output_path=output_path,
         )
@@ -328,6 +434,7 @@ def authorize_holdout(
         regression_run_ref_path = canonical["regression_run_ref_path"]
         score_ref_path = canonical["score_ref_path"]
         leakage_review_path = canonical["leakage_review_path"]
+        probe_authority_path = canonical["probe_authority_path"]
         ledger_root = canonical["ledger_root"]
         output_path = canonical["output_path"]
     backend = _production_backend() if _backend is None else _backend
@@ -338,6 +445,13 @@ def authorize_holdout(
     )
     if resolved_ledger_root != Path(backend.ledger_root):
         raise ValueError("holdout ledger root differs from durable authority")
+
+    probe_validation = validate_benchmark_v2_regression_probe_authority_candidate(
+        provider_manifest_path=Path(provider_manifest_path),
+        regression_run_ref_path=Path(regression_run_ref_path),
+        ledger_root=resolved_ledger_root,
+        probe_authority_path=Path(probe_authority_path),
+    )
 
     provider_value, provider_raw = _read_json(Path(provider_manifest_path), pretty=True)
     provider = validate_provider_manifest(provider_value)
@@ -359,13 +473,9 @@ def authorize_holdout(
     if corpus.get("content_sha256") != corpus_ref.get("content_sha256"):
         raise ValueError("provider corpus content lineage differs")
     accepted_value, accepted_raw = _read_json(
-        Path(regression_run_ref_path), pretty=False
+        Path(regression_run_ref_path), pretty=True
     )
-    accepted = _validate_accepted_run(
-        accepted_value,
-        accepted_raw,
-        validated_provider_corpus=corpus,
-    )
+    accepted = accepted_value
     accepted_ref = _accepted_run_ref(accepted, accepted_raw)
     if (
         accepted["provider_manifest_ref"] != manifest_ref
@@ -398,11 +508,20 @@ def authorize_holdout(
     ):
         raise ValueError("leakage review does not authorize this regression lineage")
     del review_raw
-    _require_public_probe_authority(accepted)
+    probe_ref, runtime_profiles = _validate_probe_authority_join(
+        probe_validation,
+        provider_manifest_ref=manifest_ref,
+        provider_corpus_ref=corpus_ref,
+        accepted_run_ref=accepted_ref,
+        score=score,
+        review=review,
+    )
 
     payload = build_authorization_payload(
         validated_provider_manifest=provider,
         provider_manifest_sha256=manifest_ref["file_sha256"],
+        regression_probe_authority_ref=probe_ref,
+        profile_sha256_by_id=runtime_profiles,
         backend=backend,
     )
     if _backend is None:
@@ -425,9 +544,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--regression-run-ref", required=True)
     parser.add_argument("--score-ref", required=True)
     parser.add_argument("--leakage-review", required=True)
+    parser.add_argument("--probe-authority", required=True)
     parser.add_argument("--ledger-root", required=True)
     parser.add_argument("--output", required=True)
     return parser
+
+
+def _fixed_flag_count(tokens: list[str], flag: str) -> int:
+    return sum(token == flag or token.startswith(flag + "=") for token in tokens)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -438,11 +562,12 @@ def main(argv: list[str] | None = None) -> int:
         "--regression-run-ref",
         "--score-ref",
         "--leakage-review",
+        "--probe-authority",
         "--ledger-root",
         "--output",
     )
     for flag in flags:
-        if tokens.count(flag) > 1:
+        if _fixed_flag_count(tokens, flag) > 1:
             _parser().error(f"argument {flag}: may not be repeated")
     args = _parser().parse_args(tokens)
     result = authorize_holdout(
@@ -451,6 +576,7 @@ def main(argv: list[str] | None = None) -> int:
         regression_run_ref_path=Path(args.regression_run_ref),
         score_ref_path=Path(args.score_ref),
         leakage_review_path=Path(args.leakage_review),
+        probe_authority_path=Path(args.probe_authority),
         ledger_root=args.ledger_root,
         output_path=Path(args.output),
     )

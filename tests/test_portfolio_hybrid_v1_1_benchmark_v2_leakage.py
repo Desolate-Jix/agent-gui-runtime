@@ -7,6 +7,7 @@ import json
 import base64
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -220,7 +221,22 @@ def _validated_provider_manifest() -> dict[str, object]:
     }
 
 
-def test_authorization_payload_uses_profile_roles_and_frozen_backend_identity(
+def _probe_authority_ref() -> dict[str, str]:
+    return {
+        "id": "probe-authority/" + "a" * 64,
+        "content_sha256": _sha("probe authority"),
+    }
+
+
+def _runtime_profile_map() -> dict[str, str]:
+    return {
+        "omni-runtime": _sha("omni runtime profile"),
+        "qwen-runtime": _sha("qwen runtime profile"),
+        "vista-runtime": _sha("vista runtime profile"),
+    }
+
+
+def test_authorization_payload_v2_uses_only_probe_runtime_profiles_and_frozen_identity(
     tmp_path: Path,
 ) -> None:
     authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
@@ -228,18 +244,23 @@ def test_authorization_payload_uses_profile_roles_and_frozen_backend_identity(
     payload = authorize.build_authorization_payload(
         validated_provider_manifest=_validated_provider_manifest(),
         provider_manifest_sha256=_sha("provider bytes"),
+        regression_probe_authority_ref=_probe_authority_ref(),
+        profile_sha256_by_id=_runtime_profile_map(),
         backend=backend,
     )
 
     cid = claim_id(IDENTITY)
     assert payload["claim_identity"] == IDENTITY
     assert payload["claim_id"] == cid
-    assert payload["profile_sha256_by_id"] == {
-        "portfolio_hybrid_v1_1_default": _sha("profile")
-    }
+    assert payload["contract_version"] == (
+        "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v2"
+    )
+    assert payload["profile_sha256_by_id"] == _runtime_profile_map()
+    assert "portfolio_hybrid_v1_1_default" not in payload["profile_sha256_by_id"]
     assert payload["config_sha256_by_path"] == {
         "configs/profiles/default.json": _sha("profile")
     }
+    assert payload["regression_probe_authority_ref"] == _probe_authority_ref()
     assert payload["code_sha256_by_path"] == {
         "app/learn/hybrid/bootstrap.py": _sha("boot"),
         "scripts/release.py": _sha("release"),
@@ -251,7 +272,9 @@ def test_authorization_payload_uses_profile_roles_and_frozen_backend_identity(
     assert payload["exact_run_order"] == list(EXACT_RUN_ORDER)
 
 
-def test_profile_roles_are_unique_before_authorization_payload(tmp_path: Path) -> None:
+def test_authorization_payload_v2_does_not_conflate_manifest_roles_with_runtime_profiles(
+    tmp_path: Path,
+) -> None:
     authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
     backend = _backend(tmp_path)
     manifest = _validated_provider_manifest()
@@ -262,12 +285,18 @@ def test_profile_roles_are_unique_before_authorization_payload(tmp_path: Path) -
             "file_sha256": _sha("alternate"),
         }
     )
-    with pytest.raises(ValueError, match="profile role"):
-        authorize.build_authorization_payload(
-            validated_provider_manifest=manifest,
-            provider_manifest_sha256=_sha("provider bytes"),
-            backend=backend,
-        )
+    payload = authorize.build_authorization_payload(
+        validated_provider_manifest=manifest,
+        provider_manifest_sha256=_sha("provider bytes"),
+        regression_probe_authority_ref=_probe_authority_ref(),
+        profile_sha256_by_id=_runtime_profile_map(),
+        backend=backend,
+    )
+    assert payload["profile_sha256_by_id"] == _runtime_profile_map()
+    assert payload["config_sha256_by_path"] == {
+        "configs/profiles/default.json": _sha("profile"),
+        "configs/profiles/alternate.json": _sha("alternate"),
+    }
 
 
 def test_review_stdout_is_one_pathless_three_field_canonical_line(
@@ -368,11 +397,15 @@ def test_provider_drift_never_changes_stable_claim_namespace(tmp_path: Path) -> 
     first = authorize.build_authorization_payload(
         validated_provider_manifest=_validated_provider_manifest(),
         provider_manifest_sha256=_sha("provider one"),
+        regression_probe_authority_ref=_probe_authority_ref(),
+        profile_sha256_by_id=_runtime_profile_map(),
         backend=backend,
     )
     second = authorize.build_authorization_payload(
         validated_provider_manifest=_validated_provider_manifest(),
         provider_manifest_sha256=_sha("provider two"),
+        regression_probe_authority_ref=_probe_authority_ref(),
+        profile_sha256_by_id=_runtime_profile_map(),
         backend=backend,
     )
     assert first["claim_id"] == second["claim_id"] == claim_id(IDENTITY)
@@ -486,19 +519,134 @@ def test_score_binding_requires_every_public_ref(field: str) -> None:
         )
 
 
+def _probe_authority_validation():
+    provider, corpus, accepted = _refs()
+    matrix = [
+        [provider_id, probe_kind]
+        for provider_id in ("omni", "qwen", "vista")
+        for probe_kind in ("cancel", "timeout")
+    ]
+    bundle = {
+        "contract_version": "benchmark_v2_regression_probe_authority_bundle_v1",
+        "artifact_id": _probe_authority_ref()["id"],
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "partition": "regression",
+        "provider_manifest_ref": provider,
+        "provider_corpus_ref": corpus,
+        "accepted_run_ref": accepted,
+        "selection_policy": "first_complete_verified_attempt_per_cell",
+        "required_matrix": matrix,
+        "probe_ledger_horizon_refs": [],
+        "probe_cells": [
+            {"provider_id": provider_id, "probe_kind": probe_kind, "status": "PASS"}
+            for provider_id, probe_kind in matrix
+        ],
+        "status": "PASS",
+        "safety": {
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "display_only": True,
+        },
+        "content_sha256": _probe_authority_ref()["content_sha256"],
+    }
+    return SimpleNamespace(
+        bundle=bundle,
+        profile_sha256_by_id=_runtime_profile_map(),
+    )
+
+
+def _probe_join_inputs():
+    provider, corpus, accepted = _refs()
+    score = {
+        "score_input_binding": {
+            "provider_manifest_ref": provider,
+            "provider_corpus_ref": corpus,
+            "corpus_parent_ref": corpus["source_parent_ref"],
+            "accepted_run_ref": accepted,
+        }
+    }
+    review = {
+        "provider_manifest_ref": provider,
+        "provider_corpus_ref": corpus,
+        "accepted_run_ref": accepted,
+    }
+    return provider, corpus, accepted, score, review
+
+
+def test_probe_authority_join_accepts_exact_six_pass_cells_and_runtime_profiles() -> None:
+    authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
+    provider, corpus, accepted, score, review = _probe_join_inputs()
+    ref, profiles = authorize._validate_probe_authority_join(
+        _probe_authority_validation(),
+        provider_manifest_ref=provider,
+        provider_corpus_ref=corpus,
+        accepted_run_ref=accepted,
+        score=score,
+        review=review,
+    )
+    assert ref == _probe_authority_ref()
+    assert profiles == _runtime_profile_map()
+
+
 @pytest.mark.parametrize(
-    "accepted",
+    "drift",
     [
-        {},
-        {"probe_receipt_ref": {"id": "stale/probe", "content_sha256": "0" * 64}},
+        "release",
+        "provider",
+        "corpus_parent",
+        "accepted_file",
+        "matrix_order",
+        "missing_cell",
+        "cell_fail",
+        "private_path",
+        "missing_profile",
+        "score",
+        "review",
     ],
 )
-def test_missing_or_stale_public_probe_authority_fails_closed(
-    accepted: dict[str, object],
+def test_probe_authority_join_drift_fails_closed_before_publisher(
+    drift: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
-    with pytest.raises(ValueError, match="probe authority unavailable"):
-        authorize._require_public_probe_authority(accepted)
+    validation = _probe_authority_validation()
+    provider, corpus, accepted, score, review = _probe_join_inputs()
+    if drift == "release":
+        validation.bundle["benchmark_release_id"] = "other-release"
+    elif drift == "provider":
+        validation.bundle["provider_manifest_ref"]["file_sha256"] = "0" * 64
+    elif drift == "corpus_parent":
+        validation.bundle["provider_corpus_ref"]["source_parent_ref"]["file_sha256"] = "0" * 64
+    elif drift == "accepted_file":
+        validation.bundle["accepted_run_ref"]["file_sha256"] = "0" * 64
+    elif drift == "matrix_order":
+        validation.bundle["required_matrix"] = list(
+            reversed(validation.bundle["required_matrix"])
+        )
+    elif drift == "missing_cell":
+        validation.bundle["probe_cells"].pop()
+    elif drift == "cell_fail":
+        validation.bundle["probe_cells"][0]["status"] = "FAIL"
+    elif drift == "private_path":
+        validation.bundle["path"] = "private/probe.json"
+    elif drift == "missing_profile":
+        validation.profile_sha256_by_id.pop("vista-runtime")
+    elif drift == "score":
+        score["score_input_binding"]["accepted_run_ref"] = {**accepted, "file_sha256": "0" * 64}
+    else:
+        review["accepted_run_ref"] = {**accepted, "content_sha256": "0" * 64}
+    called: list[bool] = []
+    monkeypatch.setattr(authorize, "_publish_authorization", lambda **_: called.append(True))
+    with pytest.raises(ValueError, match="probe authority"):
+        authorize._validate_probe_authority_join(
+            validation,
+            provider_manifest_ref=provider,
+            provider_corpus_ref=corpus,
+            accepted_run_ref=accepted,
+            score=score,
+            review=review,
+        )
+    assert called == []
 
 
 @pytest.mark.parametrize(
@@ -536,10 +684,278 @@ def test_production_alias_fails_before_any_publisher_call(
             regression_run_ref_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json"),
             score_ref_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/score-ref.json"),
             leakage_review_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/leakage-review.json"),
+            probe_authority_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"),
             ledger_root="runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
             output_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json"),
         )
     assert called == []
+
+
+def test_probe_authority_cli_is_required_and_fixed() -> None:
+    authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
+    assert authorize._TASK14_PATH_TOKENS["probe_authority_path"] == (
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"
+    )
+    with pytest.raises(SystemExit):
+        authorize._parser().parse_args([])
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "--private-manifest",
+        "--provider-manifest",
+        "--regression-run-ref",
+        "--score-ref",
+        "--leakage-review",
+        "--probe-authority",
+        "--ledger-root",
+        "--output",
+    ],
+)
+@pytest.mark.parametrize("form", ["separated", "equals", "mixed"])
+def test_probe_authority_duplicate_guard_rejects_every_fixed_flag_and_form_without_values(
+    flag: str,
+    form: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
+    flags = [
+        "--private-manifest",
+        "--provider-manifest",
+        "--regression-run-ref",
+        "--score-ref",
+        "--leakage-review",
+        "--probe-authority",
+        "--ledger-root",
+        "--output",
+    ]
+    tokens: list[str] = []
+    for item in flags:
+        if item != flag:
+            tokens.extend([item, "ordinary-value"])
+    if form == "separated":
+        tokens.extend([flag, "secret-one", flag, "secret-two"])
+    elif form == "equals":
+        tokens.extend([f"{flag}=secret-one", f"{flag}=secret-two"])
+    else:
+        tokens.extend([flag, "secret-one", f"{flag}=secret-two"])
+    called: list[bool] = []
+    monkeypatch.setattr(
+        authorize,
+        "authorize_holdout",
+        lambda **_kwargs: called.append(True)
+        or {
+            "authorization_id": "holdout-authorization/" + "a" * 64,
+            "envelope_sha256": "b" * 64,
+        },
+    )
+    with pytest.raises(SystemExit):
+        authorize.main(tokens)
+    captured = capsys.readouterr()
+    assert called == []
+    assert f"argument {flag}: may not be repeated" in captured.err
+    assert "secret-one" not in captured.err
+    assert "secret-two" not in captured.err
+
+
+def test_probe_authority_alias_path_fails_before_publisher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
+    published: list[bool] = []
+    monkeypatch.setattr(authorize, "_publish_authorization", lambda **_: published.append(True))
+    with pytest.raises(ValueError, match="canonical Task14 path"):
+        authorize.authorize_holdout(
+            private_manifest_path=Path("tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-private-manifest.json"),
+            provider_manifest_path=Path("tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-provider-manifest.json"),
+            regression_run_ref_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json"),
+            score_ref_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/score-ref.json"),
+            leakage_review_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/leakage-review.json"),
+            probe_authority_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/../regression/probe-authority.json"),
+            ledger_root="runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
+            output_path=Path("runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json"),
+        )
+    assert published == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "probe authority candidate differs from authoritative bytes",
+        "cancel probe ledger fixed file is missing",
+        "first complete lifecycle probe receipt is invalid",
+    ],
+)
+def test_probe_authority_candidate_or_raw_parent_failure_precedes_publisher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
+    value = _backend(tmp_path)
+    calls: list[bool] = []
+
+    def reject_candidate(**_kwargs):
+        calls.append(True)
+        raise ValueError(failure)
+
+    published: list[bool] = []
+    monkeypatch.setattr(
+        authorize,
+        "validate_benchmark_v2_regression_probe_authority_candidate",
+        reject_candidate,
+    )
+    monkeypatch.setattr(
+        authorize, "_publish_authorization_for_test", lambda **_: published.append(True)
+    )
+    with pytest.raises(ValueError, match="candidate differs|ledger fixed file|receipt"):
+        authorize.authorize_holdout(
+            private_manifest_path=tmp_path / "private.json",
+            provider_manifest_path=tmp_path / "provider.json",
+            regression_run_ref_path=tmp_path / "accepted.json",
+            score_ref_path=tmp_path / "score.json",
+            leakage_review_path=tmp_path / "review.json",
+            probe_authority_path=tmp_path / "probe-authority.json",
+            ledger_root=value.ledger_root,
+            output_path=value.file_root.parent / "AuthorizationRef" / "holdout-authorization.json",
+            _backend=value,
+        )
+    assert calls == [True]
+    assert published == []
+
+
+def test_probe_authority_consumer_receives_real_pretty_accepted_bytes_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorize = _load_script("authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py")
+    value = _backend(tmp_path)
+    provider_path = tmp_path / "benchmark-v2-provider-manifest.json"
+    corpus_path = tmp_path / "provider-corpus.v2.json"
+    accepted_path = tmp_path / "accepted-run-ref.json"
+    score_path = tmp_path / "score-ref.json"
+    review_path = tmp_path / "leakage-review.json"
+    private_path = tmp_path / "private.json"
+    probe_path = tmp_path / "probe-authority.json"
+    provider, corpus, _accepted_ref_placeholder = _refs()
+    manifest = _validated_provider_manifest()
+    manifest["provider_corpus_ref"] = corpus
+    manifest["evaluation_projection"] = {
+        "estimand": {"contract_version": "estimand-v2", "file_sha256": "5" * 64},
+        "gate": {"contract_version": "gate-v2", "file_sha256": "6" * 64},
+    }
+    provider_raw = json.dumps(
+        manifest, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+    ).encode("utf-8") + b"\n"
+    provider_path.write_bytes(provider_raw)
+    corpus_path.write_bytes(b"provider corpus bytes")
+    manifest_ref = authorize._provider_manifest_ref(provider_raw)
+    accepted = {
+        "content_sha256": _sha("accepted content"),
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "provider_manifest_ref": manifest_ref,
+        "provider_corpus_ref": corpus,
+        "corpus_parent_ref": corpus["source_parent_ref"],
+        "attempt_ref": {"id": "runner-attempt/accepted", "content_sha256": "1" * 64},
+        "attempt_ledger_ref": {"id": "ledger/accepted", "content_sha256": "2" * 64},
+        "automatic_prediction_ref": {"id": "prediction/accepted", "content_sha256": "3" * 64},
+        "selected_lifecycle_ref": {"id": "lifecycle/accepted", "content_sha256": "4" * 64},
+    }
+    accepted_raw = json.dumps(
+        accepted, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+    ).encode("utf-8") + b"\n"
+    accepted_path.write_bytes(accepted_raw)
+    accepted_ref = authorize._accepted_run_ref(accepted, accepted_raw)
+    private_path.write_bytes(b"opaque private bytes")
+    private_sha = hashlib.sha256(private_path.read_bytes()).hexdigest()
+    binding = {
+        "private_manifest_ref": {"file_sha256": private_sha},
+        "corpus_parent_ref": corpus["source_parent_ref"],
+        "provider_manifest_ref": manifest_ref,
+        "provider_corpus_ref": corpus,
+        "accepted_run_ref": accepted_ref,
+        "attempt_ref": accepted["attempt_ref"],
+        "attempt_ledger_ref": accepted["attempt_ledger_ref"],
+        "automatic_prediction_ref": accepted["automatic_prediction_ref"],
+        "selected_lifecycle_ref": accepted["selected_lifecycle_ref"],
+        "estimand_ref": manifest["evaluation_projection"]["estimand"],
+        "gate_ref": manifest["evaluation_projection"]["gate"],
+    }
+    score = {"status": "PASS", "score_input_binding": binding}
+    score_path.write_bytes(canonical_bytes(score) + b"\n")
+    review = {
+        "status": "PASS",
+        "finding_codes": [],
+        "provider_manifest_ref": manifest_ref,
+        "provider_corpus_ref": corpus,
+        "accepted_run_ref": accepted_ref,
+    }
+    review_path.write_bytes(
+        json.dumps(
+            review, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+        ).encode("utf-8")
+        + b"\n"
+    )
+    validation = _probe_authority_validation()
+    validation.bundle["provider_manifest_ref"] = manifest_ref
+    validation.bundle["provider_corpus_ref"] = corpus
+    validation.bundle["accepted_run_ref"] = accepted_ref
+    validation.bundle["artifact_id"] = _probe_authority_ref()["id"]
+    validation.bundle["content_sha256"] = _probe_authority_ref()["content_sha256"]
+    calls: list[bytes] = []
+
+    def validate_candidate(**kwargs):
+        assert kwargs["regression_run_ref_path"] == accepted_path
+        raw = accepted_path.read_bytes()
+        assert raw == accepted_raw and raw.startswith(b"{\n")
+        calls.append(raw)
+        return validation
+
+    published: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        authorize,
+        "validate_benchmark_v2_regression_probe_authority_candidate",
+        validate_candidate,
+    )
+    monkeypatch.setattr(authorize, "validate_provider_manifest", lambda _value: manifest)
+    monkeypatch.setattr(
+        authorize,
+        "validate_preloaded_provider_corpus",
+        lambda **_kwargs: {"content_sha256": corpus["content_sha256"]},
+    )
+    monkeypatch.setattr(
+        authorize, "validate_private_scorer_public_ref_v3", lambda _value: score
+    )
+    monkeypatch.setattr(authorize, "validate_leakage_review", lambda _value: review)
+    monkeypatch.setattr(
+        authorize,
+        "_publish_authorization_for_test",
+        lambda **kwargs: published.append(kwargs["authorization"])
+        or {
+            "authorization_id": "holdout-authorization/" + claim_id(IDENTITY),
+            "envelope_sha256": "f" * 64,
+            "fixed_authorization_path": str(
+                value.file_root / f"{claim_id(IDENTITY)}.authorization.json"
+            ),
+        },
+    )
+    authorize.authorize_holdout(
+        private_manifest_path=private_path,
+        provider_manifest_path=provider_path,
+        regression_run_ref_path=accepted_path,
+        score_ref_path=score_path,
+        leakage_review_path=review_path,
+        probe_authority_path=probe_path,
+        ledger_root=value.ledger_root,
+        output_path=value.file_root.parent / "AuthorizationRef" / "holdout-authorization.json",
+        _backend=value,
+    )
+    assert calls == [accepted_raw]
+    assert len(published) == 1
+    assert published[0]["profile_sha256_by_id"] == _runtime_profile_map()
+    assert published[0]["regression_probe_authority_ref"] == _probe_authority_ref()
 
 
 def test_leakage_cli_redacts_operator_paths(tmp_path: Path) -> None:

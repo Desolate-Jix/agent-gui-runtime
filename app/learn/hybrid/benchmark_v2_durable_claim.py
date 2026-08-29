@@ -145,6 +145,7 @@ def _validate_authorization_shape(payload: Mapping[str, object]) -> None:
         "code_sha256_by_path",
         "config_sha256_by_path",
         "profile_sha256_by_id",
+        "regression_probe_authority_ref",
         "arm_order",
         "exact_holdout_command",
         "exact_run_order",
@@ -152,7 +153,7 @@ def _validate_authorization_shape(payload: Mapping[str, object]) -> None:
     }
     if set(payload) != required:
         raise ValueError("holdout authorization field set invalid")
-    if payload["contract_version"] != "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v1":
+    if payload["contract_version"] != "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v2":
         raise ValueError("holdout authorization contract invalid")
     if payload["claim_identity"] != IDENTITY or payload["claim_id"] != claim_id(IDENTITY):
         raise ValueError("holdout authorization claim identity invalid")
@@ -183,8 +184,21 @@ def _validate_authorization_shape(payload: Mapping[str, object]) -> None:
         raise ValueError("holdout authorization code map invalid")
     if not _closed_sha_map(payload["config_sha256_by_path"]):
         raise ValueError("holdout authorization config map invalid")
-    if not _closed_sha_map(payload["profile_sha256_by_id"], profile=True):
+    if (
+        not _closed_sha_map(payload["profile_sha256_by_id"], profile=True)
+        or len(payload["profile_sha256_by_id"]) != 3
+    ):
         raise ValueError("holdout authorization profile map invalid")
+    probe_ref = payload["regression_probe_authority_ref"]
+    if (
+        not isinstance(probe_ref, dict)
+        or set(probe_ref) != {"id", "content_sha256"}
+        or not isinstance(probe_ref["id"], str)
+        or re.fullmatch(r"probe-authority/[0-9a-f]{64}", probe_ref["id"]) is None
+        or not isinstance(probe_ref["content_sha256"], str)
+        or _SHA.fullmatch(probe_ref["content_sha256"]) is None
+    ):
+        raise ValueError("holdout authorization probe authority ref invalid")
     if payload["arm_order"] != list(EXACT_ARM_ORDER):
         raise ValueError("holdout authorization arm order invalid")
     if payload["exact_holdout_command"] != list(EXACT_HOLDOUT_COMMAND):
@@ -195,7 +209,7 @@ def _validate_authorization_shape(payload: Mapping[str, object]) -> None:
 
 def authorization_envelope(payload: Mapping[str, object]) -> tuple[dict[str, object], str]:
     _validate_authorization_shape(payload)
-    return envelope("portfolio_hybrid_benchmark_v2_holdout_authorization_envelope_v1", payload)
+    return envelope("portfolio_hybrid_benchmark_v2_holdout_authorization_envelope_v2", payload)
 
 
 @dataclass(frozen=True)
