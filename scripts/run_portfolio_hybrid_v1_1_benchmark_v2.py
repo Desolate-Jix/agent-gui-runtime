@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -35,6 +36,18 @@ from app.learn.hybrid.benchmark_v2_probe_authority import (
 )
 from app.learn.hybrid.benchmark_v2_runtime import (
     get_production_benchmark_v2_runtime,
+)
+from app.learn.hybrid.benchmark_v2_durable_claim import (
+    EXACT_HOLDOUT_COMMAND,
+    IDENTITY,
+    PRODUCTION_LEDGER_ROOT,
+    SAFETY as HOLDOUT_SAFETY,
+)
+from app.learn.hybrid.benchmark_v2_holdout import (
+    AUTHORIZED_HOLDOUT_OUTPUT_ROOT,
+    append_holdout_attempt_opened,
+    claim_holdout_once,
+    validate_holdout_attempt_events,
 )
 
 
@@ -83,6 +96,22 @@ _PROBE_RECEIPT_PROVIDER_FIELDS = {
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+@dataclass(frozen=True)
+class _ValidatedHoldoutActualModelsInput:
+    provider_manifest_path: Path
+    authorization_ref_path: Path
+    ledger_root: Path
+    output_root: Path
+    authorization_ref: dict[str, str]
+
+
+@dataclass(frozen=True)
+class _OpenedHoldoutActualModelsAttempt:
+    validated: _ValidatedHoldoutActualModelsInput
+    attempt_ref: dict[str, object]
+    attempt_dir: Path
+
+
 def _canonical_bytes(value: object) -> bytes:
     return json.dumps(
         value,
@@ -102,6 +131,270 @@ def _seal(value: Mapping[str, object]) -> dict[str, object]:
     result = deepcopy(dict(value))
     result["content_sha256"] = _content_sha256(result)
     return result
+
+
+def _validate_holdout_actual_models_input(
+    argv: Sequence[str],
+) -> _ValidatedHoldoutActualModelsInput:
+    raw = tuple(argv)
+    expected = tuple(EXACT_HOLDOUT_COMMAND[4:])
+    if raw != expected:
+        raise ValueError("holdout actual-models requires the exact raw token vector")
+    if (
+        len(expected) != 11
+        or expected[0] != "--provider-manifest"
+        or expected[2:5] != ("--partition", "holdout", "--actual-models")
+        or expected[5] != "--holdout-authorization"
+        or expected[7] != "--ledger-root"
+        or expected[9] != "--output-root"
+    ):
+        raise ValueError("frozen holdout command layout is invalid")
+
+    project_root = Path(_PROJECT_ROOT)
+    if (
+        not project_root.is_absolute()
+        or project_root.resolve(strict=True) != project_root
+        or _is_reparse(project_root)
+    ):
+        raise ValueError("compile-time project root is not canonical")
+
+    def resolve_token(token: str, *, label: str) -> Path:
+        candidate = project_root.joinpath(*token.split("/"))
+        resolved = candidate.resolve(strict=False)
+        if candidate != resolved:
+            raise ValueError(f"{label} resolves through an alias")
+        return candidate
+
+    provider_manifest_path = _require_ordinary_path(
+        resolve_token(expected[1], label="holdout provider manifest"),
+        name="holdout provider manifest",
+        kind="file",
+    )
+    authorization_ref_path = _require_ordinary_path(
+        resolve_token(expected[6], label="holdout authorization ref"),
+        name="holdout authorization ref",
+        kind="file",
+    )
+    ledger_root = _require_ordinary_path(
+        resolve_token(expected[8], label="holdout ledger root"),
+        name="holdout ledger root",
+        kind="directory",
+    )
+    output_root = _require_ordinary_path(
+        resolve_token(expected[10], label="holdout output root"),
+        name="holdout output root",
+        kind="pending",
+    )
+    if ledger_root != Path(PRODUCTION_LEDGER_ROOT):
+        raise ValueError("holdout ledger root is not the fixed production root")
+    if output_root != Path(AUTHORIZED_HOLDOUT_OUTPUT_ROOT):
+        raise ValueError("holdout output root is not authorized")
+    if output_root.exists() or _is_reparse(output_root):
+        _require_ordinary_path(
+            output_root,
+            name="holdout output root",
+            kind="directory",
+        )
+    else:
+        _require_ordinary_path(
+            output_root.parent,
+            name="holdout output root parent",
+            kind="directory",
+        )
+
+    try:
+        raw_authorization_ref = authorization_ref_path.read_bytes()
+        decoded = json.loads(raw_authorization_ref.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("holdout authorization ref is not exact canonical JSON") from error
+    if (
+        not isinstance(decoded, Mapping)
+        or _canonical_bytes(decoded) != raw_authorization_ref
+        or set(decoded)
+        != {"authorization_id", "envelope_sha256", "fixed_authorization_path"}
+    ):
+        raise ValueError("holdout authorization ref is not exact canonical JSON")
+    authorization_ref = dict(decoded)
+    frozen_claim_id = hashlib.sha256(_canonical_bytes(IDENTITY)).hexdigest()
+    envelope_sha256 = authorization_ref.get("envelope_sha256")
+    fixed_path_raw = authorization_ref.get("fixed_authorization_path")
+    if (
+        authorization_ref.get("authorization_id")
+        != f"holdout-authorization/{frozen_claim_id}"
+        or not isinstance(envelope_sha256, str)
+        or len(envelope_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in envelope_sha256)
+        or not isinstance(fixed_path_raw, str)
+        or not fixed_path_raw
+    ):
+        raise ValueError("holdout authorization ref shape is invalid")
+    fixed_path = Path(fixed_path_raw)
+    if (
+        not fixed_path.is_absolute()
+        or str(fixed_path) != fixed_path_raw
+        or fixed_path.resolve(strict=False) != fixed_path
+        or fixed_path.name != f"{frozen_claim_id}.authorization.json"
+    ):
+        raise ValueError("holdout authorization ref fixed path is invalid")
+    _require_ordinary_path(
+        fixed_path,
+        name="holdout authorization fixed path",
+        kind="pending",
+    )
+    return _ValidatedHoldoutActualModelsInput(
+        provider_manifest_path=provider_manifest_path,
+        authorization_ref_path=authorization_ref_path,
+        ledger_root=ledger_root,
+        output_root=output_root,
+        authorization_ref={
+            "authorization_id": str(authorization_ref["authorization_id"]),
+            "envelope_sha256": envelope_sha256,
+            "fixed_authorization_path": fixed_path_raw,
+        },
+    )
+
+
+def _open_holdout_actual_models_attempt(
+    validated: _ValidatedHoldoutActualModelsInput,
+) -> _OpenedHoldoutActualModelsAttempt:
+    if not isinstance(validated, _ValidatedHoldoutActualModelsInput):
+        raise ValueError("holdout attempt requires already validated inputs")
+    claimed = claim_holdout_once(
+        ledger_root=validated.ledger_root,
+        claim_identity=IDENTITY,
+        authorization_ref=validated.authorization_ref,
+    )
+    claim_id = hashlib.sha256(_canonical_bytes(IDENTITY)).hexdigest()
+    expected_attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + validated.authorization_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    if not isinstance(claimed, Mapping):
+        raise ValueError("holdout claim result is invalid")
+    claim_result = dict(claimed)
+    claim_ref = claim_result.get("claim_ref")
+    if (
+        set(claim_result)
+        != {
+            "state",
+            "claim_id",
+            "attempt_id",
+            "claim_ref",
+            "newly_created",
+            "safety",
+        }
+        or claim_result.get("state") != "consumed"
+        or claim_result.get("newly_created") is not True
+        or claim_result.get("claim_id") != claim_id
+        or claim_result.get("attempt_id") != expected_attempt_id
+        or claim_result.get("safety") != HOLDOUT_SAFETY
+        or not isinstance(claim_ref, Mapping)
+        or set(claim_ref) != {"id", "envelope_sha256"}
+        or claim_ref.get("id") != f"holdout-claim/{claim_id}"
+        or not isinstance(claim_ref.get("envelope_sha256"), str)
+        or len(str(claim_ref.get("envelope_sha256"))) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in str(claim_ref.get("envelope_sha256"))
+        )
+    ):
+        raise ValueError("holdout claim is not the exact unique first use")
+    native_claim_ref = {
+        "id": str(claim_ref["id"]),
+        "envelope_sha256": str(claim_ref["envelope_sha256"]),
+    }
+
+    if validated.output_root.exists() or _is_reparse(validated.output_root):
+        _require_ordinary_path(
+            validated.output_root,
+            name="holdout output root",
+            kind="directory",
+        )
+    else:
+        _require_ordinary_path(
+            validated.output_root.parent,
+            name="holdout output root parent",
+            kind="directory",
+        )
+        validated.output_root.mkdir()
+        _require_ordinary_path(
+            validated.output_root,
+            name="holdout output root",
+            kind="directory",
+        )
+    attempt_dir = validated.output_root / expected_attempt_id
+    if (
+        attempt_dir.parent != validated.output_root
+        or attempt_dir.name != expected_attempt_id
+        or attempt_dir.exists()
+        or _is_reparse(attempt_dir)
+    ):
+        raise ValueError("holdout attempt directory is not a new exact child")
+    attempt_dir.mkdir()
+    if (
+        not attempt_dir.is_dir()
+        or _is_reparse(attempt_dir)
+        or attempt_dir.resolve(strict=True) != attempt_dir
+    ):
+        raise ValueError("holdout attempt directory is not canonical ordinary storage")
+
+    attempt_ref = _seal(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_ref_v1",
+            "attempt_id": expected_attempt_id,
+            "authorization_ref": deepcopy(validated.authorization_ref),
+            "claim_ref": native_claim_ref,
+            "partition": "holdout",
+            "mode": "actual_models",
+            "provider_id": None,
+            "safety": deepcopy(HOLDOUT_SAFETY),
+        }
+    )
+    opened_payload = _seal(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_opened_payload_v1",
+            "attempt_ref": attempt_ref,
+            "attempt_dir": str(attempt_dir),
+            "status": "opened",
+            "safety": deepcopy(HOLDOUT_SAFETY),
+        }
+    )
+    opened_event = {
+        "partition": "holdout",
+        "sequence": 0,
+        "event_kind": "opened",
+        "previous_envelope_sha256": _ZERO_SHA256,
+        "event_payload": opened_payload,
+    }
+    expected_opened_envelope = {
+        "contract_version": "benchmark_v2_holdout_attempt_event_envelope_v1",
+        "event": opened_event,
+        "event_sha256": hashlib.sha256(_canonical_bytes(opened_event)).hexdigest(),
+    }
+    appended = append_holdout_attempt_opened(
+        ledger_root=validated.ledger_root,
+        authorization_ref=validated.authorization_ref,
+        claim_ref=native_claim_ref,
+        event_payload=opened_payload,
+    )
+    if appended != expected_opened_envelope:
+        raise ValueError("holdout opened append differs from the exact envelope")
+    reopened = validate_holdout_attempt_events(
+        ledger_root=validated.ledger_root,
+        authorization_ref=validated.authorization_ref,
+        claim_ref=native_claim_ref,
+    )
+    if reopened != [expected_opened_envelope]:
+        raise ValueError("holdout opened event was not durably reopened as the exact chain")
+    return _OpenedHoldoutActualModelsAttempt(
+        validated=validated,
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
 
 
 def _sealed_mapping(value: object, *, name: str) -> dict[str, object]:

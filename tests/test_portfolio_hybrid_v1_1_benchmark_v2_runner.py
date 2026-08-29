@@ -2230,7 +2230,25 @@ def test_runner_production_import_surface_is_explicit_and_provider_safe() -> Non
         (
             "app.learn.hybrid.benchmark_v2_runtime",
             ("get_production_benchmark_v2_runtime",),
-        )
+        ),
+        (
+            "app.learn.hybrid.benchmark_v2_durable_claim",
+            (
+                "EXACT_HOLDOUT_COMMAND",
+                "IDENTITY",
+                "PRODUCTION_LEDGER_ROOT",
+                "SAFETY",
+            ),
+        ),
+        (
+            "app.learn.hybrid.benchmark_v2_holdout",
+            (
+                "AUTHORIZED_HOLDOUT_OUTPUT_ROOT",
+                "append_holdout_attempt_opened",
+                "claim_holdout_once",
+                "validate_holdout_attempt_events",
+            ),
+        ),
     ]
 
 
@@ -2350,3 +2368,379 @@ def test_probe_authority_cli_rejects_holdout_before_runtime(
                 "--output", str(tmp_path / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json"),
             ]
         )
+
+
+def _holdout_h2_input_fixture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[list[str], dict[str, str], dict[str, Path]]:
+    project_root = (tmp_path / "project").resolve()
+    provider_manifest = (
+        project_root
+        / "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-provider-manifest.json"
+    )
+    authorization_ref_path = (
+        project_root
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json"
+    )
+    ledger_root = (
+        project_root
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger"
+    )
+    output_root = (
+        project_root
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout"
+    )
+    provider_manifest.parent.mkdir(parents=True)
+    provider_manifest.write_bytes(b"{}")
+    authorization_ref_path.parent.mkdir(parents=True)
+    ledger_root.mkdir(parents=True)
+    claim_id = hashlib.sha256(_canonical(runner.IDENTITY)).hexdigest()
+    native_ref = {
+        "authorization_id": f"holdout-authorization/{claim_id}",
+        "envelope_sha256": "a" * 64,
+        "fixed_authorization_path": str(
+            (tmp_path / "claim-root" / f"{claim_id}.authorization.json").resolve()
+        ),
+    }
+    authorization_ref_path.write_bytes(_canonical(native_ref))
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", project_root)
+    monkeypatch.setattr(runner, "PRODUCTION_LEDGER_ROOT", ledger_root)
+    monkeypatch.setattr(runner, "AUTHORIZED_HOLDOUT_OUTPUT_ROOT", output_root)
+    return (
+        list(runner.EXACT_HOLDOUT_COMMAND[4:]),
+        native_ref,
+        {
+            "project_root": project_root,
+            "provider_manifest": provider_manifest,
+            "authorization_ref_path": authorization_ref_path,
+            "ledger_root": ledger_root,
+            "output_root": output_root,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda argv: argv[:-1],
+        lambda argv: argv + ["--output-root", argv[-1]],
+        lambda argv: [argv[2], argv[3], *argv[:2], *argv[4:]],
+        lambda argv: [*argv[:-2], "--output-root=" + argv[-1]],
+        lambda argv: [*argv[:-1], argv[-1] + "/."],
+        lambda argv: [*argv[:-1], str((Path.cwd() / argv[-1]).resolve())],
+        lambda argv: [*argv[:-1], argv[-1].upper()],
+        lambda argv: [*argv[:-1], argv[-1].replace("/", "\\")],
+        lambda argv: [*argv[:-1], "%CD%/" + argv[-1]],
+    ],
+)
+def test_holdout_h2_raw_vector_mutations_fail_before_claim_or_append(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutate,
+) -> None:
+    argv, _, _ = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(runner, "claim_holdout_once", lambda **_kwargs: calls.append("claim"))
+    monkeypatch.setattr(
+        runner, "append_holdout_attempt_opened", lambda **_kwargs: calls.append("append")
+    )
+
+    with pytest.raises(ValueError, match="exact raw token vector"):
+        runner._validate_holdout_actual_models_input(mutate(argv))
+
+    assert calls == []
+
+
+def test_holdout_h2_exact_raw_vector_is_cwd_independent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    unrelated_cwd = tmp_path / "unrelated-cwd"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
+    assert not paths["output_root"].exists()
+
+    validated = runner._validate_holdout_actual_models_input(argv)
+
+    assert validated.provider_manifest_path == paths["provider_manifest"]
+    assert validated.authorization_ref_path == paths["authorization_ref_path"]
+    assert validated.ledger_root == paths["ledger_root"]
+    assert validated.output_root == paths["output_root"]
+    assert validated.authorization_ref == native_ref
+    assert not paths["output_root"].exists()
+
+
+def test_holdout_h2_existing_exact_ordinary_output_root_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, _, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    paths["output_root"].mkdir()
+
+    validated = runner._validate_holdout_actual_models_input(argv)
+
+    assert validated.output_root == paths["output_root"]
+    assert list(paths["output_root"].iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "raw_builder",
+    [
+        lambda ref: _canonical(ref) + b"\n",
+        lambda ref: json.dumps(ref, indent=2).encode("utf-8"),
+        lambda ref: _canonical({**ref, "extra": "forbidden"}),
+        lambda ref: b"\xff",
+        lambda ref: _canonical({**ref, "envelope_sha256": "A" * 64}),
+        lambda ref: _canonical({**ref, "fixed_authorization_path": "relative.json"}),
+        lambda ref: _canonical(
+            {
+                **ref,
+                "fixed_authorization_path": str(
+                    Path(ref["fixed_authorization_path"]).with_name("wrong.json")
+                ),
+            }
+        ),
+    ],
+)
+def test_holdout_h2_authorization_ref_requires_exact_native_canonical_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw_builder
+) -> None:
+    argv, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    paths["authorization_ref_path"].write_bytes(raw_builder(native_ref))
+
+    with pytest.raises(ValueError, match="authorization ref"):
+        runner._validate_holdout_actual_models_input(argv)
+
+
+def _expected_holdout_h2_open(
+    *, authorization_ref: Mapping[str, str], claim_id: str, claim_ref: Mapping[str, str], attempt_dir: Path
+) -> tuple[str, dict[str, object], dict[str, object]]:
+    attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + authorization_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    attempt_ref = _sealed(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_ref_v1",
+            "attempt_id": attempt_id,
+            "authorization_ref": dict(authorization_ref),
+            "claim_ref": dict(claim_ref),
+            "partition": "holdout",
+            "mode": "actual_models",
+            "provider_id": None,
+            "safety": deepcopy(runner.HOLDOUT_SAFETY),
+        }
+    )
+    opened_payload = _sealed(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_opened_payload_v1",
+            "attempt_ref": attempt_ref,
+            "attempt_dir": str(attempt_dir),
+            "status": "opened",
+            "safety": deepcopy(runner.HOLDOUT_SAFETY),
+        }
+    )
+    event = {
+        "partition": "holdout",
+        "sequence": 0,
+        "event_kind": "opened",
+        "previous_envelope_sha256": ZERO,
+        "event_payload": opened_payload,
+    }
+    envelope = {
+        "contract_version": "benchmark_v2_holdout_attempt_event_envelope_v1",
+        "event": event,
+        "event_sha256": hashlib.sha256(_canonical(event)).hexdigest(),
+    }
+    return attempt_id, attempt_ref, envelope
+
+
+def test_holdout_h2_first_claim_creates_exact_attempt_and_reopens_opened_chain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    validated = runner._validate_holdout_actual_models_input(argv)
+    claim_id = hashlib.sha256(_canonical(runner.IDENTITY)).hexdigest()
+    claim_ref = {"id": f"holdout-claim/{claim_id}", "envelope_sha256": "b" * 64}
+    expected_attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + native_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    expected_dir = paths["output_root"] / expected_attempt_id
+    _, expected_ref, expected_envelope = _expected_holdout_h2_open(
+        authorization_ref=native_ref,
+        claim_id=claim_id,
+        claim_ref=claim_ref,
+        attempt_dir=expected_dir,
+    )
+    calls: list[str] = []
+
+    def claim(**kwargs: object) -> dict[str, object]:
+        calls.append("claim")
+        assert not paths["output_root"].exists()
+        assert kwargs == {
+            "ledger_root": paths["ledger_root"],
+            "claim_identity": runner.IDENTITY,
+            "authorization_ref": native_ref,
+        }
+        return {
+            "state": "consumed",
+            "claim_id": claim_id,
+            "attempt_id": expected_attempt_id,
+            "claim_ref": claim_ref,
+            "newly_created": True,
+            "safety": runner.HOLDOUT_SAFETY,
+        }
+
+    def append(**kwargs: object) -> dict[str, object]:
+        calls.append("append")
+        assert expected_dir.is_dir()
+        assert kwargs == {
+            "ledger_root": paths["ledger_root"],
+            "authorization_ref": native_ref,
+            "claim_ref": claim_ref,
+            "event_payload": expected_envelope["event"]["event_payload"],
+        }
+        return deepcopy(expected_envelope)
+
+    def reopen(**kwargs: object) -> list[dict[str, object]]:
+        calls.append("reopen")
+        assert kwargs == {
+            "ledger_root": paths["ledger_root"],
+            "authorization_ref": native_ref,
+            "claim_ref": claim_ref,
+        }
+        return [deepcopy(expected_envelope)]
+
+    monkeypatch.setattr(runner, "claim_holdout_once", claim)
+    monkeypatch.setattr(runner, "append_holdout_attempt_opened", append)
+    monkeypatch.setattr(runner, "validate_holdout_attempt_events", reopen)
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("H2 acquired Runtime")),
+    )
+
+    opened = runner._open_holdout_actual_models_attempt(validated)
+
+    assert calls == ["claim", "append", "reopen"]
+    assert opened.validated is validated
+    assert opened.attempt_ref == expected_ref
+    assert opened.attempt_dir == expected_dir
+    assert sorted(path.name for path in paths["output_root"].iterdir()) == [
+        expected_attempt_id
+    ]
+
+
+@pytest.mark.parametrize(
+    "claim_mutation",
+    [
+        {"newly_created": False},
+        {"claim_ref": None},
+        {"claim_ref": {"id": "holdout-claim/wrong", "envelope_sha256": "b" * 64}},
+        {"attempt_id": "f" * 64},
+        {"claim_id": "e" * 64},
+    ],
+)
+def test_holdout_h2_nonunique_or_mismatched_claim_fails_before_mkdir_and_append(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    claim_mutation: dict[str, object],
+) -> None:
+    argv, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    validated = runner._validate_holdout_actual_models_input(argv)
+    claim_id = hashlib.sha256(_canonical(runner.IDENTITY)).hexdigest()
+    attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + native_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    claim_result: dict[str, object] = {
+        "state": "consumed",
+        "claim_id": claim_id,
+        "attempt_id": attempt_id,
+        "claim_ref": {
+            "id": f"holdout-claim/{claim_id}",
+            "envelope_sha256": "b" * 64,
+        },
+        "newly_created": True,
+        "safety": runner.HOLDOUT_SAFETY,
+    }
+    claim_result.update(claim_mutation)
+    appended: list[object] = []
+    monkeypatch.setattr(runner, "claim_holdout_once", lambda **_kwargs: claim_result)
+    monkeypatch.setattr(
+        runner,
+        "append_holdout_attempt_opened",
+        lambda **kwargs: appended.append(kwargs),
+    )
+
+    with pytest.raises(ValueError, match="claim"):
+        runner._open_holdout_actual_models_attempt(validated)
+
+    assert appended == []
+    assert not paths["output_root"].exists()
+
+
+@pytest.mark.parametrize("mismatch_stage", ["append", "reopen"])
+def test_holdout_h2_append_or_reopen_mismatch_fails_closed_without_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mismatch_stage: str
+) -> None:
+    argv, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    validated = runner._validate_holdout_actual_models_input(argv)
+    claim_id = hashlib.sha256(_canonical(runner.IDENTITY)).hexdigest()
+    claim_ref = {"id": f"holdout-claim/{claim_id}", "envelope_sha256": "b" * 64}
+    attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + native_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    _, _, envelope = _expected_holdout_h2_open(
+        authorization_ref=native_ref,
+        claim_id=claim_id,
+        claim_ref=claim_ref,
+        attempt_dir=paths["output_root"] / attempt_id,
+    )
+    monkeypatch.setattr(
+        runner,
+        "claim_holdout_once",
+        lambda **_kwargs: {
+            "state": "consumed",
+            "claim_id": claim_id,
+            "attempt_id": attempt_id,
+            "claim_ref": claim_ref,
+            "newly_created": True,
+            "safety": runner.HOLDOUT_SAFETY,
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "append_holdout_attempt_opened",
+        lambda **_kwargs: {} if mismatch_stage == "append" else deepcopy(envelope),
+    )
+    monkeypatch.setattr(
+        runner,
+        "validate_holdout_attempt_events",
+        lambda **_kwargs: [] if mismatch_stage == "reopen" else [deepcopy(envelope)],
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        lambda: (_ for _ in ()).throw(AssertionError("H2 acquired Runtime")),
+    )
+
+    with pytest.raises(ValueError, match="opened"):
+        runner._open_holdout_actual_models_attempt(validated)
