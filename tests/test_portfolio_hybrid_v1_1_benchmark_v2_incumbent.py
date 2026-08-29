@@ -1359,15 +1359,50 @@ def test_benchmark_v2_c3_start_persists_exact_phases_before_launch(
     try:
         from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch
 
+        monkeypatch.setattr(dispatch, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(
             dispatch,
             "_attest_exact_window",
             lambda value: {"content_sha256": "e" * 64},
         )
+
+        def _exact_provider_attestation(provider, _value):
+            process = {"pid": 101, "create_time_ns": 202}
+            profile_sha256 = "f" * 64
+            identity = dispatch.compose_benchmark_provider_runtime_identity(
+                provider=provider,
+                lease_identity={
+                    "lease_id": "lease-c3-start",
+                    "incarnation_id": "incarnation-c3-start",
+                    "owner_request_id": "request-c3-start",
+                },
+                profile_ref={"content_sha256": profile_sha256},
+                listener_owner={
+                    "host": "127.0.0.1",
+                    "port": 8080,
+                    "process_identities": [process],
+                },
+                process_identities=[process],
+                process_scope={
+                    "scope_name": "scope-c3-start",
+                    "member_pids": [process["pid"]],
+                    "process_identities": [process],
+                },
+            )
+            return {
+                "runtime_identity": identity,
+                "profile": {
+                    "profile_id": "profile-c3-start",
+                    "profile_sha256": profile_sha256,
+                    "profile_payload_sha256": profile_sha256,
+                },
+                "installed_configuration_snapshot": None,
+            }
+
         monkeypatch.setattr(
             dispatch,
             "_attest_exact_provider_runtime",
-            lambda provider, value: {"content_sha256": "f" * 64},
+            _exact_provider_attestation,
         )
         binding_started = store.transition(
             run_id="run-c3-start",
