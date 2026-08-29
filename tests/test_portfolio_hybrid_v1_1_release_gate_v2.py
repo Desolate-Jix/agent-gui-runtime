@@ -558,6 +558,19 @@ def test_public_report_cli_requires_canonical_probe_authority_position_and_guard
         assert secret not in captured.out
 
 
+def test_public_report_cli_requires_dependency_manifest_before_ledger_root() -> None:
+    module = _module()
+    flags = module.FINAL_REPORT_FLAG_ORDER
+
+    leakage_index = flags.index("--leakage-review")
+    assert flags[leakage_index + 1] == "--dependency-manifest"
+    assert flags[leakage_index + 2] == "--ledger-root"
+    assert module.FINAL_REPORT_PATH_TOKENS["--dependency-manifest"] == (
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/"
+        "release-dependency-manifest.json"
+    )
+
+
 @pytest.mark.parametrize("ordering", ["reversed", "adjacent_swap"])
 def test_public_report_cli_rejects_reordered_fixed_flags_without_value_leakage(
     ordering: str,
@@ -718,9 +731,112 @@ def test_public_report_production_api_accepts_paths_only() -> None:
         "probe_authority_path",
         "holdout_score_ref_path",
         "leakage_review_path",
+        "dependency_manifest_path",
         "ledger_root",
         "output_path",
     }
+
+
+def test_public_report_validates_dependency_manifest_before_probe_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    calls: list[str] = []
+    canonical = {
+        flag.removeprefix("--").replace("-", "_"): Path(value)
+        for flag, value in module.FINAL_REPORT_PATH_TOKENS.items()
+    }
+
+    monkeypatch.setattr(
+        module,
+        "_validate_production_final_report_paths",
+        lambda **_kwargs: canonical,
+    )
+    monkeypatch.setattr(
+        module,
+        "_load_pretty_artifact",
+        lambda path, name: calls.append(f"load:{name}") or {"build_mode": "release"},
+    )
+
+    def reject_dependency(_manifest: object) -> None:
+        calls.append("validate:dependency")
+        raise ValueError("dependency manifest rejected")
+
+    monkeypatch.setattr(
+        module,
+        "validate_dependency_manifest_for_final_report",
+        reject_dependency,
+    )
+    monkeypatch.setattr(
+        module,
+        "_validate_probe_authority_candidate_once",
+        lambda **_kwargs: calls.append("validate:probe"),
+    )
+    monkeypatch.setattr(
+        module,
+        "write_create_new_or_byte_identical",
+        lambda *_args, **_kwargs: calls.append("write:report"),
+    )
+
+    with pytest.raises(ValueError, match="dependency manifest rejected"):
+        module.assemble_benchmark_v2_public_report(
+            provider_manifest_path=Path("provider.json"),
+            regression_run_ref_path=Path("regression-run.json"),
+            holdout_run_ref_path=Path("holdout-run.json"),
+            regression_score_ref_path=Path("regression-score.json"),
+            probe_authority_path=Path("probe-authority.json"),
+            holdout_score_ref_path=Path("holdout-score.json"),
+            leakage_review_path=Path("leakage-review.json"),
+            dependency_manifest_path=Path("dependency-manifest.json"),
+            ledger_root=Path("ledger"),
+            output_path=Path("report.json"),
+        )
+
+    assert calls == ["load:dependency manifest", "validate:dependency"]
+
+
+def test_dependency_manifest_release_mismatch_blocks_public_report_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    writes: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        module,
+        "write_create_new_or_byte_identical",
+        lambda path, payload: writes.append((path, payload)),
+    )
+
+    with pytest.raises(
+        ValueError, match="dependency manifest release differs from final report"
+    ):
+        module._write_dependency_bound_public_report(
+            dependency_manifest={"benchmark_release_id": "release-a"},
+            report={"benchmark_release_id": "release-b"},
+            output_path=Path("report.json"),
+        )
+
+    assert writes == []
+
+
+def test_matching_dependency_manifest_release_writes_public_report_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _module()
+    writes: list[tuple[object, object]] = []
+    monkeypatch.setattr(
+        module,
+        "write_create_new_or_byte_identical",
+        lambda path, payload: writes.append((path, payload)),
+    )
+    report = {"benchmark_release_id": "release-a"}
+
+    module._write_dependency_bound_public_report(
+        dependency_manifest={"benchmark_release_id": "release-a"},
+        report=report,
+        output_path=Path("report.json"),
+    )
+
+    assert writes == [(Path("report.json"), module.pretty_json_bytes(report))]
 
 
 @pytest.mark.parametrize("mutation", ["missing", "extra", "malformed"])

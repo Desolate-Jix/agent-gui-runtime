@@ -197,6 +197,7 @@ FINAL_REPORT_FLAG_ORDER = (
     "--probe-authority",
     "--holdout-score-ref",
     "--leakage-review",
+    "--dependency-manifest",
     "--ledger-root",
     "--output",
 )
@@ -208,6 +209,7 @@ FINAL_REPORT_PATH_TOKENS = {
     "--probe-authority": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json",
     "--holdout-score-ref": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout/score-ref.json",
     "--leakage-review": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/leakage-review.json",
+    "--dependency-manifest": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/release-dependency-manifest.json",
     "--ledger-root": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
     "--output": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/final-report.json",
 }
@@ -2227,6 +2229,19 @@ def _validate_production_final_report_paths(**paths: str | Path) -> dict[str, Pa
     return resolved
 
 
+def _write_dependency_bound_public_report(
+    *,
+    dependency_manifest: Mapping[str, Any],
+    report: Mapping[str, Any],
+    output_path: Path,
+) -> None:
+    if dependency_manifest.get("benchmark_release_id") != report.get(
+        "benchmark_release_id"
+    ):
+        raise ValueError("dependency manifest release differs from final report")
+    write_create_new_or_byte_identical(output_path, pretty_json_bytes(report))
+
+
 def assemble_benchmark_v2_public_report(
     *,
     provider_manifest_path: Path,
@@ -2236,6 +2251,7 @@ def assemble_benchmark_v2_public_report(
     probe_authority_path: Path,
     holdout_score_ref_path: Path,
     leakage_review_path: Path,
+    dependency_manifest_path: Path,
     ledger_root: Path,
     output_path: Path,
 ) -> dict[str, Any]:
@@ -2247,8 +2263,14 @@ def assemble_benchmark_v2_public_report(
         probe_authority=probe_authority_path,
         holdout_score_ref=holdout_score_ref_path,
         leakage_review=leakage_review_path,
+        dependency_manifest=dependency_manifest_path,
         ledger_root=ledger_root,
         output=output_path,
+    )
+    dependency_manifest = validate_dependency_manifest_for_final_report(
+        _load_pretty_artifact(
+            canonical["dependency_manifest"], "dependency manifest"
+        )
     )
     probe_validation = _validate_probe_authority_candidate_once(
         provider_manifest_path=canonical["provider_manifest"],
@@ -2316,8 +2338,10 @@ def assemble_benchmark_v2_public_report(
         authorization_envelope_contract=envelope_contract,
         authorization_ref=authorization_ref,
     )
-    write_create_new_or_byte_identical(
-        canonical["output"], pretty_json_bytes(report)
+    _write_dependency_bound_public_report(
+        dependency_manifest=dependency_manifest,
+        report=report,
+        output_path=canonical["output"],
     )
     return report
 
@@ -2328,7 +2352,7 @@ def _cli_parser() -> argparse.ArgumentParser:
     modes.add_argument("--build-dependency-manifest", action="store_true")
     modes.add_argument("--validate-final-report-dependency", action="store_true")
     parser.add_argument("--benchmark-release-id")
-    parser.add_argument("--dependency-manifest", type=Path)
+    parser.add_argument("--dependency-manifest")
     parser.add_argument("--provider-manifest")
     parser.add_argument("--regression-run-ref")
     parser.add_argument("--holdout-run-ref")
@@ -2351,7 +2375,6 @@ def _parse_cli_tokens(tokens: Sequence[str]) -> argparse.Namespace:
         "--build-dependency-manifest",
         "--validate-final-report-dependency",
         "--benchmark-release-id",
-        "--dependency-manifest",
         *FINAL_REPORT_FLAG_ORDER,
     )
     parser = _cli_parser()
@@ -2367,7 +2390,7 @@ def _parse_cli_tokens(tokens: Sequence[str]) -> argparse.Namespace:
         ]
         if missing:
             parser.error(f"the following arguments are required: {', '.join(missing)}")
-        if args.benchmark_release_id is not None or args.dependency_manifest is not None:
+        if args.benchmark_release_id is not None:
             parser.error("final report assembly accepts only the canonical report arguments")
         observed_order = tuple(
             flag
@@ -2425,7 +2448,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             or any(value is not None for value in report_only)
         ):
             raise ValueError("final-report dependency validation requires --dependency-manifest only")
-        manifest = _load_pretty_artifact(args.dependency_manifest, "dependency manifest")
+        manifest = _load_pretty_artifact(
+            Path(args.dependency_manifest), "dependency manifest"
+        )
         validate_dependency_manifest_for_final_report(manifest)
         sys.stdout.write(compact_json_bytes({"dependency_manifest_ref": artifact_ref(manifest), "status": "PASS"}).decode("utf-8") + "\n")
         return 0
@@ -2437,6 +2462,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         probe_authority_path=args.probe_authority,
         holdout_score_ref_path=args.holdout_score_ref,
         leakage_review_path=args.leakage_review,
+        dependency_manifest_path=Path(args.dependency_manifest),
         ledger_root=args.ledger_root,
         output_path=args.output,
     )
