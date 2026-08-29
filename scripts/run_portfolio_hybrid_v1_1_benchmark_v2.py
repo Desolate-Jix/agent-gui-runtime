@@ -45,8 +45,12 @@ from app.learn.hybrid.benchmark_v2_durable_claim import (
 )
 from app.learn.hybrid.benchmark_v2_holdout import (
     AUTHORIZED_HOLDOUT_OUTPUT_ROOT,
+    append_holdout_attempt_body_complete,
+    append_holdout_attempt_cleanup,
     append_holdout_attempt_opened,
+    append_holdout_attempt_result,
     claim_holdout_once,
+    holdout_attempt_events_path,
     validate_holdout_attempt_events,
 )
 
@@ -59,6 +63,7 @@ _RESULT_PAYLOAD_CONTRACT = "benchmark_v2_runner_result_payload_v1"
 _ACTUAL_RESULT_CONTRACT = "benchmark_v2_runner_actual_result_v2"
 _PRE_RESULT_REF_CONTRACT = "benchmark_v2_runner_ledger_pre_result_ref_v1"
 _CLEANUP_RECEIPT_CONTRACT = "benchmark_v2_attempt_cleanup_receipt_v1"
+_HOLDOUT_NORMAL_CLEANUP_REASON = "benchmark_v2_holdout_actual_runner_finished"
 _ZERO_SHA256 = "0" * 64
 _PROVIDERS = ("omni", "qwen", "vista")
 _ZERO_COUNTS = {
@@ -420,6 +425,16 @@ def _write_json(path: Path, value: Mapping[str, object], *, create_only: bool) -
     mode = "xb" if create_only else "wb"
     with destination.open(mode) as stream:
         stream.write(_canonical_bytes(value) + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_holdout_compact_json_create(
+    path: Path, value: Mapping[str, object]
+) -> None:
+    destination = Path(path).resolve()
+    with destination.open("xb") as stream:
+        stream.write(_canonical_bytes(value))
         stream.flush()
         os.fsync(stream.fileno())
 
@@ -1401,6 +1416,7 @@ def _validate_actual_group(
     *,
     attempt_ref: Mapping[str, object],
     provider_corpus_ref: object,
+    expected_partition: str = "regression",
 ) -> tuple[dict[str, object], tuple[str, str], set[str]]:
     group = _sealed_mapping(value, name="actual screen group")
     screen_group = group.get("screen_group")
@@ -1425,7 +1441,7 @@ def _validate_actual_group(
     if (
         not isinstance(screen_group, str)
         or not screen_group
-        or group.get("partition") != "regression"
+        or group.get("partition") != expected_partition
         or group.get("attempt_ref") != dict(attempt_ref)
         or not corpus_lineage_matches
         or not isinstance(case_refs, list)
@@ -1454,7 +1470,10 @@ def _validate_actual_group(
 
 
 def _validate_actual_projection(
-    value: object, *, group: Mapping[str, object]
+    value: object,
+    *,
+    group: Mapping[str, object],
+    expected_partition: str = "regression",
 ) -> dict[str, object]:
     projection = _sealed_mapping(value, name="actual screen-group projection")
     screen_ref = {
@@ -1475,7 +1494,7 @@ def _validate_actual_projection(
     if (
         projection.get("contract_version")
         != "benchmark_v2_actual_screen_group_projection_v1"
-        or projection.get("partition") != "regression"
+        or projection.get("partition") != expected_partition
         or projection.get("screen_group") != group["screen_group"]
         or projection.get("request_ref") != group.get("request_ref")
         or not isinstance(shared, Mapping)
@@ -1507,6 +1526,275 @@ def _validate_actual_projection(
     if observed != expected:
         raise ValueError("actual screen-group projection lineage is invalid")
     return projection
+
+
+def _reopen_holdout_transition(
+    *,
+    opened: _OpenedHoldoutActualModelsAttempt,
+    event_kind: str,
+    event_payload: Mapping[str, object],
+) -> list[dict[str, object]]:
+    appenders = {
+        "body_complete": append_holdout_attempt_body_complete,
+        "cleanup": append_holdout_attempt_cleanup,
+        "result": append_holdout_attempt_result,
+    }
+    appender = appenders.get(event_kind)
+    if appender is None:
+        raise ValueError("holdout transition kind is invalid")
+    claim_ref = opened.attempt_ref["claim_ref"]
+    assert isinstance(claim_ref, Mapping)
+    appended = appender(
+        ledger_root=opened.validated.ledger_root,
+        authorization_ref=opened.validated.authorization_ref,
+        claim_ref=claim_ref,
+        event_payload=event_payload,
+    )
+    reopened = validate_holdout_attempt_events(
+        ledger_root=opened.validated.ledger_root,
+        authorization_ref=opened.validated.authorization_ref,
+        claim_ref=claim_ref,
+    )
+    expected_kinds = {
+        "body_complete": ["opened", "body_complete"],
+        "cleanup": ["opened", "body_complete", "cleanup"],
+        "result": ["opened", "body_complete", "cleanup", "result"],
+    }[event_kind]
+    if (
+        [item.get("event", {}).get("event_kind") for item in reopened]
+        != expected_kinds
+        or not reopened
+        or reopened[-1] != appended
+    ):
+        raise ValueError("holdout transition was not durably reopened")
+    return reopened
+
+
+def _finish_holdout_actual_models_attempt(
+    runtime: object,
+    *,
+    opened: _OpenedHoldoutActualModelsAttempt,
+    append_normal_cleanup: bool,
+) -> tuple[dict[str, object], dict[str, str] | None, list[dict[str, object]] | None]:
+    cleanup = _validate_cleanup_receipt(
+        runtime.cleanup_attempt(
+            attempt=deepcopy(opened.attempt_ref),
+            reason=_HOLDOUT_NORMAL_CLEANUP_REASON,
+        ),
+        attempt_ref=opened.attempt_ref,
+        require_effect_refs=append_normal_cleanup,
+    )
+    if cleanup.get("reason") != _HOLDOUT_NORMAL_CLEANUP_REASON:
+        raise ValueError("holdout cleanup receipt reason differs")
+    counts = _require_zero_counts(runtime)
+    if cleanup.get("resource_counts") != counts:
+        raise ValueError("holdout cleanup receipt differs from fresh stable zero")
+    cleanup_path = opened.attempt_dir / "cleanup.json"
+    _write_json_create_or_identical(cleanup_path, cleanup)
+    cleanup_ref = _content_ref(cleanup, name="holdout cleanup receipt")
+    if not append_normal_cleanup:
+        return cleanup, None, None
+    cleanup_payload = _seal(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_cleanup_payload_v1",
+            "attempt_ref": deepcopy(opened.attempt_ref),
+            "attempt_dir": str(opened.attempt_dir),
+            "status": "cleanup",
+            "cleanup_receipt_ref": cleanup_ref,
+            "resource_counts": counts,
+            "safety": deepcopy(HOLDOUT_SAFETY),
+        }
+    )
+    reopened = _reopen_holdout_transition(
+        opened=opened,
+        event_kind="cleanup",
+        event_payload=cleanup_payload,
+    )
+    return cleanup, cleanup_ref, reopened
+
+
+def _holdout_pre_result_ref(
+    *,
+    opened: _OpenedHoldoutActualModelsAttempt,
+    cleanup_chain: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    if (
+        len(cleanup_chain) != 3
+        or cleanup_chain[-1].get("event", {}).get("event_kind") != "cleanup"
+    ):
+        raise ValueError("holdout cleanup chain is not complete")
+    ledger_path = holdout_attempt_events_path(
+        ledger_root=opened.validated.ledger_root
+    )
+    raw_prefix = Path(ledger_path).read_bytes()
+    cleanup_envelope = cleanup_chain[-1]
+    if not raw_prefix.endswith(b"\n") or raw_prefix != b"".join(
+        _canonical_bytes(item) + b"\n" for item in cleanup_chain
+    ):
+        raise ValueError("holdout pre-result ledger prefix is not exact")
+    return {
+        "contract_version": "benchmark_v2_holdout_attempt_ledger_pre_result_ref_v1",
+        "id": "holdout-attempt-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-holdout-attempt-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": deepcopy(opened.attempt_ref),
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": hashlib.sha256(
+            _canonical_bytes(cleanup_envelope)
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+
+
+def _run_holdout_actual_models(
+    *,
+    validated: _ValidatedHoldoutActualModelsInput,
+    runtime: object,
+) -> dict[str, object]:
+    manifest = runtime.load_provider_manifest(path=validated.provider_manifest_path)
+    if not isinstance(manifest, Mapping):
+        raise ValueError("holdout provider manifest projection must be an object")
+    provider_corpus_ref = manifest.get("provider_corpus_ref")
+    if not isinstance(provider_corpus_ref, Mapping):
+        raise ValueError("holdout provider manifest corpus lineage is unavailable")
+    opened = _open_holdout_actual_models_attempt(validated)
+    primary: BaseException | None = None
+    body: dict[str, object] | None = None
+    body_ref: dict[str, str] | None = None
+    body_complete_durable = False
+    try:
+        projections: list[dict[str, object]] = []
+        identities: set[tuple[str, str]] = set()
+        screen_group_ids: set[str] = set()
+        case_ids: set[str] = set()
+        owner = runtime.prepare_screen_groups(
+            provider_manifest=manifest,
+            partition="holdout",
+            attempt_ref=deepcopy(opened.attempt_ref),
+            attempt_dir=opened.attempt_dir,
+        )
+        with owner as groups:
+            for raw_group in groups:
+                group, identity, group_case_ids = _validate_actual_group(
+                    raw_group,
+                    attempt_ref=opened.attempt_ref,
+                    provider_corpus_ref=provider_corpus_ref,
+                    expected_partition="holdout",
+                )
+                if (
+                    identity in identities
+                    or identity[0] in screen_group_ids
+                    or case_ids.intersection(group_case_ids)
+                    or len(identities) >= 12
+                ):
+                    raise ValueError("holdout runner requires 12 unique screen groups")
+                identities.add(identity)
+                screen_group_ids.add(identity[0])
+                case_ids.update(group_case_ids)
+                projections.append(
+                    _validate_actual_projection(
+                        runtime.run_actual_screen_group(
+                            provider_group=group,
+                            attempt_ref=deepcopy(opened.attempt_ref),
+                            attempt_dir=opened.attempt_dir,
+                        ),
+                        group=group,
+                        expected_partition="holdout",
+                    )
+                )
+        if len(identities) != 12 or len(screen_group_ids) != 12 or len(case_ids) != 60:
+            raise ValueError("holdout runner requires 12 unique screen groups")
+        body = _seal(
+            {
+                "contract_version": "benchmark_v2_holdout_runner_actual_body_v1",
+                "attempt_ref": deepcopy(opened.attempt_ref),
+                "partition": "holdout",
+                "screen_group_results": projections,
+                "body_status": "complete",
+                "safety": deepcopy(HOLDOUT_SAFETY),
+            }
+        )
+        body_path = opened.attempt_dir / "body.json"
+        _write_holdout_compact_json_create(body_path, body)
+        private_body_ref = _file_ref(body_path, body)
+        body_ref = _content_ref(body, name="holdout body")
+        body_payload = _seal(
+            {
+                "contract_version": "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+                "attempt_ref": deepcopy(opened.attempt_ref),
+                "attempt_dir": str(opened.attempt_dir),
+                "status": "body_complete",
+                "body_file_ref": private_body_ref,
+                "safety": deepcopy(HOLDOUT_SAFETY),
+            }
+        )
+        _reopen_holdout_transition(
+            opened=opened,
+            event_kind="body_complete",
+            event_payload=body_payload,
+        )
+        body_complete_durable = True
+    except BaseException as error:
+        primary = error
+
+    cleanup: dict[str, object] | None = None
+    cleanup_ref: dict[str, str] | None = None
+    cleanup_chain: list[dict[str, object]] | None = None
+    try:
+        cleanup, cleanup_ref, cleanup_chain = _finish_holdout_actual_models_attempt(
+            runtime,
+            opened=opened,
+            append_normal_cleanup=body_complete_durable,
+        )
+    except BaseException as cleanup_error:
+        if primary is not None:
+            raise BaseExceptionGroup(
+                "benchmark holdout actual body and cleanup failed",
+                [primary, cleanup_error],
+            )
+        raise
+    if primary is not None:
+        raise primary
+    if body is None or body_ref is None or cleanup is None or cleanup_ref is None or cleanup_chain is None:
+        raise RuntimeError("holdout attempt evidence is incomplete")
+
+    pre_result_ref = _holdout_pre_result_ref(
+        opened=opened,
+        cleanup_chain=cleanup_chain,
+    )
+    result = _seal(
+        {
+            "contract_version": "benchmark_v2_holdout_runner_actual_result_v1",
+            "attempt_ref": deepcopy(opened.attempt_ref),
+            "attempt_dir": str(opened.attempt_dir),
+            "body_ref": body_ref,
+            "cleanup_receipt_ref": cleanup_ref,
+            "attempt_ledger_pre_result_ref": pre_result_ref,
+            "screen_group_count": 12,
+            "status": "terminal",
+            "safety": deepcopy(HOLDOUT_SAFETY),
+        }
+    )
+    result_path = opened.attempt_dir / "result.json"
+    _write_holdout_compact_json_create(result_path, result)
+    result_payload = _seal(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_result_payload_v1",
+            "attempt_ref": deepcopy(opened.attempt_ref),
+            "attempt_dir": str(opened.attempt_dir),
+            "status": "result",
+            "result_file_ref": _file_ref(result_path, result),
+            "attempt_ledger_pre_result_ref": pre_result_ref,
+            "safety": deepcopy(HOLDOUT_SAFETY),
+        }
+    )
+    _reopen_holdout_transition(
+        opened=opened,
+        event_kind="result",
+        event_payload=result_payload,
+    )
+    return result
 
 
 def _run_actual(args: argparse.Namespace, runtime: object) -> dict[str, object]:
@@ -2355,6 +2643,13 @@ def _reject(args: argparse.Namespace, *names: str) -> None:
 def run_cli(argv: Sequence[str]) -> dict[str, object]:
     argv_list = list(argv)
     args = _parser().parse_args(argv_list)
+    if args.actual_models and (
+        args.partition == "holdout" or args.holdout_authorization is not None
+    ):
+        validated = _validate_holdout_actual_models_input(argv_list)
+        runtime = get_production_benchmark_v2_runtime()
+        _run_holdout_actual_models(validated=validated, runtime=runtime)
+        return {"status": "terminal"}
     if args.materialize_score_input:
         _require(
             args,
