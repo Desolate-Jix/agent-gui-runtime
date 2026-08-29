@@ -203,6 +203,21 @@ def _positive(value: object, *, name: str) -> int:
     return result
 
 
+def _exact_zero_resource_counts(value: object, *, name: str) -> dict[str, int]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != set(_ZERO_RESOURCE_COUNTS)
+        or any(
+            isinstance(value[key], bool)
+            or not isinstance(value[key], int)
+            or value[key] != 0
+            for key in _ZERO_RESOURCE_COUNTS
+        )
+    ):
+        raise ValueError(f"{name} must contain exact integer zero counts")
+    return {key: int(value[key]) for key in _ZERO_RESOURCE_COUNTS}
+
+
 def _public_id(value: object, *, name: str) -> str:
     result = _text(value, name=name)
     if any(segment in {"", ".", "..", "~"} or segment != segment.strip() for segment in result.split("/")):
@@ -496,8 +511,228 @@ def _validate_runner_event(payload: Mapping[str, object]) -> None:
     _safety(payload["safety"])
 
 
+def _holdout_authorization_ref(value: object, *, name: str) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a pathless holdout authorization ref")
+    _closed(value, ("authorization_id", "envelope_sha256"), name=name)
+    authorization_id = _public_id(value.get("authorization_id"), name=f"{name}.authorization_id")
+    if re.fullmatch(r"holdout-authorization/[0-9a-f]{64}", authorization_id) is None:
+        raise ValueError(f"{name}.authorization_id is invalid")
+    return {
+        "authorization_id": authorization_id,
+        "envelope_sha256": _sha(value.get("envelope_sha256"), name=f"{name}.envelope_sha256"),
+    }
+
+
+def _holdout_claim_ref(value: object, *, name: str) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a pathless holdout claim ref")
+    _closed(value, ("id", "envelope_sha256"), name=name)
+    identifier = _public_id(value.get("id"), name=f"{name}.id")
+    if re.fullmatch(r"holdout-claim/[0-9a-f]{64}", identifier) is None:
+        raise ValueError(f"{name}.id is invalid")
+    return {
+        "id": identifier,
+        "envelope_sha256": _sha(value.get("envelope_sha256"), name=f"{name}.envelope_sha256"),
+    }
+
+
+def _holdout_attempt_ref(value: object, *, name: str) -> dict[str, str]:
+    result = _ref(value, name=name, prefixes=("holdout-runner-attempt",))
+    if re.fullmatch(r"holdout-runner-attempt/[0-9a-f]{64}", result["id"]) is None:
+        raise ValueError(f"{name}.id is invalid")
+    return result
+
+
+def _validate_holdout_runner_event(payload: Mapping[str, object]) -> None:
+    if payload["partition"] != "holdout":
+        raise ValueError("holdout runner event partition is invalid")
+    event_kind = payload["event_kind"]
+    if event_kind not in {"opened", "body_complete", "cleanup", "result"}:
+        raise ValueError("holdout runner event kind is invalid")
+    sequence = _nonnegative(payload["sequence"], name="sequence")
+    attempt_ref = _holdout_attempt_ref(payload["attempt_ref"], name="attempt_ref")
+    _holdout_authorization_ref(payload["authorization_ref"], name="authorization_ref")
+    _holdout_claim_ref(payload["claim_ref"], name="claim_ref")
+    previous = payload["previous_event_projection_ref"]
+    if sequence == 0:
+        if previous is not None:
+            raise ValueError("holdout sequence zero previous event ref must be null")
+    else:
+        _ref(
+            previous,
+            name="previous_event_projection_ref",
+            prefixes=("verified-holdout-runner-event",),
+        )
+    _sha(payload["raw_event_sha256"], name="raw_event_sha256")
+    refs = payload["load_bearing_refs"]
+    if not isinstance(refs, Mapping):
+        raise ValueError("holdout runner event load-bearing refs are invalid")
+    expected = {
+        "opened": {"attempt_ref"},
+        "body_complete": {"body_file_ref"},
+        "cleanup": {"cleanup_receipt_ref", "cleanup_projection_ref"},
+        "result": {"result_file_ref", "pre_result_verification_ref"},
+    }[str(event_kind)]
+    if set(refs) != expected:
+        raise ValueError("holdout runner event load-bearing refs are not closed")
+    if event_kind == "opened":
+        if _holdout_attempt_ref(refs["attempt_ref"], name="opened attempt_ref") != attempt_ref:
+            raise ValueError("holdout opened event attempt ref differs")
+    elif event_kind == "body_complete":
+        _file_ref(refs["body_file_ref"], name="body_file_ref")
+    elif event_kind == "cleanup":
+        _ref(
+            refs["cleanup_receipt_ref"],
+            name="cleanup_receipt_ref",
+            prefixes=("attempt-cleanup-receipt",),
+        )
+        _ref(
+            refs["cleanup_projection_ref"],
+            name="cleanup_projection_ref",
+            prefixes=("verified-lifecycle",),
+        )
+    else:
+        _file_ref(refs["result_file_ref"], name="result_file_ref")
+        _ref(
+            refs["pre_result_verification_ref"],
+            name="pre_result_verification_ref",
+            prefixes=("verified-holdout-pre-result",),
+        )
+    _safety(payload["safety"])
+
+
+def _validate_holdout_pre_result(payload: Mapping[str, object]) -> None:
+    if payload["partition"] != "holdout":
+        raise ValueError("holdout pre-result partition is invalid")
+    _holdout_attempt_ref(payload["attempt_ref"], name="attempt_ref")
+    _holdout_authorization_ref(payload["authorization_ref"], name="authorization_ref")
+    _holdout_claim_ref(payload["claim_ref"], name="claim_ref")
+    for field in (
+        "raw_pre_result_ref_sha256",
+        "raw_prefix_sha256",
+        "terminal_envelope_sha256",
+    ):
+        _sha(payload[field], name=field)
+    _nonnegative(payload["terminal_sequence"], name="terminal_sequence")
+    _ref(
+        payload["cleanup_event_projection_ref"],
+        name="cleanup_event_projection_ref",
+        prefixes=("verified-holdout-runner-event",),
+    )
+    if payload["verified"] is not True:
+        raise ValueError("holdout pre-result verified literal is invalid")
+    _safety(payload["safety"])
+
+
+def _validate_holdout_prefix(payload: Mapping[str, object]) -> None:
+    if payload["partition"] != "holdout":
+        raise ValueError("holdout prefix partition is invalid")
+    _holdout_authorization_ref(payload["authorization_ref"], name="authorization_ref")
+    _holdout_claim_ref(payload["claim_ref"], name="claim_ref")
+    _holdout_attempt_ref(payload["attempt_ref"], name="attempt_ref")
+    _sha(payload["raw_prefix_sha256"], name="raw_prefix_sha256")
+    _ref(
+        payload["pre_result_verification_ref"],
+        name="pre_result_verification_ref",
+        prefixes=("verified-holdout-pre-result",),
+    )
+    if _nonnegative(payload["terminal_sequence"], name="terminal_sequence") != 3:
+        raise ValueError("holdout prefix terminal sequence is invalid")
+    terminal = _ref(
+        payload["terminal_event_projection_ref"],
+        name="terminal_event_projection_ref",
+        prefixes=("verified-holdout-runner-event",),
+    )
+    events = _ref_list(
+        payload["event_projection_refs"],
+        name="event_projection_refs",
+        exact_count=4,
+    )
+    if terminal != events[-1] or payload["selection_eligible"] is not True:
+        raise ValueError("holdout prefix eligibility is invalid")
+    _safety(payload["safety"])
+
+
+def _validate_holdout_projected_ledger(payload: Mapping[str, object]) -> None:
+    _public_id(payload["benchmark_release_id"], name="benchmark_release_id")
+    if payload["partition"] != "holdout":
+        raise ValueError("holdout projected ledger partition is invalid")
+    authorization_ref = _holdout_authorization_ref(
+        payload["authorization_ref"], name="authorization_ref"
+    )
+    claim_ref = _holdout_claim_ref(payload["claim_ref"], name="claim_ref")
+    del authorization_ref, claim_ref
+    _ref(
+        payload["raw_ledger_prefix_verification_ref"],
+        name="raw_ledger_prefix_verification_ref",
+        prefixes=("verified-holdout-attempt-ledger-prefix",),
+    )
+    _ref(
+        payload["pre_result_verification_ref"],
+        name="pre_result_verification_ref",
+        prefixes=("verified-holdout-pre-result",),
+    )
+    entries = payload["entries"]
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], Mapping):
+        raise ValueError("holdout projected ledger requires one claim-bound entry")
+    entry = entries[0]
+    _closed(
+        entry,
+        (
+            "sequence",
+            "attempt_ref",
+            "observed_state",
+            "event_projection_refs",
+            "lifecycle_ref",
+            "selection_eligible",
+        ),
+        name="holdout projected ledger entry",
+    )
+    attempt_ref = _holdout_attempt_ref(entry["attempt_ref"], name="entry.attempt_ref")
+    events = _ref_list(entry["event_projection_refs"], name="entry.event_projection_refs", exact_count=4)
+    if any(not item["id"].startswith("verified-holdout-runner-event/") for item in events):
+        raise ValueError("holdout projected ledger event class differs")
+    lifecycle_ref = _ref(
+        entry["lifecycle_ref"], name="entry.lifecycle_ref", prefixes=("verified-lifecycle",)
+    )
+    if (
+        _nonnegative(entry["sequence"], name="entry.sequence") != 0
+        or entry["observed_state"] != "result"
+        or entry["selection_eligible"] is not True
+        or payload["selected_attempt_ref"] != attempt_ref
+        or payload["selected_lifecycle_ref"] != lifecycle_ref
+    ):
+        raise ValueError("holdout projected ledger selection is invalid")
+    _safety(payload["safety"])
+
+
+def _validate_holdout_actual_result(payload: Mapping[str, object]) -> None:
+    _holdout_attempt_ref(payload["attempt_ref"], name="attempt_ref")
+    if payload["result_contract_version"] != "benchmark_v2_holdout_runner_actual_result_v1":
+        raise ValueError("holdout result contract version differs")
+    for field in ("raw_file_sha256", "result_content_sha256"):
+        _sha(payload[field], name=field)
+    _ref(payload["body_projection_ref"], name="body_projection_ref", prefixes=("verified-actual-body",))
+    _ref(payload["cleanup_projection_ref"], name="cleanup_projection_ref", prefixes=("verified-lifecycle",))
+    _ref(payload["pre_result_verification_ref"], name="pre_result_verification_ref", prefixes=("verified-holdout-pre-result",))
+    _ref(
+        payload["runner_ledger_prefix_projection_ref"],
+        name="runner_ledger_prefix_projection_ref",
+        prefixes=("verified-holdout-attempt-ledger-prefix",),
+    )
+    _ref(payload["result_event_projection_ref"], name="result_event_projection_ref", prefixes=("verified-holdout-runner-event",))
+    if payload["verified"] is not True:
+        raise ValueError("holdout result verified literal is invalid")
+    _safety(payload["safety"])
+
+
 def _validate_journal_terminal(payload: Mapping[str, object]) -> None:
-    _ref(payload["attempt_ref"], name="attempt_ref", prefixes=("runner-attempt",))
+    _ref(
+        payload["attempt_ref"],
+        name="attempt_ref",
+        prefixes=("runner-attempt", "holdout-runner-attempt"),
+    )
     _nonnegative(payload["sequence"], name="sequence")
     if payload["phase"] != "terminal" or payload["event_kind"] != "attempt_terminal":
         raise ValueError("attempt journal terminal discriminator is invalid")
@@ -509,13 +744,18 @@ def _validate_journal_terminal(payload: Mapping[str, object]) -> None:
 
 
 def _validate_lifecycle(payload: Mapping[str, object]) -> None:
-    _ref(payload["attempt_ref"], name="attempt_ref", prefixes=("runner-attempt",))
+    _ref(
+        payload["attempt_ref"],
+        name="attempt_ref",
+        prefixes=("runner-attempt", "holdout-runner-attempt"),
+    )
     kind = payload["lifecycle_kind"]
     if kind not in {"attempt", "screen_group", "cleanup"}:
         raise ValueError("lifecycle_kind is invalid")
     _sha(payload["raw_evidence_sha256"], name="raw_evidence_sha256")
-    if payload["cleanup_stable_zero"] is not True or payload["resource_counts"] != _ZERO_RESOURCE_COUNTS:
+    if payload["cleanup_stable_zero"] is not True:
         raise ValueError("lifecycle stable-zero resources are invalid")
+    _exact_zero_resource_counts(payload["resource_counts"], name="resource_counts")
     started = _nonnegative(payload["started_request_count"], name="started_request_count")
     terminal = _nonnegative(payload["terminal_or_unknown_request_count"], name="terminal_or_unknown_request_count")
     parents = payload["parent_refs"]
@@ -646,15 +886,43 @@ def _validate_prediction_run(payload: Mapping[str, object]) -> None:
     classes = [class_name for _, _, class_name in closure]
     if classes.count("automatic_prediction_v3") != 1:
         raise ValueError("prediction closure requires exactly one automatic prediction")
-    if classes.count("benchmark_v2_projected_attempt_ledger_v1") != 1:
+    holdout = payload["partition"] == "holdout"
+    ledger_contract = (
+        "benchmark_v2_holdout_projected_attempt_ledger_v1"
+        if holdout
+        else "benchmark_v2_projected_attempt_ledger_v1"
+    )
+    event_contract = (
+        "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        if holdout
+        else "benchmark_v2_runner_event_verified_projection_v1"
+    )
+    if classes.count(ledger_contract) != 1:
         raise ValueError("prediction closure requires exactly one projected ledger")
-    if not any(class_name == "benchmark_v2_runner_event_verified_projection_v1" for class_name in classes):
+    event_count = classes.count(event_contract)
+    if (holdout and event_count != 4) or (not holdout and event_count == 0):
         raise ValueError("prediction closure requires runner events")
+    if holdout:
+        exact_holdout_classes = {
+            "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1": 1,
+            "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1": 1,
+            "benchmark_v2_holdout_actual_result_verified_projection_v1": 1,
+        }
+        if any(classes.count(name) != count for name, count in exact_holdout_classes.items()):
+            raise ValueError("prediction holdout closure is incomplete")
+        if any(
+            name in classes
+            for name in {
+                "benchmark_v2_projected_attempt_ledger_v1",
+                "benchmark_v2_runner_event_verified_projection_v1",
+            }
+        ):
+            raise ValueError("prediction holdout closure contains regression projections")
     automatic_ref = next(ref_value for _, ref_value, name in closure if name == "automatic_prediction_v3")
     ledger_ref = next(
         ref_value
         for _, ref_value, name in closure
-        if name == "benchmark_v2_projected_attempt_ledger_v1"
+        if name == ledger_contract
     )
     if automatic_ref != payload["automatic_prediction_ref"]:
         raise ValueError("prediction closure automatic ref mismatch")
@@ -873,10 +1141,31 @@ def _validate_lifecycle_bundle(payload: Mapping[str, object]) -> None:
         raise ValueError("lifecycle closure lifecycle classes are incomplete")
     if classes.count("benchmark_v2_attempt_journal_terminal_event_verified_projection_v1") != 1:
         raise ValueError("lifecycle closure requires one journal terminal event")
-    if classes.count("benchmark_v2_projected_attempt_ledger_v1") != 1:
+    holdout = payload["partition"] == "holdout"
+    ledger_contract = (
+        "benchmark_v2_holdout_projected_attempt_ledger_v1"
+        if holdout
+        else "benchmark_v2_projected_attempt_ledger_v1"
+    )
+    event_contract = (
+        "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        if holdout
+        else "benchmark_v2_runner_event_verified_projection_v1"
+    )
+    if classes.count(ledger_contract) != 1:
         raise ValueError("lifecycle closure requires one projected ledger")
-    if not any(name == "benchmark_v2_runner_event_verified_projection_v1" for name in classes):
+    event_count = classes.count(event_contract)
+    if (holdout and event_count != 4) or (not holdout and event_count == 0):
         raise ValueError("lifecycle closure requires runner events")
+    if holdout and any(
+        classes.count(name) != 1
+        for name in {
+            "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+            "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+            "benchmark_v2_holdout_actual_result_verified_projection_v1",
+        }
+    ):
+        raise ValueError("lifecycle holdout closure is incomplete")
     expected_screens = [ref_value for _, ref_value in screens]
     if expected_screens != payload["screen_group_lifecycle_projection_refs"]:
         raise ValueError("lifecycle closure screen-group refs mismatch")
@@ -898,7 +1187,7 @@ def _validate_lifecycle_bundle(payload: Mapping[str, object]) -> None:
     runner_events = [
         item
         for item, _, name in closure
-        if name == "benchmark_v2_runner_event_verified_projection_v1"
+        if name == event_contract
     ]
     cleanup_events = [item for item in runner_events if item["event_kind"] == "cleanup"]
     cleanup_by_attempt: dict[bytes, tuple[Mapping[str, object], dict[str, str]]] = {}
@@ -948,14 +1237,14 @@ def _validate_lifecycle_bundle(payload: Mapping[str, object]) -> None:
     ledger_ref = next(
         ref_value
         for _, ref_value, name in closure
-        if name == "benchmark_v2_projected_attempt_ledger_v1"
+        if name == ledger_contract
     )
     if ledger_ref != payload["projected_attempt_ledger_ref"]:
         raise ValueError("lifecycle closure projected ledger ref mismatch")
     ledger = next(
         item
         for item, _, name in closure
-        if name == "benchmark_v2_projected_attempt_ledger_v1"
+        if name == ledger_contract
     )
     by_ref = {
         _canonical_bytes(ref_value): (item, {})
@@ -1008,7 +1297,11 @@ def _validate_runner_prefix(payload: Mapping[str, object]) -> None:
 
 
 def _validate_journal_projection(payload: Mapping[str, object]) -> None:
-    _ref(payload["attempt_ref"], name="attempt_ref", prefixes=("runner-attempt",))
+    _ref(
+        payload["attempt_ref"],
+        name="attempt_ref",
+        prefixes=("runner-attempt", "holdout-runner-attempt"),
+    )
     _sha(payload["raw_journal_sha256"], name="raw_journal_sha256")
     _ref(payload["terminal_event_ref"], name="terminal_event_ref", prefixes=("verified-attempt-journal-terminal-event",))
     started = _nonnegative(payload["started_request_count"], name="started_request_count")
@@ -1022,7 +1315,11 @@ def _validate_journal_projection(payload: Mapping[str, object]) -> None:
 
 
 def _validate_actual_body(payload: Mapping[str, object]) -> None:
-    _ref(payload["attempt_ref"], name="attempt_ref", prefixes=("runner-attempt",))
+    _ref(
+        payload["attempt_ref"],
+        name="attempt_ref",
+        prefixes=("runner-attempt", "holdout-runner-attempt"),
+    )
     _text(payload["body_contract_version"], name="body_contract_version")
     for field in ("raw_file_sha256", "body_content_sha256", "case_arm_multiset_sha256"):
         _sha(payload[field], name=field)
@@ -1192,6 +1489,50 @@ _CONTRACTS_MUTABLE = {
         _ranks(prediction_run_v3=11, lifecycle_bundle_v3=5),
         _sort_runner_event,
     ),
+    "benchmark_v2_holdout_runner_event_verified_projection_v1": _spec(
+        "benchmark_v2_holdout_runner_event_verified_projection_v1",
+        "verified-holdout-runner-event",
+        (
+            "partition",
+            "event_kind",
+            "sequence",
+            "attempt_ref",
+            "authorization_ref",
+            "claim_ref",
+            "previous_event_projection_ref",
+            "raw_event_sha256",
+            "load_bearing_refs",
+            "safety",
+        ),
+        _validate_holdout_runner_event,
+        _roles(
+            previous_event_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_runner_event_verified_projection_v1",),
+                nullable=True,
+            ),
+            **{
+                "load_bearing_refs.attempt_ref": _EXTERNAL_REF,
+                "load_bearing_refs.body_file_ref": _RefRole("pathless_file_ref", external=True),
+                "load_bearing_refs.cleanup_receipt_ref": _RefRole(
+                    "opaque_raw_ref", external=True, raw_class="cleanup_receipt"
+                ),
+                "load_bearing_refs.cleanup_projection_ref": _RefRole(
+                    "exact_ref",
+                    ("benchmark_v2_lifecycle_verified_projection_v1",),
+                    external_registries=frozenset({"prediction_run_v3"}),
+                ),
+                "load_bearing_refs.result_file_ref": _RefRole("pathless_file_ref", external=True),
+                "load_bearing_refs.pre_result_verification_ref": _RefRole(
+                    "exact_ref",
+                    ("benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",),
+                ),
+            },
+        ),
+        ("prediction_run_v3", "lifecycle_bundle_v3"),
+        _ranks(prediction_run_v3=11, lifecycle_bundle_v3=5),
+        _sort_runner_event,
+    ),
     "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1": _spec(
         "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1",
         "verified-attempt-journal-terminal-event",
@@ -1244,6 +1585,117 @@ _CONTRACTS_MUTABLE = {
         ("prediction_run_v3", "lifecycle_bundle_v3"),
         _ranks(prediction_run_v3=12, lifecycle_bundle_v3=6),
     ),
+    "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1": _spec(
+        "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+        "verified-holdout-pre-result",
+        (
+            "partition",
+            "attempt_ref",
+            "authorization_ref",
+            "claim_ref",
+            "raw_pre_result_ref_sha256",
+            "raw_prefix_sha256",
+            "terminal_sequence",
+            "terminal_envelope_sha256",
+            "cleanup_event_projection_ref",
+            "verified",
+            "safety",
+        ),
+        _validate_holdout_pre_result,
+        _roles(
+            cleanup_event_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_runner_event_verified_projection_v1",),
+                external_registries=frozenset({"verified_parents_v1"}),
+            )
+        ),
+        ("prediction_run_v3", "lifecycle_bundle_v3", "verified_parents_v1"),
+        _ranks(prediction_run_v3=12, lifecycle_bundle_v3=6, verified_parents_v1=5),
+    ),
+    "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1": _spec(
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+        "verified-holdout-attempt-ledger-prefix",
+        (
+            "partition",
+            "authorization_ref",
+            "claim_ref",
+            "attempt_ref",
+            "raw_prefix_sha256",
+            "pre_result_verification_ref",
+            "terminal_sequence",
+            "terminal_event_projection_ref",
+            "event_projection_refs",
+            "selection_eligible",
+            "safety",
+        ),
+        _validate_holdout_prefix,
+        _roles(
+            pre_result_verification_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",),
+                external_registries=frozenset({"verified_parents_v1"}),
+            ),
+            terminal_event_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_runner_event_verified_projection_v1",),
+                external_registries=frozenset({"verified_parents_v1"}),
+            ),
+            event_projection_refs=_RefRole(
+                "ordered_exact_ref_list",
+                ("benchmark_v2_holdout_runner_event_verified_projection_v1",),
+                ordered=True,
+                external_registries=frozenset({"verified_parents_v1"}),
+            ),
+        ),
+        ("prediction_run_v3", "lifecycle_bundle_v3", "verified_parents_v1"),
+        _ranks(prediction_run_v3=13, lifecycle_bundle_v3=7, verified_parents_v1=1),
+    ),
+    "benchmark_v2_holdout_projected_attempt_ledger_v1": _spec(
+        "benchmark_v2_holdout_projected_attempt_ledger_v1",
+        "projected-holdout-attempt-ledger",
+        (
+            "benchmark_release_id",
+            "partition",
+            "authorization_ref",
+            "claim_ref",
+            "raw_ledger_prefix_verification_ref",
+            "pre_result_verification_ref",
+            "entries",
+            "selected_attempt_ref",
+            "selected_lifecycle_ref",
+            "safety",
+        ),
+        _validate_holdout_projected_ledger,
+        _roles(
+            raw_ledger_prefix_verification_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",),
+            ),
+            pre_result_verification_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",),
+            ),
+            selected_lifecycle_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_lifecycle_verified_projection_v1",),
+                external_registries=frozenset({"prediction_run_v3"}),
+            ),
+            **{
+                "entries.event_projection_refs": _RefRole(
+                    "ordered_exact_ref_list",
+                    ("benchmark_v2_holdout_runner_event_verified_projection_v1",),
+                    ordered=True,
+                ),
+                "entries.lifecycle_ref": _RefRole(
+                    "exact_ref",
+                    ("benchmark_v2_lifecycle_verified_projection_v1",),
+                    external_registries=frozenset({"prediction_run_v3"}),
+                ),
+            },
+        ),
+        ("prediction_run_v3", "lifecycle_bundle_v3"),
+        _ranks(prediction_run_v3=15, lifecycle_bundle_v3=9),
+    ),
     "automatic_prediction_v3": _spec(
         "automatic_prediction_v3",
         "automatic",
@@ -1290,8 +1742,21 @@ _CONTRACTS_MUTABLE = {
             provider_manifest_ref=_RefRole("provider_manifest_ref", external=True),
             provider_corpus_ref=_RefRole("provider_corpus_ref", external=True),
             attempt_ref=_EXTERNAL_REF,
-            projected_attempt_ledger_ref=_RefRole("exact_ref", ("benchmark_v2_projected_attempt_ledger_v1",)),
-            raw_ledger_prefix_verification_ref=_RefRole("exact_ref", ("benchmark_v2_runner_ledger_prefix_verified_projection_v1",), True),
+            projected_attempt_ledger_ref=_RefRole(
+                "exact_ref",
+                (
+                    "benchmark_v2_projected_attempt_ledger_v1",
+                    "benchmark_v2_holdout_projected_attempt_ledger_v1",
+                ),
+            ),
+            raw_ledger_prefix_verification_ref=_RefRole(
+                "exact_ref",
+                (
+                    "benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+                    "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+                ),
+                True,
+            ),
             automatic_prediction_ref=_RefRole("exact_ref", ("automatic_prediction_v3",)),
             selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",), external=True),
             **{"sealed_artifact_envelopes.ref": _RefRole("closure_ref")},
@@ -1306,8 +1771,21 @@ _CONTRACTS_MUTABLE = {
         _validate_lifecycle_bundle,
         _roles(
             attempt_ref=_EXTERNAL_REF,
-            projected_attempt_ledger_ref=_RefRole("exact_ref", ("benchmark_v2_projected_attempt_ledger_v1",)),
-            raw_ledger_prefix_verification_ref=_RefRole("exact_ref", ("benchmark_v2_runner_ledger_prefix_verified_projection_v1",), True),
+            projected_attempt_ledger_ref=_RefRole(
+                "exact_ref",
+                (
+                    "benchmark_v2_projected_attempt_ledger_v1",
+                    "benchmark_v2_holdout_projected_attempt_ledger_v1",
+                ),
+            ),
+            raw_ledger_prefix_verification_ref=_RefRole(
+                "exact_ref",
+                (
+                    "benchmark_v2_runner_ledger_prefix_verified_projection_v1",
+                    "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+                ),
+                True,
+            ),
             selected_lifecycle_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
             attempt_cleanup_projection_ref=_RefRole("exact_ref", ("benchmark_v2_lifecycle_verified_projection_v1",)),
             screen_group_lifecycle_projection_refs=_RefRole("ordered_exact_ref_list", ("benchmark_v2_lifecycle_verified_projection_v1",), ordered=True),
@@ -1369,6 +1847,54 @@ _CONTRACTS_MUTABLE = {
         ),
         ("verified_parents_v1",),
         _ranks(verified_parents_v1=4),
+    ),
+    "benchmark_v2_holdout_actual_result_verified_projection_v1": _spec(
+        "benchmark_v2_holdout_actual_result_verified_projection_v1",
+        "verified-holdout-actual-result",
+        (
+            "attempt_ref",
+            "result_contract_version",
+            "raw_file_sha256",
+            "result_content_sha256",
+            "body_projection_ref",
+            "cleanup_projection_ref",
+            "pre_result_verification_ref",
+            "runner_ledger_prefix_projection_ref",
+            "result_event_projection_ref",
+            "verified",
+            "safety",
+        ),
+        _validate_holdout_actual_result,
+        _roles(
+            body_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_actual_body_verified_projection_v1",),
+                external_registries=frozenset(
+                    {"prediction_run_v3", "lifecycle_bundle_v3"}
+                ),
+            ),
+            cleanup_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_lifecycle_verified_projection_v1",),
+                external_registries=frozenset({"prediction_run_v3", "verified_parents_v1"}),
+            ),
+            pre_result_verification_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",),
+                external_registries=frozenset({"verified_parents_v1"}),
+            ),
+            runner_ledger_prefix_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",),
+            ),
+            result_event_projection_ref=_RefRole(
+                "exact_ref",
+                ("benchmark_v2_holdout_runner_event_verified_projection_v1",),
+                external_registries=frozenset({"verified_parents_v1"}),
+            ),
+        ),
+        ("prediction_run_v3", "lifecycle_bundle_v3", "verified_parents_v1"),
+        _ranks(prediction_run_v3=14, lifecycle_bundle_v3=8, verified_parents_v1=4),
     ),
 }
 _CONTRACTS: Mapping[str, _ContractSpec] = MappingProxyType(_CONTRACTS_MUTABLE)
@@ -1751,6 +2277,13 @@ def _edges(
     spec = _registered(item["contract_version"])
     result: list[tuple[str, _RefRole, dict[str, object]]] = []
     for role, role_spec in spec.ref_role_schema.items():
+        if (
+            item.get("partition") == "holdout"
+            and item.get("contract_version")
+            in {"benchmark_v2_prediction_run_v3", "benchmark_v2_lifecycle_bundle_v3"}
+            and role == "raw_ledger_prefix_verification_ref"
+        ):
+            role_spec = _RefRole(role_spec.kind, role_spec.targets)
         for raw in _value_at(item, role):
             if raw is None and role_spec.nullable:
                 continue
@@ -1781,6 +2314,12 @@ def _validate_projected_ledger_graph(
     allow_external_lifecycle: bool = False,
 ) -> None:
     expected_kinds = ("opened", "body_complete", "cleanup", "result")
+    event_contract = (
+        "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        if ledger.get("contract_version")
+        == "benchmark_v2_holdout_projected_attempt_ledger_v1"
+        else "benchmark_v2_runner_event_verified_projection_v1"
+    )
     entries = ledger["entries"]
     assert isinstance(entries, list)
     global_events: list[tuple[int, dict[str, object], Mapping[str, object]]] = []
@@ -1800,7 +2339,7 @@ def _validate_projected_ledger_graph(
             if resolved is None:
                 raise ValueError("projected ledger event ref is unresolved")
             event = resolved[0]
-            if event.get("contract_version") != "benchmark_v2_runner_event_verified_projection_v1":
+            if event.get("contract_version") != event_contract:
                 raise ValueError("projected ledger event ref has class drift")
             global_events.append(
                 (
@@ -1845,7 +2384,7 @@ def _validate_projected_ledger_graph(
             if resolved is None:
                 raise ValueError("projected ledger event ref is unresolved")
             event = resolved[0]
-            if event.get("contract_version") != "benchmark_v2_runner_event_verified_projection_v1":
+            if event.get("contract_version") != event_contract:
                 raise ValueError("projected ledger event ref has class drift")
             if _ref(event.get("attempt_ref"), name="runner event attempt_ref") != attempt_ref:
                 raise ValueError("projected ledger event attempt mismatch")
@@ -1863,7 +2402,10 @@ def _validate_projected_ledger_graph(
         }[observed]
         if kinds not in expected_prefixes:
             raise ValueError("projected ledger event prefix is invalid")
-        sequences = [int(event["sequence"]) for event in events]
+        sequences = [
+            _nonnegative(event["sequence"], name="runner event sequence")
+            for event in events
+        ]
         if sequences != sorted(sequences) or len(set(sequences)) != len(sequences):
             raise ValueError("projected ledger event sequence is invalid")
         cleanup_events = [event for event in events if event["event_kind"] == "cleanup"]
@@ -1948,6 +2490,34 @@ def _validate_prediction_graph(
     by_ref: Mapping[bytes, tuple[dict[str, object], dict[str, object]]],
     context: Mapping[str, object],
 ) -> None:
+    if context == {"public_holdout": True}:
+        if run.get("partition") != "holdout":
+            raise ValueError("public holdout prediction graph partition differs")
+        automatic_resolved = by_ref.get(
+            _canonical_bytes(_ref(run["automatic_prediction_ref"], name="automatic ref"))
+        )
+        ledger_resolved = by_ref.get(
+            _canonical_bytes(_ref(run["projected_attempt_ledger_ref"], name="ledger ref"))
+        )
+        if automatic_resolved is None or ledger_resolved is None:
+            raise ValueError("public holdout prediction core child is unresolved")
+        automatic = automatic_resolved[0]
+        ledger = ledger_resolved[0]
+        if (
+            automatic.get("contract_version") != "automatic_prediction_v3"
+            or automatic.get("benchmark_release_id") != run.get("benchmark_release_id")
+            or automatic.get("partition") != "holdout"
+            or ledger.get("contract_version")
+            != "benchmark_v2_holdout_projected_attempt_ledger_v1"
+            or ledger.get("benchmark_release_id") != run.get("benchmark_release_id")
+            or ledger.get("partition") != "holdout"
+            or ledger.get("selected_attempt_ref") != run.get("attempt_ref")
+            or ledger.get("selected_lifecycle_ref") != run.get("selected_lifecycle_ref")
+            or ledger.get("raw_ledger_prefix_verification_ref")
+            != run.get("raw_ledger_prefix_verification_ref")
+        ):
+            raise ValueError("public holdout prediction lineage differs")
+        return
     expected_context_fields = {
         "provider_groups",
         "cases",
@@ -2214,6 +2784,7 @@ def _validate_prediction_graph(
         version = str(item.get("contract_version") or "")
         class_counts[version] = class_counts.get(version, 0) + 1
         class_ref_keys.setdefault(version, set()).add(ref_key)
+    holdout = run.get("partition") == "holdout"
     expected_class_counts = {
         "hybrid_omni_inventory_v1": 12,
         "hybrid_qwen_bindings_v1": 12,
@@ -2225,13 +2796,37 @@ def _validate_prediction_graph(
         "sealed_target_binding_v4": q_count + o_count + h_count,
         "sealed_vista_request_v4": h_count,
         "automatic_prediction_v3": 1,
-        "benchmark_v2_projected_attempt_ledger_v1": 1,
+        (
+            "benchmark_v2_holdout_projected_attempt_ledger_v1"
+            if holdout
+            else "benchmark_v2_projected_attempt_ledger_v1"
+        ): 1,
         "benchmark_v2_prediction_run_v3": 1,
     }
+    if holdout:
+        expected_class_counts.update(
+            {
+                "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1": 1,
+                "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1": 1,
+                "benchmark_v2_holdout_actual_result_verified_projection_v1": 1,
+            }
+        )
     event_count = class_counts.get(
-        "benchmark_v2_runner_event_verified_projection_v1", 0
+        (
+            "benchmark_v2_holdout_runner_event_verified_projection_v1"
+            if holdout
+            else "benchmark_v2_runner_event_verified_projection_v1"
+        ),
+        0,
     )
-    expected_class_counts["benchmark_v2_runner_event_verified_projection_v1"] = event_count
+    event_contract = (
+        "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        if holdout
+        else "benchmark_v2_runner_event_verified_projection_v1"
+    )
+    expected_class_counts[event_contract] = event_count
+    if holdout and event_count != 4:
+        raise ValueError("prediction holdout runner event count differs")
     expected_class_counts = {
         version: count for version, count in expected_class_counts.items() if count
     }
@@ -2259,7 +2854,15 @@ def _validate_prediction_graph(
         != class_ref_keys.get("hybrid_vista_refinement_request_v1", set())
     ):
         raise ValueError("prediction dependency submitted request coverage mismatch")
-    expected_child_count = 38 + request_count + 5 * q_count + 4 * o_count + 5 * h_count + event_count
+    expected_child_count = (
+        38
+        + (3 if holdout else 0)
+        + request_count
+        + 5 * q_count
+        + 4 * o_count
+        + 5 * h_count
+        + event_count
+    )
     if len(by_ref) - 1 != expected_child_count:
         raise ValueError("prediction child-envelope closure count mismatch")
 
@@ -2341,7 +2944,10 @@ def _attempt_first_open_order(
             raw_class is None
             and spec is not None
             and spec.contract_version
-            == "benchmark_v2_runner_event_verified_projection_v1"
+            in {
+                "benchmark_v2_runner_event_verified_projection_v1",
+                "benchmark_v2_holdout_runner_event_verified_projection_v1",
+            }
         ):
             sequence = _nonnegative(item["sequence"], name="runner event sequence")
             if sequence in sequences:
@@ -2538,7 +3144,10 @@ def validate_pathless_recursive(
         visit(root)
     for key in visited:
         item = by_ref[key][0]
-        if item.get("contract_version") == "benchmark_v2_projected_attempt_ledger_v1":
+        if item.get("contract_version") in {
+            "benchmark_v2_projected_attempt_ledger_v1",
+            "benchmark_v2_holdout_projected_attempt_ledger_v1",
+        }:
             _validate_projected_ledger_graph(
                 item,
                 by_ref,

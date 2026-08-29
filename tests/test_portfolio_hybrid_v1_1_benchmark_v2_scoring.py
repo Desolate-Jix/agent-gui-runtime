@@ -732,6 +732,546 @@ def test_public_score_boundary_exports_task11_task12_authority()->None:
     assert callable(public_score.scan_benchmark_v2_public_value)
 
 
+def test_h5_holdout_actual_body_projection_uses_holdout_provider_partition(
+    tmp_path: Path,
+    task10_release_inputs: dict[str, Path],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle import (
+        _h5_holdout_lifecycle_graph,
+    )
+
+    manifest_path = task10_release_inputs["provider"]
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
+    corpus_path = task10_release_inputs["corpus"]
+    corpus_bytes = corpus_path.read_bytes()
+    corpus = json.loads(corpus_bytes.decode("utf-8"))
+    groups: dict[str, list[dict[str, str]]] = {}
+    for case in corpus["cases"]:
+        if case["partition"] != "holdout":
+            continue
+        groups.setdefault(case["screen_group"], []).append(
+            {
+                "case_id": case["case_id"],
+                "case_content_sha256": content_sha256(case),
+            }
+        )
+    graph = _h5_holdout_lifecycle_graph(
+        tmp_path, screen_case_groups=sorted(groups.items())
+    )
+
+    projection = predictions.project_benchmark_v2_holdout_actual_body(
+        actual_body_bytes=graph["body_bytes"],
+        provider_manifest_bytes=manifest_bytes,
+        provider_corpus_bytes=corpus_bytes,
+    )
+
+    assert projection["body_contract_version"] == (
+        "benchmark_v2_holdout_runner_actual_body_v1"
+    )
+    assert projection["screen_group_count"] == 12
+
+
+def _h5_regression_pass_envelope() -> dict[str, object]:
+    from app.learn.hybrid.benchmark_scorer_v2 import _content_bound, _sealed_receipt
+
+    sha = "1" * 64
+    ref_value = {"id": "runner-attempt/regression", "content_sha256": sha}
+    score_input_binding = {
+        "contract_version": "private_scorer_input_binding_v1",
+        "benchmark_release_id": RELEASE,
+        "partition": "regression",
+        "private_manifest_ref": {
+            "contract_version": "portfolio_hybrid_v1_1_private_manifest_v2_1",
+            "file_sha256": sha,
+            "content_sha256": sha,
+        },
+        "corpus_parent_ref": deepcopy(PARENT_REF),
+        "provider_manifest_ref": {
+            "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+            "relative_path": "benchmark-v2-provider-manifest.json",
+            "file_sha256": sha,
+        },
+        "provider_corpus_ref": {
+            "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+            "relative_path": "provider-corpus.v2.json",
+            "file_sha256": sha,
+            "content_sha256": sha,
+            "source_parent_ref": deepcopy(PARENT_REF),
+        },
+        "accepted_run_ref": {
+            "contract_version": "benchmark_v2_accepted_regression_score_input_v2",
+            "file_sha256": sha,
+            "content_sha256": sha,
+        },
+        "attempt_ref": deepcopy(ref_value),
+        "attempt_ledger_ref": deepcopy(ref_value),
+        "automatic_prediction_ref": deepcopy(ref_value),
+        "selected_lifecycle_ref": deepcopy(ref_value),
+        "estimand_ref": {"contract_version": "estimand_v2", "file_sha256": sha},
+        "gate_ref": {"contract_version": "gate_v2", "file_sha256": sha},
+        "safety": deepcopy(SAFETY),
+    }
+    child = {
+        "status": "PASS",
+        "score_ref": "private-score/" + "2" * 64,
+        "content_sha256": "3" * 64,
+    }
+    launch = _content_bound(
+        {
+            "contract_version": "private_scorer_launch_receipt_v2",
+            "launcher_process_id": 101,
+            "launcher_process_identity": "process-101",
+            "child_process_id": 102,
+            "child_process_identity": "process-102",
+            "pipe_capability_sha256": "4" * 64,
+            "argv_sha256": "5" * 64,
+            "env_sha256": "6" * 64,
+            "cwd_sha256": "7" * 64,
+            "job_identity_sha256": "8" * 64,
+            "child_execution_receipt_sha256": "9" * 64,
+            "child_score_ref": deepcopy(child),
+            "score_input_binding": deepcopy(score_input_binding),
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    launch_envelope = _sealed_receipt(launch, "private-scorer-launch")
+    cleanup = {
+        "contract_version": "private_scorer_cleanup_receipt_v1",
+        "launch_receipt_ref": deepcopy(launch_envelope["ref"]),
+        "child_returncode": 0,
+        "job_active_processes_after": 0,
+        "job_stable_zero": True,
+        "pipe_handles_closed": True,
+        "process_pipes_closed": True,
+        "job_handle_closed": True,
+        "safety": deepcopy(SAFETY),
+    }
+    cleanup_envelope = _sealed_receipt(cleanup, "private-scorer-cleanup")
+    binding = _content_bound(
+        {
+            "contract_version": "private_scorer_final_binding_v2",
+            "child_score_ref": deepcopy(child),
+            "score_input_binding": deepcopy(score_input_binding),
+            "launch_receipt_ref": deepcopy(launch_envelope["ref"]),
+            "cleanup_receipt_ref": deepcopy(cleanup_envelope["ref"]),
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    public = _content_bound(
+        {
+            "contract_version": "private_scorer_public_ref_v3",
+            "status": "PASS",
+            "score_ref": "private-score-final/" + binding["content_sha256"],
+            "score_input_binding": score_input_binding,
+            "binding": binding,
+            "launch_receipt": launch_envelope,
+            "cleanup_receipt": cleanup_envelope,
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    raw = canonical_bytes(public)
+    return {
+        "ref": {
+            "contract_version": "private_scorer_public_ref_v3",
+            "file_sha256": hashlib.sha256(raw + b"\n").hexdigest(),
+            "content_sha256": public["content_sha256"],
+        },
+        "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+    }
+
+
+def test_h5_regression_precondition_ref_hashes_exact_lf_terminated_file_bytes() -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    envelope = _h5_regression_pass_envelope()
+    decoded = base64.b64decode(envelope["canonical_bytes_b64"], validate=True)
+    assert envelope["ref"]["file_sha256"] == hashlib.sha256(decoded + b"\n").hexdigest()
+    assert predictions._accepted_regression_precondition_envelope(envelope)[1] == envelope["ref"]
+
+    no_newline_hash = deepcopy(envelope)
+    no_newline_hash["ref"]["file_sha256"] = hashlib.sha256(decoded).hexdigest()
+    with pytest.raises(ValueError, match="precondition ref"):
+        predictions._accepted_regression_precondition_envelope(no_newline_hash)
+
+
+@pytest.fixture(scope="module")
+def h5_accepted_holdout(
+    tmp_path_factory: pytest.TempPathFactory,
+    task10_release_inputs: dict[str, Path],
+) -> tuple[dict[str, object], dict[str, object]]:
+    from app.learn.hybrid import benchmark_v2_holdout as holdout
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+    from tests.test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle import (
+        _h5_holdout_lifecycle_graph,
+    )
+
+    manifest_bytes = task10_release_inputs["provider"].read_bytes()
+    corpus_bytes = task10_release_inputs["corpus"].read_bytes()
+    corpus = json.loads(corpus_bytes.decode("utf-8"))
+    groups: dict[str, list[dict[str, str]]] = {}
+    for case in corpus["cases"]:
+        if case["partition"] == "holdout":
+            groups.setdefault(case["screen_group"], []).append(
+                {
+                    "case_id": case["case_id"],
+                    "case_content_sha256": content_sha256(case),
+                }
+            )
+    graph = _h5_holdout_lifecycle_graph(
+        tmp_path_factory.mktemp("h5-holdout"),
+        screen_case_groups=sorted(groups.items()),
+    )
+    attempt = graph["attempt"]
+    native_authorization_ref = deepcopy(attempt["authorization_ref"])
+    claim_ref = deepcopy(attempt["claim_ref"])
+    claim_id = claim_ref["id"].split("/", 1)[1]
+    authorization_projection = holdout._seal_authority_projection(
+        contract_version="benchmark_v2_holdout_authorization_public_projection_v1",
+        semantic_fields={
+            "authorization_id": native_authorization_ref["authorization_id"],
+            "envelope_sha256": native_authorization_ref["envelope_sha256"],
+            "claim_id": claim_id,
+            "safety": deepcopy(holdout.SAFETY),
+        },
+    )
+    authority = {
+        "authorization_public_projection_envelope": authorization_projection,
+        "claim_public_projection_envelope": holdout._seal_authority_projection(
+            contract_version="benchmark_v2_holdout_claim_public_projection_v1",
+            semantic_fields={
+                "claim_ref": claim_ref,
+                "claim_id": claim_id,
+                "attempt_id": attempt["attempt_id"],
+                "authorization_projection_ref": deepcopy(
+                    authorization_projection["ref"]
+                ),
+                "state": "consumed",
+                "safety": deepcopy(holdout.SAFETY),
+            },
+        ),
+        "file_anchor_public_projection_envelope": holdout._seal_authority_projection(
+            contract_version="benchmark_v2_holdout_file_anchor_public_projection_v1",
+            semantic_fields={
+                "anchor_kind": "win32_zero_byte_claim_sentinel",
+                "claim_id": claim_id,
+                "authorization_envelope_sha256": native_authorization_ref[
+                    "envelope_sha256"
+                ],
+                "size_bytes": 0,
+                "verified": True,
+                "safety": deepcopy(holdout.SAFETY),
+            },
+        ),
+        "registry_anchor_public_projection_envelope": holdout._seal_authority_projection(
+            contract_version="benchmark_v2_holdout_registry_anchor_public_projection_v1",
+            semantic_fields={
+                "anchor_kind": "hkcu_claim_registry_envelope",
+                "claim_id": claim_id,
+                "authorization_envelope_sha256": native_authorization_ref[
+                    "envelope_sha256"
+                ],
+                "claim_ref": claim_ref,
+                "envelope_verified": True,
+                "state": "consumed",
+                "safety": deepcopy(holdout.SAFETY),
+            },
+        ),
+    }
+    anchor_body = {
+        "contract_version": "benchmark_v2_holdout_anchor_verification_result_v1",
+        "authorization_ref": {
+            "authorization_id": native_authorization_ref["authorization_id"],
+            "envelope_sha256": native_authorization_ref["envelope_sha256"],
+        },
+        "claim_ref": claim_ref,
+        "attempt_id": attempt["attempt_id"],
+        "authority_projection_envelopes": authority,
+        "safety": deepcopy(holdout.SAFETY),
+    }
+    anchor = {
+        **anchor_body,
+        "content_sha256": hashlib.sha256(canonical_bytes(anchor_body)).hexdigest(),
+    }
+
+    accepted = predictions.materialize_benchmark_v2_accepted_holdout_score_input_v1(
+        actual_body_bytes=graph["body_bytes"],
+        actual_result_bytes=graph["result_bytes"],
+        cleanup_receipt_bytes=graph["cleanup_bytes"],
+        expected_attempt_dir=graph["attempt_dir"],
+        provider_manifest_bytes=manifest_bytes,
+        provider_corpus_bytes=corpus_bytes,
+        attempt_events=graph["events"],
+        attempt_events_jsonl_bytes=graph["events_bytes"],
+        attempt_journal_events=graph["journal"],
+        attempt_journal_jsonl_bytes=graph["journal_bytes"],
+        native_authorization_ref=native_authorization_ref,
+        holdout_anchor_verification_result=anchor,
+        regression_score_precondition_envelope=_h5_regression_pass_envelope(),
+    )
+
+    graph["h5_materializer_kwargs"] = {
+        "actual_body_bytes": graph["body_bytes"],
+        "actual_result_bytes": graph["result_bytes"],
+        "cleanup_receipt_bytes": graph["cleanup_bytes"],
+        "expected_attempt_dir": graph["attempt_dir"],
+        "provider_manifest_bytes": manifest_bytes,
+        "provider_corpus_bytes": corpus_bytes,
+        "attempt_events": graph["events"],
+        "attempt_events_jsonl_bytes": graph["events_bytes"],
+        "attempt_journal_events": graph["journal"],
+        "attempt_journal_jsonl_bytes": graph["journal_bytes"],
+        "native_authorization_ref": native_authorization_ref,
+        "holdout_anchor_verification_result": anchor,
+        "regression_score_precondition_envelope": _h5_regression_pass_envelope(),
+    }
+
+    return accepted, graph
+
+
+def test_h5_authoritative_holdout_materializer_builds_public_closed_graph(
+    h5_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    accepted, graph = h5_accepted_holdout
+    assert predictions.validate_benchmark_v2_accepted_holdout_score_input_v1(accepted) == accepted
+    serialized = canonical_bytes(accepted)
+    assert b"fixed_authorization_path" not in serialized
+    assert str(graph["attempt_dir"]).encode("utf-8") not in serialized
+    prediction = decode(accepted["prediction_run_envelope"])
+    lifecycle_bundle = decode(accepted["lifecycle_bundle_envelope"])
+    wanted = {
+        "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+        "benchmark_v2_holdout_actual_result_verified_projection_v1",
+    }
+    for contract in wanted:
+        prediction_envelope = next(
+            envelope
+            for envelope in prediction["sealed_artifact_envelopes"]
+            if decode(envelope)["contract_version"] == contract
+        )
+        lifecycle_envelope = next(
+            envelope
+            for envelope in lifecycle_bundle["sealed_artifact_envelopes"]
+            if decode(envelope)["contract_version"] == contract
+        )
+        assert prediction_envelope == lifecycle_envelope
+
+
+def test_h5_public_holdout_validator_rejects_leakage_and_closure_mutations(
+    h5_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    accepted, graph = h5_accepted_holdout
+    mutations: list[dict[str, object]] = []
+
+    extra = deepcopy(accepted)
+    extra["extra"] = True
+    extra["content_sha256"] = hashlib.sha256(
+        canonical_bytes({key: value for key, value in extra.items() if key != "content_sha256"})
+    ).hexdigest()
+    mutations.append(extra)
+
+    native = deepcopy(accepted)
+    native["holdout_authorization_ref"] = deepcopy(
+        graph["attempt"]["authorization_ref"]
+    )
+    native["content_sha256"] = hashlib.sha256(
+        canonical_bytes({key: value for key, value in native.items() if key != "content_sha256"})
+    ).hexdigest()
+    mutations.append(native)
+
+    for mode in ("missing", "copied"):
+        changed = deepcopy(accepted)
+        outer = decode(changed["prediction_run_envelope"])
+        children = outer["sealed_artifact_envelopes"]
+        if mode == "missing":
+            children.pop()
+        else:
+            children.append(deepcopy(children[-1]))
+        changed["prediction_run_envelope"] = _unchecked_envelope(
+            _remint_pathless_unchecked(outer)
+        )
+        changed["content_sha256"] = hashlib.sha256(
+            canonical_bytes(
+                {key: value for key, value in changed.items() if key != "content_sha256"}
+            )
+        ).hexdigest()
+        mutations.append(changed)
+
+    lifecycle_missing = deepcopy(accepted)
+    lifecycle_outer = decode(lifecycle_missing["lifecycle_bundle_envelope"])
+    lifecycle_outer["sealed_artifact_envelopes"].pop(0)
+    lifecycle_missing["lifecycle_bundle_envelope"] = _unchecked_envelope(
+        _remint_pathless_unchecked(lifecycle_outer)
+    )
+    lifecycle_missing["content_sha256"] = hashlib.sha256(
+        canonical_bytes(
+            {
+                key: value
+                for key, value in lifecycle_missing.items()
+                if key != "content_sha256"
+            }
+        )
+    ).hexdigest()
+    mutations.append(lifecycle_missing)
+
+    regression_substitution = deepcopy(accepted)
+    prefix_envelope = regression_substitution["verified_parent_projections"][
+        "runner_ledger_prefix_projection_envelope"
+    ]
+    prefix = decode(prefix_envelope)
+    prefix["contract_version"] = (
+        "benchmark_v2_runner_ledger_prefix_verified_projection_v1"
+    )
+    regression_substitution["verified_parent_projections"][
+        "runner_ledger_prefix_projection_envelope"
+    ] = _unchecked_envelope(_remint_pathless_unchecked(prefix))
+    regression_substitution["content_sha256"] = hashlib.sha256(
+        canonical_bytes(
+            {
+                key: value
+                for key, value in regression_substitution.items()
+                if key != "content_sha256"
+            }
+        )
+    ).hexdigest()
+    mutations.append(regression_substitution)
+
+    for changed in mutations:
+        with pytest.raises(ValueError):
+            predictions.validate_benchmark_v2_accepted_holdout_score_input_v1(changed)
+
+
+@pytest.mark.parametrize("mutation", ("crlf", "whitespace", "trailing_blank"))
+def test_h5_authoritative_materializer_rejects_nonexact_attempt_journal_snapshot(
+    h5_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+    mutation: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    _, graph = h5_accepted_holdout
+    kwargs = deepcopy(graph["h5_materializer_kwargs"])
+    raw = kwargs["attempt_journal_jsonl_bytes"]
+    assert isinstance(raw, bytes)
+    if mutation == "crlf":
+        changed = raw.replace(b"\n", b"\r\n", 1)
+    elif mutation == "whitespace":
+        changed = b" " + raw
+    else:
+        changed = raw + b"\n"
+    kwargs["attempt_journal_jsonl_bytes"] = changed
+
+    with pytest.raises(ValueError, match="attempt journal JSONL"):
+        predictions.materialize_benchmark_v2_accepted_holdout_score_input_v1(
+            **kwargs
+        )
+
+
+def test_h5_public_authority_rejects_consistently_reminted_attempt_id(
+    h5_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_holdout as holdout
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    accepted, _ = h5_accepted_holdout
+    authorization_ref = deepcopy(accepted["holdout_authorization_ref"])
+    claim_id = "d" * 64
+    claim_ref = {"id": "holdout-claim/" + claim_id, "envelope_sha256": "e" * 64}
+    wrong_attempt_id = "f" * 64
+    authorization = holdout._seal_authority_projection(
+        contract_version="benchmark_v2_holdout_authorization_public_projection_v1",
+        semantic_fields={
+            "authorization_id": authorization_ref["authorization_id"],
+            "envelope_sha256": authorization_ref["envelope_sha256"],
+            "claim_id": claim_id,
+            "safety": deepcopy(holdout.SAFETY),
+        },
+    )
+    authority = {
+        "authorization_public_projection_envelope": authorization,
+        "claim_public_projection_envelope": holdout._seal_authority_projection(
+            contract_version="benchmark_v2_holdout_claim_public_projection_v1",
+            semantic_fields={
+                "claim_ref": claim_ref,
+                "claim_id": claim_id,
+                "attempt_id": wrong_attempt_id,
+                "authorization_projection_ref": deepcopy(authorization["ref"]),
+                "state": "consumed",
+                "safety": deepcopy(holdout.SAFETY),
+            },
+        ),
+        "file_anchor_public_projection_envelope": holdout._seal_authority_projection(
+            contract_version="benchmark_v2_holdout_file_anchor_public_projection_v1",
+            semantic_fields={
+                "anchor_kind": "win32_zero_byte_claim_sentinel",
+                "claim_id": claim_id,
+                "authorization_envelope_sha256": authorization_ref["envelope_sha256"],
+                "size_bytes": 0,
+                "verified": True,
+                "safety": deepcopy(holdout.SAFETY),
+            },
+        ),
+        "registry_anchor_public_projection_envelope": holdout._seal_authority_projection(
+            contract_version="benchmark_v2_holdout_registry_anchor_public_projection_v1",
+            semantic_fields={
+                "anchor_kind": "hkcu_claim_registry_envelope",
+                "claim_id": claim_id,
+                "authorization_envelope_sha256": authorization_ref["envelope_sha256"],
+                "claim_ref": claim_ref,
+                "envelope_verified": True,
+                "state": "consumed",
+                "safety": deepcopy(holdout.SAFETY),
+            },
+        ),
+    }
+
+    with pytest.raises(ValueError, match="authority lineage"):
+        predictions._validate_holdout_public_authority_lineage(
+            authorization_ref=authorization_ref,
+            claim_ref=claim_ref,
+            attempt_ref={
+                "id": "holdout-runner-attempt/" + wrong_attempt_id,
+                "content_sha256": "1" * 64,
+            },
+            authority_evidence=authority,
+        )
+
+
+def test_h5_public_authority_rejects_reminted_bool_file_anchor_size(
+    h5_accepted_holdout: tuple[dict[str, object], dict[str, object]],
+) -> None:
+    from app.learn.hybrid import benchmark_v2_holdout as holdout
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    accepted, _ = h5_accepted_holdout
+    changed = deepcopy(accepted)
+    field = "file_anchor_public_projection_envelope"
+    file_anchor = decode(changed["holdout_authority_evidence"][field])
+    semantic = {
+        key: value
+        for key, value in file_anchor.items()
+        if key not in {"contract_version", "artifact_id", "content_sha256"}
+    }
+    semantic["size_bytes"] = False
+    changed["holdout_authority_evidence"][field] = holdout._seal_authority_projection(
+        contract_version="benchmark_v2_holdout_file_anchor_public_projection_v1",
+        semantic_fields=semantic,
+    )
+    changed["content_sha256"] = hashlib.sha256(
+        canonical_bytes(
+            {key: value for key, value in changed.items() if key != "content_sha256"}
+        )
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="authority lineage"):
+        predictions.validate_benchmark_v2_accepted_holdout_score_input_v1(changed)
+
+
 def test_public_score_scanner_accepts_only_internally_derived_provider_corpus_image_paths(task10_release_inputs:dict[str,Path])->None:
     from app.learn.hybrid.benchmark_v2_public_score import scan_benchmark_v2_public_value
     manifest=json.loads(task10_release_inputs["provider"].read_text(encoding="utf-8")); corpus=json.loads(task10_release_inputs["corpus"].read_text(encoding="utf-8")); exact=corpus["cases"][0]["image"]["path"]

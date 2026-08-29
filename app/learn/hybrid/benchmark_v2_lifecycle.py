@@ -4949,6 +4949,65 @@ def _s13_public_attempt_ref(value: object) -> dict[str, str]:
     }
 
 
+def _s13_public_holdout_attempt_ref(value: object) -> dict[str, str]:
+    attempt = _attempt_sealed_parent(value, "benchmark v2 holdout runner attempt ref")
+    expected = {
+        "contract_version",
+        "attempt_id",
+        "authorization_ref",
+        "claim_ref",
+        "partition",
+        "mode",
+        "provider_id",
+        "safety",
+        "content_sha256",
+    }
+    attempt_id = attempt.get("attempt_id")
+    authorization_ref = attempt.get("authorization_ref")
+    claim_ref = attempt.get("claim_ref")
+    if (
+        set(attempt) != expected
+        or attempt.get("contract_version") != "benchmark_v2_holdout_attempt_ref_v1"
+        or not isinstance(attempt_id, str)
+        or _SHA_RE.fullmatch(attempt_id) is None
+        or attempt.get("partition") != "holdout"
+        or attempt.get("mode") != "actual_models"
+        or attempt.get("provider_id") is not None
+        or attempt.get("safety") != _S13_SAFETY
+        or not isinstance(authorization_ref, Mapping)
+        or set(authorization_ref)
+        != {"authorization_id", "envelope_sha256", "fixed_authorization_path"}
+        or not isinstance(claim_ref, Mapping)
+        or set(claim_ref) != {"id", "envelope_sha256"}
+    ):
+        raise ValueError("benchmark v2 holdout runner attempt ref is invalid")
+    return {
+        "id": f"holdout-runner-attempt/{attempt_id}",
+        "content_sha256": str(attempt["content_sha256"]),
+    }
+
+
+def _s13_public_any_attempt_ref(value: object) -> dict[str, str]:
+    if isinstance(value, Mapping) and value.get("contract_version") == "benchmark_v2_holdout_attempt_ref_v1":
+        return _s13_public_holdout_attempt_ref(value)
+    return _s13_public_attempt_ref(value)
+
+
+def _s13_exact_zero_resource_counts(value: object, *, name: str) -> dict[str, int]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != set(_S13_ZERO_COUNTS)
+        or any(
+            isinstance(value[key], bool)
+            or not isinstance(value[key], int)
+            or value[key] != 0
+            for key in _S13_ZERO_COUNTS
+        )
+    ):
+        raise ValueError(f"{name} must contain exact integer zero counts")
+    return {key: int(value[key]) for key in _S13_ZERO_COUNTS}
+
+
 def _s13_cleanup_receipt(
     value: object, *, attempt_ref: Mapping[str, object] | None = None
 ) -> dict[str, Any]:
@@ -4975,14 +5034,16 @@ def _s13_cleanup_receipt(
         or receipt.get("cleanup_status") != "stable_zero"
         or receipt.get("lost_response_policy")
         != "fresh_reconcile_safe_stop_no_blind_retry"
-        or receipt.get("resource_counts") != _S13_ZERO_COUNTS
         or receipt.get("artifact_is_authorization") is not False
         or receipt.get("execute_binding_enabled") is not False
         or not isinstance(receipt.get("provider_cleanup_refs"), list)
     ):
         raise ValueError("benchmark v2 cleanup receipt is invalid")
+    _s13_exact_zero_resource_counts(
+        receipt.get("resource_counts"), name="benchmark v2 cleanup receipt resource counts"
+    )
     raw_attempt = receipt.get("attempt_ref")
-    _s13_public_attempt_ref(raw_attempt)
+    _s13_public_any_attempt_ref(raw_attempt)
     if attempt_ref is not None and dict(raw_attempt) != dict(attempt_ref):
         raise ValueError("benchmark v2 cleanup receipt attempt differs")
     for name in ("service_terminal_ref", "window_cleanup_ref"):
@@ -5017,7 +5078,7 @@ def project_benchmark_v2_cleanup_lifecycle(
 ) -> dict[str, object]:
     """把原始稳定零 cleanup receipt 投影成无路径 lifecycle 证据。"""
 
-    public_attempt_ref = _s13_public_attempt_ref(attempt_ref)
+    public_attempt_ref = _s13_public_any_attempt_ref(attempt_ref)
     receipt = _s13_cleanup_receipt(cleanup_receipt, attempt_ref=attempt_ref)
     cleanup_ref = derive_benchmark_v2_cleanup_receipt_ref(
         cleanup_receipt=receipt
@@ -5100,7 +5161,7 @@ def project_benchmark_v2_attempt_journal_terminal_event(
 ) -> dict[str, object]:
     """投影 attempt journal 的唯一终态事件，不公开嵌入的 receipt。"""
 
-    public_attempt_ref = _s13_public_attempt_ref(attempt_ref)
+    public_attempt_ref = _s13_public_any_attempt_ref(attempt_ref)
     receipt = _s13_cleanup_receipt(cleanup_receipt, attempt_ref=attempt_ref)
     events = _s13_attempt_journal_events(
         journal_events,
@@ -5182,7 +5243,7 @@ def project_benchmark_v2_attempt_journal(
 ) -> dict[str, object]:
     """将已验证的固定 attempt journal 投影为无路径父证据。"""
 
-    public_attempt_ref = _s13_public_attempt_ref(attempt_ref)
+    public_attempt_ref = _s13_public_any_attempt_ref(attempt_ref)
     events = _s13_attempt_journal_events(
         journal_events,
         attempt_ref=attempt_ref,
@@ -5863,7 +5924,7 @@ def project_benchmark_v2_screen_group_lifecycles(
 ) -> list[dict[str, object]]:
     """重验并按 Unicode code-point 顺序投影 12 个 screen-group 生命周期。"""
 
-    public_attempt_ref = _s13_public_attempt_ref(attempt_ref)
+    public_attempt_ref = _s13_public_any_attempt_ref(attempt_ref)
     if (
         not isinstance(screen_group_projections, Sequence)
         or isinstance(screen_group_projections, (str, bytes))
@@ -6500,7 +6561,7 @@ def project_benchmark_v2_attempt_lifecycle(
 ) -> dict[str, object]:
     """组合 actual-model attempt 的已验证、稳定零且无环的 lifecycle 投影。"""
 
-    public_attempt_ref = _s13_public_attempt_ref(attempt_ref)
+    public_attempt_ref = _s13_public_any_attempt_ref(attempt_ref)
     events = _s13_attempt_journal_events(
         journal_events,
         attempt_ref=attempt_ref,
@@ -6591,6 +6652,511 @@ def project_benchmark_v2_attempt_lifecycle(
             },
             "safety": deepcopy(_S13_SAFETY),
         },
+    )
+
+
+@dataclass(frozen=True)
+class BenchmarkV2HoldoutAttemptProjectionMaterialization:
+    runner_event_projections: tuple[dict[str, object], ...]
+    pre_result_projection: dict[str, object]
+    runner_ledger_prefix_projection: dict[str, object]
+    projected_attempt_ledger: dict[str, object]
+    actual_result_projection: dict[str, object]
+
+
+def _parse_exact_canonical_jsonl_snapshot(
+    raw_bytes: bytes,
+    *,
+    expected_events: Sequence[Mapping[str, object]],
+    name: str,
+) -> tuple[list[dict[str, object]], tuple[bytes, ...]]:
+    def reject_duplicate_keys(
+        pairs: list[tuple[str, object]],
+    ) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, child in pairs:
+            if key in value:
+                raise ValueError("duplicate JSON key")
+            value[key] = child
+        return value
+
+    if (
+        not isinstance(raw_bytes, bytes)
+        or not raw_bytes
+        or not raw_bytes.endswith(b"\n")
+        or b"\r" in raw_bytes
+        or not isinstance(expected_events, Sequence)
+        or isinstance(expected_events, (str, bytes))
+    ):
+        raise ValueError(f"{name} bytes are not exact canonical JSONL")
+    lines = raw_bytes[:-1].split(b"\n")
+    if not lines or any(not line for line in lines):
+        raise ValueError(f"{name} bytes are not exact canonical JSONL")
+    parsed: list[dict[str, object]] = []
+    try:
+        for line in lines:
+            value = json.loads(
+                line.decode("utf-8"),
+                object_pairs_hook=reject_duplicate_keys,
+                parse_constant=lambda token: (_ for _ in ()).throw(
+                    ValueError(f"non-finite JSON constant: {token}")
+                ),
+            )
+            if not isinstance(value, Mapping) or line != canonical_json_bytes(value):
+                raise ValueError("noncanonical JSONL record")
+            parsed.append(deepcopy(dict(value)))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+        raise ValueError(f"{name} bytes are not exact canonical JSONL") from error
+    expected = [
+        deepcopy(dict(value)) if isinstance(value, Mapping) else value
+        for value in expected_events
+    ]
+    if parsed != expected:
+        raise ValueError(f"{name} parsed events differ")
+    return parsed, tuple(lines)
+
+
+def materialize_benchmark_v2_holdout_attempt_projections(
+    *,
+    benchmark_release_id: str,
+    attempt_events: Sequence[Mapping[str, object]],
+    attempt_events_jsonl_bytes: bytes,
+    actual_body_bytes: bytes,
+    actual_result_bytes: bytes,
+    cleanup_receipt_bytes: bytes,
+    expected_attempt_dir: Path,
+    actual_body_projection: Mapping[str, object],
+    cleanup_projection: Mapping[str, object],
+    selected_lifecycle_projection: Mapping[str, object],
+) -> BenchmarkV2HoldoutAttemptProjectionMaterialization:
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        pathless_artifact_ref,
+        seal_pathless_projection,
+    )
+
+    if (
+        not isinstance(benchmark_release_id, str)
+        or not benchmark_release_id
+        or not isinstance(attempt_events, Sequence)
+        or isinstance(attempt_events, (str, bytes))
+        or len(attempt_events) != 4
+    ):
+        raise ValueError("holdout projection requires one exact four-event attempt")
+    if not all(isinstance(value, bytes) for value in (actual_body_bytes, actual_result_bytes, cleanup_receipt_bytes)):
+        raise ValueError("holdout raw artifact bytes are required")
+
+    def canonical_file(
+        raw: bytes, *, name: str, trailing_newline: bool
+    ) -> dict[str, object]:
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError(f"{name} is not UTF-8 JSON") from error
+        expected = canonical_json_bytes(value) + (b"\n" if trailing_newline else b"")
+        if not isinstance(value, Mapping) or raw != expected:
+            raise ValueError(f"{name} bytes are not canonical")
+        return deepcopy(dict(value))
+
+    body = _attempt_sealed_parent(
+        canonical_file(
+            actual_body_bytes, name="holdout body", trailing_newline=False
+        ),
+        "holdout body",
+    )
+    result = _attempt_sealed_parent(
+        canonical_file(
+            actual_result_bytes, name="holdout result", trailing_newline=False
+        ),
+        "holdout result",
+    )
+    cleanup = _s13_cleanup_receipt(
+        canonical_file(
+            cleanup_receipt_bytes,
+            name="holdout cleanup receipt",
+            trailing_newline=True,
+        )
+    )
+    expected_dir = Path(expected_attempt_dir).resolve()
+    if not expected_dir.is_absolute() or str(expected_dir) != str(expected_attempt_dir):
+        raise ValueError("holdout expected attempt directory is not exact")
+
+    verified_events, raw_event_lines = _parse_exact_canonical_jsonl_snapshot(
+        attempt_events_jsonl_bytes,
+        expected_events=attempt_events,
+        name="holdout attempt event JSONL",
+    )
+    normalized: list[dict[str, object]] = []
+    previous = "0" * 64
+    attempt_ref: dict[str, object] | None = None
+    payload_specs = (
+        (
+            "benchmark_v2_holdout_attempt_opened_payload_v1",
+            {
+                "contract_version",
+                "attempt_ref",
+                "attempt_dir",
+                "status",
+                "safety",
+                "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+            {
+                "contract_version",
+                "attempt_ref",
+                "attempt_dir",
+                "status",
+                "body_file_ref",
+                "safety",
+                "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_attempt_cleanup_payload_v1",
+            {
+                "contract_version",
+                "attempt_ref",
+                "attempt_dir",
+                "status",
+                "cleanup_receipt_ref",
+                "resource_counts",
+                "safety",
+                "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_attempt_result_payload_v1",
+            {
+                "contract_version",
+                "attempt_ref",
+                "attempt_dir",
+                "status",
+                "result_file_ref",
+                "attempt_ledger_pre_result_ref",
+                "safety",
+                "content_sha256",
+            },
+        ),
+    )
+    for sequence, raw in enumerate(verified_events):
+        if (
+            not isinstance(raw, Mapping)
+            or set(raw) != {"contract_version", "event", "event_sha256"}
+            or raw.get("contract_version")
+            != "benchmark_v2_holdout_attempt_event_envelope_v1"
+        ):
+            raise ValueError("holdout attempt event envelope is invalid")
+        event = raw.get("event")
+        if (
+            not isinstance(event, Mapping)
+            or set(event)
+            != {
+                "partition",
+                "sequence",
+                "event_kind",
+                "previous_envelope_sha256",
+                "event_payload",
+            }
+            or event.get("partition") != "holdout"
+            or isinstance(event.get("sequence"), bool)
+            or not isinstance(event.get("sequence"), int)
+            or event.get("sequence") != sequence
+            or event.get("event_kind")
+            != ("opened", "body_complete", "cleanup", "result")[sequence]
+            or event.get("previous_envelope_sha256") != previous
+            or raw.get("event_sha256")
+            != hashlib.sha256(canonical_json_bytes(event)).hexdigest()
+        ):
+            raise ValueError("holdout attempt event chain is invalid")
+        payload = _attempt_sealed_parent(
+            event.get("event_payload"), "holdout attempt event payload"
+        )
+        payload_contract, payload_fields = payload_specs[sequence]
+        if (
+            set(payload) != payload_fields
+            or payload.get("contract_version") != payload_contract
+        ):
+            raise ValueError("holdout attempt event payload schema differs")
+        current_attempt = payload.get("attempt_ref")
+        _s13_public_holdout_attempt_ref(current_attempt)
+        if attempt_ref is None:
+            attempt_ref = deepcopy(dict(current_attempt))
+        if (
+            current_attempt != attempt_ref
+            or payload.get("attempt_dir") != str(expected_dir)
+            or payload.get("status") != event.get("event_kind")
+            or payload.get("safety") != _S13_SAFETY
+        ):
+            raise ValueError("holdout attempt event authority differs")
+        normalized.append(deepcopy(dict(raw)))
+        previous = hashlib.sha256(canonical_json_bytes(raw)).hexdigest()
+    assert attempt_ref is not None
+    public_attempt_ref = _s13_public_holdout_attempt_ref(attempt_ref)
+    authorization = attempt_ref["authorization_ref"]
+    claim = attempt_ref["claim_ref"]
+    assert isinstance(authorization, Mapping) and isinstance(claim, Mapping)
+    public_authorization_ref = {
+        "authorization_id": str(authorization["authorization_id"]),
+        "envelope_sha256": str(authorization["envelope_sha256"]),
+    }
+    public_claim_ref = {
+        "id": str(claim["id"]),
+        "envelope_sha256": str(claim["envelope_sha256"]),
+    }
+    if cleanup.get("reason") != "benchmark_v2_holdout_actual_runner_finished":
+        raise ValueError("holdout cleanup reason differs")
+    if cleanup.get("attempt_ref") != attempt_ref:
+        raise ValueError("holdout cleanup receipt attempt differs")
+    cleanup_ref = derive_benchmark_v2_cleanup_receipt_ref(cleanup_receipt=cleanup)
+    cleanup_projection_ref = _s13_pathless_projection_ref(
+        cleanup_projection,
+        contract_version="benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    lifecycle_ref = _s13_pathless_projection_ref(
+        selected_lifecycle_projection,
+        contract_version="benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    body_projection_ref = _s13_pathless_projection_ref(
+        actual_body_projection,
+        contract_version="benchmark_v2_actual_body_verified_projection_v1",
+    )
+    _s13_exact_zero_resource_counts(
+        cleanup_projection.get("resource_counts"),
+        name="holdout cleanup projection resource counts",
+    )
+    _s13_exact_zero_resource_counts(
+        selected_lifecycle_projection.get("resource_counts"),
+        name="holdout selected lifecycle resource counts",
+    )
+    if (
+        body.get("contract_version") != "benchmark_v2_holdout_runner_actual_body_v1"
+        or body.get("attempt_ref") != attempt_ref
+        or body.get("partition") != "holdout"
+        or body.get("body_status") != "complete"
+        or body.get("safety") != _S13_SAFETY
+        or not isinstance(body.get("screen_group_results"), list)
+        or len(body["screen_group_results"]) != 12
+        or actual_body_projection.get("attempt_ref") != public_attempt_ref
+        or actual_body_projection.get("body_contract_version")
+        != "benchmark_v2_holdout_runner_actual_body_v1"
+        or actual_body_projection.get("raw_file_sha256")
+        != hashlib.sha256(actual_body_bytes).hexdigest()
+        or actual_body_projection.get("body_content_sha256") != body.get("content_sha256")
+        or cleanup_projection.get("attempt_ref") != public_attempt_ref
+        or cleanup_projection.get("lifecycle_kind") != "cleanup"
+        or cleanup_projection.get("cleanup_stable_zero") is not True
+        or cleanup_projection.get("resource_counts") != _S13_ZERO_COUNTS
+        or cleanup_projection.get("parent_refs") != {"cleanup_receipt_ref": cleanup_ref}
+        or selected_lifecycle_projection.get("attempt_ref") != public_attempt_ref
+        or selected_lifecycle_projection.get("lifecycle_kind") != "attempt"
+        or selected_lifecycle_projection.get("terminal_status") != "terminal"
+        or selected_lifecycle_projection.get("cleanup_stable_zero") is not True
+        or selected_lifecycle_projection.get("resource_counts") != _S13_ZERO_COUNTS
+    ):
+        raise ValueError("holdout shared lifecycle projection differs")
+
+    body_payload = normalized[1]["event"]["event_payload"]
+    cleanup_payload = normalized[2]["event"]["event_payload"]
+    result_payload = normalized[3]["event"]["event_payload"]
+    assert isinstance(body_payload, Mapping) and isinstance(cleanup_payload, Mapping) and isinstance(result_payload, Mapping)
+    body_file_ref = {
+        "file_sha256": hashlib.sha256(actual_body_bytes).hexdigest(),
+        "content_sha256": str(body["content_sha256"]),
+    }
+    result_file_ref = {
+        "file_sha256": hashlib.sha256(actual_result_bytes).hexdigest(),
+        "content_sha256": str(result["content_sha256"]),
+    }
+    expected_body_native = {"path": str(expected_dir / "body.json"), **body_file_ref}
+    expected_result_native = {"path": str(expected_dir / "result.json"), **result_file_ref}
+    _s13_exact_zero_resource_counts(
+        cleanup_payload.get("resource_counts"),
+        name="holdout cleanup event resource counts",
+    )
+    if (
+        body_payload.get("body_file_ref") != expected_body_native
+        or cleanup_payload.get("cleanup_receipt_ref")
+        != {"content_sha256": cleanup["content_sha256"]}
+        or cleanup_payload.get("resource_counts") != _S13_ZERO_COUNTS
+        or result_payload.get("result_file_ref") != expected_result_native
+    ):
+        raise ValueError("holdout raw file or cleanup lineage differs")
+
+    projections: list[dict[str, object]] = []
+    for sequence, (raw, kind) in enumerate(zip(normalized[:3], ("opened", "body_complete", "cleanup"), strict=True)):
+        refs = (
+            {"attempt_ref": public_attempt_ref}
+            if kind == "opened"
+            else {"body_file_ref": body_file_ref}
+            if kind == "body_complete"
+            else {
+                "cleanup_receipt_ref": cleanup_ref,
+                "cleanup_projection_ref": cleanup_projection_ref,
+            }
+        )
+        projections.append(
+            seal_pathless_projection(
+                contract_version="benchmark_v2_holdout_runner_event_verified_projection_v1",
+                semantic_payload={
+                    "partition": "holdout",
+                    "event_kind": kind,
+                    "sequence": sequence,
+                    "attempt_ref": public_attempt_ref,
+                    "authorization_ref": public_authorization_ref,
+                    "claim_ref": public_claim_ref,
+                    "previous_event_projection_ref": (
+                        pathless_artifact_ref(projections[-1]) if projections else None
+                    ),
+                    "raw_event_sha256": hashlib.sha256(
+                        raw_event_lines[sequence]
+                    ).hexdigest(),
+                    "load_bearing_refs": refs,
+                    "safety": deepcopy(_S13_SAFETY),
+                },
+            )
+        )
+    raw_prefix = b"".join(line + b"\n" for line in raw_event_lines[:3])
+    cleanup_envelope = normalized[2]
+    native_pre_result = result_payload.get("attempt_ledger_pre_result_ref")
+    expected_pre_result = {
+        "contract_version": "benchmark_v2_holdout_attempt_ledger_pre_result_ref_v1",
+        "id": "holdout-attempt-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-holdout-attempt-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": attempt_ref,
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": hashlib.sha256(
+            canonical_json_bytes(cleanup_envelope)
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+    if (
+        not isinstance(native_pre_result, Mapping)
+        or isinstance(native_pre_result.get("terminal_sequence"), bool)
+        or not isinstance(native_pre_result.get("terminal_sequence"), int)
+        or native_pre_result != expected_pre_result
+    ):
+        raise ValueError("holdout raw pre-result ref differs")
+    pre_result_projection = seal_pathless_projection(
+        contract_version="benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+        semantic_payload={
+            "partition": "holdout",
+            "attempt_ref": public_attempt_ref,
+            "authorization_ref": public_authorization_ref,
+            "claim_ref": public_claim_ref,
+            "raw_pre_result_ref_sha256": hashlib.sha256(
+                canonical_json_bytes(expected_pre_result)
+            ).hexdigest(),
+            "raw_prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+            "terminal_sequence": 2,
+            "terminal_envelope_sha256": expected_pre_result[
+                "terminal_envelope_sha256"
+            ],
+            "cleanup_event_projection_ref": pathless_artifact_ref(projections[2]),
+            "verified": True,
+            "safety": deepcopy(_S13_SAFETY),
+        },
+    )
+    pre_result_ref = pathless_artifact_ref(pre_result_projection)
+    projections.append(
+        seal_pathless_projection(
+            contract_version="benchmark_v2_holdout_runner_event_verified_projection_v1",
+            semantic_payload={
+                "partition": "holdout",
+                "event_kind": "result",
+                "sequence": 3,
+                "attempt_ref": public_attempt_ref,
+                "authorization_ref": public_authorization_ref,
+                "claim_ref": public_claim_ref,
+                "previous_event_projection_ref": pathless_artifact_ref(projections[-1]),
+                "raw_event_sha256": hashlib.sha256(raw_event_lines[3]).hexdigest(),
+                "load_bearing_refs": {
+                    "result_file_ref": result_file_ref,
+                    "pre_result_verification_ref": pre_result_ref,
+                },
+                "safety": deepcopy(_S13_SAFETY),
+            },
+        )
+    )
+    event_refs = [pathless_artifact_ref(item) for item in projections]
+    prefix_projection = seal_pathless_projection(
+        contract_version="benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+        semantic_payload={
+            "partition": "holdout",
+            "authorization_ref": public_authorization_ref,
+            "claim_ref": public_claim_ref,
+            "attempt_ref": public_attempt_ref,
+            "raw_prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+            "pre_result_verification_ref": pre_result_ref,
+            "terminal_sequence": 3,
+            "terminal_event_projection_ref": event_refs[-1],
+            "event_projection_refs": event_refs,
+            "selection_eligible": True,
+            "safety": deepcopy(_S13_SAFETY),
+        },
+    )
+    prefix_ref = pathless_artifact_ref(prefix_projection)
+    projected = seal_pathless_projection(
+        contract_version="benchmark_v2_holdout_projected_attempt_ledger_v1",
+        semantic_payload={
+            "benchmark_release_id": benchmark_release_id,
+            "partition": "holdout",
+            "authorization_ref": public_authorization_ref,
+            "claim_ref": public_claim_ref,
+            "raw_ledger_prefix_verification_ref": prefix_ref,
+            "pre_result_verification_ref": pre_result_ref,
+            "entries": [
+                {
+                    "sequence": 0,
+                    "attempt_ref": public_attempt_ref,
+                    "observed_state": "result",
+                    "event_projection_refs": event_refs,
+                    "lifecycle_ref": lifecycle_ref,
+                    "selection_eligible": True,
+                }
+            ],
+            "selected_attempt_ref": public_attempt_ref,
+            "selected_lifecycle_ref": lifecycle_ref,
+            "safety": deepcopy(_S13_SAFETY),
+        },
+    )
+    if (
+        result.get("contract_version") != "benchmark_v2_holdout_runner_actual_result_v1"
+        or result.get("attempt_ref") != attempt_ref
+        or result.get("attempt_dir") != str(expected_dir)
+        or result.get("body_ref") != {"content_sha256": body["content_sha256"]}
+        or result.get("cleanup_receipt_ref")
+        != {"content_sha256": cleanup["content_sha256"]}
+        or result.get("attempt_ledger_pre_result_ref") != expected_pre_result
+        or result.get("screen_group_count") != 12
+        or result.get("status") != "terminal"
+        or result.get("safety") != _S13_SAFETY
+    ):
+        raise ValueError("holdout actual result lineage differs")
+    actual_result_projection = seal_pathless_projection(
+        contract_version="benchmark_v2_holdout_actual_result_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": public_attempt_ref,
+            "result_contract_version": "benchmark_v2_holdout_runner_actual_result_v1",
+            "raw_file_sha256": result_file_ref["file_sha256"],
+            "result_content_sha256": result_file_ref["content_sha256"],
+            "body_projection_ref": body_projection_ref,
+            "cleanup_projection_ref": cleanup_projection_ref,
+            "pre_result_verification_ref": pre_result_ref,
+            "runner_ledger_prefix_projection_ref": prefix_ref,
+            "result_event_projection_ref": event_refs[-1],
+            "verified": True,
+            "safety": deepcopy(_S13_SAFETY),
+        },
+    )
+    return BenchmarkV2HoldoutAttemptProjectionMaterialization(
+        runner_event_projections=tuple(projections),
+        pre_result_projection=pre_result_projection,
+        runner_ledger_prefix_projection=prefix_projection,
+        projected_attempt_ledger=projected,
+        actual_result_projection=actual_result_projection,
     )
 
 
@@ -7260,6 +7826,117 @@ def compose_benchmark_v2_lifecycle_bundle_v3(
     )
     if pathless_artifact_ref(bundle)["id"] != bundle["artifact_id"]:
         raise ValueError("benchmark v2 lifecycle bundle identity differs")
+    return bundle
+
+
+def compose_benchmark_v2_holdout_lifecycle_bundle_v3(
+    *,
+    benchmark_release_id: str,
+    materialization: BenchmarkV2HoldoutAttemptProjectionMaterialization,
+    attempt_ref: Mapping[str, object],
+    cleanup_lifecycle_projection: Mapping[str, object],
+    journal_terminal_event_projection: Mapping[str, object],
+    selected_attempt_lifecycle_projection: Mapping[str, object],
+    screen_group_lifecycle_projections: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_pathless import (
+        order_pathless_envelopes,
+        pathless_artifact_ref,
+        seal_pathless_envelope,
+        seal_pathless_projection,
+        validate_pathless_recursive,
+    )
+
+    public_attempt_ref = _s13_public_holdout_attempt_ref(attempt_ref)
+    cleanup_ref = _s13_pathless_projection_ref(
+        cleanup_lifecycle_projection,
+        contract_version="benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    terminal_ref = _s13_pathless_projection_ref(
+        journal_terminal_event_projection,
+        contract_version="benchmark_v2_attempt_journal_terminal_event_verified_projection_v1",
+    )
+    selected_ref = _s13_pathless_projection_ref(
+        selected_attempt_lifecycle_projection,
+        contract_version="benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    if (
+        cleanup_lifecycle_projection.get("attempt_ref") != public_attempt_ref
+        or cleanup_lifecycle_projection.get("lifecycle_kind") != "cleanup"
+        or journal_terminal_event_projection.get("attempt_ref") != public_attempt_ref
+        or selected_attempt_lifecycle_projection.get("attempt_ref") != public_attempt_ref
+        or selected_attempt_lifecycle_projection.get("lifecycle_kind") != "attempt"
+    ):
+        raise ValueError("holdout lifecycle bundle shared lineage differs")
+    screens = list(screen_group_lifecycle_projections)
+    if len(screens) != 12:
+        raise ValueError("holdout lifecycle bundle requires 12 screen groups")
+    screen_refs = [
+        _s13_pathless_projection_ref(
+            item, contract_version="benchmark_v2_lifecycle_verified_projection_v1"
+        )
+        for item in screens
+    ]
+    projected_ref = pathless_artifact_ref(materialization.projected_attempt_ledger)
+    prefix_ref = pathless_artifact_ref(materialization.runner_ledger_prefix_projection)
+    children = [
+        *screens,
+        deepcopy(dict(cleanup_lifecycle_projection)),
+        deepcopy(dict(journal_terminal_event_projection)),
+        deepcopy(dict(selected_attempt_lifecycle_projection)),
+        *[deepcopy(item) for item in materialization.runner_event_projections],
+        deepcopy(materialization.pre_result_projection),
+        deepcopy(materialization.runner_ledger_prefix_projection),
+        deepcopy(materialization.actual_result_projection),
+        deepcopy(materialization.projected_attempt_ledger),
+    ]
+    child_envelopes = [seal_pathless_envelope(item) for item in children]
+    ordered = order_pathless_envelopes(
+        registry_name="lifecycle_bundle_v3",
+        envelopes=child_envelopes,
+        context={},
+    )
+    bundle = seal_pathless_projection(
+        contract_version="benchmark_v2_lifecycle_bundle_v3",
+        semantic_payload={
+            "benchmark_release_id": benchmark_release_id,
+            "partition": "holdout",
+            "attempt_ref": public_attempt_ref,
+            "projected_attempt_ledger_ref": projected_ref,
+            "raw_ledger_prefix_verification_ref": prefix_ref,
+            "selected_lifecycle_ref": selected_ref,
+            "attempt_cleanup_projection_ref": cleanup_ref,
+            "screen_group_lifecycle_projection_refs": screen_refs,
+            "sealed_artifact_envelopes": ordered,
+            "safety": deepcopy(_S13_SAFETY),
+        },
+    )
+    external_refs: dict[str, object] = {
+        "benchmark_v2_lifecycle_bundle_v3.attempt_ref": public_attempt_ref,
+        "benchmark_v2_lifecycle_verified_projection_v1.attempt_ref": public_attempt_ref,
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.cleanup_receipt_ref": cleanup_lifecycle_projection["parent_refs"]["cleanup_receipt_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.actual_screen_group_ref": [
+            item["parent_refs"]["actual_screen_group_ref"] for item in screens
+        ],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.provider_group_ref": [
+            item["parent_refs"]["provider_group_ref"] for item in screens
+        ],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.attempt_journal_projection_ref": selected_attempt_lifecycle_projection["parent_refs"]["attempt_journal_projection_ref"],
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1.attempt_ref": public_attempt_ref,
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1.cleanup_receipt_ref": journal_terminal_event_projection["cleanup_receipt_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.attempt_ref": public_attempt_ref,
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.body_file_ref": materialization.runner_event_projections[1]["load_bearing_refs"]["body_file_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.cleanup_receipt_ref": materialization.runner_event_projections[2]["load_bearing_refs"]["cleanup_receipt_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.result_file_ref": materialization.runner_event_projections[3]["load_bearing_refs"]["result_file_ref"],
+        "benchmark_v2_holdout_actual_result_verified_projection_v1.body_projection_ref": materialization.actual_result_projection["body_projection_ref"],
+    }
+    validate_pathless_recursive(
+        registry_name="lifecycle_bundle_v3",
+        roots=[pathless_artifact_ref(bundle)],
+        envelopes=[seal_pathless_envelope(bundle), *ordered],
+        external_refs=external_refs,
+        context={},
+    )
     return bundle
 
 

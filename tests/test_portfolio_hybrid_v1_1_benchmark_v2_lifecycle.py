@@ -4631,6 +4631,526 @@ def test_c4_attempt_journal_projection_rejects_terminal_cleanup_swap() -> None:
         )
 
 
+def _h5_holdout_lifecycle_graph(
+    tmp_path: Path,
+    *,
+    screen_case_groups: list[tuple[str, list[dict[str, str]]]] | None = None,
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_pathless import seal_pathless_projection
+
+    holdout_safety = {
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "display_only": True,
+    }
+    authorization_ref = {
+        "authorization_id": "holdout-authorization/" + "a" * 64,
+        "envelope_sha256": "b" * 64,
+        "fixed_authorization_path": str((tmp_path / "authorization.json").resolve()),
+    }
+    claim_ref = {
+        "id": "holdout-claim/" + "a" * 64,
+        "envelope_sha256": "c" * 64,
+    }
+    attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + "a" * 64
+            + "\0"
+            + "b" * 64
+        ).encode("utf-8")
+    ).hexdigest()
+    attempt = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_ref_v1",
+            "attempt_id": attempt_id,
+            "authorization_ref": authorization_ref,
+            "claim_ref": claim_ref,
+            "partition": "holdout",
+            "mode": "actual_models",
+            "provider_id": None,
+            "safety": deepcopy(holdout_safety),
+        }
+    )
+    attempt_dir = (tmp_path / "attempt" / attempt_id).resolve()
+    cleanup = lifecycle.compose_benchmark_v2_attempt_cleanup_receipt(
+        attempt_ref=attempt,
+        reason="benchmark_v2_holdout_actual_runner_finished",
+        service_terminal_ref=seal_immutable({"kind": "service-terminal"}),
+        window_cleanup_ref=seal_immutable({"kind": "window-cleanup"}),
+        provider_cleanup_refs=[seal_immutable({"kind": "provider-cleanup"})],
+        resource_counts={
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        },
+    )
+    groups = screen_case_groups or [
+        (f"holdout-screen-{index:02d}", None) for index in range(12)
+    ]
+    screens: list[dict[str, object]] = []
+    for index, (screen_group, case_refs) in enumerate(groups):
+        screen = _s13_screen_projection(
+            attempt=attempt,
+            screen_group=screen_group,
+            case_refs_override=case_refs,
+            evidence_width=(1280 + index if screen_case_groups is not None else None),
+        )
+        if screen_case_groups is not None:
+            for row in screen["rows"]:
+                if row["arm_id"] == "qwen_only":
+                    row["observation"]["response"] = {
+                        "screen_reading": {"screen_inventory": {"available_actions": []}}
+                    }
+                elif row["arm_id"] == "omni_to_qwen_vista":
+                    row["observation"]["review_projection"] = {"proposals": []}
+            screen.pop("content_sha256")
+            screen = seal_immutable(screen)
+        screens.append(screen)
+    body = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_holdout_runner_actual_body_v1",
+            "attempt_ref": attempt,
+            "partition": "holdout",
+            "screen_group_results": screens,
+            "body_status": "complete",
+            "safety": deepcopy(holdout_safety),
+        }
+    )
+    body_bytes = canonical_json_bytes(body)
+    cleanup_bytes = canonical_json_bytes(cleanup) + b"\n"
+
+    def payload(contract: str, kind: str, **fields: object) -> dict[str, object]:
+        return seal_immutable(
+            {
+                "contract_version": contract,
+                "attempt_ref": attempt,
+                "attempt_dir": str(attempt_dir),
+                "status": kind,
+                **fields,
+                "safety": deepcopy(holdout_safety),
+            }
+        )
+
+    raw_events: list[dict[str, object]] = []
+
+    def append(kind: str, event_payload: dict[str, object]) -> None:
+        event = {
+            "partition": "holdout",
+            "sequence": len(raw_events),
+            "event_kind": kind,
+            "previous_envelope_sha256": (
+                hashlib.sha256(canonical_json_bytes(raw_events[-1])).hexdigest()
+                if raw_events
+                else "0" * 64
+            ),
+            "event_payload": event_payload,
+        }
+        raw_events.append(
+            {
+                "contract_version": "benchmark_v2_holdout_attempt_event_envelope_v1",
+                "event": event,
+                "event_sha256": hashlib.sha256(canonical_json_bytes(event)).hexdigest(),
+            }
+        )
+
+    append(
+        "opened",
+        payload("benchmark_v2_holdout_attempt_opened_payload_v1", "opened"),
+    )
+    append(
+        "body_complete",
+        payload(
+            "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+            "body_complete",
+            body_file_ref={
+                "path": str(attempt_dir / "body.json"),
+                "file_sha256": hashlib.sha256(body_bytes).hexdigest(),
+                "content_sha256": body["content_sha256"],
+            },
+        ),
+    )
+    cleanup_projection = lifecycle.project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=attempt, cleanup_receipt=cleanup
+    )
+    cleanup_ref = lifecycle.derive_benchmark_v2_cleanup_receipt_ref(
+        cleanup_receipt=cleanup
+    )
+    append(
+        "cleanup",
+        payload(
+            "benchmark_v2_holdout_attempt_cleanup_payload_v1",
+            "cleanup",
+            cleanup_receipt_ref={"content_sha256": cleanup["content_sha256"]},
+            resource_counts=deepcopy(cleanup["resource_counts"]),
+        ),
+    )
+    raw_prefix = b"".join(canonical_json_bytes(item) + b"\n" for item in raw_events)
+    pre_result = {
+        "contract_version": "benchmark_v2_holdout_attempt_ledger_pre_result_ref_v1",
+        "id": "holdout-attempt-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-holdout-attempt-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": attempt,
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": hashlib.sha256(
+            canonical_json_bytes(raw_events[-1])
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+    result = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_holdout_runner_actual_result_v1",
+            "attempt_ref": attempt,
+            "attempt_dir": str(attempt_dir),
+            "body_ref": {"content_sha256": body["content_sha256"]},
+            "cleanup_receipt_ref": {"content_sha256": cleanup["content_sha256"]},
+            "attempt_ledger_pre_result_ref": pre_result,
+            "screen_group_count": 12,
+            "status": "terminal",
+            "safety": deepcopy(holdout_safety),
+        }
+    )
+    result_bytes = canonical_json_bytes(result)
+    append(
+        "result",
+        payload(
+            "benchmark_v2_holdout_attempt_result_payload_v1",
+            "result",
+            result_file_ref={
+                "path": str(attempt_dir / "result.json"),
+                "file_sha256": hashlib.sha256(result_bytes).hexdigest(),
+                "content_sha256": result["content_sha256"],
+            },
+            attempt_ledger_pre_result_ref=pre_result,
+        ),
+    )
+    journal = _s13_journal(attempt=attempt, cleanup=cleanup)
+    terminal = lifecycle.project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=attempt,
+        journal_events=journal,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = lifecycle.project_benchmark_v2_attempt_journal(
+        attempt_ref=attempt,
+        journal_events=journal,
+        terminal_event_projection=terminal,
+        cleanup_projection=cleanup_projection,
+    )
+    screen_lifecycles = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt, screen_group_projections=screens
+    )
+    selected_lifecycle = lifecycle.project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=attempt,
+        journal_events=journal,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=cleanup_projection,
+        terminal_event_projection=terminal,
+        screen_group_lifecycle_projections=screen_lifecycles,
+    )
+    body_projection = seal_pathless_projection(
+        contract_version="benchmark_v2_actual_body_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": {
+                "id": "holdout-runner-attempt/" + attempt_id,
+                "content_sha256": attempt["content_sha256"],
+            },
+            "body_contract_version": "benchmark_v2_holdout_runner_actual_body_v1",
+            "raw_file_sha256": hashlib.sha256(body_bytes).hexdigest(),
+            "body_content_sha256": body["content_sha256"],
+            "screen_group_count": 12,
+            "case_arm_multiset_sha256": "e" * 64,
+            "pre_vista_evidence_refs": [
+                {"id": f"pre-vista/{index}", "content_sha256": "f" * 64}
+                for index in range(12)
+            ],
+            "verified": True,
+            "safety": deepcopy(holdout_safety),
+        },
+    )
+    return {
+        "attempt": attempt,
+        "attempt_dir": attempt_dir,
+        "body_bytes": body_bytes,
+        "result_bytes": result_bytes,
+        "cleanup_bytes": cleanup_bytes,
+        "cleanup": cleanup,
+        "journal": journal,
+        "journal_bytes": b"".join(
+            canonical_json_bytes(item) + b"\n" for item in journal
+        ),
+        "events": raw_events,
+        "events_bytes": b"".join(
+            canonical_json_bytes(item) + b"\n" for item in raw_events
+        ),
+        "cleanup_projection": cleanup_projection,
+        "journal_projection": journal_projection,
+        "terminal": terminal,
+        "screen_lifecycles": screen_lifecycles,
+        "selected_lifecycle": selected_lifecycle,
+        "body_projection": body_projection,
+        "cleanup_ref": cleanup_ref,
+    }
+
+
+def test_h5_holdout_materializer_consumes_exact_compact_h3_body_and_result(
+    tmp_path: Path,
+) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+
+    materialized = lifecycle.materialize_benchmark_v2_holdout_attempt_projections(
+        benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+        attempt_events=graph["events"],
+        attempt_events_jsonl_bytes=graph["events_bytes"],
+        actual_body_bytes=graph["body_bytes"],
+        actual_result_bytes=graph["result_bytes"],
+        cleanup_receipt_bytes=graph["cleanup_bytes"],
+        expected_attempt_dir=graph["attempt_dir"],
+        actual_body_projection=graph["body_projection"],
+        cleanup_projection=graph["cleanup_projection"],
+        selected_lifecycle_projection=graph["selected_lifecycle"],
+    )
+
+    assert [item["event_kind"] for item in materialized.runner_event_projections] == [
+        "opened",
+        "body_complete",
+        "cleanup",
+        "result",
+    ]
+    assert materialized.projected_attempt_ledger["entries"][0]["selection_eligible"] is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("missing", "duplicate", "reordered", "damaged", "recovery_cleanup"),
+)
+def test_h5_holdout_materializer_rejects_non_normal_or_damaged_chain(
+    tmp_path: Path, mutation: str
+) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+    events = deepcopy(graph["events"])
+    if mutation == "missing":
+        events.pop()
+    elif mutation == "duplicate":
+        events.append(deepcopy(events[-1]))
+    elif mutation == "reordered":
+        events[1], events[2] = events[2], events[1]
+    elif mutation == "damaged":
+        events[1]["event_sha256"] = "0" * 64
+    else:
+        events[2]["event"]["event_kind"] = "recovery_cleanup"
+        events[2]["event_sha256"] = hashlib.sha256(
+            canonical_json_bytes(events[2]["event"])
+        ).hexdigest()
+
+    with pytest.raises(ValueError, match="four-event|event chain"):
+        lifecycle.materialize_benchmark_v2_holdout_attempt_projections(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            attempt_events=events,
+            attempt_events_jsonl_bytes=b"".join(
+                canonical_json_bytes(item) + b"\n" for item in events
+            ),
+            actual_body_bytes=graph["body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            actual_body_projection=graph["body_projection"],
+            cleanup_projection=graph["cleanup_projection"],
+            selected_lifecycle_projection=graph["selected_lifecycle"],
+        )
+
+
+def test_h5_holdout_materializer_rejects_wrong_cleanup_reason(tmp_path: Path) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+    cleanup = deepcopy(graph["cleanup"])
+    cleanup["reason"] = "wrong-but-nonempty"
+    cleanup.pop("content_sha256")
+    cleanup = seal_immutable(cleanup)
+
+    with pytest.raises(ValueError, match="cleanup reason"):
+        lifecycle.materialize_benchmark_v2_holdout_attempt_projections(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            attempt_events=graph["events"],
+            attempt_events_jsonl_bytes=graph["events_bytes"],
+            actual_body_bytes=graph["body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=canonical_json_bytes(cleanup) + b"\n",
+            expected_attempt_dir=graph["attempt_dir"],
+            actual_body_projection=graph["body_projection"],
+            cleanup_projection=graph["cleanup_projection"],
+            selected_lifecycle_projection=graph["selected_lifecycle"],
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("crlf", "whitespace", "trailing_blank", "duplicate_key", "nonfinite"),
+)
+def test_h5_holdout_materializer_rejects_nonexact_attempt_event_jsonl_snapshot(
+    tmp_path: Path, mutation: str
+) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+    raw = graph["events_bytes"]
+    assert isinstance(raw, bytes)
+    if mutation == "crlf":
+        changed = raw.replace(b"\n", b"\r\n", 1)
+    elif mutation == "whitespace":
+        changed = b" " + raw
+    elif mutation == "trailing_blank":
+        changed = raw + b"\n"
+    elif mutation == "duplicate_key":
+        first, remainder = raw.split(b"\n", 1)
+        changed = first[:-1] + b',"contract_version":"duplicate"}\n' + remainder
+    else:
+        first, remainder = raw.split(b"\n", 1)
+        changed = first[:-1] + b',"extra":NaN}\n' + remainder
+
+    with pytest.raises(ValueError, match="attempt event JSONL"):
+        lifecycle.materialize_benchmark_v2_holdout_attempt_projections(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            attempt_events=graph["events"],
+            attempt_events_jsonl_bytes=changed,
+            actual_body_bytes=graph["body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            actual_body_projection=graph["body_projection"],
+            cleanup_projection=graph["cleanup_projection"],
+            selected_lifecycle_projection=graph["selected_lifecycle"],
+        )
+
+
+@pytest.mark.parametrize("event_index", range(4))
+@pytest.mark.parametrize("mutation", ("wrong_contract", "extra_field"))
+def test_h5_holdout_materializer_rejects_reminted_event_payload_schema(
+    tmp_path: Path, event_index: int, mutation: str
+) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+    events = deepcopy(graph["events"])
+    payload = events[event_index]["event"]["event_payload"]
+    assert isinstance(payload, dict)
+    payload.pop("content_sha256")
+    if mutation == "wrong_contract":
+        payload["contract_version"] = "benchmark_v2_holdout_attempt_payload_v999"
+    else:
+        payload["extra"] = True
+    events[event_index]["event"]["event_payload"] = seal_immutable(payload)
+    events[event_index]["event_sha256"] = hashlib.sha256(
+        canonical_json_bytes(events[event_index]["event"])
+    ).hexdigest()
+
+    with pytest.raises(ValueError, match="payload schema"):
+        lifecycle.materialize_benchmark_v2_holdout_attempt_projections(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            attempt_events=events,
+            attempt_events_jsonl_bytes=b"".join(
+                canonical_json_bytes(item) + b"\n" for item in events
+            ),
+            actual_body_bytes=graph["body_bytes"],
+            actual_result_bytes=graph["result_bytes"],
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            actual_body_projection=graph["body_projection"],
+            cleanup_projection=graph["cleanup_projection"],
+            selected_lifecycle_projection=graph["selected_lifecycle"],
+        )
+
+
+def _h5_remint_event_chain_result(
+    graph: dict[str, object], events: list[dict[str, object]]
+) -> tuple[bytes, bytes]:
+    previous = "0" * 64
+    for raw in events[:3]:
+        raw["event"]["previous_envelope_sha256"] = previous
+        raw["event_sha256"] = hashlib.sha256(
+            canonical_json_bytes(raw["event"])
+        ).hexdigest()
+        previous = hashlib.sha256(canonical_json_bytes(raw)).hexdigest()
+    raw_prefix = b"".join(canonical_json_bytes(item) + b"\n" for item in events[:3])
+    pre_result = {
+        "contract_version": "benchmark_v2_holdout_attempt_ledger_pre_result_ref_v1",
+        "id": "holdout-attempt-ledger-pre-result/"
+        + hashlib.sha256(
+            b"benchmark-v2-holdout-attempt-ledger-pre-result\0" + raw_prefix
+        ).hexdigest(),
+        "attempt_ref": graph["attempt"],
+        "terminal_sequence": 2,
+        "terminal_envelope_sha256": hashlib.sha256(
+            canonical_json_bytes(events[2])
+        ).hexdigest(),
+        "prefix_sha256": hashlib.sha256(raw_prefix).hexdigest(),
+    }
+    result = json.loads(graph["result_bytes"].decode("utf-8"))
+    result.pop("content_sha256")
+    result["attempt_ledger_pre_result_ref"] = pre_result
+    result = seal_immutable(result)
+    result_bytes = canonical_json_bytes(result)
+    result_payload = events[3]["event"]["event_payload"]
+    result_payload.pop("content_sha256")
+    result_payload["attempt_ledger_pre_result_ref"] = pre_result
+    result_payload["result_file_ref"] = {
+        "path": str(graph["attempt_dir"] / "result.json"),
+        "file_sha256": hashlib.sha256(result_bytes).hexdigest(),
+        "content_sha256": result["content_sha256"],
+    }
+    events[3]["event"]["event_payload"] = seal_immutable(result_payload)
+    events[3]["event"]["previous_envelope_sha256"] = previous
+    events[3]["event_sha256"] = hashlib.sha256(
+        canonical_json_bytes(events[3]["event"])
+    ).hexdigest()
+    return (
+        b"".join(canonical_json_bytes(item) + b"\n" for item in events),
+        result_bytes,
+    )
+
+
+@pytest.mark.parametrize("mutation", ("SEQUENCE_ACCEPTED", "COUNTS_ACCEPTED"))
+def test_h5_holdout_materializer_rejects_bool_int_aliases_after_consistent_remint(
+    tmp_path: Path, mutation: str
+) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+    events = deepcopy(graph["events"])
+    if mutation == "SEQUENCE_ACCEPTED":
+        events[0]["event"]["sequence"] = False
+    else:
+        payload = events[2]["event"]["event_payload"]
+        payload.pop("content_sha256")
+        payload["resource_counts"]["service_operations"] = False
+        events[2]["event"]["event_payload"] = seal_immutable(payload)
+    events_bytes, result_bytes = _h5_remint_event_chain_result(graph, events)
+
+    with pytest.raises(ValueError, match="sequence|event chain|resource count"):
+        lifecycle.materialize_benchmark_v2_holdout_attempt_projections(
+            benchmark_release_id="portfolio_hybrid_v1_1_benchmark_v2_release_1",
+            attempt_events=events,
+            attempt_events_jsonl_bytes=events_bytes,
+            actual_body_bytes=graph["body_bytes"],
+            actual_result_bytes=result_bytes,
+            cleanup_receipt_bytes=graph["cleanup_bytes"],
+            expected_attempt_dir=graph["attempt_dir"],
+            actual_body_projection=graph["body_projection"],
+            cleanup_projection=graph["cleanup_projection"],
+            selected_lifecycle_projection=graph["selected_lifecycle"],
+        )
+
+
+def test_h5_shared_cleanup_receipt_rejects_reminted_bool_zero_count(
+    tmp_path: Path,
+) -> None:
+    graph = _h5_holdout_lifecycle_graph(tmp_path)
+    cleanup = deepcopy(graph["cleanup"])
+    cleanup.pop("content_sha256")
+    cleanup["resource_counts"]["service_operations"] = False
+    cleanup = seal_immutable(cleanup)
+
+    with pytest.raises(ValueError, match="cleanup receipt|resource count"):
+        lifecycle._s13_cleanup_receipt(cleanup)
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value,

@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from app.learn.hybrid.benchmark_v2_pathless import (
     pathless_artifact_ref,
@@ -664,6 +664,41 @@ def _parse_actual_body_bytes(actual_body_bytes: bytes) -> dict[str, object]:
     return body
 
 
+def _parse_holdout_actual_body_bytes(actual_body_bytes: bytes) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    if not isinstance(actual_body_bytes, bytes):
+        raise ValueError("holdout actual body bytes are required")
+    try:
+        decoded = json.loads(actual_body_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("holdout actual body is not UTF-8 JSON") from exc
+    if not isinstance(decoded, Mapping) or actual_body_bytes != canonical_bytes(decoded):
+        raise ValueError("holdout actual body bytes are not canonical")
+    body = deepcopy(dict(decoded))
+    expected_fields = {
+        "contract_version",
+        "attempt_ref",
+        "partition",
+        "screen_group_results",
+        "body_status",
+        "safety",
+        "content_sha256",
+    }
+    if (
+        set(body) != expected_fields
+        or body.get("contract_version") != "benchmark_v2_holdout_runner_actual_body_v1"
+        or body.get("partition") != "holdout"
+        or body.get("body_status") != "complete"
+        or body.get("safety") != SAFETY
+        or not isinstance(body.get("screen_group_results"), list)
+        or len(body["screen_group_results"]) != 12
+        or body.get("content_sha256") != content_sha256(body)
+    ):
+        raise ValueError("holdout actual body contract is invalid")
+    return body
+
+
 def _parse_provider_inputs(
     *, provider_manifest_bytes: bytes, provider_corpus_bytes: bytes
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]:
@@ -709,21 +744,29 @@ def _parse_provider_inputs(
     return manifest, corpus, manifest_ref, corpus_ref
 
 
-def _provider_case_index(corpus: Mapping[str, object]) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, str]], str]:
+def _provider_case_index(
+    corpus: Mapping[str, object], *, partition: str = "regression"
+) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, str]], str]:
     from app.learn.hybrid.benchmark_v2_contracts import ARM_ORDER
     from app.learn.recognition.uei.canonical import content_sha256
 
     cases = corpus.get("cases")
     if not isinstance(cases, list):
         raise ValueError("provider corpus cases are unavailable")
-    regression = [deepcopy(dict(item)) for item in cases if isinstance(item, Mapping) and item.get("partition") == "regression"]
-    if len(regression) != 60:
-        raise ValueError("provider corpus regression partition must contain 60 cases")
+    if partition not in {"regression", "holdout"}:
+        raise ValueError("provider corpus partition is invalid")
+    selected = [
+        deepcopy(dict(item))
+        for item in cases
+        if isinstance(item, Mapping) and item.get("partition") == partition
+    ]
+    if len(selected) != 60:
+        raise ValueError(f"provider corpus {partition} partition must contain 60 cases")
     by_id: dict[str, dict[str, object]] = {}
     context: dict[str, dict[str, str]] = {}
     multiset: list[dict[str, str]] = []
     groups: dict[str, int] = {}
-    for case in regression:
+    for case in selected:
         case_id = str(case.get("case_id") or "")
         group_id = str(case.get("screen_group") or "")
         if not case_id or not group_id or case_id in by_id:
@@ -871,10 +914,14 @@ def _prediction_external_refs(
         "provider_manifest_ref",
         "provider_corpus_ref",
         "attempt_ref",
-        "raw_ledger_prefix_verification_ref",
         "selected_lifecycle_ref",
     ):
         add(f"{outer_version}.{field}", prediction_run[field])
+    if prediction_run.get("partition") != "holdout":
+        add(
+            f"{outer_version}.raw_ledger_prefix_verification_ref",
+            prediction_run["raw_ledger_prefix_verification_ref"],
+        )
     automatic_version = "automatic_prediction_v3"
     add(f"{automatic_version}.source_parent_ref", automatic["source_parent_ref"])
     for dependency in automatic["provider_group_dependencies"]:
@@ -922,6 +969,26 @@ def _prediction_external_refs(
                 assert isinstance(entry, Mapping)
                 add(f"{version}.entries.attempt_ref", entry["attempt_ref"])
                 add(f"{version}.entries.lifecycle_ref", entry["lifecycle_ref"])
+        elif version == "benchmark_v2_holdout_runner_event_verified_projection_v1":
+            refs = item["load_bearing_refs"]
+            assert isinstance(refs, Mapping)
+            for field in (
+                "attempt_ref",
+                "body_file_ref",
+                "cleanup_receipt_ref",
+                "cleanup_projection_ref",
+                "result_file_ref",
+            ):
+                if field in refs:
+                    add(f"{version}.load_bearing_refs.{field}", refs[field])
+        elif version == "benchmark_v2_holdout_projected_attempt_ledger_v1":
+            add(f"{version}.selected_lifecycle_ref", item["selected_lifecycle_ref"])
+            for entry in item["entries"]:
+                assert isinstance(entry, Mapping)
+                add(f"{version}.entries.lifecycle_ref", entry["lifecycle_ref"])
+        elif version == "benchmark_v2_holdout_actual_result_verified_projection_v1":
+            add(f"{version}.body_projection_ref", item["body_projection_ref"])
+            add(f"{version}.cleanup_projection_ref", item["cleanup_projection_ref"])
     result: dict[str, object] = {}
     for role, values in collected.items():
         unique: list[object] = []
@@ -946,24 +1013,42 @@ def materialize_prediction_run_v3(
     """从已验证原始字节离线生成 production Prediction-run-v3。"""
 
     from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID, PARENT_REF
-    from app.learn.hybrid.benchmark_v2_lifecycle import _s13_public_attempt_ref
+    from app.learn.hybrid.benchmark_v2_lifecycle import _s13_public_any_attempt_ref
 
-    body = _parse_actual_body_bytes(actual_body_bytes)
+    try:
+        preview = json.loads(actual_body_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("actual body is not UTF-8 JSON") from error
+    holdout = (
+        isinstance(preview, Mapping)
+        and preview.get("contract_version")
+        == "benchmark_v2_holdout_runner_actual_body_v1"
+    )
+    body = (
+        _parse_holdout_actual_body_bytes(actual_body_bytes)
+        if holdout
+        else _parse_actual_body_bytes(actual_body_bytes)
+    )
+    partition = "holdout" if holdout else "regression"
     _, corpus, manifest_ref, corpus_ref = _parse_provider_inputs(
         provider_manifest_bytes=provider_manifest_bytes,
         provider_corpus_bytes=provider_corpus_bytes,
     )
-    provider_cases, case_context, corpus_digest = _provider_case_index(corpus)
+    provider_cases, case_context, corpus_digest = _provider_case_index(
+        corpus, partition=partition
+    )
     if not isinstance(actual_body_verified_projection, Mapping):
         raise ValueError("actual body verified projection is required")
     body_projection_ref = pathless_artifact_ref(actual_body_verified_projection)
     raw_attempt_ref = body.get("attempt_ref")
     if not isinstance(raw_attempt_ref, Mapping):
         raise ValueError("actual body attempt ref is invalid")
-    public_attempt_ref = _s13_public_attempt_ref(raw_attempt_ref)
+    public_attempt_ref = _s13_public_any_attempt_ref(raw_attempt_ref)
     if (
         actual_body_verified_projection.get("contract_version")
         != "benchmark_v2_actual_body_verified_projection_v1"
+        or actual_body_verified_projection.get("body_contract_version")
+        != body.get("contract_version")
         or actual_body_verified_projection.get("attempt_ref") != public_attempt_ref
         or actual_body_verified_projection.get("raw_file_sha256")
         != hashlib.sha256(actual_body_bytes).hexdigest()
@@ -977,7 +1062,7 @@ def materialize_prediction_run_v3(
     if (
         lifecycle_bundle_v3.get("contract_version") != "benchmark_v2_lifecycle_bundle_v3"
         or lifecycle_bundle_v3.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
-        or lifecycle_bundle_v3.get("partition") != "regression"
+        or lifecycle_bundle_v3.get("partition") != partition
         or lifecycle_bundle_v3.get("attempt_ref") != public_attempt_ref
     ):
         raise ValueError("lifecycle bundle lineage differs")
@@ -987,18 +1072,30 @@ def materialize_prediction_run_v3(
     runner_and_ledger_envelopes: list[dict[str, object]] = []
     runner_events: list[dict[str, object]] = []
     ledger: dict[str, object] | None = None
+    event_contract = (
+        "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        if holdout
+        else "benchmark_v2_runner_event_verified_projection_v1"
+    )
+    ledger_contract = (
+        "benchmark_v2_holdout_projected_attempt_ledger_v1"
+        if holdout
+        else "benchmark_v2_projected_attempt_ledger_v1"
+    )
+    holdout_shared_contracts = {
+        "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+        "benchmark_v2_holdout_actual_result_verified_projection_v1",
+    }
     for envelope in lifecycle_envelopes:
         decoded, _ = _decode_canonical_envelope(envelope, name="lifecycle child")
         version = decoded.get("contract_version")
-        if version in {
-            "benchmark_v2_runner_event_verified_projection_v1",
-            "benchmark_v2_projected_attempt_ledger_v1",
-        }:
+        if version in {event_contract, ledger_contract, *holdout_shared_contracts}:
             pathless_artifact_ref(decoded)
             runner_and_ledger_envelopes.append(deepcopy(dict(envelope)))
-            if version == "benchmark_v2_runner_event_verified_projection_v1":
+            if version == event_contract:
                 runner_events.append(decoded)
-            elif version == "benchmark_v2_projected_attempt_ledger_v1":
+            elif version == ledger_contract:
                 if ledger is not None:
                     raise ValueError("lifecycle bundle projected ledger is duplicated")
                 ledger = decoded
@@ -1069,7 +1166,7 @@ def materialize_prediction_run_v3(
         raise ValueError("actual body dependency/row multiset differs")
     automatic = _seal_automatic_prediction_v3(
         benchmark_release_id=BENCHMARK_RELEASE_ID,
-        partition="regression",
+        partition=partition,
         source_parent_ref=body_projection_ref,
         case_arm_multiset_sha256=corpus_digest,
         provider_group_dependencies=dependencies,
@@ -1089,7 +1186,7 @@ def materialize_prediction_run_v3(
         contract_version="benchmark_v2_prediction_run_v3",
         semantic_payload={
             "benchmark_release_id": BENCHMARK_RELEASE_ID,
-            "partition": "regression",
+            "partition": partition,
             "corpus_parent_ref": deepcopy(PARENT_REF),
             "provider_manifest_ref": manifest_ref,
             "provider_corpus_ref": corpus_ref,
@@ -1185,6 +1282,67 @@ def project_benchmark_v2_actual_body(
         semantic_payload={
             "attempt_ref": _s13_public_attempt_ref(raw_attempt_ref),
             "body_contract_version": "benchmark_v2_runner_actual_body_v1",
+            "raw_file_sha256": hashlib.sha256(actual_body_bytes).hexdigest(),
+            "body_content_sha256": str(body["content_sha256"]),
+            "screen_group_count": 12,
+            "case_arm_multiset_sha256": corpus_digest,
+            "pre_vista_evidence_refs": [
+                deepcopy(item["pre_vista_evidence_ref"]) for item in dependencies
+            ],
+            "verified": True,
+            "safety": deepcopy(SAFETY),
+        },
+    )
+
+
+def project_benchmark_v2_holdout_actual_body(
+    *,
+    actual_body_bytes: bytes,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        _s13_public_holdout_attempt_ref,
+    )
+
+    body = _parse_holdout_actual_body_bytes(actual_body_bytes)
+    _, corpus, _, _ = _parse_provider_inputs(
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    provider_cases, case_context, corpus_digest = _provider_case_index(
+        corpus, partition="holdout"
+    )
+    raw_attempt_ref = body.get("attempt_ref")
+    if not isinstance(raw_attempt_ref, Mapping):
+        raise ValueError("holdout actual body attempt ref is invalid")
+    dependencies: list[dict[str, object]] = []
+    row_count = 0
+    screens = body["screen_group_results"]
+    assert isinstance(screens, list)
+    for screen in screens:
+        if not isinstance(screen, Mapping):
+            raise ValueError("holdout actual body screen group is invalid")
+        dependency, rows, _, _ = _screen_group_material(
+            screen=screen,
+            raw_attempt_ref=raw_attempt_ref,
+            provider_cases=provider_cases,
+            case_context=case_context,
+        )
+        dependencies.append(dependency)
+        row_count += len(rows)
+    dependencies.sort(key=lambda item: str(item["provider_group_ref"]["id"]))
+    if (
+        len(dependencies) != 12
+        or len({str(item["provider_group_ref"]["id"]) for item in dependencies}) != 12
+        or row_count != 240
+    ):
+        raise ValueError("holdout actual body dependency/row multiset differs")
+    return seal_pathless_projection(
+        contract_version="benchmark_v2_actual_body_verified_projection_v1",
+        semantic_payload={
+            "attempt_ref": _s13_public_holdout_attempt_ref(raw_attempt_ref),
+            "body_contract_version": "benchmark_v2_holdout_runner_actual_body_v1",
             "raw_file_sha256": hashlib.sha256(actual_body_bytes).hexdigest(),
             "body_content_sha256": str(body["content_sha256"]),
             "screen_group_count": 12,
@@ -1804,6 +1962,852 @@ def validate_benchmark_v2_accepted_regression_score_input_v2(
         raise ValueError("accepted regression transitive lineage differs")
     del lifecycle_children
     return accepted
+
+
+def _accepted_holdout_authority_envelope(
+    value: object, *, name: str
+) -> tuple[dict[str, object], dict[str, str]]:
+    specs = {
+        "benchmark_v2_holdout_authorization_public_projection_v1": (
+            "holdout-authorization-public-projection",
+            {
+                "contract_version",
+                "artifact_id",
+                "authorization_id",
+                "envelope_sha256",
+                "claim_id",
+                "safety",
+                "content_sha256",
+            },
+        ),
+        "benchmark_v2_holdout_claim_public_projection_v1": (
+            "holdout-claim-public-projection",
+            {
+                "contract_version",
+                "artifact_id",
+                "claim_ref",
+                "claim_id",
+                "attempt_id",
+                "authorization_projection_ref",
+                "state",
+                "safety",
+                "content_sha256",
+            },
+        ),
+        "benchmark_v2_holdout_file_anchor_public_projection_v1": (
+            "holdout-file-anchor-public-projection",
+            {
+                "contract_version",
+                "artifact_id",
+                "anchor_kind",
+                "claim_id",
+                "authorization_envelope_sha256",
+                "size_bytes",
+                "verified",
+                "safety",
+                "content_sha256",
+            },
+        ),
+        "benchmark_v2_holdout_registry_anchor_public_projection_v1": (
+            "holdout-registry-anchor-public-projection",
+            {
+                "contract_version",
+                "artifact_id",
+                "anchor_kind",
+                "claim_id",
+                "authorization_envelope_sha256",
+                "claim_ref",
+                "envelope_verified",
+                "state",
+                "safety",
+                "content_sha256",
+            },
+        ),
+    }
+    decoded, raw = _decode_canonical_envelope(value, name=name)
+    version = decoded.get("contract_version")
+    spec = specs.get(str(version))
+    if spec is None or set(decoded) != spec[1] or decoded.get("safety") != SAFETY:
+        raise ValueError("accepted holdout authority projection contract differs")
+    payload = {
+        key: deepcopy(child)
+        for key, child in decoded.items()
+        if key not in {"artifact_id", "content_sha256"}
+    }
+    semantic_sha = hashlib.sha256(
+        str(version).encode("utf-8") + b"\0" + canonical_bytes(payload)
+    ).hexdigest()
+    if (
+        decoded.get("artifact_id") != f"{spec[0]}/{semantic_sha}"
+        or decoded.get("content_sha256")
+        != hashlib.sha256(
+            canonical_bytes(
+                {key: child for key, child in decoded.items() if key != "content_sha256"}
+            )
+        ).hexdigest()
+    ):
+        raise ValueError("accepted holdout authority projection identity differs")
+    ref = {
+        "id": str(decoded["artifact_id"]),
+        "content_sha256": str(decoded["content_sha256"]),
+    }
+    if not isinstance(value, Mapping) or value.get("ref") != ref:
+        raise ValueError("accepted holdout authority projection envelope differs")
+    del raw
+    return decoded, ref
+
+
+def _accepted_regression_precondition_envelope(
+    value: object,
+) -> tuple[dict[str, object], dict[str, str]]:
+    from app.learn.hybrid.benchmark_v2_public_score import (
+        validate_private_scorer_public_ref_v3,
+    )
+
+    decoded, raw = _decode_canonical_envelope(
+        value, name="regression score precondition"
+    )
+    validated = validate_private_scorer_public_ref_v3(decoded)
+    binding = validated.get("score_input_binding")
+    if (
+        validated.get("status") != "PASS"
+        or not isinstance(binding, Mapping)
+        or binding.get("partition") != "regression"
+    ):
+        raise ValueError("regression score precondition is not regression PASS")
+    ref = {
+        "contract_version": "private_scorer_public_ref_v3",
+        "file_sha256": hashlib.sha256(raw + b"\n").hexdigest(),
+        "content_sha256": str(validated["content_sha256"]),
+    }
+    if not isinstance(value, Mapping) or value.get("ref") != ref:
+        raise ValueError("regression score precondition ref differs")
+    return validated, ref
+
+
+def _validate_holdout_public_authority_lineage(
+    *,
+    authorization_ref: Mapping[str, object],
+    claim_ref: Mapping[str, object],
+    attempt_ref: Mapping[str, object],
+    authority_evidence: Mapping[str, object],
+) -> str:
+    authority_fields = {
+        "authorization_public_projection_envelope",
+        "claim_public_projection_envelope",
+        "file_anchor_public_projection_envelope",
+        "registry_anchor_public_projection_envelope",
+    }
+    if set(authority_evidence) != authority_fields:
+        raise ValueError("accepted holdout authority lineage differs")
+    decoded = {
+        field: _accepted_holdout_authority_envelope(
+            authority_evidence[field], name=field
+        )[0]
+        for field in authority_fields
+    }
+    authorization = decoded["authorization_public_projection_envelope"]
+    claim = decoded["claim_public_projection_envelope"]
+    file_anchor = decoded["file_anchor_public_projection_envelope"]
+    registry_anchor = decoded["registry_anchor_public_projection_envelope"]
+    authorization_projection_ref = authority_evidence[
+        "authorization_public_projection_envelope"
+    ]["ref"]
+    claim_id = str(authorization.get("claim_id") or "")
+    attempt_id = str(claim.get("attempt_id") or "")
+    authorization_id = str(authorization_ref.get("authorization_id") or "")
+    authorization_envelope_sha256 = str(
+        authorization_ref.get("envelope_sha256") or ""
+    )
+    claim_envelope_sha256 = str(claim_ref.get("envelope_sha256") or "")
+    expected_attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + authorization_envelope_sha256
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        set(authorization_ref) != {"authorization_id", "envelope_sha256"}
+        or set(claim_ref) != {"id", "envelope_sha256"}
+        or set(attempt_ref) != {"id", "content_sha256"}
+        or not all(
+            isinstance(value, str)
+            for value in (
+                authorization_ref.get("authorization_id"),
+                authorization_ref.get("envelope_sha256"),
+                claim_ref.get("id"),
+                claim_ref.get("envelope_sha256"),
+                attempt_ref.get("id"),
+                attempt_ref.get("content_sha256"),
+                authorization.get("claim_id"),
+                claim.get("attempt_id"),
+            )
+        )
+        or re.fullmatch(r"holdout-authorization/[0-9a-f]{64}", authorization_id)
+        is None
+        or re.fullmatch(r"[0-9a-f]{64}", authorization_envelope_sha256) is None
+        or re.fullmatch(r"[0-9a-f]{64}", claim_id) is None
+        or authorization_id != "holdout-authorization/" + claim_id
+        or claim_ref.get("id") != "holdout-claim/" + claim_id
+        or re.fullmatch(r"[0-9a-f]{64}", claim_envelope_sha256) is None
+        or re.fullmatch(r"[0-9a-f]{64}", attempt_id) is None
+        or attempt_id != expected_attempt_id
+        or attempt_ref.get("id") != "holdout-runner-attempt/" + attempt_id
+        or re.fullmatch(r"[0-9a-f]{64}", str(attempt_ref.get("content_sha256") or ""))
+        is None
+        or authorization_ref
+        != {
+            "authorization_id": authorization.get("authorization_id"),
+            "envelope_sha256": authorization.get("envelope_sha256"),
+        }
+        or claim_ref != claim.get("claim_ref")
+        or registry_anchor.get("claim_ref") != claim_ref
+        or claim.get("authorization_projection_ref")
+        != authorization_projection_ref
+        or claim.get("claim_id") != claim_id
+        or file_anchor.get("claim_id") != claim_id
+        or registry_anchor.get("claim_id") != claim_id
+        or file_anchor.get("authorization_envelope_sha256")
+        != authorization_envelope_sha256
+        or registry_anchor.get("authorization_envelope_sha256")
+        != authorization_envelope_sha256
+        or claim.get("state") != "consumed"
+        or registry_anchor.get("state") != "consumed"
+        or file_anchor.get("anchor_kind") != "win32_zero_byte_claim_sentinel"
+        or isinstance(file_anchor.get("size_bytes"), bool)
+        or not isinstance(file_anchor.get("size_bytes"), int)
+        or file_anchor.get("size_bytes") != 0
+        or file_anchor.get("verified") is not True
+        or registry_anchor.get("anchor_kind") != "hkcu_claim_registry_envelope"
+        or registry_anchor.get("envelope_verified") is not True
+    ):
+        raise ValueError("accepted holdout authority lineage differs")
+    return attempt_id
+
+
+def validate_benchmark_v2_accepted_holdout_score_input_v1(
+    value: object,
+) -> dict[str, object]:
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID, PARENT_REF
+
+    if not isinstance(value, Mapping):
+        raise ValueError("accepted holdout score input must be an object")
+    accepted = deepcopy(dict(value))
+    expected = {
+        "contract_version",
+        "content_sha256",
+        "benchmark_release_id",
+        "partition",
+        "corpus_parent_ref",
+        "provider_manifest_ref",
+        "provider_corpus_ref",
+        "selection_policy",
+        "attempt_ref",
+        "attempt_ledger_ref",
+        "automatic_prediction_ref",
+        "selected_lifecycle_ref",
+        "verified_parent_projections",
+        "prediction_run_envelope",
+        "lifecycle_bundle_envelope",
+        "regression_score_precondition_envelope",
+        "holdout_authority_evidence",
+        "holdout_authorization_ref",
+        "holdout_claim_ref",
+        "safety",
+    }
+    if (
+        set(accepted) != expected
+        or accepted.get("contract_version")
+        != "benchmark_v2_accepted_holdout_score_input_v1"
+        or accepted.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
+        or accepted.get("partition") != "holdout"
+        or accepted.get("selection_policy")
+        != "unique_claim_bound_holdout_attempt"
+        or accepted.get("corpus_parent_ref") != PARENT_REF
+        or accepted.get("safety") != SAFETY
+        or accepted.get("content_sha256")
+        != hashlib.sha256(
+            canonical_bytes(
+                {key: child for key, child in accepted.items() if key != "content_sha256"}
+            )
+        ).hexdigest()
+    ):
+        raise ValueError("accepted holdout score input contract is invalid")
+    _accepted_regression_precondition_envelope(
+        accepted["regression_score_precondition_envelope"]
+    )
+    authorization_ref = accepted.get("holdout_authorization_ref")
+    claim_ref = accepted.get("holdout_claim_ref")
+    if (
+        not isinstance(authorization_ref, Mapping)
+        or set(authorization_ref) != {"authorization_id", "envelope_sha256"}
+        or not isinstance(claim_ref, Mapping)
+        or set(claim_ref) != {"id", "envelope_sha256"}
+    ):
+        raise ValueError("accepted holdout pathless authority refs are invalid")
+    authority = accepted.get("holdout_authority_evidence")
+    if not isinstance(authority, Mapping):
+        raise ValueError("accepted holdout authority evidence differs")
+    if not isinstance(accepted.get("attempt_ref"), Mapping):
+        raise ValueError("accepted holdout claim-bound attempt differs")
+    _validate_holdout_public_authority_lineage(
+        authorization_ref=authorization_ref,
+        claim_ref=claim_ref,
+        attempt_ref=accepted["attempt_ref"],
+        authority_evidence=authority,
+    )
+
+    prediction, prediction_ref = _accepted_envelope(
+        accepted["prediction_run_envelope"], name="accepted holdout prediction run"
+    )
+    lifecycle, lifecycle_ref = _accepted_envelope(
+        accepted["lifecycle_bundle_envelope"], name="accepted holdout lifecycle bundle"
+    )
+    del lifecycle_ref
+    if (
+        prediction.get("contract_version") != "benchmark_v2_prediction_run_v3"
+        or lifecycle.get("contract_version") != "benchmark_v2_lifecycle_bundle_v3"
+        or prediction.get("partition") != "holdout"
+        or lifecycle.get("partition") != "holdout"
+    ):
+        raise ValueError("accepted holdout v3 bundle contract differs")
+    prediction_by_ref, prediction_children = _accepted_closure_index(
+        prediction, name="accepted holdout prediction run"
+    )
+    lifecycle_by_ref, lifecycle_children = _accepted_closure_index(
+        lifecycle, name="accepted holdout lifecycle bundle"
+    )
+    shared_versions = {
+        "benchmark_v2_holdout_runner_event_verified_projection_v1",
+        "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+        "benchmark_v2_holdout_projected_attempt_ledger_v1",
+        "benchmark_v2_holdout_actual_result_verified_projection_v1",
+    }
+    prediction_shared = {
+        key: envelope
+        for key, (item, envelope) in prediction_by_ref.items()
+        if item.get("contract_version") in shared_versions
+    }
+    lifecycle_shared = {
+        key: envelope
+        for key, (item, envelope) in lifecycle_by_ref.items()
+        if item.get("contract_version") in shared_versions
+    }
+    shared_counts = {
+        version: sum(
+            item.get("contract_version") == version for item in prediction_children
+        )
+        for version in shared_versions
+    }
+    if (
+        prediction_shared != lifecycle_shared
+        or shared_counts.get(
+            "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        )
+        != 4
+        or any(
+            shared_counts[version] != 1
+            for version in shared_versions
+            if version != "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        )
+    ):
+        raise ValueError("accepted holdout shared closure differs")
+
+    parents = accepted.get("verified_parent_projections")
+    parent_contracts = {
+        "runner_ledger_prefix_projection_envelope": "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+        "attempt_journal_projection_envelope": "benchmark_v2_attempt_journal_verified_projection_v1",
+        "actual_body_projection_envelope": "benchmark_v2_actual_body_verified_projection_v1",
+        "actual_result_projection_envelope": "benchmark_v2_holdout_actual_result_verified_projection_v1",
+    }
+    if not isinstance(parents, Mapping) or set(parents) != set(parent_contracts):
+        raise ValueError("accepted holdout verified parents differ")
+    decoded_parents: dict[str, dict[str, object]] = {}
+    parent_refs: dict[str, dict[str, object]] = {}
+    for field, contract in parent_contracts.items():
+        decoded, ref = _accepted_envelope(parents[field], name=field)
+        if decoded.get("contract_version") != contract:
+            raise ValueError("accepted holdout verified parent contract differs")
+        decoded_parents[field] = decoded
+        parent_refs[field] = ref
+    prefix = decoded_parents["runner_ledger_prefix_projection_envelope"]
+    journal = decoded_parents["attempt_journal_projection_envelope"]
+    body = decoded_parents["actual_body_projection_envelope"]
+    result = decoded_parents["actual_result_projection_envelope"]
+
+    def resolve(
+        index: Mapping[bytes, tuple[dict[str, object], dict[str, object]]],
+        ref: object,
+        contract: str,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        if not isinstance(ref, Mapping):
+            raise ValueError("accepted holdout child ref is invalid")
+        found = index.get(canonical_bytes(ref))
+        if found is None or found[0].get("contract_version") != contract:
+            raise ValueError("accepted holdout child ref is unresolved")
+        return found
+
+    ledger, _ = resolve(
+        prediction_by_ref,
+        accepted["attempt_ledger_ref"],
+        "benchmark_v2_holdout_projected_attempt_ledger_v1",
+    )
+    automatic, _ = resolve(
+        prediction_by_ref,
+        accepted["automatic_prediction_ref"],
+        "automatic_prediction_v3",
+    )
+    pre_result, pre_result_envelope = resolve(
+        prediction_by_ref,
+        ledger["pre_result_verification_ref"],
+        "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+    )
+    events = sorted(
+        (
+            item
+            for item in prediction_children
+            if item.get("contract_version")
+            == "benchmark_v2_holdout_runner_event_verified_projection_v1"
+        ),
+        key=lambda item: int(item["sequence"]),
+    )
+    event_refs = [pathless_artifact_ref(item) for item in events]
+    cleanup_lifecycle, _ = resolve(
+        lifecycle_by_ref,
+        events[2]["load_bearing_refs"]["cleanup_projection_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    selected_lifecycle, _ = resolve(
+        lifecycle_by_ref,
+        accepted["selected_lifecycle_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1",
+    )
+    if (
+        prediction.get("benchmark_release_id") != accepted["benchmark_release_id"]
+        or lifecycle.get("benchmark_release_id") != accepted["benchmark_release_id"]
+        or prediction.get("corpus_parent_ref") != accepted["corpus_parent_ref"]
+        or prediction.get("provider_manifest_ref") != accepted["provider_manifest_ref"]
+        or prediction.get("provider_corpus_ref") != accepted["provider_corpus_ref"]
+        or any(
+            outer.get("attempt_ref") != accepted["attempt_ref"]
+            for outer in (prediction, lifecycle)
+        )
+        or any(
+            outer.get("projected_attempt_ledger_ref")
+            != accepted["attempt_ledger_ref"]
+            for outer in (prediction, lifecycle)
+        )
+        or prediction.get("automatic_prediction_ref")
+        != accepted["automatic_prediction_ref"]
+        or any(
+            outer.get("selected_lifecycle_ref")
+            != accepted["selected_lifecycle_ref"]
+            for outer in (prediction, lifecycle)
+        )
+        or any(
+            outer.get("raw_ledger_prefix_verification_ref")
+            != parent_refs["runner_ledger_prefix_projection_envelope"]
+            for outer in (prediction, lifecycle)
+        )
+        or prefix.get("authorization_ref") != authorization_ref
+        or prefix.get("claim_ref") != claim_ref
+        or prefix.get("attempt_ref") != accepted["attempt_ref"]
+        or prefix.get("pre_result_verification_ref")
+        != pathless_artifact_ref(pre_result)
+        or prefix.get("event_projection_refs") != event_refs
+        or prefix.get("terminal_event_projection_ref") != event_refs[-1]
+        or prefix.get("selection_eligible") is not True
+        or pre_result.get("authorization_ref") != authorization_ref
+        or pre_result.get("claim_ref") != claim_ref
+        or pre_result.get("attempt_ref") != accepted["attempt_ref"]
+        or ledger.get("authorization_ref") != authorization_ref
+        or ledger.get("claim_ref") != claim_ref
+        or ledger.get("selected_attempt_ref") != accepted["attempt_ref"]
+        or len(ledger.get("entries", [])) != 1
+        or ledger["entries"][0].get("event_projection_refs") != event_refs
+        or result.get("attempt_ref") != accepted["attempt_ref"]
+        or result.get("pre_result_verification_ref") != pathless_artifact_ref(pre_result)
+        or result.get("runner_ledger_prefix_projection_ref")
+        != parent_refs["runner_ledger_prefix_projection_envelope"]
+        or result.get("result_event_projection_ref") != event_refs[-1]
+        or prediction_shared.get(canonical_bytes(pathless_artifact_ref(pre_result)))
+        != pre_result_envelope
+        or lifecycle_shared.get(canonical_bytes(pathless_artifact_ref(pre_result)))
+        != pre_result_envelope
+        or prediction_shared.get(
+            canonical_bytes(parent_refs["runner_ledger_prefix_projection_envelope"])
+        )
+        != parents["runner_ledger_prefix_projection_envelope"]
+        or lifecycle_shared.get(
+            canonical_bytes(parent_refs["runner_ledger_prefix_projection_envelope"])
+        )
+        != parents["runner_ledger_prefix_projection_envelope"]
+        or prediction_shared.get(
+            canonical_bytes(parent_refs["actual_result_projection_envelope"])
+        )
+        != parents["actual_result_projection_envelope"]
+        or lifecycle_shared.get(
+            canonical_bytes(parent_refs["actual_result_projection_envelope"])
+        )
+        != parents["actual_result_projection_envelope"]
+        or any(event.get("authorization_ref") != authorization_ref for event in events)
+        or any(event.get("claim_ref") != claim_ref for event in events)
+        or any(event.get("attempt_ref") != accepted["attempt_ref"] for event in events)
+        or [event.get("event_kind") for event in events]
+        != ["opened", "body_complete", "cleanup", "result"]
+        or [event.get("sequence") for event in events] != [0, 1, 2, 3]
+        or cleanup_lifecycle.get("cleanup_stable_zero") is not True
+        or cleanup_lifecycle.get("resource_counts")
+        != {
+            "service_operations": 0,
+            "windows": 0,
+            "providers": 0,
+            "listeners": 0,
+            "leases": 0,
+        }
+        or selected_lifecycle.get("cleanup_stable_zero") is not True
+        or selected_lifecycle.get("attempt_ref") != accepted["attempt_ref"]
+        or journal.get("attempt_ref") != accepted["attempt_ref"]
+        or body.get("attempt_ref") != accepted["attempt_ref"]
+        or automatic.get("source_parent_ref")
+        != parent_refs["actual_body_projection_envelope"]
+        or result.get("body_projection_ref")
+        != parent_refs["actual_body_projection_envelope"]
+        or result.get("cleanup_projection_ref")
+        != pathless_artifact_ref(cleanup_lifecycle)
+    ):
+        raise ValueError("accepted holdout transitive lineage differs")
+
+    prediction_external = _prediction_external_refs(
+        prediction_run=prediction,
+        automatic=automatic,
+        artifacts=prediction_children,
+        runner_and_ledger_envelopes=[
+            envelope
+            for _, envelope in prediction_by_ref.values()
+            if envelope["ref"] in [item["ref"] for item in prediction["sealed_artifact_envelopes"]]
+        ],
+    )
+    validate_pathless_recursive(
+        registry_name="prediction_run_v3",
+        roots=[prediction_ref],
+        envelopes=[
+            deepcopy(dict(accepted["prediction_run_envelope"])),
+            *[deepcopy(dict(item)) for item in prediction["sealed_artifact_envelopes"]],
+        ],
+        external_refs=prediction_external,
+        context={"public_holdout": True},
+    )
+    verified_parent_external = {
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1.pre_result_verification_ref": prefix["pre_result_verification_ref"],
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1.terminal_event_projection_ref": prefix["terminal_event_projection_ref"],
+        "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1.event_projection_refs": prefix["event_projection_refs"],
+        "benchmark_v2_attempt_journal_verified_projection_v1.attempt_ref": journal["attempt_ref"],
+        "benchmark_v2_attempt_journal_verified_projection_v1.terminal_event_ref": journal["terminal_event_ref"],
+        "benchmark_v2_attempt_journal_verified_projection_v1.cleanup_projection_ref": journal["cleanup_projection_ref"],
+        "benchmark_v2_actual_body_verified_projection_v1.attempt_ref": body["attempt_ref"],
+        "benchmark_v2_actual_body_verified_projection_v1.pre_vista_evidence_refs": body["pre_vista_evidence_refs"],
+        "benchmark_v2_holdout_actual_result_verified_projection_v1.cleanup_projection_ref": result["cleanup_projection_ref"],
+        "benchmark_v2_holdout_actual_result_verified_projection_v1.pre_result_verification_ref": result["pre_result_verification_ref"],
+        "benchmark_v2_holdout_actual_result_verified_projection_v1.result_event_projection_ref": result["result_event_projection_ref"],
+    }
+    validate_pathless_recursive(
+        registry_name="verified_parents_v1",
+        roots=[parent_refs[field] for field in parent_contracts],
+        envelopes=[deepcopy(dict(parents[field])) for field in parent_contracts],
+        external_refs=verified_parent_external,
+        context={},
+    )
+    terminal = next(
+        (
+            item
+            for item in lifecycle_children
+            if item.get("contract_version")
+            == "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1"
+        ),
+        None,
+    )
+    screen_lifecycles = [
+        item
+        for item in lifecycle_children
+        if item.get("contract_version")
+        == "benchmark_v2_lifecycle_verified_projection_v1"
+        and item.get("lifecycle_kind") == "screen_group"
+    ]
+    if not isinstance(terminal, Mapping) or len(screen_lifecycles) != 12:
+        raise ValueError("accepted holdout lifecycle closure differs")
+    lifecycle_external = {
+        "benchmark_v2_lifecycle_bundle_v3.attempt_ref": accepted["attempt_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1.attempt_ref": accepted["attempt_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.cleanup_receipt_ref": cleanup_lifecycle["parent_refs"]["cleanup_receipt_ref"],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.actual_screen_group_ref": [
+            item["parent_refs"]["actual_screen_group_ref"]
+            for item in screen_lifecycles
+        ],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.provider_group_ref": [
+            item["parent_refs"]["provider_group_ref"] for item in screen_lifecycles
+        ],
+        "benchmark_v2_lifecycle_verified_projection_v1.parent_refs.attempt_journal_projection_ref": selected_lifecycle["parent_refs"]["attempt_journal_projection_ref"],
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1.attempt_ref": accepted["attempt_ref"],
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1.cleanup_receipt_ref": terminal["cleanup_receipt_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.attempt_ref": accepted["attempt_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.body_file_ref": events[1]["load_bearing_refs"]["body_file_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.cleanup_receipt_ref": events[2]["load_bearing_refs"]["cleanup_receipt_ref"],
+        "benchmark_v2_holdout_runner_event_verified_projection_v1.load_bearing_refs.result_file_ref": events[3]["load_bearing_refs"]["result_file_ref"],
+        "benchmark_v2_holdout_actual_result_verified_projection_v1.body_projection_ref": result["body_projection_ref"],
+    }
+    validate_pathless_recursive(
+        registry_name="lifecycle_bundle_v3",
+        roots=[pathless_artifact_ref(lifecycle)],
+        envelopes=[
+            deepcopy(dict(accepted["lifecycle_bundle_envelope"])),
+            *[deepcopy(dict(item)) for item in lifecycle["sealed_artifact_envelopes"]],
+        ],
+        external_refs=lifecycle_external,
+        context={},
+    )
+    return accepted
+
+
+def materialize_benchmark_v2_accepted_holdout_score_input_v1(
+    *,
+    actual_body_bytes: bytes,
+    actual_result_bytes: bytes,
+    cleanup_receipt_bytes: bytes,
+    expected_attempt_dir: Path,
+    provider_manifest_bytes: bytes,
+    provider_corpus_bytes: bytes,
+    attempt_events: Sequence[Mapping[str, object]],
+    attempt_events_jsonl_bytes: bytes,
+    attempt_journal_events: Sequence[Mapping[str, object]],
+    attempt_journal_jsonl_bytes: bytes,
+    native_authorization_ref: Mapping[str, object],
+    holdout_anchor_verification_result: Mapping[str, object],
+    regression_score_precondition_envelope: Mapping[str, object],
+) -> dict[str, object]:
+    """从固定 H1-H4 原始证据重新派生唯一可公开的 holdout 图。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        compose_benchmark_v2_holdout_lifecycle_bundle_v3,
+        materialize_benchmark_v2_holdout_attempt_projections,
+        _parse_exact_canonical_jsonl_snapshot,
+        project_benchmark_v2_attempt_journal,
+        project_benchmark_v2_attempt_journal_terminal_event,
+        project_benchmark_v2_attempt_lifecycle,
+        project_benchmark_v2_cleanup_lifecycle,
+        project_benchmark_v2_screen_group_lifecycles,
+    )
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    _accepted_regression_precondition_envelope(
+        regression_score_precondition_envelope
+    )
+    if (
+        not isinstance(native_authorization_ref, Mapping)
+        or set(native_authorization_ref)
+        != {"authorization_id", "envelope_sha256", "fixed_authorization_path"}
+        or not isinstance(native_authorization_ref.get("fixed_authorization_path"), str)
+        or not Path(str(native_authorization_ref["fixed_authorization_path"])).is_absolute()
+    ):
+        raise ValueError("holdout native authorization ref is invalid")
+    public_native_authorization_ref = {
+        "authorization_id": str(native_authorization_ref["authorization_id"]),
+        "envelope_sha256": str(native_authorization_ref["envelope_sha256"]),
+    }
+    anchor = deepcopy(dict(holdout_anchor_verification_result))
+    anchor_fields = {
+        "contract_version",
+        "authorization_ref",
+        "claim_ref",
+        "attempt_id",
+        "authority_projection_envelopes",
+        "safety",
+        "content_sha256",
+    }
+    if (
+        set(anchor) != anchor_fields
+        or anchor.get("contract_version")
+        != "benchmark_v2_holdout_anchor_verification_result_v1"
+        or anchor.get("authorization_ref") != public_native_authorization_ref
+        or anchor.get("safety") != SAFETY
+        or anchor.get("content_sha256")
+        != content_sha256(anchor)
+    ):
+        raise ValueError("holdout anchor verification result is invalid")
+    authority = anchor.get("authority_projection_envelopes")
+    authority_fields = {
+        "authorization_public_projection_envelope",
+        "claim_public_projection_envelope",
+        "file_anchor_public_projection_envelope",
+        "registry_anchor_public_projection_envelope",
+    }
+    if not isinstance(authority, Mapping) or set(authority) != authority_fields:
+        raise ValueError("holdout anchor authority projections differ")
+    for field in authority_fields:
+        _accepted_holdout_authority_envelope(authority[field], name=field)
+
+    body = _parse_holdout_actual_body_bytes(actual_body_bytes)
+    raw_attempt = body.get("attempt_ref")
+    if not isinstance(raw_attempt, Mapping):
+        raise ValueError("holdout body attempt ref is invalid")
+    claim_ref = anchor.get("claim_ref")
+    attempt_id = anchor.get("attempt_id")
+    claim_id = (
+        str(claim_ref.get("id")).split("/", 1)[1]
+        if isinstance(claim_ref, Mapping)
+        and isinstance(claim_ref.get("id"), str)
+        and str(claim_ref["id"]).startswith("holdout-claim/")
+        else ""
+    )
+    expected_attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + str(native_authorization_ref.get("envelope_sha256") or "")
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        raw_attempt.get("authorization_ref") != dict(native_authorization_ref)
+        or raw_attempt.get("claim_ref") != claim_ref
+        or raw_attempt.get("attempt_id") != attempt_id
+        or attempt_id != expected_attempt_id
+    ):
+        raise ValueError("holdout unique claim-bound attempt differs")
+
+    try:
+        cleanup_value = json.loads(cleanup_receipt_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("holdout cleanup receipt is not UTF-8 JSON") from error
+    if (
+        not isinstance(cleanup_value, Mapping)
+        or cleanup_receipt_bytes != canonical_bytes(cleanup_value) + b"\n"
+    ):
+        raise ValueError("holdout cleanup receipt bytes are not canonical")
+    cleanup = deepcopy(dict(cleanup_value))
+
+    verified_journal_events, raw_journal_lines = (
+        _parse_exact_canonical_jsonl_snapshot(
+            attempt_journal_jsonl_bytes,
+            expected_events=attempt_journal_events,
+            name="holdout attempt journal JSONL",
+        )
+    )
+
+    actual_body_projection = project_benchmark_v2_holdout_actual_body(
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+    )
+    cleanup_projection = project_benchmark_v2_cleanup_lifecycle(
+        attempt_ref=raw_attempt, cleanup_receipt=cleanup
+    )
+    terminal_projection = project_benchmark_v2_attempt_journal_terminal_event(
+        attempt_ref=raw_attempt,
+        journal_events=verified_journal_events,
+        cleanup_receipt=cleanup,
+        cleanup_projection=cleanup_projection,
+    )
+    journal_projection = project_benchmark_v2_attempt_journal(
+        attempt_ref=raw_attempt,
+        journal_events=verified_journal_events,
+        terminal_event_projection=terminal_projection,
+        cleanup_projection=cleanup_projection,
+    )
+    screen_lifecycles = project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=raw_attempt,
+        screen_group_projections=body["screen_group_results"],
+    )
+    selected_lifecycle = project_benchmark_v2_attempt_lifecycle(
+        attempt_ref=raw_attempt,
+        journal_events=verified_journal_events,
+        attempt_journal_projection=journal_projection,
+        cleanup_projection=cleanup_projection,
+        terminal_event_projection=terminal_projection,
+        screen_group_lifecycle_projections=screen_lifecycles,
+    )
+    materialization = materialize_benchmark_v2_holdout_attempt_projections(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        attempt_events=attempt_events,
+        attempt_events_jsonl_bytes=attempt_events_jsonl_bytes,
+        actual_body_bytes=actual_body_bytes,
+        actual_result_bytes=actual_result_bytes,
+        cleanup_receipt_bytes=cleanup_receipt_bytes,
+        expected_attempt_dir=expected_attempt_dir,
+        actual_body_projection=actual_body_projection,
+        cleanup_projection=cleanup_projection,
+        selected_lifecycle_projection=selected_lifecycle,
+    )
+    exact_journal_sha256 = hashlib.sha256(attempt_journal_jsonl_bytes).hexdigest()
+    if (
+        terminal_projection.get("raw_event_sha256")
+        != hashlib.sha256(raw_journal_lines[-1]).hexdigest()
+        or journal_projection.get("raw_journal_sha256") != exact_journal_sha256
+        or selected_lifecycle.get("raw_evidence_sha256") != exact_journal_sha256
+    ):
+        raise ValueError("holdout attempt journal JSONL hashes differ")
+    lifecycle_bundle = compose_benchmark_v2_holdout_lifecycle_bundle_v3(
+        benchmark_release_id=BENCHMARK_RELEASE_ID,
+        materialization=materialization,
+        attempt_ref=raw_attempt,
+        cleanup_lifecycle_projection=cleanup_projection,
+        journal_terminal_event_projection=terminal_projection,
+        selected_attempt_lifecycle_projection=selected_lifecycle,
+        screen_group_lifecycle_projections=screen_lifecycles,
+    )
+    prediction = materialize_prediction_run_v3(
+        actual_body_bytes=actual_body_bytes,
+        provider_manifest_bytes=provider_manifest_bytes,
+        provider_corpus_bytes=provider_corpus_bytes,
+        actual_body_verified_projection=actual_body_projection,
+        lifecycle_bundle_v3=lifecycle_bundle,
+    )
+    run = prediction.prediction_run
+    parents = {
+        "runner_ledger_prefix_projection_envelope": seal_pathless_envelope(
+            materialization.runner_ledger_prefix_projection
+        ),
+        "attempt_journal_projection_envelope": seal_pathless_envelope(
+            journal_projection
+        ),
+        "actual_body_projection_envelope": seal_pathless_envelope(
+            actual_body_projection
+        ),
+        "actual_result_projection_envelope": seal_pathless_envelope(
+            materialization.actual_result_projection
+        ),
+    }
+    accepted: dict[str, object] = {
+        "contract_version": "benchmark_v2_accepted_holdout_score_input_v1",
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "partition": "holdout",
+        "corpus_parent_ref": deepcopy(run["corpus_parent_ref"]),
+        "provider_manifest_ref": deepcopy(run["provider_manifest_ref"]),
+        "provider_corpus_ref": deepcopy(run["provider_corpus_ref"]),
+        "selection_policy": "unique_claim_bound_holdout_attempt",
+        "attempt_ref": deepcopy(run["attempt_ref"]),
+        "attempt_ledger_ref": deepcopy(run["projected_attempt_ledger_ref"]),
+        "automatic_prediction_ref": deepcopy(run["automatic_prediction_ref"]),
+        "selected_lifecycle_ref": deepcopy(run["selected_lifecycle_ref"]),
+        "verified_parent_projections": parents,
+        "prediction_run_envelope": deepcopy(prediction.prediction_run_envelope),
+        "lifecycle_bundle_envelope": seal_pathless_envelope(lifecycle_bundle),
+        "regression_score_precondition_envelope": deepcopy(
+            dict(regression_score_precondition_envelope)
+        ),
+        "holdout_authority_evidence": deepcopy(dict(authority)),
+        "holdout_authorization_ref": {
+            **public_native_authorization_ref,
+        },
+        "holdout_claim_ref": deepcopy(dict(claim_ref)),
+        "safety": deepcopy(SAFETY),
+    }
+    accepted["content_sha256"] = hashlib.sha256(canonical_bytes(accepted)).hexdigest()
+    return validate_benchmark_v2_accepted_holdout_score_input_v1(accepted)
 
 
 def materialize_benchmark_v2_accepted_regression_score_input_v2(

@@ -30,8 +30,245 @@ SAFETY = {
 SHA = "a" * 64
 
 
+HOLDOUT_AUTHORIZATION_REF = {
+    "authorization_id": "holdout-authorization/" + "1" * 64,
+    "envelope_sha256": "2" * 64,
+}
+HOLDOUT_CLAIM_REF = {
+    "id": "holdout-claim/" + "1" * 64,
+    "envelope_sha256": "3" * 64,
+}
+HOLDOUT_ATTEMPT_REF = {
+    "id": "holdout-runner-attempt/" + "4" * 64,
+    "content_sha256": "5" * 64,
+}
+
+
 def _ref(identifier: str) -> dict[str, str]:
     return {"id": identifier, "content_sha256": SHA}
+
+
+@pytest.mark.parametrize(
+    ("contract_version", "prefix", "payload", "fields"),
+    [
+        (
+            "benchmark_v2_holdout_runner_event_verified_projection_v1",
+            "verified-holdout-runner-event",
+            {
+                "partition": "holdout",
+                "event_kind": "opened",
+                "sequence": 0,
+                "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "authorization_ref": HOLDOUT_AUTHORIZATION_REF,
+                "claim_ref": HOLDOUT_CLAIM_REF,
+                "previous_event_projection_ref": None,
+                "raw_event_sha256": "6" * 64,
+                "load_bearing_refs": {"attempt_ref": HOLDOUT_ATTEMPT_REF},
+                "safety": SAFETY,
+            },
+            {
+                "contract_version", "artifact_id", "partition", "event_kind",
+                "sequence", "attempt_ref", "authorization_ref", "claim_ref",
+                "previous_event_projection_ref", "raw_event_sha256",
+                "load_bearing_refs", "safety", "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_attempt_ledger_pre_result_verified_projection_v1",
+            "verified-holdout-pre-result",
+            {
+                "partition": "holdout",
+                "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "authorization_ref": HOLDOUT_AUTHORIZATION_REF,
+                "claim_ref": HOLDOUT_CLAIM_REF,
+                "raw_pre_result_ref_sha256": "6" * 64,
+                "raw_prefix_sha256": "7" * 64,
+                "terminal_sequence": 2,
+                "terminal_envelope_sha256": "8" * 64,
+                "cleanup_event_projection_ref": _ref("verified-holdout-runner-event/cleanup"),
+                "verified": True,
+                "safety": SAFETY,
+            },
+            {
+                "contract_version", "artifact_id", "partition", "attempt_ref",
+                "authorization_ref", "claim_ref", "raw_pre_result_ref_sha256",
+                "raw_prefix_sha256", "terminal_sequence",
+                "terminal_envelope_sha256", "cleanup_event_projection_ref",
+                "verified", "safety", "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_attempt_ledger_prefix_verified_projection_v1",
+            "verified-holdout-attempt-ledger-prefix",
+            {
+                "partition": "holdout",
+                "authorization_ref": HOLDOUT_AUTHORIZATION_REF,
+                "claim_ref": HOLDOUT_CLAIM_REF,
+                "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "raw_prefix_sha256": "7" * 64,
+                "pre_result_verification_ref": _ref("verified-holdout-pre-result/one"),
+                "terminal_sequence": 3,
+                "terminal_event_projection_ref": _ref("verified-holdout-runner-event/result"),
+                "event_projection_refs": [
+                    _ref(f"verified-holdout-runner-event/{kind}")
+                    for kind in ("opened", "body", "cleanup", "result")
+                ],
+                "selection_eligible": True,
+                "safety": SAFETY,
+            },
+            {
+                "contract_version", "artifact_id", "partition", "authorization_ref",
+                "claim_ref", "attempt_ref", "raw_prefix_sha256",
+                "pre_result_verification_ref", "terminal_sequence",
+                "terminal_event_projection_ref", "event_projection_refs",
+                "selection_eligible", "safety", "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_projected_attempt_ledger_v1",
+            "projected-holdout-attempt-ledger",
+            {
+                "benchmark_release_id": "portfolio-hybrid-v1-1-benchmark-v2",
+                "partition": "holdout",
+                "authorization_ref": HOLDOUT_AUTHORIZATION_REF,
+                "claim_ref": HOLDOUT_CLAIM_REF,
+                "raw_ledger_prefix_verification_ref": _ref("verified-holdout-attempt-ledger-prefix/one"),
+                "pre_result_verification_ref": _ref("verified-holdout-pre-result/one"),
+                "entries": [{
+                    "sequence": 0,
+                    "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                    "observed_state": "result",
+                    "event_projection_refs": [
+                        _ref(f"verified-holdout-runner-event/{kind}")
+                        for kind in ("opened", "body", "cleanup", "result")
+                    ],
+                    "lifecycle_ref": _ref("verified-lifecycle/one"),
+                    "selection_eligible": True,
+                }],
+                "selected_attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "selected_lifecycle_ref": _ref("verified-lifecycle/one"),
+                "safety": SAFETY,
+            },
+            {
+                "contract_version", "artifact_id", "benchmark_release_id",
+                "partition", "authorization_ref", "claim_ref",
+                "raw_ledger_prefix_verification_ref", "pre_result_verification_ref",
+                "entries", "selected_attempt_ref", "selected_lifecycle_ref",
+                "safety", "content_sha256",
+            },
+        ),
+        (
+            "benchmark_v2_holdout_actual_result_verified_projection_v1",
+            "verified-holdout-actual-result",
+            {
+                "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "result_contract_version": "benchmark_v2_holdout_runner_actual_result_v1",
+                "raw_file_sha256": "6" * 64,
+                "result_content_sha256": "7" * 64,
+                "body_projection_ref": _ref("verified-actual-body/one"),
+                "cleanup_projection_ref": _ref("verified-lifecycle/one"),
+                "pre_result_verification_ref": _ref("verified-holdout-pre-result/one"),
+                "runner_ledger_prefix_projection_ref": _ref("verified-holdout-attempt-ledger-prefix/one"),
+                "result_event_projection_ref": _ref("verified-holdout-runner-event/result"),
+                "verified": True,
+                "safety": SAFETY,
+            },
+            {
+                "contract_version", "artifact_id", "attempt_ref",
+                "result_contract_version", "raw_file_sha256",
+                "result_content_sha256", "body_projection_ref",
+                "cleanup_projection_ref", "pre_result_verification_ref",
+                "runner_ledger_prefix_projection_ref", "result_event_projection_ref",
+                "verified", "safety", "content_sha256",
+            },
+        ),
+    ],
+)
+def test_holdout_h5_distinct_pathless_contracts_use_exact_s11_identity(
+    contract_version: str,
+    prefix: str,
+    payload: dict[str, object],
+    fields: set[str],
+) -> None:
+    projection = seal_pathless_projection(
+        contract_version=contract_version,
+        semantic_payload=payload,
+    )
+    semantic_sha = hashlib.sha256(
+        contract_version.encode("utf-8")
+        + b"\0"
+        + _canonical({"contract_version": contract_version, **payload})
+    ).hexdigest()
+
+    assert set(projection) == fields
+    assert projection["artifact_id"] == f"{prefix}/{semantic_sha}"
+    envelope = seal_pathless_envelope(projection)
+    assert envelope["ref"] == pathless_artifact_ref(projection)
+    assert base64.b64decode(envelope["canonical_bytes_b64"], validate=True) == _canonical(
+        projection
+    )
+
+
+def test_h5_holdout_projected_ledger_rejects_bool_entry_sequence() -> None:
+    with pytest.raises(ValueError, match="sequence|integer"):
+        seal_pathless_projection(
+            contract_version="benchmark_v2_holdout_projected_attempt_ledger_v1",
+            semantic_payload={
+                "benchmark_release_id": "portfolio-hybrid-v1-1-benchmark-v2",
+                "partition": "holdout",
+                "authorization_ref": HOLDOUT_AUTHORIZATION_REF,
+                "claim_ref": HOLDOUT_CLAIM_REF,
+                "raw_ledger_prefix_verification_ref": _ref(
+                    "verified-holdout-attempt-ledger-prefix/one"
+                ),
+                "pre_result_verification_ref": _ref(
+                    "verified-holdout-pre-result/one"
+                ),
+                "entries": [
+                    {
+                        "sequence": False,
+                        "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                        "observed_state": "result",
+                        "event_projection_refs": [
+                            _ref(f"verified-holdout-runner-event/{kind}")
+                            for kind in ("opened", "body", "cleanup", "result")
+                        ],
+                        "lifecycle_ref": _ref("verified-lifecycle/one"),
+                        "selection_eligible": True,
+                    }
+                ],
+                "selected_attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "selected_lifecycle_ref": _ref("verified-lifecycle/one"),
+                "safety": SAFETY,
+            },
+        )
+
+
+def test_h5_shared_cleanup_lifecycle_rejects_bool_zero_count() -> None:
+    with pytest.raises(ValueError, match="resource|integer"):
+        seal_pathless_projection(
+            contract_version="benchmark_v2_lifecycle_verified_projection_v1",
+            semantic_payload={
+                "attempt_ref": HOLDOUT_ATTEMPT_REF,
+                "lifecycle_kind": "cleanup",
+                "raw_evidence_sha256": "1" * 64,
+                "terminal_status": "stable_zero",
+                "cleanup_stable_zero": True,
+                "resource_counts": {
+                    "service_operations": False,
+                    "windows": 0,
+                    "providers": 0,
+                    "listeners": 0,
+                    "leases": 0,
+                },
+                "started_request_count": 0,
+                "terminal_or_unknown_request_count": 0,
+                "parent_refs": {
+                    "cleanup_receipt_ref": _ref("attempt-cleanup-receipt/one")
+                },
+                "safety": SAFETY,
+            },
+        )
 
 
 def _case_ref() -> dict[str, str]:
