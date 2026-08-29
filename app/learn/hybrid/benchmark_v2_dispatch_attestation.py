@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
+import time
+from hashlib import sha256
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -63,6 +66,46 @@ _ACTIVE_RECEIPTS: ContextVar[list[dict[str, str]] | None] = ContextVar(
     "benchmark_v2_dispatch_receipts", default=None
 )
 _JOURNAL_LOCK = RLock()
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+_PROFILE_FIELDS = {"profile_id", "profile_sha256", "profile_payload_sha256"}
+_OMNI_CONFIGURATION_FIELDS = {
+    "contract_version",
+    "profile_id",
+    "interpreter_path",
+    "worker_script_path",
+    "code_path",
+    "weights_path",
+    "cache_path",
+    "minimum_free_gpu_gib",
+    "is_available",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_RUNTIME_PARENT_FIELDS = {
+    "contract_version",
+    "provider",
+    "operation_ref",
+    "dispatch_receipt_ref",
+    "runtime_identity",
+    "profile",
+    "installed_configuration_snapshot",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
+_COMMIT_MARKER_FIELDS = {
+    "contract_version",
+    "provider",
+    "operation_ref",
+    "dispatch_receipt_ref",
+    "runtime_parent_ref",
+    "journal_prefix_sha256",
+    "artifact_is_authorization",
+    "execute_binding_enabled",
+    "content_sha256",
+}
 
 
 def compose_benchmark_dispatch_context(
@@ -78,8 +121,10 @@ def compose_benchmark_dispatch_context(
     operation = _operation_ref(operation_ref)
     binding = _mapping(window_binding, "benchmark dispatch window binding")
     journal = Path(receipt_journal_path)
-    if not journal.is_absolute() or journal != journal.resolve():
+    if not journal.is_absolute() or journal != _lexical_absolute_path(journal):
         raise ValueError("benchmark dispatch receipt journal path is not canonical")
+    if journal != _fixed_dispatch_journal_path(operation):
+        raise ValueError("benchmark dispatch receipt journal path differs from fixed project root")
     body: dict[str, Any] = {
         "contract_version": "benchmark_v2_dispatch_context_v1",
         "provider": normalized_provider,
@@ -103,8 +148,10 @@ def validate_benchmark_dispatch_context(value: object) -> dict[str, Any]:
         context["window_binding"], "benchmark dispatch window binding"
     )
     journal = Path(_text(context["receipt_journal_path"], "receipt journal path"))
-    if not journal.is_absolute() or journal != journal.resolve():
+    if not journal.is_absolute() or journal != _lexical_absolute_path(journal):
         raise ValueError("benchmark dispatch receipt journal path is not canonical")
+    if journal != _fixed_dispatch_journal_path(context["operation_ref"]):
+        raise ValueError("benchmark dispatch receipt journal path differs from fixed project root")
     if (
         context["artifact_is_authorization"] is not False
         or context["execute_binding_enabled"] is not False
@@ -345,10 +392,13 @@ def attest_benchmark_provider_dispatch(
     window_ref = _content_ref(
         _attest_exact_window(binding), "benchmark dispatch window attestation"
     )
-    runtime_ref = _content_ref(
+    runtime_attestation = _validate_exact_provider_attestation(
+        normalized_provider,
         _attest_exact_provider_runtime(normalized_provider, runtime),
-        "benchmark dispatch provider attestation",
     )
+    runtime_ref = {
+        "content_sha256": runtime_attestation["runtime_identity"]["content_sha256"]
+    }
     refs = _ACTIVE_RECEIPTS.get()
     if refs is None:
         raise RuntimeError("benchmark dispatch receipt collector is unavailable")
@@ -366,7 +416,17 @@ def attest_benchmark_provider_dispatch(
         "execute_binding_enabled": False,
     }
     receipt["content_sha256"] = content_sha256(receipt)
-    _append_receipt(Path(context["receipt_journal_path"]), receipt)
+    parent = _compose_dispatch_runtime_parent(
+        provider=normalized_provider,
+        operation_ref=operation,
+        receipt=receipt,
+        runtime_attestation=runtime_attestation,
+    )
+    receipt = _commit_dispatch_transaction(
+        journal_path=Path(context["receipt_journal_path"]),
+        receipt=receipt,
+        runtime_parent=parent,
+    )
     refs.append(
         {
             "provider": normalized_provider,
@@ -406,7 +466,7 @@ def validate_benchmark_dispatch_receipt_refs(
     """从 durable journal 重建并验证服务采用的 dispatch receipt 集合。"""
 
     path = Path(receipt_journal_path)
-    if not path.is_absolute() or path != path.resolve() or not path.is_file():
+    if not path.is_absolute() or path != _lexical_absolute_path(path):
         raise ValueError("benchmark dispatch receipt journal is unavailable")
     if not isinstance(receipt_refs, list) or not receipt_refs:
         raise ValueError("benchmark dispatch receipt refs are missing")
@@ -435,6 +495,8 @@ def validate_benchmark_dispatch_receipt_refs(
     identity["capture_ref"] = _identity_ref(
         identity["capture_ref"], "dispatch identity capture ref"
     )
+    if path != _fixed_dispatch_journal_path(identity):
+        raise ValueError("benchmark dispatch receipt journal differs from fixed project root")
     expected = dict(expected_provider_counts)
     if not expected or any(provider not in _PROVIDERS for provider in expected):
         raise ValueError("benchmark dispatch expected providers are invalid")
@@ -463,14 +525,8 @@ def validate_benchmark_dispatch_receipt_refs(
 
     records: dict[str, dict[str, Any]] = {}
     journal_order: dict[str, int] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            record = _validate_dispatch_receipt(json.loads(line))
-        except (json.JSONDecodeError, TypeError, ValueError) as error:
-            raise ValueError("benchmark dispatch receipt journal is corrupt") from error
+    for record in _read_committed_dispatch_records(path):
         digest = record["content_sha256"]
-        if digest in records:
-            raise ValueError("benchmark dispatch receipt journal has duplicate rows")
         journal_order[digest] = len(journal_order)
         records[digest] = record
     selected: list[dict[str, Any]] = []
@@ -530,25 +586,8 @@ def read_latest_benchmark_dispatch_receipt(
 
     context = validate_benchmark_dispatch_context(dispatch_context)
     path = Path(context["receipt_journal_path"])
-    if not path.is_file():
-        return None
-    raw = path.read_bytes()
-    if not raw or not raw.endswith(b"\n"):
-        raise ValueError("benchmark dispatch receipt journal is incomplete")
     records: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for raw_line in raw.splitlines():
-        try:
-            decoded = json.loads(raw_line.decode("utf-8"))
-            if canonical_json_bytes(decoded) != raw_line:
-                raise ValueError("benchmark dispatch receipt row is not canonical")
-            receipt = _validate_dispatch_receipt(decoded)
-        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
-            raise ValueError("benchmark dispatch receipt journal is corrupt") from error
-        digest = receipt["content_sha256"]
-        if digest in seen:
-            raise ValueError("benchmark dispatch receipt journal has duplicate rows")
-        seen.add(digest)
+    for receipt in _read_committed_dispatch_records(path):
         if receipt["provider"] == context["provider"]:
             if receipt["operation_ref"] != context["operation_ref"]:
                 raise ValueError(
@@ -926,10 +965,9 @@ def _attest_exact_window(value: Mapping[str, object]) -> dict[str, str]:
 
 def _attest_exact_provider_runtime(
     provider: str, value: Mapping[str, object]
-) -> dict[str, str]:
+) -> dict[str, Any]:
     if provider == "qwen":
-        identity = _attest_qwen_runtime(value)
-        return {"content_sha256": identity["content_sha256"]}
+        return _attest_qwen_runtime(value)
     if provider == "vista":
         return _attest_vista_runtime(value)
     return _attest_scoped_process_runtime(value, expected_provider="omni")
@@ -963,7 +1001,9 @@ def _attest_qwen_runtime(value: Mapping[str, object]) -> dict[str, Any]:
     )
     from app.learn.hybrid.windows_process_scope import WindowsProcessScope
 
-    if content_sha256(_public_profile(profile)) != lease.get("profile_sha256"):
+    public_profile = _public_profile(profile)
+    profile_payload_sha256 = content_sha256(public_profile)
+    if profile_payload_sha256 != lease.get("profile_sha256"):
         raise ValueError("Qwen exact profile identity changed before dispatch")
     owner = _find_qwen_owner_record(str(lease.get("owner_request_id") or ""))
     if (
@@ -1001,7 +1041,7 @@ def _attest_qwen_runtime(value: Mapping[str, object]) -> dict[str, Any]:
     host = str(parsed.hostname or "")
     if not host or port <= 0 or process["pid"] not in _listening_pids_for_port(port):
         raise ValueError("Qwen exact listener ownership changed before dispatch")
-    return compose_benchmark_provider_runtime_identity(
+    identity = compose_benchmark_provider_runtime_identity(
         provider="qwen",
         lease_identity={
             "lease_id": lease["lease_id"],
@@ -1021,16 +1061,28 @@ def _attest_qwen_runtime(value: Mapping[str, object]) -> dict[str, Any]:
             "process_identities": [process],
         },
     )
+    return {
+        "runtime_identity": identity,
+        "profile": {
+            "profile_id": _text(lease["profile_id"], "Qwen profile id"),
+            "profile_sha256": _sha(lease["profile_sha256"], "Qwen profile SHA"),
+            "profile_payload_sha256": profile_payload_sha256,
+        },
+        "installed_configuration_snapshot": None,
+    }
 
 
 def _attest_scoped_process_runtime(
     value: Mapping[str, object], *, expected_provider: str
-) -> dict[str, str]:
+) -> dict[str, Any]:
     runtime = _mapping(value, "benchmark scoped provider runtime")
     if runtime.get("provider") != expected_provider:
         raise ValueError("benchmark scoped provider runtime provider mismatch")
     identity = _process_identity(runtime.get("process_identity"))
     scope_name = _text(runtime.get("scope_name"), "provider scope name")
+    snapshot = _validate_omni_installed_configuration_snapshot(
+        runtime.get("installed_configuration_snapshot")
+    )
     from app.core.model_server import _current_process_identity
     from app.learn.hybrid.windows_process_scope import WindowsProcessScope
 
@@ -1055,10 +1107,18 @@ def _attest_scoped_process_runtime(
             "process_identities": [identity],
         },
     )
-    return {"content_sha256": exact["content_sha256"]}
+    return {
+        "runtime_identity": exact,
+        "profile": {
+            "profile_id": snapshot["profile_id"],
+            "profile_sha256": snapshot["content_sha256"],
+            "profile_payload_sha256": snapshot["content_sha256"],
+        },
+        "installed_configuration_snapshot": snapshot,
+    }
 
 
-def _attest_vista_runtime(value: Mapping[str, object]) -> dict[str, str]:
+def _attest_vista_runtime(value: Mapping[str, object]) -> dict[str, Any]:
     lease = _mapping(value, "benchmark VISTA lease")
     if (
         lease.get("contract_version") != "hybrid_vista_model_lease_v2"
@@ -1119,13 +1179,14 @@ def _attest_vista_runtime(value: Mapping[str, object]) -> dict[str, str]:
     expected_pids = {item["pid"] for item in identities}
     if not listener_pids or not set(listener_pids).issubset(expected_pids):
         raise ValueError("VISTA listener socket ownership changed before dispatch")
+    profile_sha256 = content_sha256(profile)
     exact = compose_benchmark_provider_runtime_identity(
         provider="vista",
         lease_identity={
             "incarnation_id": lease["incarnation_id"],
             "lease_content_sha256": content_sha256(lease),
         },
-        profile_ref={"content_sha256": content_sha256(profile)},
+        profile_ref={"content_sha256": profile_sha256},
         listener_owner={
             "host": str(profile.get("host") or "127.0.0.1"),
             "port": port,
@@ -1138,18 +1199,666 @@ def _attest_vista_runtime(value: Mapping[str, object]) -> dict[str, str]:
             "process_identities": identities,
         },
     )
-    return {"content_sha256": exact["content_sha256"]}
+    return {
+        "runtime_identity": exact,
+        "profile": {
+            "profile_id": profile_id,
+            "profile_sha256": profile_sha256,
+            "profile_payload_sha256": profile_sha256,
+        },
+        "installed_configuration_snapshot": None,
+    }
+
+
+def _lexical_absolute_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _is_link_or_reparse(stat_result: os.stat_result) -> bool:
+    attributes = int(getattr(stat_result, "st_file_attributes", 0))
+    reparse_flag = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+    return stat.S_ISLNK(stat_result.st_mode) or bool(attributes & reparse_flag)
+
+
+def _assert_secure_dispatch_path(path: Path, *, final_may_be_missing: bool) -> Path:
+    root = _lexical_absolute_path(Path(PROJECT_ROOT))
+    candidate = _lexical_absolute_path(Path(path))
+    if not root.is_absolute() or candidate != Path(path):
+        raise ValueError("benchmark dispatch path is not lexical canonical absolute")
+    try:
+        root_observation = os.lstat(root)
+    except OSError as error:
+        raise ValueError("benchmark dispatch fixed project root is unavailable") from error
+    if _is_link_or_reparse(root_observation) or not stat.S_ISDIR(
+        root_observation.st_mode
+    ):
+        raise ValueError("benchmark dispatch fixed project root is unsafe")
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as error:
+        raise ValueError("benchmark dispatch path escapes fixed project root") from error
+    current = Path(root.anchor)
+    components = [current]
+    for part in root.parts[1:]:
+        current = current / part
+        components.append(current)
+    for part in relative.parts:
+        current = current / part
+        components.append(current)
+    for position, component in enumerate(components):
+        is_final = position == len(components) - 1
+        try:
+            observed = os.lstat(component)
+        except FileNotFoundError:
+            if is_final and not final_may_be_missing:
+                raise ValueError("benchmark dispatch final path is unavailable")
+            continue
+        except OSError as error:
+            raise ValueError("benchmark dispatch path cannot be inspected") from error
+        if _is_link_or_reparse(observed):
+            raise ValueError("benchmark dispatch path contains a symlink or reparse point")
+        if is_final:
+            if stat.S_ISREG(observed.st_mode) and observed.st_nlink != 1:
+                raise ValueError("benchmark dispatch final path is a hardlink")
+        elif not stat.S_ISDIR(observed.st_mode):
+            raise ValueError("benchmark dispatch ancestor is not a directory")
+    return candidate
+
+
+def _fixed_dispatch_journal_path(operation_ref: Mapping[str, object]) -> Path:
+    key = content_sha256(
+        {
+            name: operation_ref[name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    root = _lexical_absolute_path(Path(PROJECT_ROOT))
+    path = (
+        root
+        / "runtime_state"
+        / "benchmark-v2-provider-dispatch"
+        / f"{key}.jsonl"
+    )
+    return _assert_secure_dispatch_path(path, final_may_be_missing=True)
+
+
+def _dispatch_artifact_path(
+    operation_ref: Mapping[str, object], provider: str, dispatch_index: int, suffix: str
+) -> Path:
+    journal = _fixed_dispatch_journal_path(operation_ref)
+    path = journal.parent / f"{journal.stem}.{provider}.{dispatch_index}.{suffix}.json"
+    return _assert_secure_dispatch_path(path, final_may_be_missing=True)
+
+
+@contextmanager
+def _journal_process_lock(journal_path: Path) -> Iterator[None]:
+    """以 crash-released OS primitive 串行同一 journal 的跨进程事务。"""
+
+    journal = _assert_secure_dispatch_path(
+        Path(journal_path), final_may_be_missing=True
+    )
+    lock_path = _assert_secure_dispatch_path(
+        journal.with_name(journal.name + ".lock"), final_may_be_missing=True
+    )
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    _assert_secure_dispatch_path(lock_path.parent, final_may_be_missing=False)
+    if os.name == "nt":
+        with _windows_exclusive_file_lock(lock_path):
+            yield
+        return
+
+    import fcntl
+
+    flags = os.O_RDWR | os.O_CREAT
+    flags |= int(getattr(os, "O_NOFOLLOW", 0))
+    descriptor = os.open(lock_path, flags, 0o600)
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_nlink != 1
+            or _is_link_or_reparse(observed)
+        ):
+            raise ValueError("benchmark dispatch process lock is unsafe")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        _assert_secure_dispatch_path(lock_path, final_may_be_missing=False)
+        yield
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
+
+
+@contextmanager
+def _windows_exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+    import ctypes
+    from ctypes import wintypes
+
+    class _ByHandleFileInformation(ctypes.Structure):
+        _fields_ = [
+            ("dwFileAttributes", wintypes.DWORD),
+            ("ftCreationTime", wintypes.FILETIME),
+            ("ftLastAccessTime", wintypes.FILETIME),
+            ("ftLastWriteTime", wintypes.FILETIME),
+            ("dwVolumeSerialNumber", wintypes.DWORD),
+            ("nFileSizeHigh", wintypes.DWORD),
+            ("nFileSizeLow", wintypes.DWORD),
+            ("nNumberOfLinks", wintypes.DWORD),
+            ("nFileIndexHigh", wintypes.DWORD),
+            ("nFileIndexLow", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    get_information = kernel32.GetFileInformationByHandle
+    get_information.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ByHandleFileInformation),
+    ]
+    get_information.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+
+    deadline = time.monotonic() + 30.0
+    invalid_handle = wintypes.HANDLE(-1).value
+    handle = None
+    while handle is None:
+        candidate = create_file(
+            str(lock_path),
+            0x80000000 | 0x40000000,
+            0,
+            None,
+            4,
+            0x00000080 | 0x00200000,
+            None,
+        )
+        if candidate != invalid_handle:
+            handle = candidate
+            break
+        error_code = ctypes.get_last_error()
+        if error_code not in {32, 33} or time.monotonic() >= deadline:
+            raise OSError(error_code, "benchmark dispatch process lock failed")
+        time.sleep(0.01)
+    try:
+        information = _ByHandleFileInformation()
+        if not get_information(handle, ctypes.byref(information)):
+            error_code = ctypes.get_last_error()
+            raise OSError(error_code, "benchmark dispatch process lock inspection failed")
+        if (
+            information.dwFileAttributes & 0x400
+            or information.nNumberOfLinks != 1
+        ):
+            raise ValueError("benchmark dispatch process lock is unsafe")
+        _assert_secure_dispatch_path(lock_path, final_may_be_missing=False)
+        yield
+    finally:
+        close_handle(handle)
+
+
+def _validate_profile_identity(value: object) -> dict[str, str]:
+    profile = _closed(value, _PROFILE_FIELDS, "benchmark dispatch profile identity")
+    profile["profile_id"] = _text(profile["profile_id"], "dispatch profile id")
+    for name in ("profile_sha256", "profile_payload_sha256"):
+        profile[name] = _sha(profile[name], f"dispatch {name}")
+    if profile["profile_sha256"] != profile["profile_payload_sha256"]:
+        raise ValueError("benchmark dispatch profile payload identity differs")
+    return profile
+
+
+def _validate_omni_installed_configuration_snapshot(value: object) -> dict[str, Any]:
+    snapshot = _closed(
+        value,
+        _OMNI_CONFIGURATION_FIELDS,
+        "Omni installed configuration snapshot",
+    )
+    if snapshot["contract_version"] != "omniparser_installed_configuration_snapshot_v1":
+        raise ValueError("Omni installed configuration snapshot contract is invalid")
+    snapshot["profile_id"] = _text(snapshot["profile_id"], "Omni profile id")
+    for name in (
+        "interpreter_path",
+        "worker_script_path",
+        "code_path",
+        "weights_path",
+        "cache_path",
+    ):
+        path = Path(_text(snapshot[name], f"Omni {name}"))
+        if not path.is_absolute() or path != path.resolve():
+            raise ValueError(f"Omni {name} is not canonical")
+    minimum = snapshot["minimum_free_gpu_gib"]
+    if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 0:
+        raise ValueError("Omni minimum free GPU value is invalid")
+    if not isinstance(snapshot["is_available"], bool):
+        raise ValueError("Omni availability snapshot is invalid")
+    if (
+        snapshot["artifact_is_authorization"] is not False
+        or snapshot["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("Omni configuration snapshot cannot authorize actions")
+    _sha(snapshot["content_sha256"], "Omni configuration snapshot SHA")
+    if snapshot["content_sha256"] != content_sha256(snapshot):
+        raise ValueError("Omni configuration snapshot seal is invalid")
+    return snapshot
+
+
+def _validate_exact_provider_attestation(
+    provider: str, value: object
+) -> dict[str, Any]:
+    attestation = _closed(
+        value,
+        {"runtime_identity", "profile", "installed_configuration_snapshot"},
+        "benchmark exact provider attestation",
+    )
+    identity = validate_benchmark_provider_runtime_identity(
+        attestation["runtime_identity"]
+    )
+    if identity["provider"] != provider:
+        raise ValueError("benchmark exact provider runtime differs")
+    profile = _validate_profile_identity(attestation["profile"])
+    snapshot = attestation["installed_configuration_snapshot"]
+    if provider == "omni":
+        snapshot = _validate_omni_installed_configuration_snapshot(snapshot)
+        if (
+            profile["profile_id"] != snapshot["profile_id"]
+            or profile["profile_sha256"] != snapshot["content_sha256"]
+            or profile["profile_payload_sha256"] != snapshot["content_sha256"]
+        ):
+            raise ValueError("Omni installed profile identity differs")
+    elif snapshot is not None:
+        raise ValueError("managed provider has unexpected Omni configuration snapshot")
+    if identity["profile_ref"] is not None and identity["profile_ref"] != {
+        "content_sha256": profile["profile_sha256"]
+    }:
+        raise ValueError("benchmark runtime and profile identity differ")
+    return {
+        "runtime_identity": identity,
+        "profile": profile,
+        "installed_configuration_snapshot": snapshot,
+    }
+
+
+def _compose_dispatch_runtime_parent(
+    *,
+    provider: str,
+    operation_ref: Mapping[str, object],
+    receipt: Mapping[str, object],
+    runtime_attestation: Mapping[str, object],
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "contract_version": "benchmark_v2_dispatch_runtime_parent_v1",
+        "provider": provider,
+        "operation_ref": deepcopy(dict(operation_ref)),
+        "dispatch_receipt_ref": {"content_sha256": receipt["content_sha256"]},
+        "runtime_identity": deepcopy(runtime_attestation["runtime_identity"]),
+        "profile": deepcopy(runtime_attestation["profile"]),
+        "installed_configuration_snapshot": deepcopy(
+            runtime_attestation["installed_configuration_snapshot"]
+        ),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_dispatch_runtime_parent(body)
+
+
+def _validate_dispatch_runtime_parent(value: object) -> dict[str, Any]:
+    parent = _closed(value, _RUNTIME_PARENT_FIELDS, "benchmark dispatch runtime parent")
+    if parent["contract_version"] != "benchmark_v2_dispatch_runtime_parent_v1":
+        raise ValueError("benchmark dispatch runtime parent contract is invalid")
+    parent["provider"] = _provider(parent["provider"])
+    parent["operation_ref"] = _operation_ref(parent["operation_ref"])
+    parent["dispatch_receipt_ref"] = _content_ref(
+        parent["dispatch_receipt_ref"], "dispatch runtime parent receipt ref"
+    )
+    exact = _validate_exact_provider_attestation(
+        parent["provider"],
+        {
+            "runtime_identity": parent["runtime_identity"],
+            "profile": parent["profile"],
+            "installed_configuration_snapshot": parent[
+                "installed_configuration_snapshot"
+            ],
+        },
+    )
+    parent.update(exact)
+    if (
+        parent["artifact_is_authorization"] is not False
+        or parent["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark dispatch runtime parent cannot authorize actions")
+    _sha(parent["content_sha256"], "dispatch runtime parent SHA")
+    if parent["content_sha256"] != content_sha256(parent):
+        raise ValueError("benchmark dispatch runtime parent content SHA mismatch")
+    return parent
+
+
+def _compose_dispatch_commit_marker(
+    *,
+    receipt: Mapping[str, object],
+    runtime_parent: Mapping[str, object],
+    journal_prefix: bytes,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "contract_version": "benchmark_v2_dispatch_commit_marker_v1",
+        "provider": receipt["provider"],
+        "operation_ref": deepcopy(receipt["operation_ref"]),
+        "dispatch_receipt_ref": {"content_sha256": receipt["content_sha256"]},
+        "runtime_parent_ref": {
+            "content_sha256": runtime_parent["content_sha256"]
+        },
+        "journal_prefix_sha256": sha256(journal_prefix).hexdigest(),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_dispatch_commit_marker(body)
+
+
+def _validate_dispatch_commit_marker(value: object) -> dict[str, Any]:
+    marker = _closed(value, _COMMIT_MARKER_FIELDS, "benchmark dispatch commit marker")
+    if marker["contract_version"] != "benchmark_v2_dispatch_commit_marker_v1":
+        raise ValueError("benchmark dispatch commit marker contract is invalid")
+    marker["provider"] = _provider(marker["provider"])
+    marker["operation_ref"] = _operation_ref(marker["operation_ref"])
+    for name in ("dispatch_receipt_ref", "runtime_parent_ref"):
+        marker[name] = _content_ref(marker[name], f"dispatch commit marker {name}")
+    _sha(marker["journal_prefix_sha256"], "dispatch journal prefix SHA")
+    if (
+        marker["artifact_is_authorization"] is not False
+        or marker["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark dispatch commit marker cannot authorize actions")
+    _sha(marker["content_sha256"], "dispatch commit marker SHA")
+    if marker["content_sha256"] != content_sha256(marker):
+        raise ValueError("benchmark dispatch commit marker content SHA mismatch")
+    return marker
+
+
+def _read_canonical_artifact(
+    path: Path, validator: Any, name: str
+) -> dict[str, Any]:
+    try:
+        _assert_secure_dispatch_path(path, final_may_be_missing=False)
+        raw = path.read_bytes()
+        if not raw.endswith(b"\n") or raw.count(b"\n") != 1:
+            raise ValueError(f"{name} is not canonical")
+        decoded = json.loads(raw[:-1].decode("utf-8"))
+        if canonical_json_bytes(decoded) + b"\n" != raw:
+            raise ValueError(f"{name} is not canonical")
+        return validator(decoded)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+        if isinstance(error, ValueError) and str(error).startswith(name):
+            raise
+        raise ValueError(f"{name} is corrupt") from error
+
+
+def _write_create_or_identical(path: Path, value: Mapping[str, object], name: str) -> None:
+    raw = canonical_json_bytes(dict(value)) + b"\n"
+    _assert_secure_dispatch_path(path, final_may_be_missing=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _assert_secure_dispatch_path(path.parent, final_may_be_missing=False)
+    try:
+        with path.open("xb", buffering=0) as stream:
+            written = stream.write(raw)
+            if written != len(raw):
+                raise OSError(f"{name} short write")
+            stream.flush()
+            os.fsync(stream.fileno())
+        _assert_secure_dispatch_path(path, final_may_be_missing=False)
+    except FileExistsError:
+        _assert_secure_dispatch_path(path, final_may_be_missing=False)
+        if path.read_bytes() != raw:
+            raise ValueError(f"existing {name} is different")
+        with path.open("ab", buffering=0) as stream:
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
+def _publish_commit_marker(
+    path: Path, value: Mapping[str, object]
+) -> None:
+    name = "benchmark dispatch commit marker"
+    raw = canonical_json_bytes(dict(value)) + b"\n"
+    _assert_secure_dispatch_path(path, final_may_be_missing=True)
+    if path.exists():
+        existing = _read_canonical_artifact(
+            path, _validate_dispatch_commit_marker, name
+        )
+        if existing != dict(value) or path.read_bytes() != raw:
+            raise ValueError(f"existing {name} is different")
+        return
+
+    pending = path.with_name(path.name + ".pending")
+    _assert_secure_dispatch_path(pending, final_may_be_missing=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _assert_secure_dispatch_path(path.parent, final_may_be_missing=False)
+    try:
+        if pending.exists():
+            _assert_secure_dispatch_path(pending, final_may_be_missing=False)
+            if pending.read_bytes() != raw:
+                raise ValueError(f"existing pending {name} is different")
+            with pending.open("ab", buffering=0) as stream:
+                stream.flush()
+                os.fsync(stream.fileno())
+        else:
+            try:
+                with pending.open("xb", buffering=0) as stream:
+                    written = stream.write(raw)
+                    if written != len(raw):
+                        raise OSError(f"{name} short write")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            except BaseException:
+                try:
+                    pending.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+        _assert_secure_dispatch_path(pending, final_may_be_missing=False)
+        try:
+            os.link(pending, path, follow_symlinks=False)
+        except FileExistsError as error:
+            raise ValueError(f"existing {name} appeared during publish") from error
+        try:
+            pending.unlink()
+        except OSError:
+            try:
+                path.unlink(missing_ok=True)
+            finally:
+                raise
+        _assert_secure_dispatch_path(path, final_may_be_missing=False)
+    finally:
+        if not path.exists():
+            try:
+                pending.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _decode_journal(raw: bytes) -> tuple[list[dict[str, Any]], list[bytes]]:
+    if not raw:
+        return [], []
+    if not raw.endswith(b"\n"):
+        raise ValueError("benchmark dispatch receipt journal is incomplete")
+    records: list[dict[str, Any]] = []
+    lines = raw.splitlines(keepends=True)
+    seen: set[str] = set()
+    for line in lines:
+        raw_line = line[:-1]
+        try:
+            decoded = json.loads(raw_line.decode("utf-8"))
+            if canonical_json_bytes(decoded) != raw_line:
+                raise ValueError("receipt row is not canonical")
+            receipt = _validate_dispatch_receipt(decoded)
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as error:
+            raise ValueError("benchmark dispatch receipt journal is corrupt") from error
+        digest = receipt["content_sha256"]
+        if digest in seen:
+            raise ValueError("benchmark dispatch receipt journal has duplicate rows")
+        seen.add(digest)
+        records.append(receipt)
+    return records, lines
+
+
+def _validate_committed_row(
+    *, receipt: Mapping[str, object], prefix: bytes
+) -> None:
+    provider = str(receipt["provider"])
+    index = int(receipt["dispatch_index"])
+    operation = receipt["operation_ref"]
+    parent_path = _dispatch_artifact_path(operation, provider, index, "runtime-parent")
+    marker_path = _dispatch_artifact_path(operation, provider, index, "commit-marker")
+    if not marker_path.is_file():
+        raise ValueError("benchmark dispatch receipt row is uncommitted (commit marker missing)")
+    parent = _read_canonical_artifact(
+        parent_path, _validate_dispatch_runtime_parent, "benchmark dispatch runtime parent"
+    )
+    marker = _read_canonical_artifact(
+        marker_path, _validate_dispatch_commit_marker, "benchmark dispatch commit marker"
+    )
+    if (
+        parent["provider"] != provider
+        or parent["operation_ref"] != operation
+        or parent["dispatch_receipt_ref"]
+        != {"content_sha256": receipt["content_sha256"]}
+        or receipt["provider_runtime_attestation_ref"]
+        != {"content_sha256": parent["runtime_identity"]["content_sha256"]}
+        or marker["provider"] != provider
+        or marker["operation_ref"] != operation
+        or marker["dispatch_receipt_ref"] != parent["dispatch_receipt_ref"]
+        or marker["runtime_parent_ref"]
+        != {"content_sha256": parent["content_sha256"]}
+        or marker["journal_prefix_sha256"] != sha256(prefix).hexdigest()
+    ):
+        raise ValueError("benchmark dispatch parent or commit marker join differs")
+
+
+def _read_committed_dispatch_records_locked(path: Path) -> list[dict[str, Any]]:
+    _assert_secure_dispatch_path(path, final_may_be_missing=False)
+    records, lines = _decode_journal(path.read_bytes())
+    prefix = b""
+    provider_indexes: dict[str, int] = {}
+    for receipt, line in zip(records, lines, strict=True):
+        prefix += line
+        provider = receipt["provider"]
+        provider_indexes[provider] = provider_indexes.get(provider, 0) + 1
+        if receipt["dispatch_index"] != provider_indexes[provider]:
+            raise ValueError("benchmark dispatch receipt index is not contiguous")
+        _validate_committed_row(receipt=receipt, prefix=prefix)
+    return records
+
+
+def _read_committed_dispatch_records(path: Path) -> list[dict[str, Any]]:
+    with _JOURNAL_LOCK, _journal_process_lock(path):
+        _assert_secure_dispatch_path(path, final_may_be_missing=True)
+        if not path.is_file():
+            return []
+        return _read_committed_dispatch_records_locked(path)
 
 
 def _append_receipt(path: Path, receipt: Mapping[str, object]) -> None:
-    raw = canonical_json_bytes(receipt) + b"\n"
-    with _JOURNAL_LOCK:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("ab", buffering=0) as stream:
-            written = stream.write(raw)
-            if written != len(raw):
-                raise OSError("benchmark dispatch receipt short write")
-            os.fsync(stream.fileno())
+    raw = canonical_json_bytes(dict(receipt)) + b"\n"
+    _assert_secure_dispatch_path(path, final_may_be_missing=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _assert_secure_dispatch_path(path.parent, final_may_be_missing=False)
+    with path.open("ab", buffering=0) as stream:
+        written = stream.write(raw)
+        if written != len(raw):
+            raise OSError("benchmark dispatch receipt short write")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _assert_secure_dispatch_path(path, final_may_be_missing=False)
+
+
+def _commit_dispatch_transaction(
+    *,
+    journal_path: Path,
+    receipt: Mapping[str, object],
+    runtime_parent: Mapping[str, object],
+) -> dict[str, Any]:
+    exact_receipt = _validate_dispatch_receipt(receipt)
+    exact_parent = _validate_dispatch_runtime_parent(runtime_parent)
+    operation = exact_receipt["operation_ref"]
+    provider = exact_receipt["provider"]
+    index = exact_receipt["dispatch_index"]
+    if journal_path != _fixed_dispatch_journal_path(operation):
+        raise ValueError("benchmark dispatch journal differs from fixed project root")
+    parent_path = _dispatch_artifact_path(operation, provider, index, "runtime-parent")
+    marker_path = _dispatch_artifact_path(operation, provider, index, "commit-marker")
+    with _JOURNAL_LOCK, _journal_process_lock(journal_path):
+        _assert_secure_dispatch_path(journal_path, final_may_be_missing=True)
+        raw = journal_path.read_bytes() if journal_path.is_file() else b""
+        records, lines = _decode_journal(raw)
+        slot_positions = [
+            position
+            for position, record in enumerate(records)
+            if record["provider"] == provider
+            and record["operation_ref"] == operation
+            and record["dispatch_index"] == index
+        ]
+        if len(slot_positions) > 1:
+            raise ValueError("benchmark dispatch journal has duplicate slot rows")
+        if slot_positions and records[slot_positions[0]] != exact_receipt:
+            raise ValueError("benchmark dispatch replay runtime or profile differs")
+
+        if slot_positions:
+            if not parent_path.is_file():
+                raise ValueError(
+                    "benchmark dispatch uncommitted row is missing its exact parent"
+                )
+            existing_parent = _read_canonical_artifact(
+                parent_path,
+                _validate_dispatch_runtime_parent,
+                "benchmark dispatch runtime parent",
+            )
+            if existing_parent != exact_parent:
+                raise ValueError("existing benchmark dispatch runtime parent is different")
+            _write_create_or_identical(
+                parent_path, exact_parent, "benchmark dispatch runtime parent"
+            )
+            position = slot_positions[0]
+            prefix = b"".join(lines[: position + 1])
+            if marker_path.is_file():
+                _validate_committed_row(receipt=exact_receipt, prefix=prefix)
+                return deepcopy(exact_receipt)
+            if position != len(records) - 1:
+                raise ValueError("benchmark dispatch uncommitted row is not the exact tail")
+            for prior_position, prior in enumerate(records[:position]):
+                _validate_committed_row(
+                    receipt=prior, prefix=b"".join(lines[: prior_position + 1])
+                )
+            # 精确单行恢复：不重写 row，只重新 flush/fsync 后铸造 marker。
+            with journal_path.open("ab", buffering=0) as stream:
+                stream.flush()
+                os.fsync(stream.fileno())
+        else:
+            if records:
+                _read_committed_dispatch_records_locked(journal_path)
+            # parent 必须先于 journal authority 持久化。
+            _write_create_or_identical(
+                parent_path, exact_parent, "benchmark dispatch runtime parent"
+            )
+            _append_receipt(journal_path, exact_receipt)
+            prefix = raw + canonical_json_bytes(exact_receipt) + b"\n"
+
+        marker = _compose_dispatch_commit_marker(
+            receipt=exact_receipt,
+            runtime_parent=exact_parent,
+            journal_prefix=prefix,
+        )
+        _publish_commit_marker(marker_path, marker)
+        return deepcopy(exact_receipt)
 
 
 def _operation_ref(value: object) -> dict[str, Any]:

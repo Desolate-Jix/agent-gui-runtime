@@ -132,6 +132,125 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     assert not calls[0]["output_path"].exists()
 
 
+def test_installed_configuration_snapshot_is_sealed_at_construction_and_survives_profile_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.hybrid import windows_process_scope
+    from app.learn.recognition.uei import omniparser_shadow_adapter as omni
+
+    runtime = tmp_path / "runtime"
+    interpreter = runtime / "Scripts" / "python.exe"
+    worker = tmp_path / "worker.py"
+    code = tmp_path / "code"
+    weights = tmp_path / "weights"
+    cache = tmp_path / "cache"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text("fixed", encoding="utf-8")
+    worker.write_text("fixed", encoding="utf-8")
+    for path in (code, weights, cache):
+        path.mkdir()
+    profile_path = tmp_path / "learn_mode_omniparser_v2.json"
+    original_profile = {
+        "expected_paths": {
+            "runtime_path": "runtime",
+            "code_path": "code",
+            "weights_path": "weights",
+            "huggingface_cache_path": str(cache),
+        },
+        "runtime_probe": {"minimum_free_gpu_gib": 3},
+        "launchable": True,
+        "download_status": "downloaded",
+    }
+    profile_path.write_text(json.dumps(original_profile), encoding="utf-8")
+    monkeypatch.setattr(omni, "ROOT", tmp_path)
+    monkeypatch.setattr(omni, "PROFILE_PATH", profile_path)
+    monkeypatch.setattr(omni, "WORKER_PATH", worker)
+    adapter = omni.OmniParserShadowAdapter()
+    snapshot = adapter.installed_configuration_snapshot
+
+    profile_path.write_text(
+        json.dumps(
+            {
+                **original_profile,
+                "expected_paths": {
+                    **original_profile["expected_paths"],
+                    "weights_path": "replaced-weights",
+                },
+                "runtime_probe": {"minimum_free_gpu_gib": 99},
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured_runtime: list[dict[str, object]] = []
+    process = FakeProcess(
+        payload={"items": [], "duration_ms": 1, "resource_units": 1}
+    )
+    process.process_identity = {"pid": process.pid, "create_time_ns": 7}
+
+    def _spawn(command: list[str], **kwargs: object) -> FakeProcess:
+        before_resume = kwargs["before_resume"]
+        before_resume(dict(process.process_identity))
+        output = Path(command[command.index("--output-json") + 1])
+        output.write_text(json.dumps(process.payload), encoding="utf-8")
+        return process
+
+    class _Scope:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def pids(self) -> list[int]:
+            return [process.pid]
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", "omni-scope")
+    monkeypatch.setattr(windows_process_scope, "spawn_process_in_scope", _spawn)
+    monkeypatch.setattr(windows_process_scope, "WindowsProcessScope", _Scope)
+    monkeypatch.setattr(
+        attestation,
+        "current_benchmark_dispatch_context",
+        lambda: {"provider": "omni", "operation_ref": {}, "window_binding": {}},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "attest_benchmark_provider_dispatch",
+        lambda **kwargs: captured_runtime.append(kwargs["provider_runtime"])
+        or {"content_sha256": "d" * 64},
+    )
+    adapter._cleanup_observation = {
+        "process_identity": None,
+        "descendant_identities": [],
+        "inventory_observable": True,
+    }
+    monkeypatch.setattr(adapter, "_capture_cleanup_process_tree", lambda value: None)
+
+    adapter._invoke_worker(
+        capture=_capture(tmp_path), budget=_budget(), cancellation_event=None
+    )
+
+    assert snapshot["contract_version"] == "omniparser_installed_configuration_snapshot_v1"
+    assert snapshot["profile_id"] == omni.PROFILE_ID
+    assert snapshot["interpreter_path"] == str(interpreter.resolve())
+    assert snapshot["worker_script_path"] == str(worker.resolve())
+    assert snapshot["code_path"] == str(code.resolve())
+    assert snapshot["weights_path"] == str(weights.resolve())
+    assert snapshot["cache_path"] == str(cache.resolve())
+    assert snapshot["minimum_free_gpu_gib"] == 3
+    assert snapshot["is_available"] is True
+    assert snapshot["content_sha256"] == omni.content_sha256(snapshot)
+    assert captured_runtime == [
+        {
+            "provider": "omni",
+            "process_identity": process.process_identity,
+            "scope_name": "omni-scope",
+            "installed_configuration_snapshot": snapshot,
+        }
+    ]
+
+
 def test_adapter_persists_exact_invocation_cleanup_observation(
     tmp_path: Path,
     monkeypatch,

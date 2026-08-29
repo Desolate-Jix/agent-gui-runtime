@@ -186,6 +186,21 @@ class OmniParserShadowAdapter:
         benchmark_mode: bool = False,
     ) -> None:
         self._configuration = configuration or TrustedOmniParserConfiguration.load_default()
+        self._installed_configuration_snapshot = seal_immutable(
+            {
+                "contract_version": "omniparser_installed_configuration_snapshot_v1",
+                "profile_id": PROFILE_ID,
+                "interpreter_path": str(self._configuration.interpreter.resolve()),
+                "worker_script_path": str(self._configuration.worker_script.resolve()),
+                "code_path": str(self._configuration.code_path.resolve()),
+                "weights_path": str(self._configuration.weights_path.resolve()),
+                "cache_path": str(self._configuration.cache_path.resolve()),
+                "minimum_free_gpu_gib": self._configuration.minimum_free_gpu_gib,
+                "is_available": self._configuration.is_available,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
         self._lease_manager = resource_lease_manager or ProcessResourceLeaseManager()
         self._gpu_free_gib = gpu_free_gib or _free_gpu_gib
         self._benchmark_mode = benchmark_mode is True
@@ -194,6 +209,12 @@ class OmniParserShadowAdapter:
         )
         self.last_benchmark: dict[str, object] | None = None
         self._cleanup_observation: dict[str, object] | None = None
+
+    @property
+    def installed_configuration_snapshot(self) -> dict[str, object]:
+        """返回构造时封存的实际安装配置，不重读可替换的 profile 文件。"""
+
+        return deepcopy(self._installed_configuration_snapshot)
 
     def invoke(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
@@ -346,6 +367,9 @@ class OmniParserShadowAdapter:
                                 "provider": "omni",
                                 "process_identity": deepcopy(dict(process_identity)),
                                 "scope_name": process_scope_name,
+                                "installed_configuration_snapshot": deepcopy(
+                                    self._installed_configuration_snapshot
+                                ),
                             },
                         )
 

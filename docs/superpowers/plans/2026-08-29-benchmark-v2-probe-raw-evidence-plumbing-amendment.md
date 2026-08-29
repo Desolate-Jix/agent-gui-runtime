@@ -13,12 +13,13 @@
 ## Global Constraints
 
 - Implementation starts by deleting or shrinking the current synthetic body/termination/stable-zero and hard-coded profile paths; do not layer another projection over them.
-- The only incremental P0 allowlist is the six files in §2. No model-server, adapter, process-scope, supervisor, public-contract, or new test-module change is allowed.
+- The only incremental P0 allowlist is the eight files in §2. The Omni adapter exception is limited to sealing the configuration object already loaded by that adapter and passing that immutable snapshot into dispatch attestation. No model-server, process-scope, supervisor, public-contract, or additional test-module change is allowed.
 - Add no model, general supervisor, remote witness, public API, provider contract, accepted/scorer/provider/dependency field, or B1 contract/validator redesign.
 - `WorkflowService` changes only the internal lock-before-cancel persistence path. Its public method signatures and response shapes remain byte-for-byte contract-compatible.
 - The runtime may orchestrate and locate evidence but may not author conclusions used as parents. An opaque `{content_sha256}` ref, runtime dictionary, status label, or provider profile reconstruction is not evidence.
 - New local artifacts are nonauthorizing, contain native paths/process identities only locally, use canonical UTF-8 JSON, end with one LF, and are create-new-or-byte-identical.
 - The lifecycle validator and runner receive trusted local roots, derive every fixed path themselves, read exact bytes again, verify seals and joins, and reject caller-injected replacements.
+- Fixed dispatch paths reject static symlink/junction/reparse escapes and final hard links, and ordinary concurrent writers/readers share one crash-released per-journal OS lock. Adversarial same-user/local-administrator replacement in the interval between path inspection and OS open remains outside the frozen benchmark threat model; do not delay the actual benchmark by building a general handle-relative filesystem authority layer.
 - Do not run an actual benchmark, model, provider, or GUI until all four slices pass and the preflight in §9 returns PASSABLE.
 
 ---
@@ -40,14 +41,16 @@ The runtime-produced receipt candidate is therefore only a locator/request. A re
 
 ## 2. Frozen incremental allowlist
 
-These are the only six files added to the current P0 implementation allowlist:
+These are the only eight files added to the current P0 implementation allowlist:
 
 | File | Exact permitted symbols/regions |
 |---|---|
 | `app/learn/hybrid/benchmark_v2_dispatch_attestation.py` | `attest_benchmark_provider_dispatch`; `_attest_exact_provider_runtime`, `_attest_qwen_runtime`, `_attest_vista_runtime`, `_attest_scoped_process_runtime`; new `_compose/_validate/_write/_read_benchmark_v2_dispatch_runtime_parent_v1` helpers |
+| `app/learn/recognition/uei/omniparser_shadow_adapter.py` | constructor-time immutable installed-configuration snapshot and `_before_resume` handoff only; no launch, worker, cleanup, or public provider-contract change |
 | `app/learn/workflow_worker.py` | `LearningStageWorkerRegistry` internal pre-cancel persistence and provider-raw retention helpers; existing provider cleanup reconciliation and existing create-only writer only |
 | `app/learn/workflow_service.py` | `_cancel_benchmark_v2_hybrid_workflow_service` internal call ordering only; no new exported function or method |
 | `tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py` | dispatch raw-parent RED/GREEN tests |
+| `tests/test_uei_v1_omniparser_shadow_adapter.py` | constructor-time snapshot and profile-swap non-regression tests only |
 | `tests/test_learning_workflow_stage_worker.py` | pre-cancel body, exact worker incarnation, provider raw retention, and create-new-or-identical tests |
 | `tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py` | operation-lock-before-registry-lock-before-cancel ordering and public-shape non-regression tests |
 
@@ -60,7 +63,7 @@ Existing P0 allowlist files remain limited to their already approved receipt/run
 - `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py`
 - `tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py`
 
-Do not pre-add `app/core/model_server.py`, `app/learn/recognition/uei/omniparser_shadow_adapter.py`, `app/learn/hybrid/windows_process_scope.py`, or a new test file. If a required raw fact cannot be produced through the six incremental files and existing producers, apply the fail-closed stop in §9.
+Do not pre-add `app/core/model_server.py`, `app/learn/hybrid/windows_process_scope.py`, or a new test file. The adapter exception above is exhausted by the installed-configuration snapshot; any further adapter change requires the fail-closed stop in §9. If another required raw fact cannot be produced through the eight incremental files and existing producers, apply the same stop.
 
 ---
 
@@ -76,7 +79,7 @@ Fixed local path:
 runtime_state/benchmark-v2-provider-dispatch/<operation-key>.<provider>.1.runtime-parent.json
 ```
 
-`<operation-key>` is the lowercase SHA-256 of canonical `operation_ref`; `<provider>` is exactly `omni`, `qwen`, or `vista`; `.1` is dispatch index 1. A probe with zero, multiple, or differently indexed dispatches fails closed.
+`<operation-key>` is the lowercase SHA-256 of canonical `{run_id, stage, operation_id}`. The complete sealed `operation_ref`, including revision and capture/window refs, remains inside every joined record; a different complete ref in the same operation slot fails closed. `<provider>` is exactly `omni`, `qwen`, or `vista`; `.1` is dispatch index 1. A probe with zero, multiple, or differently indexed dispatches fails closed.
 
 Exact top-level fields:
 
@@ -87,6 +90,7 @@ operation_ref
 dispatch_receipt_ref
 runtime_identity
 profile
+installed_configuration_snapshot
 artifact_is_authorization
 execute_binding_enabled
 content_sha256
@@ -100,11 +104,11 @@ profile_sha256
 profile_payload_sha256
 ```
 
-`runtime_identity` is the complete validated `benchmark_v2_provider_runtime_identity_v1`, including exact `{pid, create_time_ns}` process incarnations, Job membership, listener ownership where applicable, and lease identity where applicable. `profile_sha256` is the producer contract's profile identity; `profile_payload_sha256` is recomputed from the exact canonical profile payload read at dispatch. For profile contracts where those identities are defined identically, both values are equal; neither may be reconstructed later from a provider ID.
+`runtime_identity` is the complete validated `benchmark_v2_provider_runtime_identity_v1`, including exact `{pid, create_time_ns}` process incarnations, Job membership, listener ownership where applicable, and lease identity where applicable. `profile_sha256` is the producer contract's profile identity; `profile_payload_sha256` is recomputed from the exact canonical profile payload already validated by that producer. For Qwen and VISTA, both values bind the validated lease/profile payload. For Omni, `installed_configuration_snapshot` is the constructor-time sealed projection of the actual adapter configuration (profile ID, canonical interpreter/worker/code/weights/cache paths, minimum free GPU, and availability); its content SHA is the profile payload identity. Managed providers require this field to be `null`. No provider identity may be reconstructed later from a provider ID.
 
 ### 3.2 Producer ordering
 
-Refactor `_attest_exact_provider_runtime` and its provider branches to return the full validated runtime identity plus the exact profile descriptor rather than only an opaque digest. For Omni, read and validate the exact configured `learn_mode_omniparser_v2.json` payload used by the installed adapter at dispatch; do not use the hard-coded dictionary currently in `_probe_runtime_profile_identity`. Qwen and VISTA reuse the exact lease/profile payloads they already validate.
+Refactor `_attest_exact_provider_runtime` and its provider branches to return the full validated runtime identity plus the exact profile descriptor rather than only an opaque digest. For Omni, seal the actual `TrustedOmniParserConfiguration` once in `OmniParserShadowAdapter.__init__`, pass that snapshot through `_before_resume`, and never reread the replaceable global profile path during dispatch. Do not use the hard-coded dictionary currently in `_probe_runtime_profile_identity`. Qwen and VISTA reuse the exact lease/profile payloads they already validate.
 
 `attest_benchmark_provider_dispatch` performs this order:
 
@@ -113,9 +117,10 @@ Refactor `_attest_exact_provider_runtime` and its provider branches to return th
 3. compose the local runtime parent with `dispatch_receipt_ref={content_sha256}`;
 4. create the fixed parent file, flush and fsync it; an existing file is accepted only if its bytes are identical;
 5. append and fsync the existing dispatch receipt journal row;
-6. return the existing dispatch receipt shape unchanged.
+6. publish a fixed commit marker only after its pending bytes have been flushed and fsynced; the marker binds the receipt, runtime parent, and exact journal-prefix SHA;
+7. return the existing dispatch receipt shape unchanged.
 
-The parent is intentionally local and path-bearing. A crash after step 4 leaves a harmless orphan that cannot join a missing dispatch receipt. A crash before step 4 leaves no dispatch authority.
+The parent is intentionally local and path-bearing. A crash after step 4 leaves a harmless orphan that cannot join a missing dispatch receipt. A crash after step 5 but before marker publication leaves one recoverable uncommitted tail row. Exact replay may fsync that unchanged row and publish the marker; it must not append a duplicate. Readers accept only marker-joined rows. A crash before step 4 leaves no dispatch authority.
 
 ### 3.3 Consumer rules
 
@@ -247,10 +252,12 @@ The P0 summary makes no selection-authority or PASS claim. Remove `selection_pol
 
 **Files:**
 - Modify: `app/learn/hybrid/benchmark_v2_dispatch_attestation.py`
+- Modify: `app/learn/recognition/uei/omniparser_shadow_adapter.py`
 - Test: `tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py`
+- Test: `tests/test_uei_v1_omniparser_shadow_adapter.py`
 
-- [ ] Add failing tests proving the parent contains full exact runtime/profile evidence, is durable before the journal append, survives a simulated append failure as a nonjoining orphan, and rejects different existing bytes.
-- [ ] Run: `uv run pytest -q tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py -k "runtime_parent or profile_parent or create_new"`
+- [ ] Add failing tests proving the adapter snapshot survives a profile-file swap; the parent contains full exact runtime/profile evidence; parent, journal, and marker have the required durability order; exact replay recovers one uncommitted tail without duplicate append; ordinary cross-process readers/writers serialize; and static path aliases or different existing bytes fail closed.
+- [ ] Run: `uv run pytest -q tests/test_uei_v1_omniparser_shadow_adapter.py tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py`
 - [ ] Expected RED: parent helpers/order do not exist and the current attestor returns only an opaque runtime digest.
 - [ ] Implement only contract A and the refactor needed to return full attested values; keep the dispatch receipt shape unchanged.
 - [ ] Rerun the same command; expected PASS.

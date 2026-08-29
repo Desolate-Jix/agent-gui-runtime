@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 from copy import deepcopy
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_dispatch_project_root():
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    original = module.PROJECT_ROOT
+    try:
+        yield
+    finally:
+        module.PROJECT_ROOT = original
 
 
 def _sealed_ref(identifier: str, digit: str) -> dict[str, str]:
@@ -18,9 +31,9 @@ def _context(
     provider: str = "qwen",
     revision: int = 7,
 ) -> dict[str, object]:
-    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
-        compose_benchmark_dispatch_context,
-    )
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    module.PROJECT_ROOT = tmp_path.resolve()
 
     operation_ref = {
         "run_id": "run-1",
@@ -37,12 +50,141 @@ def _context(
         "job_name": "job-1",
         "payload_sha256": "c" * 64,
     }
-    return compose_benchmark_dispatch_context(
+    journal_key = module.content_sha256(
+        {
+            "run_id": operation_ref["run_id"],
+            "stage": operation_ref["stage"],
+            "operation_id": operation_ref["operation_id"],
+        }
+    )
+    return module.compose_benchmark_dispatch_context(
         provider=provider,
         operation_ref=operation_ref,
         window_binding=window_binding,
-        receipt_journal_path=(tmp_path / "dispatch.jsonl").resolve(),
+        receipt_journal_path=(
+            tmp_path
+            / "runtime_state"
+            / "benchmark-v2-provider-dispatch"
+            / f"{journal_key}.jsonl"
+        ).resolve(),
     )
+
+
+def _runtime_attestation(module, *, provider: str = "qwen", digit: str = "e"):
+    process = {"pid": 101, "create_time_ns": 202}
+    common = {
+        "process_identities": [process],
+        "process_scope": {
+            "scope_name": f"scope-{provider}",
+            "member_pids": [101],
+            "process_identities": [process],
+        },
+    }
+    if provider == "omni":
+        identity = module.compose_benchmark_provider_runtime_identity(
+            provider="omni",
+            lease_identity=None,
+            profile_ref=None,
+            listener_owner=None,
+            **common,
+        )
+        installed_snapshot = {
+            "contract_version": "omniparser_installed_configuration_snapshot_v1",
+            "profile_id": "profile-omni",
+            "interpreter_path": str(Path.cwd().resolve()),
+            "worker_script_path": str(Path.cwd().resolve()),
+            "code_path": str(Path.cwd().resolve()),
+            "weights_path": str(Path.cwd().resolve()),
+            "cache_path": str(Path.cwd().resolve()),
+            "minimum_free_gpu_gib": 0,
+            "is_available": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        installed_snapshot["content_sha256"] = module.content_sha256(
+            installed_snapshot
+        )
+    else:
+        identity = module.compose_benchmark_provider_runtime_identity(
+            provider=provider,
+            lease_identity=(
+                {
+                    "lease_id": "lease-qwen",
+                    "incarnation_id": "incarnation-qwen",
+                    "owner_request_id": "request-qwen",
+                }
+                if provider == "qwen"
+                else {
+                    "incarnation_id": "incarnation-vista",
+                    "lease_content_sha256": "c" * 64,
+                }
+            ),
+            profile_ref={"content_sha256": digit * 64},
+            listener_owner={
+                "host": "127.0.0.1",
+                "port": 8080,
+                "process_identities": [process],
+            },
+            **common,
+        )
+    profile_sha256 = (
+        installed_snapshot["content_sha256"] if provider == "omni" else digit * 64
+    )
+    profile = {
+        "profile_id": f"profile-{provider}",
+        "profile_sha256": profile_sha256,
+        "profile_payload_sha256": profile_sha256,
+    }
+    return {
+        "runtime_identity": identity,
+        "profile": profile,
+        "installed_configuration_snapshot": (
+            installed_snapshot if provider == "omni" else None
+        ),
+    }
+
+
+def _cross_process_dispatch_worker(
+    project_root: str,
+    start_event,
+    result_queue,
+) -> None:
+    try:
+        from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+        root = Path(project_root)
+        context = _context(root)
+        module._attest_exact_window = lambda value: {"content_sha256": "d" * 64}
+        module._attest_exact_provider_runtime = (
+            lambda provider, value: _runtime_attestation(
+                module, provider=provider
+            )
+        )
+        if not start_event.wait(timeout=10):
+            raise RuntimeError("cross-process dispatch start timeout")
+        with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+            receipt = module.attest_benchmark_provider_dispatch(
+                provider="qwen",
+                operation_ref=context["operation_ref"],
+                window_binding=context["window_binding"],
+                provider_runtime={"provider": "qwen"},
+            )
+        result_queue.put(("ok", receipt["content_sha256"]))
+    except BaseException as error:
+        result_queue.put(("error", f"{type(error).__name__}:{error}"))
+
+
+def _crash_while_holding_dispatch_lock(
+    project_root: str,
+    journal_path: str,
+    acquired_event,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    module.PROJECT_ROOT = Path(project_root)
+    with module._journal_process_lock(Path(journal_path)):
+        acquired_event.set()
+        os._exit(0)
 
 
 def test_provider_dispatch_context_ref_preserves_exact_server_issued_revision(
@@ -86,7 +228,7 @@ def test_attestation_is_fsynced_after_fresh_window_and_runtime_before_dispatch(
         module,
         "_attest_exact_provider_runtime",
         lambda provider, value: events.append(f"runtime:{provider}")
-        or {"content_sha256": "e" * 64},
+        or _runtime_attestation(module, provider=provider),
     )
     real_fsync = module.os.fsync
     monkeypatch.setattr(
@@ -105,7 +247,14 @@ def test_attestation_is_fsynced_after_fresh_window_and_runtime_before_dispatch(
         events.append("dispatch")
         refs = module.current_benchmark_dispatch_receipt_refs()
 
-    assert events == ["window", "runtime:qwen", "fsync", "dispatch"]
+    assert events == [
+        "window",
+        "runtime:qwen",
+        "fsync",  # 父对象
+        "fsync",  # journal 行
+        "fsync",  # 提交标记
+        "dispatch",
+    ]
     assert refs == [
         {"provider": "qwen", "content_sha256": receipt["content_sha256"]}
     ]
@@ -249,7 +398,7 @@ def test_registry_rejects_aggregate_only_hybrid_provider_cleanup(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {"content_sha256": "e" * 64},
+        lambda provider, value: _runtime_attestation(module, provider=provider),
     )
     with module.install_benchmark_dispatch_attestor(dispatch_context=context):
         receipt = module.attest_benchmark_provider_dispatch(
@@ -292,7 +441,9 @@ def test_registry_rejects_aggregate_only_hybrid_provider_cleanup(
         },
     )
     assert receipt["provider_runtime_attestation_ref"] == {
-        "content_sha256": "e" * 64
+        "content_sha256": _runtime_attestation(module)["runtime_identity"][
+            "content_sha256"
+        ]
     }
     assert projection is None
 
@@ -329,7 +480,8 @@ def test_registry_persists_exact_owner_cleanup_and_replays_after_restart(
         module,
         "_attest_exact_provider_runtime",
         lambda provider, value: {
-            "content_sha256": runtime_identity["content_sha256"]
+            **_runtime_attestation(module, provider="omni"),
+            "runtime_identity": runtime_identity,
         },
     )
     with module.install_benchmark_dispatch_attestor(dispatch_context=context):
@@ -520,7 +672,7 @@ def test_receipt_fsync_failure_prevents_provider_dispatch(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {"content_sha256": "e" * 64},
+        lambda provider, value: _runtime_attestation(module, provider=provider),
     )
     monkeypatch.setattr(module.os, "fsync", lambda descriptor: (_ for _ in ()).throw(OSError("disk")))
     dispatches = 0
@@ -998,7 +1150,13 @@ def test_vista_lease_binds_incarnation_profile_job_and_listener(
     )
     monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda port: [202])
 
-    assert module._attest_exact_provider_runtime("vista", lease)["content_sha256"]
+    exact = module._attest_exact_provider_runtime("vista", lease)
+    assert exact["runtime_identity"]["content_sha256"]
+    assert exact["profile"] == {
+        "profile_id": "vista-exact",
+        "profile_sha256": module.content_sha256(profile),
+        "profile_payload_sha256": module.content_sha256(profile),
+    }
 
     stale = deepcopy(lease)
     stale["incarnation_id"] = "f" * 64
@@ -1024,7 +1182,7 @@ def test_receipt_validator_reconstructs_exact_durable_multiset(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {"content_sha256": "e" * 64},
+        lambda provider, value: _runtime_attestation(module, provider=provider),
     )
     with module.install_benchmark_dispatch_attestor(dispatch_context=context):
         module.attest_benchmark_provider_dispatch(
@@ -1083,12 +1241,11 @@ def test_receipt_validator_enforces_each_worker_context_chain_and_ref_order(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {
-            "content_sha256": {"omni": "1", "qwen": "2", "vista": "3"}[
-                provider
-            ]
-            * 64
-        },
+        lambda provider, value: _runtime_attestation(
+            module,
+            provider=provider,
+            digit={"omni": "1", "qwen": "2", "vista": "3"}[provider],
+        ),
     )
     refs: list[dict[str, str]] = []
     for provider, count in (("omni", 1), ("qwen", 1), ("vista", 2)):
@@ -1174,7 +1331,7 @@ def test_hybrid_adoption_rejects_resealed_stale_projected_provider_context(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {"content_sha256": "e" * 64},
+        lambda provider, value: _runtime_attestation(module, provider=provider),
     )
     with module.install_benchmark_dispatch_attestor(dispatch_context=context):
         module.attest_benchmark_provider_dispatch(
@@ -1271,7 +1428,7 @@ def test_receipt_validator_rejects_resealed_skipped_chain_fields(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {"content_sha256": "e" * 64},
+        lambda provider, value: _runtime_attestation(module, provider=provider),
     )
     with module.install_benchmark_dispatch_attestor(dispatch_context=context):
         for _ in range(2):
@@ -1291,12 +1448,8 @@ def test_receipt_validator_rejects_resealed_skipped_chain_fields(
         target[field] = "f" * 64
     target["content_sha256"] = module.content_sha256(target)
     refs[1]["content_sha256"] = target["content_sha256"]
-    journal.write_text(
-        "".join(
-            json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
-            for row in rows
-        ),
-        encoding="utf-8",
+    journal.write_bytes(
+        b"".join(module.canonical_json_bytes(row) + b"\n" for row in rows)
     )
     operation = context["operation_ref"]
     identity = {
@@ -1309,7 +1462,7 @@ def test_receipt_validator_rejects_resealed_skipped_chain_fields(
             "capture_ref",
         )
     }
-    with pytest.raises(ValueError, match="index|predecessor|chain"):
+    with pytest.raises(ValueError, match="index|predecessor|chain|marker"):
         module.validate_benchmark_dispatch_receipt_refs(
             receipt_journal_path=journal,
             receipt_refs=refs,
@@ -1333,7 +1486,7 @@ def test_short_receipt_write_prevents_fsync_and_dispatch_ref(
     monkeypatch.setattr(
         module,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {"content_sha256": "e" * 64},
+        lambda provider, value: _runtime_attestation(module, provider=provider),
     )
     fsync_calls: list[int] = []
 
@@ -1362,6 +1515,612 @@ def test_short_receipt_write_prevents_fsync_and_dispatch_ref(
             )
         assert module.current_benchmark_dispatch_receipt_refs() == []
     assert fsync_calls == []
+
+
+def test_dispatch_context_rejects_caller_selected_journal_path(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    with pytest.raises(ValueError, match="fixed|journal|project"):
+        module.compose_benchmark_dispatch_context(
+            provider="qwen",
+            operation_ref=context["operation_ref"],
+            window_binding=context["window_binding"],
+            receipt_journal_path=(tmp_path / "caller-selected.jsonl").resolve(),
+        )
+
+
+def test_dispatch_parent_journal_and_commit_marker_recover_after_post_write_fsync_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    runtime_attestation = _runtime_attestation(module)
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(runtime_attestation),
+    )
+    real_fsync = module.os.fsync
+    fsync_count = 0
+
+    def _fail_journal_fsync(descriptor: int) -> None:
+        nonlocal fsync_count
+        fsync_count += 1
+        if fsync_count == 2:
+            raise OSError("post-write journal fsync failed")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(module.os, "fsync", _fail_journal_fsync)
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    root = tmp_path / "runtime_state" / "benchmark-v2-provider-dispatch"
+    parent_path = root / f"{operation_key}.qwen.1.runtime-parent.json"
+    marker_path = root / f"{operation_key}.qwen.1.commit-marker.json"
+    journal = Path(str(context["receipt_journal_path"]))
+
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        with pytest.raises(OSError, match="fsync"):
+            module.attest_benchmark_provider_dispatch(
+                provider="qwen",
+                operation_ref=context["operation_ref"],
+                window_binding=context["window_binding"],
+                provider_runtime={"provider": "qwen"},
+            )
+        assert module.current_benchmark_dispatch_receipt_refs() == []
+
+    assert parent_path.is_file()
+    assert journal.read_bytes().count(b"\n") == 1
+    assert not marker_path.exists()
+    with pytest.raises(ValueError, match="commit|uncommitted"):
+        module.read_latest_benchmark_dispatch_receipt(dispatch_context=context)
+
+    monkeypatch.setattr(module.os, "fsync", real_fsync)
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        recovered = module.attest_benchmark_provider_dispatch(
+            provider="qwen",
+            operation_ref=context["operation_ref"],
+            window_binding=context["window_binding"],
+            provider_runtime={"provider": "qwen"},
+        )
+        refs = module.current_benchmark_dispatch_receipt_refs()
+
+    assert journal.read_bytes().count(b"\n") == 1
+    assert marker_path.is_file()
+    assert set(recovered) == {
+        "contract_version",
+        "provider",
+        "dispatch_index",
+        "operation_ref",
+        "window_attestation_ref",
+        "provider_runtime_attestation_ref",
+        "predecessor_content_sha256",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    assert refs == [
+        {"provider": "qwen", "content_sha256": recovered["content_sha256"]}
+    ]
+    parent = json.loads(parent_path.read_text(encoding="utf-8"))
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    assert parent["runtime_identity"] == runtime_attestation["runtime_identity"]
+    assert parent["profile"] == runtime_attestation["profile"]
+    assert parent["dispatch_receipt_ref"] == {
+        "content_sha256": recovered["content_sha256"]
+    }
+    assert marker["dispatch_receipt_ref"] == parent["dispatch_receipt_ref"]
+    assert marker["runtime_parent_ref"] == {
+        "content_sha256": parent["content_sha256"]
+    }
+    assert marker["journal_prefix_sha256"] == hashlib.sha256(
+        journal.read_bytes()
+    ).hexdigest()
+    assert module.read_latest_benchmark_dispatch_receipt(
+        dispatch_context=context
+    ) == recovered
+
+
+def test_identical_dispatch_replay_is_noop_but_different_runtime_fails_before_append(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    attestation = _runtime_attestation(module, digit="e")
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(attestation),
+    )
+    kwargs = {
+        "provider": "qwen",
+        "operation_ref": context["operation_ref"],
+        "window_binding": context["window_binding"],
+        "provider_runtime": {"provider": "qwen"},
+    }
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        first = module.attest_benchmark_provider_dispatch(**kwargs)
+        first_ref = module.current_benchmark_dispatch_receipt_refs()
+    journal = Path(str(context["receipt_journal_path"]))
+    original = journal.read_bytes()
+
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        replay = module.attest_benchmark_provider_dispatch(**kwargs)
+        replay_ref = module.current_benchmark_dispatch_receipt_refs()
+
+    assert replay == first
+    assert replay_ref == first_ref
+    assert journal.read_bytes() == original
+
+    attestation = _runtime_attestation(module, digit="f")
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        with pytest.raises(ValueError, match="parent|runtime|profile|replay"):
+            module.attest_benchmark_provider_dispatch(**kwargs)
+    assert journal.read_bytes() == original
+
+
+@pytest.mark.parametrize("artifact", ["runtime-parent", "commit-marker"])
+def test_dispatch_replay_rejects_different_existing_parent_or_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    attestation = _runtime_attestation(module)
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(attestation),
+    )
+    kwargs = {
+        "provider": "qwen",
+        "operation_ref": context["operation_ref"],
+        "window_binding": context["window_binding"],
+        "provider_runtime": {"provider": "qwen"},
+    }
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        module.attest_benchmark_provider_dispatch(**kwargs)
+    journal = Path(str(context["receipt_journal_path"]))
+    original = journal.read_bytes()
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    path = (
+        journal.parent
+        / f"{operation_key}.qwen.1.{artifact}.json"
+    )
+    path.write_bytes(path.read_bytes() + b"different")
+
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        with pytest.raises(ValueError, match="different|canonical|corrupt|marker|parent"):
+            module.attest_benchmark_provider_dispatch(**kwargs)
+    assert journal.read_bytes() == original
+
+
+def test_marker_fsync_failure_never_publishes_final_marker_or_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    attestation = _runtime_attestation(module)
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(attestation),
+    )
+    real_fsync = module.os.fsync
+    fsync_count = 0
+
+    def _fail_marker_fsync(descriptor: int) -> None:
+        nonlocal fsync_count
+        fsync_count += 1
+        if fsync_count == 3:
+            raise OSError("marker fsync failed")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(module.os, "fsync", _fail_marker_fsync)
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        with pytest.raises(OSError, match="marker fsync"):
+            module.attest_benchmark_provider_dispatch(
+                provider="qwen",
+                operation_ref=context["operation_ref"],
+                window_binding=context["window_binding"],
+                provider_runtime={"provider": "qwen"},
+            )
+        assert module.current_benchmark_dispatch_receipt_refs() == []
+
+    journal = Path(str(context["receipt_journal_path"]))
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    marker = journal.parent / f"{operation_key}.qwen.1.commit-marker.json"
+    pending = marker.with_name(marker.name + ".pending")
+    assert journal.is_file()
+    assert not marker.exists()
+    assert not pending.exists()
+    with pytest.raises(ValueError, match="commit|uncommitted"):
+        module.read_latest_benchmark_dispatch_receipt(dispatch_context=context)
+
+    row = json.loads(journal.read_text(encoding="utf-8"))
+    operation = context["operation_ref"]
+    identity = {
+        name: deepcopy(operation[name])
+        for name in (
+            "run_id",
+            "stage",
+            "operation_id",
+            "window_binding_ref",
+            "capture_ref",
+        )
+    }
+    with pytest.raises(ValueError, match="commit|uncommitted"):
+        module.validate_benchmark_dispatch_receipt_refs(
+            receipt_journal_path=journal,
+            receipt_refs=[
+                {"provider": "qwen", "content_sha256": row["content_sha256"]}
+            ],
+            operation_identity=identity,
+            expected_provider_counts={"qwen": 1},
+            expected_dispatch_contexts={"qwen": context},
+        )
+
+
+def test_fixed_dispatch_root_rejects_runtime_state_ancestor_symlink_escape(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    runtime_state = tmp_path / "runtime_state"
+    try:
+        os.symlink(outside, runtime_state, target_is_directory=True)
+    except (NotImplementedError, OSError) as error:
+        pytest.skip(f"symlink unavailable: {error}")
+    module.PROJECT_ROOT = tmp_path.resolve()
+    operation_ref = {
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "revision": 7,
+        "window_binding_ref": _sealed_ref("window-1", "a"),
+        "capture_ref": _sealed_ref("capture-1", "b"),
+    }
+    journal_key = module.content_sha256(
+        {
+            name: operation_ref[name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    escaped = (
+        runtime_state
+        / "benchmark-v2-provider-dispatch"
+        / f"{journal_key}.jsonl"
+    ).resolve()
+    with pytest.raises(ValueError, match="symlink|reparse|escape|fixed|root"):
+        module.compose_benchmark_dispatch_context(
+            provider="qwen",
+            operation_ref=operation_ref,
+            window_binding={"contract_version": "test_window_binding_v1"},
+            receipt_journal_path=escaped,
+        )
+
+
+@pytest.mark.parametrize("artifact", ["runtime-parent", "commit-marker"])
+def test_dispatch_replay_rejects_exact_final_artifact_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    attestation = _runtime_attestation(module)
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(attestation),
+    )
+    kwargs = {
+        "provider": "qwen",
+        "operation_ref": context["operation_ref"],
+        "window_binding": context["window_binding"],
+        "provider_runtime": {"provider": "qwen"},
+    }
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        module.attest_benchmark_provider_dispatch(**kwargs)
+    journal = Path(str(context["receipt_journal_path"]))
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    final_path = journal.parent / f"{operation_key}.qwen.1.{artifact}.json"
+    outside = tmp_path / f"outside-{artifact}.json"
+    outside.write_bytes(final_path.read_bytes())
+    final_path.unlink()
+    try:
+        os.symlink(outside, final_path)
+    except (NotImplementedError, OSError) as error:
+        pytest.skip(f"symlink unavailable: {error}")
+
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        with pytest.raises(ValueError, match="symlink|reparse|hardlink|unsafe"):
+            module.attest_benchmark_provider_dispatch(**kwargs)
+
+
+def test_cross_process_fresh_same_slot_has_one_row_and_one_marker(
+    tmp_path: Path,
+) -> None:
+    import multiprocessing
+
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    assert hasattr(module, "_journal_process_lock")
+    context = _context(tmp_path)
+    process_context = multiprocessing.get_context("spawn")
+    start_event = process_context.Event()
+    result_queue = process_context.Queue()
+    processes = [
+        process_context.Process(
+            target=_cross_process_dispatch_worker,
+            args=(str(tmp_path.resolve()), start_event, result_queue),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    start_event.set()
+    for process in processes:
+        process.join(timeout=15)
+        assert not process.is_alive()
+        assert process.exitcode == 0
+    results = [result_queue.get(timeout=3) for _ in processes]
+    assert any(status == "ok" for status, _detail in results)
+
+    journal = Path(str(context["receipt_journal_path"]))
+    rows = journal.read_bytes().splitlines()
+    assert len(rows) == 1
+    receipt = json.loads(rows[0])
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    marker = journal.parent / f"{operation_key}.qwen.1.commit-marker.json"
+    assert marker.is_file()
+    assert all(
+        status == "error" or detail == receipt["content_sha256"]
+        for status, detail in results
+    )
+
+
+@pytest.mark.parametrize("reader_kind", ["latest", "validator"])
+def test_public_dispatch_reader_waits_for_append_to_marker_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reader_kind: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    attestation = _runtime_attestation(module)
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(attestation),
+    )
+    real_publish = module._publish_commit_marker
+    journal_appended = Event()
+    allow_marker = Event()
+    reader_done = Event()
+    writer_errors: list[BaseException] = []
+    reader_results: list[object] = []
+
+    def _paused_publish(path: Path, value: object) -> None:
+        journal_appended.set()
+        assert allow_marker.wait(timeout=5)
+        real_publish(path, value)
+
+    monkeypatch.setattr(module, "_publish_commit_marker", _paused_publish)
+
+    def _write() -> None:
+        try:
+            with module.install_benchmark_dispatch_attestor(
+                dispatch_context=context
+            ):
+                module.attest_benchmark_provider_dispatch(
+                    provider="qwen",
+                    operation_ref=context["operation_ref"],
+                    window_binding=context["window_binding"],
+                    provider_runtime={"provider": "qwen"},
+                )
+        except BaseException as error:
+            writer_errors.append(error)
+
+    def _read() -> None:
+        try:
+            journal = Path(str(context["receipt_journal_path"]))
+            row = json.loads(journal.read_text(encoding="utf-8"))
+            if reader_kind == "latest":
+                result = module.read_latest_benchmark_dispatch_receipt(
+                    dispatch_context=context
+                )
+            else:
+                operation = context["operation_ref"]
+                identity = {
+                    name: deepcopy(operation[name])
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "window_binding_ref",
+                        "capture_ref",
+                    )
+                }
+                result = module.validate_benchmark_dispatch_receipt_refs(
+                    receipt_journal_path=journal,
+                    receipt_refs=[
+                        {
+                            "provider": "qwen",
+                            "content_sha256": row["content_sha256"],
+                        }
+                    ],
+                    operation_identity=identity,
+                    expected_provider_counts={"qwen": 1},
+                    expected_dispatch_contexts={"qwen": context},
+                )
+            reader_results.append(result)
+        except BaseException as error:
+            reader_results.append(error)
+        finally:
+            reader_done.set()
+
+    writer = Thread(target=_write)
+    writer.start()
+    assert journal_appended.wait(timeout=5)
+    reader = Thread(target=_read)
+    reader.start()
+    assert reader_done.wait(timeout=0.2) is False
+    allow_marker.set()
+    writer.join(timeout=5)
+    reader.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert not reader.is_alive()
+    assert writer_errors == []
+    assert len(reader_results) == 1
+    assert not isinstance(reader_results[0], BaseException)
+    if reader_kind == "latest":
+        assert reader_results[0]["content_sha256"]
+    else:
+        assert reader_results[0][0]["provider"] == "qwen"
+
+
+@pytest.mark.parametrize("artifact", ["runtime-parent", "commit-marker"])
+def test_dispatch_replay_rejects_final_artifact_hardlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    context = _context(tmp_path)
+    attestation = _runtime_attestation(module)
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(attestation),
+    )
+    kwargs = {
+        "provider": "qwen",
+        "operation_ref": context["operation_ref"],
+        "window_binding": context["window_binding"],
+        "provider_runtime": {"provider": "qwen"},
+    }
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        module.attest_benchmark_provider_dispatch(**kwargs)
+    journal = Path(str(context["receipt_journal_path"]))
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    final_path = journal.parent / f"{operation_key}.qwen.1.{artifact}.json"
+    hardlink = tmp_path / f"hardlink-{artifact}.json"
+    try:
+        os.link(final_path, hardlink)
+    except OSError as error:
+        pytest.skip(f"hardlink unavailable: {error}")
+
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        with pytest.raises(ValueError, match="hardlink|unsafe"):
+            module.attest_benchmark_provider_dispatch(**kwargs)
+
+
+def test_windows_dispatch_process_lock_is_released_after_holder_crash(
+    tmp_path: Path,
+) -> None:
+    import multiprocessing
+
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    if os.name != "nt":
+        pytest.skip("Windows crash-release primitive")
+    context = _context(tmp_path)
+    process_context = multiprocessing.get_context("spawn")
+    acquired_event = process_context.Event()
+    journal = Path(str(context["receipt_journal_path"]))
+    process = process_context.Process(
+        target=_crash_while_holding_dispatch_lock,
+        args=(str(tmp_path.resolve()), str(journal), acquired_event),
+    )
+    process.start()
+    assert acquired_event.wait(timeout=10)
+    process.join(timeout=10)
+    assert not process.is_alive()
+    assert process.exitcode == 0
+
+    with module._journal_process_lock(journal):
+        assert True
 
 
 def test_vista_receipt_count_is_exactly_bound_to_calibration_batch_count() -> None:
