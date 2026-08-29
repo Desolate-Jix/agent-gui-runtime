@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import hashlib
+from importlib import import_module
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -19,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULT_RECEIPT_CONTRACT = "benchmark_v2_dependency_result_receipt_v1"
 REVIEW_RECEIPT_CONTRACT = "benchmark_v2_dependency_review_receipt_v1"
 DEPENDENCY_MANIFEST_CONTRACT = "benchmark_v2_release_dependency_manifest_v1"
+FINAL_REPORT_CONTRACT = "portfolio_hybrid_v1_1_benchmark_v2_public_report_v1"
 
 SAFETY = {
     "artifact_is_authorization": False,
@@ -186,6 +188,148 @@ _MANIFEST_KEYS = {
 }
 _REF_KEYS = {"contract_version", "file_sha256", "content_sha256"}
 _ACTIVE_PLUGIN_CONFIG: Any | None = None
+
+FINAL_REPORT_FLAG_ORDER = (
+    "--provider-manifest",
+    "--regression-run-ref",
+    "--holdout-run-ref",
+    "--regression-score-ref",
+    "--probe-authority",
+    "--holdout-score-ref",
+    "--leakage-review",
+    "--ledger-root",
+    "--output",
+)
+FINAL_REPORT_PATH_TOKENS = {
+    "--provider-manifest": "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-provider-manifest.json",
+    "--regression-run-ref": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/accepted-run-ref.json",
+    "--holdout-run-ref": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout/run-ref.json",
+    "--regression-score-ref": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/score-ref.json",
+    "--probe-authority": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/probe-authority.json",
+    "--holdout-score-ref": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout/score-ref.json",
+    "--leakage-review": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/leakage-review.json",
+    "--ledger-root": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
+    "--output": "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/final-report.json",
+}
+
+_FINAL_REPORT_FIELDS = {
+    "contract_version",
+    "benchmark_release_id",
+    "provider_manifest_ref",
+    "provider_corpus_ref",
+    "corpus_parent_ref",
+    "regression_run_ref",
+    "holdout_run_ref",
+    "regression_score_ref",
+    "holdout_score_ref",
+    "regression_probe_authority_ref",
+    "leakage_review_ref",
+    "holdout_authorization_ref",
+    "holdout_claim_ref",
+    "estimand_ref",
+    "gate_ref",
+    "promotion_eligible",
+    "status",
+    "limitations",
+    "safety",
+    "content_sha256",
+}
+_PROBE_BUNDLE_FIELDS = {
+    "contract_version",
+    "artifact_id",
+    "benchmark_release_id",
+    "partition",
+    "provider_manifest_ref",
+    "provider_corpus_ref",
+    "accepted_run_ref",
+    "selection_policy",
+    "required_matrix",
+    "probe_ledger_horizon_refs",
+    "probe_cells",
+    "status",
+    "safety",
+    "content_sha256",
+}
+_PROBE_CELL_FIELDS = {
+    "provider_id",
+    "probe_kind",
+    "attempt_ref",
+    "run_id",
+    "operation_id",
+    "model_request_id",
+    "runner_probe_result_ref",
+    "lifecycle_probe_receipt_ref",
+    "cleanup_receipt_ref",
+    "stable_zero_ref",
+    "ledger_pre_result_ref",
+    "ledger_horizon_ref",
+    "deadline_expiration_ref",
+    "body_completion_state",
+    "termination_outcome",
+    "stable_zero_observations",
+    "status",
+}
+_AUTHORIZATION_PAYLOAD_V2_FIELDS = {
+    "contract_version",
+    "claim_identity",
+    "claim_id",
+    "ledger_identity",
+    "fixed_authorization_path",
+    "provider_manifest_sha256",
+    "provider_manifest_contract_version",
+    "code_sha256_by_path",
+    "config_sha256_by_path",
+    "profile_sha256_by_id",
+    "regression_probe_authority_ref",
+    "arm_order",
+    "exact_holdout_command",
+    "exact_run_order",
+    "absolute_owner_journal_root",
+}
+_REGRESSION_BINDING_FIELDS = {
+    "contract_version",
+    "benchmark_release_id",
+    "partition",
+    "private_manifest_ref",
+    "corpus_parent_ref",
+    "provider_manifest_ref",
+    "provider_corpus_ref",
+    "accepted_run_ref",
+    "attempt_ref",
+    "attempt_ledger_ref",
+    "automatic_prediction_ref",
+    "selected_lifecycle_ref",
+    "estimand_ref",
+    "gate_ref",
+    "safety",
+}
+_HOLDOUT_BINDING_FIELDS = _REGRESSION_BINDING_FIELDS | {
+    "regression_score_precondition_ref",
+    "holdout_authorization_ref",
+    "holdout_claim_ref",
+}
+_HOLDOUT_RUN_FIELDS = {
+    "contract_version",
+    "content_sha256",
+    "benchmark_release_id",
+    "partition",
+    "corpus_parent_ref",
+    "provider_manifest_ref",
+    "provider_corpus_ref",
+    "selection_policy",
+    "attempt_ref",
+    "attempt_ledger_ref",
+    "automatic_prediction_ref",
+    "selected_lifecycle_ref",
+    "verified_parent_projections",
+    "prediction_run_envelope",
+    "lifecycle_bundle_envelope",
+    "regression_score_precondition_envelope",
+    "holdout_authority_evidence",
+    "holdout_authorization_ref",
+    "holdout_claim_ref",
+    "safety",
+}
 
 
 def compact_json_bytes(value: object) -> bytes:
@@ -1341,35 +1485,967 @@ def _load_canonical_task12_acceptance_evidence() -> tuple[
     return result, result_ref, review, review_ref
 
 
+def _exact_file_ref(value: object, name: str) -> dict[str, str]:
+    ref = _closed_mapping(value, _REF_KEYS, name)
+    if (
+        not isinstance(ref.get("contract_version"), str)
+        or not ref["contract_version"]
+        or not _is_sha256(ref.get("file_sha256"))
+        or not _is_sha256(ref.get("content_sha256"))
+    ):
+        raise ValueError(f"{name} is invalid")
+    return deepcopy(dict(ref))
+
+
+def _exact_public_ref(value: object, name: str) -> dict[str, str]:
+    ref = _closed_mapping(value, {"id", "content_sha256"}, name)
+    if (
+        not isinstance(ref.get("id"), str)
+        or not ref["id"]
+        or not _is_sha256(ref.get("content_sha256"))
+    ):
+        raise ValueError(f"{name} is invalid")
+    return deepcopy(dict(ref))
+
+
+def _exact_authorization_ref(value: object, name: str) -> dict[str, str]:
+    ref = _closed_mapping(value, {"authorization_id", "envelope_sha256"}, name)
+    if (
+        not isinstance(ref.get("authorization_id"), str)
+        or re.fullmatch(r"holdout-authorization/[0-9a-f]{64}", ref["authorization_id"])
+        is None
+        or not _is_sha256(ref.get("envelope_sha256"))
+    ):
+        raise ValueError(f"{name} is invalid")
+    return deepcopy(dict(ref))
+
+
+def _exact_claim_ref(value: object, name: str) -> dict[str, str]:
+    ref = _closed_mapping(value, {"id", "envelope_sha256"}, name)
+    if (
+        not isinstance(ref.get("id"), str)
+        or re.fullmatch(r"holdout-claim/[0-9a-f]{64}", ref["id"]) is None
+        or not _is_sha256(ref.get("envelope_sha256"))
+    ):
+        raise ValueError(f"{name} is invalid")
+    return deepcopy(dict(ref))
+
+
+def _content_only_ref(value: object, name: str) -> None:
+    ref = _closed_mapping(value, {"content_sha256"}, name)
+    if not _is_sha256(ref.get("content_sha256")):
+        raise ValueError(f"{name} is invalid")
+
+
+def _exact_corpus_parent_ref(value: object, name: str) -> dict[str, str]:
+    ref = _closed_mapping(
+        value,
+        {"contract_version", "artifact_id", "file_sha256", "content_sha256"},
+        name,
+    )
+    if (
+        not isinstance(ref.get("contract_version"), str)
+        or not ref["contract_version"]
+        or not isinstance(ref.get("artifact_id"), str)
+        or not ref["artifact_id"]
+        or not _is_sha256(ref.get("file_sha256"))
+        or not _is_sha256(ref.get("content_sha256"))
+    ):
+        raise ValueError(f"{name} is invalid")
+    return deepcopy(dict(ref))
+
+
+def _exact_contract_file_ref(value: object, name: str) -> dict[str, str]:
+    ref = _closed_mapping(value, {"contract_version", "file_sha256"}, name)
+    if (
+        not isinstance(ref.get("contract_version"), str)
+        or not ref["contract_version"]
+        or not _is_sha256(ref.get("file_sha256"))
+    ):
+        raise ValueError(f"{name} is invalid")
+    return deepcopy(dict(ref))
+
+
+def _validate_probe_authority_for_report(value: object) -> tuple[
+    Mapping[str, Any], dict[str, str], Mapping[str, str]
+]:
+    bundle = getattr(value, "bundle", None)
+    profiles = getattr(value, "profile_sha256_by_id", None)
+    bundle = _closed_mapping(bundle, _PROBE_BUNDLE_FIELDS, "probe authority bundle")
+    if (
+        bundle.get("contract_version")
+        != "benchmark_v2_regression_probe_authority_bundle_v1"
+        or bundle.get("partition") != "regression"
+        or bundle.get("selection_policy")
+        != "first_complete_verified_attempt_per_cell"
+        or bundle.get("status") != "PASS"
+        or bundle.get("safety") != SAFETY
+        or not isinstance(bundle.get("benchmark_release_id"), str)
+        or not bundle["benchmark_release_id"]
+        or not _is_sha256(bundle.get("content_sha256"))
+        or bundle["content_sha256"] != content_sha256(bundle)
+    ):
+        raise ValueError("probe authority bundle is invalid")
+    semantic = {
+        key: deepcopy(child)
+        for key, child in bundle.items()
+        if key not in {"artifact_id", "content_sha256"}
+    }
+    semantic_sha256 = hashlib.sha256(
+        b"benchmark_v2_regression_probe_authority_bundle_v1\0"
+        + compact_json_bytes(semantic)
+    ).hexdigest()
+    if bundle.get("artifact_id") != f"probe-authority/{semantic_sha256}":
+        raise ValueError("probe authority semantic identity differs")
+
+    providers = ("omni", "qwen", "vista")
+    kinds = ("cancel", "timeout")
+    expected_matrix = [
+        [provider, kind] for provider in providers for kind in kinds
+    ]
+    if bundle.get("required_matrix") != expected_matrix:
+        raise ValueError("probe authority required matrix differs")
+    raw_horizons = bundle.get("probe_ledger_horizon_refs")
+    if not isinstance(raw_horizons, list) or len(raw_horizons) != 2:
+        raise ValueError("probe authority ledger horizons differ")
+    horizons: dict[str, dict[str, str]] = {}
+    for index, kind in enumerate(kinds):
+        item = _closed_mapping(
+            raw_horizons[index],
+            {"probe_kind", "ledger_horizon_ref"},
+            "probe authority ledger horizon",
+        )
+        if item.get("probe_kind") != kind:
+            raise ValueError("probe authority ledger horizon order differs")
+        horizons[kind] = _exact_public_ref(
+            item.get("ledger_horizon_ref"),
+            "probe authority ledger horizon ref",
+        )
+
+    raw_cells = bundle.get("probe_cells")
+    if not isinstance(raw_cells, list) or len(raw_cells) != 6:
+        raise ValueError("probe authority must contain exactly six cells")
+    lineage: dict[str, set[str]] = {
+        "attempt_ref": set(),
+        "run_id": set(),
+        "operation_id": set(),
+        "model_request_id": set(),
+    }
+    for index, (provider, kind) in enumerate(
+        (pair for pair in ((p, k) for p in providers for k in kinds))
+    ):
+        cell = _closed_mapping(
+            raw_cells[index], _PROBE_CELL_FIELDS, "probe authority cell"
+        )
+        if (
+            cell.get("provider_id") != provider
+            or cell.get("probe_kind") != kind
+            or cell.get("status") != "PASS"
+            or cell.get("body_completion_state") != "not_complete"
+            or cell.get("termination_outcome") != "same_incarnations_exited"
+            or type(cell.get("stable_zero_observations")) is not int
+            or cell["stable_zero_observations"] < 3
+        ):
+            raise ValueError("probe authority cell is not PASS")
+        attempt_ref = _exact_public_ref(
+            cell.get("attempt_ref"), "probe authority attempt ref"
+        )
+        _exact_file_ref(
+            cell.get("runner_probe_result_ref"), "probe authority result ref"
+        )
+        _exact_file_ref(
+            cell.get("lifecycle_probe_receipt_ref"),
+            "probe authority lifecycle ref",
+        )
+        _content_only_ref(cell.get("cleanup_receipt_ref"), "probe cleanup ref")
+        _content_only_ref(cell.get("stable_zero_ref"), "probe stable-zero ref")
+        _exact_public_ref(
+            cell.get("ledger_pre_result_ref"), "probe pre-result ref"
+        )
+        if cell.get("ledger_horizon_ref") != horizons[kind]:
+            raise ValueError("probe authority cell horizon join differs")
+        deadline = cell.get("deadline_expiration_ref")
+        if kind == "cancel":
+            if deadline is not None:
+                raise ValueError("cancel probe carries timeout authority")
+        else:
+            _content_only_ref(deadline, "timeout deadline ref")
+        values: dict[str, str] = {
+            "attempt_ref": compact_json_bytes(attempt_ref).decode("utf-8"),
+        }
+        for field in ("run_id", "operation_id", "model_request_id"):
+            child = cell.get(field)
+            if not isinstance(child, str) or not child:
+                raise ValueError("probe authority cell identity is invalid")
+            values[field] = child
+        for field, child in values.items():
+            if child in lineage[field]:
+                raise ValueError("probe authority cell lineage is not distinct")
+            lineage[field].add(child)
+
+    manifest_ref = _closed_mapping(
+        bundle.get("provider_manifest_ref"),
+        {"contract_version", "relative_path", "file_sha256"},
+        "probe provider manifest ref",
+    )
+    if (
+        manifest_ref.get("contract_version")
+        != "portfolio_hybrid_v1_1_provider_manifest_v2_1"
+        or manifest_ref.get("relative_path") != "benchmark-v2-provider-manifest.json"
+        or not _is_sha256(manifest_ref.get("file_sha256"))
+    ):
+        raise ValueError("probe provider manifest ref differs")
+    corpus_ref = _closed_mapping(
+        bundle.get("provider_corpus_ref"),
+        {
+            "contract_version",
+            "relative_path",
+            "file_sha256",
+            "content_sha256",
+            "source_parent_ref",
+        },
+        "probe provider corpus ref",
+    )
+    if (
+        corpus_ref.get("contract_version")
+        != "portfolio_hybrid_v1_1_provider_corpus_v2"
+        or corpus_ref.get("relative_path") != "provider-corpus.v2.json"
+        or not _is_sha256(corpus_ref.get("file_sha256"))
+        or not _is_sha256(corpus_ref.get("content_sha256"))
+    ):
+        raise ValueError("probe provider corpus ref differs")
+    _exact_corpus_parent_ref(
+        corpus_ref.get("source_parent_ref"), "probe corpus source parent ref"
+    )
+    accepted_ref = _exact_file_ref(
+        bundle.get("accepted_run_ref"), "probe accepted run ref"
+    )
+    if (
+        accepted_ref.get("contract_version")
+        != "benchmark_v2_accepted_regression_score_input_v2"
+    ):
+        raise ValueError("probe accepted regression contract differs")
+    if (
+        not isinstance(profiles, Mapping)
+        or len(profiles) != 3
+        or any(
+            not isinstance(profile_id, str)
+            or not profile_id
+            or not _is_sha256(digest)
+            for profile_id, digest in profiles.items()
+        )
+    ):
+        raise ValueError("probe runtime profile authority is invalid")
+    return (
+        bundle,
+        {
+            "id": str(bundle["artifact_id"]),
+            "content_sha256": str(bundle["content_sha256"]),
+        },
+        deepcopy(dict(profiles)),
+    )
+
+
+def _validate_score_binding_for_report(
+    value: object, *, partition: str
+) -> Mapping[str, Any]:
+    fields = (
+        _REGRESSION_BINDING_FIELDS
+        if partition == "regression"
+        else _HOLDOUT_BINDING_FIELDS
+    )
+    binding = _closed_mapping(value, fields, f"{partition} score binding")
+    expected_contract = (
+        "private_scorer_input_binding_v1"
+        if partition == "regression"
+        else "private_scorer_holdout_input_binding_v1"
+    )
+    if (
+        binding.get("contract_version") != expected_contract
+        or binding.get("partition") != partition
+        or binding.get("safety") != SAFETY
+        or not isinstance(binding.get("benchmark_release_id"), str)
+        or not binding["benchmark_release_id"]
+    ):
+        raise ValueError(f"{partition} score binding is invalid")
+    for name in (
+        "attempt_ref",
+        "attempt_ledger_ref",
+        "automatic_prediction_ref",
+        "selected_lifecycle_ref",
+    ):
+        _exact_public_ref(binding.get(name), f"{partition} {name}")
+    accepted_ref = _exact_file_ref(
+        binding.get("accepted_run_ref"), f"{partition} accepted ref"
+    )
+    expected_accepted_contract = (
+        "benchmark_v2_accepted_regression_score_input_v2"
+        if partition == "regression"
+        else "benchmark_v2_accepted_holdout_score_input_v1"
+    )
+    if accepted_ref.get("contract_version") != expected_accepted_contract:
+        raise ValueError(f"{partition} accepted contract differs")
+    _exact_corpus_parent_ref(
+        binding.get("corpus_parent_ref"), f"{partition} corpus parent ref"
+    )
+    _exact_contract_file_ref(binding.get("estimand_ref"), f"{partition} estimand ref")
+    _exact_contract_file_ref(binding.get("gate_ref"), f"{partition} gate ref")
+    if partition == "holdout":
+        regression_precondition = _exact_file_ref(
+            binding.get("regression_score_precondition_ref"),
+            "holdout regression score precondition ref",
+        )
+        if regression_precondition.get("contract_version") != "private_scorer_public_ref_v3":
+            raise ValueError("holdout regression score precondition contract differs")
+        _exact_authorization_ref(
+            binding.get("holdout_authorization_ref"),
+            "holdout score authorization ref",
+        )
+        _exact_claim_ref(binding.get("holdout_claim_ref"), "holdout score claim ref")
+    return binding
+
+
+def _validate_holdout_run_for_report(value: object) -> Mapping[str, Any]:
+    run = _closed_mapping(value, _HOLDOUT_RUN_FIELDS, "accepted holdout run")
+    if (
+        run.get("contract_version")
+        != "benchmark_v2_accepted_holdout_score_input_v1"
+        or run.get("partition") != "holdout"
+        or run.get("selection_policy") != "unique_claim_bound_holdout_attempt"
+        or run.get("safety") != SAFETY
+        or not _is_sha256(run.get("content_sha256"))
+        or run["content_sha256"] != content_sha256(run)
+    ):
+        raise ValueError("accepted holdout run is invalid")
+    _exact_public_ref(run.get("attempt_ref"), "holdout attempt ref")
+    _exact_public_ref(run.get("attempt_ledger_ref"), "holdout ledger ref")
+    _exact_public_ref(run.get("automatic_prediction_ref"), "holdout prediction ref")
+    _exact_public_ref(run.get("selected_lifecycle_ref"), "holdout lifecycle ref")
+    _exact_authorization_ref(
+        run.get("holdout_authorization_ref"), "holdout run authorization ref"
+    )
+    _exact_claim_ref(run.get("holdout_claim_ref"), "holdout run claim ref")
+    return run
+
+
+def _validate_authorization_payload_for_report(
+    payload: object,
+    *,
+    envelope_contract: str,
+    probe_ref: Mapping[str, str],
+    profiles: Mapping[str, str],
+    manifest_ref: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    authorization = _closed_mapping(
+        payload,
+        _AUTHORIZATION_PAYLOAD_V2_FIELDS,
+        "holdout authorization payload",
+    )
+    if (
+        envelope_contract
+        != "portfolio_hybrid_benchmark_v2_holdout_authorization_envelope_v2"
+        or authorization.get("contract_version")
+        != "portfolio_hybrid_benchmark_v2_holdout_authorization_payload_v2"
+        or authorization.get("regression_probe_authority_ref") != dict(probe_ref)
+        or authorization.get("profile_sha256_by_id") != dict(profiles)
+        or authorization.get("provider_manifest_sha256")
+        != manifest_ref.get("file_sha256")
+        or authorization.get("provider_manifest_contract_version")
+        != manifest_ref.get("contract_version")
+        or not _is_sha256(authorization.get("claim_id"))
+    ):
+        raise ValueError("holdout authorization v2 lineage differs")
+    return authorization
+
+
+def _reject_private_report_data(value: object) -> None:
+    forbidden = {
+        "absolute_ledger_root",
+        "absolute_owner_journal_root",
+        "attempt_dir",
+        "candidate_body",
+        "fixed_authorization_path",
+        "holdout_events_path",
+        "native_authorization_ref",
+        "observer_identity",
+        "owner_journal_root",
+        "payload",
+        "pid",
+        "probe_cells",
+        "process_identities",
+        "profile_sha256_by_id",
+        "raw_parent",
+        "socket",
+    }
+
+    def scan(item: object) -> None:
+        if isinstance(item, Mapping):
+            if any(str(key).casefold() in forbidden for key in item):
+                raise ValueError("public report contains private or raw evidence")
+            for child in item.values():
+                scan(child)
+        elif isinstance(item, list):
+            for child in item:
+                scan(child)
+        elif isinstance(item, str):
+            if re.match(r"^(?:[A-Za-z]:[\\/]|\\\\|/)", item) or item.casefold().startswith(
+                "file:"
+            ):
+                raise ValueError("public report contains a native path")
+
+    scan(value)
+
+
+def validate_probe_bound_public_report(value: object) -> dict[str, Any]:
+    report = _closed_mapping(value, _FINAL_REPORT_FIELDS, "final public report")
+    if (
+        report.get("contract_version") != FINAL_REPORT_CONTRACT
+        or report.get("status") != "PASS"
+        or report.get("promotion_eligible") is not True
+        or report.get("safety") != SAFETY
+        or report.get("limitations")
+        != {
+            "threat_model": "local_one_shot_threat_model",
+            "external_append_only_witness_present": False,
+        }
+        or not _is_sha256(report.get("content_sha256"))
+        or report["content_sha256"] != content_sha256(report)
+    ):
+        raise ValueError("final public report is invalid")
+    _exact_public_ref(
+        report.get("regression_probe_authority_ref"),
+        "final report probe authority ref",
+    )
+    _exact_authorization_ref(
+        report.get("holdout_authorization_ref"),
+        "final report authorization ref",
+    )
+    _exact_claim_ref(report.get("holdout_claim_ref"), "final report claim ref")
+    for name in (
+        "regression_run_ref",
+        "holdout_run_ref",
+        "regression_score_ref",
+        "holdout_score_ref",
+        "leakage_review_ref",
+    ):
+        _exact_file_ref(report.get(name), f"final report {name}")
+    manifest_ref = _closed_mapping(
+        report.get("provider_manifest_ref"),
+        {"contract_version", "relative_path", "file_sha256"},
+        "final report provider manifest ref",
+    )
+    corpus_ref = _closed_mapping(
+        report.get("provider_corpus_ref"),
+        {
+            "contract_version",
+            "relative_path",
+            "file_sha256",
+            "content_sha256",
+            "source_parent_ref",
+        },
+        "final report provider corpus ref",
+    )
+    if (
+        manifest_ref.get("relative_path") != "benchmark-v2-provider-manifest.json"
+        or corpus_ref.get("relative_path") != "provider-corpus.v2.json"
+        or corpus_ref.get("source_parent_ref") != report.get("corpus_parent_ref")
+    ):
+        raise ValueError("final report provider or corpus ref differs")
+    _exact_corpus_parent_ref(report.get("corpus_parent_ref"), "final report corpus parent ref")
+    _exact_contract_file_ref(report.get("estimand_ref"), "final report estimand ref")
+    _exact_contract_file_ref(report.get("gate_ref"), "final report gate ref")
+    _reject_private_report_data(report)
+    return deepcopy(dict(report))
+
+
+def _assemble_probe_bound_public_report(
+    *,
+    probe_validation: object,
+    regression_score_status: str,
+    holdout_score_status: str,
+    regression_score_binding: object,
+    holdout_score_binding: object,
+    regression_score_ref: object,
+    holdout_score_ref: object,
+    holdout_run: object,
+    holdout_run_ref: object,
+    leakage_review: object,
+    leakage_review_ref: object,
+    authorization_payload: object,
+    authorization_envelope_contract: str,
+    authorization_ref: object,
+) -> dict[str, Any]:
+    bundle, probe_ref, profiles = _validate_probe_authority_for_report(
+        probe_validation
+    )
+    if regression_score_status != "PASS" or holdout_score_status != "PASS":
+        raise ValueError("both public scores must be PASS")
+    regression = _validate_score_binding_for_report(
+        regression_score_binding, partition="regression"
+    )
+    holdout = _validate_score_binding_for_report(
+        holdout_score_binding, partition="holdout"
+    )
+    regression_score = _exact_file_ref(
+        regression_score_ref, "regression public score ref"
+    )
+    holdout_score = _exact_file_ref(holdout_score_ref, "holdout public score ref")
+    accepted_holdout = _validate_holdout_run_for_report(holdout_run)
+    accepted_holdout_ref = _exact_file_ref(
+        holdout_run_ref, "accepted holdout run ref"
+    )
+    public_authorization_ref = _exact_authorization_ref(
+        authorization_ref, "holdout authorization public ref"
+    )
+    authorization = _validate_authorization_payload_for_report(
+        authorization_payload,
+        envelope_contract=authorization_envelope_contract,
+        probe_ref=probe_ref,
+        profiles=profiles,
+        manifest_ref=bundle["provider_manifest_ref"],
+    )
+
+    manifest_ref = bundle["provider_manifest_ref"]
+    corpus_ref = bundle["provider_corpus_ref"]
+    source_parent_ref = corpus_ref["source_parent_ref"]
+    accepted_regression_ref = bundle["accepted_run_ref"]
+    release = bundle["benchmark_release_id"]
+    common = (
+        regression.get("benchmark_release_id") == release
+        and holdout.get("benchmark_release_id") == release
+        and accepted_holdout.get("benchmark_release_id") == release
+        and regression.get("provider_manifest_ref") == manifest_ref
+        and holdout.get("provider_manifest_ref") == manifest_ref
+        and accepted_holdout.get("provider_manifest_ref") == manifest_ref
+        and regression.get("provider_corpus_ref") == corpus_ref
+        and holdout.get("provider_corpus_ref") == corpus_ref
+        and accepted_holdout.get("provider_corpus_ref") == corpus_ref
+        and regression.get("corpus_parent_ref") == source_parent_ref
+        and holdout.get("corpus_parent_ref") == source_parent_ref
+        and accepted_holdout.get("corpus_parent_ref") == source_parent_ref
+        and regression.get("accepted_run_ref") == accepted_regression_ref
+        and holdout.get("accepted_run_ref") == accepted_holdout_ref
+        and holdout.get("regression_score_precondition_ref") == regression_score
+        and accepted_holdout.get("holdout_authorization_ref")
+        == public_authorization_ref
+        and holdout.get("holdout_authorization_ref") == public_authorization_ref
+        and accepted_holdout.get("holdout_claim_ref")
+        == holdout.get("holdout_claim_ref")
+        and public_authorization_ref.get("authorization_id")
+        == f"holdout-authorization/{authorization['claim_id']}"
+        and holdout.get("holdout_claim_ref", {}).get("id")
+        == f"holdout-claim/{authorization['claim_id']}"
+        and regression.get("estimand_ref") == holdout.get("estimand_ref")
+        and regression.get("gate_ref") == holdout.get("gate_ref")
+    )
+    review = leakage_review
+    if (
+        not isinstance(review, Mapping)
+        or review.get("contract_version") != "benchmark_v2_leakage_review_v1"
+        or review.get("benchmark_release_id") != release
+        or review.get("status") != "PASS"
+        or review.get("finding_codes") != []
+        or review.get("provider_manifest_ref") != manifest_ref
+        or review.get("provider_corpus_ref") != corpus_ref
+        or review.get("accepted_run_ref") != accepted_regression_ref
+        or not common
+    ):
+        raise ValueError("final report release, provider, corpus, accepted, or authority join differs")
+    review_ref = _exact_file_ref(leakage_review_ref, "leakage review ref")
+    if review_ref.get("content_sha256") != review.get("content_sha256"):
+        raise ValueError("leakage review ref differs")
+    if accepted_holdout_ref.get("content_sha256") != accepted_holdout.get(
+        "content_sha256"
+    ):
+        raise ValueError("accepted holdout ref differs")
+
+    report = _sealed(
+        {
+            "contract_version": FINAL_REPORT_CONTRACT,
+            "benchmark_release_id": release,
+            "provider_manifest_ref": deepcopy(manifest_ref),
+            "provider_corpus_ref": deepcopy(corpus_ref),
+            "corpus_parent_ref": deepcopy(source_parent_ref),
+            "regression_run_ref": deepcopy(accepted_regression_ref),
+            "holdout_run_ref": deepcopy(accepted_holdout_ref),
+            "regression_score_ref": deepcopy(regression_score),
+            "holdout_score_ref": deepcopy(holdout_score),
+            "regression_probe_authority_ref": deepcopy(probe_ref),
+            "leakage_review_ref": deepcopy(review_ref),
+            "holdout_authorization_ref": deepcopy(public_authorization_ref),
+            "holdout_claim_ref": deepcopy(holdout["holdout_claim_ref"]),
+            "estimand_ref": deepcopy(regression["estimand_ref"]),
+            "gate_ref": deepcopy(regression["gate_ref"]),
+            "promotion_eligible": True,
+            "status": "PASS",
+            "limitations": {
+                "threat_model": "local_one_shot_threat_model",
+                "external_append_only_witness_present": False,
+            },
+            "safety": deepcopy(SAFETY),
+        }
+    )
+    return validate_probe_bound_public_report(report)
+
+
+def _validate_probe_authority_candidate_once(
+    *,
+    provider_manifest_path: Path,
+    regression_run_ref_path: Path,
+    ledger_root: Path,
+    probe_authority_path: Path,
+) -> object:
+    module = import_module("app.learn.hybrid.benchmark_v2_probe_authority")
+    validator = getattr(
+        module, "validate_benchmark_v2_regression_probe_authority_candidate"
+    )
+    return validator(
+        provider_manifest_path=provider_manifest_path,
+        regression_run_ref_path=regression_run_ref_path,
+        ledger_root=ledger_root,
+        probe_authority_path=probe_authority_path,
+    )
+
+
+def _load_canonical_json_artifact(
+    path: Path, *, name: str, encoding: str
+) -> tuple[dict[str, Any], bytes]:
+    artifact_path = _ordinary_artifact_path(path, name)
+    raw = artifact_path.read_bytes()
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{name} is not UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{name} is not an object")
+    expected = {
+        "pretty_lf": pretty_json_bytes(value),
+        "compact_lf": compact_json_bytes(value) + b"\n",
+        "compact": compact_json_bytes(value),
+    }.get(encoding)
+    if expected is None or raw != expected:
+        raise ValueError(f"{name} bytes are not canonical")
+    return value, raw
+
+
+def _file_ref_from_raw(value: Mapping[str, Any], raw: bytes, name: str) -> dict[str, str]:
+    contract = value.get("contract_version")
+    digest = value.get("content_sha256")
+    if not isinstance(contract, str) or not contract or not _is_sha256(digest):
+        raise ValueError(f"{name} identity is invalid")
+    return {
+        "contract_version": contract,
+        "file_sha256": hashlib.sha256(raw).hexdigest(),
+        "content_sha256": str(digest),
+    }
+
+
+def _load_native_authorization_v2(
+    *, ledger_root: Path
+) -> tuple[Mapping[str, Any], str, dict[str, str]]:
+    external_path = (
+        ROOT
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json"
+    )
+    native_ref, _ = _load_canonical_json_artifact(
+        external_path,
+        name="holdout authorization external ref",
+        encoding="compact",
+    )
+    if set(native_ref) != {
+        "authorization_id",
+        "envelope_sha256",
+        "fixed_authorization_path",
+    }:
+        raise ValueError("holdout authorization external ref is invalid")
+    native_path = native_ref.get("fixed_authorization_path")
+    if not isinstance(native_path, str) or not Path(native_path).is_absolute():
+        raise ValueError("holdout authorization external ref is invalid")
+    wrapped, _ = _load_canonical_json_artifact(
+        Path(native_path),
+        name="native holdout authorization",
+        encoding="compact",
+    )
+    if set(wrapped) != {"contract_version", "payload", "payload_sha256"}:
+        raise ValueError("holdout authorization envelope is invalid")
+    payload = wrapped.get("payload")
+    if (
+        wrapped.get("contract_version")
+        != "portfolio_hybrid_benchmark_v2_holdout_authorization_envelope_v2"
+        or not isinstance(payload, Mapping)
+        or wrapped.get("payload_sha256")
+        != hashlib.sha256(compact_json_bytes(payload)).hexdigest()
+        or native_ref.get("envelope_sha256")
+        != hashlib.sha256(compact_json_bytes(wrapped)).hexdigest()
+    ):
+        raise ValueError("holdout authorization envelope v2 is invalid")
+    try:
+        durable = import_module("app.learn.hybrid.benchmark_v2_durable_claim")
+        backend = durable._production_backend()
+        if Path(backend.ledger_root).resolve() != Path(ledger_root).resolve():
+            raise ValueError("ledger root differs")
+        durable._validate_authorization_for_backend(backend, payload)
+        rebuilt, digest = durable.authorization_envelope(payload)
+        expected_native_ref = durable._authorization_ref(backend, rebuilt, digest)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("holdout authorization payload or backend binding differs") from None
+    if rebuilt != wrapped or expected_native_ref != native_ref:
+        raise ValueError("holdout authorization object or external ref differs")
+    return (
+        deepcopy(dict(payload)),
+        str(wrapped["contract_version"]),
+        {
+            "authorization_id": str(native_ref["authorization_id"]),
+            "envelope_sha256": str(native_ref["envelope_sha256"]),
+        },
+    )
+
+
+def _validate_production_final_report_paths(**paths: str | Path) -> dict[str, Path]:
+    expected_names = {flag.removeprefix("--").replace("-", "_") for flag in FINAL_REPORT_FLAG_ORDER}
+    if set(paths) != expected_names:
+        raise ValueError("canonical final report path set differs")
+    resolved: dict[str, Path] = {}
+    for flag in FINAL_REPORT_FLAG_ORDER:
+        name = flag.removeprefix("--").replace("-", "_")
+        token = FINAL_REPORT_PATH_TOKENS[flag]
+        if os.fspath(paths[name]) != token:
+            raise ValueError("canonical final report path token differs")
+        target = (ROOT / token).resolve()
+        if target != ROOT / Path(token):
+            raise ValueError("canonical final report path authority differs")
+        _reject_alias_ancestors(target.parent, "canonical final report path")
+        resolved[name] = target
+    for name in expected_names - {"ledger_root", "output"}:
+        _ordinary_artifact_path(resolved[name], "canonical final report input")
+    ledger = resolved["ledger_root"]
+    if not ledger.is_dir() or ledger.is_symlink():
+        raise ValueError("canonical final report ledger root is unavailable")
+    output = resolved["output"]
+    if output.exists():
+        _ordinary_artifact_path(output, "canonical final report output")
+    return resolved
+
+
+def assemble_benchmark_v2_public_report(
+    *,
+    provider_manifest_path: Path,
+    regression_run_ref_path: Path,
+    holdout_run_ref_path: Path,
+    regression_score_ref_path: Path,
+    probe_authority_path: Path,
+    holdout_score_ref_path: Path,
+    leakage_review_path: Path,
+    ledger_root: Path,
+    output_path: Path,
+) -> dict[str, Any]:
+    canonical = _validate_production_final_report_paths(
+        provider_manifest=provider_manifest_path,
+        regression_run_ref=regression_run_ref_path,
+        holdout_run_ref=holdout_run_ref_path,
+        regression_score_ref=regression_score_ref_path,
+        probe_authority=probe_authority_path,
+        holdout_score_ref=holdout_score_ref_path,
+        leakage_review=leakage_review_path,
+        ledger_root=ledger_root,
+        output=output_path,
+    )
+    probe_validation = _validate_probe_authority_candidate_once(
+        provider_manifest_path=canonical["provider_manifest"],
+        regression_run_ref_path=canonical["regression_run_ref"],
+        ledger_root=canonical["ledger_root"],
+        probe_authority_path=canonical["probe_authority"],
+    )
+    public_score_module = import_module(
+        "app.learn.hybrid.benchmark_v2_public_score"
+    )
+    regression_score, regression_score_raw = _load_canonical_json_artifact(
+        canonical["regression_score_ref"],
+        name="regression public score",
+        encoding="compact_lf",
+    )
+    holdout_score, holdout_score_raw = _load_canonical_json_artifact(
+        canonical["holdout_score_ref"],
+        name="holdout public score",
+        encoding="compact_lf",
+    )
+    regression_score = public_score_module.validate_private_scorer_public_ref_v3(
+        regression_score
+    )
+    holdout_score = public_score_module.validate_private_scorer_public_ref_v3(
+        holdout_score
+    )
+    holdout_run, holdout_run_raw = _load_canonical_json_artifact(
+        canonical["holdout_run_ref"],
+        name="accepted holdout run",
+        encoding="pretty_lf",
+    )
+    leakage_value, leakage_raw = _load_canonical_json_artifact(
+        canonical["leakage_review"],
+        name="leakage review",
+        encoding="pretty_lf",
+    )
+    leakage_module = import_module(
+        "scripts.review_portfolio_hybrid_v1_1_benchmark_v2_leakage"
+    )
+    leakage = leakage_module.validate_leakage_review(leakage_value)
+    authorization_payload, envelope_contract, authorization_ref = (
+        _load_native_authorization_v2(ledger_root=canonical["ledger_root"])
+    )
+    report = _assemble_probe_bound_public_report(
+        probe_validation=probe_validation,
+        regression_score_status=str(regression_score.get("status")),
+        holdout_score_status=str(holdout_score.get("status")),
+        regression_score_binding=regression_score.get("score_input_binding"),
+        holdout_score_binding=holdout_score.get("score_input_binding"),
+        regression_score_ref=_file_ref_from_raw(
+            regression_score, regression_score_raw, "regression public score"
+        ),
+        holdout_score_ref=_file_ref_from_raw(
+            holdout_score, holdout_score_raw, "holdout public score"
+        ),
+        holdout_run=holdout_run,
+        holdout_run_ref=_file_ref_from_raw(
+            holdout_run, holdout_run_raw, "accepted holdout run"
+        ),
+        leakage_review=leakage,
+        leakage_review_ref=_file_ref_from_raw(
+            leakage, leakage_raw, "leakage review"
+        ),
+        authorization_payload=authorization_payload,
+        authorization_envelope_contract=envelope_contract,
+        authorization_ref=authorization_ref,
+    )
+    write_create_new_or_byte_identical(
+        canonical["output"], pretty_json_bytes(report)
+    )
+    return report
+
+
 def _cli_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    modes = parser.add_mutually_exclusive_group(required=True)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--build-dependency-manifest", action="store_true")
     modes.add_argument("--validate-final-report-dependency", action="store_true")
     parser.add_argument("--benchmark-release-id")
     parser.add_argument("--dependency-manifest", type=Path)
-    parser.add_argument("--output", type=Path)
+    parser.add_argument("--provider-manifest")
+    parser.add_argument("--regression-run-ref")
+    parser.add_argument("--holdout-run-ref")
+    parser.add_argument("--regression-score-ref")
+    parser.add_argument("--probe-authority")
+    parser.add_argument("--holdout-score-ref")
+    parser.add_argument("--leakage-review")
+    parser.add_argument("--ledger-root")
+    parser.add_argument("--output")
     return parser
 
 
+def _fixed_flag_count(tokens: Sequence[str], flag: str) -> int:
+    return sum(token == flag or token.startswith(flag + "=") for token in tokens)
+
+
+def _parse_cli_tokens(tokens: Sequence[str]) -> argparse.Namespace:
+    raw = list(tokens)
+    guarded = (
+        "--build-dependency-manifest",
+        "--validate-final-report-dependency",
+        "--benchmark-release-id",
+        "--dependency-manifest",
+        *FINAL_REPORT_FLAG_ORDER,
+    )
+    parser = _cli_parser()
+    for flag in guarded:
+        if _fixed_flag_count(raw, flag) > 1:
+            parser.error(f"argument {flag}: may not be repeated")
+    args = parser.parse_args(raw)
+    if not args.build_dependency_manifest and not args.validate_final_report_dependency:
+        missing = [
+            flag
+            for flag in FINAL_REPORT_FLAG_ORDER
+            if getattr(args, flag.removeprefix("--").replace("-", "_")) is None
+        ]
+        if missing:
+            parser.error(f"the following arguments are required: {', '.join(missing)}")
+        if args.benchmark_release_id is not None or args.dependency_manifest is not None:
+            parser.error("final report assembly accepts only the canonical report arguments")
+        observed_order = tuple(
+            flag
+            for token in raw
+            for flag in FINAL_REPORT_FLAG_ORDER
+            if token == flag or token.startswith(flag + "=")
+        )
+        if observed_order != FINAL_REPORT_FLAG_ORDER:
+            parser.error("canonical final report fixed-flag order differs")
+    return args
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _cli_parser().parse_args(argv)
+    tokens = list(sys.argv[1:] if argv is None else argv)
+    args = _parse_cli_tokens(tokens)
     if args.build_dependency_manifest:
-        if args.dependency_manifest is not None or args.benchmark_release_id is None or args.output is None:
+        report_only = (
+            args.provider_manifest,
+            args.regression_run_ref,
+            args.holdout_run_ref,
+            args.regression_score_ref,
+            args.probe_authority,
+            args.holdout_score_ref,
+            args.leakage_review,
+            args.ledger_root,
+        )
+        if (
+            args.dependency_manifest is not None
+            or args.benchmark_release_id is None
+            or args.output is None
+            or any(value is not None for value in report_only)
+        ):
             raise ValueError("build mode requires release ID and output only")
         manifest = build_release_dependency_manifest(
             benchmark_release_id=args.benchmark_release_id,
         )
-        write_create_new_or_byte_identical(args.output, pretty_json_bytes(manifest))
+        write_create_new_or_byte_identical(Path(args.output), pretty_json_bytes(manifest))
         sys.stdout.write(compact_json_bytes({"dependency_manifest_ref": artifact_ref(manifest), "status": "PASS"}).decode("utf-8") + "\n")
         return 0
-    if args.dependency_manifest is None or args.output is not None or args.benchmark_release_id is not None:
-        raise ValueError("final-report dependency validation requires --dependency-manifest only")
-    manifest = _load_pretty_artifact(args.dependency_manifest, "dependency manifest")
-    validate_dependency_manifest_for_final_report(
-        manifest,
+    if args.validate_final_report_dependency:
+        report_only = (
+            args.provider_manifest,
+            args.regression_run_ref,
+            args.holdout_run_ref,
+            args.regression_score_ref,
+            args.probe_authority,
+            args.holdout_score_ref,
+            args.leakage_review,
+            args.ledger_root,
+            args.output,
+        )
+        if (
+            args.dependency_manifest is None
+            or args.benchmark_release_id is not None
+            or any(value is not None for value in report_only)
+        ):
+            raise ValueError("final-report dependency validation requires --dependency-manifest only")
+        manifest = _load_pretty_artifact(args.dependency_manifest, "dependency manifest")
+        validate_dependency_manifest_for_final_report(manifest)
+        sys.stdout.write(compact_json_bytes({"dependency_manifest_ref": artifact_ref(manifest), "status": "PASS"}).decode("utf-8") + "\n")
+        return 0
+    report = assemble_benchmark_v2_public_report(
+        provider_manifest_path=args.provider_manifest,
+        regression_run_ref_path=args.regression_run_ref,
+        holdout_run_ref_path=args.holdout_run_ref,
+        regression_score_ref_path=args.regression_score_ref,
+        probe_authority_path=args.probe_authority,
+        holdout_score_ref_path=args.holdout_score_ref,
+        leakage_review_path=args.leakage_review,
+        ledger_root=args.ledger_root,
+        output_path=args.output,
     )
-    sys.stdout.write(compact_json_bytes({"dependency_manifest_ref": artifact_ref(manifest), "status": "PASS"}).decode("utf-8") + "\n")
+    sys.stdout.write(
+        compact_json_bytes(
+            {"final_report_ref": artifact_ref(report), "status": "PASS"}
+        ).decode("utf-8")
+        + "\n"
+    )
     return 0
 
 
