@@ -10,6 +10,8 @@
 
 **Spec:** This amendment is subordinate to `docs/superpowers/plans/2026-08-26-portfolio-hybrid-v1-1-benchmark-v2-plan.md` and supersedes only conflicting probe-authority, Task 11 profile-binding, Task 11/12 ordering, and canonical CLI clauses in the 2026-08-28 scoring-bridge and 2026-08-29 Task 11/12 evidence-boundary amendments. All unrelated estimand, scoring, leakage, durable-claim, holdout, B1, S1-S4, and safety contracts remain authoritative.
 
+**Authoritative P0 correction:** `docs/superpowers/plans/2026-08-29-benchmark-v2-probe-raw-evidence-plumbing-amendment.md` supersedes this plan only for P0 raw-parent production/revalidation and P0 runner-summary semantics. In particular, P0 records `collection_policy="one_requested_attempt_per_provider"` and `status="terminal"` and makes no first-complete claim; `first_complete_verified_attempt_per_cell` remains exclusively the P1 canonical-ledger rebuild/public-bundle rule. The existing public bundle field set and all unrelated clauses below remain unchanged.
+
 ## Global constraints
 
 - Keep exactly four benchmark arms and the frozen release, corpus, estimand, gate, and threshold semantics.
