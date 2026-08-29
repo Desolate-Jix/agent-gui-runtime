@@ -502,6 +502,44 @@ def _write_dispatch_journal(
     return receipt
 
 
+def _prepare_probe_for_absence_control(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    attempt_id: str,
+    pid: int,
+):
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed({"attempt_id": attempt_id, "partition": "regression"})
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / attempt_id).resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=pid,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    return runtime_module, runtime, service, windows, attempt, context, request
+
+
 def _prepare_service_start_intent(
     *,
     runtime_module: object,
@@ -869,6 +907,7 @@ def test_probe_uses_public_workflow_cascade_and_idempotent_cleanup(
 ) -> None:
     from app.learn.hybrid import benchmark_v2_dispatch_attestation as dispatch_module
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
     from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
 
     _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
@@ -920,7 +959,14 @@ def test_probe_uses_public_workflow_cascade_and_idempotent_cleanup(
         probe_kind="cancel",
         request_in_flight_journal=in_flight,
     )
-    assert triggered["outcome"] == "safe_stopped"
+    assert triggered["outcome"] == "safe_stopped_exact_incarnation_absent"
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    assert "probe_trigger_terminal" in [event["event_kind"] for event in events]
     first = runtime.cleanup_attempt(attempt=attempt, reason="probe_cancelled")
     second = runtime.cleanup_attempt(attempt=attempt, reason="probe_cancelled")
 
@@ -1025,7 +1071,7 @@ def test_probe_persists_exact_non_authorizing_trigger_intent_before_cancel(
         request_in_flight_journal=request,
     )
 
-    assert trigger["outcome"] == "safe_stopped"
+    assert trigger["outcome"] == "safe_stopped_exact_incarnation_absent"
     assert service.cancel_calls == 1
     assert runtime.cleanup_attempt(
         attempt=attempt, reason="trigger_intent_test"
@@ -1149,6 +1195,17 @@ def test_probe_trigger_rejects_non_safe_or_unbound_terminal_before_success_event
         attempt_ref=attempt,
     )
     assert "probe_triggered" not in [event["event_kind"] for event in events]
+    observations = 0
+    class _ExactPendingIdentity:
+        def create_time(self) -> float:
+            return 5000 / 1_000_000_000
+    def pending_then_absent(pid: int):
+        nonlocal observations
+        observations += 1
+        if observations == 1:
+            return _ExactPendingIdentity()
+        raise runtime_module.psutil.NoSuchProcess(pid)
+    monkeypatch.setattr(runtime_module.psutil, "Process", pending_then_absent)
     repaired = runtime.cleanup_attempt(attempt=attempt, reason="invalid_trigger")
     assert repaired["cleanup_status"] == "stable_zero"
     assert windows.active == 0
@@ -2167,3 +2224,790 @@ def test_probe_lost_trigger_response_uses_durable_reconciliation_without_retry(
         "listeners": 0,
         "leases": 0,
     }
+
+
+def test_intent_only_restart_uses_read_only_safe_stop_lookup_without_recancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已落盘 intent 且服务已安全停止时，恢复只能读取并证明，绝不再次 cancel。"""
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-intent-only-safe-stop", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-intent-only-safe-stop").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4861,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    original_cancel = service.cancel_operation
+    terminal: dict[str, object] | None = None
+
+    def lose_terminal_response(**kwargs: object) -> dict[str, object]:
+        nonlocal terminal
+        terminal = original_cancel(**kwargs)
+        raise ConnectionError("terminal response lost after service safe stop")
+
+    monkeypatch.setattr(service, "cancel_operation", lose_terminal_response)
+    with pytest.raises(ConnectionError, match="terminal response lost"):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="cancel",
+            request_in_flight_journal=request,
+        )
+    assert service.cancel_calls == 1
+    assert terminal is not None
+
+    def lookup_safe_stopped(**kwargs: object) -> dict[str, object]:
+        service.lookup_calls += 1
+        assert kwargs["screen_group"] == service.started_screen_group
+        assert kwargs["window_binding"] == service.started_window_binding
+        assert terminal is not None
+        return {
+            "operation_ref": deepcopy(terminal["operation_ref"]),
+            "status": "cancelled",
+            "terminal_receipt": None,
+            "cleanup_refs": deepcopy(terminal["cleanup_refs"]),
+            "provider_dispatch_context_projection": deepcopy(
+                terminal["provider_dispatch_context_projection"]
+            ),
+        }
+
+    monkeypatch.setattr(service, "lookup_hybrid_operation", lookup_safe_stopped)
+    runtime._active = None
+    runtime._pending_cleanup = None
+    runtime._attempt_states.clear()
+    recovered = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+
+    receipt = recovered.cleanup_attempt(attempt=attempt, reason="intent_only_restart")
+
+    assert receipt["cleanup_status"] == "stable_zero"
+    assert service.lookup_calls == 1
+    assert service.cancel_calls == 1
+    assert windows.active == 0
+
+
+def test_same_runtime_response_loss_uses_one_read_only_lookup_without_recancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-same-runtime-response-loss", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-same-runtime-response-loss").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4950,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    original_cancel = service.cancel_operation
+    terminal: dict[str, object] | None = None
+
+    def lose_terminal_response(**kwargs: object) -> dict[str, object]:
+        nonlocal terminal
+        terminal = original_cancel(**kwargs)
+        raise ConnectionError("same-runtime cancel response lost")
+
+    def lookup_terminal(**kwargs: object) -> dict[str, object]:
+        service.lookup_calls += 1
+        assert kwargs["screen_group"] == service.started_screen_group
+        assert kwargs["window_binding"] == service.started_window_binding
+        assert terminal is not None
+        return {
+            "operation_ref": deepcopy(terminal["operation_ref"]),
+            "status": "cancelled",
+            "terminal_receipt": None,
+            "cleanup_refs": deepcopy(terminal["cleanup_refs"]),
+            "provider_dispatch_context_projection": deepcopy(
+                terminal["provider_dispatch_context_projection"]
+            ),
+        }
+
+    monkeypatch.setattr(service, "cancel_operation", lose_terminal_response)
+    monkeypatch.setattr(service, "lookup_hybrid_operation", lookup_terminal)
+    with pytest.raises(ConnectionError, match="response lost"):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="cancel",
+            request_in_flight_journal=request,
+        )
+
+    trigger = runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    assert trigger["outcome"] == "safe_stopped_exact_incarnation_absent"
+    receipt = runtime.cleanup_attempt(attempt=attempt, reason="same_runtime_loss")
+
+    assert receipt["cleanup_status"] == "stable_zero"
+    assert service.lookup_calls == 1
+    assert service.cancel_calls == 1
+    assert windows.active == 0
+
+
+def test_terminal_receipt_replay_requires_fresh_exact_absence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """终态收据只能证明历史；每次消费都必须重新确认同一进程实例已离场。"""
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-terminal-fresh-absence", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-terminal-fresh-absence").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4862,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    assert runtime.cleanup_attempt(attempt=attempt, reason="initial") ["cleanup_status"] == "stable_zero"
+
+    class _StillSameIncarnation:
+        def create_time(self) -> float:
+            return 5000 / 1_000_000_000
+
+    monkeypatch.setattr(
+        runtime_module.psutil,
+        "Process",
+        lambda pid: _StillSameIncarnation(),
+    )
+    with pytest.raises(ValueError, match="remains live"):
+        runtime.cleanup_attempt(attempt=attempt, reason="replay")
+    assert service.cancel_calls == 1
+
+
+def test_probe_trigger_terminal_is_unique_per_tuple(
+    tmp_path: Path,
+) -> None:
+    """同一 attempt/provider/probe tuple 只允许一个持久化 terminal。"""
+    from app.learn.hybrid.benchmark_v2_lifecycle import append_benchmark_v2_attempt_event
+
+    attempt = _sealed({"attempt_id": "attempt-trigger-terminal-unique"})
+    journal = (tmp_path / "attempt.jsonl").resolve()
+    append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="prepared",
+        event_kind="attempt_prepared",
+        resource_ref=_sealed({"attempt_dir": str(tmp_path.resolve())}),
+    )
+    first = append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="body_complete",
+        event_kind="probe_trigger_terminal",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=_sealed({"terminal": "first"}),
+    )
+    assert append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="body_complete",
+        event_kind="probe_trigger_terminal",
+        provider_id="omni",
+        probe_kind="cancel",
+        resource_ref=_sealed({"terminal": "first"}),
+    ) == first
+    with pytest.raises(ValueError, match="trigger terminal"):
+        append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="body_complete",
+            event_kind="probe_trigger_terminal",
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"terminal": "different"}),
+        )
+
+
+def test_probe_terminal_selector_validates_exact_tuple_and_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Selector rebuilds one sealed tuple and rejects a same-tuple conflict."""
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed({"attempt_id": "attempt-terminal-tuple-scope", "partition": "regression"})
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-terminal-tuple-scope").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4961,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    receipt = runtime.trigger_probe(
+        probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+    )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    assert runtime_module._probe_trigger_from_terminal_events(
+        events, provider_id="omni", probe_kind="cancel"
+    ) == receipt
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="tuple_scope_cleanup"
+    )["cleanup_status"] == "stable_zero"
+
+    conflict = deepcopy(next(event for event in events if event["event_kind"] == "probe_trigger_terminal"))
+    conflict["resource_ref"] = _sealed({"different": "same-tuple-terminal"})
+    with pytest.raises(ValueError, match="probe_trigger_terminal.*unique"):
+        runtime_module._probe_trigger_from_terminal_events(
+            [*events, conflict], provider_id="omni", probe_kind="cancel"
+        )
+
+
+def test_probe_recovery_selects_only_unfinished_tuple() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    events = [
+        {"event_kind": "probe_trigger_intent", "provider_id": "omni", "probe_kind": "cancel"},
+        {"event_kind": "probe_trigger_terminal", "provider_id": "omni", "probe_kind": "cancel"},
+        {"event_kind": "probe_trigger_intent", "provider_id": "qwen", "probe_kind": "timeout"},
+    ]
+
+    assert runtime_module._single_probe_intent_tuple(events) == ("qwen", "timeout")
+    assert runtime_module._single_probe_intent_tuple(events[:2]) is None
+
+
+def test_probe_recovery_rejects_multiple_unfinished_tuples() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    with pytest.raises(ValueError, match="unfinished.*ambiguous"):
+        runtime_module._single_probe_intent_tuple([
+            {"event_kind": "probe_trigger_intent", "provider_id": "omni", "probe_kind": "cancel"},
+            {"event_kind": "probe_trigger_intent", "provider_id": "qwen", "probe_kind": "timeout"},
+        ])
+
+
+def test_probe_context_rejects_runtime_parent_provider_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, _, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-runtime-parent-provider-tamper",
+        pid=4962,
+    )
+    intent = module._compose_probe_trigger_intent(
+        project_root=tmp_path, context=context, request=request
+    )
+    parent = deepcopy(intent["dispatch_runtime_parent_ref"])
+    parent["provider"] = "qwen"
+    parent["content_sha256"] = content_sha256(parent)
+    intent["dispatch_runtime_parent_ref"] = parent
+    intent["content_sha256"] = content_sha256(intent)
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+
+    with pytest.raises(ValueError, match="runtime parent|provider"):
+        module._probe_context_from_events(
+            events, trigger_intent=intent, request=request
+        )
+    runtime.cleanup_attempt(attempt=attempt, reason="runtime_parent_tamper_cleanup")
+
+
+def test_probe_context_rejects_service_started_binding_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, _, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-service-start-binding-tamper",
+        pid=4963,
+    )
+    intent = module._compose_probe_trigger_intent(
+        project_root=tmp_path, context=context, request=request
+    )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    service_event = next(event for event in events if event["event_kind"] == "service_started")
+    value = deepcopy(service_event["resource_ref"]["value"])
+    binding = deepcopy(value["window_binding"])
+    binding["operation_id"] = f"{binding['operation_id']}-tampered"
+    binding["content_sha256"] = content_sha256(binding)
+    value["window_binding"] = binding
+    tampered_resource = module._runtime_resource_ref(
+        "workflow_service_operation", value
+    )
+    tampered_event = deepcopy(service_event)
+    tampered_event["resource_ref"] = tampered_resource
+    tampered_event["content_sha256"] = content_sha256(tampered_event)
+    tampered_events = [
+        tampered_event if event is service_event else event for event in events
+    ]
+
+    with pytest.raises(ValueError, match="service start.*lineage|window"):
+        module._probe_context_from_events(
+            tampered_events, trigger_intent=intent, request=request
+        )
+    runtime.cleanup_attempt(attempt=attempt, reason="service_start_tamper_cleanup")
+
+
+def test_probe_terminal_rejects_absence_identity_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, _, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-terminal-absence-tamper",
+        pid=4964,
+    )
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    terminal_event = next(
+        event for event in events if event["event_kind"] == "probe_trigger_terminal"
+    )
+    terminal = deepcopy(
+        terminal_event["resource_ref"]["value"]["probe_trigger_terminal"]
+    )
+    terminal["absence_observations"][0]["pid"] += 1
+    terminal["content_sha256"] = content_sha256(terminal)
+    tampered_event = deepcopy(terminal_event)
+    tampered_event["resource_ref"] = module._runtime_resource_ref(
+        "probe_trigger_terminal", {"probe_trigger_terminal": terminal}
+    )
+    tampered_event["content_sha256"] = content_sha256(tampered_event)
+    tampered_events = [
+        tampered_event if event is terminal_event else event for event in events
+    ]
+
+    with pytest.raises(ValueError, match="absence.*identity|process identities"):
+        module._probe_trigger_from_terminal_events(
+            tampered_events, provider_id="omni", probe_kind="cancel"
+        )
+    runtime.cleanup_attempt(attempt=attempt, reason="absence_tamper_cleanup")
+
+
+
+def test_intent_only_pending_restart_cancels_exact_operation_once_then_persists_terminal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """仅有 intent 且 worker 尚在时，恢复只取消该 exact operation 一次并补全 terminal。"""
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-intent-only-pending", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-intent-only-pending").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4863,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    original_cancel = service.cancel_operation
+
+    def fail_before_cancel(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        raise ConnectionError("cancel response unavailable before dispatch")
+
+    monkeypatch.setattr(service, "cancel_operation", fail_before_cancel)
+    with pytest.raises(ConnectionError, match="before dispatch"):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="cancel",
+            request_in_flight_journal=request,
+        )
+    assert service.cancel_calls == 0
+    monkeypatch.setattr(service, "cancel_operation", original_cancel)
+    runtime._active = None
+    runtime._pending_cleanup = None
+    runtime._attempt_states.clear()
+    recovered = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    observations = 0
+
+    class _LiveThenAbsent:
+        def create_time(self) -> float:
+            return 5000 / 1_000_000_000
+
+    def process_for_pending_recovery(pid: int):
+        nonlocal observations
+        observations += 1
+        if observations == 1:
+            return _LiveThenAbsent()
+        raise runtime_module.psutil.NoSuchProcess(pid)
+
+    monkeypatch.setattr(runtime_module.psutil, "Process", process_for_pending_recovery)
+    assert recovered.cleanup_attempt(
+        attempt=attempt, reason="intent_only_pending"
+    )["cleanup_status"] == "stable_zero"
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    assert [event["event_kind"] for event in events].count("probe_trigger_terminal") == 1
+    assert service.cancel_calls == 1
+    assert windows.active == 0
+
+
+def test_trigger_terminal_replay_returns_same_receipt_without_recancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """terminal 已 fsync 但响应丢失时，重试只 fresh re-attest 并返回同一 receipt。"""
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-trigger-terminal-replay", "partition": "regression"}
+    )
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-trigger-terminal-replay").resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4864,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    first = runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+    runtime._probe_state(context).pop("trigger_receipt", None)
+
+    replay = runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+
+    assert replay == first
+    assert service.cancel_calls == 1
+    runtime._active = None
+    runtime._pending_cleanup = None
+    runtime._attempt_states.clear()
+    restarted = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    assert restarted.cleanup_attempt(
+        attempt=attempt, reason="terminal_replay_test_cleanup"
+    )["cleanup_status"] == "stable_zero"
+    assert service.cancel_calls == 1
+
+
+def test_probe_access_denied_fails_closed_without_terminal_or_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, service, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, attempt_id="attempt-access-denied", pid=4865
+    )
+    original_process = module.psutil.Process
+    monkeypatch.setattr(
+        module.psutil, "Process", lambda pid: (_ for _ in ()).throw(module.psutil.AccessDenied(pid))
+    )
+    with pytest.raises(ValueError, match="live absence is indeterminate"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(project_root=tmp_path, attempt_ref=attempt),
+        attempt_ref=attempt,
+    )
+    assert "probe_trigger_terminal" not in [event["event_kind"] for event in events]
+    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    with pytest.raises(ValueError, match="remains pending"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    assert service.cancel_calls == 1
+    monkeypatch.setattr(module.psutil, "Process", original_process)
+    assert runtime.cleanup_attempt(attempt=attempt, reason="access_denied_test_cleanup")["cleanup_status"] == "stable_zero"
+
+
+def test_probe_psutil_api_failure_fails_closed_without_terminal_or_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, service, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, attempt_id="attempt-psutil-api-failure", pid=4866
+    )
+    original_process = module.psutil.Process
+    monkeypatch.setattr(
+        module.psutil, "Process", lambda pid: (_ for _ in ()).throw(OSError("psutil api unavailable"))
+    )
+    with pytest.raises(ValueError, match="live absence is indeterminate"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(project_root=tmp_path, attempt_ref=attempt),
+        attempt_ref=attempt,
+    )
+    assert "probe_trigger_terminal" not in [event["event_kind"] for event in events]
+    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    with pytest.raises(ValueError, match="remains pending"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    assert service.cancel_calls == 1
+    monkeypatch.setattr(module.psutil, "Process", original_process)
+    assert runtime.cleanup_attempt(attempt=attempt, reason="api_failure_test_cleanup")["cleanup_status"] == "stable_zero"
+
+
+def test_probe_malformed_identity_fails_closed_without_terminal_or_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, service, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, attempt_id="attempt-malformed-identity", pid=4867
+    )
+    original_absence = module._live_absence_observations
+    monkeypatch.setattr(
+        module,
+        "_live_absence_observations",
+        lambda identities: original_absence([{"pid": 4867}]),
+    )
+    with pytest.raises(ValueError, match="process identity is invalid"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(project_root=tmp_path, attempt_ref=attempt),
+        attempt_ref=attempt,
+    )
+    assert "probe_trigger_terminal" not in [event["event_kind"] for event in events]
+    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    with pytest.raises(ValueError, match="remains pending"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    assert service.cancel_calls == 1
+    with pytest.raises(BaseExceptionGroup, match="indeterminate"):
+        runtime.cleanup_attempt(attempt=attempt, reason="malformed_identity_test_cleanup")
+
+
+def test_pid_reuse_records_observed_identity_as_exact_incarnation_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    class _ReusedPid:
+        def create_time(self) -> float:
+            return 9000 / 1_000_000_000
+
+    monkeypatch.setattr(runtime_module.psutil, "Process", lambda pid: _ReusedPid())
+    observations = runtime_module._live_absence_observations(
+        [{"pid": 4868, "create_time_ns": 5000}]
+    )
+    assert observations == [{
+        "pid": 4868,
+        "create_time_ns": 5000,
+        "observed_create_time_ns": 9000,
+        "outcome": "pid_reused",
+    }]
+
+
+def test_in_memory_trigger_replay_requires_fresh_absence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module, runtime, service, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, attempt_id="attempt-memory-replay", pid=4870
+    )
+    original_process = module.psutil.Process
+    runtime.trigger_probe(
+        probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+    )
+
+    class _Same:
+        def create_time(self) -> float:
+            return 5000 / 1_000_000_000
+
+    monkeypatch.setattr(module.psutil, "Process", lambda pid: _Same())
+    with pytest.raises(ValueError, match="remains live"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    assert service.cancel_calls == 1
+    monkeypatch.setattr(module.psutil, "Process", original_process)
+    assert runtime.cleanup_attempt(attempt=attempt, reason="memory_replay_cleanup")["cleanup_status"] == "stable_zero"
+
+
+def test_active_cleanup_after_absence_failure_never_terminalizes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    module, runtime, service, _, attempt, context, request = _prepare_probe_for_absence_control(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, attempt_id="attempt-active-cleanup-denied", pid=4871
+    )
+    monkeypatch.setattr(
+        module.psutil, "Process", lambda pid: (_ for _ in ()).throw(module.psutil.AccessDenied(pid))
+    )
+    with pytest.raises(ValueError, match="indeterminate"):
+        runtime.trigger_probe(
+            probe_context=context, probe_kind="cancel", request_in_flight_journal=request
+        )
+    with pytest.raises(BaseExceptionGroup, match="indeterminate"):
+        runtime.cleanup_attempt(attempt=attempt, reason="active_absence_failure")
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(project_root=tmp_path, attempt_ref=attempt),
+        attempt_ref=attempt,
+    )
+    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    assert service.cancel_calls == 1

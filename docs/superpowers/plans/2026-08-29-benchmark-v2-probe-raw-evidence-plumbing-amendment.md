@@ -24,6 +24,7 @@ P0-C contains exactly these requirements:
 5. Mark all generated evidence as `benchmark_probe_only_non_authorizing`, with
    `artifact_is_authorization=false` and `execute_binding_enabled=false`.
 6. Make the cancellation trigger exactly once across a lost response or restart.
+7. Do not create a general durable process supervisor.
 
 P0-C must not create a general durable process supervisor, modify B1, add a
 provider model, retain provider raw output, change `WorkflowService` or
@@ -79,6 +80,22 @@ lost response or restart does not repeat cancellation:
 - accept only confirmed absence or a different PID incarnation; and
 - return an indeterminate/fail-closed result for `AccessDenied`, API failure,
   same-incarnation live, or any ambiguity.
+
+### Implemented Slice 2 behavior
+
+The attempt journal admits one `probe_trigger_intent` and one
+`probe_trigger_terminal` per provider/kind. The terminal records only
+benchmark-probe non-authorizing evidence and exact identity outcomes. On every
+terminal or cleanup-receipt replay, the runtime ignores historical absence as
+proof and performs a fresh exact `{pid, create_time_ns}` observation. `NoSuchProcess`
+or a different incarnation is acceptable; same incarnation, `AccessDenied`, API
+failure, malformed identity, or ambiguity fails closed. PID reuse records the
+newly observed `observed_create_time_ns` and is accepted only as absence of the
+previous exact incarnation. An intent-only restart uses the existing read-only
+WorkflowService lookup first: a confirmed safe stop
+is journaled without recancel; a pending exact operation may be cancelled once,
+then is freshly re-attested and terminalized. This does not create a general
+process supervisor or alter B1.
 
 The resulting evidence remains benchmark-only and non-authorizing. It may
 support a benchmark report, never action dispatch.

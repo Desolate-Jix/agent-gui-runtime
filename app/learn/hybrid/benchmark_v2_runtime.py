@@ -8,6 +8,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import psutil
 from threading import RLock
 import time
 from typing import Any, Callable, Iterator, Mapping, Protocol
@@ -98,8 +99,9 @@ _PROBE_DEADLINE_SECONDS = 120.0
 _PROBE_MAX_CONTINUES = 4096
 _PROBE_CONTEXT_CONTRACT = "benchmark_v2_probe_context_v1"
 _PROBE_REQUEST_CONTRACT = "benchmark_v2_probe_request_in_flight_v1"
-_PROBE_TRIGGER_CONTRACT = "benchmark_v2_probe_trigger_receipt_v1"
+_PROBE_TRIGGER_CONTRACT = "benchmark_v2_probe_trigger_receipt_v2"
 _PROBE_TRIGGER_INTENT_CONTRACT = "benchmark_v2_probe_trigger_intent_v1"
+_PROBE_TRIGGER_TERMINAL_CONTRACT = "benchmark_v2_probe_trigger_terminal_v1"
 _PROBE_CONTEXT_FIELDS = {
     "contract_version",
     "attempt_ref",
@@ -151,8 +153,12 @@ _PROBE_TRIGGER_FIELDS = {
     "provider_id",
     "probe_kind",
     "request_in_flight_ref",
+    "trigger_intent_ref",
     "service_terminal_ref",
     "cleanup_binding_ref",
+    "probe_trigger_terminal_ref",
+    "absence_observations",
+    "evidence_scope",
     "attempt_event_ref",
     "outcome",
     "artifact_is_authorization",
@@ -1430,15 +1436,70 @@ class _BenchmarkV2ProductionRuntime:
         state = self._probe_state(context)
         if state.get("request_in_flight") != request:
             raise ValueError("benchmark probe request was not observed by this runtime")
-        existing = state.get("trigger_receipt")
-        if isinstance(existing, Mapping):
-            return _validate_probe_trigger(existing)
+        journal_path = _benchmark_v2_attempt_journal_path(
+            project_root=self._project_root, attempt_ref=context["attempt_ref"]
+        )
+        events = read_benchmark_v2_attempt_journal(
+            journal_path=journal_path, attempt_ref=context["attempt_ref"]
+        )
+        persisted = _probe_trigger_from_terminal_events(
+            events,
+            provider_id=context["provider_id"],
+            probe_kind=context["probe_kind"],
+        )
+        if persisted is not None:
+            state["trigger_receipt"] = deepcopy(persisted)
+            return persisted
+        existing_intent = _probe_trigger_intent_from_events(
+            events,
+            provider_id=context["provider_id"],
+            probe_kind=context["probe_kind"],
+        )
+        if existing_intent is not None:
+            recovered_context = _probe_context_from_events(
+                events, trigger_intent=existing_intent, request=request
+            )
+            recovered_terminal = _safe_stopped_terminal_from_lookup(
+                events=events,
+                service=state["service"],
+                context=recovered_context,
+                request=request,
+            )
+            if recovered_terminal is None:
+                raise ValueError("benchmark probe retry remains pending after prior trigger intent")
+            intent_event = _one_probe_event_for_tuple(
+                events,
+                event_kind="probe_trigger_intent",
+                provider_id=context["provider_id"],
+                probe_kind=context["probe_kind"],
+                required=True,
+            )
+            assert intent_event is not None
+            _persist_recovered_probe_terminal(
+                journal_path=journal_path,
+                context=recovered_context,
+                request=request,
+                trigger_intent_event=intent_event,
+                service_terminal=recovered_terminal,
+            )
+            state["service_terminal"] = recovered_terminal
+            rebuilt = _probe_trigger_from_terminal_events(
+                read_benchmark_v2_attempt_journal(
+                    journal_path=journal_path, attempt_ref=context["attempt_ref"]
+                ),
+                provider_id=context["provider_id"],
+                probe_kind=context["probe_kind"],
+            )
+            if rebuilt is None:
+                raise ValueError("benchmark probe retry terminal rebuild is unavailable")
+            state["trigger_receipt"] = deepcopy(rebuilt)
+            return rebuilt
         trigger_intent = _compose_probe_trigger_intent(
             project_root=self._project_root,
             context=context,
             request=request,
         )
-        append_benchmark_v2_attempt_event(
+        intent_event = append_benchmark_v2_attempt_event(
             journal_path=_benchmark_v2_attempt_journal_path(
                 project_root=self._project_root,
                 attempt_ref=context["attempt_ref"],
@@ -1492,18 +1553,50 @@ class _BenchmarkV2ProductionRuntime:
                 },
             ),
         )
+        absence_observations = _live_absence_observations(
+            trigger_intent["process_identities"]
+        )
+        terminal_body: dict[str, Any] = {
+            "contract_version": _PROBE_TRIGGER_TERMINAL_CONTRACT,
+            "trigger_intent_ref": _event_ref(intent_event),
+            "service_terminal_ref": _content_ref(service_terminal, name="workflow service terminal result"),
+            "cleanup_binding_ref": cleanup_binding,
+            "absence_observations": _persisted_probe_absence_observations(absence_observations),
+            "outcome": "safe_stopped_exact_incarnation_absent",
+            "evidence_scope": "benchmark_probe_only_non_authorizing",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+        terminal_body["content_sha256"] = content_sha256(terminal_body)
+        terminal = _sealed_parent(terminal_body, name="probe trigger terminal")
+        terminal_event = append_benchmark_v2_attempt_event(
+            journal_path=_benchmark_v2_attempt_journal_path(
+                project_root=self._project_root,
+                attempt_ref=context["attempt_ref"],
+            ),
+            attempt_ref=context["attempt_ref"],
+            phase="body_complete",
+            event_kind="probe_trigger_terminal",
+            provider_id=str(context["provider_id"]),
+            probe_kind=kind,
+            resource_ref=_runtime_resource_ref(
+                "probe_trigger_terminal", {"probe_trigger_terminal": terminal}
+            ),
+        )
         body: dict[str, Any] = {
             "contract_version": _PROBE_TRIGGER_CONTRACT,
             "attempt_ref": deepcopy(context["attempt_ref"]),
             "provider_id": context["provider_id"],
             "probe_kind": kind,
             "request_in_flight_ref": _content_ref(request, name="probe request"),
-            "service_terminal_ref": _content_ref(
-                service_terminal, name="workflow service terminal result"
-            ),
+            "trigger_intent_ref": _event_ref(intent_event),
+            "service_terminal_ref": _content_ref(service_terminal, name="workflow service terminal result"),
             "cleanup_binding_ref": cleanup_binding,
+            "probe_trigger_terminal_ref": _event_ref(terminal_event),
+            "absence_observations": absence_observations,
             "attempt_event_ref": _event_ref(event),
-            "outcome": "safe_stopped",
+            "outcome": "safe_stopped_exact_incarnation_absent",
+            "evidence_scope": "benchmark_probe_only_non_authorizing",
             "artifact_is_authorization": False,
             "execute_binding_enabled": False,
         }
@@ -1527,6 +1620,19 @@ class _BenchmarkV2ProductionRuntime:
             journal_path=journal_path,
             attempt_ref=attempt_ref,
         )
+        # 终态 receipt 的 replay 必须先完整重建并校验 durable probe terminal。
+        completed_probe_terminals: list[Mapping[str, object]] = []
+        for provider_id, probe_kind in _probe_terminal_tuples(events):
+            _probe_trigger_from_terminal_events(
+                events, provider_id=provider_id, probe_kind=probe_kind
+            )
+            material = _probe_terminal_material(
+                events, provider_id=provider_id, probe_kind=probe_kind
+            )
+            assert material is not None
+            completed_probe_terminals.append(material["service_terminal"])
+        if len(completed_probe_terminals) > 1:
+            raise ValueError("benchmark completed probe service terminal is ambiguous")
         terminal = _cleanup_receipt_from_terminal(events)
         if terminal is not None:
             with self._lock:
@@ -1551,7 +1657,9 @@ class _BenchmarkV2ProductionRuntime:
         with self._lock:
             state = self._attempt_states.get(attempt_key)
 
-        service_terminal: Mapping[str, object] | None = None
+        service_terminal: Mapping[str, object] | None = (
+            completed_probe_terminals[0] if completed_probe_terminals else None
+        )
         window_cleanup: Mapping[str, object] | None = None
         cleanup_errors: list[BaseException] = []
         actual_attestations: list[Mapping[str, object]] = []
@@ -1573,6 +1681,13 @@ class _BenchmarkV2ProductionRuntime:
                 cleanup_errors.append(error)
         if isinstance(state, dict):
             try:
+                active_tuple = _probe_tuple(state["provider_id"], state["probe_kind"])
+                trigger_intent = _probe_trigger_intent_from_events(
+                    events, provider_id=active_tuple[0], probe_kind=active_tuple[1]
+                )
+                request = _probe_request_from_events(
+                    events, provider_id=active_tuple[0], probe_kind=active_tuple[1]
+                )
                 service_terminal = state.get("service_terminal")
                 if not isinstance(service_terminal, Mapping):
                     operation = state.get("latest_operation_ref")
@@ -1595,10 +1710,32 @@ class _BenchmarkV2ProductionRuntime:
                             screen_group=state["screen_group"],
                         )
                     if isinstance(operation, Mapping):
-                        try:
-                            service_terminal = state["service"].cancel_operation(
-                                operation_ref=deepcopy(dict(operation))
+                        if trigger_intent is not None and request is not None:
+                            recovered_context = _probe_context_from_events(
+                                events, trigger_intent=trigger_intent, request=request
                             )
+                            service_terminal = _safe_stopped_terminal_from_lookup(
+                                events=events,
+                                service=state["service"],
+                                context=recovered_context,
+                                request=request,
+                            )
+                        if service_terminal is not None:
+                            state["service_terminal"] = service_terminal
+                        else:
+                            if trigger_intent is not None:
+                                if operation != trigger_intent["operation_ref"]:
+                                    raise ValueError(
+                                        "benchmark probe pending recovery operation is stale"
+                                    )
+                                _observe_exact_process_identities_before_cancel(
+                                    trigger_intent["process_identities"]
+                                )
+                        try:
+                            if service_terminal is None:
+                                service_terminal = state["service"].cancel_operation(
+                                    operation_ref=deepcopy(dict(operation))
+                                )
                         except ValueError:
                             consumed = state.get("continuation_in_flight")
                             if not isinstance(consumed, Mapping) or consumed != operation:
@@ -1625,6 +1762,42 @@ class _BenchmarkV2ProductionRuntime:
                             )
                         service_terminal = _validate_service_terminal(service_terminal)
                         state["service_terminal"] = service_terminal
+                if (
+                    isinstance(service_terminal, Mapping)
+                    and trigger_intent is not None
+                    and request is not None
+                    and _one_probe_event_for_tuple(
+                        events,
+                        event_kind="probe_trigger_terminal",
+                        provider_id=active_tuple[0],
+                        probe_kind=active_tuple[1],
+                        required=False,
+                    )
+                    is None
+                ):
+                    recovered_context = _probe_context_from_events(
+                        events, trigger_intent=trigger_intent, request=request
+                    )
+                    intent_event = _one_probe_event_for_tuple(
+                        events,
+                        event_kind="probe_trigger_intent",
+                        provider_id=active_tuple[0],
+                        probe_kind=active_tuple[1],
+                        required=True,
+                    )
+                    assert intent_event is not None
+                    service_terminal = _persist_recovered_probe_terminal(
+                        journal_path=journal_path,
+                        context=recovered_context,
+                        request=request,
+                        trigger_intent_event=intent_event,
+                        service_terminal=service_terminal,
+                    )
+                    state["service_terminal"] = service_terminal
+                    events = read_benchmark_v2_attempt_journal(
+                        journal_path=journal_path,
+                        attempt_ref=attempt_ref,
+                    )
             except BaseException as error:
                 cleanup_errors.append(error)
             try:
@@ -1639,8 +1812,98 @@ class _BenchmarkV2ProductionRuntime:
                 cleanup_errors.append(error)
         else:
             try:
-                if service_terminal is None:
-                    service_terminal = _service_terminal_from_events(events)
+                recovered_tuple = _single_probe_intent_tuple(events)
+                trigger_intent = (
+                    _probe_trigger_intent_from_events(
+                        events, provider_id=recovered_tuple[0], probe_kind=recovered_tuple[1]
+                    )
+                    if recovered_tuple is not None
+                    else None
+                )
+                request = (
+                    _probe_request_from_events(
+                        events, provider_id=recovered_tuple[0], probe_kind=recovered_tuple[1]
+                    )
+                    if recovered_tuple is not None
+                    else None
+                )
+                if (
+                    service_terminal is None
+                    and trigger_intent is not None
+                    and request is not None
+                ):
+                    recovered_context = _probe_context_from_events(
+                        events, trigger_intent=trigger_intent, request=request
+                    )
+                    recovered_terminal = _safe_stopped_terminal_from_lookup(
+                        events=events,
+                        service=get_production_benchmark_v2_workflow_service(),
+                        context=recovered_context,
+                        request=request,
+                    )
+                    if recovered_terminal is not None:
+                        assert recovered_tuple is not None
+                        intent_event = _one_probe_event_for_tuple(
+                            events,
+                            event_kind="probe_trigger_intent",
+                            provider_id=recovered_tuple[0],
+                            probe_kind=recovered_tuple[1],
+                            required=True,
+                        )
+                        assert intent_event is not None
+                        service_terminal = _persist_recovered_probe_terminal(
+                            journal_path=journal_path,
+                            context=recovered_context,
+                            request=request,
+                            trigger_intent_event=intent_event,
+                            service_terminal=recovered_terminal,
+                        )
+                        events = read_benchmark_v2_attempt_journal(
+                            journal_path=journal_path,
+                            attempt_ref=attempt_ref,
+                        )
+                if service_terminal is None and recovered_tuple is not None:
+                    service_terminal = _service_terminal_from_events(
+                        events,
+                        provider_id=recovered_tuple[0],
+                        probe_kind=recovered_tuple[1],
+                    )
+                if (
+                    isinstance(service_terminal, Mapping)
+                    and trigger_intent is not None
+                    and request is not None
+                    and recovered_tuple is not None
+                    and _one_probe_event_for_tuple(
+                        events,
+                        event_kind="probe_trigger_terminal",
+                        provider_id=recovered_tuple[0],
+                        probe_kind=recovered_tuple[1],
+                        required=False,
+                    )
+                    is None
+                ):
+                    recovered_context = _probe_context_from_events(
+                        events, trigger_intent=trigger_intent, request=request
+                    )
+                    intent_event = _one_probe_event_for_tuple(
+                        events,
+                        event_kind="probe_trigger_intent",
+                        provider_id=recovered_tuple[0],
+                        probe_kind=recovered_tuple[1],
+                        required=True,
+                    )
+                    assert intent_event is not None
+                    service_terminal = _persist_recovered_probe_terminal(
+                        journal_path=journal_path,
+                        context=recovered_context,
+                        request=request,
+                        trigger_intent_event=intent_event,
+                        service_terminal=service_terminal,
+                    )
+                    events = read_benchmark_v2_attempt_journal(
+                        journal_path=journal_path,
+                        attempt_ref=attempt_ref,
+                    )
                 service_operation = durable_service_operation
                 service: object | None = None
                 intent = _service_start_intent_from_events(events)
@@ -1659,12 +1922,54 @@ class _BenchmarkV2ProductionRuntime:
                             screen_group=intent["screen_group"],
                         )
                 if service_terminal is None and service_operation is not None:
+                    if trigger_intent is not None:
+                        if service_operation != trigger_intent["operation_ref"]:
+                            raise ValueError("benchmark probe pending recovery operation is stale")
+                        _observe_exact_process_identities_before_cancel(
+                            trigger_intent["process_identities"]
+                        )
                     if service is None:
                         service = get_production_benchmark_v2_workflow_service()
                     service_terminal = service.cancel_operation(
                         operation_ref=service_operation
                     )
                     service_terminal = _validate_service_terminal(service_terminal)
+                if (
+                    isinstance(service_terminal, Mapping)
+                    and trigger_intent is not None
+                    and request is not None
+                    and recovered_tuple is not None
+                    and _one_probe_event_for_tuple(
+                        events,
+                        event_kind="probe_trigger_terminal",
+                        provider_id=recovered_tuple[0],
+                        probe_kind=recovered_tuple[1],
+                        required=False,
+                    )
+                    is None
+                ):
+                    recovered_context = _probe_context_from_events(
+                        events, trigger_intent=trigger_intent, request=request
+                    )
+                    intent_event = _one_probe_event_for_tuple(
+                        events,
+                        event_kind="probe_trigger_intent",
+                        provider_id=recovered_tuple[0],
+                        probe_kind=recovered_tuple[1],
+                        required=True,
+                    )
+                    assert intent_event is not None
+                    service_terminal = _persist_recovered_probe_terminal(
+                        journal_path=journal_path,
+                        context=recovered_context,
+                        request=request,
+                        trigger_intent_event=intent_event,
+                        service_terminal=service_terminal,
+                    )
+                    events = read_benchmark_v2_attempt_journal(
+                        journal_path=journal_path,
+                        attempt_ref=attempt_ref,
+                    )
             except BaseException as error:
                 cleanup_errors.append(error)
             try:
@@ -3430,13 +3735,94 @@ def _validate_probe_trigger_intent(value: object) -> dict[str, Any]:
     return intent
 
 
+def _observe_exact_process_identities_before_cancel(process_identities: object) -> None:
+    if not isinstance(process_identities, list) or not process_identities:
+        raise ValueError("benchmark probe process identities are unavailable")
+    for expected in process_identities:
+        if not isinstance(expected, Mapping) or set(expected) != {"pid", "create_time_ns"}:
+            raise ValueError("benchmark probe process identity is invalid")
+        pid = expected.get("pid")
+        created = expected.get("create_time_ns")
+        if (
+            isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            or isinstance(created, bool) or not isinstance(created, int) or created <= 0
+        ):
+            raise ValueError("benchmark probe process identity is invalid")
+        try:
+            observed = int(round(psutil.Process(pid).create_time() * 1_000_000_000))
+        except (psutil.AccessDenied, psutil.Error, OSError, ValueError, TypeError) as error:
+            raise ValueError("benchmark probe pre-cancel process identity is indeterminate") from error
+        if abs(observed - created) > 1000:
+            raise ValueError("benchmark probe pre-cancel exact process identity is stale")
+
+
+def _live_absence_observations(
+    process_identities: object,
+) -> list[dict[str, object]]:
+    if not isinstance(process_identities, list) or not process_identities:
+        raise ValueError("benchmark probe process identities are unavailable")
+    observations: list[dict[str, object]] = []
+    seen: set[tuple[int, int]] = set()
+    for expected in process_identities:
+        if not isinstance(expected, Mapping) or set(expected) != {"pid", "create_time_ns"}:
+            raise ValueError("benchmark probe process identity is invalid")
+        pid = expected.get("pid")
+        created = expected.get("create_time_ns")
+        if (
+            isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or pid <= 0
+            or isinstance(created, bool)
+            or not isinstance(created, int)
+            or created <= 0
+            or (pid, created) in seen
+        ):
+            raise ValueError("benchmark probe process identity is invalid")
+        seen.add((pid, created))
+        try:
+            observed = int(round(psutil.Process(pid).create_time() * 1_000_000_000))
+        except psutil.NoSuchProcess:
+            outcome = "no_such_process"
+        except (psutil.AccessDenied, psutil.Error, OSError, ValueError, TypeError) as error:
+            raise ValueError("benchmark probe live absence is indeterminate") from error
+        else:
+            if abs(observed - created) <= 1000:
+                raise ValueError("benchmark probe exact incarnation remains live")
+            outcome = "pid_reused"
+        observation: dict[str, object] = {
+            "pid": pid,
+            "create_time_ns": created,
+            "outcome": outcome,
+        }
+        if outcome == "pid_reused":
+            observation["observed_create_time_ns"] = observed
+        observations.append(observation)
+    return observations
+
+
+def _persisted_probe_absence_observations(
+    observations: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    persisted: list[dict[str, object]] = []
+    for observation in _validate_probe_absence_observations(
+        observations, name="benchmark probe fresh"
+    ):
+        item = dict(observation)
+        item["create_time_ns"] = str(item["create_time_ns"])
+        if item["outcome"] == "pid_reused":
+            item["observed_create_time_ns"] = str(item["observed_create_time_ns"])
+        persisted.append(item)
+    return persisted
+
+
 def _validate_probe_trigger(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != _PROBE_TRIGGER_FIELDS:
         raise ValueError("benchmark probe trigger receipt is not closed")
     trigger = deepcopy(dict(value))
     if (
         trigger["contract_version"] != _PROBE_TRIGGER_CONTRACT
-        or trigger["outcome"] != "safe_stopped"
+        or trigger["outcome"] != "safe_stopped_exact_incarnation_absent"
+        or trigger["evidence_scope"] != "benchmark_probe_only_non_authorizing"
         or trigger["artifact_is_authorization"] is not False
         or trigger["execute_binding_enabled"] is not False
         or trigger["content_sha256"] != content_sha256(trigger)
@@ -3449,11 +3835,16 @@ def _validate_probe_trigger(value: object) -> dict[str, Any]:
     trigger["probe_kind"] = _probe_kind(trigger["probe_kind"])
     for name in (
         "request_in_flight_ref",
+        "trigger_intent_ref",
         "service_terminal_ref",
         "cleanup_binding_ref",
+        "probe_trigger_terminal_ref",
         "attempt_event_ref",
     ):
         trigger[name] = _sealed_parent(trigger[name], name=f"probe trigger {name}")
+    trigger["absence_observations"] = _validate_probe_absence_observations(
+        trigger["absence_observations"], name="benchmark probe trigger"
+    )
     return trigger
 
 
@@ -3918,11 +4309,542 @@ def _probe_cleanup_binding(
     )
 
 
-def _service_terminal_from_events(
+def _probe_tuple(provider_id: object, probe_kind: object) -> tuple[str, str]:
+    return _probe_provider(provider_id), _probe_kind(probe_kind)
+
+
+def _probe_terminal_tuples(events: list[Mapping[str, object]]) -> list[tuple[str, str]]:
+    tuples: set[tuple[str, str]] = set()
+    for event in events:
+        if event.get("event_kind") == "probe_trigger_terminal":
+            tuples.add(_probe_tuple(event.get("provider_id"), event.get("probe_kind")))
+    return sorted(tuples)
+
+
+def _single_probe_intent_tuple(events: list[Mapping[str, object]]) -> tuple[str, str] | None:
+    tuples: set[tuple[str, str]] = set()
+    for event in events:
+        if event.get("event_kind") == "probe_trigger_intent":
+            tuples.add(_probe_tuple(event.get("provider_id"), event.get("probe_kind")))
+    tuples.difference_update(_probe_terminal_tuples(events))
+    if not tuples:
+        return None
+    if len(tuples) != 1:
+        raise ValueError("benchmark unfinished probe recovery tuple is ambiguous")
+    return next(iter(tuples))
+
+
+def _probe_events_for_tuple(
     events: list[Mapping[str, object]],
+    *,
+    event_kind: str,
+    provider_id: object,
+    probe_kind: object,
+) -> list[Mapping[str, object]]:
+    provider, kind = _probe_tuple(provider_id, probe_kind)
+    return [
+        event
+        for event in events
+        if event.get("event_kind") == event_kind
+        and event.get("provider_id") == provider
+        and event.get("probe_kind") == kind
+    ]
+
+
+def _one_probe_event_for_tuple(
+    events: list[Mapping[str, object]],
+    *,
+    event_kind: str,
+    provider_id: object,
+    probe_kind: object,
+    required: bool,
+) -> Mapping[str, object] | None:
+    matches = _probe_events_for_tuple(
+        events,
+        event_kind=event_kind,
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+    )
+    if not matches:
+        if required:
+            raise ValueError(f"benchmark probe {event_kind} is unavailable for tuple")
+        return None
+    if len(matches) != 1:
+        raise ValueError(f"benchmark probe {event_kind} is not unique for tuple")
+    return matches[0]
+
+
+def _validate_probe_absence_observations(
+    value: object, *, name: str, allow_encoded_times: bool = False
+) -> list[dict[str, object]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{name} absence observations are invalid")
+    normalized: list[dict[str, object]] = []
+    seen: set[tuple[int, int]] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError(f"{name} absence observation is invalid")
+        outcome = item.get("outcome")
+        fields = {"pid", "create_time_ns", "outcome"}
+        if outcome == "pid_reused":
+            fields.add("observed_create_time_ns")
+        if outcome not in {"no_such_process", "pid_reused"} or set(item) != fields:
+            raise ValueError(f"{name} absence observation is invalid")
+        pid = item.get("pid")
+        created = item.get("create_time_ns")
+        def _time_value(raw: object) -> int | str:
+            if isinstance(raw, bool):
+                raise ValueError(f"{name} absence observation is invalid")
+            if isinstance(raw, int) and raw > 0:
+                return raw
+            if (
+                allow_encoded_times
+                and isinstance(raw, str)
+                and raw.isascii()
+                and raw.isdecimal()
+                and raw[0] != "0"
+                and int(raw) > 0
+            ):
+                return raw
+            raise ValueError(f"{name} absence observation is invalid")
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+            raise ValueError(f"{name} absence observation is invalid")
+        created_value = _time_value(created)
+        identity = (pid, int(created_value))
+        if identity in seen:
+            raise ValueError(f"{name} absence observation is invalid")
+        observed: dict[str, object] = {
+            "pid": pid,
+            "create_time_ns": created_value,
+            "outcome": outcome,
+        }
+        if outcome == "pid_reused":
+            observed["observed_create_time_ns"] = _time_value(item.get("observed_create_time_ns"))
+        seen.add(identity)
+        normalized.append(observed)
+    return normalized
+
+
+def _validate_probe_trigger_terminal(value: object) -> dict[str, Any]:
+    fields = {
+        "contract_version", "trigger_intent_ref", "service_terminal_ref",
+        "cleanup_binding_ref", "absence_observations", "outcome",
+        "evidence_scope", "artifact_is_authorization", "execute_binding_enabled",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise ValueError("benchmark probe trigger terminal is not closed")
+    terminal = deepcopy(dict(value))
+    if (
+        terminal["contract_version"] != _PROBE_TRIGGER_TERMINAL_CONTRACT
+        or terminal["outcome"] != "safe_stopped_exact_incarnation_absent"
+        or terminal["evidence_scope"] != "benchmark_probe_only_non_authorizing"
+        or terminal["artifact_is_authorization"] is not False
+        or terminal["execute_binding_enabled"] is not False
+        or terminal["content_sha256"] != content_sha256(terminal)
+    ):
+        raise ValueError("benchmark probe trigger terminal is invalid")
+    for field in ("trigger_intent_ref", "service_terminal_ref", "cleanup_binding_ref"):
+        terminal[field] = _sealed_parent(terminal[field], name=f"probe trigger terminal {field}")
+    terminal["absence_observations"] = _validate_probe_absence_observations(
+        terminal["absence_observations"],
+        name="benchmark probe terminal",
+        allow_encoded_times=True,
+    )
+    return terminal
+
+
+def _probe_trigger_intent_from_events(
+    events: list[Mapping[str, object]], *, provider_id: object, probe_kind: object
 ) -> dict[str, Any] | None:
+    event = _one_probe_event_for_tuple(
+        events,
+        event_kind="probe_trigger_intent",
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+        required=False,
+    )
+    if event is None:
+        return None
+    value = _runtime_resource_value(event, expected_kind="probe_trigger_intent")
+    if not isinstance(value, Mapping) or set(value) != {"trigger_intent"}:
+        raise ValueError("benchmark probe trigger intent resource is not closed")
+    return _validate_probe_trigger_intent(value["trigger_intent"])
+
+
+def _probe_request_from_events(
+    events: list[Mapping[str, object]], *, provider_id: object, probe_kind: object
+) -> dict[str, Any] | None:
+    event = _one_probe_event_for_tuple(
+        events,
+        event_kind="provider_request_in_flight",
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+        required=False,
+    )
+    if event is None:
+        return None
+    value = _runtime_resource_value(event, expected_kind="provider_request_in_flight")
+    if not isinstance(value, Mapping) or set(value) != {
+        "operation_ref", "provider_dispatch_context_projection", "dispatch_receipt"
+    }:
+        raise ValueError("benchmark probe request resource is not closed")
+    receipt = _sealed_parent(value["dispatch_receipt"], name="benchmark probe dispatch receipt")
+    if not isinstance(receipt.get("provider_runtime_attestation_ref"), Mapping):
+        raise ValueError("benchmark probe dispatch runtime identity is unavailable")
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_REQUEST_CONTRACT,
+        "attempt_ref": deepcopy(event["attempt_ref"]),
+        "provider_id": event["provider_id"],
+        "probe_kind": event["probe_kind"],
+        "operation_ref": deepcopy(value["operation_ref"]),
+        "provider_dispatch_context_projection": deepcopy(value["provider_dispatch_context_projection"]),
+        "request_state": "request_in_flight",
+        "dispatch_receipt_ref": _content_ref(receipt, name="dispatch receipt"),
+        "provider_runtime_attestation_ref": deepcopy(receipt["provider_runtime_attestation_ref"]),
+        "attempt_event_ref": _event_ref(event),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_probe_request(body)
+
+
+def _probe_context_from_events(
+    events: list[Mapping[str, object]],
+    *,
+    trigger_intent: Mapping[str, object],
+    request: Mapping[str, object],
+) -> dict[str, Any]:
+    intent = _validate_probe_trigger_intent(trigger_intent)
+    in_flight = _validate_probe_request(request)
+    if (
+        in_flight["attempt_ref"] != intent["attempt_ref"]
+        or in_flight["provider_id"] != intent["provider_id"]
+        or in_flight["probe_kind"] != intent["probe_kind"]
+        or in_flight["operation_ref"] != intent["operation_ref"]
+        or intent["request_in_flight_ref"] != _content_ref(in_flight, name="probe trigger request")
+        or intent["dispatch_receipt_ref"] != in_flight["dispatch_receipt_ref"]
+    ):
+        raise ValueError("benchmark probe recovery lineage is stale")
+    parent = _sealed_parent(intent["dispatch_runtime_parent_ref"], name="probe trigger dispatch runtime parent")
+    runtime_identity = _sealed_parent(
+        parent.get("runtime_identity"), name="probe trigger runtime identity"
+    )
+    if (
+        parent.get("provider") != intent["provider_id"]
+        or parent.get("operation_ref")
+        != in_flight["provider_dispatch_context_projection"]["operation_ref"]
+        or parent.get("dispatch_receipt_ref")
+        != {"content_sha256": in_flight["dispatch_receipt_ref"]["content_sha256"]}
+        or in_flight["provider_runtime_attestation_ref"]
+        != {"content_sha256": runtime_identity["content_sha256"]}
+    ):
+        raise ValueError("benchmark probe recovery runtime parent/provider lineage is stale")
+    matches: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
+    for event in events:
+        if event.get("event_kind") != "service_started":
+            continue
+        value = _runtime_resource_value(event, expected_kind="workflow_service_operation")
+        if isinstance(value, Mapping) and value.get("operation_ref") == intent["operation_ref"]:
+            matches.append((event, value))
+    if len(matches) != 1:
+        raise ValueError("benchmark probe service start event is unavailable for tuple")
+    service_event, value = matches[0]
+    if set(value) != {"operation_ref", "window_binding", "screen_group_ref"}:
+        raise ValueError("benchmark probe service start resource is not closed")
+    binding = validate_benchmark_v2_workflow_window_binding(value["window_binding"])
+    group_ref = _identity_ref(value["screen_group_ref"], name="benchmark service start screen group ref")
+    operation = intent["operation_ref"]
+    if any(binding[name] != operation[name] for name in (
+        "run_id", "stage", "operation_id", "window_binding_ref", "capture_ref"
+    )):
+        raise ValueError("benchmark probe service start window binding lineage is stale")
+    start_matches: list[dict[str, dict[str, Any]]] = []
+    for event in events:
+        if event.get("event_kind") != "service_start_intent":
+            continue
+        start_value = _runtime_resource_value(
+            event, expected_kind="workflow_service_start_intent"
+        )
+        if not isinstance(start_value, Mapping) or set(start_value) != {
+            "screen_group", "window_binding"
+        }:
+            raise ValueError("benchmark service start intent is not closed")
+        start_group = validate_benchmark_v2_hybrid_screen_group_start(
+            start_value["screen_group"]
+        )
+        start_binding = validate_benchmark_v2_workflow_window_binding(
+            start_value["window_binding"]
+        )
+        candidate_group_ref = {
+            "id": str(start_group["screen_group"]),
+            "content_sha256": str(start_group["content_sha256"]),
+        }
+        if start_binding == binding and candidate_group_ref == group_ref:
+            start_matches.append({
+                "screen_group": start_group,
+                "window_binding": start_binding,
+            })
+    if len(start_matches) != 1:
+        raise ValueError("benchmark probe exact service start intent is unavailable")
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_CONTEXT_CONTRACT,
+        "attempt_ref": deepcopy(intent["attempt_ref"]),
+        "provider_id": intent["provider_id"],
+        "probe_kind": intent["probe_kind"],
+        "operation_ref": deepcopy(intent["operation_ref"]),
+        "provider_dispatch_context_projection": deepcopy(in_flight["provider_dispatch_context_projection"]),
+        "window_binding_ref": deepcopy(intent["operation_ref"]["window_binding_ref"]),
+        "capture_ref": deepcopy(intent["operation_ref"]["capture_ref"]),
+        "screen_group_ref": group_ref,
+        "service_event_ref": _event_ref(service_event),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_probe_context(body)
+
+
+def _probe_terminal_material(
+    events: list[Mapping[str, object]], *, provider_id: object, probe_kind: object
+) -> dict[str, Any] | None:
+    provider, kind = _probe_tuple(provider_id, probe_kind)
+    terminal_event = _one_probe_event_for_tuple(
+        events, event_kind="probe_trigger_terminal", provider_id=provider, probe_kind=kind, required=False
+    )
+    if terminal_event is None:
+        return None
+    intent_event = _one_probe_event_for_tuple(
+        events, event_kind="probe_trigger_intent", provider_id=provider, probe_kind=kind, required=True
+    )
+    request_event = _one_probe_event_for_tuple(
+        events, event_kind="provider_request_in_flight", provider_id=provider, probe_kind=kind, required=True
+    )
+    triggered_event = _one_probe_event_for_tuple(
+        events, event_kind="probe_triggered", provider_id=provider, probe_kind=kind, required=True
+    )
+    assert intent_event is not None and request_event is not None and triggered_event is not None
+    terminal_value = _runtime_resource_value(terminal_event, expected_kind="probe_trigger_terminal")
+    if not isinstance(terminal_value, Mapping) or set(terminal_value) != {"probe_trigger_terminal"}:
+        raise ValueError("benchmark probe trigger terminal resource is not closed")
+    durable_terminal = _validate_probe_trigger_terminal(terminal_value["probe_trigger_terminal"])
+    intent = _probe_trigger_intent_from_events(events, provider_id=provider, probe_kind=kind)
+    request = _probe_request_from_events(events, provider_id=provider, probe_kind=kind)
+    if intent is None or request is None:
+        raise ValueError("benchmark probe trigger terminal recovery is incomplete")
+    context = _probe_context_from_events(events, trigger_intent=intent, request=request)
+    triggered_value = _runtime_resource_value(triggered_event, expected_kind="probe_trigger")
+    if not isinstance(triggered_value, Mapping) or set(triggered_value) != {
+        "request_ref", "service_terminal", "cleanup_binding_ref"
+    }:
+        raise ValueError("benchmark probe trigger recovery resource is not closed")
+    service_terminal = _validate_service_terminal(
+        triggered_value["service_terminal"],
+        expected_operation=context["operation_ref"],
+        expected_context_projection=context["provider_dispatch_context_projection"],
+        expected_request=request,
+        require_safe_stop=True,
+    )
+    cleanup_binding = _probe_cleanup_binding(
+        context=context, request=request, service_terminal=service_terminal
+    )
+    if (
+        durable_terminal["trigger_intent_ref"] != _event_ref(intent_event)
+        or durable_terminal["service_terminal_ref"] != _content_ref(service_terminal, name="workflow service terminal result")
+        or durable_terminal["cleanup_binding_ref"] != cleanup_binding
+        or triggered_value["request_ref"] != _content_ref(request, name="probe request")
+        or triggered_value["cleanup_binding_ref"] != cleanup_binding
+    ):
+        raise ValueError("benchmark probe trigger terminal recovery lineage is stale")
+    historical = durable_terminal["absence_observations"]
+    identities = intent["process_identities"]
+    if len(historical) != len(identities) or any(
+        observation["pid"] != identity["pid"]
+        or int(observation["create_time_ns"]) != identity["create_time_ns"]
+        for observation, identity in zip(historical, identities, strict=True)
+    ):
+        raise ValueError("benchmark probe terminal absence identity is stale")
+    return {
+        "provider_id": provider,
+        "probe_kind": kind,
+        "terminal_event": terminal_event,
+        "intent_event": intent_event,
+        "request_event": request_event,
+        "triggered_event": triggered_event,
+        "terminal": durable_terminal,
+        "intent": intent,
+        "request": request,
+        "context": context,
+        "service_terminal": service_terminal,
+        "cleanup_binding": cleanup_binding,
+    }
+
+
+def _probe_trigger_from_terminal_events(
+    events: list[Mapping[str, object]], *, provider_id: object, probe_kind: object
+) -> dict[str, Any] | None:
+    material = _probe_terminal_material(events, provider_id=provider_id, probe_kind=probe_kind)
+    if material is None:
+        return None
+    observations = _live_absence_observations(material["intent"]["process_identities"])
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_TRIGGER_CONTRACT,
+        "attempt_ref": deepcopy(material["context"]["attempt_ref"]),
+        "provider_id": material["provider_id"],
+        "probe_kind": material["probe_kind"],
+        "request_in_flight_ref": _content_ref(material["request"], name="probe request"),
+        "trigger_intent_ref": _event_ref(material["intent_event"]),
+        "service_terminal_ref": _content_ref(material["service_terminal"], name="workflow service terminal result"),
+        "cleanup_binding_ref": deepcopy(material["cleanup_binding"]),
+        "probe_trigger_terminal_ref": _event_ref(material["terminal_event"]),
+        "absence_observations": observations,
+        "attempt_event_ref": _event_ref(material["triggered_event"]),
+        "outcome": "safe_stopped_exact_incarnation_absent",
+        "evidence_scope": "benchmark_probe_only_non_authorizing",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_probe_trigger(body)
+
+def _safe_stopped_terminal_from_lookup(
+    *,
+    events: list[Mapping[str, object]],
+    service: object,
+    context: Mapping[str, object],
+    request: Mapping[str, object],
+) -> dict[str, Any] | None:
+    start = _service_start_intent_from_events(events)
+    if start is None:
+        raise ValueError("benchmark probe service start intent is unavailable")
+    lookup = getattr(service, "lookup_hybrid_operation", None)
+    if not callable(lookup):
+        raise RuntimeError("WorkflowService lookup_hybrid_operation is unavailable")
+    step = lookup(
+        screen_group=deepcopy(start["screen_group"]),
+        window_binding=deepcopy(start["window_binding"]),
+    )
+    if step is None:
+        raise ValueError("benchmark probe exact service lookup is unavailable")
+    operation = _service_operation_from_step(step, name="probe trigger intent recovery")
+    if operation["status"] == "pending":
+        if operation != context["operation_ref"]:
+            raise ValueError("benchmark probe pending lookup operation is stale")
+        return None
+    if operation["status"] not in {"cancelled", "safe_stopped"}:
+        raise ValueError("benchmark probe exact service lookup is not safe-stopped")
+    if not isinstance(step, Mapping):
+        raise ValueError("benchmark probe exact service lookup is invalid")
+    cleanup = step.get("cleanup_refs")
+    projection = step.get("provider_dispatch_context_projection")
+    if not isinstance(cleanup, Mapping) or not isinstance(projection, Mapping):
+        raise ValueError("benchmark probe exact service lookup lacks terminal lineage")
+    body: dict[str, Any] = {
+        "status": operation["status"],
+        "operation_ref": operation,
+        "provider_dispatch_context_projection": deepcopy(dict(projection)),
+        "cleanup_refs": deepcopy(dict(cleanup)),
+    }
+    body["content_sha256"] = content_sha256(body)
+    return _validate_service_terminal(
+        body,
+        expected_operation=context["operation_ref"],
+        expected_context_projection=context["provider_dispatch_context_projection"],
+        expected_request=request,
+        require_safe_stop=True,
+    )
+
+
+def _persist_recovered_probe_terminal(
+    *,
+    journal_path: Path,
+    context: Mapping[str, object],
+    request: Mapping[str, object],
+    trigger_intent_event: Mapping[str, object],
+    service_terminal: Mapping[str, object],
+) -> dict[str, Any]:
+    context = _validate_probe_context(context)
+    request = _validate_probe_request(request)
+    service_terminal = _validate_service_terminal(
+        service_terminal,
+        expected_operation=context["operation_ref"],
+        expected_context_projection=context["provider_dispatch_context_projection"],
+        expected_request=request,
+        require_safe_stop=True,
+    )
+    cleanup_binding = _probe_cleanup_binding(
+        context=context,
+        request=request,
+        service_terminal=service_terminal,
+    )
+    triggered = append_benchmark_v2_attempt_event(
+        journal_path=journal_path,
+        attempt_ref=context["attempt_ref"],
+        phase="request_in_flight",
+        event_kind="probe_triggered",
+        provider_id=str(context["provider_id"]),
+        probe_kind=str(context["probe_kind"]),
+        resource_ref=_runtime_resource_ref(
+            "probe_trigger",
+            {
+                "request_ref": _content_ref(request, name="probe request"),
+                "service_terminal": service_terminal,
+                "cleanup_binding_ref": cleanup_binding,
+            },
+        ),
+    )
+    absence_observations = _live_absence_observations(
+        _validate_probe_trigger_intent(
+            _runtime_resource_value(
+                trigger_intent_event, expected_kind="probe_trigger_intent"
+            )["trigger_intent"]
+        )["process_identities"]
+    )
+    body: dict[str, Any] = {
+        "contract_version": _PROBE_TRIGGER_TERMINAL_CONTRACT,
+        "trigger_intent_ref": _event_ref(trigger_intent_event),
+        "service_terminal_ref": _content_ref(service_terminal, name="workflow service terminal result"),
+        "cleanup_binding_ref": cleanup_binding,
+        "absence_observations": _persisted_probe_absence_observations(absence_observations),
+        "outcome": "safe_stopped_exact_incarnation_absent",
+        "evidence_scope": "benchmark_probe_only_non_authorizing",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    terminal = _sealed_parent(body, name="probe trigger terminal")
+    terminal_resource = _runtime_resource_ref(
+        "probe_trigger_terminal", {"probe_trigger_terminal": terminal}
+    )
+    append_benchmark_v2_attempt_event(
+        journal_path=journal_path,
+        attempt_ref=context["attempt_ref"],
+        phase="body_complete",
+        event_kind="probe_trigger_terminal",
+        provider_id=str(context["provider_id"]),
+        probe_kind=str(context["probe_kind"]),
+        resource_ref=terminal_resource,
+    )
+    return _validate_service_terminal(
+        service_terminal,
+        expected_operation=context["operation_ref"],
+        expected_context_projection=context["provider_dispatch_context_projection"],
+        expected_request=request,
+        require_safe_stop=True,
+    )
+
+
+def _service_terminal_from_events(
+    events: list[Mapping[str, object]], *, provider_id: object, probe_kind: object
+) -> dict[str, Any] | None:
+    provider, kind = _probe_tuple(provider_id, probe_kind)
     for event in reversed(events):
-        if event.get("event_kind") != "probe_triggered":
+        if (
+            event.get("event_kind") != "probe_triggered"
+            or event.get("provider_id") != provider
+            or event.get("probe_kind") != kind
+        ):
             continue
         value = _runtime_resource_value(event, expected_kind="probe_trigger")
         if isinstance(value, Mapping) and isinstance(

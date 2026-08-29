@@ -70,6 +70,7 @@ _ATTEMPT_EVENT_PHASE = {
     "provider_request_in_flight": "request_in_flight",
     "probe_trigger_intent": "request_in_flight",
     "probe_triggered": "request_in_flight",
+    "probe_trigger_terminal": "body_complete",
     "provider_body_complete": "body_complete",
     "attempt_cleanup_prepared": "body_complete",
     "attempt_terminal": "terminal",
@@ -4093,6 +4094,7 @@ def _validate_benchmark_v2_attempt_event(value: object) -> dict[str, Any]:
         "provider_request_in_flight",
         "probe_trigger_intent",
         "probe_triggered",
+        "probe_trigger_terminal",
         "provider_body_complete",
     }
     if provider_event:
@@ -4208,6 +4210,24 @@ def append_benchmark_v2_attempt_event(
                 ):
                     return deepcopy(existing_intent)
                 raise ValueError("benchmark probe trigger intent conflicts")
+        if event_kind == "probe_trigger_terminal":
+            prior_terminals = [
+                event
+                for event in events
+                if event["event_kind"] == "probe_trigger_terminal"
+                and event["provider_id"] == provider_id
+                and event["probe_kind"] == probe_kind
+            ]
+            if len(prior_terminals) > 1:
+                raise ValueError("benchmark probe trigger terminal is not unique")
+            if prior_terminals:
+                existing_terminal = prior_terminals[0]
+                if all(
+                    existing_terminal[name] == value
+                    for name, value in idempotency.items()
+                ):
+                    return deepcopy(existing_terminal)
+                raise ValueError("benchmark probe trigger terminal conflicts")
         if events:
             last = events[-1]
             if all(last[name] == value for name, value in idempotency.items()):
