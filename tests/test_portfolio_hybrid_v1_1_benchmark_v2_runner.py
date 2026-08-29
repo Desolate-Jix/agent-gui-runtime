@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 from copy import deepcopy
 import hashlib
 import json
@@ -2218,6 +2219,7 @@ def test_runner_production_import_surface_is_explicit_and_provider_safe() -> Non
         (
             "app.learn.hybrid.benchmark_v2_predictions",
             (
+                "materialize_benchmark_v2_accepted_holdout_score_input_v1",
                 "materialize_benchmark_v2_accepted_regression_score_input_v2",
                 "project_benchmark_v2_actual_body",
                 "project_benchmark_v2_actual_result",
@@ -2254,6 +2256,7 @@ def test_runner_production_import_surface_is_explicit_and_provider_safe() -> Non
                 "claim_holdout_once",
                 "holdout_attempt_events_path",
                 "validate_holdout_attempt_events",
+                "verify_holdout_claim_anchors_for_public_projection",
             ),
         ),
     ]
@@ -3618,3 +3621,413 @@ def test_holdout_h4_damaged_ledger_without_independent_runtime_proof_is_indeterm
     assert paths["attempt_ledger"].read_bytes() == damaged
     assert chain == [chain[0]]
     assert not (paths["attempt_dir"] / "cleanup.json").exists()
+
+
+def _install_holdout_h7_materialize_boundary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[list[str], dict[str, Path], dict[str, object]]:
+    runtime = _HoldoutH3Runtime()
+    actual_argv, paths, chain = _install_holdout_h3_boundary(
+        monkeypatch, tmp_path, runtime
+    )
+    runner.run_cli(actual_argv)
+    attempt_ref = deepcopy(chain[0]["event"]["event_payload"]["attempt_ref"])
+    claim_ref = deepcopy(attempt_ref["claim_ref"])
+    provider_corpus = paths["provider_manifest"].parent / "provider-corpus.v2.json"
+    provider_corpus.write_bytes(b"provider-corpus-exact-bytes")
+    regression_score = _sealed(
+        {
+            "contract_version": "private_scorer_public_ref_v3",
+            "status": "PASS",
+            "score_ref": "private-score-final/" + "d" * 64,
+        }
+    )
+    regression_score_path = (
+        paths["project_root"]
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/score-ref.json"
+    )
+    regression_score_path.parent.mkdir(parents=True)
+    regression_score_path.write_bytes(_canonical(regression_score) + b"\n")
+    journal_path = (
+        paths["project_root"]
+        / "runtime_state/benchmark-v2-attempts"
+        / f"{attempt_ref['content_sha256']}.jsonl"
+    )
+    journal_path.parent.mkdir(parents=True)
+    journal_event = {"phase": "terminal", "event_kind": "cleanup_complete"}
+    journal_bytes = _canonical(journal_event) + b"\n"
+    journal_path.write_bytes(journal_bytes)
+    anchor = {
+        "contract_version": "benchmark_v2_holdout_anchor_verification_result_v1",
+        "authorization_ref": {
+            "authorization_id": attempt_ref["authorization_ref"]["authorization_id"],
+            "envelope_sha256": attempt_ref["authorization_ref"]["envelope_sha256"],
+        },
+        "claim_ref": claim_ref,
+        "attempt_id": attempt_ref["attempt_id"],
+        "authority_projection_envelopes": {"read_only": True},
+        "safety": deepcopy(runner.HOLDOUT_SAFETY),
+        "content_sha256": "e" * 64,
+    }
+    accepted = _sealed(
+        {
+            "contract_version": "benchmark_v2_accepted_holdout_score_input_v1",
+            "partition": "holdout",
+            "status": "materialized",
+            **SAFETY,
+        }
+    )
+    calls: dict[str, object] = {
+        "anchor": [],
+        "materializer": [],
+        "journal": [],
+        "forbidden": [],
+        "accepted": accepted,
+    }
+
+    def verify(**kwargs: object) -> dict[str, object]:
+        calls["anchor"].append(kwargs)
+        return deepcopy(anchor)
+
+    def read_journal(**kwargs: object) -> list[dict[str, object]]:
+        calls["journal"].append(kwargs)
+        return [deepcopy(journal_event)]
+
+    def materialize(**kwargs: object) -> dict[str, object]:
+        calls["materializer"].append(kwargs)
+        return deepcopy(calls["accepted"])
+
+    def forbidden(name: str):
+        def fail(**_kwargs: object) -> object:
+            calls["forbidden"].append(name)
+            raise AssertionError(f"forbidden H7 call: {name}")
+
+        return fail
+
+    monkeypatch.setattr(
+        runner,
+        "verify_holdout_claim_anchors_for_public_projection",
+        verify,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runner,
+        "materialize_benchmark_v2_accepted_holdout_score_input_v1",
+        materialize,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        runner, "read_benchmark_v2_attempt_journal", read_journal
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_production_benchmark_v2_runtime",
+        forbidden("runtime"),
+    )
+    for name in (
+        "claim_holdout_once",
+        "append_holdout_attempt_opened",
+        "append_holdout_attempt_body_complete",
+        "append_holdout_attempt_cleanup",
+        "append_holdout_attempt_recovery_cleanup",
+        "append_holdout_attempt_result",
+    ):
+        monkeypatch.setattr(runner, name, forbidden(name), raising=False)
+
+    output_path = paths["output_root"] / "run-ref.json"
+    argv = [
+        "--provider-manifest",
+        "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-provider-manifest.json",
+        "--partition",
+        "holdout",
+        "--materialize-score-input",
+        "--holdout-authorization",
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout-authorization.json",
+        "--regression-score-ref",
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/score-ref.json",
+        "--ledger-root",
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2-ledger",
+        "--output",
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/holdout/run-ref.json",
+    ]
+    paths.update(
+        {
+            "provider_corpus": provider_corpus,
+            "regression_score": regression_score_path,
+            "journal": journal_path,
+            "output": output_path,
+        }
+    )
+    calls["attempt_ref"] = attempt_ref
+    calls["anchor_result"] = anchor
+    return argv, paths, calls
+
+
+def _h7_evidence_snapshot(paths: Mapping[str, Path]) -> dict[str, bytes]:
+    names = (
+        "provider_manifest",
+        "provider_corpus",
+        "authorization_ref_path",
+        "attempt_ledger",
+        "regression_score",
+        "journal",
+    )
+    result = {name: paths[name].read_bytes() for name in names}
+    for name in ("body.json", "cleanup.json", "result.json"):
+        result[name] = (paths["attempt_dir"] / name).read_bytes()
+    return result
+
+
+def test_holdout_h7_materialize_is_read_only_raw_exact_and_idempotent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, paths, calls = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    before = _h7_evidence_snapshot(paths)
+
+    first = runner.run_cli(argv)
+    first_bytes = paths["output"].read_bytes()
+    second = runner.run_cli(argv)
+
+    assert first == second == calls["accepted"]
+    assert first_bytes == _canonical(first) + b"\n"
+    assert paths["output"].read_bytes() == first_bytes
+    assert _h7_evidence_snapshot(paths) == before
+    assert calls["forbidden"] == []
+    assert len(calls["anchor"]) == 2
+    assert calls["anchor"][0] == {
+        "authorization_ref": calls["attempt_ref"]["authorization_ref"],
+        "ledger_root": paths["ledger_root"],
+    }
+    assert len(calls["materializer"]) == 2
+    trusted = calls["materializer"][0]
+    assert trusted["attempt_events_jsonl_bytes"] == before["attempt_ledger"]
+    assert trusted["attempt_events"] == _read_chain(paths["attempt_ledger"])
+    assert trusted["attempt_journal_jsonl_bytes"] == before["journal"]
+    assert trusted["attempt_journal_events"] == [
+        {"phase": "terminal", "event_kind": "cleanup_complete"}
+    ]
+    assert trusted["actual_body_bytes"] == before["body.json"]
+    assert trusted["cleanup_receipt_bytes"] == before["cleanup.json"]
+    assert trusted["actual_result_bytes"] == before["result.json"]
+    assert trusted["provider_manifest_bytes"] == before["provider_manifest"]
+    assert trusted["provider_corpus_bytes"] == before["provider_corpus"]
+    assert trusted["native_authorization_ref"] == calls["attempt_ref"][
+        "authorization_ref"
+    ]
+    assert trusted["holdout_anchor_verification_result"] == calls["anchor_result"]
+    score_raw = before["regression_score"]
+    assert trusted["regression_score_precondition_envelope"] == {
+        "ref": {
+            "contract_version": "private_scorer_public_ref_v3",
+            "file_sha256": hashlib.sha256(score_raw).hexdigest(),
+            "content_sha256": _read_json(paths["regression_score"])[
+                "content_sha256"
+            ],
+        },
+        "canonical_bytes_b64": base64.b64encode(score_raw[:-1]).decode("ascii"),
+    }
+    serialized = json.dumps(first, sort_keys=True)
+    assert str(paths["project_root"]) not in serialized
+    assert "fixed_authorization_path" not in serialized
+
+
+def test_holdout_h7_emitted_compact_bytes_pass_h6_accepted_input_validation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    from app.learn.hybrid import benchmark_scorer_v2 as scorer
+    from tests import test_portfolio_hybrid_v1_1_benchmark_v2_scoring as scoring
+
+    release_inputs = scoring.task10_release_inputs.__wrapped__(tmp_path_factory)
+    h5_accepted = scoring.h5_accepted_holdout.__wrapped__(
+        tmp_path_factory, release_inputs
+    )
+    accepted, release = scoring.h6_accepted_holdout.__wrapped__(
+        h5_accepted, release_inputs
+    )
+    argv, paths, calls = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    calls["accepted"] = accepted
+
+    emitted = runner.run_cli(argv)
+    raw = paths["output"].read_bytes()
+
+    assert emitted == accepted
+    assert raw == _canonical(accepted) + b"\n"
+    validated, _, _ = scorer._validate_accepted_score_input(
+        json.loads(raw.decode("utf-8")), raw=raw, release=release
+    )
+    assert validated == accepted
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "attempt_ledger",
+        "output_root",
+        "alternate_output",
+        "provider_absolute",
+        "ledger_backslash",
+        "output_dot",
+        "missing_partition",
+        "changed_partition",
+        "authorization_case",
+        "score_dot",
+    ),
+)
+def test_holdout_h7_materialize_rejects_forbidden_or_path_alias_before_verification(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    argv, paths, calls = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    changed = list(argv)
+    if mutation == "attempt_ledger":
+        changed += ["--attempt-ledger", str(paths["attempt_ledger"])]
+    elif mutation == "output_root":
+        changed += ["--output-root", str(paths["output_root"])]
+    elif mutation == "alternate_output":
+        changed[-1] = changed[-1].replace("run-ref.json", "other.json")
+    elif mutation == "provider_absolute":
+        changed[1] = str(paths["provider_manifest"])
+    elif mutation == "ledger_backslash":
+        changed[-3] = changed[-3].replace("/", "\\")
+    elif mutation == "output_dot":
+        changed[-1] += "/."
+    elif mutation == "missing_partition":
+        changed = [*changed[:2], *changed[4:]]
+    elif mutation == "changed_partition":
+        changed[3] = "regression"
+    elif mutation == "authorization_case":
+        changed[6] = changed[6].upper()
+    else:
+        changed[8] += "/."
+    before = _h7_evidence_snapshot(paths)
+
+    with pytest.raises(ValueError, match="exact raw token vector"):
+        runner.run_cli(changed)
+
+    assert calls["anchor"] == []
+    assert calls["materializer"] == []
+    assert calls["forbidden"] == []
+    assert not paths["output"].exists()
+    assert _h7_evidence_snapshot(paths) == before
+
+
+@pytest.mark.parametrize(
+    "unknown_flag", ("--actual-body", "--actual-result", "--attempt-journal")
+)
+def test_holdout_h7_materialize_unknown_evidence_path_flags_remain_argparse_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unknown_flag: str
+) -> None:
+    argv, paths, calls = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    before = _h7_evidence_snapshot(paths)
+
+    with pytest.raises(SystemExit):
+        runner.run_cli([*argv, unknown_flag, str(tmp_path / "injected")])
+
+    assert calls["anchor"] == []
+    assert calls["materializer"] == []
+    assert calls["forbidden"] == []
+    assert not paths["output"].exists()
+    assert _h7_evidence_snapshot(paths) == before
+
+
+def test_holdout_h7_materialize_validation_failure_is_zero_mutation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, paths, calls = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    before = _h7_evidence_snapshot(paths)
+    monkeypatch.setattr(
+        runner,
+        "materialize_benchmark_v2_accepted_holdout_score_input_v1",
+        lambda **_kwargs: (_ for _ in ()).throw(ValueError("invalid raw evidence")),
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="invalid raw evidence"):
+        runner.run_cli(argv)
+
+    assert len(calls["anchor"]) == 1
+    assert calls["forbidden"] == []
+    assert not paths["output"].exists()
+    assert _h7_evidence_snapshot(paths) == before
+
+
+def test_holdout_h7_materialize_conflicting_output_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, paths, _ = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    runner.run_cli(argv)
+    paths["output"].write_bytes(b"conflicting-existing-bytes")
+    before = _h7_evidence_snapshot(paths)
+
+    with pytest.raises(ValueError, match="differs from authoritative bytes"):
+        runner.run_cli(argv)
+
+    assert paths["output"].read_bytes() == b"conflicting-existing-bytes"
+    assert _h7_evidence_snapshot(paths) == before
+
+
+def test_holdout_h7_materialize_does_not_select_alternate_attempt_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, paths, calls = _install_holdout_h7_materialize_boundary(
+        monkeypatch, tmp_path
+    )
+    alternate = paths["output_root"] / ("f" * 64)
+    alternate.mkdir()
+    for name in ("body.json", "cleanup.json", "result.json"):
+        (alternate / name).write_bytes((paths["attempt_dir"] / name).read_bytes())
+    for name in ("body.json", "cleanup.json", "result.json"):
+        (paths["attempt_dir"] / name).unlink()
+
+    with pytest.raises(ValueError, match="fixed file is missing"):
+        runner.run_cli(argv)
+
+    assert calls["materializer"] == []
+    assert calls["forbidden"] == []
+    assert not paths["output"].exists()
+
+
+def test_holdout_h7_materialize_static_call_surface_is_read_only_h5_only() -> None:
+    source_path = Path(runner.__file__).resolve()
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_materialize_holdout_score_input"
+    )
+    calls = {
+        node.func.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "materialize_benchmark_v2_accepted_holdout_score_input_v1" in calls
+    assert "verify_holdout_claim_anchors_for_public_projection" in calls
+    assert "holdout_attempt_events_path" in calls
+    assert "validate_holdout_attempt_events" in calls
+    assert "read_benchmark_v2_attempt_journal" in calls
+    assert calls.isdisjoint(
+        {
+            "get_production_benchmark_v2_runtime",
+            "claim_holdout_once",
+            "append_holdout_attempt_opened",
+            "append_holdout_attempt_body_complete",
+            "append_holdout_attempt_cleanup",
+            "append_holdout_attempt_recovery_cleanup",
+            "append_holdout_attempt_result",
+        }
+    )
+    assert not any(name.startswith("project_benchmark_v2_") for name in calls)

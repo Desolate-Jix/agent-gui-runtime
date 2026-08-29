@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from app.learn.hybrid.benchmark_v2_lifecycle import (
     select_benchmark_v2_attempt_ledger_horizon,
 )
 from app.learn.hybrid.benchmark_v2_predictions import (
+    materialize_benchmark_v2_accepted_holdout_score_input_v1,
     materialize_benchmark_v2_accepted_regression_score_input_v2,
     project_benchmark_v2_actual_body,
     project_benchmark_v2_actual_result,
@@ -55,6 +57,7 @@ from app.learn.hybrid.benchmark_v2_holdout import (
     claim_holdout_once,
     holdout_attempt_events_path,
     validate_holdout_attempt_events,
+    verify_holdout_claim_anchors_for_public_projection,
 )
 
 
@@ -136,6 +139,19 @@ class _PreparedHoldoutCleanupOnly:
     claim_ref: dict[str, str]
     structure: str
     chain: list[dict[str, object]] | None
+
+
+@dataclass(frozen=True)
+class _ValidatedHoldoutMaterializeInput:
+    provider_manifest_path: Path
+    provider_corpus_path: Path
+    authorization_ref_path: Path
+    regression_score_ref_path: Path
+    ledger_root: Path
+    output_root: Path
+    output_path: Path
+    authorization_ref: dict[str, str]
+    regression_score_precondition_envelope: dict[str, object]
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -277,6 +293,189 @@ def _validate_holdout_actual_models_input(
             "envelope_sha256": envelope_sha256,
             "fixed_authorization_path": fixed_path_raw,
         },
+    )
+
+
+def _validate_holdout_materialize_input(
+    argv: Sequence[str],
+) -> _ValidatedHoldoutMaterializeInput:
+    frozen = tuple(EXACT_HOLDOUT_COMMAND[4:])
+    regression_score_token = (
+        "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/"
+        "regression/score-ref.json"
+    )
+    if (
+        len(frozen) != 11
+        or frozen[0] != "--provider-manifest"
+        or frozen[2:5] != ("--partition", "holdout", "--actual-models")
+        or frozen[5] != "--holdout-authorization"
+        or frozen[7] != "--ledger-root"
+        or frozen[9] != "--output-root"
+    ):
+        raise ValueError("frozen holdout command layout is invalid")
+    expected = (
+        frozen[0],
+        frozen[1],
+        frozen[2],
+        frozen[3],
+        "--materialize-score-input",
+        frozen[5],
+        frozen[6],
+        "--regression-score-ref",
+        regression_score_token,
+        frozen[7],
+        frozen[8],
+        "--output",
+        frozen[10] + "/run-ref.json",
+    )
+    if tuple(argv) != expected:
+        raise ValueError("holdout materialization requires the exact raw token vector")
+
+    project_root = Path(_PROJECT_ROOT)
+    if (
+        not project_root.is_absolute()
+        or project_root.resolve(strict=True) != project_root
+        or _is_reparse(project_root)
+    ):
+        raise ValueError("compile-time project root is not canonical")
+
+    def resolve_token(token: str, *, label: str) -> Path:
+        candidate = project_root.joinpath(*token.split("/"))
+        if candidate.resolve(strict=False) != candidate:
+            raise ValueError(f"{label} resolves through an alias")
+        return candidate
+
+    provider_manifest_path = _require_ordinary_path(
+        resolve_token(frozen[1], label="holdout provider manifest"),
+        name="holdout provider manifest",
+        kind="file",
+    )
+    provider_corpus_path = _require_ordinary_path(
+        provider_manifest_path.parent / "provider-corpus.v2.json",
+        name="holdout provider corpus",
+        kind="file",
+    )
+    authorization_ref_path = _require_ordinary_path(
+        resolve_token(frozen[6], label="holdout authorization ref"),
+        name="holdout authorization ref",
+        kind="file",
+    )
+    regression_score_ref_path = _require_ordinary_path(
+        resolve_token(regression_score_token, label="regression score ref"),
+        name="regression score ref",
+        kind="file",
+    )
+    ledger_root = _require_ordinary_path(
+        resolve_token(frozen[8], label="holdout ledger root"),
+        name="holdout ledger root",
+        kind="directory",
+    )
+    output_root = _require_ordinary_path(
+        resolve_token(frozen[10], label="authorized holdout output root"),
+        name="authorized holdout output root",
+        kind="directory",
+    )
+    output_path = resolve_token(expected[-1], label="holdout run ref")
+    _require_ordinary_path(output_path, name="holdout run ref", kind="pending")
+    if ledger_root != Path(PRODUCTION_LEDGER_ROOT):
+        raise ValueError("holdout ledger root is not the fixed production root")
+    if output_root != Path(AUTHORIZED_HOLDOUT_OUTPUT_ROOT):
+        raise ValueError("holdout output root is not authorized")
+    if output_path != output_root / "run-ref.json":
+        raise ValueError("holdout run ref is not the exact authorized output")
+    if len(
+        {
+            provider_manifest_path,
+            provider_corpus_path,
+            authorization_ref_path,
+            regression_score_ref_path,
+            ledger_root,
+            output_root,
+            output_path,
+        }
+    ) != 7:
+        raise ValueError("holdout materializer paths are aliased")
+
+    try:
+        authorization_raw = authorization_ref_path.read_bytes()
+        authorization_value = json.loads(authorization_raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("holdout authorization ref is not exact canonical JSON") from error
+    if (
+        not isinstance(authorization_value, Mapping)
+        or _canonical_bytes(authorization_value) != authorization_raw
+        or set(authorization_value)
+        != {"authorization_id", "envelope_sha256", "fixed_authorization_path"}
+    ):
+        raise ValueError("holdout authorization ref is not exact canonical JSON")
+    authorization_ref = dict(authorization_value)
+    claim_id = hashlib.sha256(_canonical_bytes(IDENTITY)).hexdigest()
+    envelope_sha256 = authorization_ref.get("envelope_sha256")
+    fixed_path_raw = authorization_ref.get("fixed_authorization_path")
+    if (
+        authorization_ref.get("authorization_id")
+        != "holdout-authorization/" + claim_id
+        or not isinstance(envelope_sha256, str)
+        or len(envelope_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in envelope_sha256)
+        or not isinstance(fixed_path_raw, str)
+        or not fixed_path_raw
+    ):
+        raise ValueError("holdout authorization ref shape is invalid")
+    fixed_path = Path(fixed_path_raw)
+    if (
+        not fixed_path.is_absolute()
+        or str(fixed_path) != fixed_path_raw
+        or fixed_path.resolve(strict=False) != fixed_path
+        or fixed_path.name != f"{claim_id}.authorization.json"
+    ):
+        raise ValueError("holdout authorization ref fixed path is invalid")
+    _require_ordinary_path(
+        fixed_path, name="holdout authorization fixed path", kind="pending"
+    )
+
+    score_raw = regression_score_ref_path.read_bytes()
+    if (
+        not score_raw.endswith(b"\n")
+        or score_raw.count(b"\n") != 1
+        or not score_raw[:-1]
+    ):
+        raise ValueError("regression score ref is not compact LF JSON")
+    try:
+        score_value = json.loads(score_raw[:-1].decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("regression score ref is not compact LF JSON") from error
+    if (
+        not isinstance(score_value, Mapping)
+        or _canonical_bytes(score_value) != score_raw[:-1]
+        or score_value.get("contract_version") != "private_scorer_public_ref_v3"
+        or score_value.get("status") != "PASS"
+        or not isinstance(score_value.get("content_sha256"), str)
+        or score_value.get("content_sha256") != _content_sha256(score_value)
+    ):
+        raise ValueError("regression score ref is not exact PASS public-v3")
+    precondition_envelope = {
+        "ref": {
+            "contract_version": "private_scorer_public_ref_v3",
+            "file_sha256": hashlib.sha256(score_raw).hexdigest(),
+            "content_sha256": str(score_value["content_sha256"]),
+        },
+        "canonical_bytes_b64": base64.b64encode(score_raw[:-1]).decode("ascii"),
+    }
+    return _ValidatedHoldoutMaterializeInput(
+        provider_manifest_path=provider_manifest_path,
+        provider_corpus_path=provider_corpus_path,
+        authorization_ref_path=authorization_ref_path,
+        regression_score_ref_path=regression_score_ref_path,
+        ledger_root=ledger_root,
+        output_root=output_root,
+        output_path=output_path,
+        authorization_ref={
+            "authorization_id": str(authorization_ref["authorization_id"]),
+            "envelope_sha256": envelope_sha256,
+            "fixed_authorization_path": fixed_path_raw,
+        },
+        regression_score_precondition_envelope=precondition_envelope,
     )
 
 
@@ -2645,6 +2844,173 @@ def _materializer_attempt_paths(
     return attempt_dirs
 
 
+def _materialize_holdout_score_input(
+    validated: _ValidatedHoldoutMaterializeInput,
+) -> dict[str, object]:
+    if not isinstance(validated, _ValidatedHoldoutMaterializeInput):
+        raise ValueError("holdout materializer requires already validated inputs")
+    anchor = verify_holdout_claim_anchors_for_public_projection(
+        authorization_ref=validated.authorization_ref,
+        ledger_root=validated.ledger_root,
+    )
+    if not isinstance(anchor, Mapping):
+        raise ValueError("holdout anchor verification result is invalid")
+    anchor_result = deepcopy(dict(anchor))
+    claim_ref = anchor_result.get("claim_ref")
+    attempt_id = anchor_result.get("attempt_id")
+    public_authorization_ref = {
+        "authorization_id": validated.authorization_ref["authorization_id"],
+        "envelope_sha256": validated.authorization_ref["envelope_sha256"],
+    }
+    claim_id = (
+        str(claim_ref.get("id")).split("/", 1)[1]
+        if isinstance(claim_ref, Mapping)
+        and isinstance(claim_ref.get("id"), str)
+        and str(claim_ref["id"]).startswith("holdout-claim/")
+        else ""
+    )
+    expected_attempt_id = hashlib.sha256(
+        (
+            "benchmark-v2-holdout-attempt\0"
+            + claim_id
+            + "\0"
+            + validated.authorization_ref["envelope_sha256"]
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        anchor_result.get("authorization_ref") != public_authorization_ref
+        or not isinstance(claim_ref, Mapping)
+        or set(claim_ref) != {"id", "envelope_sha256"}
+        or claim_ref.get("id") != "holdout-claim/" + claim_id
+        or not isinstance(claim_ref.get("envelope_sha256"), str)
+        or len(str(claim_ref["envelope_sha256"])) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in str(claim_ref["envelope_sha256"])
+        )
+        or attempt_id != expected_attempt_id
+    ):
+        raise ValueError("holdout anchor claim-bound attempt differs")
+
+    attempt_dir = _require_ordinary_path(
+        validated.output_root / expected_attempt_id,
+        name="holdout materializer attempt directory",
+        kind="directory",
+    )
+    if (
+        attempt_dir.parent != validated.output_root
+        or attempt_dir.name != expected_attempt_id
+    ):
+        raise ValueError("holdout materializer attempt directory differs")
+    attempt_ledger_path = _require_ordinary_path(
+        holdout_attempt_events_path(ledger_root=validated.ledger_root),
+        name="holdout attempt ledger",
+        kind="file",
+    )
+    if (
+        attempt_ledger_path
+        != validated.ledger_root / "holdout" / "attempt-events.jsonl"
+    ):
+        raise ValueError("holdout attempt ledger path differs")
+    attempt_events_jsonl_bytes = attempt_ledger_path.read_bytes()
+    attempt_events = validate_holdout_attempt_events(
+        ledger_root=validated.ledger_root,
+        authorization_ref=validated.authorization_ref,
+        claim_ref=claim_ref,
+    )
+    event_kinds = ("opened", "body_complete", "cleanup", "result")
+    if len(attempt_events) != 4:
+        raise ValueError("holdout materializer requires one exact normal attempt")
+    raw_attempt_ref: dict[str, object] | None = None
+    for sequence, (envelope, event_kind) in enumerate(
+        zip(attempt_events, event_kinds, strict=True)
+    ):
+        if not isinstance(envelope, Mapping):
+            raise ValueError("holdout materializer event chain is invalid")
+        event = envelope.get("event")
+        payload = event.get("event_payload") if isinstance(event, Mapping) else None
+        attempt_ref = payload.get("attempt_ref") if isinstance(payload, Mapping) else None
+        if (
+            not isinstance(event, Mapping)
+            or event.get("partition") != "holdout"
+            or event.get("sequence") != sequence
+            or isinstance(event.get("sequence"), bool)
+            or event.get("event_kind") != event_kind
+            or not isinstance(payload, Mapping)
+            or payload.get("status") != event_kind
+            or payload.get("attempt_dir") != str(attempt_dir)
+            or not isinstance(attempt_ref, Mapping)
+        ):
+            raise ValueError("holdout materializer normal event chain differs")
+        current_attempt_ref = deepcopy(dict(attempt_ref))
+        if raw_attempt_ref is None:
+            raw_attempt_ref = current_attempt_ref
+        elif current_attempt_ref != raw_attempt_ref:
+            raise ValueError("holdout materializer attempt lineage differs")
+    if (
+        raw_attempt_ref is None
+        or raw_attempt_ref.get("attempt_id") != expected_attempt_id
+        or raw_attempt_ref.get("authorization_ref") != validated.authorization_ref
+        or raw_attempt_ref.get("claim_ref") != claim_ref
+    ):
+        raise ValueError("holdout materializer claim-bound attempt differs")
+
+    body_path = _require_ordinary_path(
+        attempt_dir / "body.json", name="holdout body", kind="file"
+    )
+    cleanup_path = _require_ordinary_path(
+        attempt_dir / "cleanup.json", name="holdout cleanup receipt", kind="file"
+    )
+    result_path = _require_ordinary_path(
+        attempt_dir / "result.json", name="holdout result", kind="file"
+    )
+    content_sha256 = raw_attempt_ref.get("content_sha256")
+    if (
+        not isinstance(content_sha256, str)
+        or len(content_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in content_sha256)
+    ):
+        raise ValueError("holdout attempt content SHA is invalid")
+    journal_path = _require_ordinary_path(
+        _PROJECT_ROOT
+        / "runtime_state"
+        / "benchmark-v2-attempts"
+        / f"{content_sha256}.jsonl",
+        name="holdout attempt journal",
+        kind="file",
+    )
+    attempt_journal_jsonl_bytes = journal_path.read_bytes()
+    attempt_journal_events = read_benchmark_v2_attempt_journal(
+        journal_path=journal_path,
+        attempt_ref=raw_attempt_ref,
+    )
+    if (
+        not attempt_journal_events
+        or attempt_journal_events[-1].get("phase") != "terminal"
+    ):
+        raise ValueError("holdout attempt journal is not terminal")
+
+    accepted = materialize_benchmark_v2_accepted_holdout_score_input_v1(
+        actual_body_bytes=body_path.read_bytes(),
+        actual_result_bytes=result_path.read_bytes(),
+        cleanup_receipt_bytes=cleanup_path.read_bytes(),
+        expected_attempt_dir=attempt_dir,
+        provider_manifest_bytes=validated.provider_manifest_path.read_bytes(),
+        provider_corpus_bytes=validated.provider_corpus_path.read_bytes(),
+        attempt_events=attempt_events,
+        attempt_events_jsonl_bytes=attempt_events_jsonl_bytes,
+        attempt_journal_events=attempt_journal_events,
+        attempt_journal_jsonl_bytes=attempt_journal_jsonl_bytes,
+        native_authorization_ref=validated.authorization_ref,
+        holdout_anchor_verification_result=anchor_result,
+        regression_score_precondition_envelope=(
+            validated.regression_score_precondition_envelope
+        ),
+    )
+    _write_json_create_or_identical(validated.output_path, accepted)
+    return accepted
+
+
 def _materialize_score_input(args: argparse.Namespace) -> dict[str, object]:
     if args.partition != "regression":
         raise ValueError("score-input materialization is regression-only")
@@ -2906,6 +3272,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--attempt-ledger")
     parser.add_argument("--ledger-root")
     parser.add_argument("--regression-run-ref")
+    parser.add_argument("--regression-score-ref")
     parser.add_argument("--output")
     parser.add_argument("--output-root")
     parser.add_argument("--holdout-authorization")
@@ -2927,6 +3294,10 @@ def _reject(args: argparse.Namespace, *names: str) -> None:
 def run_cli(argv: Sequence[str]) -> dict[str, object]:
     argv_list = list(argv)
     args = _parser().parse_args(argv_list)
+    if args.regression_score_ref is not None and not args.materialize_score_input:
+        raise ValueError(
+            "runner arguments are not valid for this action: regression_score_ref"
+        )
     if args.cleanup_only:
         validated_cleanup = _validate_holdout_cleanup_only_input(argv_list)
         prepared_cleanup = _prepare_holdout_cleanup_only(validated_cleanup)
@@ -2943,6 +3314,15 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
         _run_holdout_actual_models(validated=validated, runtime=runtime)
         return {"status": "terminal"}
     if args.materialize_score_input:
+        if (
+            args.partition == "holdout"
+            or args.holdout_authorization is not None
+            or args.regression_score_ref is not None
+        ):
+            validated_materialization = _validate_holdout_materialize_input(
+                argv_list
+            )
+            return _materialize_holdout_score_input(validated_materialization)
         _require(
             args,
             "provider_manifest",
@@ -2955,6 +3335,7 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             "providers",
             "ledger_root",
             "regression_run_ref",
+            "regression_score_ref",
             "holdout_authorization",
         )
         present = [
