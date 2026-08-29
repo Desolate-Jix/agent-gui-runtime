@@ -36,6 +36,7 @@ from app.learn.hybrid.benchmark_v2_durable_claim import (
     PRODUCTION_FILE_ROOT,
     PRODUCTION_REGISTRY_ROOT,
     RELEASE,
+    SAFETY,
     _claim_with_backend_for_test,
     _close_handle_checked,
     _expected_claim_values,
@@ -57,6 +58,14 @@ from app.learn.hybrid.benchmark_v2_holdout import (
     _append_regression_event_for_test,
     _authorize_holdout_genesis_for_test,
     _chain,
+    _holdout_attempt_mutex_name,
+    _validate_holdout_attempt_events_for_test,
+    _append_holdout_attempt_body_complete_for_test,
+    _append_holdout_attempt_cleanup_for_test,
+    _append_holdout_attempt_opened_for_test,
+    _append_holdout_attempt_recovery_cleanup_for_test,
+    _append_holdout_attempt_result_for_test,
+    holdout_attempt_events_path,
 )
 from app.learn.hybrid.windows_process_scope import (
     WindowsProcessScope,
@@ -223,6 +232,253 @@ def test_two_layer_hashes_have_no_self_reference_and_stable_identity(test_backen
     changed["provider_manifest_sha256"] = "9" * 64
     assert claim_id(changed["claim_identity"]) == claim_id(payload["claim_identity"])
     assert authorization_envelope(changed)[1] != digest
+
+
+def _sealed_holdout(value: dict[str, object]) -> dict[str, object]:
+    result = dict(value)
+    result["content_sha256"] = hashlib.sha256(canonical_bytes(result)).hexdigest()
+    return result
+
+
+def _holdout_attempt_contract(test_backend) -> tuple[dict[str, str], dict[str, str], dict[str, object], str]:
+    payload = prepared(test_backend)
+    wrapped, digest = authorization_envelope(payload)
+    authorization_ref = {
+        "authorization_id": "holdout-authorization/" + claim_id(IDENTITY),
+        "envelope_sha256": digest,
+        "fixed_authorization_path": str(test_backend.file_root / f"{claim_id(IDENTITY)}.authorization.json"),
+    }
+    _authorize_holdout_genesis_for_test(
+        backend=test_backend, claim_identity=IDENTITY, authorization_ref=authorization_ref
+    )
+    _claim_with_backend_for_test(backend=test_backend, authorization=payload)
+    _auth_ref, _claim_payload, _wrapped_claim, claim_digest, _expected = _expected_claim_values(test_backend, payload)
+    claim_ref = {"id": "holdout-claim/" + claim_id(IDENTITY), "envelope_sha256": claim_digest}
+    attempt_id = hashlib.sha256(
+        ("benchmark-v2-holdout-attempt\0" + claim_id(IDENTITY) + "\0" + digest).encode("utf-8")
+    ).hexdigest()
+    attempt_dir = str((test_backend.file_root.parent / "HoldoutOutput" / attempt_id).resolve())
+    attempt_ref = _sealed_holdout(
+        {
+            "contract_version": "benchmark_v2_holdout_attempt_ref_v1",
+            "attempt_id": attempt_id,
+            "authorization_ref": authorization_ref,
+            "claim_ref": claim_ref,
+            "partition": "holdout",
+            "mode": "actual_models",
+            "provider_id": None,
+            "safety": dict(SAFETY),
+        }
+    )
+    return authorization_ref, claim_ref, attempt_ref, attempt_dir
+
+
+def _holdout_payload(contract: str, attempt_ref, attempt_dir: str, status: str, **extra):
+    return _sealed_holdout(
+        {
+            "contract_version": contract,
+            "attempt_ref": attempt_ref,
+            "attempt_dir": attempt_dir,
+            "status": status,
+            **extra,
+            "safety": dict(SAFETY),
+        }
+    )
+
+
+def test_holdout_attempt_ledger_fixed_path_and_closed_normal_fsm(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    assert path == test_backend.ledger_root / "holdout" / "attempt-events.jsonl"
+    opened = _holdout_payload(
+        "benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened"
+    )
+    body_object = _sealed_holdout({"contract_version": "benchmark_v2_holdout_runner_actual_body_v1", "attempt_ref": attempt_ref, "partition": "holdout", "screen_group_results": [], "body_status": "complete", "safety": dict(SAFETY)})
+    body_path = Path(attempt_dir) / "body.json"
+    body_path.parent.mkdir(parents=True)
+    body_path.write_bytes(canonical_bytes(body_object))
+    body = _holdout_payload(
+        "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+        attempt_ref,
+        attempt_dir,
+        "body_complete",
+        body_file_ref={"path": str(body_path), "file_sha256": hashlib.sha256(body_path.read_bytes()).hexdigest(), "content_sha256": body_object["content_sha256"]},
+    )
+    cleanup_ref = {"content_sha256": "3" * 64}
+    counts = {"service_operations": 0, "windows": 0, "providers": 0, "listeners": 0, "leases": 0}
+    cleanup = _holdout_payload(
+        "benchmark_v2_holdout_attempt_cleanup_payload_v1",
+        attempt_ref,
+        attempt_dir,
+        "cleanup",
+        cleanup_receipt_ref=cleanup_ref,
+        resource_counts=counts,
+    )
+    _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+    _append_holdout_attempt_body_complete_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=body)
+    _append_holdout_attempt_cleanup_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=cleanup)
+    prefix = path.read_bytes()
+    cleanup_envelope = json.loads(prefix.splitlines()[-1])
+    pre_result = {"contract_version": "benchmark_v2_holdout_attempt_ledger_pre_result_ref_v1", "id": "holdout-attempt-ledger-pre-result/" + hashlib.sha256(b"benchmark-v2-holdout-attempt-ledger-pre-result\0" + prefix).hexdigest(), "attempt_ref": attempt_ref, "terminal_sequence": 2, "terminal_envelope_sha256": hashlib.sha256(canonical_bytes(cleanup_envelope)).hexdigest(), "prefix_sha256": hashlib.sha256(prefix).hexdigest()}
+    result_object = _sealed_holdout({"contract_version": "benchmark_v2_holdout_runner_actual_result_v1", "attempt_ref": attempt_ref, "attempt_dir": attempt_dir, "body_ref": {"content_sha256": body_object["content_sha256"]}, "cleanup_receipt_ref": cleanup_ref, "attempt_ledger_pre_result_ref": pre_result, "screen_group_count": 0, "status": "terminal", "safety": dict(SAFETY)})
+    result_path = Path(attempt_dir) / "result.json"
+    result_path.write_bytes(canonical_bytes(result_object))
+    result = _holdout_payload("benchmark_v2_holdout_attempt_result_payload_v1", attempt_ref, attempt_dir, "result", result_file_ref={"path": str(result_path), "file_sha256": hashlib.sha256(result_path.read_bytes()).hexdigest(), "content_sha256": result_object["content_sha256"]}, attempt_ledger_pre_result_ref=pre_result)
+    _append_holdout_attempt_result_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=result)
+    events = _validate_holdout_attempt_events_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref)
+    assert [item["event"]["event_kind"] for item in events] == ["opened", "body_complete", "cleanup", "result"]
+    assert path.read_bytes().endswith(b"\n")
+    assert all(canonical_bytes(json.loads(line)) == line for line in path.read_bytes().splitlines())
+
+
+def test_holdout_attempt_ledger_rejects_reorder_and_never_repairs_bytes(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    body = _holdout_payload(
+        "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+        attempt_ref,
+        attempt_dir,
+        "body_complete",
+        body_file_ref={"path": str(Path(attempt_dir) / "body.json"), "file_sha256": "1" * 64, "content_sha256": "2" * 64},
+    )
+    with pytest.raises(ValueError, match="transition"):
+        _append_holdout_attempt_body_complete_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=body)
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b'{"partial":')
+    before = path.read_bytes()
+    opened = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened")
+    with pytest.raises(ValueError):
+        _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+    assert path.read_bytes() == before
+
+
+def test_holdout_attempt_recovery_cleanup_is_idempotent_terminal(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    opened = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened")
+    counts = {"service_operations": 0, "windows": 0, "providers": 0, "listeners": 0, "leases": 0}
+    recovery = _holdout_payload(
+        "benchmark_v2_holdout_attempt_recovery_cleanup_payload_v1",
+        attempt_ref,
+        attempt_dir,
+        "recovery_cleanup",
+        cleanup_receipt_ref={"content_sha256": "3" * 64},
+        resource_counts=counts,
+        recovery_reason="cleanup_only_after_interrupted_holdout_attempt",
+    )
+    _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+    first = _append_holdout_attempt_recovery_cleanup_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=recovery)
+    before = holdout_attempt_events_path(ledger_root=test_backend.ledger_root).read_bytes()
+    second = _append_holdout_attempt_recovery_cleanup_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=recovery)
+    assert second == first
+    assert holdout_attempt_events_path(ledger_root=test_backend.ledger_root).read_bytes() == before
+    validated = _validate_holdout_attempt_events_for_test(
+        backend=test_backend,
+        authorization_ref=authorization_ref,
+        claim_ref=claim_ref,
+    )
+    assert [item["event"]["event_kind"] for item in validated] == [
+        "opened",
+        "recovery_cleanup",
+    ]
+    assert holdout_attempt_events_path(ledger_root=test_backend.ledger_root).read_bytes() == before
+    with pytest.raises(ValueError, match="terminal"):
+        _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+
+
+def test_holdout_attempt_payload_is_closed_and_test_backend_is_required(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    opened = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened")
+    changed = dict(opened)
+    changed["unexpected"] = True
+    changed["content_sha256"] = hashlib.sha256(canonical_bytes({k: v for k, v in changed.items() if k != "content_sha256"})).hexdigest()
+    with pytest.raises(ValueError, match="payload"):
+        _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=changed)
+    fake = type("Backend", (), {"ledger_root": test_backend.ledger_root, "test_capability": None})()
+    with pytest.raises(ValueError, match="test backend"):
+        _append_holdout_attempt_opened_for_test(backend=fake, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+
+
+def test_holdout_attempt_mutex_identity_and_hash_corruption_fail_closed(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    assert _holdout_attempt_mutex_name(path) == (
+        "Local\\portfolio-hybrid-v1-1-benchmark-v2-holdout-attempt-"
+        + hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+    )
+    opened = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened")
+    _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+    raw = path.read_bytes().replace(b'"event_sha256":"', b'"event_sha256":"f', 1)
+    path.write_bytes(raw)
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        _validate_holdout_attempt_events_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref)
+    with pytest.raises(ValueError):
+        _append_holdout_attempt_recovery_cleanup_for_test(
+            backend=test_backend,
+            authorization_ref=authorization_ref,
+            claim_ref=claim_ref,
+            event_payload=_holdout_payload(
+                "benchmark_v2_holdout_attempt_recovery_cleanup_payload_v1",
+                attempt_ref,
+                attempt_dir,
+                "recovery_cleanup",
+                cleanup_receipt_ref={"content_sha256": "3" * 64},
+                resource_counts={"service_operations": 0, "windows": 0, "providers": 0, "listeners": 0, "leases": 0},
+                recovery_reason="cleanup_only_after_interrupted_holdout_attempt",
+            ),
+        )
+    assert path.read_bytes() == before
+
+
+def test_holdout_attempt_existing_zero_byte_ledger_is_invalid(test_backend) -> None:
+    authorization_ref, claim_ref, _attempt_ref, _attempt_dir = _holdout_attempt_contract(test_backend)
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    with pytest.raises(ValueError, match="empty"):
+        _validate_holdout_attempt_events_for_test(
+            backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref
+        )
+
+
+def test_holdout_body_file_must_exist_and_match_ref(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    opened = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened")
+    body = _holdout_payload(
+        "benchmark_v2_holdout_attempt_body_complete_payload_v1",
+        attempt_ref,
+        attempt_dir,
+        "body_complete",
+        body_file_ref={"path": str(Path(attempt_dir) / "body.json"), "file_sha256": "1" * 64, "content_sha256": "2" * 64},
+    )
+    _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+    with pytest.raises(ValueError, match="body file"):
+        _append_holdout_attempt_body_complete_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=body)
+
+
+def test_holdout_attempt_rejects_crlf_bool_and_non_derived_identity(test_backend) -> None:
+    authorization_ref, claim_ref, attempt_ref, attempt_dir = _holdout_attempt_contract(test_backend)
+    changed_ref = _sealed_holdout({**{k: v for k, v in attempt_ref.items() if k != "content_sha256"}, "attempt_id": "f" * 64})
+    changed = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", changed_ref, attempt_dir, "opened")
+    with pytest.raises(ValueError, match="authority-derived"):
+        _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=changed)
+    opened = _holdout_payload("benchmark_v2_holdout_attempt_opened_payload_v1", attempt_ref, attempt_dir, "opened")
+    _append_holdout_attempt_opened_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref, event_payload=opened)
+    path = holdout_attempt_events_path(ledger_root=test_backend.ledger_root)
+    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        _validate_holdout_attempt_events_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref)
+    assert path.read_bytes() == before
+
+    # bool 是 int 的子类，必须显式拒绝，不能让 True 通过 sequence=1 或零计数检查。
+    path.write_bytes(before.replace(b"\r\n", b"\n"))
+    envelope = json.loads(path.read_bytes().splitlines()[0])
+    envelope["event"]["sequence"] = False
+    envelope["event_sha256"] = hashlib.sha256(canonical_bytes(envelope["event"])).hexdigest()
+    path.write_bytes(canonical_bytes(envelope) + b"\n")
+    with pytest.raises(ValueError):
+        _validate_holdout_attempt_events_for_test(backend=test_backend, authorization_ref=authorization_ref, claim_ref=claim_ref)
 
 
 def test_authorization_payload_v2_is_closed_while_claim_identity_stays_stable(
@@ -2519,10 +2775,17 @@ def test_public_surface_has_no_reset_delete_override() -> None:
     import app.learn.hybrid.benchmark_v2_holdout as holdout
 
     assert set(holdout.__all__) == {
+        "append_holdout_attempt_body_complete",
+        "append_holdout_attempt_cleanup",
+        "append_holdout_attempt_opened",
+        "append_holdout_attempt_recovery_cleanup",
+        "append_holdout_attempt_result",
         "append_regression_event",
         "authorize_holdout_genesis",
         "claim_holdout_once",
         "recover_claim",
+        "holdout_attempt_events_path",
+        "validate_holdout_attempt_events",
         "verify_holdout_claim_anchors_for_public_projection",
     }
     assert not any(
