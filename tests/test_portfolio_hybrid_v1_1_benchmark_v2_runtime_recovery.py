@@ -698,6 +698,19 @@ def test_probe_trigger_intent_replay_is_journal_wide_idempotent(
         resource_ref=_sealed({"attempt_dir": str(tmp_path.resolve())}),
     )
     intent_resource = _sealed({"intent": "first"})
+    for event_kind in (
+        "provider_request_in_flight",
+        "probe_trigger_observation",
+    ):
+        append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="request_in_flight",
+            event_kind=event_kind,
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"event": event_kind}),
+        )
     intent = append_benchmark_v2_attempt_event(
         journal_path=journal,
         attempt_ref=attempt,
@@ -712,9 +725,9 @@ def test_probe_trigger_intent_replay_is_journal_wide_idempotent(
         attempt_ref=attempt,
         phase="request_in_flight",
         event_kind="provider_request_in_flight",
-        provider_id="omni",
+        provider_id="qwen",
         probe_kind="cancel",
-        resource_ref=_sealed({"request": "in-flight"}),
+        resource_ref=_sealed({"request": "other-tuple"}),
     )
 
     replay = append_benchmark_v2_attempt_event(
@@ -734,6 +747,8 @@ def test_probe_trigger_intent_replay_is_journal_wide_idempotent(
     assert replay == intent
     assert [event["event_kind"] for event in events] == [
         "attempt_prepared",
+        "provider_request_in_flight",
+        "probe_trigger_observation",
         "probe_trigger_intent",
         "provider_request_in_flight",
     ]
@@ -756,24 +771,20 @@ def test_probe_trigger_intent_rejects_different_journal_wide_replay(
         event_kind="attempt_prepared",
         resource_ref=_sealed({"attempt_dir": str(tmp_path.resolve())}),
     )
-    append_benchmark_v2_attempt_event(
-        journal_path=journal,
-        attempt_ref=attempt,
-        phase="request_in_flight",
-        event_kind="probe_trigger_intent",
-        provider_id="omni",
-        probe_kind="cancel",
-        resource_ref=_sealed({"intent": "first"}),
-    )
-    append_benchmark_v2_attempt_event(
-        journal_path=journal,
-        attempt_ref=attempt,
-        phase="request_in_flight",
-        event_kind="provider_request_in_flight",
-        provider_id="omni",
-        probe_kind="cancel",
-        resource_ref=_sealed({"request": "in-flight"}),
-    )
+    for event_kind in (
+        "provider_request_in_flight",
+        "probe_trigger_observation",
+        "probe_trigger_intent",
+    ):
+        append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="request_in_flight",
+            event_kind=event_kind,
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"event": event_kind}),
+        )
 
     with pytest.raises(ValueError, match="trigger intent"):
         append_benchmark_v2_attempt_event(
@@ -791,7 +802,7 @@ def test_probe_trigger_intent_rejects_different_journal_wide_replay(
             journal_path=journal,
             attempt_ref=attempt,
         )
-    ) == 3
+    ) == 4
 
 
 def test_attempt_journal_rejects_phase_regression_and_short_write(
@@ -2149,7 +2160,15 @@ def test_probe_lost_trigger_response_uses_durable_reconciliation_without_retry(
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
     from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
 
-    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    clock = _DeterministicDeadlineClock()
+    _, runtime, manifest, _, windows, _ = _runtime(
+        monkeypatch,
+        tmp_path,
+        runtime_options={
+            "monotonic_ns": clock.monotonic_ns,
+            "wait_hook": clock.wait,
+        },
+    )
     service = _ProbeService()
     monkeypatch.setattr(
         runtime_module,
@@ -2462,6 +2481,21 @@ def test_probe_trigger_terminal_is_unique_per_tuple(
         event_kind="attempt_prepared",
         resource_ref=_sealed({"attempt_dir": str(tmp_path.resolve())}),
     )
+    for event_kind in (
+        "provider_request_in_flight",
+        "probe_trigger_observation",
+        "probe_trigger_intent",
+        "probe_triggered",
+    ):
+        append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="request_in_flight",
+            event_kind=event_kind,
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"event": event_kind}),
+        )
     first = append_benchmark_v2_attempt_event(
         journal_path=journal,
         attempt_ref=attempt,
@@ -3011,3 +3045,561 @@ def test_active_cleanup_after_absence_failure_never_terminalizes(
     )
     assert "attempt_terminal" not in [event["event_kind"] for event in events]
     assert service.cancel_calls == 1
+
+
+class _DeterministicDeadlineClock:
+    def __init__(self, values: list[int] | None = None) -> None:
+        self.now = 100
+        self.values = list(values or [])
+        self.reads = 0
+        self.waits = 0
+        self.before_wait = None
+
+    def monotonic_ns(self) -> int:
+        self.reads += 1
+        if self.values:
+            return self.values.pop(0)
+        return self.now
+
+    def wait(self) -> None:
+        if self.before_wait is not None:
+            self.before_wait()
+        self.waits += 1
+        self.now += 40_000_000_000
+
+
+def _prepare_deadline_probe(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    attempt_id: str,
+    probe_kind: str,
+    clock: _DeterministicDeadlineClock,
+):
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(
+        monkeypatch,
+        tmp_path,
+        runtime_options={
+            "monotonic_ns": clock.monotonic_ns,
+            "wait_hook": clock.wait,
+        },
+    )
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed({"attempt_id": attempt_id, "partition": "regression"})
+    context = runtime.begin_probe(
+        provider_id="omni",
+        probe_kind=probe_kind,
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / attempt_id).resolve(),
+    )
+    _write_dispatch_journal(
+        runtime_module=runtime_module,
+        project_root=tmp_path,
+        monkeypatch=monkeypatch,
+        context=context,
+        provider="omni",
+        pid=4980,
+        service=service,
+    )
+    request = runtime.read_server_journal(probe_context=context)
+    return runtime_module, runtime, service, windows, attempt, context, request
+
+
+def test_timeout_monotonic_deadline_waits_before_cancel_and_persists_expiration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, service, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-timeout-monotonic-deadline",
+        probe_kind="timeout",
+        clock=clock,
+    )
+    clock.before_wait = lambda: service.cancel_calls == 0 or pytest.fail(
+        "timeout cancelled before monotonic expiry"
+    )
+    original_cancel = service.cancel_operation
+
+    def cancel_after_durable_observation(**kwargs: object) -> dict[str, object]:
+        events = read_benchmark_v2_attempt_journal(
+            journal_path=module._benchmark_v2_attempt_journal_path(
+                project_root=tmp_path, attempt_ref=attempt
+            ),
+            attempt_ref=attempt,
+        )
+        assert [event["event_kind"] for event in events].count(
+            "probe_trigger_observation"
+        ) == 1
+        return original_cancel(**kwargs)
+
+    monkeypatch.setattr(
+        service, "cancel_operation", cancel_after_durable_observation
+    )
+
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="timeout",
+        request_in_flight_journal=request,
+    )
+
+    assert clock.waits == 3
+    assert service.cancel_calls == 1
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    matches = [
+        event for event in events if event["event_kind"] == "probe_trigger_observation"
+    ]
+    assert len(matches) == 1
+    value = matches[0]["resource_ref"]["value"]
+    observation = value["trigger_observation"]
+    expiration = value["deadline_expiration"]
+    assert observation == {
+        "kind": "timeout",
+        "action": "monotonic_deadline_expired",
+        "request_in_flight_ref": request,
+        "triggered_monotonic_ns": 120_000_000_100,
+        "deadline_expiration_ref": {
+            "content_sha256": expiration["content_sha256"]
+        },
+    }
+    assert expiration["contract_version"] == (
+        "benchmark_v2_probe_monotonic_deadline_expiration_v1"
+    )
+    assert expiration["clock"] == "time.monotonic_ns"
+    assert expiration["owner"] == "BenchmarkV2Runtime"
+    assert expiration["duration_ns"] == 120_000_000_000
+    assert (
+        expiration["started_monotonic_ns"]
+        < expiration["deadline_monotonic_ns"]
+        <= expiration["expired_monotonic_ns"]
+        <= observation["triggered_monotonic_ns"]
+    )
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="timeout_deadline_test_cleanup"
+    )["cleanup_status"] == "stable_zero"
+
+
+def test_cancel_has_no_deadline_expiration_ref_and_does_not_wait(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, service, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-cancel-no-deadline-expiration",
+        probe_kind="cancel",
+        clock=clock,
+    )
+    clock.before_wait = lambda: pytest.fail("explicit cancel invoked deadline wait")
+
+    runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="cancel",
+        request_in_flight_journal=request,
+    )
+
+    assert clock.waits == 0
+    assert service.cancel_calls == 1
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    value = next(
+        event["resource_ref"]["value"]
+        for event in events
+        if event["event_kind"] == "probe_trigger_observation"
+    )
+    assert value["trigger_observation"]["action"] == "explicit_cancel"
+    assert value["trigger_observation"]["deadline_expiration_ref"] is None
+    assert value["deadline_expiration"] is None
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="cancel_observation_test_cleanup"
+    )["cleanup_status"] == "stable_zero"
+
+
+@pytest.mark.parametrize(
+    "values, message",
+    [
+        ([True], "monotonic clock"),
+        ([100, 99], "regressed"),
+    ],
+)
+def test_timeout_monotonic_deadline_rejects_invalid_or_backward_clock_before_cancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    values: list[int],
+    message: str,
+) -> None:
+    clock = _DeterministicDeadlineClock(values)
+    _, runtime, service, _, _, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id=f"attempt-timeout-clock-{message}",
+        probe_kind="timeout",
+        clock=clock,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="timeout",
+            request_in_flight_journal=request,
+        )
+    assert service.cancel_calls == 0
+    assert runtime.cleanup_attempt(
+        attempt=context["attempt_ref"], reason="invalid_clock_test_cleanup"
+    )["cleanup_status"] == "stable_zero"
+
+
+@pytest.mark.parametrize("mutation", ["owner", "clock", "duration", "cross_attempt"])
+def test_timeout_monotonic_deadline_parent_conflicts_fail_closed_before_cancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import append_benchmark_v2_attempt_event
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, service, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id=f"attempt-timeout-parent-{mutation}",
+        probe_kind="timeout",
+        clock=clock,
+    )
+    expiration = _sealed(
+        {
+            "contract_version": "benchmark_v2_probe_monotonic_deadline_expiration_v1",
+            "attempt_ref": attempt,
+            "operation_ref": context["operation_ref"],
+            "request_in_flight_ref": request,
+            "clock": "time.monotonic_ns",
+            "owner": "BenchmarkV2Runtime",
+            "started_monotonic_ns": 100,
+            "duration_ns": 120_000_000_000,
+            "deadline_monotonic_ns": 120_000_000_100,
+            "expired_monotonic_ns": 120_000_000_100,
+        }
+    )
+    if mutation == "owner":
+        expiration["owner"] = "runner"
+    elif mutation == "clock":
+        expiration["clock"] = "time.time_ns"
+    elif mutation == "duration":
+        expiration["duration_ns"] = 1
+    else:
+        expiration["attempt_ref"] = _sealed(
+            {"attempt_id": "another-attempt", "partition": "regression"}
+        )
+    expiration["content_sha256"] = content_sha256(expiration)
+    observation = {
+        "kind": "timeout",
+        "action": "monotonic_deadline_expired",
+        "request_in_flight_ref": request,
+        "triggered_monotonic_ns": 120_000_000_100,
+        "deadline_expiration_ref": {
+            "content_sha256": expiration["content_sha256"]
+        },
+    }
+    append_benchmark_v2_attempt_event(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="probe_trigger_observation",
+        provider_id="omni",
+        probe_kind="timeout",
+        resource_ref=module._runtime_resource_ref(
+            "probe_trigger_observation",
+            {
+                "trigger_observation": observation,
+                "deadline_expiration": expiration,
+            },
+        ),
+    )
+    intent = module._compose_probe_trigger_intent(
+        project_root=tmp_path, context=context, request=request
+    )
+    append_benchmark_v2_attempt_event(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+        phase="request_in_flight",
+        event_kind="probe_trigger_intent",
+        provider_id="omni",
+        probe_kind="timeout",
+        resource_ref=module._runtime_resource_ref(
+            "probe_trigger_intent", {"trigger_intent": intent}
+        ),
+    )
+
+    with pytest.raises(ValueError, match="deadline|owner|clock|duration|attempt"):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="timeout",
+            request_in_flight_journal=request,
+        )
+    assert service.cancel_calls == 0
+    state = runtime._probe_state(context)
+    service.cancel_operation(operation_ref=state["latest_operation_ref"])
+    runtime._close_probe_window(
+        state=state, reason="deadline_conflict_test_fixture_cleanup"
+    )
+    runtime._attempt_states.clear()
+
+
+def test_probe_trigger_intent_without_trigger_observation_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import append_benchmark_v2_attempt_event
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, service, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-intent-missing-observation",
+        probe_kind="cancel",
+        clock=clock,
+    )
+    intent = module._compose_probe_trigger_intent(
+        project_root=tmp_path, context=context, request=request
+    )
+    with pytest.raises(ValueError, match="causal.*observation.*intent"):
+        append_benchmark_v2_attempt_event(
+            journal_path=module._benchmark_v2_attempt_journal_path(
+                project_root=tmp_path, attempt_ref=attempt
+            ),
+            attempt_ref=attempt,
+            phase="request_in_flight",
+            event_kind="probe_trigger_intent",
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=module._runtime_resource_ref(
+                "probe_trigger_intent", {"trigger_intent": intent}
+            ),
+        )
+    assert service.cancel_calls == 0
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="missing_observation_test_cleanup"
+    )["cleanup_status"] == "stable_zero"
+
+
+def test_timeout_monotonic_deadline_lost_response_retry_reuses_observation_without_recancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_lifecycle import read_benchmark_v2_attempt_journal
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, service, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-timeout-observation-response-loss",
+        probe_kind="timeout",
+        clock=clock,
+    )
+    original_cancel = service.cancel_operation
+    terminal = None
+
+    def lose_cancel_response(**kwargs: object) -> dict[str, object]:
+        nonlocal terminal
+        terminal = original_cancel(**kwargs)
+        raise ConnectionError("timeout cancel response lost")
+
+    def lookup_terminal(**_kwargs: object) -> dict[str, object]:
+        assert terminal is not None
+        return {
+            "operation_ref": deepcopy(terminal["operation_ref"]),
+            "status": "cancelled",
+            "terminal_receipt": None,
+            "cleanup_refs": deepcopy(terminal["cleanup_refs"]),
+            "provider_dispatch_context_projection": deepcopy(
+                terminal["provider_dispatch_context_projection"]
+            ),
+        }
+
+    monkeypatch.setattr(service, "cancel_operation", lose_cancel_response)
+    monkeypatch.setattr(service, "lookup_hybrid_operation", lookup_terminal)
+    with pytest.raises(ConnectionError, match="response lost"):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="timeout",
+            request_in_flight_journal=request,
+        )
+    reads_after_loss = clock.reads
+    waits_after_loss = clock.waits
+
+    trigger = runtime.trigger_probe(
+        probe_context=context,
+        probe_kind="timeout",
+        request_in_flight_journal=request,
+    )
+
+    assert trigger["outcome"] == "safe_stopped_exact_incarnation_absent"
+    assert service.cancel_calls == 1
+    assert clock.reads == reads_after_loss
+    assert clock.waits == waits_after_loss
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path, attempt_ref=attempt
+        ),
+        attempt_ref=attempt,
+    )
+    assert [event["event_kind"] for event in events].count(
+        "probe_trigger_observation"
+    ) == 1
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="response_loss_test_cleanup"
+    )["cleanup_status"] == "stable_zero"
+
+
+def test_probe_trigger_causal_replay_rejects_observation_after_intent(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+
+    attempt = _sealed({"attempt_id": "attempt-retroactive-observation"})
+    journal = (tmp_path / "retroactive-observation.jsonl").resolve()
+    for event_kind in (
+        "attempt_prepared",
+        "provider_request_in_flight",
+        "probe_trigger_observation",
+        "probe_trigger_intent",
+    ):
+        lifecycle.append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase=(
+                "prepared"
+                if event_kind == "attempt_prepared"
+                else "request_in_flight"
+            ),
+            event_kind=event_kind,
+            provider_id=None if event_kind == "attempt_prepared" else "omni",
+            probe_kind=None if event_kind == "attempt_prepared" else "cancel",
+            resource_ref=_sealed({"event": event_kind}),
+        )
+    events = lifecycle.read_benchmark_v2_attempt_journal(
+        journal_path=journal, attempt_ref=attempt
+    )
+    prepared, request, observation, intent = events
+    retroactive_observation = deepcopy(observation)
+    reordered = [prepared, request, observation, intent, retroactive_observation]
+    predecessor = None
+    for sequence, event in enumerate(reordered, 1):
+        event["sequence"] = sequence
+        event["predecessor_content_sha256"] = predecessor
+        event["content_sha256"] = content_sha256(event)
+        predecessor = event["content_sha256"]
+    journal.write_bytes(
+        b"".join(
+            lifecycle.canonical_json_bytes(event) + b"\n" for event in reordered
+        )
+    )
+
+    with pytest.raises(ValueError, match="causal|observation.*intent"):
+        lifecycle.read_benchmark_v2_attempt_journal(
+            journal_path=journal, attempt_ref=attempt
+        )
+
+
+def test_probe_trigger_causal_order_requires_triggered_before_terminal(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+
+    attempt = _sealed({"attempt_id": "attempt-terminal-before-triggered"})
+    journal = (tmp_path / "terminal-before-triggered.jsonl").resolve()
+    lifecycle.append_benchmark_v2_attempt_event(
+        journal_path=journal,
+        attempt_ref=attempt,
+        phase="prepared",
+        event_kind="attempt_prepared",
+        resource_ref=_sealed({"event": "prepared"}),
+    )
+    for event_kind in (
+        "provider_request_in_flight",
+        "probe_trigger_observation",
+        "probe_trigger_intent",
+    ):
+        lifecycle.append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="request_in_flight",
+            event_kind=event_kind,
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"event": event_kind}),
+        )
+
+    with pytest.raises(ValueError, match="causal|triggered.*terminal"):
+        lifecycle.append_benchmark_v2_attempt_event(
+            journal_path=journal,
+            attempt_ref=attempt,
+            phase="body_complete",
+            event_kind="probe_trigger_terminal",
+            provider_id="omni",
+            probe_kind="cancel",
+            resource_ref=_sealed({"event": "terminal"}),
+        )
+
+
+def test_timeout_monotonic_deadline_nonadvancing_clock_fails_closed_before_cancel(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wait_calls = 0
+
+    def no_progress_wait() -> None:
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls > 4100:
+            raise AssertionError("deadline wait was not bounded")
+
+    clock = _DeterministicDeadlineClock()
+    module, runtime, service, _, attempt, context, request = _prepare_deadline_probe(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        attempt_id="attempt-timeout-nonadvancing-clock",
+        probe_kind="timeout",
+        clock=clock,
+    )
+    runtime._wait_hook = no_progress_wait
+
+    with pytest.raises(ValueError, match="monotonic clock failed to advance"):
+        runtime.trigger_probe(
+            probe_context=context,
+            probe_kind="timeout",
+            request_in_flight_journal=request,
+        )
+
+    assert wait_calls <= 4096
+    assert service.cancel_calls == 0
+    assert runtime.cleanup_attempt(
+        attempt=attempt, reason="nonadvancing_clock_test_cleanup"
+    )["cleanup_status"] == "stable_zero"

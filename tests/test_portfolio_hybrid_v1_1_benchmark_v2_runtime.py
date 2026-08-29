@@ -512,7 +512,13 @@ def _install_fakes(
     )
 
 
-def _runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **window_options: bool):
+def _runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    runtime_options: Mapping[str, object] | None = None,
+    **window_options: bool,
+):
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
 
     manifest_path, corpus = _write_fixture(tmp_path)
@@ -522,6 +528,7 @@ def _runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, **window_options: 
     runtime = runtime_module._BenchmarkV2ProductionRuntime(
         project_root=tmp_path,
         authority_root=tmp_path / "runtime_state" / "binding-authority",
+        **dict(runtime_options or {}),
     )
     manifest = runtime.load_provider_manifest(path=manifest_path)
     return runtime_module, runtime, manifest, corpus, windows, ocr

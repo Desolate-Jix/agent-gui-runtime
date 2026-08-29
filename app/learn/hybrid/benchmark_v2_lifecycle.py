@@ -68,6 +68,7 @@ _ATTEMPT_EVENT_PHASE = {
     "service_started": "prepared",
     "service_recovered": "prepared",
     "provider_request_in_flight": "request_in_flight",
+    "probe_trigger_observation": "request_in_flight",
     "probe_trigger_intent": "request_in_flight",
     "probe_triggered": "request_in_flight",
     "probe_trigger_terminal": "body_complete",
@@ -4092,6 +4093,7 @@ def _validate_benchmark_v2_attempt_event(value: object) -> dict[str, Any]:
     probe_kind = event["probe_kind"]
     provider_event = kind in {
         "provider_request_in_flight",
+        "probe_trigger_observation",
         "probe_trigger_intent",
         "probe_triggered",
         "probe_trigger_terminal",
@@ -4112,6 +4114,51 @@ def _validate_benchmark_v2_attempt_event(value: object) -> dict[str, Any]:
     ):
         raise ValueError("benchmark attempt predecessor SHA is invalid")
     return event
+
+
+def _validate_benchmark_v2_probe_causal_order(
+    events: list[Mapping[str, object]],
+) -> None:
+    prerequisites = {
+        "probe_trigger_observation": ("provider_request_in_flight",),
+        "probe_trigger_intent": (
+            "provider_request_in_flight",
+            "probe_trigger_observation",
+        ),
+        "probe_triggered": (
+            "provider_request_in_flight",
+            "probe_trigger_observation",
+            "probe_trigger_intent",
+        ),
+        "probe_trigger_terminal": (
+            "provider_request_in_flight",
+            "probe_trigger_observation",
+            "probe_trigger_intent",
+            "probe_triggered",
+        ),
+    }
+    tracked = {"provider_request_in_flight", *prerequisites}
+    seen: dict[tuple[object, object], dict[str, list[int]]] = {}
+    for event in events:
+        kind = event.get("event_kind")
+        if kind not in tracked:
+            continue
+        key = (event.get("provider_id"), event.get("probe_kind"))
+        tuple_events = seen.setdefault(key, {})
+        if tuple_events.get(str(kind)):
+            raise ValueError("benchmark probe causal event is not tuple-unique")
+        if kind in prerequisites and any(
+            len(tuple_events.get(required, [])) != 1
+            for required in prerequisites[kind]
+        ):
+            raise ValueError(
+                "benchmark probe causal order requires request < observation < "
+                "intent < triggered < terminal"
+            )
+        sequence = event.get("sequence")
+        if isinstance(sequence, bool) or not isinstance(sequence, int):
+            raise ValueError("benchmark probe causal event sequence is invalid")
+        tuple_events.setdefault(str(kind), []).append(sequence)
 
 
 def read_benchmark_v2_attempt_journal(
@@ -4154,6 +4201,7 @@ def read_benchmark_v2_attempt_journal(
         if events and events[-1]["phase"] == "terminal":
             raise ValueError("benchmark attempt journal continued after terminal")
         events.append(event)
+    _validate_benchmark_v2_probe_causal_order(events)
     return events
 
 
@@ -4192,16 +4240,21 @@ def append_benchmark_v2_attempt_event(
             "probe_kind": probe_kind,
             "resource_ref": normalized_resource,
         }
-        if event_kind == "probe_trigger_intent":
+        if event_kind in {"probe_trigger_observation", "probe_trigger_intent"}:
+            event_label = (
+                "probe trigger intent"
+                if event_kind == "probe_trigger_intent"
+                else "probe trigger observation"
+            )
             prior_intents = [
                 event
                 for event in events
-                if event["event_kind"] == "probe_trigger_intent"
+                if event["event_kind"] == event_kind
                 and event["provider_id"] == provider_id
                 and event["probe_kind"] == probe_kind
             ]
             if len(prior_intents) > 1:
-                raise ValueError("benchmark probe trigger intent is not unique")
+                raise ValueError(f"benchmark {event_label} is not unique")
             if prior_intents:
                 existing_intent = prior_intents[0]
                 if all(
@@ -4209,7 +4262,7 @@ def append_benchmark_v2_attempt_event(
                     for name, value in idempotency.items()
                 ):
                     return deepcopy(existing_intent)
-                raise ValueError("benchmark probe trigger intent conflicts")
+                raise ValueError(f"benchmark {event_label} conflicts")
         if event_kind == "probe_trigger_terminal":
             prior_terminals = [
                 event
@@ -4253,6 +4306,7 @@ def append_benchmark_v2_attempt_event(
         }
         body["content_sha256"] = content_sha256(body)
         event = _validate_benchmark_v2_attempt_event(body)
+        _validate_benchmark_v2_probe_causal_order([*events, event])
         path.parent.mkdir(parents=True, exist_ok=True)
         raw = canonical_json_bytes(event) + b"\n"
         with path.open("ab") as stream:

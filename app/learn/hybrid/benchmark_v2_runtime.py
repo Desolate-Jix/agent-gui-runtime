@@ -96,12 +96,17 @@ _PROBE_TARGET_TASKS = {
 _PROBE_KINDS = {"cancel", "timeout"}
 _PROBE_POLL_SECONDS = 0.02
 _PROBE_DEADLINE_SECONDS = 120.0
+_PROBE_DEADLINE_DURATION_NS = 120_000_000_000
+_PROBE_MAX_STAGNANT_READS = 4096
 _PROBE_MAX_CONTINUES = 4096
 _PROBE_CONTEXT_CONTRACT = "benchmark_v2_probe_context_v1"
 _PROBE_REQUEST_CONTRACT = "benchmark_v2_probe_request_in_flight_v1"
 _PROBE_TRIGGER_CONTRACT = "benchmark_v2_probe_trigger_receipt_v2"
 _PROBE_TRIGGER_INTENT_CONTRACT = "benchmark_v2_probe_trigger_intent_v1"
 _PROBE_TRIGGER_TERMINAL_CONTRACT = "benchmark_v2_probe_trigger_terminal_v1"
+_PROBE_DEADLINE_EXPIRATION_CONTRACT = (
+    "benchmark_v2_probe_monotonic_deadline_expiration_v1"
+)
 _PROBE_CONTEXT_FIELDS = {
     "contract_version",
     "attempt_ref",
@@ -888,16 +893,33 @@ class _BenchmarkV2ProductionRuntime:
         "_pending_cleanup",
         "_preparing",
         "_attempt_states",
+        "_monotonic_ns",
+        "_wait_hook",
     )
 
-    def __init__(self, *, project_root: Path, authority_root: Path) -> None:
+    def __init__(
+        self,
+        *,
+        project_root: Path,
+        authority_root: Path,
+        monotonic_ns: Callable[[], int] | None = None,
+        wait_hook: Callable[[], None] | None = None,
+    ) -> None:
         self._project_root = Path(project_root).resolve()
         self._authority_root = Path(authority_root).resolve()
+        self._monotonic_ns = monotonic_ns or time.monotonic_ns
+        self._wait_hook = wait_hook or self._wait_for_probe_deadline
+        if not callable(self._monotonic_ns) or not callable(self._wait_hook):
+            raise ValueError("benchmark probe monotonic clock and wait hook must be callable")
         self._lock = RLock()
         self._active: dict[str, Any] | None = None
         self._pending_cleanup: dict[str, object] | None = None
         self._preparing = False
         self._attempt_states: dict[str, dict[str, Any]] = {}
+
+    @staticmethod
+    def _wait_for_probe_deadline() -> None:
+        time.sleep(_PROBE_POLL_SECONDS)
 
     def load_provider_manifest(self, *, path: Path) -> Mapping[str, object]:
         manifest_path = _canonical_file(path, name="provider manifest")
@@ -1450,12 +1472,27 @@ class _BenchmarkV2ProductionRuntime:
         if persisted is not None:
             state["trigger_receipt"] = deepcopy(persisted)
             return persisted
+        trigger_observation = _probe_trigger_observation_from_events(
+            events,
+            provider_id=context["provider_id"],
+            probe_kind=context["probe_kind"],
+            required=False,
+        )
         existing_intent = _probe_trigger_intent_from_events(
             events,
             provider_id=context["provider_id"],
             probe_kind=context["probe_kind"],
         )
         if existing_intent is not None:
+            if trigger_observation is None:
+                raise ValueError(
+                    "benchmark probe trigger observation is unavailable for prior intent"
+                )
+            _validate_probe_trigger_observation_lineage(
+                material=trigger_observation,
+                context=context,
+                request=request,
+            )
             recovered_context = _probe_context_from_events(
                 events, trigger_intent=existing_intent, request=request
             )
@@ -1494,6 +1531,38 @@ class _BenchmarkV2ProductionRuntime:
                 raise ValueError("benchmark probe retry terminal rebuild is unavailable")
             state["trigger_receipt"] = deepcopy(rebuilt)
             return rebuilt
+        if trigger_observation is None:
+            trigger_observation = _compose_probe_trigger_observation(
+                context=context,
+                request=request,
+                monotonic_ns=self._monotonic_ns,
+                wait_hook=self._wait_hook,
+            )
+            append_benchmark_v2_attempt_event(
+                journal_path=journal_path,
+                attempt_ref=context["attempt_ref"],
+                phase="request_in_flight",
+                event_kind="probe_trigger_observation",
+                provider_id=str(context["provider_id"]),
+                probe_kind=kind,
+                resource_ref=_runtime_resource_ref(
+                    "probe_trigger_observation",
+                    {
+                        "trigger_observation": trigger_observation[
+                            "trigger_observation"
+                        ],
+                        "deadline_expiration": trigger_observation[
+                            "deadline_expiration"
+                        ],
+                    },
+                ),
+            )
+        else:
+            _validate_probe_trigger_observation_lineage(
+                material=trigger_observation,
+                context=context,
+                request=request,
+            )
         trigger_intent = _compose_probe_trigger_intent(
             project_root=self._project_root,
             context=context,
@@ -1688,6 +1757,28 @@ class _BenchmarkV2ProductionRuntime:
                 request = _probe_request_from_events(
                     events, provider_id=active_tuple[0], probe_kind=active_tuple[1]
                 )
+                if trigger_intent is not None:
+                    if request is None:
+                        raise ValueError(
+                            "benchmark probe request is unavailable for prior trigger intent"
+                        )
+                    observation_context = state.get("probe_context")
+                    if not isinstance(observation_context, Mapping):
+                        observation_context = _probe_context_from_events(
+                            events, trigger_intent=trigger_intent, request=request
+                        )
+                    trigger_observation = _probe_trigger_observation_from_events(
+                        events,
+                        provider_id=active_tuple[0],
+                        probe_kind=active_tuple[1],
+                        required=True,
+                    )
+                    assert trigger_observation is not None
+                    _validate_probe_trigger_observation_lineage(
+                        material=trigger_observation,
+                        context=observation_context,
+                        request=request,
+                    )
                 service_terminal = state.get("service_terminal")
                 if not isinstance(service_terminal, Mapping):
                     operation = state.get("latest_operation_ref")
@@ -1827,6 +1918,26 @@ class _BenchmarkV2ProductionRuntime:
                     if recovered_tuple is not None
                     else None
                 )
+                if trigger_intent is not None:
+                    if request is None:
+                        raise ValueError(
+                            "benchmark probe request is unavailable for prior trigger intent"
+                        )
+                    observation_context = _probe_context_from_events(
+                        events, trigger_intent=trigger_intent, request=request
+                    )
+                    trigger_observation = _probe_trigger_observation_from_events(
+                        events,
+                        provider_id=recovered_tuple[0],
+                        probe_kind=recovered_tuple[1],
+                        required=True,
+                    )
+                    assert trigger_observation is not None
+                    _validate_probe_trigger_observation_lineage(
+                        material=trigger_observation,
+                        context=observation_context,
+                        request=request,
+                    )
                 if (
                     service_terminal is None
                     and trigger_intent is not None
@@ -3653,6 +3764,251 @@ def _exact_ordered_process_identities(
     return normalized
 
 
+def _monotonic_clock_value(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("benchmark probe monotonic clock value is invalid")
+    return value
+
+
+def _deadline_content_ref(value: Mapping[str, object]) -> dict[str, str]:
+    digest = value.get("content_sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise ValueError("benchmark probe deadline expiration ref is invalid")
+    return {"content_sha256": digest}
+
+
+def _validate_probe_deadline_expiration(value: object) -> dict[str, Any]:
+    fields = {
+        "contract_version",
+        "attempt_ref",
+        "operation_ref",
+        "request_in_flight_ref",
+        "clock",
+        "owner",
+        "started_monotonic_ns",
+        "duration_ns",
+        "deadline_monotonic_ns",
+        "expired_monotonic_ns",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise ValueError("benchmark probe deadline expiration parent is not closed")
+    expiration = deepcopy(dict(value))
+    if (
+        expiration["contract_version"] != _PROBE_DEADLINE_EXPIRATION_CONTRACT
+        or expiration["clock"] != "time.monotonic_ns"
+        or expiration["owner"] != "BenchmarkV2Runtime"
+        or expiration["duration_ns"] != _PROBE_DEADLINE_DURATION_NS
+        or expiration["content_sha256"] != content_sha256(expiration)
+    ):
+        raise ValueError("benchmark probe deadline expiration parent is invalid")
+    expiration["attempt_ref"] = _sealed_parent(
+        expiration["attempt_ref"], name="probe deadline attempt ref"
+    )
+    expiration["operation_ref"] = validate_benchmark_v2_workflow_service_operation_ref(
+        expiration["operation_ref"]
+    )
+    expiration["request_in_flight_ref"] = _sealed_parent(
+        expiration["request_in_flight_ref"], name="probe deadline request ref"
+    )
+    started = _monotonic_clock_value(expiration["started_monotonic_ns"])
+    deadline = _monotonic_clock_value(expiration["deadline_monotonic_ns"])
+    expired = _monotonic_clock_value(expiration["expired_monotonic_ns"])
+    if (
+        deadline != started + _PROBE_DEADLINE_DURATION_NS
+        or not started < deadline <= expired
+    ):
+        raise ValueError("benchmark probe monotonic deadline expiration is invalid")
+    return expiration
+
+
+def _validate_probe_trigger_observation_resource(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "trigger_observation",
+        "deadline_expiration",
+    }:
+        raise ValueError("benchmark probe trigger observation resource is not closed")
+    raw_observation = value.get("trigger_observation")
+    if not isinstance(raw_observation, Mapping) or set(raw_observation) != {
+        "kind",
+        "action",
+        "request_in_flight_ref",
+        "triggered_monotonic_ns",
+        "deadline_expiration_ref",
+    }:
+        raise ValueError("benchmark probe trigger observation is not closed")
+    observation = deepcopy(dict(raw_observation))
+    kind = _probe_kind(observation["kind"])
+    observation["kind"] = kind
+    observation["request_in_flight_ref"] = _sealed_parent(
+        observation["request_in_flight_ref"],
+        name="probe trigger observation request ref",
+    )
+    triggered = _monotonic_clock_value(observation["triggered_monotonic_ns"])
+    expiration_value = value.get("deadline_expiration")
+    if kind == "cancel":
+        if (
+            observation["action"] != "explicit_cancel"
+            or observation["deadline_expiration_ref"] is not None
+            or expiration_value is not None
+        ):
+            raise ValueError("benchmark cancel trigger observation has deadline evidence")
+        expiration = None
+    else:
+        if observation["action"] != "monotonic_deadline_expired":
+            raise ValueError("benchmark timeout trigger observation action is invalid")
+        expiration = _validate_probe_deadline_expiration(expiration_value)
+        expected_ref = _deadline_content_ref(expiration)
+        if observation["deadline_expiration_ref"] != expected_ref:
+            raise ValueError("benchmark timeout deadline expiration ref is stale")
+        if expiration["expired_monotonic_ns"] > triggered:
+            raise ValueError("benchmark timeout trigger preceded monotonic expiration")
+    return {
+        "trigger_observation": observation,
+        "deadline_expiration": expiration,
+    }
+
+
+def _probe_trigger_observation_from_events(
+    events: list[Mapping[str, object]],
+    *,
+    provider_id: object,
+    probe_kind: object,
+    required: bool,
+) -> dict[str, Any] | None:
+    event = _one_probe_event_for_tuple(
+        events,
+        event_kind="probe_trigger_observation",
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+        required=required,
+    )
+    if event is None:
+        return None
+    value = _runtime_resource_value(
+        event, expected_kind="probe_trigger_observation"
+    )
+    material = _validate_probe_trigger_observation_resource(value)
+    material["event"] = event
+    return material
+
+
+def _validate_probe_trigger_observation_lineage(
+    *,
+    material: Mapping[str, object],
+    context: Mapping[str, object],
+    request: Mapping[str, object],
+) -> None:
+    probe_context = _validate_probe_context(context)
+    in_flight = _validate_probe_request(request)
+    observation = material["trigger_observation"]
+    if not isinstance(observation, Mapping):
+        raise ValueError("benchmark probe trigger observation is unavailable")
+    if (
+        observation["kind"] != probe_context["probe_kind"]
+        or observation["request_in_flight_ref"]
+        != _content_ref(in_flight, name="probe trigger observation request")
+    ):
+        raise ValueError("benchmark probe trigger observation lineage is stale")
+    expiration = material.get("deadline_expiration")
+    if probe_context["probe_kind"] == "timeout":
+        if not isinstance(expiration, Mapping):
+            raise ValueError("benchmark timeout deadline expiration is unavailable")
+        if (
+            expiration["attempt_ref"] != probe_context["attempt_ref"]
+            or expiration["operation_ref"] != probe_context["operation_ref"]
+            or expiration["request_in_flight_ref"]
+            != _content_ref(in_flight, name="probe deadline request")
+        ):
+            raise ValueError("benchmark timeout deadline expiration lineage is stale")
+    elif expiration is not None:
+        raise ValueError("benchmark cancel deadline expiration must be absent")
+
+
+def _compose_probe_trigger_observation(
+    *,
+    context: Mapping[str, object],
+    request: Mapping[str, object],
+    monotonic_ns: Callable[[], int],
+    wait_hook: Callable[[], None],
+) -> dict[str, Any]:
+    probe_context = _validate_probe_context(context)
+    in_flight = _validate_probe_request(request)
+    if (
+        in_flight["attempt_ref"] != probe_context["attempt_ref"]
+        or in_flight["provider_id"] != probe_context["provider_id"]
+        or in_flight["probe_kind"] != probe_context["probe_kind"]
+        or in_flight["operation_ref"] != probe_context["operation_ref"]
+    ):
+        raise ValueError("benchmark probe trigger observation lineage is stale")
+    kind = str(probe_context["probe_kind"])
+    if kind == "cancel":
+        expiration = None
+        action = "explicit_cancel"
+        triggered = _monotonic_clock_value(monotonic_ns())
+        deadline_ref = None
+    else:
+        started = _monotonic_clock_value(monotonic_ns())
+        deadline = started + _PROBE_DEADLINE_DURATION_NS
+        observed = _monotonic_clock_value(monotonic_ns())
+        stagnant_reads = 0
+        while observed < deadline:
+            if observed < started:
+                raise ValueError("benchmark probe monotonic clock regressed")
+            wait_hook()
+            previous = observed
+            observed = _monotonic_clock_value(monotonic_ns())
+            if observed < previous:
+                raise ValueError("benchmark probe monotonic clock regressed")
+            if observed == previous:
+                stagnant_reads += 1
+                if stagnant_reads >= _PROBE_MAX_STAGNANT_READS:
+                    raise ValueError(
+                        "benchmark probe monotonic clock failed to advance"
+                    )
+            else:
+                stagnant_reads = 0
+        expired = observed
+        triggered = _monotonic_clock_value(monotonic_ns())
+        if triggered < expired:
+            raise ValueError("benchmark probe monotonic clock regressed")
+        expiration_body: dict[str, Any] = {
+            "contract_version": _PROBE_DEADLINE_EXPIRATION_CONTRACT,
+            "attempt_ref": deepcopy(probe_context["attempt_ref"]),
+            "operation_ref": deepcopy(probe_context["operation_ref"]),
+            "request_in_flight_ref": _content_ref(
+                in_flight, name="probe deadline request"
+            ),
+            "clock": "time.monotonic_ns",
+            "owner": "BenchmarkV2Runtime",
+            "started_monotonic_ns": started,
+            "duration_ns": _PROBE_DEADLINE_DURATION_NS,
+            "deadline_monotonic_ns": deadline,
+            "expired_monotonic_ns": expired,
+        }
+        expiration_body["content_sha256"] = content_sha256(expiration_body)
+        expiration = _validate_probe_deadline_expiration(expiration_body)
+        action = "monotonic_deadline_expired"
+        deadline_ref = _deadline_content_ref(expiration)
+    material = {
+        "trigger_observation": {
+            "kind": kind,
+            "action": action,
+            "request_in_flight_ref": _content_ref(
+                in_flight, name="probe trigger observation request"
+            ),
+            "triggered_monotonic_ns": triggered,
+            "deadline_expiration_ref": deadline_ref,
+        },
+        "deadline_expiration": expiration,
+    }
+    validated = _validate_probe_trigger_observation_resource(material)
+    _validate_probe_trigger_observation_lineage(
+        material=validated, context=probe_context, request=in_flight
+    )
+    return validated
+
+
 def _compose_probe_trigger_intent(
     *,
     project_root: Path,
@@ -4634,6 +4990,37 @@ def _probe_terminal_material(
     if intent is None or request is None:
         raise ValueError("benchmark probe trigger terminal recovery is incomplete")
     context = _probe_context_from_events(events, trigger_intent=intent, request=request)
+    trigger_observation = _probe_trigger_observation_from_events(
+        events,
+        provider_id=provider,
+        probe_kind=kind,
+        required=True,
+    )
+    assert trigger_observation is not None
+    _validate_probe_trigger_observation_lineage(
+        material=trigger_observation,
+        context=context,
+        request=request,
+    )
+    causal_events = (
+        request_event,
+        trigger_observation["event"],
+        intent_event,
+        triggered_event,
+        terminal_event,
+    )
+    causal_sequences = [event.get("sequence") for event in causal_events]
+    if any(
+        isinstance(sequence, bool) or not isinstance(sequence, int)
+        for sequence in causal_sequences
+    ) or any(
+        left >= right
+        for left, right in zip(causal_sequences, causal_sequences[1:])
+    ):
+        raise ValueError(
+            "benchmark probe causal order requires request < observation < intent < "
+            "triggered < terminal"
+        )
     triggered_value = _runtime_resource_value(triggered_event, expected_kind="probe_trigger")
     if not isinstance(triggered_value, Mapping) or set(triggered_value) != {
         "request_ref", "service_terminal", "cleanup_binding_ref"
@@ -4678,6 +5065,7 @@ def _probe_terminal_material(
         "context": context,
         "service_terminal": service_terminal,
         "cleanup_binding": cleanup_binding,
+        "trigger_observation": trigger_observation,
     }
 
 
