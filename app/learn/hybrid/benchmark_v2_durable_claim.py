@@ -67,6 +67,11 @@ PRODUCTION_LEDGER_ROOT = (
     / "portfolio-hybrid-v1-1"
     / "benchmark-v2-ledger"
 ).resolve()
+PRODUCTION_OWNER_JOURNAL_ROOT = (
+    PROJECT_ROOT
+    / "runtime_state"
+    / "benchmark-v2-worker-window-binding-authority"
+).resolve()
 _SHA = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 _UUID = re.compile(r"[0-9a-f]{32}")
@@ -274,6 +279,7 @@ def _test_backend(
     production_paths = (
         PRODUCTION_FILE_ROOT,
         PRODUCTION_LEDGER_ROOT,
+        PRODUCTION_OWNER_JOURNAL_ROOT,
     )
     test_paths = (file_path, ledger_path, base / "OwnerJournal")
     if (
@@ -297,7 +303,7 @@ def _production_backend() -> _Backend:
         file_root=PRODUCTION_FILE_ROOT,
         registry_root=PRODUCTION_REGISTRY_ROOT,
         ledger_root=PRODUCTION_LEDGER_ROOT,
-        owner_journal_root=(PRODUCTION_FILE_ROOT / "owner").resolve(),
+        owner_journal_root=PRODUCTION_OWNER_JOURNAL_ROOT,
     )
 
 

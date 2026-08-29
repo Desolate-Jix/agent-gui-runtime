@@ -389,6 +389,9 @@ def test_authorization_uses_shared_provider_manifest_v2_1(tmp_path: Path) -> Non
 def test_production_backend_splits_claim_anchors_from_repo_ledger(
     tmp_path: Path,
 ) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime
+    from app.learn.hybrid import benchmark_v2_worker_binding
+
     production = durable._production_backend()
     project_root = Path(__file__).resolve().parents[1]
     expected_ledger = (
@@ -397,13 +400,36 @@ def test_production_backend_splits_claim_anchors_from_repo_ledger(
         / "portfolio-hybrid-v1-1"
         / "benchmark-v2-ledger"
     ).resolve()
+    expected_owner_journal_root = (
+        project_root
+        / "runtime_state"
+        / "benchmark-v2-worker-window-binding-authority"
+    ).resolve()
     assert durable.PRODUCTION_LEDGER_ROOT == expected_ledger
+    assert durable.PRODUCTION_OWNER_JOURNAL_ROOT == expected_owner_journal_root
     assert production.file_root == PRODUCTION_FILE_ROOT
     assert production.registry_root == PRODUCTION_REGISTRY_ROOT
     assert production.ledger_root == expected_ledger
-    assert production.owner_journal_root == (PRODUCTION_FILE_ROOT / "owner").resolve()
+    assert production.owner_journal_root == expected_owner_journal_root
+    assert production.owner_journal_root == benchmark_v2_runtime._AUTHORITY_ROOT
+    assert production.owner_journal_root == (
+        benchmark_v2_worker_binding._PRODUCTION_SERVER_BINDING_AUTHORITY_ROOT
+    )
+
+    production_authorization = authorization(production)
+    _validate_authorization_for_backend(production, production_authorization)
+    stale_owner_authorization = deepcopy(production_authorization)
+    stale_owner_authorization["absolute_owner_journal_root"] = str(
+        (PRODUCTION_FILE_ROOT / "owner").resolve()
+    )
+    with pytest.raises(ValueError, match="paths are not bound to backend"):
+        _validate_authorization_for_backend(production, stale_owner_authorization)
 
     value = backend(tmp_path)
+    assert value.owner_journal_root == (
+        value.file_root.parent / "OwnerJournal"
+    ).resolve()
+    _validate_authorization_for_backend(value, authorization(value))
     test_roots = (value.file_root, value.ledger_root, value.owner_journal_root)
     production_roots = (
         production.file_root,
