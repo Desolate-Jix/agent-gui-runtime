@@ -56,6 +56,27 @@ _SAFETY = {
     "artifact_is_authorization": False,
     "execute_binding_enabled": False,
 }
+_PROBE_RESULT_V2_FIELDS = {
+    "contract_version", "attempt_ref", "attempt_dir", "provider_id", "probe_kind",
+    "body_ref", "cleanup_receipt_ref", "lifecycle_probe_receipt_ref", "status",
+    "artifact_is_authorization", "execute_binding_enabled", "content_sha256",
+}
+_PROBE_SUMMARY_V2_FIELDS = {
+    "contract_version", "benchmark_release_id", "partition", "probe_kind",
+    "collection_policy", "attempts", "status", "artifact_is_authorization",
+    "execute_binding_enabled", "content_sha256",
+}
+_PROBE_RECEIPT_V2_FIELDS = {
+    "contract_version", "benchmark_release_id", "partition", "probe_id",
+    "attempt_ref", "provider", "probe_kind", "operation_ref",
+    "request_in_flight_ref", "trigger_observation", "body_completion_observation",
+    "termination_observation", "stable_zero_observation", "cleanup_receipt_ref",
+    "observer_identity", "status", "artifact_is_authorization",
+    "execute_binding_enabled", "content_sha256",
+}
+_PROBE_RECEIPT_PROVIDER_FIELDS = {
+    "provider_id", "provider_revision", "profile_id", "profile_sha256",
+}
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -473,35 +494,135 @@ def _validate_probe_result(
     body_ref: Mapping[str, object],
     cleanup_ref: Mapping[str, object],
 ) -> None:
-    expected = {
-        "contract_version",
-        "attempt_ref",
-        "attempt_dir",
-        "provider_id",
-        "probe_kind",
-        "body_ref",
-        "cleanup_receipt_ref",
-        "status",
-        "artifact_is_authorization",
-        "execute_binding_enabled",
-        "content_sha256",
-    }
+    result = _sealed_mapping(value, name="probe result v2")
+    expected_kind = str(attempt_ref.get("mode", "")).removesuffix("_probe")
     if (
-        set(value) != expected
-        or value.get("contract_version") != "benchmark_v2_runner_probe_result_v1"
-        or value.get("attempt_ref") != dict(attempt_ref)
-        or value.get("attempt_dir") != str(Path(attempt_dir).resolve())
-        or value.get("provider_id") != attempt_ref.get("provider_id")
-        or value.get("probe_kind") not in {"cancel", "timeout"}
-        or value.get("body_ref")
+        set(result) != _PROBE_RESULT_V2_FIELDS
+        or result.get("contract_version") != "benchmark_v2_runner_probe_result_v2"
+        or result.get("attempt_ref") != dict(attempt_ref)
+        or result.get("attempt_dir") != str(Path(attempt_dir).resolve())
+        or result.get("provider_id") != attempt_ref.get("provider_id")
+        or result.get("probe_kind") != expected_kind
+        or result.get("body_ref")
         != {"content_sha256": body_ref.get("content_sha256")}
-        or value.get("cleanup_receipt_ref")
+        or result.get("cleanup_receipt_ref")
         != {"content_sha256": cleanup_ref.get("content_sha256")}
-        or value.get("status") != "terminal"
-        or value.get("artifact_is_authorization") is not False
-        or value.get("execute_binding_enabled") is not False
+        or not _valid_probe_receipt_ref(result.get("lifecycle_probe_receipt_ref"))
+        or result.get("status") != "terminal"
+        or result.get("artifact_is_authorization") is not False
+        or result.get("execute_binding_enabled") is not False
     ):
         raise ValueError("probe result lineage is invalid")
+    receipt, receipt_bytes = _read_finalized_probe_receipt(
+        Path(attempt_dir).resolve() / "lifecycle-probe-receipt.json",
+        attempt_ref=attempt_ref,
+        provider_id=str(attempt_ref["provider_id"]),
+        probe_kind=expected_kind,
+        cleanup_ref=cleanup_ref,
+    )
+    if result.get("lifecycle_probe_receipt_ref") != {
+        "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+        "file_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+        "content_sha256": receipt["content_sha256"],
+    }:
+        raise ValueError("probe result lifecycle receipt lineage is invalid")
+
+
+def _valid_probe_receipt_ref(value: object) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and set(value) == {"contract_version", "file_sha256", "content_sha256"}
+        and value.get("contract_version") == "benchmark_v2_lifecycle_probe_receipt_v2"
+        and all(
+            isinstance(value.get(name), str)
+            and len(str(value[name])) == 64
+            and str(value[name]) == str(value[name]).lower()
+            and all(ch in "0123456789abcdef" for ch in str(value[name]))
+            for name in ("file_sha256", "content_sha256")
+        )
+    )
+
+
+def _valid_lower_sha(value: object) -> bool:
+    return bool(
+        isinstance(value, str)
+        and len(value) == 64
+        and value == value.lower()
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def _validate_finalized_probe_receipt_projection(
+    value: object,
+    *,
+    attempt_ref: Mapping[str, object],
+    provider_id: str,
+    probe_kind: str,
+    cleanup_ref: Mapping[str, object],
+) -> dict[str, object]:
+    receipt = _sealed_mapping(value, name="lifecycle probe receipt v2")
+    if (
+        set(receipt) != _PROBE_RECEIPT_V2_FIELDS
+        or receipt.get("contract_version") != "benchmark_v2_lifecycle_probe_receipt_v2"
+        or receipt.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
+        or receipt.get("partition") != "regression"
+        or receipt.get("probe_id")
+        != f"probe/{provider_id}/{probe_kind}/{attempt_ref['content_sha256']}"
+        or receipt.get("attempt_ref") != dict(attempt_ref)
+        or receipt.get("probe_kind") != probe_kind
+        or receipt.get("status") != "PASS"
+        or receipt.get("artifact_is_authorization") is not False
+        or receipt.get("execute_binding_enabled") is not False
+    ):
+        raise ValueError("lifecycle probe receipt v2 is not closed")
+    provider = receipt.get("provider")
+    if (
+        not isinstance(provider, Mapping)
+        or set(provider) != _PROBE_RECEIPT_PROVIDER_FIELDS
+        or provider.get("provider_id") != provider_id
+        or not isinstance(provider.get("provider_revision"), str)
+        or not provider["provider_revision"]
+        or not isinstance(provider.get("profile_id"), str)
+        or not provider["profile_id"]
+        or not _valid_lower_sha(provider.get("profile_sha256"))
+    ):
+        raise ValueError("lifecycle probe provider lineage differs")
+    # D2 语义只由生产 Runtime 的 finalizer 证明；Runner 仅固定 D3 投影与当前 lineage。
+    if (
+        receipt.get("cleanup_receipt_ref")
+        != {"content_sha256": cleanup_ref.get("content_sha256")}
+        or not _valid_lower_sha(cleanup_ref.get("content_sha256"))
+    ):
+        raise ValueError("lifecycle probe cleanup lineage differs")
+    return receipt
+
+
+def _read_finalized_probe_receipt(
+    path: Path,
+    *,
+    attempt_ref: Mapping[str, object],
+    provider_id: str,
+    probe_kind: str,
+    cleanup_ref: Mapping[str, object],
+) -> tuple[dict[str, object], bytes]:
+    raw = Path(path).read_bytes()
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("lifecycle probe receipt is not canonical") from error
+    receipt = _validate_finalized_probe_receipt_projection(
+        decoded,
+        attempt_ref=attempt_ref,
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+        cleanup_ref=cleanup_ref,
+    )
+    expected = json.dumps(
+        receipt, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+    ).encode("utf-8") + b"\n"
+    if raw != expected:
+        raise ValueError("lifecycle probe receipt is not canonical pretty-LF")
+    return receipt, raw
 
 
 def _validate_ledger_records(
@@ -1319,15 +1440,42 @@ def _run_one_probe(
         raise primary
     if body is None or cleanup is None:
         raise RuntimeError("benchmark probe attempt did not produce complete evidence")
+    lifecycle_receipt = _validate_finalized_probe_receipt_projection(
+        runtime.finalize_probe_lifecycle_receipt(
+            provider_manifest=manifest,
+            attempt_ref=deepcopy(attempt),
+            cleanup_receipt=deepcopy(cleanup),
+        ),
+        attempt_ref=attempt,
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+        cleanup_ref=cleanup,
+    )
+    receipt_path = attempt_dir / "lifecycle-probe-receipt.json"
+    persisted_receipt, receipt_bytes = _read_finalized_probe_receipt(
+        receipt_path,
+        attempt_ref=attempt,
+        provider_id=provider_id,
+        probe_kind=probe_kind,
+        cleanup_ref=cleanup,
+    )
+    if persisted_receipt != lifecycle_receipt:
+        raise ValueError("lifecycle probe receipt bytes differ from finalized receipt")
+    lifecycle_ref = {
+        "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+        "file_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+        "content_sha256": lifecycle_receipt["content_sha256"],
+    }
     result = _seal(
         {
-            "contract_version": "benchmark_v2_runner_probe_result_v1",
+            "contract_version": "benchmark_v2_runner_probe_result_v2",
             "attempt_ref": deepcopy(attempt),
             "attempt_dir": str(attempt_dir),
             "provider_id": provider_id,
             "probe_kind": probe_kind,
             "body_ref": _content_ref(body, name="probe body"),
             "cleanup_receipt_ref": _content_ref(cleanup, name="cleanup receipt"),
+            "lifecycle_probe_receipt_ref": lifecycle_ref,
             "status": "terminal",
             **_SAFETY,
         }
@@ -1339,6 +1487,63 @@ def _run_one_probe(
         result=result,
     )
     return result
+
+
+def _validate_probe_summary(
+    value: object,
+    *,
+    probe_kind: str,
+    requested_providers: Sequence[str],
+    expected_results: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    summary = _sealed_mapping(value, name="probe summary v2")
+    providers = tuple(requested_providers)
+    attempts = summary.get("attempts")
+    if (
+        set(summary) != _PROBE_SUMMARY_V2_FIELDS
+        or summary.get("contract_version") != "benchmark_v2_runner_probe_summary_v2"
+        or summary.get("benchmark_release_id") != BENCHMARK_RELEASE_ID
+        or summary.get("partition") != "regression"
+        or summary.get("probe_kind") != probe_kind
+        or summary.get("collection_policy") != "one_requested_attempt_per_provider"
+        or summary.get("status") != "terminal"
+        or summary.get("artifact_is_authorization") is not False
+        or summary.get("execute_binding_enabled") is not False
+        or probe_kind not in {"cancel", "timeout"}
+        or not providers
+        or len(set(providers)) != len(providers)
+        or any(provider not in _PROVIDERS for provider in providers)
+        or not isinstance(attempts, list)
+        or attempts != [dict(item) for item in expected_results]
+        or len(attempts) != len(providers)
+        or [item.get("provider_id") for item in attempts if isinstance(item, Mapping)]
+        != list(providers)
+    ):
+        raise ValueError("probe summary v2 lineage is invalid")
+    seen_attempts: set[str] = set()
+    for provider_id, raw_result in zip(providers, attempts, strict=True):
+        if not isinstance(raw_result, Mapping):
+            raise ValueError("probe summary v2 result is not an object")
+        attempt_ref = _validate_attempt_ref(raw_result.get("attempt_ref"))
+        digest = str(attempt_ref["content_sha256"])
+        if digest in seen_attempts or attempt_ref.get("provider_id") != provider_id:
+            raise ValueError("probe summary v2 attempts are duplicate or reordered")
+        seen_attempts.add(digest)
+        attempt_dir = Path(str(raw_result.get("attempt_dir"))).resolve()
+        body = _read_canonical_json_file(attempt_dir / "body.json", name="probe body")
+        cleanup = _read_canonical_json_file(
+            attempt_dir / "cleanup.json", name="probe cleanup receipt"
+        )
+        _validate_probe_result(
+            raw_result,
+            attempt_ref=attempt_ref,
+            attempt_dir=attempt_dir,
+            body_ref=body,
+            cleanup_ref=cleanup,
+        )
+        if raw_result.get("probe_kind") != probe_kind:
+            raise ValueError("probe summary v2 cell kind differs")
+    return summary
 
 
 def _run_probes(args: argparse.Namespace, runtime: object, *, probe_kind: str) -> dict[str, object]:
@@ -1357,20 +1562,28 @@ def _run_probes(args: argparse.Namespace, runtime: object, *, probe_kind: str) -
         )
         for provider in providers
     ]
-    result = _seal(
+    result = _validate_probe_summary(
+        _seal(
         {
-            "contract_version": "benchmark_v2_runner_probe_summary_v1",
+            "contract_version": "benchmark_v2_runner_probe_summary_v2",
+            "benchmark_release_id": BENCHMARK_RELEASE_ID,
             "partition": "regression",
             "probe_kind": probe_kind,
+            "collection_policy": "one_requested_attempt_per_provider",
             "attempts": attempts,
+            "status": "terminal",
             **_SAFETY,
         }
+        ),
+        probe_kind=probe_kind,
+        requested_providers=providers,
+        expected_results=attempts,
     )
-    _write_json(
-        Path(args.output_root) / f"{probe_kind}-probes.json",
-        result,
-        create_only=False,
+    summary_path = (
+        _PROJECT_ROOT / "runtime_state" / "portfolio-hybrid-v1-1" / "benchmark-v2"
+        / "regression" / f"{probe_kind}-probes" / f"{probe_kind}-probes.json"
     )
+    _write_json_create_or_identical(summary_path, result)
     return result
 
 

@@ -36,6 +36,43 @@ def _sealed(value: Mapping[str, object]) -> dict[str, object]:
     return result
 
 
+def _probe_receipt(
+    *,
+    attempt_ref: Mapping[str, object],
+    provider: str,
+    probe_kind: str,
+    cleanup_receipt: Mapping[str, object],
+) -> dict[str, object]:
+    return _sealed(
+        {
+            "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+            "benchmark_release_id": runner.BENCHMARK_RELEASE_ID,
+            "partition": "regression",
+            "probe_id": f"probe/{provider}/{probe_kind}/{attempt_ref['content_sha256']}",
+            "attempt_ref": dict(attempt_ref),
+            "provider": {
+                "provider_id": provider,
+                "provider_revision": f"{provider}-revision-v1",
+                "profile_id": f"{provider}-profile-v1",
+                "profile_sha256": "5" * 64,
+            },
+            "probe_kind": probe_kind,
+            "operation_ref": {"runtime_owned": "operation"},
+            "request_in_flight_ref": {"runtime_owned": "request"},
+            "trigger_observation": {"runtime_owned": "trigger"},
+            "body_completion_observation": {"runtime_owned": "body"},
+            "termination_observation": {"runtime_owned": "termination"},
+            "stable_zero_observation": {"runtime_owned": "stable-zero"},
+            "cleanup_receipt_ref": {
+                "content_sha256": cleanup_receipt["content_sha256"]
+            },
+            "observer_identity": {"runtime_owned": "observer"},
+            "status": "PASS",
+            **SAFETY,
+        }
+    )
+
+
 def _read_json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -103,13 +140,19 @@ class _DeterministicRuntime:
         group_variant: str = "exact",
         cleanup_mutation: str | None = None,
         projection_mismatch: bool = False,
+        receipt_mutation: str | None = None,
+        finalize_failure: bool = False,
     ) -> None:
         self.fail_actual = fail_actual
         self.group_variant = group_variant
         self.cleanup_mutation = cleanup_mutation
         self.projection_mismatch = projection_mismatch
+        self.receipt_mutation = receipt_mutation
+        self.finalize_failure = finalize_failure
         self.calls: list[tuple[str, object]] = []
         self.owned_groups: list[_OwnedGroups] = []
+        self.probe_dirs: dict[str, Path] = {}
+        self.probe_cells: dict[str, tuple[str, str]] = {}
 
     def load_provider_manifest(self, *, path: Path) -> Mapping[str, object]:
         self.calls.append(("load_provider_manifest", Path(path)))
@@ -248,6 +291,8 @@ class _DeterministicRuntime:
         ledger = next(Path(attempt_dir).parents[1].rglob("*.jsonl"))
         assert _read_chain(ledger)[-1]["event"]["event_payload"]["status"] == "opened"
         self.calls.append(("begin_probe", (provider_id, probe_kind)))
+        self.probe_dirs[str(attempt_ref["content_sha256"])] = Path(attempt_dir)
+        self.probe_cells[str(attempt_ref["content_sha256"])] = (provider_id, probe_kind)
         return _sealed(
             {
                 "contract_version": "test_probe_context_v1",
@@ -339,6 +384,47 @@ class _DeterministicRuntime:
             ).hexdigest()
         return receipt
 
+    def finalize_probe_lifecycle_receipt(self, *, provider_manifest, attempt_ref, cleanup_receipt):
+        del provider_manifest
+        self.calls.append(("finalize_probe_lifecycle_receipt", attempt_ref["attempt_id"]))
+        if self.finalize_failure:
+            raise RuntimeError("deterministic finalize failure")
+        provider, probe_kind = self.probe_cells[str(attempt_ref["content_sha256"])]
+        receipt = _probe_receipt(
+            attempt_ref=attempt_ref,
+            provider=provider,
+            probe_kind=probe_kind,
+            cleanup_receipt=cleanup_receipt,
+        )
+        if self.receipt_mutation == "provider":
+            receipt["provider"]["provider_id"] = "qwen" if provider != "qwen" else "vista"
+        elif self.receipt_mutation == "kind":
+            receipt["probe_kind"] = "timeout" if probe_kind == "cancel" else "cancel"
+        elif self.receipt_mutation == "probe_id":
+            receipt["probe_id"] = "probe/cross-attempt"
+        elif self.receipt_mutation == "cleanup":
+            receipt["cleanup_receipt_ref"] = {"content_sha256": "9" * 64}
+        elif self.receipt_mutation == "top_extra":
+            receipt["unexpected"] = True
+        elif self.receipt_mutation == "release":
+            receipt["benchmark_release_id"] = "different-release"
+        elif self.receipt_mutation == "d2_owned_semantics":
+            receipt["observer_identity"] = {"runtime_owned": True}
+            receipt["trigger_observation"] = {"runtime_owned": "trigger"}
+            receipt["stable_zero_observation"] = {"runtime_owned": "stable-zero"}
+        elif self.receipt_mutation == "returned_file_mismatch":
+            persisted = deepcopy(receipt)
+            persisted["status"] = "FAIL"
+            persisted["content_sha256"] = runner._content_sha256(persisted)
+        else:
+            persisted = receipt
+        if self.receipt_mutation not in {None, "returned_file_mismatch"}:
+            receipt["content_sha256"] = runner._content_sha256(receipt)
+            persisted = receipt
+        path = self.probe_dirs[str(attempt_ref["content_sha256"])] / "lifecycle-probe-receipt.json"
+        path.write_bytes(json.dumps(persisted, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8") + b"\n")
+        return receipt
+
     def resource_counts(self) -> Mapping[str, int]:
         self.calls.append(("resource_counts", None))
         return {
@@ -362,6 +448,36 @@ def _manifest(tmp_path: Path) -> Path:
     path = tmp_path / "provider-manifest.json"
     path.write_text("{}\n", encoding="utf-8")
     return path
+
+
+def _run_probe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runtime: object,
+    *,
+    probe_kind: str = "cancel",
+    providers: str = "omni,qwen,vista",
+    suffix: str = "run",
+) -> tuple[dict[str, object], Path]:
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", tmp_path)
+    _install_runtime(monkeypatch, runtime)
+    ledger = tmp_path / "ledger" / f"{probe_kind}-{suffix}.jsonl"
+    result = runner.run_cli(
+        [
+            "--provider-manifest",
+            str(_manifest(tmp_path)),
+            "--partition",
+            "regression",
+            f"--run-{probe_kind}-probe",
+            "--providers",
+            providers,
+            "--attempt-ledger",
+            str(ledger),
+            "--output-root",
+            str(tmp_path / suffix),
+        ]
+    )
+    return result, ledger
 
 
 def test_dry_run_loads_the_public_facade_and_never_prepares_or_dispatches(
@@ -1604,12 +1720,13 @@ def test_actual_rejects_malformed_or_mismatched_authoritative_cleanup_receipt(
     ("flag", "probe_kind"),
     [("--run-cancel-probe", "cancel"), ("--run-timeout-probe", "timeout")],
 )
-def test_lifecycle_probe_waits_for_request_in_flight_then_triggers_and_cleans(
+def test_probe_result_v2_receipt_ref_and_probe_summary_v2_receipt_results(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     flag: str,
     probe_kind: str,
 ) -> None:
+    monkeypatch.setattr(runner, "_PROJECT_ROOT", tmp_path)
     runtime = _DeterministicRuntime()
     _install_runtime(monkeypatch, runtime)
     ledger = tmp_path / "ledger" / f"{probe_kind}.jsonl"
@@ -1631,6 +1748,11 @@ def test_lifecycle_probe_waits_for_request_in_flight_then_triggers_and_cleans(
     )
 
     assert result["probe_kind"] == probe_kind
+    assert result["contract_version"] == "benchmark_v2_runner_probe_summary_v2"
+    assert result["benchmark_release_id"] == runner.BENCHMARK_RELEASE_ID
+    assert result["collection_policy"] == "one_requested_attempt_per_provider"
+    assert result["status"] == "terminal"
+    assert "selection_policy" not in result
     assert [item["provider_id"] for item in result["attempts"]] == [
         "omni",
         "qwen",
@@ -1644,8 +1766,247 @@ def test_lifecycle_probe_waits_for_request_in_flight_then_triggers_and_cleans(
         begin = runtime.calls.index(("begin_probe", (provider, probe_kind)))
         read = runtime.calls.index(("read_server_journal", provider))
         trigger = runtime.calls.index(("trigger_probe", (provider, probe_kind)))
-        assert begin < read < trigger
+        item = next(value for value in result["attempts"] if value["provider_id"] == provider)
+        attempt_id = item["attempt_ref"]["attempt_id"]
+        cleanup = runtime.calls.index(
+            (
+                "cleanup_attempt",
+                (attempt_id, f"benchmark_v2_{probe_kind}_probe_finished"),
+            )
+        )
+        finalize = runtime.calls.index(("finalize_probe_lifecycle_receipt", attempt_id))
+        assert begin < read < trigger < cleanup < finalize
+        assert item["contract_version"] == "benchmark_v2_runner_probe_result_v2"
+        assert item["status"] == "terminal"
+        receipt_path = Path(item["attempt_dir"]) / "lifecycle-probe-receipt.json"
+        receipt_bytes = receipt_path.read_bytes()
+        receipt = json.loads(receipt_bytes.decode("utf-8"))
+        assert item["lifecycle_probe_receipt_ref"] == {
+            "contract_version": "benchmark_v2_lifecycle_probe_receipt_v2",
+            "file_sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+            "content_sha256": receipt["content_sha256"],
+        }
+        assert receipt["probe_kind"] == probe_kind
+        assert receipt["provider"]["provider_id"] == provider
+    summary_path = (
+        tmp_path
+        / f"runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/{probe_kind}-probes/{probe_kind}-probes.json"
+    )
+    assert _read_json(summary_path) == result
+    assert not (tmp_path / probe_kind / f"{probe_kind}-probes.json").exists()
     assert all(value == 0 for value in runtime.resource_counts().values())
+
+
+def test_probe_summary_v2_receipt_results_preserve_requested_subset_order_and_fresh_attempts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result, ledger = _run_probe(
+        monkeypatch,
+        tmp_path,
+        _DeterministicRuntime(),
+        providers="vista,omni",
+    )
+
+    assert [item["provider_id"] for item in result["attempts"]] == ["vista", "omni"]
+    assert len({item["attempt_ref"]["content_sha256"] for item in result["attempts"]}) == 2
+    assert [
+        row["event"]["event_payload"]["provider_id"]
+        for row in _read_chain(ledger)
+        if row["event"]["event_type"] == "result"
+    ] == ["vista", "omni"]
+
+
+@pytest.mark.parametrize(
+    "mutation", ["provider", "kind", "probe_id", "cleanup", "top_extra", "release"]
+)
+def test_probe_result_v2_receipt_ref_rejects_receipt_mismatch_matrix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    with pytest.raises(ValueError, match="lifecycle probe"):
+        _run_probe(
+            monkeypatch,
+            tmp_path,
+            _DeterministicRuntime(receipt_mutation=mutation),
+            providers="omni",
+        )
+
+    summary = (
+        tmp_path
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/cancel-probes/cancel-probes.json"
+    )
+    assert not summary.exists()
+
+
+def test_probe_result_v2_receipt_ref_defers_d2_semantics_to_production_finalizer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result, _ = _run_probe(
+        monkeypatch,
+        tmp_path,
+        _DeterministicRuntime(receipt_mutation="d2_owned_semantics"),
+        providers="omni",
+    )
+
+    assert result["attempts"][0]["provider_id"] == "omni"
+
+
+@pytest.mark.parametrize(
+    "mutation", ["returned_file_mismatch", "missing", "tampered", "noncanonical"]
+)
+def test_probe_result_v2_receipt_ref_rejects_returned_file_or_byte_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    runtime = _DeterministicRuntime(
+        receipt_mutation=("returned_file_mismatch" if mutation == "returned_file_mismatch" else None)
+    )
+    original = runtime.finalize_probe_lifecycle_receipt
+
+    def finalize(**kwargs):
+        receipt = original(**kwargs)
+        if mutation != "returned_file_mismatch":
+            path = runtime.probe_dirs[str(kwargs["attempt_ref"]["content_sha256"])] / "lifecycle-probe-receipt.json"
+            if mutation == "missing":
+                path.unlink()
+            elif mutation == "tampered":
+                path.write_bytes(path.read_bytes().replace(b'"status": "PASS"', b'"status": "FAIL"'))
+            else:
+                path.write_bytes(_canonical(receipt) + b"\n")
+        return receipt
+
+    runtime.finalize_probe_lifecycle_receipt = finalize  # type: ignore[method-assign]
+    with pytest.raises((FileNotFoundError, ValueError)):
+        _run_probe(monkeypatch, tmp_path, runtime, providers="omni")
+
+
+@pytest.mark.parametrize("failure", ["finalize", "cleanup"])
+def test_probe_summary_v2_receipt_results_failure_cuts_emit_no_result_or_summary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
+    runtime = _DeterministicRuntime(
+        finalize_failure=failure == "finalize",
+        cleanup_mutation="bogus" if failure == "cleanup" else None,
+    )
+    with pytest.raises((RuntimeError, ValueError)):
+        _run_probe(monkeypatch, tmp_path, runtime, providers="omni")
+
+    attempts = list((tmp_path / "run").rglob("attempt-*"))
+    assert attempts
+    assert not any((path / "result.json").exists() for path in attempts)
+    assert not (
+        tmp_path
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/cancel-probes/cancel-probes.json"
+    ).exists()
+
+
+def test_probe_summary_v2_receipt_results_fixed_path_is_create_identical_never_overwrite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result, _ = _run_probe(
+        monkeypatch, tmp_path, _DeterministicRuntime(), providers="omni"
+    )
+    summary = (
+        tmp_path
+        / "runtime_state/portfolio-hybrid-v1-1/benchmark-v2/regression/cancel-probes/cancel-probes.json"
+    )
+    before = summary.read_bytes()
+
+    runner._write_json_create_or_identical(summary, result)
+    assert summary.read_bytes() == before
+    with pytest.raises(ValueError, match="differs from authoritative bytes"):
+        runner._write_json_create_or_identical(summary, _sealed({"different": True}))
+    assert summary.read_bytes() == before
+
+
+@pytest.mark.parametrize("mutation", ["v1", "ref_path", "bad_sha"])
+def test_probe_result_v2_receipt_ref_rejects_v1_path_or_bad_sha_on_replay(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation: str
+) -> None:
+    result, _ = _run_probe(
+        monkeypatch, tmp_path, _DeterministicRuntime(), providers="omni"
+    )
+    probe_result = deepcopy(result["attempts"][0])
+    attempt_dir = Path(probe_result["attempt_dir"])
+    body = _read_json(attempt_dir / "body.json")
+    cleanup = _read_json(attempt_dir / "cleanup.json")
+    if mutation == "v1":
+        probe_result["contract_version"] = "benchmark_v2_runner_probe_result_v1"
+    elif mutation == "ref_path":
+        probe_result["lifecycle_probe_receipt_ref"]["path"] = str(attempt_dir)
+    else:
+        probe_result["lifecycle_probe_receipt_ref"]["file_sha256"] = "A" * 64
+    probe_result["content_sha256"] = runner._content_sha256(probe_result)
+
+    with pytest.raises(ValueError, match="probe result"):
+        runner._validate_probe_result(
+            probe_result,
+            attempt_ref=probe_result["attempt_ref"],
+            attempt_dir=attempt_dir,
+            body_ref=body,
+            cleanup_ref=cleanup,
+        )
+
+
+def test_probe_summary_v2_receipt_results_validator_rejects_order_or_old_result(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    result, _ = _run_probe(
+        monkeypatch,
+        tmp_path,
+        _DeterministicRuntime(),
+        providers="omni,qwen",
+    )
+    reversed_summary = deepcopy(result)
+    reversed_summary["attempts"] = list(reversed(reversed_summary["attempts"]))
+    reversed_summary["content_sha256"] = runner._content_sha256(reversed_summary)
+
+    with pytest.raises(ValueError, match="summary"):
+        runner._validate_probe_summary(
+            reversed_summary,
+            probe_kind="cancel",
+            requested_providers=("omni", "qwen"),
+            expected_results=result["attempts"],
+        )
+
+
+def test_probe_summary_v2_receipt_results_never_reuses_prior_attempt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first, ledger = _run_probe(
+        monkeypatch,
+        tmp_path,
+        _DeterministicRuntime(),
+        providers="omni",
+        suffix="shared",
+    )
+    first_attempt = first["attempts"][0]["attempt_ref"]
+    runtime = _DeterministicRuntime()
+    _install_runtime(monkeypatch, runtime)
+
+    with pytest.raises(ValueError, match="differs from authoritative bytes"):
+        runner.run_cli(
+            [
+                "--provider-manifest",
+                str(_manifest(tmp_path)),
+                "--partition",
+                "regression",
+                "--run-cancel-probe",
+                "--providers",
+                "qwen",
+                "--attempt-ledger",
+                str(ledger),
+                "--output-root",
+                str(tmp_path / "shared"),
+            ]
+        )
+
+    results = [
+        row["event"]["event_payload"]["attempt_ref"]
+        for row in _read_chain(ledger)
+        if row["event"]["event_type"] == "result"
+    ]
+    assert len(results) == 2
+    assert results[0] == first_attempt
+    assert results[1] != first_attempt
 
 
 def test_holdout_probe_is_rejected_before_the_facade_can_dispatch(
