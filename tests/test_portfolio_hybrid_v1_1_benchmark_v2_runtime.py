@@ -1920,6 +1920,59 @@ def test_screen_group_capture_ref_binds_raw_screenshot_sha_not_lineage_object(
         assert lineage_sha256 != screenshot_sha256
 
 
+def test_owned_window_journal_preserves_production_process_create_time_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    create_time_ns = 1_788_068_912_282_699_008
+    launch = runtime_module.launch_owned_window
+
+    def launch_with_production_identity(**kwargs: object) -> dict[str, object]:
+        owner = launch(**kwargs)
+        owner["process_identity"]["create_time_ns"] = create_time_ns
+        owner["content_sha256"] = content_sha256(owner)
+        windows.launched[-1] = deepcopy(owner)
+        return owner
+
+    monkeypatch.setattr(
+        runtime_module,
+        "launch_owned_window",
+        launch_with_production_identity,
+    )
+    attempt_ref = _sealed({"attempt_id": "attempt-owned-window-process-identity"})
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=(tmp_path / "attempt-owned-window-process-identity").resolve(),
+    )
+
+    with iterator:
+        next(iterator)
+        events = runtime_module.read_benchmark_v2_attempt_journal(
+            journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+                project_root=tmp_path,
+                attempt_ref=attempt_ref,
+            ),
+            attempt_ref=attempt_ref,
+        )
+        owned = [
+            event
+            for event in events
+            if event["event_kind"] == "window_owned"
+            and event["resource_ref"]["value"].get("ownership_state") == "owned"
+        ]
+
+        assert len(owned) == 1
+        value = owned[0]["resource_ref"]["value"]
+        assert value["process_identity_projection"] == {
+            "pid": windows.launched[-1]["process_identity"]["pid"],
+            "create_time_ns_decimal": str(create_time_ns),
+        }
+        assert "process_identity" not in value
+
+
 def test_screen_group_iterator_context_closes_retained_early_break(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

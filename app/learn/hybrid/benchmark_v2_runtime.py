@@ -2683,7 +2683,11 @@ class _BenchmarkV2ProductionRuntime:
                         "attempt_dir": str(attempt_dir),
                         "owner_journal_path": str(journal_path.resolve()),
                         "owner_id": str(owner["owner_id"]),
-                        "process_identity": deepcopy(owner["process_identity"]),
+                        "process_identity_projection": (
+                            _runtime_process_identity_projection(
+                                owner["process_identity"]
+                            )
+                        ),
                         "workflow_window_binding": workflow_window_binding,
                         "ownership_state": "owned",
                     },
@@ -3710,6 +3714,26 @@ def _runtime_resource_ref(kind: str, value: Mapping[str, object]) -> dict[str, A
     }
     body["content_sha256"] = content_sha256(body)
     return body
+
+
+def _runtime_process_identity_projection(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping) or set(value) != {"pid", "create_time_ns"}:
+        raise ValueError("benchmark runtime process identity is invalid")
+    pid = value.get("pid")
+    create_time_ns = value.get("create_time_ns")
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+        or isinstance(create_time_ns, bool)
+        or not isinstance(create_time_ns, int)
+        or create_time_ns <= 0
+    ):
+        raise ValueError("benchmark runtime process identity is invalid")
+    return {
+        "pid": pid,
+        "create_time_ns_decimal": str(create_time_ns),
+    }
 
 
 def _runtime_resource_value(
