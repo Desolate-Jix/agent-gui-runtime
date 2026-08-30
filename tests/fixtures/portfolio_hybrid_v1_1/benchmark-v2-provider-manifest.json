@@ -182,6 +182,11 @@
         "role": "predictions"
       },
       {
+        "file_sha256": "22031a8f2bf89ca1fe2c84ea1f06eabb323c4de0902bfdef983479e7c190748c",
+        "relative_path": "app/learn/hybrid/qwen_binding.py",
+        "role": "qwen_binding"
+      },
+      {
         "file_sha256": "86ac639366433506aec348725d6d926dd03270d72a4af1192296d959d21fd187",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
