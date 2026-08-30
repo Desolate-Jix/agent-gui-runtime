@@ -137,7 +137,7 @@
         "role": "panel_service"
       },
       {
-        "file_sha256": "119172aabba2fa63b6d38457f5c55cca796fb03f13a41dd10917dbeb5169690d",
+        "file_sha256": "b92d38aab2dc665ac943e286e0caab15a2533a85bee8ee3dc0d5e81e0d8e4db1",
         "relative_path": "app/core/model_server.py",
         "role": "model_server"
       },
