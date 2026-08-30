@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import statistics
@@ -36,6 +37,19 @@ def _input(path: Path) -> tuple[Path, dict[str, int]]:
     return Path(image_path), {"width": image_size["width"], "height": image_size["height"]}
 
 
+def _hub_cache_path(profile: dict[str, object]) -> Path:
+    explicit = os.environ.get("HF_HUB_CACHE")
+    if explicit is not None:
+        cache_path = Path(explicit)
+        if not explicit.strip() or not cache_path.is_absolute():
+            raise ValueError("huggingface_cache_invalid")
+        return cache_path
+    expected_paths = profile["expected_paths"]
+    if not isinstance(expected_paths, dict):
+        raise ValueError("huggingface_cache_invalid")
+    return Path(str(expected_paths["huggingface_cache_path"])).expanduser()
+
+
 def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = False) -> dict[str, object]:
     from app.learn.recognition.omniparser_quality import filter_omniparser_candidates
     from scripts import run_omniparser_learn_smoke as runner
@@ -43,7 +57,7 @@ def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = Fals
     profile = runner._load_profile()
     code_path = ROOT / profile["expected_paths"]["code_path"]
     weights_path = ROOT / profile["expected_paths"]["weights_path"]
-    cache_path = Path(str(profile["expected_paths"]["huggingface_cache_path"])).expanduser()
+    cache_path = _hub_cache_path(profile)
     preflight = runner._preflight(code_path=code_path, weights_path=weights_path, hub_cache=cache_path)
     detector, caption, check_ocr_box, get_som_labeled_img = runner._load_official_models(code_path, weights_path, cache_path)
     items, duration_ms = runner._run_once(

@@ -36,6 +36,7 @@ def test_worker_uses_profile_huggingface_cache_for_preflight_and_model_load(tmp_
     from scripts import run_uei_omniparser_shadow_worker as worker
 
     observed = _patch_runner(monkeypatch, outputs=[([], 4.0)])
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
     monkeypatch.setattr(worker, "_peak_resource_units", lambda: 7)
 
     result = worker._run(tmp_path / "capture.png", {"width": 20, "height": 10})
@@ -43,6 +44,32 @@ def test_worker_uses_profile_huggingface_cache_for_preflight_and_model_load(tmp_
     expected = Path("~/.cache/huggingface/hub").expanduser()
     assert observed == {"preflight_cache": expected, "model_cache": expected}
     assert result["resource_units"] == 7
+
+
+def test_worker_uses_explicit_absolute_huggingface_cache_without_home_directory(tmp_path: Path, monkeypatch):
+    from scripts import run_uei_omniparser_shadow_worker as worker
+
+    observed = _patch_runner(monkeypatch, outputs=[([], 4.0)])
+    for name in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(name, raising=False)
+    expected = tmp_path / "huggingface-cache"
+    monkeypatch.setenv("HF_HUB_CACHE", str(expected))
+    monkeypatch.setattr(worker, "_peak_resource_units", lambda: 7)
+
+    result = worker._run(tmp_path / "capture.png", {"width": 20, "height": 10})
+
+    assert observed == {"preflight_cache": expected, "model_cache": expected}
+    assert result["resource_units"] == 7
+
+
+def test_worker_rejects_relative_explicit_huggingface_cache(tmp_path: Path, monkeypatch):
+    from scripts import run_uei_omniparser_shadow_worker as worker
+
+    _patch_runner(monkeypatch, outputs=[([], 4.0)])
+    monkeypatch.setenv("HF_HUB_CACHE", "relative/huggingface-cache")
+
+    with pytest.raises(ValueError, match="huggingface_cache_invalid"):
+        worker._run(tmp_path / "capture.png", {"width": 20, "height": 10})
 
 
 def test_worker_projects_boxes_into_the_exact_capture_coordinate_space(tmp_path: Path, monkeypatch):

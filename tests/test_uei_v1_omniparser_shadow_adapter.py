@@ -119,7 +119,8 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
                                                 "provider_confidence": 0.8}], "duration_ms": 2, "resource_units": 1})
     calls: list[dict[str, object]] = []
     monkeypatch.setattr("app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen", _fake_popen(process, calls))
-    output = OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke(
+    configuration = _config(tmp_path)
+    output = OmniParserShadowAdapter(configuration=configuration).invoke(
         capture=_capture(tmp_path), budget=_budget(), invocation_id="invocation/1",
     )
 
@@ -128,6 +129,8 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     assert output.items[0].safe_role == "text"
     assert output.items[0].safe_states == ("interactable",)
     assert calls[0]["env"]["HF_HUB_OFFLINE"] == "1"
+    assert calls[0]["env"]["HF_HUB_CACHE"] == str(configuration.cache_path)
+    assert not {"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"}.intersection(calls[0]["env"])
     assert "capture.png" not in repr(output)
     assert not calls[0]["output_path"].exists()
 
