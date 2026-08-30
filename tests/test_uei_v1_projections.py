@@ -147,6 +147,81 @@ def test_uia_projection_accepts_truthful_nullable_root_automation_id(tmp_path):
     assert result['items'][0]['opaque_attributes']['automation_id'] is None
 
 
+def test_uia_projection_accepts_truthful_nullable_descendant_metadata(tmp_path):
+    from app.learn.recognition.uei.projections import project_uia_snapshot
+
+    context = build_context_from_sidecar(tmp_path, 'uia')
+    fixture = deepcopy(load_fixture('uia-snapshot-static.json'))
+    descendant = deepcopy(fixture['controls'][0])
+    descendant.update({
+        'control_id': 'uia_1_unknown_descendant',
+        'name': None,
+        'control_type': None,
+        'automation_id': None,
+        'class_name': None,
+        'bbox': {'x': 120, 'y': 24, 'w': 80, 'h': 32},
+        'screen_bbox': {'x': 220, 'y': 224, 'w': 80, 'h': 32},
+        'enabled': None,
+        'visible': None,
+        'patterns': [],
+    })
+    fixture['controls'].append(descendant)
+    fixture['control_count'] = 2
+
+    result = project_uia_snapshot(**context.for_case('uia'), fixture=fixture)
+
+    assert result['status'] == 'success'
+    assert result['review_only'] is True
+    assert result['items'][1]['safe_text'] is None
+    assert result['items'][1]['safe_role'] is None
+    assert result['items'][1]['safe_states'] == []
+    assert result['items'][1]['opaque_attributes'] == {
+        'automation_id': None,
+        'class_name': None,
+        'patterns': [],
+    }
+
+
+@pytest.mark.parametrize(
+    ('field', 'invalid_value'),
+    [
+        ('name', 7),
+        ('name', ''),
+        ('control_type', 7),
+        ('control_type', ''),
+        ('class_name', 7),
+        ('class_name', ''),
+        ('enabled', 'true'),
+        ('visible', 'true'),
+    ],
+    ids=[
+        'name-non-string',
+        'name-empty',
+        'control-type-non-string',
+        'control-type-empty',
+        'class-name-non-string',
+        'class-name-empty',
+        'enabled-non-bool',
+        'visible-non-bool',
+    ],
+)
+def test_uia_projection_rejects_invalid_non_null_optional_metadata(tmp_path, field, invalid_value):
+    from app.learn.recognition.uei.projections import project_uia_snapshot
+
+    context = build_context_from_sidecar(tmp_path, 'uia')
+    fixture = deepcopy(load_fixture('uia-snapshot-static.json'))
+    fixture['controls'][0][field] = invalid_value
+
+    result = project_uia_snapshot(**context.for_case('uia'), fixture=fixture)
+    error = context.store.get(result['error_ref'], contract_version='provider_error_v1')
+
+    assert (result['status'], error['stage'], error['code']) == (
+        'failed',
+        'projection',
+        'provider_fixture_schema_invalid',
+    )
+
+
 def test_uia_projection_still_rejects_non_string_non_null_automation_id(tmp_path):
     from app.learn.recognition.uei.projections import project_uia_snapshot
 
