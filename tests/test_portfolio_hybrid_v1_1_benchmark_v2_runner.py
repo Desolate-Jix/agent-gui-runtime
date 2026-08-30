@@ -48,6 +48,48 @@ def test_runner_cli_help_bootstraps_project_root_without_pythonpath() -> None:
     assert "Run Portfolio Hybrid v1.1 Benchmark-v2" in completed.stdout
 
 
+def test_runner_cli_canonical_regression_dry_run_uses_production_corpus_binding(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    output = tmp_path / "dry-run.json"
+
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+            "--provider-manifest",
+            "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-provider-manifest.json",
+            "--partition",
+            "regression",
+            "--dry-run",
+            "--output",
+            str(output),
+        ],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    persisted = json.loads(output.read_text(encoding="utf-8"))
+    assert result == persisted
+    assert result["contract_version"] == "benchmark_v2_runner_dry_run_v1"
+    assert result["partition"] == "regression"
+    assert result["provider_dispatch_count"] == 0
+    assert result["dry_run"] is True
+    assert result["artifact_is_authorization"] is False
+    assert result["execute_binding_enabled"] is False
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value,

@@ -970,9 +970,14 @@ class _BenchmarkV2ProductionRuntime:
         }
         if expected_case_refs != observed_case_refs:
             raise ValueError("production provider case resolver differs from corpus")
+        resolver_parent_ref = corpus_file_ref.get("source_parent_ref")
+        manifest_parent_ref = ref.get("source_parent_ref")
         if (
             corpus_file_ref.get("file_sha256") != ref["file_sha256"]
-            or corpus_file_ref.get("source_parent_ref") != ref["source_parent_ref"]
+            or not isinstance(resolver_parent_ref, Mapping)
+            or not isinstance(manifest_parent_ref, Mapping)
+            or resolver_parent_ref.get("content_sha256")
+            != manifest_parent_ref.get("content_sha256")
         ):
             raise ValueError("production provider corpus ref differs from manifest")
         return _LoadedProviderManifest(
