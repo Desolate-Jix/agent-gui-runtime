@@ -14,6 +14,12 @@ import sys
 from typing import Iterator, Mapping, Sequence
 import uuid
 
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
 from app.learn.hybrid.benchmark_v2_contracts import BENCHMARK_RELEASE_ID
 from app.learn.hybrid.benchmark_v2_lifecycle import (
     compose_benchmark_v2_lifecycle_bundle_v3,

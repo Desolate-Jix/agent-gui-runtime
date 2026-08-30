@@ -5,7 +5,9 @@ import base64
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 from typing import Mapping
 
@@ -19,6 +21,31 @@ SAFETY = {
     "artifact_is_authorization": False,
     "execute_binding_enabled": False,
 }
+
+
+def test_runner_cli_help_bootstraps_project_root_without_pythonpath() -> None:
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+            "--help",
+        ],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "Run Portfolio Hybrid v1.1 Benchmark-v2" in completed.stdout
 
 
 def _canonical(value: object) -> bytes:
