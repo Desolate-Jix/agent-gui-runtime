@@ -1147,9 +1147,13 @@ def _active_listener_endpoints(
 
 
 def _offline_environment(cache_path: Path) -> dict[str, str]:
+    runtime_cache_root = ROOT / "runtime_state" / "omniparser-home"
     environment = {
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_CACHE": str(cache_path),
         "PYTHONNOUSERSITE": "1", "PYTHONUTF8": "1",
+        "USERPROFILE": str(runtime_cache_root),
+        "TORCHINDUCTOR_CACHE_DIR": str(runtime_cache_root / "torchinductor"),
+        "YOLO_CONFIG_DIR": str(runtime_cache_root / "ultralytics"),
     }
     for name in ("SystemRoot", "WINDIR", "PATH", "ProgramFiles", "ProgramW6432"):
         value = os.environ.get(name)

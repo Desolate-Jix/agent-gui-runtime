@@ -111,7 +111,7 @@ class _BarrierCancellation:
             return True, action()
 
 def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_path: Path, monkeypatch):
-    from app.learn.recognition.uei.omniparser_shadow_adapter import OmniParserShadowAdapter
+    from app.learn.recognition.uei.omniparser_shadow_adapter import ROOT, OmniParserShadowAdapter
 
     process = FakeProcess(payload={"items": [{"source_item_id": "item/1", "kind": "text", "safe_text": "Search",
                                                 "safe_role": "text", "safe_states": ["interactable"],
@@ -130,7 +130,8 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     assert output.items[0].safe_states == ("interactable",)
     assert calls[0]["env"]["HF_HUB_OFFLINE"] == "1"
     assert calls[0]["env"]["HF_HUB_CACHE"] == str(configuration.cache_path)
-    assert not {"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"}.intersection(calls[0]["env"])
+    assert calls[0]["env"]["USERPROFILE"] == str(ROOT / "runtime_state" / "omniparser-home")
+    assert not {"HOME", "HOMEDRIVE", "HOMEPATH"}.intersection(calls[0]["env"])
     assert "capture.png" not in repr(output)
     assert not calls[0]["output_path"].exists()
 
@@ -150,8 +151,31 @@ def test_offline_environment_preserves_only_windows_program_roots(tmp_path: Path
 
     assert environment["ProgramFiles"] == r"C:\Program Files"
     assert environment["ProgramW6432"] == r"C:\Program Files"
-    assert not {"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"}.intersection(environment)
+    assert not {"HOME", "HOMEDRIVE", "HOMEPATH"}.intersection(environment)
     assert "ARBITRARY_PARENT_VALUE" not in environment
+
+
+def test_offline_environment_sets_library_caches_without_user_identity(tmp_path: Path, monkeypatch) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as omni
+
+    monkeypatch.setenv("HOME", r"C:\Users\private")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\private")
+    monkeypatch.setenv("USERNAME", "private-user")
+    monkeypatch.setenv("HOMEDRIVE", "C:")
+    monkeypatch.setenv("HOMEPATH", r"\Users\private")
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", r"C:\Users\private\torchinductor")
+    monkeypatch.setenv("YOLO_CONFIG_DIR", r"C:\Users\private\ultralytics")
+    monkeypatch.setattr(omni, "ROOT", tmp_path)
+    cache_path = tmp_path / "huggingface" / "hub"
+
+    environment = omni._offline_environment(cache_path)
+
+    runtime_cache_root = tmp_path / "runtime_state" / "omniparser-home"
+    assert environment["USERPROFILE"] == str(runtime_cache_root)
+    assert environment["USERPROFILE"] != r"C:\Users\private"
+    assert environment["TORCHINDUCTOR_CACHE_DIR"] == str(runtime_cache_root / "torchinductor")
+    assert environment["YOLO_CONFIG_DIR"] == str(runtime_cache_root / "ultralytics")
+    assert not {"HOME", "USERNAME", "HOMEDRIVE", "HOMEPATH"}.intersection(environment)
 
 
 def test_installed_configuration_snapshot_is_sealed_at_construction_and_survives_profile_swap(
