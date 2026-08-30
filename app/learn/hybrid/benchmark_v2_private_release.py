@@ -66,6 +66,7 @@ _CODE_PATHS = (
     "app/learn/hybrid/benchmark_v2_provider_corpus.py",
     "app/learn/hybrid/benchmark_v2_provider_sandbox.py",
     "app/learn/hybrid/benchmark_v2_public_score.py",
+    "app/learn/hybrid/qwen_binding.py",
     "app/learn/hybrid/benchmark_v2_runtime.py",
     "app/learn/hybrid/benchmark_v2_window_owner.py",
     "app/learn/hybrid/benchmark_v2_worker_binding.py",
@@ -96,6 +97,7 @@ _CONFIG_PATHS = (
     "configs/model_profiles/learn_mode_omniparser_v2.json",
 )
 _TEST_PATHS = (
+    "tests/test_learn_hybrid_qwen_binding.py",
     "tests/test_learn_hybrid_windows_process_scope.py",
     "tests/test_learning_workflow_stage_execution.py",
     "tests/test_learning_workflow_stage_worker.py",
@@ -132,6 +134,7 @@ _RELEASE_CODE_REFS = (
     ("incumbent_operation", "app/learn/hybrid/benchmark_v2_incumbent_operation.py"),
     ("lifecycle", "app/learn/hybrid/benchmark_v2_lifecycle.py"),
     ("predictions", "app/learn/hybrid/benchmark_v2_predictions.py"),
+    ("qwen_binding", "app/learn/hybrid/qwen_binding.py"),
     ("benchmark_runtime", "app/learn/hybrid/benchmark_v2_runtime.py"),
     ("window_owner", "app/learn/hybrid/benchmark_v2_window_owner.py"),
     ("worker_binding", "app/learn/hybrid/benchmark_v2_worker_binding.py"),

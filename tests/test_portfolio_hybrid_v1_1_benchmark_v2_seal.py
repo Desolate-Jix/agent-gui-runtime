@@ -51,6 +51,7 @@ CODE_PATHS = (
     "app/learn/hybrid/benchmark_v2_provider_corpus.py",
     "app/learn/hybrid/benchmark_v2_provider_sandbox.py",
     "app/learn/hybrid/benchmark_v2_public_score.py",
+    "app/learn/hybrid/qwen_binding.py",
     "app/learn/hybrid/benchmark_v2_runtime.py",
     "app/learn/hybrid/benchmark_v2_window_owner.py",
     "app/learn/hybrid/benchmark_v2_worker_binding.py",
@@ -81,6 +82,7 @@ CONFIG_PATHS = (
     "configs/model_profiles/learn_mode_omniparser_v2.json",
 )
 TEST_PATHS = (
+    "tests/test_learn_hybrid_qwen_binding.py",
     "tests/test_learn_hybrid_windows_process_scope.py",
     "tests/test_learning_workflow_stage_execution.py",
     "tests/test_learning_workflow_stage_worker.py",
@@ -131,6 +133,7 @@ RELEASE_REFS = (
     ("incumbent_operation", "app/learn/hybrid/benchmark_v2_incumbent_operation.py"),
     ("lifecycle", "app/learn/hybrid/benchmark_v2_lifecycle.py"),
     ("predictions", "app/learn/hybrid/benchmark_v2_predictions.py"),
+    ("qwen_binding", "app/learn/hybrid/qwen_binding.py"),
     ("benchmark_runtime", "app/learn/hybrid/benchmark_v2_runtime.py"),
     ("window_owner", "app/learn/hybrid/benchmark_v2_window_owner.py"),
     ("worker_binding", "app/learn/hybrid/benchmark_v2_worker_binding.py"),
@@ -499,6 +502,39 @@ def test_generation_is_canonical_closed_idempotent_and_verifiable(sealed, sealer
     )
     assert (private_path.read_bytes(), provider_path.read_bytes()) == first
     assert _verify(sealer, repo, private_path, provider_path) == (private, provider)
+
+
+def test_qwen_binding_source_test_and_provider_release_ref_are_frozen(sealed) -> None:
+    _, _, _, private, provider = sealed
+    source_path = "app/learn/hybrid/qwen_binding.py"
+    test_path = "tests/test_learn_hybrid_qwen_binding.py"
+    source_sha256 = hashlib.sha256((ROOT / source_path).read_bytes()).hexdigest()
+    test_sha256 = hashlib.sha256((ROOT / test_path).read_bytes()).hexdigest()
+
+    release_refs = [
+        item
+        for item in provider["sealed_runtime"]["release_code_refs"]
+        if item["role"] == "qwen_binding"
+    ]
+    assert {
+        "source_sha256": private["artifact_inventory"]["code_sha256_by_path"].get(
+            source_path
+        ),
+        "test_sha256": private["artifact_inventory"]["test_sha256_by_path"].get(
+            test_path
+        ),
+        "release_refs": release_refs,
+    } == {
+        "source_sha256": source_sha256,
+        "test_sha256": test_sha256,
+        "release_refs": [
+            {
+                "role": "qwen_binding",
+                "relative_path": source_path,
+                "file_sha256": source_sha256,
+            }
+        ],
+    }
 
 
 def test_both_seals_are_non_authorizing_and_provider_has_no_private_paths(sealed) -> None:
