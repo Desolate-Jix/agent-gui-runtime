@@ -1894,6 +1894,32 @@ def test_prepare_screen_groups_is_lazy_exact_and_shares_capture_lineage(
     assert len(windows.closed) == 24
 
 
+def test_screen_group_capture_ref_binds_raw_screenshot_sha_not_lineage_object(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=_sealed({"attempt_id": "attempt-capture-ref-sha"}),
+        attempt_dir=tmp_path / "attempt-capture-ref-sha",
+    )
+
+    with iterator:
+        group = next(iterator)
+        binding = runtime.open_screen_group(provider_group=group)
+        screenshot_sha256 = hashlib.sha256(
+            Path(windows.launched[-1]["screenshot_path"]).read_bytes()
+        ).hexdigest()
+        lineage_sha256 = group["capture_bundle"]["capture_lineage_ref"][
+            "content_sha256"
+        ]
+
+        assert binding["capture_ref"]["content_sha256"] == screenshot_sha256
+        assert lineage_sha256 != screenshot_sha256
+
+
 def test_screen_group_iterator_context_closes_retained_early_break(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

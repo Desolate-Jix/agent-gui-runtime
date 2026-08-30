@@ -2628,7 +2628,7 @@ class _BenchmarkV2ProductionRuntime:
             )
             capture_ref = {
                 "id": str(identity["capture_id"]),
-                "content_sha256": str(identity["capture_lineage_ref"]["content_sha256"]),
+                "content_sha256": image_sha,
             }
             authority = publish_server_worker_window_binding(
                 publisher=get_production_server_worker_window_binding_publisher(),
