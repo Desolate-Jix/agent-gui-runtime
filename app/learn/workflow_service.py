@@ -5384,6 +5384,22 @@ def _benchmark_v2_hybrid_continuation_predecessor(
     return str(validated_receipt["consumed_operation_ref_sha256"])
 
 
+def _benchmark_v2_hybrid_requires_terminal_preparation(
+    *,
+    task_kind: str,
+    response: Mapping[str, object],
+) -> bool:
+    if task_kind == "panel_learning_hybrid_review_projection":
+        return True
+    outcome = response.get("outcome")
+    return (
+        response.get("contract_version")
+        == "learning_hybrid_managed_stage_result_v1"
+        and isinstance(outcome, str)
+        and outcome != "completed"
+    )
+
+
 def _benchmark_v2_hybrid_attachment(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -6409,8 +6425,9 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 )
             generic_adoption = deepcopy(dict(generic_adoption))
             generic_adoption["response"] = validated_response
-            if worker_record["task_kind"] == (
-                "panel_learning_hybrid_review_projection"
+            if _benchmark_v2_hybrid_requires_terminal_preparation(
+                task_kind=str(worker_record["task_kind"]),
+                response=validated_response,
             ):
                 current = _persist_benchmark_v2_hybrid_continuation_receipt(
                     composition=composition,
@@ -6433,8 +6450,17 @@ def _continue_benchmark_v2_hybrid_workflow_service(
         else:
             current, stage_execution, binding, worker_record, supplied = prepared
             stage = str(supplied["stage"])
-            if worker_record["task_kind"] != (
-                "panel_learning_hybrid_review_projection"
+            prepared_projection = _read_benchmark_v2_hybrid_adopted_projection(
+                composition=composition,
+                worker_record=worker_record,
+                binding=binding,
+            )
+            prepared_response = prepared_projection.get("response")
+            if not isinstance(
+                prepared_response, Mapping
+            ) or not _benchmark_v2_hybrid_requires_terminal_preparation(
+                task_kind=str(worker_record["task_kind"]),
+                response=prepared_response,
             ):
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 hybrid terminal preparation task is stale"

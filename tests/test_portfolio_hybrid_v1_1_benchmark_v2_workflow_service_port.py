@@ -2554,6 +2554,98 @@ def test_s3_lost_response_retry_replays_consumed_ref_without_second_producer(
         store.close()
 
 
+def test_s3_early_failure_persists_predecessor_before_terminal_transition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    continuation_calls = 0
+
+    def _continue(**_kwargs):
+        nonlocal continuation_calls
+        continuation_calls += 1
+        if continuation_calls == 1:
+            raise RuntimeError("transient early failure continuation")
+        state = store.get("run-h1")
+        finished = workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="safe_stopped",
+            reason="hybrid Omni worker failed",
+        )
+        return {
+            "stage_finished": True,
+            "outcome": "safe_stopped",
+            "next_stage_operation": None,
+            "next_stage_worker": None,
+            "workflow_state": finished["workflow_state"],
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current(
+            {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "task_kind": "panel_learning_hybrid_omni_discovery",
+                "outcome": "failed",
+                "orchestration": {},
+                "result": {"failure_reason": "provider failed"},
+            }
+        )
+
+        with pytest.raises(
+            RuntimeError, match="transient early failure continuation"
+        ):
+            service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        prepared_state = store.get("run-h1")
+        prepared_receipt = prepared_state["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]["benchmark_v2_workflow_service_hybrid"][
+            "continuation_receipt"
+        ]
+        assert prepared_receipt["receipt_phase"] == "terminal_prepared"
+        assert prepared_receipt["consumed_operation_ref_sha256"] == consumed_ref[
+            "content_sha256"
+        ]
+
+        returned = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        replay = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        reconciled = service.cancel_operation(
+            operation_ref=returned["operation_ref"]
+        )
+
+        assert returned["status"] == "safe_stopped"
+        assert returned["operation_ref"]["predecessor_content_sha256"] == (
+            consumed_ref["content_sha256"]
+        )
+        assert canonical_json_bytes(replay) == canonical_json_bytes(returned)
+        assert canonical_json_bytes(reconciled) == canonical_json_bytes(returned)
+        assert store.get("run-h1")["terminal"] is True
+        assert registry.active_resources == 0
+        assert continuation_calls == 2
+        assert registry.adopt_calls == 1
+    finally:
+        store.close()
+
+
 def test_s3_terminal_prepared_retry_resumes_without_false_terminal_claim(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -1396,11 +1396,13 @@ class _FakeWorkflowService:
         pending_replays: int = 0,
         never_complete_hybrid: bool = False,
         stale_hybrid: bool = False,
+        early_safe_stop: bool = False,
         successor_fault: str | None = None,
     ) -> None:
         self.pending_replays = max(pending_replays, 1 if duplicate_reads else 0)
         self.never_complete_hybrid = never_complete_hybrid
         self.stale_hybrid = stale_hybrid
+        self.early_safe_stop = early_safe_stop
         self.successor_fault = successor_fault
         self.successor_fault_used = False
         self.window_binding: dict[str, object] | None = None
@@ -1529,6 +1531,25 @@ class _FakeWorkflowService:
         if self.never_complete_hybrid or replay_count < self.pending_replays:
             self._hybrid_replays[digest] = replay_count + 1
             return _step(operation_ref, task_kind=f"server-managed-hybrid-{self._hybrid_index}")
+        if self.early_safe_stop:
+            assert self.window_binding is not None
+            assert self.provider_group is not None
+            consumed = deepcopy(self.active_ops["hybrid"])
+            stopped = _operation_ref(
+                mode="hybrid_v1_1",
+                operation_id=str(self.window_binding["operation_id"]),
+                request_ref=self.provider_group["request_ref"],
+                window_binding=self.window_binding,
+                worker_ref=consumed["worker_ref"],
+                status="safe_stopped",
+                revision=int(consumed["workflow_state_ref"]["revision"]) + 1,
+                predecessor=consumed,
+            )
+            self.active_workers.discard(
+                str(consumed["worker_ref"]["content_sha256"])
+            )
+            self.active_ops["hybrid"] = deepcopy(stopped)
+            return _step(stopped, task_kind="server-managed-hybrid-safe-stop")
         if self.successor_fault is not None and not self.successor_fault_used:
             self.successor_fault_used = True
             if self.successor_fault == "same_digest_changed_step":
@@ -1808,6 +1829,7 @@ def _ports(
     pending_replays: int = 0,
     never_complete_hybrid: bool = False,
     stale_hybrid: bool = False,
+    early_safe_stop: bool = False,
     successor_fault: str | None = None,
 ):
     events: list[str] = []
@@ -1816,6 +1838,7 @@ def _ports(
         pending_replays=pending_replays,
         never_complete_hybrid=never_complete_hybrid,
         stale_hybrid=stale_hybrid,
+        early_safe_stop=early_safe_stop,
         successor_fault=successor_fault,
     )
     owner = _FakeWindowOwner(events)
@@ -2330,6 +2353,31 @@ def test_stale_hybrid_projection_fails_closed_before_prediction_and_still_cleans
 
     assert service.hybrid_start_calls == 1
     assert service.incumbent_start_calls == 0
+    assert not sink.values
+    assert events[-1] == "window-close"
+    assert "lifecycle-stable-zero" not in events
+    assert not service.active_ops
+    assert not service.active_workers
+    assert not owner.active_windows
+
+
+def test_chained_early_safe_stop_preserves_primary_terminal_error_and_cleanup() -> None:
+    events, service, owner, lifecycle, sink = _ports(early_safe_stop=True)
+
+    with pytest.raises(
+        ValueError, match="Hybrid operation stopped without a complete result: safe_stopped"
+    ):
+        run_screen_group(
+            provider_group=_provider_group(),
+            service=service,
+            window_owner=owner,
+            lifecycle=lifecycle,
+            prediction_sink=sink,
+        )
+
+    assert service.hybrid_continue_calls == 1
+    assert service.incumbent_start_calls == 0
+    assert service.cancel_calls == 1
     assert not sink.values
     assert events[-1] == "window-close"
     assert "lifecycle-stable-zero" not in events
