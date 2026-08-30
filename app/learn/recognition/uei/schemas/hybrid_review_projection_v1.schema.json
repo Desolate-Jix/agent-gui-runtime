@@ -85,7 +85,7 @@
         "source_item_id": {"type": "string", "minLength": 1, "maxLength": 512},
         "bbox_original": {"$ref": "#/$defs/bbox"},
         "coordinate_space": {"const": "capture_pixel_xyxy"},
-        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "active": {"type": "boolean"},
         "inactive_reason": {"type": ["string", "null"], "maxLength": 256},
         "provenance": {"$ref": "#/$defs/provenance"}

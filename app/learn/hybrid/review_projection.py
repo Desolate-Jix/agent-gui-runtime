@@ -290,7 +290,9 @@ def _full_parent_candidate_projection(
         "description": "",
     }
     warnings: list[str] = []
-    if candidate["confidence"] < 0.5:
+    if candidate["confidence"] is None:
+        warnings.append("provider_confidence_unavailable")
+    elif candidate["confidence"] < 0.5:
         warnings.append("low_provider_confidence")
     if not candidate["active"]:
         warnings.append("inactive_candidate_visible_for_audit")
@@ -796,7 +798,9 @@ def _candidate_projection(
 ) -> dict[str, Any]:
     bbox = deepcopy(candidate["bbox_original"])
     warnings: list[str] = []
-    if candidate["confidence"] < 0.5:
+    if candidate["confidence"] is None:
+        warnings.append("provider_confidence_unavailable")
+    elif candidate["confidence"] < 0.5:
         warnings.append("low_provider_confidence")
     if not candidate["active"]:
         warnings.append("inactive_candidate_visible_for_audit")
@@ -841,7 +845,12 @@ def _candidate_projection(
 
 def _projection_warnings(candidates: list[dict[str, Any]]) -> list[str]:
     warnings: list[str] = []
-    if any(candidate["confidence"] < 0.5 for candidate in candidates):
+    if any(candidate["confidence"] is None for candidate in candidates):
+        warnings.append("provider_confidence_unavailable")
+    if any(
+        candidate["confidence"] is not None and candidate["confidence"] < 0.5
+        for candidate in candidates
+    ):
         warnings.append("low_provider_confidence")
     if any(not candidate["active"] for candidate in candidates):
         warnings.append("inactive_candidate_visible_for_audit")

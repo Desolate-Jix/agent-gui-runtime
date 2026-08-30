@@ -7,9 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.learn.draft_review import load_learning_draft_review
+from app.learn.hybrid.omni_candidates import build_omni_candidate_ledger
 from app.learn.hybrid.review_projection import (
     apply_hybrid_review_decisions,
+    build_hybrid_review_projection,
     project_hybrid_review,
+    render_hybrid_review_candidates,
     validate_hybrid_review_projection,
 )
 from app.learn.recognition.roi import build_roi_crop_metadata
@@ -173,6 +176,54 @@ def test_full_parent_projection_keeps_model_evidence_immutable_and_non_authorizi
     assert projection["screen_facts"]["capture_lineage_ref"] == bundle["capture_lineage_ref"]
     assert "bbox" not in projection["screen_facts"]
     assert all(projection[field] == expected for field, expected in NON_AUTHORIZING.items())
+
+
+def test_null_provider_confidence_is_preserved_and_warned_in_all_review_projections() -> None:
+    bundle = _verified_bundle()
+    inventory = _inventory_for_capture(
+        bundle["capture_identity"], candidate_count=1, provider_confidence=None
+    )
+    bindings = binding_fixture(inventory=inventory)
+    bindings["context_ref"] = deepcopy(bundle["context_ref"])
+    fusion = fusion_fixture(inventory=inventory)
+    vista = vista_fixture(inventory=inventory)
+    _bind_vista_to_trusted_roi_builder(bundle, fusion, vista)
+
+    full = project_hybrid_review(
+        capture_bundle=bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        fusion_result=fusion,
+        vista_proposals=vista,
+    )
+    full_candidate = full["candidates"][0]
+    assert full_candidate["model_proposal"]["omni_candidate"]["confidence"] is None
+    assert full_candidate["model_proposal"]["provider_item"]["provider_confidence"] is None
+    assert "provider_confidence_unavailable" in full_candidate["warnings"]
+    assert "provider_confidence_unavailable" in full["warnings"]
+    assert "low_provider_confidence" not in full_candidate["warnings"]
+
+    legacy_bundle = deepcopy(bundle)
+    legacy_bundle["bundle_ref"] = {
+        "id": legacy_bundle["bundle_id"],
+        "content_sha256": legacy_bundle["content_sha256"],
+    }
+    legacy_ledger = build_omni_candidate_ledger(
+        safe_result=inventory["provider_result"], capture_bundle=legacy_bundle
+    )
+    legacy = build_hybrid_review_projection(
+        omni_ledger=legacy_ledger,
+        displayed_image_sha256=bundle["capture_identity"]["screenshot_sha256"],
+        displayed_image_size=bundle["capture_identity"]["image_size"],
+    )
+    assert legacy["candidates"][0]["confidence"] is None
+    assert "provider_confidence_unavailable" in legacy["warnings"]
+    assert "low_provider_confidence" not in legacy["warnings"]
+
+    rendered = render_hybrid_review_candidates(omni_ledger=legacy_ledger)[0]
+    assert rendered["confidence"] is None
+    assert "provider_confidence_unavailable" in rendered["warnings"]
+    assert "low_provider_confidence" not in rendered["warnings"]
 
 
 def test_full_parent_projection_rejects_any_parent_capture_mismatch() -> None:

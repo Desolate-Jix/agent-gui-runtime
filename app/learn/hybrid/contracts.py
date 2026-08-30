@@ -118,6 +118,12 @@ def _confidence(value: Any, *, name: str) -> int | float:
     return result
 
 
+def _optional_confidence(value: Any, *, name: str) -> int | float | None:
+    if value is None:
+        return None
+    return _confidence(value, name=name)
+
+
 def _image_size(value: Any, *, name: str) -> dict[str, int]:
     result = _object(value, name=name, fields={"width", "height"})
     for field in ("width", "height"):
@@ -427,8 +433,14 @@ def validate_omni_inventory(value: Mapping[str, Any]) -> dict[str, Any]:
         if bbox[0] < 0 or bbox[1] < 0 or bbox[2] > image_size["width"] or bbox[3] > image_size["height"]:
             raise ValueError(f"candidate[{index}].bbox_original must be inside capture bounds")
         _coordinate_space(candidate["coordinate_space"], name=f"candidate[{index}].coordinate_space")
-        confidence = _confidence(candidate["confidence"], name=f"candidate[{index}].confidence")
-        if provider_item.get("provider_confidence") != confidence:
+        confidence = _optional_confidence(
+            candidate["confidence"], name=f"candidate[{index}].confidence"
+        )
+        provider_confidence = _optional_confidence(
+            provider_item.get("provider_confidence"),
+            name=f"provider item[{source_item_id}].provider_confidence",
+        )
+        if provider_confidence != confidence:
             raise ValueError("candidate confidence does not match immutable provider result")
         if not isinstance(candidate["active"], bool):
             raise ValueError(f"candidate[{index}].active must be a boolean")

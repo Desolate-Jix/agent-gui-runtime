@@ -53,10 +53,18 @@ def _verified_bundle(*, width: int = 1280) -> dict:
         )
 
 
-def _inventory_for_capture(capture_identity: dict, *, candidate_count: int) -> dict:
+def _inventory_for_capture(
+    capture_identity: dict,
+    *,
+    candidate_count: int,
+    provider_confidence: int | float | None = 0.9,
+) -> dict:
     from app.learn.hybrid.contracts import stable_candidate_id
 
-    inventory = inventory_fixture(candidate_count=candidate_count)
+    inventory = inventory_fixture(
+        candidate_count=candidate_count,
+        provider_confidence=provider_confidence,
+    )
     inventory["capture_identity"] = deepcopy(capture_identity)
     provider = {
         key: deepcopy(value)

@@ -77,7 +77,9 @@ def capture_fixture(*, image_sha: str = IMAGE_SHA) -> dict:
     }
 
 
-def inventory_fixture(*, candidate_count: int = 1) -> dict:
+def inventory_fixture(
+    *, candidate_count: int = 1, provider_confidence: int | float | None = 0.9
+) -> dict:
     capture = capture_fixture()
     provider_id = "local.runtime/omniparser"
     profile_id = "local.runtime/omniparser/shadow-v2"
@@ -98,7 +100,7 @@ def inventory_fixture(*, candidate_count: int = 1) -> dict:
                 "source_coordinate_space": "capture_pixel_xyxy",
                 "coordinate_transform_ref": None,
                 "opaque_attributes": {},
-                "provider_confidence": 0.9,
+                "provider_confidence": provider_confidence,
             }
         )
     provider_result = seal_immutable(
@@ -362,6 +364,20 @@ def test_omni_inventory_rejects_duplicate_or_reused_candidate_ids():
     value["candidates"][0]["candidate_id"] = "candidate/" + "ff" * 32
     with pytest.raises(ValueError, match="candidate_id does not match stable identity"):
         validate_omni_inventory(value)
+
+
+def test_omni_inventory_preserves_null_provider_confidence_and_requires_exact_match() -> None:
+    value = inventory_fixture(provider_confidence=None)
+
+    validated = validate_omni_inventory(value)
+
+    assert validated["candidates"][0]["confidence"] is None
+    assert validated["provider_result"]["items"][0]["provider_confidence"] is None
+
+    mismatched = inventory_fixture(provider_confidence=None)
+    mismatched["candidates"][0]["confidence"] = 0.0
+    with pytest.raises(ValueError, match="immutable provider result"):
+        validate_omni_inventory(mismatched)
 
 
 def test_qwen_binding_is_candidate_id_closed_and_cannot_replace_geometry():

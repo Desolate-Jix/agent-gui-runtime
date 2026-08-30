@@ -191,3 +191,19 @@ def test_hybrid_projection_rejects_nested_extra_fields():
     value["candidates"][0]["unexpected"] = True
     with pytest.raises(UEIValidationError, match="additionalProperties"):
         validate_contract(value, contract_version="hybrid_review_projection_v1")
+
+
+def test_hybrid_projection_confidence_accepts_null_or_bounded_finite_number():
+    from app.learn.recognition.uei.contracts import UEIValidationError, validate_contract
+
+    template = minimal_contract_values()["hybrid_review_projection_v1"]
+    for confidence in (None, 0, 0.5, 1):
+        value = deepcopy(template)
+        value["candidates"][0]["confidence"] = confidence
+        validate_contract(value, contract_version="hybrid_review_projection_v1")
+
+    for confidence in (-0.01, 1.01, float("nan"), float("inf"), float("-inf")):
+        value = deepcopy(template)
+        value["candidates"][0]["confidence"] = confidence
+        with pytest.raises(UEIValidationError):
+            validate_contract(value, contract_version="hybrid_review_projection_v1")
