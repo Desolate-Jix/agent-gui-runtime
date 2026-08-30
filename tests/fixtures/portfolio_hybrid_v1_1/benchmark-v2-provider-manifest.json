@@ -232,7 +232,7 @@
         "role": "workflow_service"
       },
       {
-        "file_sha256": "de32a776dd91c8522bcf0512269d01144524786293d0078b324bd337fd91b2e1",
+        "file_sha256": "6b2f0b96d1b5ee1ea282bc480781c3c94e855a4244603fbd6cb9f81de885b62d",
         "relative_path": "app/learn/workflow_worker.py",
         "role": "workflow_worker"
       },
