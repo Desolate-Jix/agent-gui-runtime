@@ -177,6 +177,10 @@ def parse_qwen_candidate_bindings(
     for index, ambiguity in enumerate(value["ambiguity_sets"]):
         if not isinstance(ambiguity, Mapping) or set(ambiguity) != _AMBIGUITY_SET_FIELDS:
             raise ValueError(f"ambiguity_set[{index}] is not closed")
+    value["ambiguity_sets"] = _complete_missing_ambiguity_sets(
+        value["bindings"],
+        value["ambiguity_sets"],
+    )
     verified_context_ref = _immutable_context_ref(context_ref)
 
     artifact = {
@@ -206,6 +210,65 @@ def parse_qwen_candidate_bindings(
             raise ValueError("duplicate orphan semantic target")
         orphan_targets.add(target)
     return validated
+
+
+def _complete_missing_ambiguity_sets(
+    bindings: list[object],
+    ambiguity_sets: list[object],
+) -> list[dict[str, object]]:
+    binding_ids: set[str] = set()
+    semantic_groups: dict[tuple[str, str, str, str], list[str]] = {}
+    for index, binding in enumerate(bindings):
+        if not isinstance(binding, Mapping):
+            raise ValueError(f"binding[{index}] is not closed")
+        candidate_id = binding.get("candidate_id")
+        if not isinstance(candidate_id, str):
+            raise ValueError(f"binding[{index}].candidate_id is invalid")
+        binding_ids.add(candidate_id)
+        semantic_groups.setdefault(canonical_semantic_target_key(binding), []).append(
+            candidate_id
+        )
+
+    expected_sets = {
+        tuple(sorted(candidate_ids))
+        for candidate_ids in semantic_groups.values()
+        if len(candidate_ids) > 1
+    }
+    completed = [deepcopy(dict(item)) for item in ambiguity_sets]
+    declared_sets: set[tuple[str, ...]] = set()
+    declared_memberships: set[str] = set()
+    for ambiguity in completed:
+        if ambiguity.get("contract_version") != "hybrid_semantic_ambiguity_set_v1":
+            raise ValueError("Qwen ambiguity set contract_version is invalid")
+        candidate_ids = ambiguity.get("candidate_ids")
+        if (
+            not isinstance(candidate_ids, list)
+            or len(candidate_ids) < 2
+            or any(not isinstance(candidate_id, str) for candidate_id in candidate_ids)
+            or candidate_ids != sorted(candidate_ids)
+            or len(set(candidate_ids)) != len(candidate_ids)
+            or any(candidate_id not in binding_ids for candidate_id in candidate_ids)
+        ):
+            raise ValueError("Qwen ambiguity set candidate_ids are invalid")
+        declared = tuple(candidate_ids)
+        if declared in declared_sets:
+            raise ValueError("duplicate Qwen ambiguity set")
+        if any(candidate_id in declared_memberships for candidate_id in candidate_ids):
+            raise ValueError("Qwen candidate belongs to multiple ambiguity sets")
+        if declared not in expected_sets:
+            raise ValueError(
+                "Qwen ambiguity set semantic target mismatch; "
+                "must be a complete exact duplicate semantic target group"
+            )
+        declared_sets.add(declared)
+        declared_memberships.update(candidate_ids)
+
+    for missing in sorted(expected_sets - declared_sets):
+        completed.append({
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": list(missing),
+        })
+    return completed
 
 
 def run_qwen_candidate_binding(

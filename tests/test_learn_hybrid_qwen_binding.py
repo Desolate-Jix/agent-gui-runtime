@@ -206,8 +206,7 @@ def test_parser_rejects_unknown_duplicate_and_omitted_candidate_ids() -> None:
         _parse(raw, inventory)
 
 
-def test_parser_rejects_one_semantic_target_bound_to_multiple_ids() -> None:
-    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+def test_parser_completes_missing_exact_duplicate_ambiguity_pair() -> None:
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
     inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
@@ -215,8 +214,12 @@ def test_parser_rejects_one_semantic_target_bound_to_multiple_ids() -> None:
     for field in ("role", "label", "description", "relation"):
         raw["bindings"][1][field] = raw["bindings"][0][field]
 
-    with pytest.raises(ValueError, match="ambiguity sets must cover"):
-        _parse(raw, inventory)
+    parsed = _parse(raw, inventory)
+
+    assert parsed["ambiguity_sets"] == [{
+        "contract_version": "hybrid_semantic_ambiguity_set_v1",
+        "candidate_ids": sorted(binding["candidate_id"] for binding in raw["bindings"]),
+    }]
 
 
 @pytest.mark.parametrize(
@@ -227,11 +230,10 @@ def test_parser_rejects_one_semantic_target_bound_to_multiple_ids() -> None:
         ("Cafe\u0301", "CAFÉ"),
     ],
 )
-def test_parser_rejects_canonical_case_whitespace_and_unicode_duplicates(
+def test_parser_completes_canonical_case_whitespace_unicode_ambiguity_pair(
     left: str,
     right: str,
 ) -> None:
-    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture
 
     inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
@@ -241,7 +243,68 @@ def test_parser_rejects_canonical_case_whitespace_and_unicode_duplicates(
     raw["bindings"][1]["role"] = raw["bindings"][0]["role"].upper()
     raw["bindings"][1]["description"] = "  打开申请流程  "
 
-    with pytest.raises(ValueError, match="ambiguity sets must cover"):
+    parsed = _parse(raw, inventory)
+
+    assert parsed["ambiguity_sets"] == [{
+        "contract_version": "hybrid_semantic_ambiguity_set_v1",
+        "candidate_ids": sorted(binding["candidate_id"] for binding in raw["bindings"]),
+    }]
+
+
+def test_parser_preserves_declared_ambiguity_then_appends_missing_group_deterministically() -> None:
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=4))
+    raw = _raw_for(inventory)
+    for left, right in ((0, 1), (2, 3)):
+        for field in ("role", "label", "description"):
+            raw["bindings"][right][field] = raw["bindings"][left][field]
+    declared_ids = sorted(raw["bindings"][index]["candidate_id"] for index in (2, 3))
+    missing_ids = sorted(raw["bindings"][index]["candidate_id"] for index in (0, 1))
+    raw["ambiguity_sets"] = [{
+        "contract_version": "hybrid_semantic_ambiguity_set_v1",
+        "candidate_ids": declared_ids,
+    }]
+
+    parsed = _parse(raw, inventory)
+
+    assert parsed["ambiguity_sets"] == [
+        raw["ambiguity_sets"][0],
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": missing_ids,
+        },
+    ]
+
+
+def test_parser_rejects_partial_triplicate_ambiguity_group() -> None:
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=3))
+    raw = _raw_for(inventory)
+    for index in (1, 2):
+        for field in ("role", "label", "description"):
+            raw["bindings"][index][field] = raw["bindings"][0][field]
+    raw["ambiguity_sets"] = [{
+        "contract_version": "hybrid_semantic_ambiguity_set_v1",
+        "candidate_ids": sorted(binding["candidate_id"] for binding in raw["bindings"][:2]),
+    }]
+
+    with pytest.raises(ValueError, match="exact duplicate semantic target"):
+        _parse(raw, inventory)
+
+
+def test_parser_rejects_extra_semantic_mismatch_ambiguity_group() -> None:
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    raw = _raw_for(inventory)
+    raw["ambiguity_sets"] = [{
+        "contract_version": "hybrid_semantic_ambiguity_set_v1",
+        "candidate_ids": sorted(binding["candidate_id"] for binding in raw["bindings"]),
+    }]
+
+    with pytest.raises(ValueError, match="semantic target mismatch"):
         _parse(raw, inventory)
 
 
