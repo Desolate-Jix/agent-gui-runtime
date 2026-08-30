@@ -217,7 +217,7 @@
         "role": "builtin_learning_projection"
       },
       {
-        "file_sha256": "a2ca4e4f74c25226d10b7852efa20f0c3e9fc9273603a2d43d94545a18d85883",
+        "file_sha256": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
         "relative_path": "app/learn/recognition/uei/omniparser_shadow_adapter.py",
         "role": "omniparser_shadow_adapter"
       },

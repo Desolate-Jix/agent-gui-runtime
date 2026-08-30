@@ -27,7 +27,7 @@
       "app/learn/recognition/omniparser_provider.py": "5c411dc791fd0c3f6c749fd34fabc22564fad4d90c6e59e1221117be60eefd7a",
       "app/learn/recognition/omniparser_quality.py": "5488b85302b7d8cb4475c6a37dbe67b792837302544c6802b7ec975a29043ef5",
       "app/learn/recognition/uei/builtin_learning_projection.py": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
-      "app/learn/recognition/uei/omniparser_shadow_adapter.py": "a2ca4e4f74c25226d10b7852efa20f0c3e9fc9273603a2d43d94545a18d85883",
+      "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
       "app/learn/workflow_service.py": "46999fe5f5ad797467b832e3e36c542544e87c10f13c8aa0e906ea5d244fb1ab",
       "app/learn/workflow_worker.py": "de32a776dd91c8522bcf0512269d01144524786293d0078b324bd337fd91b2e1",
@@ -77,7 +77,7 @@
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "78348a9ac5f71ce3efddd98e6c6a9746e0616d29e6dc90c49a8fe8a5f25e3571",
+  "content_sha256": "63c444c9865d0086c071e6db198d9c8ce9730efa78a925da41fd3eb08583ebb4",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -112,7 +112,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "dffb1e62d4335279fd9c845ad1311803d8a6da10ce5c938304472570984d2aaa",
+    "file_sha256": "4ab9af41a89e31880686b167f7e5fe6d59e52d3e657533d8f9d341b8671f3e98",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
