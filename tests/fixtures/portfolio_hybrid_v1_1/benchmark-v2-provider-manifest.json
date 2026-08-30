@@ -123,6 +123,11 @@
         "file_sha256": "c123a09b48ae144b6869c2d1a0d6e87db81948f6212a8bb686ad863826ad4eeb",
         "relative_path": "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json",
         "role": "estimand"
+      },
+      {
+        "file_sha256": "a870a19d2c818112efba1a604f50f182bfebf0bb5d4e5e58a6f6f4c93b33bb70",
+        "relative_path": "configs/model_profiles/learn_mode_omniparser_v2.json",
+        "role": "omniparser_model_profile"
       }
     ],
     "release_code_refs": [
@@ -197,6 +202,16 @@
         "role": "windows_process_scope"
       },
       {
+        "file_sha256": "5c411dc791fd0c3f6c749fd34fabc22564fad4d90c6e59e1221117be60eefd7a",
+        "relative_path": "app/learn/recognition/omniparser_provider.py",
+        "role": "omniparser_provider"
+      },
+      {
+        "file_sha256": "5488b85302b7d8cb4475c6a37dbe67b792837302544c6802b7ec975a29043ef5",
+        "relative_path": "app/learn/recognition/omniparser_quality.py",
+        "role": "omniparser_quality"
+      },
+      {
         "file_sha256": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
         "relative_path": "app/learn/recognition/uei/builtin_learning_projection.py",
         "role": "builtin_learning_projection"
@@ -212,7 +227,7 @@
         "role": "uei_projections"
       },
       {
-        "file_sha256": "ac9fd16428a4cab6ef197fac125f25e0be8600152d42d09570d7f9e58414a50f",
+        "file_sha256": "4505c38f6cdfe8773d80e095b5d2659c75c7725d92b8aa9f7965ef1b1702ca42",
         "relative_path": "app/learn/workflow_service.py",
         "role": "workflow_service"
       },
@@ -232,9 +247,19 @@
         "role": "test_window"
       },
       {
+        "file_sha256": "85a5b0cfb07b1049f65530b44c8943582ecdac2749a6a9ea17963ec109142035",
+        "relative_path": "scripts/run_omniparser_learn_smoke.py",
+        "role": "omniparser_learn_smoke"
+      },
+      {
         "file_sha256": "fe2fe12bef59e6ab01b3295f97e11344e84062dd7d1d2275d02884b949f1d29f",
         "relative_path": "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
         "role": "benchmark_runner"
+      },
+      {
+        "file_sha256": "0e742ad76ef8185696f50bb270ada5cce726bc7e650e4dcb304f675236d625ab",
+        "relative_path": "scripts/run_uei_omniparser_shadow_worker.py",
+        "role": "omniparser_shadow_worker"
       }
     ]
   },
