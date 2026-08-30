@@ -1736,22 +1736,39 @@ def _validate_actual_group(
     screen_group = group.get("screen_group")
     case_refs = group.get("case_refs")
     group_corpus_ref = group.get("provider_corpus_ref")
-    corpus_lineage_fields = {
-        "relative_path",
-        "file_sha256",
-        "content_sha256",
-        "source_parent_ref",
-    }
-    corpus_lineage_matches = bool(
-        isinstance(group_corpus_ref, Mapping)
-        and isinstance(provider_corpus_ref, Mapping)
-        and corpus_lineage_fields.issubset(group_corpus_ref)
-        and corpus_lineage_fields.issubset(provider_corpus_ref)
-        and all(
-            group_corpus_ref.get(name) == provider_corpus_ref.get(name)
-            for name in corpus_lineage_fields
+    corpus_lineage_matches = False
+    if isinstance(group_corpus_ref, Mapping) and isinstance(
+        provider_corpus_ref, Mapping
+    ):
+        try:
+            sealed_group_corpus_ref = _sealed_mapping(
+                group_corpus_ref, name="actual screen group provider corpus ref"
+            )
+        except ValueError:
+            sealed_group_corpus_ref = {}
+        group_parent_ref = sealed_group_corpus_ref.get("source_parent_ref")
+        manifest_parent_ref = provider_corpus_ref.get("source_parent_ref")
+        corpus_lineage_matches = bool(
+            set(sealed_group_corpus_ref)
+            == {
+                "contract_version",
+                "relative_path",
+                "file_sha256",
+                "source_parent_ref",
+                "content_sha256",
+            }
+            and sealed_group_corpus_ref.get("contract_version")
+            == "benchmark_v2_provider_corpus_file_ref_v1"
+            and sealed_group_corpus_ref.get("relative_path")
+            == provider_corpus_ref.get("relative_path")
+            and sealed_group_corpus_ref.get("file_sha256")
+            == provider_corpus_ref.get("file_sha256")
+            and isinstance(group_parent_ref, Mapping)
+            and set(group_parent_ref) == {"content_sha256"}
+            and isinstance(manifest_parent_ref, Mapping)
+            and group_parent_ref.get("content_sha256")
+            == manifest_parent_ref.get("content_sha256")
         )
-    )
     if (
         not isinstance(screen_group, str)
         or not screen_group

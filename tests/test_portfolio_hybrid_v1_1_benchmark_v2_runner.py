@@ -259,8 +259,19 @@ class _DeterministicRuntime:
         )
         count = {"empty": 0, "two": 2, "missing": 11}.get(self.group_variant, 12)
         values = []
-        provider_corpus_ref = dict(provider_manifest["provider_corpus_ref"])
-        provider_corpus_ref["contract_version"] = "test_provider_corpus_file_ref_v1"
+        manifest_corpus_ref = provider_manifest["provider_corpus_ref"]
+        provider_corpus_ref = _sealed(
+            {
+                "contract_version": "benchmark_v2_provider_corpus_file_ref_v1",
+                "relative_path": manifest_corpus_ref["relative_path"],
+                "file_sha256": manifest_corpus_ref["file_sha256"],
+                "source_parent_ref": {
+                    "content_sha256": manifest_corpus_ref["source_parent_ref"][
+                        "content_sha256"
+                    ]
+                },
+            }
+        )
         for group_index in range(count):
             case_refs = [
                 {
@@ -1728,6 +1739,96 @@ def test_actual_rejects_incomplete_or_duplicate_regression_screen_groups(
     ]
     assert statuses == ["opened", "terminal"]
     assert runtime.owned_groups[0].closed is True
+    if variant == "missing":
+        actual_calls = [
+            call for call in runtime.calls if call[0] == "run_actual_screen_group"
+        ]
+        assert len(actual_calls) == 11
+
+
+def _production_actual_group_fixture() -> tuple[
+    dict[str, object], dict[str, object], dict[str, object]
+]:
+    attempt_ref = _sealed({"attempt_id": "attempt-production-ref"})
+    parent_ref = _sealed({"kind": "source-parent"})
+    manifest_corpus_ref = {
+        "contract_version": "test_provider_manifest_corpus_ref_v1",
+        "relative_path": "provider-corpus.v2.json",
+        "file_sha256": "a" * 64,
+        "content_sha256": "b" * 64,
+        "source_parent_ref": parent_ref,
+    }
+    group_corpus_ref = _sealed(
+        {
+            "contract_version": "benchmark_v2_provider_corpus_file_ref_v1",
+            "relative_path": "provider-corpus.v2.json",
+            "file_sha256": "a" * 64,
+            "source_parent_ref": {
+                "content_sha256": parent_ref["content_sha256"]
+            },
+        }
+    )
+    group = _sealed(
+        {
+            "screen_group": "screen-group-production-ref",
+            "partition": "regression",
+            "attempt_ref": attempt_ref,
+            "provider_corpus_ref": group_corpus_ref,
+            "case_refs": [
+                {
+                    "case_id": f"case-{index}",
+                    "case_content_sha256": hashlib.sha256(
+                        f"case-{index}".encode("utf-8")
+                    ).hexdigest(),
+                }
+                for index in range(5)
+            ],
+        }
+    )
+    return attempt_ref, manifest_corpus_ref, group
+
+
+def test_actual_group_accepts_production_corpus_file_ref_projection() -> None:
+    attempt_ref, manifest_corpus_ref, group = _production_actual_group_fixture()
+
+    validated, identity, case_ids = runner._validate_actual_group(
+        group,
+        attempt_ref=attempt_ref,
+        provider_corpus_ref=manifest_corpus_ref,
+    )
+
+    assert validated == group
+    assert identity == (group["screen_group"], group["content_sha256"])
+    assert case_ids == {f"case-{index}" for index in range(5)}
+
+
+@pytest.mark.parametrize("mutation", ["file_sha256", "parent_content_sha256"])
+def test_actual_group_rejects_corpus_file_ref_lineage_mismatch(mutation: str) -> None:
+    attempt_ref, manifest_corpus_ref, group = _production_actual_group_fixture()
+    group_body = {
+        name: deepcopy(value)
+        for name, value in group.items()
+        if name != "content_sha256"
+    }
+    group_corpus_ref = group_body["provider_corpus_ref"]
+    assert isinstance(group_corpus_ref, Mapping)
+    corpus_ref_body = {
+        name: deepcopy(value)
+        for name, value in group_corpus_ref.items()
+        if name != "content_sha256"
+    }
+    if mutation == "file_sha256":
+        corpus_ref_body["file_sha256"] = "c" * 64
+    else:
+        corpus_ref_body["source_parent_ref"] = {"content_sha256": "d" * 64}
+    group_body["provider_corpus_ref"] = _sealed(corpus_ref_body)
+
+    with pytest.raises(ValueError, match="12 unique regression screen groups"):
+        runner._validate_actual_group(
+            _sealed(group_body),
+            attempt_ref=attempt_ref,
+            provider_corpus_ref=manifest_corpus_ref,
+        )
 
 
 def test_actual_rejects_projection_that_does_not_bind_the_returned_group(
