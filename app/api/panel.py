@@ -97,9 +97,9 @@ from app.learn.workflow_service import (
 from app.learn.workflow_worker import (
     HYBRID_STAGE_HANDLER_REGISTRY,
     LearningStageWorkerError,
+    get_production_learning_stage_worker_registry,
     hybrid_registered_handler_chain_ready,
     hybrid_registered_lifecycle_status,
-    learning_stage_worker_registry,
 )
 from app.learn.workflow_state import (
     LEARNING_WORKFLOW_STAGES,
@@ -162,6 +162,7 @@ SCOPED_CAPTURE_ARTIFACT_DIR = ROOT_DIR / "artifacts" / "learning-runs" / "scoped
 continuous_task_memory_store = ReviewedInterfaceMemoryStore(project_root=ROOT_DIR)
 
 router = APIRouter(tags=["panel"])
+learning_stage_worker_registry = get_production_learning_stage_worker_registry()
 _PRODUCTION_PANEL_WORKFLOW_STORE = learning_workflow_run_store
 _PRODUCTION_PANEL_WORKER_REGISTRY = learning_stage_worker_registry
 

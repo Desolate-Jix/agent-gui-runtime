@@ -5571,6 +5571,196 @@ def test_worker_registry_rejects_cross_operation_status_lookup(tmp_path: Path) -
         )
 
 
+def test_learning_stage_spawn_does_not_reacquire_parent_workflow_store_lock(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "spawn_worker_import_probe.py"
+    script.write_text(
+        """from __future__ import annotations
+
+import multiprocessing
+import sys
+
+
+sys.path.insert(0, sys.argv[1])
+
+
+def child_probe() -> None:
+    if "app.learn.workflow_store" in sys.modules:
+        raise RuntimeError("workflow_store was imported before worker probe")
+    from app.learn import workflow_worker
+
+    if "app.learn.workflow_store" in sys.modules:
+        raise RuntimeError("worker import acquired the workflow store")
+    if workflow_worker._PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY is not None:
+        raise RuntimeError("worker import constructed the production Registry")
+    if workflow_worker.learning_stage_worker_registry is not None:
+        raise RuntimeError("worker import published the production Registry")
+
+
+if __name__ == "__main__":
+    from app.learn.workflow_store import learning_workflow_run_store
+
+    assert learning_workflow_run_store is not None
+    process = multiprocessing.get_context("spawn").Process(
+        target=child_probe,
+        name="learning-stage-store-lock-probe",
+    )
+    process.start()
+    process.join(timeout=30)
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=5)
+        raise SystemExit(124)
+    raise SystemExit(process.exitcode or 0)
+""",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH"] = str(
+        tmp_path / "learning-workflow-runs.json"
+    )
+    result = subprocess.run(
+        [sys.executable, str(script), str(Path(__file__).resolve().parents[1])],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_production_worker_registry_factory_constructs_once_under_concurrency(
+    monkeypatch,
+) -> None:
+    from app.learn import workflow_worker as worker_module
+
+    expected_root = object()
+    constructor_entered = Event()
+    release_constructor = Event()
+    calls: list[dict] = []
+    calls_lock = Lock()
+
+    class FakeRegistry:
+        def __init__(self, **kwargs) -> None:
+            with calls_lock:
+                calls.append(dict(kwargs))
+            constructor_entered.set()
+            if not release_constructor.wait(timeout=5):
+                raise RuntimeError("test Registry constructor release timed out")
+
+    monkeypatch.setattr(
+        worker_module,
+        "_PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY",
+        None,
+    )
+    monkeypatch.setattr(worker_module, "learning_stage_worker_registry", None)
+    monkeypatch.setattr(worker_module, "LearningStageWorkerRegistry", FakeRegistry)
+    monkeypatch.setattr(
+        worker_module,
+        "get_production_benchmark_worker_supervision_root",
+        lambda: expected_root,
+    )
+
+    results: list[object] = []
+    errors: list[BaseException] = []
+
+    def resolve_registry() -> None:
+        try:
+            results.append(
+                worker_module.get_production_learning_stage_worker_registry()
+            )
+        except BaseException as exc:  # pragma: no cover - 仅用于保留线程失败证据
+            errors.append(exc)
+
+    first = Thread(target=resolve_registry)
+    second = Thread(target=resolve_registry)
+    first.start()
+    assert constructor_entered.wait(timeout=5)
+    second.start()
+    time.sleep(0.1)
+    release_constructor.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert len(calls) == 1
+    assert calls[0]["benchmark_supervision_root"] is expected_root
+    assert len(results) == 2
+    assert results[0] is results[1]
+    assert worker_module.learning_stage_worker_registry is results[0]
+
+
+def test_production_benchmark_root_factory_constructs_once_under_concurrency(
+    monkeypatch,
+) -> None:
+    from app.learn import workflow_store as store_module
+    from app.learn import workflow_worker as worker_module
+
+    class FakeStore:
+        def get(self, run_id: str) -> dict:
+            return {"run_id": run_id}
+
+    digest_entered = Event()
+    release_digest = Event()
+    calls: list[dict] = []
+    calls_lock = Lock()
+
+    def root_digest(**kwargs) -> str:
+        with calls_lock:
+            calls.append(dict(kwargs))
+        digest_entered.set()
+        if not release_digest.wait(timeout=5):
+            raise RuntimeError("test root digest release timed out")
+        return "a" * 64
+
+    monkeypatch.setattr(worker_module, "_PRODUCTION_BENCHMARK_ROOT", None)
+    monkeypatch.setattr(worker_module, "_BENCHMARK_ROOTS", {})
+    monkeypatch.setattr(worker_module, "_benchmark_root_digest", root_digest)
+    monkeypatch.setattr(
+        store_module,
+        "learning_workflow_run_store",
+        FakeStore(),
+    )
+
+    results: list[object] = []
+    errors: list[BaseException] = []
+
+    def resolve_root() -> None:
+        try:
+            results.append(
+                worker_module.get_production_benchmark_worker_supervision_root()
+            )
+        except BaseException as exc:  # pragma: no cover - 仅用于保留线程失败证据
+            errors.append(exc)
+
+    first = Thread(target=resolve_root)
+    second = Thread(target=resolve_root)
+    first.start()
+    assert digest_entered.wait(timeout=5)
+    second.start()
+    time.sleep(0.1)
+    release_digest.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert errors == []
+    assert len(calls) == 1
+    assert len(results) == 2
+    assert results[0] is results[1]
+    assert worker_module._PRODUCTION_BENCHMARK_ROOT is results[0]
+    assert worker_module._BENCHMARK_ROOTS == {
+        id(results[0].root_capability): results[0]
+    }
+
+
 def test_real_spawn_worker_reports_invalid_payload_without_model_call(
     tmp_path: Path,
 ) -> None:

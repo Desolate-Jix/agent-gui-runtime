@@ -371,9 +371,10 @@ def get_production_learning_workflow_service_composition(
     from app.learn.workflow_store import learning_workflow_run_store
     from app.learn.workflow_worker import (
         get_production_benchmark_worker_supervision_root,
-        learning_stage_worker_registry,
+        get_production_learning_stage_worker_registry,
     )
 
+    learning_stage_worker_registry = get_production_learning_stage_worker_registry()
     composition = _validate_learning_workflow_service_composition(
         store=learning_workflow_run_store,
         worker_registry=learning_stage_worker_registry,

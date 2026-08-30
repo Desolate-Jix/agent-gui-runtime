@@ -196,6 +196,7 @@ _BENCHMARK_TEST_STORE_CAPABILITIES: dict[int, BenchmarkWorkerSupervisionRoot] = 
 _BENCHMARK_CONTROLLER_LOCAL = local()
 _BENCHMARK_INSPECTION_ABANDONED_POLICY = object()
 _PRODUCTION_BENCHMARK_ROOT: BenchmarkWorkerSupervisionRoot | None = None
+_PRODUCTION_BENCHMARK_ROOT_LOCK = RLock()
 
 
 def _benchmark_root_digest(
@@ -361,37 +362,41 @@ def get_production_benchmark_worker_supervision_root(
     global _PRODUCTION_BENCHMARK_ROOT
     if _PRODUCTION_BENCHMARK_ROOT is not None:
         return _PRODUCTION_BENCHMARK_ROOT
-    from app.learn.workflow_store import learning_workflow_run_store
-    journal_root = (_PROJECT_ROOT / "logs" / "workflow-workers").resolve()
-    capability = object()
-    store_capability = object()
-    identity_sha256 = _benchmark_root_digest(
-        authority_kind="production_workflow_service", journal_root=journal_root,
-        workflow_store=learning_workflow_run_store,
-        memory_store_token=content_sha256({
-            "authority_kind": "production_workflow_service",
-            "journal_root": str(journal_root).casefold(),
-            "store_class": (
-                f"{type(learning_workflow_run_store).__module__}."
-                f"{type(learning_workflow_run_store).__qualname__}"
-            ),
-        }),
-    )
-    authority = _BenchmarkStoreAuthority(
-        lambda run_id: learning_workflow_run_store.get(run_id),
-        store_capability,
-        identity_sha256,
-    )
-    root = BenchmarkWorkerSupervisionRoot(
-        authority_kind="production_workflow_service",
-        journal_root=journal_root,
-        root_capability=capability,
-        read_only_store_authority=authority,
-        store_identity_sha256=identity_sha256,
-    )
-    _BENCHMARK_ROOTS[id(capability)] = root
-    _PRODUCTION_BENCHMARK_ROOT = root
-    return root
+    with _PRODUCTION_BENCHMARK_ROOT_LOCK:
+        if _PRODUCTION_BENCHMARK_ROOT is None:
+            from app.learn.workflow_store import learning_workflow_run_store
+
+            journal_root = (_PROJECT_ROOT / "logs" / "workflow-workers").resolve()
+            capability = object()
+            store_capability = object()
+            identity_sha256 = _benchmark_root_digest(
+                authority_kind="production_workflow_service",
+                journal_root=journal_root,
+                workflow_store=learning_workflow_run_store,
+                memory_store_token=content_sha256({
+                    "authority_kind": "production_workflow_service",
+                    "journal_root": str(journal_root).casefold(),
+                    "store_class": (
+                        f"{type(learning_workflow_run_store).__module__}."
+                        f"{type(learning_workflow_run_store).__qualname__}"
+                    ),
+                }),
+            )
+            authority = _BenchmarkStoreAuthority(
+                lambda run_id: learning_workflow_run_store.get(run_id),
+                store_capability,
+                identity_sha256,
+            )
+            root = BenchmarkWorkerSupervisionRoot(
+                authority_kind="production_workflow_service",
+                journal_root=journal_root,
+                root_capability=capability,
+                read_only_store_authority=authority,
+                store_identity_sha256=identity_sha256,
+            )
+            _BENCHMARK_ROOTS[id(capability)] = root
+            _PRODUCTION_BENCHMARK_ROOT = root
+    return _PRODUCTION_BENCHMARK_ROOT
 
 
 def _validate_benchmark_supervision_root(
@@ -11916,7 +11921,28 @@ def _is_immutable_ref(value: object) -> bool:
     )
 
 
-learning_stage_worker_registry = LearningStageWorkerRegistry(
-    result_root=Path(__file__).resolve().parents[2] / "logs" / "workflow-workers",
-    benchmark_supervision_root=get_production_benchmark_worker_supervision_root(),
-)
+_PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY: LearningStageWorkerRegistry | None = None
+_PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY_LOCK = RLock()
+learning_stage_worker_registry: LearningStageWorkerRegistry | None = None
+
+
+def get_production_learning_stage_worker_registry() -> LearningStageWorkerRegistry:
+    """仅在父端服务组合真正使用时创建 production Registry。"""
+
+    global _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY
+    global learning_stage_worker_registry
+    if _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY is None:
+        with _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY_LOCK:
+            if _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY is None:
+                _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY = (
+                    LearningStageWorkerRegistry(
+                        result_root=Path(__file__).resolve().parents[2]
+                        / "logs"
+                        / "workflow-workers",
+                        benchmark_supervision_root=(
+                            get_production_benchmark_worker_supervision_root()
+                        ),
+                    )
+                )
+    learning_stage_worker_registry = _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY
+    return _PRODUCTION_LEARNING_STAGE_WORKER_REGISTRY
