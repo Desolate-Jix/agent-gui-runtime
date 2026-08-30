@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterator, Mapping, Protocol
 from app.core.ocr_service import ocr_service
 from app.learn.hybrid import benchmark_v2_actual
 from app.learn.hybrid import benchmark_v2_dispatch_attestation
+from app.learn.hybrid import benchmark_v2_window_owner
 from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes,
     content_sha256,
@@ -2333,43 +2334,60 @@ class _BenchmarkV2ProductionRuntime:
             )
 
         if actual_attestations:
-            service_terminal_parent = (
-                actual_attestations[0]
-                if len(actual_attestations) == 1
-                else _runtime_resource_ref(
-                    "actual_group_stable_zero_attestations",
-                    {
-                        "group_attestation_refs": [
-                            _content_ref(item, name="actual group attestation")
-                            for item in actual_attestations
-                        ]
-                    },
+            if len(actual_attestations) == 1:
+                service_terminal_ref = _cleanup_parent_ref(
+                    actual_attestations[0],
+                    parent_kind="actual_operations_stable_zero",
+                    name="actual operations stable-zero attestation",
                 )
-            )
+            else:
+                service_terminal_ref = _cleanup_parent_ref(
+                    _runtime_resource_ref(
+                        "actual_group_stable_zero_attestations",
+                        {
+                            "group_attestation_refs": [
+                                _content_ref(item, name="actual group attestation")
+                                for item in actual_attestations
+                            ]
+                        },
+                    ),
+                    parent_kind="actual_operations_stable_zero_aggregate",
+                    name="actual operations stable-zero aggregate",
+                )
             provider_cleanup_refs = [
-                _content_ref(
-                    terminal["cleanup_refs"]["provider_cleanup_ref"],
-                    name="actual provider cleanup ref",
+                _cleanup_parent_ref(
+                    terminal["cleanup_refs"][name],
+                    parent_kind=parent_kind,
+                    name=f"actual {name}",
                 )
                 for terminal in actual_terminals
+                for name, parent_kind in (
+                    ("worker_cleanup_ref", "worker_cleanup"),
+                    ("provider_cleanup_ref", "provider_cleanup"),
+                )
             ]
         else:
-            service_terminal_parent = service_terminal
+            service_terminal_ref = (
+                _cleanup_parent_ref(
+                    service_terminal,
+                    parent_kind="workflow_service_terminal",
+                    name="workflow service terminal result",
+                )
+                if isinstance(service_terminal, Mapping)
+                else None
+            )
             provider_cleanup_refs = _provider_cleanup_refs(service_terminal)
         counts = self.resource_counts()
         receipt = compose_benchmark_v2_attempt_cleanup_receipt(
             attempt_ref=attempt_ref,
             reason=normalized_reason,
-            service_terminal_ref=(
-                _content_ref(
-                    service_terminal_parent,
-                    name="workflow service terminal result",
-                )
-                if isinstance(service_terminal_parent, Mapping)
-                else None
-            ),
+            service_terminal_ref=service_terminal_ref,
             window_cleanup_ref=(
-                _content_ref(window_cleanup, name="window cleanup receipt")
+                _cleanup_parent_ref(
+                    window_cleanup,
+                    parent_kind="window_cleanup",
+                    name="window cleanup receipt",
+                )
                 if isinstance(window_cleanup, Mapping)
                 else None
             ),
@@ -3726,6 +3744,299 @@ def _event_ref(event: Mapping[str, object]) -> dict[str, Any]:
 
 def _content_ref(value: Mapping[str, object], *, name: str) -> dict[str, Any]:
     return _sealed_parent(value, name=name)
+
+
+def _cleanup_parent_ref(
+    value: Mapping[str, object], *, parent_kind: str, name: str
+) -> dict[str, Any]:
+    if parent_kind not in {
+        "workflow_service_terminal",
+        "window_cleanup",
+        "worker_cleanup",
+        "provider_cleanup",
+        "actual_operations_stable_zero",
+        "actual_operations_stable_zero_aggregate",
+    }:
+        raise ValueError("benchmark cleanup parent kind is invalid")
+    producer = _sealed_parent(value, name=name)
+    inferred_kind, producer_contract = _validate_cleanup_parent_semantics(
+        producer, name=name
+    )
+    if inferred_kind != parent_kind:
+        raise ValueError("benchmark cleanup parent kind differs from producer contract")
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_cleanup_parent_ref_v1",
+            "parent_kind": inferred_kind,
+            "producer_contract_version": producer_contract,
+            "producer_content_sha256": producer["content_sha256"],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _validate_cleanup_parent_semantics(
+    producer: Mapping[str, object], *, name: str
+) -> tuple[str, str]:
+    if producer.get("artifact_is_authorization") is True or producer.get(
+        "execute_binding_enabled"
+    ) is True:
+        raise ValueError(f"{name} cannot authorize execution")
+    contract = producer.get("contract_version")
+    if contract == benchmark_v2_window_owner.CLEANUP_CONTRACT:
+        benchmark_v2_window_owner._validate_event_payload(
+            "cleanup_verified", producer
+        )
+        return "window_cleanup", str(contract)
+    if contract == "benchmark_v2_actual_operations_stable_zero_v1":
+        validate_benchmark_v2_actual_operations_stable_zero(producer)
+        return "actual_operations_stable_zero", str(contract)
+    if contract == "benchmark_v2_runtime_resource_ref_v1":
+        fields = {
+            "contract_version",
+            "resource_kind",
+            "value",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        body = producer.get("value")
+        if (
+            set(producer) != fields
+            or producer.get("resource_kind")
+            != "actual_group_stable_zero_attestations"
+            or producer.get("artifact_is_authorization") is not False
+            or producer.get("execute_binding_enabled") is not False
+            or not isinstance(body, Mapping)
+            or set(body) != {"group_attestation_refs"}
+            or not isinstance(body.get("group_attestation_refs"), list)
+            or len(body["group_attestation_refs"]) < 2
+        ):
+            raise ValueError("actual operations stable-zero aggregate is invalid")
+        for item in body["group_attestation_refs"]:
+            validate_benchmark_v2_actual_operations_stable_zero(item)
+        return "actual_operations_stable_zero_aggregate", str(contract)
+    if contract == "benchmark_v2_hybrid_worker_cleanup_ref_v1":
+        fields = {
+            "contract_version",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "backend_compute_termination",
+            "model_service_compute_termination",
+            "cancellation_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        if (
+            set(producer) != fields
+            or producer.get("backend_compute_termination")
+            not in {"not_running", "terminated"}
+            or producer.get("model_service_compute_termination")
+            not in {"request_not_active", "terminated"}
+            or producer.get("artifact_is_authorization") is not False
+            or producer.get("execute_binding_enabled") is not False
+            or not _cleanup_identity_fields_are_nonempty(producer)
+            or not _is_exact_sha_ref(producer.get("cancellation_ref"))
+        ):
+            raise ValueError("Hybrid worker cleanup receipt is invalid")
+        return "worker_cleanup", str(contract)
+    if contract == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1":
+        fields = {
+            "contract_version",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "worker_status",
+            "runtime_attached",
+            "result_available",
+            "authoritative_worker_record_sha256",
+            "provider_cleanup_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        if (
+            set(producer) != fields
+            or producer.get("worker_status") != "completed"
+            or producer.get("runtime_attached") is not False
+            or producer.get("result_available") is not True
+            or producer.get("artifact_is_authorization") is not False
+            or producer.get("execute_binding_enabled") is not False
+            or not _cleanup_identity_fields_are_nonempty(producer)
+            or not _is_sha(producer.get("authoritative_worker_record_sha256"))
+            or not _is_exact_sha_ref(producer.get("provider_cleanup_ref"))
+        ):
+            raise ValueError("completed Hybrid worker cleanup receipt is invalid")
+        return "worker_cleanup", str(contract)
+    if contract == "benchmark_worker_cleanup_receipt_v1":
+        fields = {
+            "contract_version",
+            "outcome",
+            "operation_anchor_ref",
+            "reservation_ref",
+            "supervision_ref",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "process_identity",
+            "assignment_proven_ref",
+            "finalization_intent_ref",
+            "exact_handle_observation_refs",
+            "job_absence_observation_ref",
+            "worker_absence_observation_ref",
+            "supervisor_absence_observation_ref",
+            "reservation_abort_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        outcome = producer.get("outcome")
+        if (
+            set(producer) != fields
+            or outcome not in {"verified_not_launched", "verified_exact_worker_exited"}
+            or producer.get("artifact_is_authorization") is not False
+            or producer.get("execute_binding_enabled") is not False
+            or not all(
+                isinstance(producer.get(field), str) and producer.get(field)
+                for field in ("run_id", "stage", "operation_id", "worker_id")
+            )
+            or not _is_exact_sha_ref(producer.get("operation_anchor_ref"))
+            or not _is_exact_sha_ref(producer.get("reservation_ref"))
+        ):
+            raise ValueError("incumbent worker cleanup receipt is invalid")
+        if outcome == "verified_not_launched":
+            absent_fields = (
+                "supervision_ref",
+                "process_identity",
+                "assignment_proven_ref",
+                "finalization_intent_ref",
+                "exact_handle_observation_refs",
+                "job_absence_observation_ref",
+                "worker_absence_observation_ref",
+                "supervisor_absence_observation_ref",
+            )
+            if any(producer.get(field) is not None for field in absent_fields) or not (
+                _is_exact_sha_ref(producer.get("reservation_abort_ref"))
+            ):
+                raise ValueError("incumbent not-launched cleanup receipt is invalid")
+        elif (
+            not _is_exact_sha_ref(producer.get("supervision_ref"))
+            or not isinstance(producer.get("process_identity"), Mapping)
+            or not _is_exact_sha_ref(producer.get("assignment_proven_ref"))
+            or not _is_exact_sha_ref(producer.get("finalization_intent_ref"))
+            or not isinstance(producer.get("exact_handle_observation_refs"), Mapping)
+            or not _is_exact_sha_ref(producer.get("job_absence_observation_ref"))
+            or not _is_exact_sha_ref(producer.get("worker_absence_observation_ref"))
+            or producer.get("reservation_abort_ref") is not None
+        ):
+            raise ValueError("incumbent exited worker cleanup receipt is invalid")
+        return "worker_cleanup", str(contract)
+    if contract == "benchmark_provider_cleanup_ref_v1":
+        fields = {
+            "contract_version",
+            "status",
+            "outcome",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "reservation_ref",
+            "acquisition_owner_ref",
+            "acquisition_intent_ref",
+            "runtime_owner_ref",
+            "cleanup_receipt_ref",
+            "content_sha256",
+        }
+        if (
+            set(producer) != fields
+            or producer.get("status") != "cleanup_verified"
+            or producer.get("outcome")
+            not in {"verified_not_acquired", "verified_exact_process_exited"}
+            or not all(
+                isinstance(producer.get(field), str) and producer.get(field)
+                for field in (
+                    "authority_kind",
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                )
+            )
+            or any(
+                not _is_exact_sha_ref(producer.get(field))
+                for field in (
+                    "reservation_ref",
+                    "acquisition_owner_ref",
+                    "acquisition_intent_ref",
+                    "runtime_owner_ref",
+                    "cleanup_receipt_ref",
+                )
+            )
+        ):
+            raise ValueError("provider cleanup receipt is invalid")
+        return "provider_cleanup", str(contract)
+    terminal_fields = {
+        "status",
+        "operation_ref",
+        "provider_dispatch_context_projection",
+        "cleanup_refs",
+        "content_sha256",
+    }
+    if contract is None and set(producer) == terminal_fields:
+        _validate_service_terminal(producer)
+        return (
+            "workflow_service_terminal",
+            "benchmark_v2_workflow_service_terminal_result_v1",
+        )
+    raise ValueError(f"{name} producer contract is unsupported")
+
+
+def _is_exact_sha_ref(value: object) -> bool:
+    digest = value.get("content_sha256") if isinstance(value, Mapping) else None
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {"content_sha256"}
+        and isinstance(digest, str)
+        and len(digest) == 64
+        and all(character in "0123456789abcdef" for character in digest)
+    )
+
+
+def _is_sha(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _cleanup_identity_fields_are_nonempty(value: Mapping[str, object]) -> bool:
+    return all(
+        isinstance(value.get(field), str) and value.get(field)
+        for field in (
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+        )
+    )
 
 
 def _service_operation_resource(
@@ -5550,12 +5861,21 @@ def _provider_cleanup_refs(
     }:
         raise ValueError("workflow service terminal cleanup lineage is unavailable")
     result: list[dict[str, Any]] = []
-    for name in ("worker_cleanup_ref", "provider_cleanup_ref"):
+    for name, parent_kind in (
+        ("worker_cleanup_ref", "worker_cleanup"),
+        ("provider_cleanup_ref", "provider_cleanup"),
+    ):
         value = cleanup.get(name)
         if value is not None:
             if not isinstance(value, Mapping):
                 raise ValueError("workflow service terminal cleanup proof is unavailable")
-            result.append(_sealed_parent(value, name=name))
+            result.append(
+                _cleanup_parent_ref(
+                    value,
+                    parent_kind=parent_kind,
+                    name=name,
+                )
+            )
     return result
 
 

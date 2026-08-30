@@ -17,6 +17,112 @@ def _sealed(value: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _native_window_cleanup_with_large_create_time() -> dict[str, object]:
+    return _sealed(
+        {
+            "contract_version": "portfolio_hybrid_benchmark_v2_window_cleanup_v1",
+            "owner_id": "benchmark-v2-owner-regression",
+            "reason": "benchmark_v2_cleanup",
+            "exact_hwnd": 18745282,
+            "process_identity": {
+                "pid": 61844,
+                "create_time_ns": 1788061836336039424,
+            },
+            "cleanup_subject_kind": "ready_window",
+            "finalization_intent_sha256": "1" * 64,
+            "process_event_sha256": "2" * 64,
+            "ready_event_sha256": "3" * 64,
+            "publication_content_sha256": "4" * 64,
+            "cleanup_status": "verified",
+            "shutdown_event_name": "benchmark-v2-shutdown-regression",
+            "shutdown_event_signaled": True,
+            "shutdown_event_error_code": 0,
+            "shutdown_event_handle_closed": True,
+            "enum_windows_exact_hwnd_absent": True,
+            "matching_owned_windows_after": [],
+            "member_pids_after": [],
+            "stable_zero_observations": 3,
+            "scope_absent_after_owner_close": True,
+            "process_handle_closed": True,
+            "job_handle_closed": True,
+            "active_listeners_after": [],
+            "listener_or_lease_residue": [],
+            "outer_owner_python_finally_observed": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _actual_stable_zero_from_existing_service_helper(
+    *, suffix: str
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import (
+        _ActualService,
+        _actual_operation,
+    )
+
+    binding = {
+        "stage": "screen_understanding",
+        "window_binding_ref": {
+            "id": f"window-{suffix}",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": f"capture-{suffix}",
+            "content_sha256": "b" * 64,
+        },
+    }
+    operations = []
+    for index in range(6):
+        operation_id = (
+            f"hybrid-{suffix}" if index == 0 else f"incumbent-{suffix}-{index}"
+        )
+        operations.append(
+            _actual_operation(
+                mode="hybrid_v1_1" if index == 0 else "incumbent_qwen_only",
+                operation_id=operation_id,
+                request_ref={
+                    "id": f"case-{suffix}-{index}",
+                    "content_sha256": f"{index + 1:x}" * 64,
+                },
+                binding={
+                    **binding,
+                    "run_id": f"run-actual-parent-{suffix}-{index}",
+                },
+                revision=index + 1,
+            )
+        )
+    service = _ActualService([])
+    terminals = [
+        service.cancel_operation(operation_ref=operation) for operation in operations
+    ]
+    attestation = service.attest_actual_operations_stable_zero(
+        operation_refs=[terminal["operation_ref"] for terminal in terminals]
+    )
+    return attestation, terminals
+
+
+@pytest.fixture(autouse=True)
+def _use_producer_complete_window_cleanup_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _Windows
+
+    original_close = _Windows.close
+
+    def close(
+        windows: object, *, journal_path: Path, reason: str
+    ) -> dict[str, object]:
+        original_close(windows, journal_path=journal_path, reason=reason)
+        receipt = _native_window_cleanup_with_large_create_time()
+        receipt["reason"] = reason
+        receipt["content_sha256"] = content_sha256(receipt)
+        return receipt
+
+    monkeypatch.setattr(_Windows, "close", close)
+
+
 def _identity(identifier: str, digit: str) -> dict[str, str]:
     return {"id": identifier, "content_sha256": digit * 64}
 
@@ -90,12 +196,17 @@ class _ProbeService:
         worker_cleanup = _sealed(
             {
                 "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
-                "status": "closed",
+                "run_id": operation["run_id"],
+                "stage": operation["stage"],
+                "operation_id": operation["operation_id"],
                 "worker_id": worker["worker_id"],
                 "model_request_id": worker["model_request_id"],
                 "payload_sha256": worker["payload_sha256"],
                 "backend_compute_termination": "terminated",
                 "model_service_compute_termination": "terminated",
+                "cancellation_ref": {"content_sha256": "9" * 64},
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
             }
         )
         receipt = self.dispatch_receipt
@@ -907,6 +1018,259 @@ def test_cleanup_receipt_requires_exact_stable_zero_counts() -> None:
             provider_cleanup_refs=receipt["provider_cleanup_refs"],
             resource_counts=stale,
         )
+
+
+def test_cleanup_projects_native_window_receipt_and_replays_terminal_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        read_benchmark_v2_attempt_journal,
+    )
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    service = _ProbeService()
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+    attempt = _sealed(
+        {"attempt_id": "attempt-native-window-cleanup", "partition": "regression"}
+    )
+    runtime.begin_probe(
+        provider_id="omni",
+        probe_kind="cancel",
+        provider_manifest=manifest,
+        attempt_ref=attempt,
+        attempt_dir=(tmp_path / "attempt-native-window-cleanup").resolve(),
+    )
+    native_cleanup = _native_window_cleanup_with_large_create_time()
+    original_close = windows.close
+
+    def close_with_native_receipt(
+        *, journal_path: Path, reason: str
+    ) -> dict[str, object]:
+        original_close(journal_path=journal_path, reason=reason)
+        return deepcopy(native_cleanup)
+
+    monkeypatch.setattr(runtime_module, "close_owned_window", close_with_native_receipt)
+
+    first = runtime.cleanup_attempt(attempt=attempt, reason="native_window_cleanup")
+    second = runtime.cleanup_attempt(attempt=attempt, reason="native_window_cleanup")
+
+    assert first == second
+    assert first["cleanup_status"] == "stable_zero"
+    assert first["window_cleanup_ref"] == {
+        "contract_version": "benchmark_v2_cleanup_parent_ref_v1",
+        "parent_kind": "window_cleanup",
+        "producer_contract_version": (
+            "portfolio_hybrid_benchmark_v2_window_cleanup_v1"
+        ),
+        "producer_content_sha256": native_cleanup["content_sha256"],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "content_sha256": first["window_cleanup_ref"]["content_sha256"],
+    }
+    assert "create_time_ns" not in json.dumps(first, sort_keys=True)
+    assert first["service_terminal_ref"]["parent_kind"] == (
+        "workflow_service_terminal"
+    )
+    assert [
+        parent["parent_kind"] for parent in first["provider_cleanup_refs"]
+    ] == ["worker_cleanup"]
+    assert windows.close_calls == 1
+    assert service.cancel_calls == 1
+    assert runtime.resource_counts() == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+    events = read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt,
+        ),
+        attempt_ref=attempt,
+    )
+    assert [event["event_kind"] for event in events].count("attempt_terminal") == 1
+
+
+def test_cleanup_rejects_tampered_native_window_receipt_before_projection() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    tampered = _native_window_cleanup_with_large_create_time()
+    tampered["reason"] = "tampered"
+
+    with pytest.raises(ValueError, match="window cleanup receipt content SHA differs"):
+        runtime_module._cleanup_parent_ref(
+            tampered,
+            parent_kind="window_cleanup",
+            name="window cleanup receipt",
+        )
+
+
+def test_cleanup_parent_projection_rejects_wrong_contract_and_cross_kind() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    wrong_contract = _sealed(
+        {
+            "contract_version": "benchmark_v2_wrong_cleanup_v1",
+            "cleanup_status": "verified",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    with pytest.raises(ValueError, match="contract|unsupported"):
+        runtime_module._cleanup_parent_ref(
+            wrong_contract,
+            parent_kind="window_cleanup",
+            name="wrong cleanup receipt",
+        )
+
+    window_cleanup = _native_window_cleanup_with_large_create_time()
+    with pytest.raises(ValueError, match="kind"):
+        runtime_module._cleanup_parent_ref(
+            window_cleanup,
+            parent_kind="provider_cleanup",
+            name="cross-kind cleanup receipt",
+        )
+
+
+def test_cleanup_parent_projection_rejects_authorizing_producer() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    authorizing = _native_window_cleanup_with_large_create_time()
+    authorizing["artifact_is_authorization"] = True
+    authorizing["content_sha256"] = content_sha256(authorizing)
+
+    with pytest.raises(ValueError, match="authorization|authorize"):
+        runtime_module._cleanup_parent_ref(
+            authorizing,
+            parent_kind="window_cleanup",
+            name="authorizing window cleanup receipt",
+        )
+
+
+def test_cleanup_parent_projection_accepts_production_actual_provider_and_aggregate() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    first_attestation, first_terminals = (
+        _actual_stable_zero_from_existing_service_helper(suffix="first")
+    )
+    second_attestation, _ = _actual_stable_zero_from_existing_service_helper(
+        suffix="second"
+    )
+
+    actual_parent = runtime_module._cleanup_parent_ref(
+        first_attestation,
+        parent_kind="actual_operations_stable_zero",
+        name="actual operations stable-zero attestation",
+    )
+    provider_parent = runtime_module._cleanup_parent_ref(
+        first_terminals[0]["cleanup_refs"]["provider_cleanup_ref"],
+        parent_kind="provider_cleanup",
+        name="actual provider cleanup",
+    )
+    aggregate = runtime_module._runtime_resource_ref(
+        "actual_group_stable_zero_attestations",
+        {
+            "group_attestation_refs": [
+                first_attestation,
+                second_attestation,
+            ]
+        },
+    )
+    aggregate_parent = runtime_module._cleanup_parent_ref(
+        aggregate,
+        parent_kind="actual_operations_stable_zero_aggregate",
+        name="actual operations stable-zero aggregate",
+    )
+
+    assert actual_parent["producer_contract_version"] == (
+        "benchmark_v2_actual_operations_stable_zero_v1"
+    )
+    assert provider_parent["producer_contract_version"] == (
+        "benchmark_provider_cleanup_ref_v1"
+    )
+    assert aggregate_parent["parent_kind"] == (
+        "actual_operations_stable_zero_aggregate"
+    )
+    assert all(
+        parent["artifact_is_authorization"] is False
+        and parent["execute_binding_enabled"] is False
+        for parent in (actual_parent, provider_parent, aggregate_parent)
+    )
+
+
+def test_cleanup_parent_projection_accepts_each_production_worker_contract() -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    _, terminals = _actual_stable_zero_from_existing_service_helper(
+        suffix="workers"
+    )
+    cancelled = terminals[0]["cleanup_refs"]["worker_cleanup_ref"]
+    provider_cleanup = terminals[0]["cleanup_refs"]["provider_cleanup_ref"]
+    completed = _sealed(
+        {
+            "contract_version": (
+                "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+            ),
+            "run_id": "run-completed",
+            "stage": "screen_understanding",
+            "operation_id": "operation-completed",
+            "worker_id": "worker-completed",
+            "model_request_id": "request-completed",
+            "payload_sha256": "1" * 64,
+            "worker_status": "completed",
+            "runtime_attached": False,
+            "result_available": True,
+            "authoritative_worker_record_sha256": "2" * 64,
+            "provider_cleanup_ref": {
+                "content_sha256": provider_cleanup["content_sha256"]
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    cancelled_reservation = _sealed(
+        {
+            "run_id": "run-incumbent",
+            "stage": "screen_understanding",
+            "operation_id": "operation-incumbent",
+            "worker_id": "worker-incumbent",
+        }
+    )
+    incumbent = workflow_worker._compose_benchmark_not_launched_receipt(
+        cancelled_reservation=cancelled_reservation,
+        operation_anchor={"anchor_identity_sha256": "3" * 64},
+        observation={"content_sha256": "4" * 64},
+    )
+
+    parents = [
+        runtime_module._cleanup_parent_ref(
+            producer,
+            parent_kind="worker_cleanup",
+            name=name,
+        )
+        for producer, name in (
+            (cancelled, "cancelled Hybrid worker cleanup"),
+            (completed, "completed Hybrid worker cleanup"),
+            (incumbent, "incumbent worker cleanup"),
+        )
+    ]
+
+    assert [parent["producer_contract_version"] for parent in parents] == [
+        "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+        "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1",
+        "benchmark_worker_cleanup_receipt_v1",
+    ]
+    assert all(parent["parent_kind"] == "worker_cleanup" for parent in parents)
 
 
 @pytest.mark.parametrize(
