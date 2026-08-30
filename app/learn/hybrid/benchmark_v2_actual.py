@@ -156,23 +156,24 @@ def run_screen_group(
                 )
             except BaseException as exc:
                 cleanup_errors.append(exc)
-            try:
-                lifecycle_ref = _sealed_parent(
-                    _call_port(
-                        lifecycle,
-                        "stable_zero",
-                        provider_group=deepcopy(group),
-                        window_binding=deepcopy(binding),
-                        execution_refs=[
-                            _execution_ref(step["operation_ref"])
-                            for step in terminal_steps
-                        ],
-                        window_close_ref=deepcopy(close_ref),
-                    ),
-                    "benchmark lifecycle ref",
-                )
-            except BaseException as exc:
-                cleanup_errors.append(exc)
+            if len(terminal_steps) == 6 and close_ref is not None:
+                try:
+                    lifecycle_ref = _sealed_parent(
+                        _call_port(
+                            lifecycle,
+                            "stable_zero",
+                            provider_group=deepcopy(group),
+                            window_binding=deepcopy(binding),
+                            execution_refs=[
+                                _execution_ref(step["operation_ref"])
+                                for step in terminal_steps
+                            ],
+                            window_close_ref=deepcopy(close_ref),
+                        ),
+                        "benchmark lifecycle ref",
+                    )
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
 
     if primary_error is not None:
         for cleanup_error in cleanup_errors:

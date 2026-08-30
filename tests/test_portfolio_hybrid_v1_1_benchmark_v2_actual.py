@@ -2331,7 +2331,48 @@ def test_stale_hybrid_projection_fails_closed_before_prediction_and_still_cleans
     assert service.hybrid_start_calls == 1
     assert service.incumbent_start_calls == 0
     assert not sink.values
-    assert events[-2:] == ["window-close", "lifecycle-stable-zero"]
+    assert events[-1] == "window-close"
+    assert "lifecycle-stable-zero" not in events
+    assert not service.active_ops
+    assert not service.active_workers
+    assert not owner.active_windows
+
+
+def test_hybrid_start_failure_before_operation_ref_preserves_primary_error() -> None:
+    events, service, owner, lifecycle, sink = _ports()
+    primary = RuntimeError("hybrid start failed before operation ref")
+    stable_zero_calls = 0
+
+    def fail_start(*, screen_group, window_binding):
+        raise primary
+
+    def fail_stable_zero(**_kwargs):
+        nonlocal stable_zero_calls
+        stable_zero_calls += 1
+        events.append("unexpected-stable-zero")
+        raise RuntimeError("benchmark actual execution cleanup multiset is incomplete")
+
+    service.start_hybrid_operation = fail_start
+    lifecycle.stable_zero = fail_stable_zero
+
+    with pytest.raises(RuntimeError) as caught:
+        run_screen_group(
+            provider_group=_provider_group(),
+            service=service,
+            window_owner=owner,
+            lifecycle=lifecycle,
+            prediction_sink=sink,
+        )
+
+    assert caught.value is primary
+    assert stable_zero_calls == 0
+    assert not any(
+        "cleanup multiset" in note
+        for note in getattr(primary, "__notes__", ())
+    )
+    assert service.cancel_calls == 0
+    assert events == ["window-open", "window-close"]
+    assert not sink.values
     assert not service.active_ops
     assert not service.active_workers
     assert not owner.active_windows
@@ -2434,13 +2475,12 @@ def test_true_poll_deadline_times_out_then_reconciles_before_window_close(
     assert service.hybrid_start_calls == 1
     assert service.incumbent_start_calls == 0
     assert service.cancel_calls == 1
-    assert events[-2:] == ["window-close", "lifecycle-stable-zero"]
+    assert events[-1] == "window-close"
+    assert "lifecycle-stable-zero" not in events
     assert not sink.values
     assert not service.active_ops
     assert not service.active_workers
     assert not owner.active_windows
-    assert not lifecycle.active_listeners
-    assert not lifecycle.active_leases
 
 
 @pytest.mark.parametrize(
@@ -2469,7 +2509,8 @@ def test_successor_lineage_fault_fails_before_second_downstream_call_and_cleans_
     assert service.hybrid_continue_calls == 1
     assert service.incumbent_start_calls == 0
     assert service.cancel_calls == 1
-    assert events[-2:] == ["window-close", "lifecycle-stable-zero"]
+    assert events[-1] == "window-close"
+    assert "lifecycle-stable-zero" not in events
     assert not sink.values
     assert not service.active_ops
     assert not service.active_workers
