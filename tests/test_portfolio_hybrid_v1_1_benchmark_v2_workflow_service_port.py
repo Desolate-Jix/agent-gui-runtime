@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import ast
+from datetime import datetime, timedelta
 import hashlib
 import inspect
 import json
@@ -1176,6 +1177,7 @@ class _S3Registry:
         self.adopt_calls = 0
         self.read_calls = 0
         self.cancel_calls = 0
+        self.materialize_cleanup_calls = 0
         self.active_resources = 0
 
     @property
@@ -1325,6 +1327,30 @@ class _S3Registry:
             "benchmark_provider_cleanup_ref": deepcopy(provider_cleanup_ref),
         }
 
+    def materialize_completed_hybrid_provider_cleanup(
+        self, **kwargs
+    ) -> dict[str, object]:
+        self.materialize_cleanup_calls += 1
+        current = self._owned(kwargs)
+        if (
+            current["status"] != "completed"
+            or current["runtime_attached"] is not False
+            or current["result_available"] is not True
+        ):
+            raise AssertionError("completed Hybrid cleanup was materialized too early")
+        context_ref = kwargs.get("dispatch_context_ref")
+        if (
+            not isinstance(context_ref, dict)
+            or context_ref.get("provider") != "omni"
+            or not isinstance(context_ref.get("dispatch_context"), dict)
+        ):
+            raise AssertionError("completed Hybrid cleanup lost its service context")
+        projection = current.get("benchmark_provider_cleanup_ref")
+        if not isinstance(projection, dict):
+            projection = _s3_provider_cleanup_ref(current)
+            current["benchmark_provider_cleanup_ref"] = projection
+        return deepcopy(projection)
+
     def complete_current(self, response: dict[str, object]) -> None:
         current = self.current
         if current is None:
@@ -1343,6 +1369,28 @@ class _S3Registry:
             if name in kwargs and current[name] != kwargs[name]:
                 raise AssertionError(f"hybrid worker ownership differs: {name}")
         return current
+
+
+def _s3_provider_cleanup_ref(worker: dict[str, object]) -> dict[str, object]:
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_exact_process_exited",
+            "authority_kind": "benchmark_v2_workflow_service_dispatch_cleanup",
+            "run_id": worker["run_id"],
+            "stage": worker["stage"],
+            "operation_id": worker["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "reservation_ref": {"content_sha256": "a" * 64},
+            "acquisition_owner_ref": {"content_sha256": "b" * 64},
+            "acquisition_intent_ref": {"content_sha256": "c" * 64},
+            "runtime_owner_ref": {"content_sha256": "d" * 64},
+            "cleanup_receipt_ref": {"content_sha256": "e" * 64},
+        }
+    )
 
 
 def _s3_service(
@@ -1397,6 +1445,34 @@ def _s3_service(
 
 def _s3_window_binding() -> dict[str, object]:
     return _window_binding(run_id="run-h1", operation_id="operation-h1")
+
+
+def _s3_omni_dispatch_context(tmp_path: Path) -> dict[str, object]:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    binding = _s3_window_binding()
+    operation_ref = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "revision": 4,
+        "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+        "capture_ref": deepcopy(binding["capture_ref"]),
+    }
+    return attestation.compose_benchmark_dispatch_context(
+        provider="omni",
+        operation_ref=operation_ref,
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-h1",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(
+            operation_ref
+        ),
+    )
 
 
 def test_s3_hybrid_binding_keeps_each_exact_server_issued_provider_context(
@@ -2642,6 +2718,287 @@ def test_s3_early_failure_persists_predecessor_before_terminal_transition(
         assert registry.active_resources == 0
         assert continuation_calls == 2
         assert registry.adopt_calls == 1
+    finally:
+        store.close()
+
+
+def test_s3_expired_completed_terminal_result_recovers_without_second_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    real_continue = workflow_service.continue_guarded_learning_stage_worker_result
+    continuation_calls = 0
+    try:
+        monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+        dispatch_context = _s3_omni_dispatch_context(tmp_path)
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_dispatch_context_for_worker",
+            lambda **_kwargs: deepcopy(dispatch_context),
+        )
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current(
+            {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "task_kind": "panel_learning_hybrid_omni_discovery",
+                "outcome": "failed",
+                "orchestration": {},
+                "result": {"failure_reason": "provider failed"},
+            }
+        )
+        worker = registry.current
+        assert worker is not None
+        execution = store.get("run-h1")["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        lease_expires_at = datetime.fromisoformat(execution["lease_expires_at"])
+        worker_finished_at = lease_expires_at - timedelta(seconds=1)
+        worker["finished_at"] = worker_finished_at.isoformat()
+        worker["payload"] = None
+        wall_clock = lease_expires_at + timedelta(seconds=1)
+        real_utc_datetime = workflow_service._utc_datetime
+        monkeypatch.setattr(
+            workflow_service,
+            "_utc_datetime",
+            lambda value: (
+                wall_clock if value is None else real_utc_datetime(value)
+            ),
+        )
+
+        def _flaky_continue(**kwargs):
+            nonlocal continuation_calls
+            continuation_calls += 1
+            assert kwargs["now"] == worker_finished_at
+            if continuation_calls == 1:
+                raise RuntimeError("lost expired terminal continuation response")
+            return real_continue(**kwargs)
+
+        monkeypatch.setattr(
+            workflow_service,
+            "continue_guarded_learning_stage_worker_result",
+            _flaky_continue,
+        )
+
+        with pytest.raises(
+            RuntimeError, match="lost expired terminal continuation response"
+        ):
+            service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        prepared = store.get("run-h1")
+        assert prepared["terminal"] is False
+        assert worker["result_adopted"] is True
+        assert registry.adopt_calls == 1
+        assert registry.start_calls == 1
+
+        terminal = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        assert registry.current is not None
+        registry.current["recovered_from_journal"] = True
+        replay = service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        assert terminal["status"] == "safe_stopped"
+        assert canonical_json_bytes(replay) == canonical_json_bytes(terminal)
+        assert store.get("run-h1")["terminal"] is True
+        assert terminal["cleanup_refs"]["worker_cleanup_ref"][
+            "contract_version"
+        ] == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+        assert terminal["cleanup_refs"]["provider_cleanup_ref"] == worker[
+            "benchmark_provider_cleanup_ref"
+        ]
+        assert registry.adopt_calls == 1
+        assert registry.start_calls == 1
+        assert registry.materialize_cleanup_calls == 2
+        assert registry.cancel_calls == 0
+        assert registry.active_resources == 0
+        assert continuation_calls == 2
+    finally:
+        store.close()
+
+
+def test_s3_expired_terminal_adoption_retries_after_preparation_write_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+        dispatch_context = _s3_omni_dispatch_context(tmp_path)
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_dispatch_context_for_worker",
+            lambda **_kwargs: deepcopy(dispatch_context),
+        )
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        registry.complete_current(
+            {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "task_kind": "panel_learning_hybrid_omni_discovery",
+                "outcome": "failed",
+                "orchestration": {},
+                "result": {"failure_reason": "provider failed"},
+            }
+        )
+        worker = registry.current
+        assert worker is not None
+        execution = store.get("run-h1")["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        lease_expires_at = datetime.fromisoformat(execution["lease_expires_at"])
+        worker["finished_at"] = (
+            lease_expires_at - timedelta(seconds=1)
+        ).isoformat()
+        worker["payload"] = None
+        wall_clock = lease_expires_at + timedelta(seconds=1)
+        real_utc_datetime = workflow_service._utc_datetime
+        monkeypatch.setattr(
+            workflow_service,
+            "_utc_datetime",
+            lambda value: (
+                wall_clock if value is None else real_utc_datetime(value)
+            ),
+        )
+        real_persist = (
+            workflow_service._persist_benchmark_v2_hybrid_continuation_receipt
+        )
+        persistence_calls = 0
+
+        def _flaky_persist(**kwargs):
+            nonlocal persistence_calls
+            persistence_calls += 1
+            if persistence_calls == 1:
+                raise RuntimeError("lost terminal preparation write")
+            return real_persist(**kwargs)
+
+        monkeypatch.setattr(
+            workflow_service,
+            "_persist_benchmark_v2_hybrid_continuation_receipt",
+            _flaky_persist,
+        )
+
+        with pytest.raises(RuntimeError, match="lost terminal preparation write"):
+            service.continue_hybrid_operation(
+                operation_ref=initial["operation_ref"]
+            )
+
+        assert worker["result_adopted"] is True
+        assert store.get("run-h1")["terminal"] is False
+
+        terminal = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+
+        assert terminal["status"] == "safe_stopped"
+        assert store.get("run-h1")["terminal"] is True
+        assert registry.start_calls == 1
+        assert registry.cancel_calls == 0
+        assert registry.active_resources == 0
+        assert registry.adopt_calls == 2
+        assert registry.materialize_cleanup_calls == 2
+        assert persistence_calls == 2
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("violation", "error_match"),
+    (
+        ("late_completion", "outside the lease interval"),
+        ("pre_start_completion", "outside the lease interval"),
+        ("missing_cleanup", "provider cleanup is not closed"),
+        ("nonterminal_success", "result is not terminal-safe"),
+        ("wrong_task_kind", "result is not terminal-safe"),
+    ),
+)
+def test_s3_expired_completed_terminal_recovery_fails_closed_before_adoption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    violation: str,
+    error_match: str,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        response_outcome = (
+            "completed" if violation == "nonterminal_success" else "failed"
+        )
+        registry.complete_current(
+            {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "task_kind": (
+                    "panel_learning_hybrid_qwen_binding"
+                    if violation == "wrong_task_kind"
+                    else "panel_learning_hybrid_omni_discovery"
+                ),
+                "outcome": response_outcome,
+                "orchestration": {},
+                "result": {},
+            }
+        )
+        worker = registry.current
+        assert worker is not None
+        execution = store.get("run-h1")["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        lease_expires_at = datetime.fromisoformat(execution["lease_expires_at"])
+        started_at = datetime.fromisoformat(execution["started_at"])
+        if violation == "late_completion":
+            worker_finished_at = lease_expires_at + timedelta(seconds=1)
+        elif violation == "pre_start_completion":
+            worker_finished_at = started_at - timedelta(seconds=1)
+        else:
+            worker_finished_at = lease_expires_at - timedelta(seconds=1)
+        worker["finished_at"] = worker_finished_at.isoformat()
+        if violation != "missing_cleanup":
+            worker["benchmark_provider_cleanup_ref"] = _s3_provider_cleanup_ref(
+                worker
+            )
+        wall_clock = lease_expires_at + timedelta(seconds=2)
+        real_utc_datetime = workflow_service._utc_datetime
+        monkeypatch.setattr(
+            workflow_service,
+            "_utc_datetime",
+            lambda value: (
+                wall_clock if value is None else real_utc_datetime(value)
+            ),
+        )
+
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match=error_match,
+        ):
+            service.continue_hybrid_operation(
+                operation_ref=initial["operation_ref"]
+            )
+
+        assert worker["result_adopted"] is False
+        assert store.get("run-h1")["terminal"] is False
+        assert registry.start_calls == 1
+        assert registry.cancel_calls == 0
+        assert registry.active_resources == 0
     finally:
         store.close()
 

@@ -8131,6 +8131,246 @@ class LearningStageWorkerRegistry:
                 return self._public_record(record)
         return None
 
+    def materialize_completed_hybrid_provider_cleanup(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        dispatch_context_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        """只从已完成 worker 的持久化 Omni 证据补建清理投影。"""
+
+        worker = _required_text(worker_id, "worker_id")
+        operation_key = (
+            _required_text(run_id, "run_id"),
+            _required_text(stage, "stage"),
+            _required_text(operation_id, "operation_id"),
+        )
+        from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+            validate_benchmark_dispatch_context_ref,
+            validate_benchmark_dispatch_receipt_refs,
+        )
+
+        try:
+            exact_context_ref = validate_benchmark_dispatch_context_ref(
+                dispatch_context_ref
+            )
+        except (TypeError, ValueError) as error:
+            raise LearningStageWorkerError(
+                "completed Hybrid cleanup dispatch context is invalid"
+            ) from error
+        if exact_context_ref["provider"] != "omni":
+            raise LearningStageWorkerError(
+                "completed Hybrid cleanup is limited to the Omni blocker"
+            )
+        context = exact_context_ref["dispatch_context"]
+        context_operation = context["operation_ref"]
+        if any(
+            context_operation[name] != expected
+            for name, expected in zip(
+                ("run_id", "stage", "operation_id"), operation_key
+            )
+        ):
+            raise LearningStageWorkerError(
+                "completed Hybrid cleanup dispatch operation differs"
+            )
+
+        with self._lock:
+            record = self._records.get(worker)
+            latest = self._latest_operation_record(operation_key)
+            if record is None or latest is not record:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup worker ownership does not match"
+                )
+            self._refresh_record(record)
+            public = self._public_record(record)
+            result_envelope = record.get("worker_result")
+            response = (
+                result_envelope.get("response")
+                if isinstance(result_envelope, Mapping)
+                else None
+            )
+            if (
+                record.get("run_id") != operation_key[0]
+                or record.get("stage") != operation_key[1]
+                or record.get("operation_id") != operation_key[2]
+                or record.get("task_kind")
+                != "panel_learning_hybrid_omni_discovery"
+                or public.get("status") != "completed"
+                or public.get("runtime_attached") is not False
+                or public.get("result_available") is not True
+                or not isinstance(response, Mapping)
+                or response.get("contract_version")
+                != "learning_hybrid_managed_stage_result_v1"
+                or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+                or response.get("task_kind") != record.get("task_kind")
+                or response.get("outcome") == "completed"
+            ):
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup worker is not terminal-safe"
+                )
+            orchestration = response.get("orchestration")
+            result_contexts = (
+                orchestration.get("benchmark_v2_provider_dispatch_context_refs")
+                if isinstance(orchestration, Mapping)
+                else None
+            )
+            result_context_ref = (
+                result_contexts.get("omni")
+                if isinstance(result_contexts, Mapping)
+                else None
+            )
+            try:
+                exact_result_context_ref = validate_benchmark_dispatch_context_ref(
+                    result_context_ref
+                )
+            except (TypeError, ValueError) as error:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup worker context is invalid"
+                ) from error
+            if exact_result_context_ref != exact_context_ref:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup service and worker contexts differ"
+                )
+            operation_identity = {
+                name: deepcopy(context_operation[name])
+                for name in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "window_binding_ref",
+                    "capture_ref",
+                )
+            }
+            try:
+                validate_benchmark_dispatch_receipt_refs(
+                    receipt_journal_path=Path(context["receipt_journal_path"]),
+                    receipt_refs=(
+                        orchestration.get(
+                            "benchmark_v2_provider_dispatch_receipt_refs"
+                        )
+                        if isinstance(orchestration, Mapping)
+                        else None
+                    ),
+                    operation_identity=operation_identity,
+                    expected_provider_counts={"omni": 1},
+                    expected_dispatch_contexts={"omni": context},
+                )
+            except (OSError, TypeError, ValueError) as error:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup dispatch receipt is invalid"
+                ) from error
+
+            runtime_path = record.get("provider_runtime_path")
+            if not isinstance(runtime_path, str) or not runtime_path:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup runtime owner is missing"
+                )
+            from app.learn.recognition.uei.omniparser_shadow_adapter import (
+                _load_omniparser_owner,
+            )
+
+            try:
+                runtime_owner = _load_omniparser_owner(Path(runtime_path))
+            except (OSError, RuntimeError, TypeError, ValueError) as error:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup runtime owner is invalid"
+                ) from error
+            if runtime_owner.get("state") != "released":
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup runtime owner is not released"
+                )
+            reconciliation = _reconcile_hybrid_provider_scope_record(record)
+            observation = reconciliation.get("provider_cleanup_evidence")
+            cleanup_observation = (
+                observation.get("cleanup_observation")
+                if isinstance(observation, Mapping)
+                else None
+            )
+            if (
+                reconciliation.get("status") != "verified"
+                or not isinstance(cleanup_observation, Mapping)
+                or cleanup_observation.get("cleanup_status") != "verified"
+                or cleanup_observation.get("inventory_observable") is not True
+                or cleanup_observation.get("provider_processes_after") != []
+                or cleanup_observation.get("orphan_descendant_identities") != []
+                or cleanup_observation.get("active_listeners_after") != []
+                or cleanup_observation.get("lease_files_after") != []
+            ):
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup provider state is indeterminate"
+                )
+            scope_name = str(cleanup_observation.get("process_scope_name") or "")
+            job_probe = _benchmark_cleanup_replay_job_probe(scope_name)
+            if job_probe.get("outcome") != "job_name_absent":
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup Job absence is indeterminate"
+                )
+            identities = [
+                cleanup_observation.get("process_identity"),
+                *list(cleanup_observation.get("descendant_identities") or []),
+            ]
+            exact_identities = [
+                _validate_exact_benchmark_process_identity(
+                    identity,
+                    label="completed Hybrid cleanup process",
+                )
+                for identity in identities
+            ]
+            if len(
+                {
+                    (identity["pid"], identity["create_time_ns"])
+                    for identity in exact_identities
+                }
+            ) != len(exact_identities):
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup process identities are duplicated"
+                )
+            for identity in exact_identities:
+                process_probe = _benchmark_cleanup_replay_process_probe(identity)
+                if process_probe.get("outcome") not in {
+                    "no_such_process",
+                    "different_incarnation",
+                }:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid cleanup process absence is indeterminate"
+                    )
+            lease_path = cleanup_observation.get("lease_path")
+            if isinstance(lease_path, str) and lease_path and Path(lease_path).exists():
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup resource lease is present"
+                )
+            projection = self._compose_hybrid_benchmark_provider_cleanup(
+                record=record,
+                worker_termination={
+                    "worker_id": record["worker_id"],
+                    "model_request_id": record["model_request_id"],
+                },
+                dispatch_context=context,
+            )
+            if projection is None:
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup projection is unavailable"
+                )
+            existing = record.get("benchmark_provider_cleanup_ref")
+            if isinstance(existing, Mapping):
+                validated_existing = (
+                    _validate_hybrid_benchmark_provider_cleanup_projection(
+                        existing,
+                        identity=record,
+                    )
+                )
+                if validated_existing != projection:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid cleanup projection replay differs"
+                    )
+            else:
+                record["benchmark_provider_cleanup_ref"] = deepcopy(projection)
+                self._persist_record_journal(record)
+            return deepcopy(projection)
+
     def cancel_by_operation(
         self,
         *,
@@ -8171,10 +8411,13 @@ class LearningStageWorkerRegistry:
         *,
         record: Mapping[str, object],
         worker_termination: Mapping[str, object],
+        dispatch_context: Mapping[str, object] | None = None,
     ) -> dict[str, Any] | None:
         payload = record.get("payload")
         context_value = (
-            payload.get("_benchmark_v2_dispatch_context")
+            dispatch_context
+            if dispatch_context is not None
+            else payload.get("_benchmark_v2_dispatch_context")
             if isinstance(payload, Mapping)
             else None
         )

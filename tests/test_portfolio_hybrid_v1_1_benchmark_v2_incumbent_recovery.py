@@ -385,6 +385,24 @@ def test_stable_zero_validator_rejects_active_cross_worker_and_aggregate_cleanup
     completed = _stable_receipt(hybrid_status="complete")
     assert incumbent.validate_benchmark_v2_actual_operations_stable_zero(completed) == completed
 
+    safe_stopped_completed = deepcopy(receipt)
+    safe_stopped_completed["cleanup_entries"][0]["worker_cleanup_ref"] = deepcopy(
+        completed["cleanup_entries"][0]["worker_cleanup_ref"]
+    )
+    safe_stopped_completed = seal_immutable(
+        {
+            key: value
+            for key, value in safe_stopped_completed.items()
+            if key != "content_sha256"
+        }
+    )
+    assert (
+        incumbent.validate_benchmark_v2_actual_operations_stable_zero(
+            safe_stopped_completed
+        )
+        == safe_stopped_completed
+    )
+
     active = _stable_receipt(hybrid_status="pending")
     with pytest.raises(ValueError, match="active operation"):
         incumbent.validate_benchmark_v2_actual_operations_stable_zero(active)

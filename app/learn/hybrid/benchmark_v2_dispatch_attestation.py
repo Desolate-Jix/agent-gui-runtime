@@ -856,10 +856,77 @@ def _authoritative_omni_cleanup(
     if not isinstance(response, Mapping):
         return None
     invocation_id = response.get("provider_invocation_id")
-    if (
-        not isinstance(invocation_id, str)
-        or not invocation_id.startswith("invocation/")
-    ):
+    response_has_invocation = isinstance(invocation_id, str) and invocation_id.startswith(
+        "invocation/"
+    )
+    observation: Mapping[str, object] | None = None
+    runtime_path = record.get("provider_runtime_path")
+    expected_scope = record.get("provider_scope_name")
+    expected_lineage = record.get("provider_lineage")
+    owner_context_present = any(
+        value is not None
+        for value in (runtime_path, expected_scope, expected_lineage)
+    )
+    if owner_context_present:
+        if (
+            not isinstance(runtime_path, str)
+            or not runtime_path
+            or not isinstance(expected_scope, str)
+            or not expected_scope
+            or not isinstance(expected_lineage, Mapping)
+        ):
+            return None
+        from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+        from app.learn.recognition.uei.omniparser_shadow_adapter import (
+            _load_omniparser_owner,
+            reconcile_omniparser_invocation_owner,
+        )
+
+        try:
+            owner = _load_omniparser_owner(Path(runtime_path))
+            if owner.get("state") != "released":
+                return None
+            reconciliation = reconcile_omniparser_invocation_owner(
+                Path(runtime_path),
+                expected_lineage=validate_hybrid_lineage(expected_lineage),
+                expected_scope_name=expected_scope,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        candidate = reconciliation.get("cleanup_observation")
+        if (
+            reconciliation.get("status") != "verified"
+            or not isinstance(candidate, Mapping)
+            or owner.get("cleanup_observation_sha256")
+            != candidate.get("content_sha256")
+            or owner.get("provider_invocation_id")
+            != candidate.get("provider_invocation_id")
+            or owner.get("lineage") != candidate.get("lineage")
+            or owner.get("process_scope_name")
+            != candidate.get("process_scope_name")
+            or owner.get("process_identity") != candidate.get("process_identity")
+            or owner.get("process_scope_acquisition")
+            != candidate.get("process_scope_acquisition")
+        ):
+            return None
+        observation = candidate
+        owner_invocation_id = owner.get("provider_invocation_id")
+        if (
+            not isinstance(owner_invocation_id, str)
+            or not owner_invocation_id.startswith("invocation/")
+            or (
+                response_has_invocation
+                and invocation_id != owner_invocation_id
+            )
+        ):
+            return None
+        if not response_has_invocation and (
+            cooperative is not None
+            or record.get("provider_recovery_blocked") is True
+        ):
+            return None
+        invocation_id = owner_invocation_id
+    elif not response_has_invocation:
         return None
     if isinstance(cooperative, Mapping) and (
         cooperative.get("contract_version") != "hybrid_omni_cooperative_cleanup_v1"
@@ -873,10 +940,11 @@ def _authoritative_omni_cleanup(
         load_omniparser_invocation_cleanup_observation,
     )
 
-    try:
-        observation = load_omniparser_invocation_cleanup_observation(invocation_id)
-    except (OSError, RuntimeError, TypeError, ValueError):
-        return None
+    if observation is None:
+        try:
+            observation = load_omniparser_invocation_cleanup_observation(invocation_id)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
     acquisition = observation.get("process_scope_acquisition")
     process = observation.get("process_identity")
     if (

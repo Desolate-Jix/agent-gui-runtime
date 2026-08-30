@@ -620,6 +620,326 @@ def test_registry_persists_exact_owner_cleanup_and_replays_after_restart(
     assert attachment["benchmark_provider_cleanup_ref"] == projection
 
 
+def test_completed_omni_cleanup_materializes_after_clean_registry_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei import omniparser_shadow_adapter as omni
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn.workflow_worker import (
+        LearningStageWorkerRegistry,
+        LearningStageWorkerError,
+        _hybrid_provider_lineage,
+        _write_hybrid_provider_owner,
+    )
+
+    context = _context(tmp_path, provider="omni", revision=4)
+    process = {
+        "pid": 2_147_483_000,
+        "create_time_ns": 1_788_105_801_765_804_544,
+    }
+    lineage = _hybrid_provider_lineage(
+        run_id="run-1",
+        workflow_revision=0,
+        operation_id="operation-1",
+        stage="screen_understanding",
+    )
+    scope_name = process_scope_name(lineage, "omni")
+    runtime_identity = module.compose_benchmark_provider_runtime_identity(
+        provider="omni",
+        lease_identity=None,
+        profile_ref=None,
+        listener_owner=None,
+        process_identities=[process],
+        process_scope={
+            "scope_name": scope_name,
+            "member_pids": [process["pid"]],
+            "process_identities": [process],
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: {
+            **_runtime_attestation(module, provider="omni"),
+            "runtime_identity": runtime_identity,
+        },
+    )
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        dispatch_receipt = module.attest_benchmark_provider_dispatch(
+            provider="omni",
+            operation_ref=deepcopy(context["operation_ref"]),
+            window_binding=deepcopy(context["window_binding"]),
+            provider_runtime={"provider": "omni"},
+        )
+
+    invocation_id = "invocation/completed-clean-restart"
+    lease_path = (tmp_path / "hybrid_omniparser_v2.lock").resolve()
+    observation = seal_immutable(
+        {
+            "contract_version": "omniparser_invocation_cleanup_observation_v1",
+            "provider_invocation_id": invocation_id,
+            "process_identity": process,
+            "descendant_identities": [],
+            "provider_processes_after": [],
+            "orphan_descendant_identities": [],
+            "active_listeners_after": [],
+            "pid_file_paths": [],
+            "lease_path": str(lease_path),
+            "lease_files_after": [],
+            "inventory_observable": True,
+            "cleanup_status": "verified",
+            "process_scope_name": scope_name,
+            "process_scope_cleanup": {
+                "scope_name": scope_name,
+                "cleanup_status": "verified",
+            },
+            "process_scope_acquisition": {
+                "contract_version": "hybrid_process_scope_acquisition_v1",
+                "scope_name": scope_name,
+                "member_pids": [process["pid"]],
+                "provider_pid": process["pid"],
+            },
+            "cleanup_reason": "completed",
+            "lineage": lineage,
+            "resource_lease_identity": {
+                "lease_path": str(lease_path),
+                "lease_token_sha256": "1" * 64,
+            },
+        }
+    )
+    monkeypatch.setattr(
+        omni,
+        "load_omniparser_invocation_cleanup_observation",
+        lambda exact_invocation_id: (
+            deepcopy(observation)
+            if exact_invocation_id == invocation_id
+            else (_ for _ in ()).throw(RuntimeError("unexpected invocation"))
+        ),
+    )
+
+    root = (tmp_path / "workers").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    worker_id = "worker-completed-clean-restart"
+    result_path = root / f"{worker_id}.result.json"
+    journal_path = root / f"{worker_id}.worker.json"
+    provider_owner_path = root / f"{worker_id}.provider-owner.json"
+    provider_runtime_path = root / f"{worker_id}.provider-runtime.json"
+    runtime_owner = seal_immutable(
+        {
+            "contract_version": "omniparser_invocation_owner_v1",
+            "state": "released",
+            "provider_invocation_id": invocation_id,
+            "resource_group": "hybrid_omniparser_v2",
+            "resource_lease_path": str(lease_path),
+            "resource_lease_token": "2" * 32,
+            "lineage": lineage,
+            "process_scope_name": scope_name,
+            "process_identity": process,
+            "process_scope_acquisition": deepcopy(
+                observation["process_scope_acquisition"]
+            ),
+            "cleanup_observation_sha256": observation["content_sha256"],
+        }
+    )
+    provider_runtime_path.write_text(
+        json.dumps(runtime_owner, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    _write_hybrid_provider_owner(
+        provider_owner_path,
+        worker_id=worker_id,
+        task_kind="panel_learning_hybrid_omni_discovery",
+        model_request_id="request-completed-clean-restart",
+        provider="omni",
+        lineage=lineage,
+        process_scope_name_value=scope_name,
+        runtime_file=provider_runtime_path.name,
+        predecessor_sha256="3" * 64,
+    )
+    context_ref = module.compose_benchmark_dispatch_context_ref(context=context)
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_omni_discovery",
+        "outcome": "failed",
+        "orchestration": {
+            "benchmark_v2_provider_dispatch_context_refs": {
+                "omni": deepcopy(context_ref)
+            },
+            "benchmark_v2_provider_dispatch_receipt_refs": [
+                {
+                    "provider": "omni",
+                    "content_sha256": dispatch_receipt["content_sha256"],
+                }
+            ],
+        },
+        "result": {"failure_reason": "Hybrid Omni cleanup result is invalid"},
+    }
+    result_envelope = {
+        "contract_version": "learning_stage_worker_result_v2",
+        "worker_id": worker_id,
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_hybrid_omni_discovery",
+        "model_request_id": "request-completed-clean-restart",
+        "payload_sha256": "f" * 64,
+        "status": "completed",
+        "response": response,
+    }
+    result_path.write_text(
+        json.dumps(result_envelope, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    registry = LearningStageWorkerRegistry(result_root=root)
+    record = {
+        **result_envelope,
+        "contract_version": "learning_stage_worker_v1",
+        "started_at": "2026-08-28T00:00:00+00:00",
+        "finished_at": "2026-08-28T00:00:01+00:00",
+        "result_path": str(result_path),
+        "journal_path": str(journal_path),
+        "provider_scope_name": scope_name,
+        "provider_owner_path": str(provider_owner_path),
+        "provider_runtime_path": str(provider_runtime_path),
+        "provider_lineage": lineage,
+        "workflow_revision": 0,
+        "payload": None,
+        "worker_result": result_envelope,
+        "process": None,
+    }
+    other_invocation_id = "invocation/completed-clean-restart-other"
+    other_observation = seal_immutable(
+        {
+            key: deepcopy(value)
+            for key, value in observation.items()
+            if key not in {"provider_invocation_id", "content_sha256"}
+        }
+        | {"provider_invocation_id": other_invocation_id}
+    )
+    monkeypatch.setattr(
+        omni,
+        "load_omniparser_invocation_cleanup_observation",
+        lambda exact_invocation_id: deepcopy(
+            observation
+            if exact_invocation_id == invocation_id
+            else other_observation
+            if exact_invocation_id == other_invocation_id
+            else (_ for _ in ()).throw(RuntimeError("unexpected invocation"))
+        ),
+    )
+    mismatched_record = deepcopy(record)
+    mismatched_record["worker_result"]["response"][
+        "provider_invocation_id"
+    ] = other_invocation_id
+    assert (
+        module._authoritative_omni_cleanup(
+            mismatched_record,
+            {
+                "worker_id": worker_id,
+                "model_request_id": "request-completed-clean-restart",
+            },
+        )
+        is None
+    )
+    registry._records[worker_id] = record
+    registry._workers_by_operation[("run-1", "screen_understanding", "operation-1")] = [
+        worker_id
+    ]
+    registry._workers_by_invocation[
+        (
+            "run-1",
+            "screen_understanding",
+            "operation-1",
+            "panel_learning_hybrid_omni_discovery",
+            "f" * 64,
+        )
+    ] = worker_id
+    registry._persist_record_journal(record)
+
+    restarted = LearningStageWorkerRegistry(result_root=root)
+    assert restarted._records[worker_id]["payload"] is None
+    projection = restarted.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=context_ref,
+    )
+    replay = restarted.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=context_ref,
+    )
+
+    assert replay == projection
+    cleanup_binding = json.loads(
+        (
+            root
+            / f"{worker_id}.benchmark-v2-hybrid-provider-cleanup.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert cleanup_binding["artifact_is_authorization"] is False
+    assert cleanup_binding["execute_binding_enabled"] is False
+    assert projection["authority_kind"] == (
+        "benchmark_v2_workflow_service_dispatch_cleanup"
+    )
+    assert restarted._records[worker_id]["status"] == "completed"
+    assert restarted._records[worker_id].get("result_adoption") is None
+    final_restart = LearningStageWorkerRegistry(result_root=root)
+    attachment = final_restart.attachment_by_operation(
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+    )
+    assert attachment is not None
+    assert attachment["benchmark_provider_cleanup_ref"] == projection
+
+    stale_context_ref = module.compose_benchmark_dispatch_context_ref(
+        context=_context(tmp_path, provider="omni", revision=5)
+    )
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="service and worker contexts differ",
+    ):
+        final_restart.materialize_completed_hybrid_provider_cleanup(
+            worker_id=worker_id,
+            run_id="run-1",
+            stage="screen_understanding",
+            operation_id="operation-1",
+            dispatch_context_ref=stale_context_ref,
+        )
+
+    from app.learn import workflow_worker as worker_module
+
+    monkeypatch.setattr(
+        worker_module,
+        "_benchmark_cleanup_replay_process_probe",
+        lambda identity: {"outcome": "indeterminate"},
+    )
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="process absence is indeterminate",
+    ):
+        final_restart.materialize_completed_hybrid_provider_cleanup(
+            worker_id=worker_id,
+            run_id="run-1",
+            stage="screen_understanding",
+            operation_id="operation-1",
+            dispatch_context_ref=context_ref,
+        )
+
+
 @pytest.mark.parametrize("mutation", ["provider", "operation", "window"])
 def test_stale_or_cross_provider_inputs_fail_before_attestation_or_journal(
     tmp_path: Path,

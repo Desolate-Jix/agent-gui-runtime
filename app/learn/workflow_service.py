@@ -100,6 +100,11 @@ class _LearningWorkflowRegistryOwner:
     ) -> dict[str, Any] | None:
         return self._registry.attachment_by_operation(**kwargs)
 
+    def materialize_completed_hybrid_provider_cleanup(
+        self, **kwargs: Any
+    ) -> dict[str, Any]:
+        return self._registry.materialize_completed_hybrid_provider_cleanup(**kwargs)
+
     def prepare_benchmark_identity(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.prepare_benchmark_worker_identity(**kwargs)
 
@@ -3700,8 +3705,11 @@ def _attest_benchmark_v2_actual_operations_stable_zero(
                 "worker_status": "completed",
                 "runtime_attached": False,
                 "result_available": True,
-                "authoritative_worker_record_sha256": content_sha256(
-                    dict(worker_record)
+                "authoritative_worker_record_sha256": (
+                    _benchmark_v2_hybrid_completed_worker_record_sha256(
+                        worker_record=worker_record,
+                        provider_cleanup_ref=hybrid_provider_cleanup,
+                    )
                 ),
                 "provider_cleanup_ref": {
                     "content_sha256": hybrid_provider_cleanup["content_sha256"]
@@ -5400,6 +5408,86 @@ def _benchmark_v2_hybrid_requires_terminal_preparation(
     )
 
 
+def _benchmark_v2_hybrid_expired_terminal_completion_time(
+    *,
+    stage_execution: Mapping[str, object],
+    worker_record: Mapping[str, object],
+    task_kind: str,
+    response: Mapping[str, object],
+    checked_at: datetime,
+) -> datetime | None:
+    lease_expires_at = _parse_utc_datetime(
+        stage_execution.get("lease_expires_at"),
+        field="lease_expires_at",
+    )
+    if checked_at <= lease_expires_at:
+        return None
+    if (
+        response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+        or response.get("task_kind") != task_kind
+        or response.get("outcome") == "completed"
+        or not _benchmark_v2_hybrid_requires_terminal_preparation(
+            task_kind=task_kind,
+            response=response,
+        )
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid result is not terminal-safe"
+        )
+    if (
+        worker_record.get("status") != "completed"
+        or worker_record.get("runtime_attached") is not False
+        or worker_record.get("result_available") is not True
+        or not (
+            worker_record.get("result_adopted") is False
+            or worker_record.get("result_adopted") is True
+        )
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid worker is not completed and detached"
+        )
+    finished_at = _parse_utc_datetime(
+        worker_record.get("finished_at"),
+        field="worker finished_at",
+    )
+    started_at = _parse_utc_datetime(
+        stage_execution.get("started_at"),
+        field="started_at",
+    )
+    if finished_at < started_at or finished_at > lease_expires_at:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid worker completion is outside the lease interval"
+        )
+    decision = _interpret_hybrid_post_calibration_worker_result(
+        stage=str(worker_record.get("stage") or ""),
+        task_kind=task_kind,
+        response=deepcopy(dict(response)),
+    )
+    if decision is None:
+        decision = interpret_learning_stage_worker_result(
+            stage=str(worker_record.get("stage") or ""),
+            task_kind=task_kind,
+            response=deepcopy(dict(response)),
+            learning_pipeline_mode="hybrid_v1_1",
+        )
+    if (
+        decision.get("stage_finished") is not True
+        or decision.get("outcome") not in {"failed", "safe_stopped"}
+        or decision.get("next_worker") is not None
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid result could continue execution"
+        )
+    provider_cleanup = worker_record.get("benchmark_provider_cleanup_ref")
+    _validate_benchmark_v2_hybrid_provider_cleanup(
+        cleanup=provider_cleanup,
+        worker_record=worker_record,
+    )
+    return finished_at
+
+
 def _benchmark_v2_hybrid_attachment(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -5421,6 +5509,44 @@ def _benchmark_v2_hybrid_attachment(
     result = deepcopy(dict(record))
     _benchmark_v2_hybrid_worker_ref(result)
     return result
+
+
+def _materialize_benchmark_v2_hybrid_completed_cleanup(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    binding: Mapping[str, object],
+    worker_record: Mapping[str, object],
+) -> dict[str, Any]:
+    provider = _BENCHMARK_V2_PROVIDER_TASKS.get(
+        str(worker_record.get("task_kind") or "")
+    )
+    context_refs = binding.get("provider_dispatch_context_refs")
+    context_ref = (
+        context_refs.get(provider)
+        if isinstance(context_refs, Mapping) and isinstance(provider, str)
+        else None
+    )
+    if provider != "omni" or not isinstance(context_ref, Mapping):
+        if composition.composition_kind == "test":
+            return deepcopy(dict(worker_record))
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid cleanup lacks its Omni service context"
+        )
+    _LearningWorkflowRegistryOwner(
+        composition.worker_registry
+    ).materialize_completed_hybrid_provider_cleanup(
+        worker_id=str(worker_record.get("worker_id") or ""),
+        run_id=str(worker_record.get("run_id") or ""),
+        stage=str(worker_record.get("stage") or ""),
+        operation_id=str(worker_record.get("operation_id") or ""),
+        dispatch_context_ref=deepcopy(dict(context_ref)),
+    )
+    return _benchmark_v2_hybrid_attachment(
+        composition=composition,
+        run_id=str(worker_record["run_id"]),
+        stage=str(worker_record["stage"]),
+        operation_id=str(worker_record["operation_id"]),
+    )
 
 
 def _benchmark_v2_hybrid_service_status(
@@ -5700,6 +5826,17 @@ def _project_benchmark_v2_hybrid_step(
                 cleanup=provider_cleanup_value,
                 worker_record=worker_record,
             )
+        if (
+            worker_cleanup_ref is None
+            and isinstance(provider_cleanup_ref, Mapping)
+            and worker_record.get("result_adopted") is True
+        ):
+            worker_cleanup_ref = (
+                _compose_benchmark_v2_hybrid_completed_worker_cleanup_ref(
+                    worker_record=worker_record,
+                    provider_cleanup_ref=provider_cleanup_ref,
+                )
+            )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:
@@ -5806,6 +5943,79 @@ def _validate_benchmark_v2_hybrid_provider_cleanup(
                 f"benchmark_v2 hybrid provider cleanup {name} is invalid"
             )
     return projection
+
+
+def _benchmark_v2_hybrid_completed_worker_record_sha256(
+    *,
+    worker_record: Mapping[str, object],
+    provider_cleanup_ref: Mapping[str, object],
+) -> str:
+    if (
+        worker_record.get("status") != "completed"
+        or worker_record.get("runtime_attached") is not False
+        or worker_record.get("result_available") is not True
+        or worker_record.get("result_adopted") is not True
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid completed worker cleanup is incomplete"
+        )
+    worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+    adoption_receipt = worker_record.get("adoption_receipt")
+    if not isinstance(adoption_receipt, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid completed worker adoption receipt is missing"
+        )
+    authoritative_worker_snapshot = {
+        "contract_version": "benchmark_v2_hybrid_completed_worker_snapshot_v1",
+        "worker_ref": deepcopy(worker_identity),
+        "worker_status": "completed",
+        "runtime_attached": False,
+        "result_available": True,
+        "result_adopted": True,
+        "adoption_receipt_sha256": content_sha256(dict(adoption_receipt)),
+        "provider_cleanup_ref": {
+            "content_sha256": str(provider_cleanup_ref["content_sha256"])
+        },
+    }
+    return content_sha256(authoritative_worker_snapshot)
+
+
+def _compose_benchmark_v2_hybrid_completed_worker_cleanup_ref(
+    *,
+    worker_record: Mapping[str, object],
+    provider_cleanup_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    authoritative_worker_record_sha256 = (
+        _benchmark_v2_hybrid_completed_worker_record_sha256(
+            worker_record=worker_record,
+            provider_cleanup_ref=provider_cleanup_ref,
+        )
+    )
+    worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+    return seal_immutable(
+        {
+            "contract_version": (
+                "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+            ),
+            "run_id": worker_identity["run_id"],
+            "stage": worker_identity["stage"],
+            "operation_id": worker_identity["operation_id"],
+            "worker_id": worker_identity["worker_id"],
+            "model_request_id": worker_identity["model_request_id"],
+            "payload_sha256": worker_identity["payload_sha256"],
+            "worker_status": "completed",
+            "runtime_attached": False,
+            "result_available": True,
+            "authoritative_worker_record_sha256": (
+                authoritative_worker_record_sha256
+            ),
+            "provider_cleanup_ref": {
+                "content_sha256": str(provider_cleanup_ref["content_sha256"])
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
 
 
 def _replay_benchmark_v2_hybrid_consumed_operation_ref(
@@ -6298,6 +6508,7 @@ def _continue_benchmark_v2_hybrid_workflow_service(
         run_id=run_id,
         operation_id=operation_id,
     ):
+        continuation_now: datetime | None = None
         prepared = _benchmark_v2_hybrid_terminal_prepared_context(
             composition=composition,
             operation_ref=operation_ref,
@@ -6364,37 +6575,77 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 hybrid worker is not complete"
                 )
+            checked_at = _utc_datetime(None)
+            lease_expires_at = _parse_utc_datetime(
+                stage_execution.get("lease_expires_at"),
+                field="lease_expires_at",
+            )
+            lease_expired = checked_at > lease_expires_at
+            if lease_expired:
+                worker_record = (
+                    _materialize_benchmark_v2_hybrid_completed_cleanup(
+                        composition=composition,
+                        binding=binding,
+                        worker_record=worker_record,
+                    )
+                )
             validated_before_adoption: dict[str, dict[str, Any]] = {}
+            expired_completion: dict[str, datetime] = {}
             result_validator: Callable[[Mapping[str, object]], None] | None = None
-            if not (
+            if lease_expired or not (
                 composition.composition_kind == "test"
                 and composition.benchmark_v2_worker_binding_resolver is None
             ):
                 def _validate_before_adoption(
                     candidate: Mapping[str, object],
                 ) -> None:
-                    validated_before_adoption["response"] = (
-                        _validate_benchmark_v2_hybrid_adoption(
-                            composition=composition,
-                            response=candidate,
-                            window_binding=binding["window_binding"],
-                            task_kind=str(worker_record["task_kind"]),
-                            provider_dispatch_context_refs=binding[
-                                "provider_dispatch_context_refs"
-                            ],
-                        )
+                    validated = _validate_benchmark_v2_hybrid_adoption(
+                        composition=composition,
+                        response=candidate,
+                        window_binding=binding["window_binding"],
+                        task_kind=str(worker_record["task_kind"]),
+                        provider_dispatch_context_refs=binding[
+                            "provider_dispatch_context_refs"
+                        ],
                     )
+                    validated_before_adoption["response"] = validated
+                    if lease_expired:
+                        expired_completion["finished_at"] = (
+                            _benchmark_v2_hybrid_expired_terminal_completion_time(
+                                stage_execution=stage_execution,
+                                worker_record=worker_record,
+                                task_kind=str(worker_record["task_kind"]),
+                                response=validated,
+                                checked_at=checked_at,
+                            )
+                        )
 
                 result_validator = _validate_before_adoption
-            generic_adoption = adopt_guarded_learning_stage_worker_result(
-                composition=composition,
-                worker_id=worker_record["worker_id"],
-                run_id=run_id,
-                expected_revision=int(current["revision"]),
-                stage=stage,
-                operation_id=operation_id,
-                _result_validator=result_validator,
-            )
+            if lease_expired:
+                generic_adoption = _LearningWorkflowRegistryOwner(
+                    composition.worker_registry
+                ).adopt_worker_result(
+                    worker_id=worker_record["worker_id"],
+                    run_id=run_id,
+                    stage=stage,
+                    operation_id=operation_id,
+                    result_validator=result_validator,
+                )
+                continuation_now = expired_completion.get("finished_at")
+                if continuation_now is None:
+                    raise LearningWorkflowStageOperationError(
+                        "expired benchmark_v2 Hybrid result was not validated"
+                    )
+            else:
+                generic_adoption = adopt_guarded_learning_stage_worker_result(
+                    composition=composition,
+                    worker_id=worker_record["worker_id"],
+                    run_id=run_id,
+                    expected_revision=int(current["revision"]),
+                    stage=stage,
+                    operation_id=operation_id,
+                    _result_validator=result_validator,
+                )
             adopted_response = (
                 generic_adoption.get("response")
                 if isinstance(generic_adoption, Mapping)
@@ -6450,6 +6701,18 @@ def _continue_benchmark_v2_hybrid_workflow_service(
         else:
             current, stage_execution, binding, worker_record, supplied = prepared
             stage = str(supplied["stage"])
+            checked_at = _utc_datetime(None)
+            if checked_at > _parse_utc_datetime(
+                stage_execution.get("lease_expires_at"),
+                field="lease_expires_at",
+            ):
+                worker_record = (
+                    _materialize_benchmark_v2_hybrid_completed_cleanup(
+                        composition=composition,
+                        binding=binding,
+                        worker_record=worker_record,
+                    )
+                )
             prepared_projection = _read_benchmark_v2_hybrid_adopted_projection(
                 composition=composition,
                 worker_record=worker_record,
@@ -6465,6 +6728,15 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 hybrid terminal preparation task is stale"
                 )
+            continuation_now = (
+                _benchmark_v2_hybrid_expired_terminal_completion_time(
+                    stage_execution=stage_execution,
+                    worker_record=worker_record,
+                    task_kind=str(worker_record["task_kind"]),
+                    response=prepared_response,
+                    checked_at=checked_at,
+                )
+            )
         issued_dispatch_contexts: list[dict[str, Any]] = []
         continuation = continue_guarded_learning_stage_worker_result(
             composition=composition,
@@ -6473,6 +6745,7 @@ def _continue_benchmark_v2_hybrid_workflow_service(
             stage=stage,
             operation_id=operation_id,
             worker_id=worker_record["worker_id"],
+            now=continuation_now,
             _benchmark_dispatch_context_sink=(
                 lambda context: issued_dispatch_contexts.append(
                     deepcopy(dict(context))

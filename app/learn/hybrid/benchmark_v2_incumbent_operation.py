@@ -2133,7 +2133,7 @@ def validate_benchmark_v2_actual_operations_stable_zero(
             completed_cleanup = (
                 worker_cleanup.get("contract_version")
                 == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
-                and operation["status"] == "complete"
+                and operation["status"] in {"complete", "safe_stopped"}
                 and worker_cleanup.get("worker_status") == "completed"
                 and worker_cleanup.get("runtime_attached") is False
                 and worker_cleanup.get("result_available") is True
