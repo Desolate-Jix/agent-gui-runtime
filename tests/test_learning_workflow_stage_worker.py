@@ -7153,6 +7153,98 @@ def test_hybrid_omni_completion_publishes_verified_cleanup_receipt(
     assert receipt["cleanup_status"] == "verified"
 
 
+def test_hybrid_omni_cleanup_accepts_canonical_safe_result_success_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei import omniparser_shadow_adapter, store
+
+    run_id = "run-omni-canonical-success"
+    task_kind = "panel_learning_hybrid_omni_discovery"
+    lineage = _hybrid_lineage(run_id=run_id, task_kind=task_kind)
+    invocation_id = "invocation/canonical-success"
+    result_ref = {"id": "result/canonical-success", "content_sha256": "1" * 64}
+    receipt_ref = {"id": "receipt/canonical-success", "content_sha256": "2" * 64}
+    capture_lineage_ref = {"id": "capture/canonical-success", "content_sha256": "3" * 64}
+    provider_result = {
+        "provider_receipt_ref": receipt_ref,
+        "provider_result_ref": result_ref,
+        "provider_invocation_id": invocation_id,
+        "inventory": {"provider_result_ref": result_ref},
+    }
+    stored = {
+        "provider_runtime_receipt_v1": {
+            "receipt_id": "receipt/canonical-success",
+            "result_ref": result_ref,
+            "provider_id": "local.runtime/omniparser",
+            "profile_id": "local.runtime/omniparser/shadow-v2",
+            "cleanup_status": "clean",
+            "status": "succeeded",
+            "capture_lineage_ref": capture_lineage_ref,
+        },
+        "provider_safe_result_v1": {
+            "result_id": "result/canonical-success",
+            "status": "success",
+            "provider_id": "local.runtime/omniparser",
+            "profile_id": "local.runtime/omniparser/shadow-v2",
+            "capture_lineage_ref": capture_lineage_ref,
+        },
+    }
+
+    class _ObjectStore:
+        def __init__(self, *, root: Path) -> None:
+            self.root = root
+
+        def get(self, ref: dict, *, contract_version: str) -> dict:
+            expected_ref = (
+                receipt_ref
+                if contract_version == "provider_runtime_receipt_v1"
+                else result_ref
+            )
+            assert ref == expected_ref
+            return deepcopy(stored[contract_version])
+
+    process_identity = {"pid": 4200, "create_time_ns": 100_000_000_000}
+    scope_name = process_scope_name(lineage, "omni")
+    cleanup_observation = {
+        "cleanup_status": "verified",
+        "process_scope_name": scope_name,
+        "process_scope_cleanup": {
+            "scope_name": scope_name,
+            "cleanup_status": "verified",
+        },
+        "process_scope_acquisition": {
+            "scope_name": scope_name,
+            "member_pids": [process_identity["pid"]],
+        },
+        "process_identity": process_identity,
+        "inventory_observable": True,
+        "provider_processes_after": [],
+        "orphan_descendant_identities": [],
+        "lease_files_after": [],
+        "active_listeners_after": [],
+    }
+    monkeypatch.setattr(store, "UEIObjectStore", _ObjectStore)
+    monkeypatch.setattr(
+        omniparser_shadow_adapter,
+        "load_omniparser_invocation_cleanup_observation",
+        lambda value: deepcopy(cleanup_observation),
+    )
+
+    inventory = workflow_worker._observe_hybrid_omni_cleanup(
+        provider_result,
+        lineage=lineage,
+        predecessor_sha256="4" * 64,
+        provider_result_sha256="5" * 64,
+    )
+
+    assert inventory["release_status"] == "verified"
+    assert inventory["termination_reason"] == "completed"
+    assert inventory["source_cleanup_evidence"]["status"] == "verified"
+    assert inventory["source_cleanup_evidence"]["provider_receipt"]["status"] == "succeeded"
+
+
 def test_hybrid_vista_completion_releases_before_review_receipt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

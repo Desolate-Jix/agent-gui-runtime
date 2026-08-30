@@ -1754,7 +1754,7 @@ def _observe_hybrid_omni_cleanup(
         and receipt.get("profile_id") == "local.runtime/omniparser/shadow-v2"
         and receipt.get("cleanup_status") == "clean"
         and receipt.get("status") == "succeeded"
-        and persisted_result.get("status") == "succeeded"
+        and persisted_result.get("status") == "success"
         and persisted_result.get("provider_id") == receipt.get("provider_id")
         and persisted_result.get("profile_id") == receipt.get("profile_id")
         and persisted_result.get("capture_lineage_ref")
