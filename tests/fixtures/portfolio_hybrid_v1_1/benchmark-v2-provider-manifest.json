@@ -232,7 +232,7 @@
         "role": "test_window"
       },
       {
-        "file_sha256": "bbc3b8eaae4a99ea0192fb481ccd1b3421322579beeb509c9a33268dbf5a692a",
+        "file_sha256": "fe2fe12bef59e6ab01b3295f97e11344e84062dd7d1d2275d02884b949f1d29f",
         "relative_path": "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
         "role": "benchmark_runner"
       }
