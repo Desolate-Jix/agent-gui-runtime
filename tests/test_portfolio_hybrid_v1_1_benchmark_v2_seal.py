@@ -55,6 +55,8 @@ CODE_PATHS = (
     "app/learn/hybrid/benchmark_v2_window_owner.py",
     "app/learn/hybrid/benchmark_v2_worker_binding.py",
     "app/learn/hybrid/windows_process_scope.py",
+    "app/learn/recognition/omniparser_provider.py",
+    "app/learn/recognition/omniparser_quality.py",
     "app/learn/recognition/uei/builtin_learning_projection.py",
     "app/learn/recognition/uei/omniparser_shadow_adapter.py",
     "app/learn/recognition/uei/projections.py",
@@ -66,7 +68,9 @@ CODE_PATHS = (
     "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
     "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
+    "scripts/run_omniparser_learn_smoke.py",
     "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+    "scripts/run_uei_omniparser_shadow_worker.py",
     "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py",
     "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py",
 )
@@ -74,6 +78,7 @@ CONFIG_PATHS = (
     "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json",
     "configs/benchmarks/portfolio_hybrid_v1_1_gate.v2.json",
     TEMPLATE_PATH,
+    "configs/model_profiles/learn_mode_omniparser_v2.json",
 )
 TEST_PATHS = (
     "tests/test_learn_hybrid_windows_process_scope.py",
@@ -130,6 +135,8 @@ RELEASE_REFS = (
     ("window_owner", "app/learn/hybrid/benchmark_v2_window_owner.py"),
     ("worker_binding", "app/learn/hybrid/benchmark_v2_worker_binding.py"),
     ("windows_process_scope", "app/learn/hybrid/windows_process_scope.py"),
+    ("omniparser_provider", "app/learn/recognition/omniparser_provider.py"),
+    ("omniparser_quality", "app/learn/recognition/omniparser_quality.py"),
     ("builtin_learning_projection", "app/learn/recognition/uei/builtin_learning_projection.py"),
     ("omniparser_shadow_adapter", "app/learn/recognition/uei/omniparser_shadow_adapter.py"),
     ("uei_projections", "app/learn/recognition/uei/projections.py"),
@@ -137,7 +144,13 @@ RELEASE_REFS = (
     ("workflow_worker", "app/learn/workflow_worker.py"),
     ("screen_reader", "app/operation/observe/screen_reader.py"),
     ("test_window", "scripts/portfolio_hybrid_v1_1_test_window_v2.py"),
+    ("omniparser_learn_smoke", "scripts/run_omniparser_learn_smoke.py"),
     ("benchmark_runner", "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py"),
+    ("omniparser_shadow_worker", "scripts/run_uei_omniparser_shadow_worker.py"),
+)
+PROFILE_REFS = (
+    ("estimand", "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json"),
+    ("omniparser_model_profile", "configs/model_profiles/learn_mode_omniparser_v2.json"),
 )
 
 
@@ -472,6 +485,7 @@ def test_generation_is_canonical_closed_idempotent_and_verifiable(sealed, sealer
         for role, path in BOOT_REFS
     ]
     assert [(item["role"], item["relative_path"]) for item in provider["sealed_runtime"]["release_code_refs"]] == list(RELEASE_REFS)
+    assert [(item["role"], item["relative_path"]) for item in provider["sealed_runtime"]["profile_refs"]] == list(PROFILE_REFS)
     assert validate_provider_manifest(provider) == provider
     assert private_path.read_bytes().endswith(b"\n") and not private_path.read_bytes().endswith(b"\n\n")
     assert provider_path.read_bytes().endswith(b"\n") and not provider_path.read_bytes().endswith(b"\n\n")

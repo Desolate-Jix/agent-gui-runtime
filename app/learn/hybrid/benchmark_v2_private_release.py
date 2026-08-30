@@ -70,6 +70,8 @@ _CODE_PATHS = (
     "app/learn/hybrid/benchmark_v2_window_owner.py",
     "app/learn/hybrid/benchmark_v2_worker_binding.py",
     "app/learn/hybrid/windows_process_scope.py",
+    "app/learn/recognition/omniparser_provider.py",
+    "app/learn/recognition/omniparser_quality.py",
     "app/learn/recognition/uei/builtin_learning_projection.py",
     "app/learn/recognition/uei/omniparser_shadow_adapter.py",
     "app/learn/recognition/uei/projections.py",
@@ -81,7 +83,9 @@ _CODE_PATHS = (
     "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py",
     "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py",
     "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py",
+    "scripts/run_omniparser_learn_smoke.py",
     "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+    "scripts/run_uei_omniparser_shadow_worker.py",
     "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py",
     "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py",
 )
@@ -89,6 +93,7 @@ _CONFIG_PATHS = (
     _ESTIMAND_PATH,
     _GATE_PATH,
     "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-manifest.template.json",
+    "configs/model_profiles/learn_mode_omniparser_v2.json",
 )
 _TEST_PATHS = (
     "tests/test_learn_hybrid_windows_process_scope.py",
@@ -131,6 +136,8 @@ _RELEASE_CODE_REFS = (
     ("window_owner", "app/learn/hybrid/benchmark_v2_window_owner.py"),
     ("worker_binding", "app/learn/hybrid/benchmark_v2_worker_binding.py"),
     ("windows_process_scope", "app/learn/hybrid/windows_process_scope.py"),
+    ("omniparser_provider", "app/learn/recognition/omniparser_provider.py"),
+    ("omniparser_quality", "app/learn/recognition/omniparser_quality.py"),
     ("builtin_learning_projection", "app/learn/recognition/uei/builtin_learning_projection.py"),
     ("omniparser_shadow_adapter", "app/learn/recognition/uei/omniparser_shadow_adapter.py"),
     ("uei_projections", "app/learn/recognition/uei/projections.py"),
@@ -138,9 +145,14 @@ _RELEASE_CODE_REFS = (
     ("workflow_worker", "app/learn/workflow_worker.py"),
     ("screen_reader", "app/operation/observe/screen_reader.py"),
     ("test_window", "scripts/portfolio_hybrid_v1_1_test_window_v2.py"),
+    ("omniparser_learn_smoke", "scripts/run_omniparser_learn_smoke.py"),
     ("benchmark_runner", "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py"),
+    ("omniparser_shadow_worker", "scripts/run_uei_omniparser_shadow_worker.py"),
 )
-_PROFILE_REFS = (("estimand", _ESTIMAND_PATH),)
+_PROFILE_REFS = (
+    ("estimand", _ESTIMAND_PATH),
+    ("omniparser_model_profile", "configs/model_profiles/learn_mode_omniparser_v2.json"),
+)
 _PRIVATE_SCORER_REFS = (
     ("private_scorer_module", "app/learn/hybrid/benchmark_scorer_v2.py"),
     ("private_scorer_entrypoint", "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py"),
