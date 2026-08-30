@@ -3108,7 +3108,11 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
                     {
                         "message": {
                             "content": json.dumps(
-                                {"bindings": [], "orphan_semantics": []},
+                                {
+                                    "bindings": [],
+                                    "ambiguity_sets": [],
+                                    "orphan_semantics": [],
+                                },
                                 ensure_ascii=False,
                             )
                         }
@@ -3127,12 +3131,18 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
         timeout_seconds=3.0,
     )
 
-    assert result == {"bindings": [], "orphan_semantics": []}
+    assert result == {
+        "bindings": [],
+        "ambiguity_sets": [],
+        "orphan_semantics": [],
+    }
     assert seen["url"] == profile["endpoint"]
     assert seen["timeout"] == 3.0
     assert seen["body"]["request_id"] == "learn-qwen-request"
     assert seen["body"]["model"] == profile["model_name"]
-    assert "申请职位" in seen["body"]["messages"][1]["content"][0]["text"]
+    prompt = seen["body"]["messages"][1]["content"][0]["text"]
+    assert "申请职位" in prompt
+    assert "three top-level fields bindings, ambiguity_sets, and orphan_semantics" in prompt
     image_url = seen["body"]["messages"][1]["content"][1]["image_url"]["url"]
     assert base64.b64decode(image_url.split(",", 1)[1]) == screenshot_bytes
 

@@ -427,8 +427,9 @@ def run_qwen_binding_model(
         + base64.b64encode(screenshot_bytes).decode("ascii")
     )
     prompt = (
-        "Bind semantics only to the supplied candidate_id values. Return exactly one JSON object with "
-        "bindings and orphan_semantics. Never output geometry, action authority, new candidate IDs, or prose. "
+        "Bind semantics only to the supplied candidate_id values. Return exactly one JSON object with the "
+        "three top-level fields bindings, ambiguity_sets, and orphan_semantics. Never output geometry, action "
+        "authority, new candidate IDs, or prose. "
         "Every supplied candidate_id must appear exactly once. Important visible semantics without a candidate "
         "must use reason ORPHAN_SEMANTIC. Canonical request: "
         + json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
