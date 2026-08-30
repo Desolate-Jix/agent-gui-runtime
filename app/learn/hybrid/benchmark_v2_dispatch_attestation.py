@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import stat
@@ -67,6 +68,7 @@ _ACTIVE_RECEIPTS: ContextVar[list[dict[str, str]] | None] = ContextVar(
 )
 _JOURNAL_LOCK = RLock()
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_MAX_EXACT_BINARY64_INTEGER = (1 << 53) - 1
 
 _PROFILE_FIELDS = {"profile_id", "profile_sha256", "profile_payload_sha256"}
 _OMNI_CONFIGURATION_FIELDS = {
@@ -1593,7 +1595,10 @@ def _read_canonical_artifact(
         raw = path.read_bytes()
         if not raw.endswith(b"\n") or raw.count(b"\n") != 1:
             raise ValueError(f"{name} is not canonical")
-        decoded = json.loads(raw[:-1].decode("utf-8"))
+        decoded = json.loads(
+            raw[:-1].decode("utf-8"),
+            parse_int=_parse_canonical_integer,
+        )
         if canonical_json_bytes(decoded) + b"\n" != raw:
             raise ValueError(f"{name} is not canonical")
         return validator(decoded)
@@ -1601,6 +1606,16 @@ def _read_canonical_artifact(
         if isinstance(error, ValueError) and str(error).startswith(name):
             raise
         raise ValueError(f"{name} is corrupt") from error
+
+
+def _parse_canonical_integer(raw: str) -> int:
+    value = int(raw)
+    if abs(value) <= _MAX_EXACT_BINARY64_INTEGER:
+        return value
+    as_float = float(raw)
+    if not math.isfinite(as_float) or not as_float.is_integer():
+        raise ValueError("canonical integer is not binary64")
+    return int(as_float)
 
 
 def _write_create_or_identical(path: Path, value: Mapping[str, object], name: str) -> None:

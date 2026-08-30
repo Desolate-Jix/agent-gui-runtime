@@ -70,8 +70,14 @@ def _context(
     )
 
 
-def _runtime_attestation(module, *, provider: str = "qwen", digit: str = "e"):
-    process = {"pid": 101, "create_time_ns": 202}
+def _runtime_attestation(
+    module,
+    *,
+    provider: str = "qwen",
+    digit: str = "e",
+    create_time_ns: int = 202,
+):
+    process = {"pid": 101, "create_time_ns": create_time_ns}
     common = {
         "process_identities": [process],
         "process_scope": {
@@ -1632,6 +1638,92 @@ def test_dispatch_parent_journal_and_commit_marker_recover_after_post_write_fsyn
     assert module.read_latest_benchmark_dispatch_receipt(
         dispatch_context=context
     ) == recovered
+
+
+@pytest.mark.parametrize("provider", ["omni", "qwen", "vista"])
+def test_dispatch_runtime_parent_round_trips_binary64_process_create_time(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+
+    create_time_ns = 1_788_068_912_282_699_008
+    context = _context(tmp_path, provider=provider)
+    runtime_attestation = _runtime_attestation(
+        module,
+        provider=provider,
+        create_time_ns=create_time_ns,
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        module,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: deepcopy(runtime_attestation),
+    )
+
+    with module.install_benchmark_dispatch_attestor(dispatch_context=context):
+        receipt = module.attest_benchmark_provider_dispatch(
+            provider=provider,
+            operation_ref=context["operation_ref"],
+            window_binding=context["window_binding"],
+            provider_runtime={"provider": provider},
+        )
+
+    assert module.read_latest_benchmark_dispatch_receipt(
+        dispatch_context=context
+    ) == receipt
+    operation_key = module.content_sha256(
+        {
+            name: context["operation_ref"][name]
+            for name in ("run_id", "stage", "operation_id")
+        }
+    )
+    parent_path = (
+        tmp_path
+        / "runtime_state"
+        / "benchmark-v2-provider-dispatch"
+        / f"{operation_key}.{provider}.1.runtime-parent.json"
+    )
+    parent = module._read_canonical_artifact(
+        parent_path,
+        module._validate_dispatch_runtime_parent,
+        "benchmark dispatch runtime parent",
+    )
+    assert parent["runtime_identity"]["process_identities"] == [
+        {"pid": 101, "create_time_ns": create_time_ns}
+    ]
+    assert parent["runtime_identity"]["process_scope"]["process_identities"] == [
+        {"pid": 101, "create_time_ns": create_time_ns}
+    ]
+    if provider != "omni":
+        assert parent["runtime_identity"]["listener_owner"]["process_identities"] == [
+            {"pid": 101, "create_time_ns": create_time_ns}
+        ]
+
+    canonical_token = (
+        module.canonical_json_bytes({"value": create_time_ns})
+        .decode("utf-8")
+        .removeprefix('{"value":')
+        .removesuffix("}")
+    )
+    assert canonical_token != str(create_time_ns)
+    raw = parent_path.read_text(encoding="utf-8")
+    parent_path.write_text(
+        raw.replace(canonical_token, str(int(canonical_token) + 1)),
+        encoding="utf-8",
+        newline="\n",
+    )
+    with pytest.raises(ValueError, match="corrupt|canonical"):
+        module._read_canonical_artifact(
+            parent_path,
+            module._validate_dispatch_runtime_parent,
+            "benchmark dispatch runtime parent",
+        )
 
 
 def test_identical_dispatch_replay_is_noop_but_different_runtime_fails_before_append(
