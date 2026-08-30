@@ -52,7 +52,23 @@ def _window_binding(
     )
 
 
-def _screen_group() -> dict[str, object]:
+def _screen_group(
+    *,
+    capture_bundle: dict[str, object] | None = None,
+    hybrid_capture_bundle_ref: dict[str, object] | None = None,
+    capture_image_path: str = "artifacts/benchmark/screen-group-1.png",
+) -> dict[str, object]:
+    bundle_ref = _identity("capture-bundle")
+    expanded_bundle = capture_bundle or {
+        "bundle_id": "capture-bundle",
+        "bundle_ref": bundle_ref,
+        "run_id": "run-h1",
+        "workflow_revision": 0,
+    }
+    if hybrid_capture_bundle_ref is not None:
+        bundle_ref = deepcopy(hybrid_capture_bundle_ref)
+    elif isinstance(expanded_bundle.get("bundle_ref"), dict):
+        bundle_ref = deepcopy(expanded_bundle["bundle_ref"])
     return incumbent.compose_benchmark_v2_hybrid_screen_group_start(
         attempt_ref=_sealed_parent("attempt"),
         partition="regression",
@@ -62,14 +78,33 @@ def _screen_group() -> dict[str, object]:
             {"case_id": f"case-{index}", "case_content_sha256": SHA_A}
             for index in range(5)
         ],
-        hybrid_capture_bundle_ref=_identity("capture-bundle"),
+        hybrid_capture_bundle_ref=bundle_ref,
         request_ref=_identity("request-1"),
         registration_ref=_identity("registration-1"),
         manifest_ref=_identity("manifest-1"),
-        capture_image_path="artifacts/benchmark/screen-group-1.png",
+        capture_image_path=capture_image_path,
         hybrid_config={"mode": "hybrid_v1_1"},
-        capture_bundle={"bundle_id": "capture-bundle"},
+        capture_bundle=expanded_bundle,
     )
+
+
+def _hybrid_worker_payload() -> dict[str, object]:
+    group = _screen_group()
+    orchestration = {
+        "run_id": "run-h1",
+        "workflow_revision": 0,
+        "hybrid_capture_bundle_ref": deepcopy(
+            group["hybrid_capture_bundle_ref"]
+        ),
+        "capture_image_path": group["capture_image_path"],
+        "hybrid_config": deepcopy(group["hybrid_config"]),
+        "capture_bundle": deepcopy(group["capture_bundle"]),
+    }
+    return {
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "workflow_revision": 0,
+        "_hybrid_orchestration": orchestration,
+    }
 
 
 def _operation_ref(
@@ -1366,30 +1401,34 @@ def _s3_window_binding() -> dict[str, object]:
 
 def test_s3_hybrid_binding_keeps_each_exact_server_issued_provider_context(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
     from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
         compose_benchmark_dispatch_context,
     )
 
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path)
     binding = workflow_service._compose_benchmark_v2_hybrid_service_binding(
         screen_group=_screen_group(),
         window_binding=_s3_window_binding(),
     )
     contexts = []
     for provider, revision in (("omni", 7), ("qwen", 8), ("vista", 10)):
+        operation_ref = {
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-h1",
+            "revision": revision,
+            "window_binding_ref": deepcopy(
+                _s3_window_binding()["window_binding_ref"]
+            ),
+            "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
+        }
         context = compose_benchmark_dispatch_context(
             provider=provider,
-            operation_ref={
-                "run_id": "run-h1",
-                "stage": "screen_understanding",
-                "operation_id": "operation-h1",
-                "revision": revision,
-                "window_binding_ref": deepcopy(
-                    _s3_window_binding()["window_binding_ref"]
-                ),
-                "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
-            },
+            operation_ref=operation_ref,
             window_binding={
                 "contract_version": "test_window_binding_v1",
                 "exact_hwnd": 101,
@@ -1397,7 +1436,9 @@ def test_s3_hybrid_binding_keeps_each_exact_server_issued_provider_context(
                 "job_name": "job-h1",
                 "payload_sha256": "c" * 64,
             },
-            receipt_journal_path=(tmp_path / "dispatch.jsonl").resolve(),
+            receipt_journal_path=attestation._fixed_dispatch_journal_path(
+                operation_ref
+            ),
         )
         contexts.append(context)
         binding = workflow_service._benchmark_v2_hybrid_binding_with_dispatch_context(
@@ -1441,6 +1482,7 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
     from app.learn import workflow_service
     from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
 
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path)
     registry = _S3Registry()
     store, composition, service, _started = _s3_service(
         tmp_path,
@@ -1463,15 +1505,18 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
         "_attest_exact_window",
         lambda value: {"content_sha256": "d" * 64},
     )
+    from test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation import (
+        _runtime_attestation,
+    )
+
     monkeypatch.setattr(
         attestation,
         "_attest_exact_provider_runtime",
-        lambda provider, value: {
-            "content_sha256": {"omni": "1", "qwen": "2", "vista": "3"}[
-                provider
-            ]
-            * 64
-        },
+        lambda provider, value: _runtime_attestation(
+            attestation,
+            provider=provider,
+            digit={"omni": "1", "qwen": "2", "vista": "3"}[provider],
+        ),
     )
     task_order = [
         "panel_learning_hybrid_omni_discovery",
@@ -1491,6 +1536,9 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
         assert current is not None
         payload = current["payload"]
         assert isinstance(payload, dict)
+        assert payload["workflow_revision"] == 0
+        assert payload["_hybrid_orchestration"]["workflow_revision"] == 0
+        assert current["authoritative_workflow_revision"] == 0
         context = payload.get("_benchmark_v2_dispatch_context")
         task_kind = str(current["task_kind"])
         if isinstance(context, dict):
@@ -1559,8 +1607,13 @@ def test_s3_public_facade_adopts_each_server_issued_provider_revision_across_tra
             sink = kwargs.get("_benchmark_dispatch_context_sink")
             if isinstance(context, dict) and callable(sink):
                 sink(context)
+            orchestration = deepcopy(
+                current_worker["payload"]["_hybrid_orchestration"]
+            )
             payload = {
                 "learning_pipeline_mode": "hybrid_v1_1",
+                "workflow_revision": orchestration["workflow_revision"],
+                "_hybrid_orchestration": orchestration,
                 "sequence_index": index + 1,
             }
             if isinstance(context, dict):
@@ -1673,8 +1726,480 @@ def test_s3_start_uses_authoritative_initial_builder_once_and_replays(
             "panel_learning_hybrid_omni_discovery"
         )
         assert registry.start_calls == 1
+        assert registry.current is not None
+        assert registry.current["payload"]["workflow_revision"] == 0
+        assert registry.current["payload"]["_hybrid_orchestration"][
+            "workflow_revision"
+        ] == 0
+        assert registry.current["authoritative_workflow_revision"] == 0
         assert first["artifact_is_authorization"] is False
         assert first["execute_binding_enabled"] is False
+    finally:
+        store.close()
+
+
+def test_s3_start_preserves_capture_revision_after_context_persistence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(
+        tmp_path,
+        registry,
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    serialized_window = {
+        "contract_version": "test_window_binding_v1",
+        "exact_hwnd": 101,
+        "process_identity": {"pid": 202, "create_time_ns": 303},
+        "job_name": "job-h1",
+        "payload_sha256": "c" * 64,
+    }
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        lambda **_kwargs: {"serialized_window_binding": deepcopy(serialized_window)},
+    )
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path)
+
+    try:
+        service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert registry.current is not None
+        assert "_benchmark_v2_dispatch_context" in registry.current["payload"]
+        payload = registry.current["payload"]
+        assert payload["workflow_revision"] == 0
+        assert payload["_hybrid_orchestration"]["workflow_revision"] == 0
+        assert registry.current["authoritative_workflow_revision"] == 0
+        workflow_state = store.get("run-h1")
+        assert workflow_state["revision"] == 5
+        assert payload["_benchmark_v2_dispatch_context"]["operation_ref"][
+            "revision"
+        ] == 4
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    ("capture_bundle", "screen_group_ref"),
+    [
+        (
+            {
+                "bundle_id": "capture-bundle",
+                "bundle_ref": _identity("capture-bundle"),
+                "run_id": "other-run",
+                "workflow_revision": 0,
+            },
+            _identity("capture-bundle"),
+        ),
+        (
+            {
+                "bundle_id": "capture-bundle",
+                "bundle_ref": _identity("other-bundle", SHA_B),
+                "run_id": "run-h1",
+                "workflow_revision": 0,
+            },
+            _identity("capture-bundle"),
+        ),
+    ],
+    ids=("cross-run", "bundle-ref-mismatch"),
+)
+def test_s3_start_rejects_unbound_capture_lineage_before_registry_start(
+    tmp_path: Path,
+    capture_bundle: dict[str, object],
+    screen_group_ref: dict[str, object],
+) -> None:
+    from app.learn.workflow_service import LearningWorkflowStageOperationError
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        with pytest.raises(
+            LearningWorkflowStageOperationError,
+            match="capture bundle lineage is invalid",
+        ):
+            service.start_hybrid_operation(
+                screen_group=_screen_group(
+                    capture_bundle=capture_bundle,
+                    hybrid_capture_bundle_ref=screen_group_ref,
+                ),
+                window_binding=_s3_window_binding(),
+            )
+
+        assert registry.start_calls == 0
+        assert registry.current is None
+    finally:
+        store.close()
+
+
+def test_s3_initial_payload_loads_exact_capture_revision_before_provider_dispatch(
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
+    from test_learn_hybrid_capture import _bundle
+
+    capture_bundle = _bundle(tmp_path, run_id="run-h1", revision=0)
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        binding = workflow_service._compose_benchmark_v2_hybrid_service_binding(
+            screen_group=_screen_group(
+                capture_bundle=capture_bundle,
+                capture_image_path="artifacts/screenshots/capture.png",
+            ),
+            window_binding=_s3_window_binding(),
+        )
+        assert workflow_service._require_benchmark_v2_hybrid_capture_bundle(
+            project_root=tmp_path,
+            binding=binding,
+        ) == 0
+        stale_bundle = deepcopy(capture_bundle)
+        stale_bundle["workflow_revision"] = 1
+        stale_binding = (
+            workflow_service._compose_benchmark_v2_hybrid_service_binding(
+                screen_group=_screen_group(
+                    capture_bundle=stale_bundle,
+                    hybrid_capture_bundle_ref=deepcopy(
+                        capture_bundle["bundle_ref"]
+                    ),
+                    capture_image_path="artifacts/screenshots/capture.png",
+                ),
+                window_binding=_s3_window_binding(),
+            )
+        )
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="stale workflow revision",
+        ):
+            workflow_service._require_benchmark_v2_hybrid_capture_bundle(
+                project_root=tmp_path,
+                binding=stale_binding,
+            )
+        type_confused_bundle = deepcopy(capture_bundle)
+        type_confused_bundle["capture_identity"]["image_size"]["height"] = 6.0
+        type_confused_binding = (
+            workflow_service._compose_benchmark_v2_hybrid_service_binding(
+                screen_group=_screen_group(
+                    capture_bundle=type_confused_bundle,
+                    hybrid_capture_bundle_ref=deepcopy(
+                        capture_bundle["bundle_ref"]
+                    ),
+                    capture_image_path="artifacts/screenshots/capture.png",
+                ),
+                window_binding=_s3_window_binding(),
+            )
+        )
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="expanded capture bundle is stale",
+        ):
+            workflow_service._require_benchmark_v2_hybrid_capture_bundle(
+                project_root=tmp_path,
+                binding=type_confused_binding,
+            )
+        assert registry.start_calls == 0
+
+        service.start_hybrid_operation(
+            screen_group=_screen_group(
+                capture_bundle=capture_bundle,
+                capture_image_path="artifacts/screenshots/capture.png",
+            ),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert registry.current is not None
+        payload = registry.current["payload"]
+        loaded = load_and_verify_hybrid_capture_bundle(
+            project_root=tmp_path,
+            bundle_ref=payload["hybrid_capture_bundle_ref"],
+            expected_run_id="run-h1",
+            expected_workflow_revision=payload["workflow_revision"],
+        )
+        assert loaded["workflow_revision"] == 0
+        assert registry.start_calls == 1
+        with pytest.raises(ValueError, match="stale workflow revision"):
+            load_and_verify_hybrid_capture_bundle(
+                project_root=tmp_path,
+                bundle_ref=payload["hybrid_capture_bundle_ref"],
+                expected_run_id="run-h1",
+                expected_workflow_revision=store.get("run-h1")["revision"],
+            )
+    finally:
+        store.close()
+
+
+def test_s3_generic_omni_continuation_preserves_capture_revision(
+    tmp_path: Path,
+) -> None:
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        step = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        assert registry.current is not None
+        orchestration = deepcopy(
+            registry.current["payload"]["_hybrid_orchestration"]
+        )
+        registry.complete_current(
+            {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "task_kind": "panel_learning_hybrid_omni_discovery",
+                "outcome": "completed",
+                "orchestration": orchestration,
+                "result": {
+                    "contract_version": "hybrid_omni_discovery_result_v1",
+                    "hybrid_capture_bundle_ref": deepcopy(
+                        orchestration["hybrid_capture_bundle_ref"]
+                    ),
+                    "inventory": {"contract_version": "test_inventory_v1"},
+                },
+            }
+        )
+
+        advanced = service.continue_hybrid_operation(
+            operation_ref=step["operation_ref"]
+        )
+
+        assert advanced["observed_task_kind"] == (
+            "panel_learning_hybrid_qwen_binding"
+        )
+        assert registry.current is not None
+        assert registry.current["payload"]["workflow_revision"] == 0
+        assert registry.current["payload"]["_hybrid_orchestration"][
+            "workflow_revision"
+        ] == 0
+        assert registry.current["authoritative_workflow_revision"] == 0
+        assert store.get("run-h1")["revision"] > 0
+    finally:
+        store.close()
+
+
+def test_s3_terminal_review_uses_capture_revision_while_store_cas_advances(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+    from test_learn_hybrid_capture import _bundle
+
+    capture_bundle = _bundle(tmp_path, run_id="run-h1", revision=0)
+    screen_group = _screen_group(
+        capture_bundle=capture_bundle,
+        capture_image_path="artifacts/screenshots/capture.png",
+    )
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    monkeypatch.setattr(
+        workflow_service,
+        "_managed_hybrid_large_review_projection",
+        lambda **_kwargs: {"contract_version": "test_large_review_v1"},
+    )
+    try:
+        binding = workflow_service._compose_benchmark_v2_hybrid_service_binding(
+            screen_group=screen_group,
+            window_binding=_s3_window_binding(),
+        )
+        current = workflow_service._persist_benchmark_v2_hybrid_service_binding(
+            composition=composition,
+            workflow_state=store.get("run-h1"),
+            stage="screen_understanding",
+            binding=binding,
+        )
+        response = {
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "outcome": "completed",
+            "supervisor_lineage": {
+                "run_id": "run-h1",
+                "workflow_revision": 0,
+                "operation_id": "operation-h1",
+                "stage": "screen_understanding",
+            },
+            "orchestration": {
+                "run_id": "run-h1",
+                "workflow_revision": 0,
+                "hybrid_capture_bundle_ref": deepcopy(
+                    capture_bundle["bundle_ref"]
+                ),
+                "capture_bundle": deepcopy(capture_bundle),
+                "capture_image_path": "artifacts/screenshots/capture.png",
+            },
+            "result": {
+                "contract_version": "hybrid_review_projection_v1",
+                "outcome": "completed",
+                "review_status": "REVIEW_REQUIRED",
+                "automatic_acceptance": False,
+                "hybrid_capture_bundle_ref": deepcopy(
+                    capture_bundle["bundle_ref"]
+                ),
+                "proposals": [
+                    {
+                        "candidate_id": "candidate/one",
+                        "roi_ref": {
+                            "capture_lineage_ref": deepcopy(
+                                capture_bundle["capture_lineage_ref"]
+                            )
+                        },
+                    }
+                ],
+                "execute_binding_enabled": False,
+                "no_live_click_authorization": True,
+            },
+        }
+
+        trial_path = workflow_service._persist_managed_hybrid_review_trial(
+            project_root=tmp_path,
+            run_id="run-h1",
+            workflow_revision=0,
+            operation_id="operation-h1",
+            worker_id="worker-review",
+            result_sha256="d" * 64,
+            response=deepcopy(response),
+            current=current,
+        )
+
+        assert current["revision"] > 0
+        assert (tmp_path / trial_path).is_file()
+        for lineage_owner in ("supervisor_lineage", "orchestration"):
+            stale = deepcopy(response)
+            stale[lineage_owner]["workflow_revision"] = 1
+            with pytest.raises(
+                workflow_service.LearningWorkflowStageOperationError,
+                match="lineage is stale|orchestration is stale",
+            ):
+                workflow_service._persist_managed_hybrid_review_trial(
+                    project_root=tmp_path,
+                    run_id="run-h1",
+                    workflow_revision=0,
+                    operation_id="operation-h1",
+                    worker_id="worker-review",
+                    result_sha256="d" * 64,
+                    response=stale,
+                    current=current,
+                )
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "mutated_field",
+    (
+        "workflow_revision",
+        "workflow_revision_bool",
+        "orchestration_revision",
+        "orchestration_revision_float",
+        "orchestration_run_id",
+        "orchestration_bundle_ref",
+        "orchestration_capture_bundle_revision_float",
+        "top_level_run_id",
+        "top_level_bundle_ref",
+    ),
+)
+def test_s3_worker_start_rejects_mutated_capture_revision_before_registry_start(
+    tmp_path: Path,
+    mutated_field: str,
+) -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    try:
+        binding = workflow_service._compose_benchmark_v2_hybrid_service_binding(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        current = workflow_service._persist_benchmark_v2_hybrid_service_binding(
+            composition=composition,
+            workflow_state=store.get("run-h1"),
+            stage="screen_understanding",
+            binding=binding,
+        )
+        payload = _hybrid_worker_payload()
+        if mutated_field == "workflow_revision":
+            payload["workflow_revision"] = 1
+        elif mutated_field == "workflow_revision_bool":
+            payload["workflow_revision"] = False
+        elif mutated_field == "orchestration_revision":
+            payload["_hybrid_orchestration"]["workflow_revision"] = 1
+        elif mutated_field == "orchestration_revision_float":
+            payload["_hybrid_orchestration"]["workflow_revision"] = 0.0
+        elif mutated_field == "orchestration_run_id":
+            payload["_hybrid_orchestration"]["run_id"] = "other-run"
+        elif mutated_field == "orchestration_bundle_ref":
+            payload["_hybrid_orchestration"]["hybrid_capture_bundle_ref"] = (
+                _identity("other-bundle", SHA_B)
+            )
+        elif mutated_field == "orchestration_capture_bundle_revision_float":
+            payload["_hybrid_orchestration"]["capture_bundle"][
+                "workflow_revision"
+            ] = 0.0
+        elif mutated_field == "top_level_run_id":
+            payload["run_id"] = "other-run"
+        else:
+            payload["hybrid_capture_bundle_ref"] = _identity(
+                "other-bundle", SHA_B
+            )
+
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="payload workflow lineage is stale",
+        ):
+            workflow_service.start_guarded_learning_stage_worker(
+                composition=composition,
+                run_id="run-h1",
+                expected_revision=current["revision"],
+                stage="screen_understanding",
+                operation_id="operation-h1",
+                task_kind="panel_learning_hybrid_omni_discovery",
+                payload=payload,
+            )
+
+        assert registry.start_calls == 0
+    finally:
+        store.close()
+
+
+def test_s3_worker_start_rejects_stale_store_cas_with_valid_capture_revision(
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    try:
+        binding = workflow_service._compose_benchmark_v2_hybrid_service_binding(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        current = workflow_service._persist_benchmark_v2_hybrid_service_binding(
+            composition=composition,
+            workflow_state=store.get("run-h1"),
+            stage="screen_understanding",
+            binding=binding,
+        )
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="revision conflict",
+        ):
+            workflow_service.start_guarded_learning_stage_worker(
+                composition=composition,
+                run_id="run-h1",
+                expected_revision=current["revision"] - 1,
+                stage="screen_understanding",
+                operation_id="operation-h1",
+                task_kind="panel_learning_hybrid_omni_discovery",
+                payload=_hybrid_worker_payload(),
+            )
+
+        assert registry.start_calls == 0
     finally:
         store.close()
 
@@ -1871,6 +2396,12 @@ def test_s3_continue_advances_exact_existing_order_one_producer_per_call(
                 task_kind=task_order[index + 1],
                 payload={
                     "learning_pipeline_mode": "hybrid_v1_1",
+                    "workflow_revision": current["payload"][
+                        "workflow_revision"
+                    ],
+                    "_hybrid_orchestration": deepcopy(
+                        current["payload"]["_hybrid_orchestration"]
+                    ),
                     "sequence_index": index + 1,
                 },
                 reuse_active_identical=True,
@@ -1971,6 +2502,8 @@ def test_s3_lost_response_retry_replays_consumed_ref_without_second_producer(
         nonlocal continuation_calls
         continuation_calls += 1
         state = store.get("run-h1")
+        current = registry.current
+        assert current is not None
         worker = workflow_service.start_guarded_learning_stage_worker(
             composition=composition,
             run_id="run-h1",
@@ -1980,6 +2513,10 @@ def test_s3_lost_response_retry_replays_consumed_ref_without_second_producer(
             task_kind="panel_learning_hybrid_qwen_binding",
             payload={
                 "learning_pipeline_mode": "hybrid_v1_1",
+                "workflow_revision": current["payload"]["workflow_revision"],
+                "_hybrid_orchestration": deepcopy(
+                    current["payload"]["_hybrid_orchestration"]
+                ),
                 "sequence_index": 1,
             },
             reuse_active_identical=True,
@@ -2032,7 +2569,7 @@ def test_s3_terminal_prepared_retry_resumes_without_false_terminal_claim(
         "build_learning_pipeline_initial_worker_request",
         lambda **_kwargs: {
             "task_kind": "panel_learning_hybrid_review_projection",
-            "payload": {"learning_pipeline_mode": "hybrid_v1_1"},
+            "payload": _hybrid_worker_payload(),
         },
     )
 
@@ -2126,7 +2663,7 @@ def test_s3_terminal_prepared_state_remains_cancellable_with_zero_resources(
         "build_learning_pipeline_initial_worker_request",
         lambda **_kwargs: {
             "task_kind": "panel_learning_hybrid_review_projection",
-            "payload": {"learning_pipeline_mode": "hybrid_v1_1"},
+            "payload": _hybrid_worker_payload(),
         },
     )
 

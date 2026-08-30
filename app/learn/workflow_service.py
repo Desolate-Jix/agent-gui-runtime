@@ -3306,7 +3306,7 @@ def start_guarded_learning_stage_worker(
                 request=payload["benchmark_v2_incumbent"],
             )
         )
-    require_active_learning_workflow_stage_operation(
+    stage_execution = require_active_learning_workflow_stage_operation(
         store=composition.store,
         run_id=run_id,
         expected_revision=expected_revision,
@@ -3314,6 +3314,23 @@ def start_guarded_learning_stage_worker(
         operation_id=operation_id,
     )
     worker_payload = deepcopy(dict(payload))
+    authoritative_hybrid_revision = expected_revision
+    if worker_payload.get("learning_pipeline_mode") == "hybrid_v1_1":
+        benchmark_binding = _benchmark_v2_hybrid_service_binding_from_execution(
+            stage_execution
+        )
+        if benchmark_binding is not None:
+            authoritative_hybrid_revision = (
+                _require_benchmark_v2_hybrid_payload_workflow_revision(
+                    payload=worker_payload,
+                    binding=benchmark_binding,
+                )
+            )
+            if composition.composition_kind == "production":
+                _require_benchmark_v2_hybrid_capture_bundle(
+                    project_root=composition.project_root,
+                    binding=benchmark_binding,
+                )
     result = _LearningWorkflowRegistryOwner(
         composition.worker_registry
     ).start_worker(
@@ -3324,7 +3341,7 @@ def start_guarded_learning_stage_worker(
         payload=worker_payload,
         reuse_active_identical=reuse_active_identical,
         authoritative_workflow_revision=(
-            expected_revision
+            authoritative_hybrid_revision
             if worker_payload.get("learning_pipeline_mode") == "hybrid_v1_1"
             else None
         ),
@@ -5097,6 +5114,142 @@ def _benchmark_v2_hybrid_service_binding_from_execution(
     return _validate_benchmark_v2_hybrid_service_binding(value)
 
 
+def _benchmark_v2_exact_json_equal(left: object, right: object) -> bool:
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
+
+    try:
+        return canonical_json_bytes(left) == canonical_json_bytes(right)
+    except (TypeError, ValueError):
+        return False
+
+
+def _benchmark_v2_hybrid_lineage_workflow_revision(
+    binding: Mapping[str, object],
+) -> int:
+    """从持久化绑定取得不可变截图 revision，不得用可变 store CAS 替代。"""
+
+    screen_group = binding.get("screen_group")
+    window_binding = binding.get("window_binding")
+    capture_bundle = (
+        screen_group.get("capture_bundle")
+        if isinstance(screen_group, Mapping)
+        else None
+    )
+    bundle_ref = (
+        screen_group.get("hybrid_capture_bundle_ref")
+        if isinstance(screen_group, Mapping)
+        else None
+    )
+    if (
+        not isinstance(capture_bundle, Mapping)
+        or capture_bundle.get("bundle_ref") != bundle_ref
+        or not isinstance(window_binding, Mapping)
+        or capture_bundle.get("run_id") != window_binding.get("run_id")
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid capture bundle lineage is invalid"
+        )
+    revision = (
+        capture_bundle.get("workflow_revision")
+        if isinstance(capture_bundle, Mapping)
+        else None
+    )
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid capture workflow revision is invalid"
+        )
+    return revision
+
+
+def _require_benchmark_v2_hybrid_payload_workflow_revision(
+    *, payload: Mapping[str, object], binding: Mapping[str, object]
+) -> int:
+    revision = _benchmark_v2_hybrid_lineage_workflow_revision(binding)
+    screen_group = binding["screen_group"]
+    window_binding = binding["window_binding"]
+    orchestration = payload.get("_hybrid_orchestration")
+    supplied_revision = payload.get("workflow_revision")
+    orchestration_revision = (
+        orchestration.get("workflow_revision")
+        if isinstance(orchestration, Mapping)
+        else None
+    )
+    if (
+        (
+            "workflow_revision" in payload
+            and (
+                isinstance(supplied_revision, bool)
+                or not isinstance(supplied_revision, int)
+                or supplied_revision != revision
+            )
+        )
+        or not isinstance(orchestration, Mapping)
+        or isinstance(orchestration_revision, bool)
+        or not isinstance(orchestration_revision, int)
+        or orchestration_revision != revision
+        or orchestration.get("run_id") != window_binding["run_id"]
+        or not _benchmark_v2_exact_json_equal(
+            orchestration.get("hybrid_capture_bundle_ref"),
+            screen_group["hybrid_capture_bundle_ref"],
+        )
+        or orchestration.get("capture_image_path")
+        != screen_group["capture_image_path"]
+        or not _benchmark_v2_exact_json_equal(
+            orchestration.get("hybrid_config"),
+            screen_group["hybrid_config"],
+        )
+        or not _benchmark_v2_exact_json_equal(
+            orchestration.get("capture_bundle"),
+            screen_group["capture_bundle"],
+        )
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid payload workflow lineage is stale"
+        )
+    for name, expected in (
+        ("run_id", window_binding["run_id"]),
+        (
+            "hybrid_capture_bundle_ref",
+            screen_group["hybrid_capture_bundle_ref"],
+        ),
+        ("capture_image_path", screen_group["capture_image_path"]),
+        ("capture_bundle", screen_group["capture_bundle"]),
+    ):
+        if name in payload and not _benchmark_v2_exact_json_equal(
+            payload[name], expected
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 hybrid payload workflow lineage is stale"
+            )
+    return revision
+
+
+def _require_benchmark_v2_hybrid_capture_bundle(
+    *, project_root: str | Path, binding: Mapping[str, object]
+) -> int:
+    revision = _benchmark_v2_hybrid_lineage_workflow_revision(binding)
+    screen_group = binding["screen_group"]
+    window_binding = binding["window_binding"]
+    try:
+        loaded = load_and_verify_hybrid_capture_bundle(
+            project_root=Path(project_root).resolve(),
+            bundle_ref=deepcopy(screen_group["hybrid_capture_bundle_ref"]),
+            expected_run_id=str(window_binding["run_id"]),
+            expected_workflow_revision=revision,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise LearningWorkflowStageOperationError(
+            f"benchmark_v2 hybrid capture bundle is invalid · {exc}"
+        ) from exc
+    expanded_bundle = deepcopy(dict(screen_group["capture_bundle"]))
+    expanded_bundle.pop("bundle_ref", None)
+    if not _benchmark_v2_exact_json_equal(loaded, expanded_bundle):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid expanded capture bundle is stale"
+        )
+    return revision
+
+
 def _persist_benchmark_v2_hybrid_service_binding(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -6021,6 +6174,9 @@ def _start_benchmark_v2_hybrid_workflow_service(
                 "benchmark_v2 hybrid service start binding is stale"
             )
         assert binding is not None
+        lineage_workflow_revision = (
+            _benchmark_v2_hybrid_lineage_workflow_revision(binding)
+        )
         attachment = _LearningWorkflowRegistryOwner(
             composition.worker_registry
         ).project_worker_attachment(
@@ -6033,7 +6189,7 @@ def _start_benchmark_v2_hybrid_workflow_service(
                 learning_pipeline_mode="hybrid_v1_1",
                 payload={
                     "run_id": run_id,
-                    "workflow_revision": int(current["revision"]),
+                    "workflow_revision": lineage_workflow_revision,
                     "hybrid_capture_bundle_ref": deepcopy(
                         screen_group["hybrid_capture_bundle_ref"]
                     ),
@@ -6520,11 +6676,25 @@ def continue_guarded_learning_stage_worker_result(
                 worker_id=worker_id,
             )
         )
-    def _dispatch_context_factory(task_kind: str) -> Mapping[str, object] | None:
-        assert isinstance(current, Mapping)
-        binding = _benchmark_v2_hybrid_service_binding_from_execution(
+    benchmark_hybrid_binding = (
+        _benchmark_v2_hybrid_service_binding_from_execution(
             _benchmark_v2_stage_execution(current, stage)
         )
+        if isinstance(current, Mapping)
+        else None
+    )
+    if (
+        benchmark_hybrid_binding is not None
+        and composition.composition_kind == "production"
+    ):
+        _require_benchmark_v2_hybrid_capture_bundle(
+            project_root=composition.project_root,
+            binding=benchmark_hybrid_binding,
+        )
+
+    def _dispatch_context_factory(task_kind: str) -> Mapping[str, object] | None:
+        assert isinstance(current, Mapping)
+        binding = benchmark_hybrid_binding
         if binding is None:
             return None
         context = _benchmark_v2_dispatch_context_for_worker(
@@ -6553,11 +6723,7 @@ def continue_guarded_learning_stage_worker_result(
         _preloaded_current=current if isinstance(current, Mapping) else None,
         _benchmark_dispatch_context_factory=(
             _dispatch_context_factory
-            if isinstance(current, Mapping)
-            and _benchmark_v2_hybrid_service_binding_from_execution(
-                _benchmark_v2_stage_execution(current, stage)
-            )
-            is not None
+            if isinstance(current, Mapping) and benchmark_hybrid_binding is not None
             else None
         ),
     )
@@ -7206,6 +7372,20 @@ def continue_learning_stage_worker_result(
     learning_pipeline_mode = normalize_learning_pipeline_mode(
         _learning_pipeline_mode_for_stage(current, stage)
     )
+    benchmark_hybrid_binding = None
+    hybrid_lineage_workflow_revision = expected_revision
+    if learning_pipeline_mode == "hybrid_v1_1":
+        benchmark_hybrid_binding = (
+            _benchmark_v2_hybrid_service_binding_from_execution(
+                _benchmark_v2_stage_execution(current, stage)
+            )
+        )
+        if benchmark_hybrid_binding is not None:
+            hybrid_lineage_workflow_revision = (
+                _benchmark_v2_hybrid_lineage_workflow_revision(
+                    benchmark_hybrid_binding
+                )
+            )
     if task_kind == "vision_observe_screen" and response.get("success") is True:
         response = _verify_hybrid_observe_handoff(
             response=response,
@@ -7276,7 +7456,7 @@ def continue_learning_stage_worker_result(
         trial_path = _persist_managed_hybrid_review_trial(
             project_root=project_root,
             run_id=run_id,
-            workflow_revision=expected_revision,
+            workflow_revision=hybrid_lineage_workflow_revision,
             operation_id=str(operation_id or "").strip(),
             worker_id=normalized_worker_id,
             result_sha256=result_sha256,
@@ -7310,6 +7490,11 @@ def continue_learning_stage_worker_result(
                 raise LearningWorkflowStageOperationError(
                     "worker continuation next_worker contract is invalid"
                 )
+            if benchmark_hybrid_binding is not None:
+                _require_benchmark_v2_hybrid_payload_workflow_revision(
+                    payload=next_payload,
+                    binding=benchmark_hybrid_binding,
+                )
             if _benchmark_dispatch_context_factory is not None:
                 next_payload = _inject_benchmark_v2_dispatch_context(
                     payload=next_payload,
@@ -7323,7 +7508,11 @@ def continue_learning_stage_worker_result(
                 payload=deepcopy(next_payload),
                 reuse_active_identical=True,
                 **(
-                    {"authoritative_workflow_revision": expected_revision}
+                    {
+                        "authoritative_workflow_revision": (
+                            hybrid_lineage_workflow_revision
+                        )
+                    }
                     if next_payload.get("learning_pipeline_mode") == "hybrid_v1_1"
                     else {}
                 ),
