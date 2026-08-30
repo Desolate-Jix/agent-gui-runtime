@@ -1846,7 +1846,7 @@ def test_invalid_http_json_marks_compute_complete_before_failure_reconciliation(
     monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda *args, **kwargs: InvalidResponse())
     with pytest.raises(ValueError):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
@@ -3070,6 +3070,70 @@ def test_qwen_os_lock_is_not_stolen_from_live_owner(tmp_path, monkeypatch) -> No
     assert waiter_entered.is_set() is True
 
 
+@pytest.mark.parametrize("candidate_count", [0, 1, 15])
+def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
+    candidate_count,
+) -> None:
+    candidate_ids = [
+        "candidate/" + f"{index:064x}" for index in range(candidate_count)
+    ]
+
+    schema = model_server._qwen_binding_response_schema(
+        {"candidates": [{"candidate_id": candidate_id} for candidate_id in candidate_ids]}
+    )
+
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == {
+        "bindings",
+        "ambiguity_sets",
+        "orphan_semantics",
+    }
+    bindings_schema = schema["properties"]["bindings"]
+    assert set(bindings_schema) == {"type", "prefixItems"}
+    assert [
+        item["properties"]["candidate_id"]["const"]
+        for item in bindings_schema["prefixItems"]
+    ] == candidate_ids
+    binding_fields = {
+        "candidate_id",
+        "role",
+        "label",
+        "description",
+        "semantic_confidence",
+        "task_relevance",
+        "relation",
+        "ambiguity",
+    }
+    assert all(
+        set(item["properties"]) == binding_fields
+        and set(item["required"]) == binding_fields
+        and item["additionalProperties"] is False
+        for item in bindings_schema["prefixItems"]
+    )
+
+
+def test_qwen_binding_response_schema_rejects_missing_candidate_inventory() -> None:
+    with pytest.raises(ValueError, match="Qwen binding request candidates"):
+        model_server._qwen_binding_response_schema({})
+
+
+@pytest.mark.parametrize(
+    "candidates",
+    [
+        None,
+        {},
+        [{"candidate_id": 7}],
+        [{"candidate_id": "candidate/duplicate"}, {"candidate_id": "candidate/duplicate"}],
+    ],
+)
+def test_qwen_binding_response_schema_rejects_invalid_candidate_inventory(
+    candidates,
+) -> None:
+    with pytest.raises(ValueError, match="Qwen binding request candidates"):
+        model_server._qwen_binding_response_schema({"candidates": candidates})
+
+
 def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
     tmp_path,
     monkeypatch,
@@ -3094,6 +3158,29 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
     })
     monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "learn-qwen-request")
     screenshot_bytes = b"controlled-task2-image-bytes"
+    candidate_ids = ["candidate/" + "a" * 64, "candidate/" + "b" * 64]
+    model_request = {
+        "contract_version": "hybrid_qwen_binding_request_v1",
+        "label": "申请职位",
+        "candidates": [{"candidate_id": candidate_id} for candidate_id in candidate_ids],
+    }
+    model_response = {
+        "bindings": [
+            {
+                "candidate_id": candidate_id,
+                "role": "button",
+                "label": f"candidate {index}",
+                "description": "",
+                "semantic_confidence": 0.5,
+                "task_relevance": 0.5,
+                "relation": "visible",
+                "ambiguity": None,
+            }
+            for index, candidate_id in enumerate(candidate_ids)
+        ],
+        "ambiguity_sets": [],
+        "orphan_semantics": [],
+    }
 
     def fake_urlopen(request, timeout):
         seen.update(
@@ -3107,14 +3194,7 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
                 "choices": [
                     {
                         "message": {
-                            "content": json.dumps(
-                                {
-                                    "bindings": [],
-                                    "ambiguity_sets": [],
-                                    "orphan_semantics": [],
-                                },
-                                ensure_ascii=False,
-                            )
+                            "content": json.dumps(model_response, ensure_ascii=False)
                         }
                     }
                 ]
@@ -3123,7 +3203,7 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
 
     monkeypatch.setattr(model_server.urllib.request, "urlopen", fake_urlopen)
     result = model_server.run_qwen_binding_model(
-        request={"label": "申请职位"},
+        request=model_request,
         screenshot_bytes=screenshot_bytes,
         screenshot_media_type="image/png",
         screenshot_sha256=__import__("hashlib").sha256(screenshot_bytes).hexdigest(),
@@ -3131,15 +3211,38 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
         timeout_seconds=3.0,
     )
 
-    assert result == {
-        "bindings": [],
-        "ambiguity_sets": [],
-        "orphan_semantics": [],
-    }
+    assert result == model_response
     assert seen["url"] == profile["endpoint"]
     assert seen["timeout"] == 3.0
     assert seen["body"]["request_id"] == "learn-qwen-request"
     assert seen["body"]["model"] == profile["model_name"]
+    response_format = seen["body"]["response_format"]
+    assert response_format["type"] == "json_object"
+    schema = response_format["schema"]
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["bindings", "ambiguity_sets", "orphan_semantics"]
+    bindings_schema = schema["properties"]["bindings"]
+    assert "items" not in bindings_schema
+    assert [
+        item["properties"]["candidate_id"]["const"]
+        for item in bindings_schema["prefixItems"]
+    ] == candidate_ids
+    assert all(
+        item["additionalProperties"] is False
+        and set(item["required"])
+        == {
+            "candidate_id",
+            "role",
+            "label",
+            "description",
+            "semantic_confidence",
+            "task_relevance",
+            "relation",
+            "ambiguity",
+        }
+        for item in bindings_schema["prefixItems"]
+    )
     prompt = seen["body"]["messages"][1]["content"][0]["text"]
     assert "申请职位" in prompt
     assert "three top-level fields bindings, ambiguity_sets, and orphan_semantics" in prompt
@@ -3162,7 +3265,7 @@ def test_qwen_binding_runner_normalizes_timeout_types(monkeypatch, error) -> Non
 
     with pytest.raises(model_server.QwenModelRequestTimeout):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
@@ -3187,7 +3290,7 @@ def test_qwen_binding_runner_rejects_oversized_http_body(monkeypatch) -> None:
     monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda *args, **kwargs: OversizedResponse())
     with pytest.raises(ValueError, match="response byte limit"):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
@@ -3201,7 +3304,7 @@ def test_qwen_http_event_set_and_cancelled_transport_use_typed_cancellation(monk
     cancellation.set()
     with pytest.raises(model_server.QwenModelRequestCancelled):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
@@ -3218,7 +3321,7 @@ def test_qwen_http_event_set_and_cancelled_transport_use_typed_cancellation(monk
     monkeypatch.setattr(model_server.urllib.request, "urlopen", cancelled_transport)
     with pytest.raises(model_server.QwenModelRequestCancelled):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
@@ -3245,7 +3348,7 @@ def test_qwen_runner_rejects_replaced_server_incarnation_before_http(
 
     with pytest.raises(RuntimeError, match="server incarnation ownership changed"):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),
@@ -3288,7 +3391,7 @@ def test_qwen_runner_rejects_replaced_endpoint_socket_owner_before_http(
 
     with pytest.raises(RuntimeError, match="endpoint socket ownership changed"):
         model_server.run_qwen_binding_model(
-            request={},
+            request={"candidates": []},
             screenshot_bytes=b"same-bytes",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"same-bytes").hexdigest(),

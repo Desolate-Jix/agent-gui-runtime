@@ -1188,7 +1188,7 @@ def test_qwen_http_boundary_attests_inside_the_cancellation_fence(
     )
 
     model_server.run_qwen_binding_model(
-        request={"candidate_ids": []},
+        request={"candidates": []},
         screenshot_bytes=b"png",
         screenshot_media_type="image/png",
         screenshot_sha256=__import__("hashlib").sha256(b"png").hexdigest(),
@@ -2655,7 +2655,7 @@ def test_cancelled_qwen_fence_has_zero_attestation_and_http_dispatch(
 
     with pytest.raises(RuntimeError, match="cancelled"):
         model_server.run_qwen_binding_model(
-            request={"candidate_ids": []},
+            request={"candidates": []},
             screenshot_bytes=b"png",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"png").hexdigest(),
@@ -2806,7 +2806,7 @@ def test_qwen_benchmark_context_without_exact_lease_has_zero_http_dispatch(
 
     with pytest.raises(ValueError, match="exact managed lease"):
         model_server.run_qwen_binding_model(
-            request={"candidate_ids": []},
+            request={"candidates": []},
             screenshot_bytes=b"png",
             screenshot_media_type="image/png",
             screenshot_sha256=__import__("hashlib").sha256(b"png").hexdigest(),

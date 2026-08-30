@@ -393,6 +393,65 @@ def _cancel_qwen_profile(
     }
 
 
+def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
+    """把当前候选闭集投影为 llama.cpp 可执行的 JSON Schema。"""
+    raw_candidates = request.get("candidates")
+    if not isinstance(raw_candidates, list):
+        raise ValueError("Qwen binding request candidates must be a list")
+    candidate_ids: list[str] = []
+    for candidate in raw_candidates:
+        candidate_id = candidate.get("candidate_id") if isinstance(candidate, Mapping) else None
+        if not isinstance(candidate_id, str) or not candidate_id.startswith("candidate/"):
+            raise ValueError("Qwen binding request candidates contain invalid candidate_id")
+        if candidate_id in candidate_ids:
+            raise ValueError("Qwen binding request candidates contain duplicate candidate_id")
+        candidate_ids.append(candidate_id)
+
+    binding_fields = [
+        "candidate_id",
+        "role",
+        "label",
+        "description",
+        "semantic_confidence",
+        "task_relevance",
+        "relation",
+        "ambiguity",
+    ]
+
+    def _binding_schema(candidate_id: str) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "candidate_id": {"const": candidate_id},
+                "role": {"type": "string"},
+                "label": {"type": "string"},
+                "description": {"type": "string"},
+                "semantic_confidence": {"type": "number"},
+                "task_relevance": {"type": "number"},
+                "relation": {"type": "string"},
+                "ambiguity": {"type": ["string", "null"]},
+            },
+            "required": binding_fields,
+            "additionalProperties": False,
+        }
+
+    return {
+        "type": "object",
+        "properties": {
+            "bindings": {
+                "type": "array",
+                "prefixItems": [
+                    _binding_schema(candidate_id) for candidate_id in candidate_ids
+                ],
+            },
+            "ambiguity_sets": {"type": "array"},
+            "orphan_semantics": {"type": "array"},
+        },
+        "required": ["bindings", "ambiguity_sets", "orphan_semantics"],
+        "additionalProperties": False,
+    }
+
+
 def run_qwen_binding_model(
     *,
     request: dict[str, Any],
@@ -438,7 +497,10 @@ def run_qwen_binding_model(
         "model": str(profile.get("model_name") or profile.get("model_id") or "qwen"),
         "temperature": 0.0,
         "max_tokens": 4096,
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_object",
+            "schema": _qwen_binding_response_schema(request),
+        },
         "messages": [
             {"role": "system", "content": "Return one closed JSON object only."},
             {
