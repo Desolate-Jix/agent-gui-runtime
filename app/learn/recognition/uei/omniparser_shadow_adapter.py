@@ -1151,7 +1151,7 @@ def _offline_environment(cache_path: Path) -> dict[str, str]:
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_CACHE": str(cache_path),
         "PYTHONNOUSERSITE": "1", "PYTHONUTF8": "1",
     }
-    for name in ("SystemRoot", "WINDIR", "PATH"):
+    for name in ("SystemRoot", "WINDIR", "PATH", "ProgramFiles", "ProgramW6432"):
         value = os.environ.get(name)
         if value:
             environment[name] = value

@@ -135,6 +135,25 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     assert not calls[0]["output_path"].exists()
 
 
+def test_offline_environment_preserves_only_windows_program_roots(tmp_path: Path, monkeypatch) -> None:
+    from app.learn.recognition.uei.omniparser_shadow_adapter import _offline_environment
+
+    monkeypatch.setenv("ProgramFiles", r"C:\Program Files")
+    monkeypatch.setenv("ProgramW6432", r"C:\Program Files")
+    monkeypatch.setenv("HOME", r"C:\Users\private")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\private")
+    monkeypatch.setenv("HOMEDRIVE", "C:")
+    monkeypatch.setenv("HOMEPATH", r"\Users\private")
+    monkeypatch.setenv("ARBITRARY_PARENT_VALUE", "must-not-propagate")
+
+    environment = _offline_environment(tmp_path / "cache")
+
+    assert environment["ProgramFiles"] == r"C:\Program Files"
+    assert environment["ProgramW6432"] == r"C:\Program Files"
+    assert not {"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"}.intersection(environment)
+    assert "ARBITRARY_PARENT_VALUE" not in environment
+
+
 def test_installed_configuration_snapshot_is_sealed_at_construction_and_survives_profile_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
