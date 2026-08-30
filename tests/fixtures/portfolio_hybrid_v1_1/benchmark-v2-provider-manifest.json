@@ -1,0 +1,247 @@
+{
+  "arm_order": [
+    "qwen_only",
+    "omni_only_discovery",
+    "omni_to_qwen",
+    "omni_to_qwen_vista"
+  ],
+  "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+  "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
+  "evaluation_projection": {
+    "estimand": {
+      "arms": {
+        "arm_ids": [
+          "qwen_only",
+          "omni_only_discovery",
+          "omni_to_qwen",
+          "omni_to_qwen_vista"
+        ],
+        "release_arm": "omni_to_qwen_vista",
+        "statistical_arm_count": 4
+      },
+      "contract_version": "portfolio_hybrid_v1_1_estimand_v2_1",
+      "execution_units": {
+        "call_count_reports": [
+          "unique_invocation_count",
+          "amortized_per_target_count"
+        ],
+        "hybrid_arms": [
+          "omni_only_discovery",
+          "omni_to_qwen",
+          "omni_to_qwen_vista"
+        ],
+        "hybrid_invocation_unit": "screen_group",
+        "hybrid_invocations_per_screen_group": 1,
+        "incumbent_arm": "qwen_only",
+        "incumbent_invocation_unit": "target",
+        "targets_per_screen_group": 5
+      },
+      "file_sha256": "c123a09b48ae144b6869c2d1a0d6e87db81948f6212a8bb686ad863826ad4eeb",
+      "point_metric": {
+        "comparison_arithmetic": "exact_rational_no_rounding",
+        "denominator": "submitted_count",
+        "gain": "gain_numerator/submitted_count",
+        "gain_numerator": "sum(refined_hit-baseline_hit)",
+        "min_vista_submitted_count": 1,
+        "required_gain_numerator": ">0"
+      }
+    },
+    "gate": {
+      "automatic_split": "pre_review",
+      "contract_version": "portfolio_hybrid_v1_1_automatic_gate_v2",
+      "file_sha256": "677a5bb7f8f97468b811332bf0811333c793790b4098e2b21fc7068aa7136861",
+      "holdout_role": "automatic_gate",
+      "regression_role": "precondition_only",
+      "thresholds": {
+        "min_coverage": "1/5",
+        "min_important_target_correct_coverage_delta": "1/20",
+        "min_semantic_precision_delta": "0/1",
+        "min_vista_submitted_count": 1,
+        "required_vista_gain_numerator": ">0",
+        "wrong_target_count": 0
+      }
+    },
+    "provider_policy": {
+      "provider_revisions": {
+        "omni": "PINNED_OMNI_REVISION",
+        "qwen": "PINNED_QWEN_REVISION",
+        "vista": "PINNED_VISTA_REVISION"
+      },
+      "provider_revisions_sha256": "25ff2b06d0f5c3fa24809b9e3b046994f3a1d3a472fecffd252238aaa0a0e1c4",
+      "shared_budget": {
+        "max_output_tokens_per_case": 2048,
+        "max_provider_calls_per_case": 3,
+        "max_wall_time_ms_per_case": 120000
+      },
+      "shared_budget_sha256": "ee15ff899063c6e6ce6de50d635886699b2bc4c3962ca441f3ea2cbf23028932",
+      "shared_context_policy": {
+        "ocr": "same_capture_optional",
+        "policy_version": "portfolio-hybrid-shared-uia-ocr-v1",
+        "uia": "same_capture_optional"
+      },
+      "shared_context_policy_sha256": "a02c7efbb9c639d1c45c8e621be5f24a474a85aa34205e46a5b654d84eb1d31e"
+    }
+  },
+  "holdout_partition": "holdout",
+  "provider_corpus_ref": {
+    "content_sha256": "2d31d8a3467a4dd3e7e69fe8c7c59bd3ee5037a2711198cc83ff662aadb3861a",
+    "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+    "file_sha256": "29c9266f97e8f82d9b0e8a8b92a09181352bf70d1170c207c0cde92547acf076",
+    "relative_path": "provider-corpus.v2.json",
+    "source_parent_ref": {
+      "artifact_id": "portfolio-hybrid-v1-1-corpus-parent",
+      "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
+      "contract_version": "portfolio_hybrid_v1_1_corpus_parent_ref_v1",
+      "file_sha256": "8503010496a426893456e903b9d768f2a281ef0509f11230d312b073c0760757"
+    }
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "display_only": true,
+    "execute_binding_enabled": false
+  },
+  "sealed_runtime": {
+    "code_refs": [
+      {
+        "file_sha256": "adc7be75ef0a88917cf39406b5eaffbb95792b34a1f0375777e8e66c80c01817",
+        "relative_path": "app/learn/hybrid/benchmark_v2_provider_sandbox.py",
+        "role": "bootstrap"
+      },
+      {
+        "file_sha256": "2499d9c0f87ca16298e900dd05843ad6445f674dfd0aea35bc2508512bf18989",
+        "relative_path": "app/learn/hybrid/benchmark_v2_contracts.py",
+        "role": "contracts"
+      },
+      {
+        "file_sha256": "eb584658b1a0946aaaa60357b2c48dac491231aecd87f818b1daab117dc110dc",
+        "relative_path": "app/learn/hybrid/benchmark_v2_provider_corpus.py",
+        "role": "corpus_loader"
+      }
+    ],
+    "profile_refs": [
+      {
+        "file_sha256": "c123a09b48ae144b6869c2d1a0d6e87db81948f6212a8bb686ad863826ad4eeb",
+        "relative_path": "configs/benchmarks/portfolio_hybrid_v1_1_estimand.v2.json",
+        "role": "estimand"
+      }
+    ],
+    "release_code_refs": [
+      {
+        "file_sha256": "aa40f467267e9c4f3545cd07b75c7a37f22c3d36dc94688c15fb8b087af2bb89",
+        "relative_path": "app/api/panel.py",
+        "role": "panel_service"
+      },
+      {
+        "file_sha256": "06c01af65a6868cd177f26bf53426059a71dd97d0c6160c12f86615cdbbb969c",
+        "relative_path": "app/core/model_server.py",
+        "role": "model_server"
+      },
+      {
+        "file_sha256": "da160b06cf639a83d161e970482f980b9f60a1562ecd104122f36a99ec446258",
+        "relative_path": "app/learn/calibration_sequence.py",
+        "role": "calibration_sequence"
+      },
+      {
+        "file_sha256": "bc8c7fade019b862299398d56e994d23184e1ea0ab0e053eb943a15ec6b8efec",
+        "relative_path": "app/learn/hybrid/benchmark_v2_actual.py",
+        "role": "benchmark_actual"
+      },
+      {
+        "file_sha256": "aa5a6fc749e1010309b2c0b4130a8a9cf21ff30ca2d65e18353d26b7875604dc",
+        "relative_path": "app/learn/hybrid/benchmark_v2_dispatch_attestation.py",
+        "role": "dispatch_attestation"
+      },
+      {
+        "file_sha256": "20a64caab578d73f0b3505b3ed9fb82f84dbefd182936a1cc9e07d26c0137a65",
+        "relative_path": "app/learn/hybrid/benchmark_v2_durable_claim.py",
+        "role": "durable_claim"
+      },
+      {
+        "file_sha256": "9afc37625eeff737390ac91c3cadac8f75c5a1b05e67bf89880d75c48636b4b4",
+        "relative_path": "app/learn/hybrid/benchmark_v2_holdout.py",
+        "role": "holdout_ledger"
+      },
+      {
+        "file_sha256": "cc4330b9420e0abce33542aef1e7040134762102cc8cb63098d9d6ab33fd0348",
+        "relative_path": "app/learn/hybrid/benchmark_v2_incumbent_operation.py",
+        "role": "incumbent_operation"
+      },
+      {
+        "file_sha256": "87cb05fe8b0716281a272d466db32001b2eab2c157749fa0bc75506b14af8f3d",
+        "relative_path": "app/learn/hybrid/benchmark_v2_lifecycle.py",
+        "role": "lifecycle"
+      },
+      {
+        "file_sha256": "b45746894b3b95ee862c38e21614c05dada80af2c380eaa464534f29c515bf71",
+        "relative_path": "app/learn/hybrid/benchmark_v2_predictions.py",
+        "role": "predictions"
+      },
+      {
+        "file_sha256": "40a6cb0a3df79a7599e01535c138a9df375c7df307f06ee7043254926005a465",
+        "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
+        "role": "benchmark_runtime"
+      },
+      {
+        "file_sha256": "d170c258c9e0eaf17aea93260c4e470c8ba0c7e550dd2347da571b3591a2cd1b",
+        "relative_path": "app/learn/hybrid/benchmark_v2_window_owner.py",
+        "role": "window_owner"
+      },
+      {
+        "file_sha256": "e9db063f3978a49fba6d1ca651ee270a7c2dc87a5e97101a5c0bdbe7e3ae9a0c",
+        "relative_path": "app/learn/hybrid/benchmark_v2_worker_binding.py",
+        "role": "worker_binding"
+      },
+      {
+        "file_sha256": "d7e0eccd20c69a70054366efd84c4a95a96eee496745b5a128caac8909b57387",
+        "relative_path": "app/learn/hybrid/windows_process_scope.py",
+        "role": "windows_process_scope"
+      },
+      {
+        "file_sha256": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
+        "relative_path": "app/learn/recognition/uei/builtin_learning_projection.py",
+        "role": "builtin_learning_projection"
+      },
+      {
+        "file_sha256": "95244e3ebc2fdf8953254a1bdcac859be0a3c9f2c08687ce067675ed1ca31a7d",
+        "relative_path": "app/learn/recognition/uei/omniparser_shadow_adapter.py",
+        "role": "omniparser_shadow_adapter"
+      },
+      {
+        "file_sha256": "648258f642ad70975d4b5ebb4537b25e68ff458fa95cc5b4dd1690f5362c2df9",
+        "relative_path": "app/learn/recognition/uei/projections.py",
+        "role": "uei_projections"
+      },
+      {
+        "file_sha256": "400e60f1801427e4cab4154951ae21678dca9a5c335000676833c364f73dc89c",
+        "relative_path": "app/learn/workflow_service.py",
+        "role": "workflow_service"
+      },
+      {
+        "file_sha256": "c5f9ac8b5d22b875c34ef821af100f82ff3d4560cd09163b1dff1ef99b12a144",
+        "relative_path": "app/learn/workflow_worker.py",
+        "role": "workflow_worker"
+      },
+      {
+        "file_sha256": "1804ca6fe539da7bdf0e81ebf8c3d2ee991bc2f14bbe18865755419a8a603437",
+        "relative_path": "app/operation/observe/screen_reader.py",
+        "role": "screen_reader"
+      },
+      {
+        "file_sha256": "361b9a5961483f14154c3b3c20e24ab9aed09ca62dd3676d1d88bd5ddb66eef2",
+        "relative_path": "scripts/portfolio_hybrid_v1_1_test_window_v2.py",
+        "role": "test_window"
+      },
+      {
+        "file_sha256": "bbc3b8eaae4a99ea0192fb481ccd1b3421322579beeb509c9a33268dbf5a692a",
+        "relative_path": "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+        "role": "benchmark_runner"
+      }
+    ]
+  },
+  "workload": {
+    "artifact_is_authorization": false,
+    "command": "validate_provider_corpus",
+    "contract_version": "provider_sandbox_workload_request_v1",
+    "execute_binding_enabled": false
+  }
+}

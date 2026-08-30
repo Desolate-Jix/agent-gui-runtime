@@ -1,0 +1,2544 @@
+{
+  "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
+  "cases": [
+    {
+      "case_id": "92eb305a6e83a59e6830dc715d033a35d0fd37d0ad3ca8c919b0bd3fde028802",
+      "goal": "Select the button labeled 'New task'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+        "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "project_board",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Project Board"
+      },
+      "partition": "regression",
+      "screen_group": "b9dc08397d636984861fbcd08d8c77f01345f3030b6b0e4c56d3261eed9f192c"
+    },
+    {
+      "case_id": "a4f56d91dc0c369ddf1a73af88cc2dc5ca7f3185226ef8f27b6ecfd908fa7177",
+      "goal": "Select the textbox labeled 'Search board'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+        "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "project_board",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Project Board"
+      },
+      "partition": "regression",
+      "screen_group": "b9dc08397d636984861fbcd08d8c77f01345f3030b6b0e4c56d3261eed9f192c"
+    },
+    {
+      "case_id": "55e92af7804789600ff53e984a1768c158d74e2d7ac951d5e41e03596128f9be",
+      "goal": "Select the tab labeled 'Active'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+        "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "project_board",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Project Board"
+      },
+      "partition": "regression",
+      "screen_group": "b9dc08397d636984861fbcd08d8c77f01345f3030b6b0e4c56d3261eed9f192c"
+    },
+    {
+      "case_id": "812a3f10a1934e767771052f151e07040ef593a453a8d9279726d5a7089d076c",
+      "goal": "Select the combobox labeled 'Filter'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+        "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "project_board",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Project Board"
+      },
+      "partition": "regression",
+      "screen_group": "b9dc08397d636984861fbcd08d8c77f01345f3030b6b0e4c56d3261eed9f192c"
+    },
+    {
+      "case_id": "c99fd706274dd9f23d8e3363bff237be62168a881620474e871fd69de21a84da",
+      "goal": "Select the link labeled 'Settings'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+        "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "project_board",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Project Board"
+      },
+      "partition": "regression",
+      "screen_group": "b9dc08397d636984861fbcd08d8c77f01345f3030b6b0e4c56d3261eed9f192c"
+    },
+    {
+      "case_id": "27540d0b6dc10b7a9df2e2e15b727f0d7f8fdc373e531774959c6c27b79b6402",
+      "goal": "Select the button labeled 'Compose'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+        "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "mail_inbox",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Mail Inbox"
+      },
+      "partition": "regression",
+      "screen_group": "66eb80b0e8cc72d8b74b6a25cec5b6e5c45d6965b1854f71484bfcf366588cd7"
+    },
+    {
+      "case_id": "22fb76e64972079a7327203a2d59ef1bf26a87b0b0e21fad932eb13521e93d19",
+      "goal": "Select the textbox labeled 'Search mail'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+        "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "mail_inbox",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Mail Inbox"
+      },
+      "partition": "regression",
+      "screen_group": "66eb80b0e8cc72d8b74b6a25cec5b6e5c45d6965b1854f71484bfcf366588cd7"
+    },
+    {
+      "case_id": "d99535fbccc096218188053a7f6dd2c65bf45712b688538f7efa0cba0b09c607",
+      "goal": "Select the tab labeled 'Primary'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+        "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "mail_inbox",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Mail Inbox"
+      },
+      "partition": "regression",
+      "screen_group": "66eb80b0e8cc72d8b74b6a25cec5b6e5c45d6965b1854f71484bfcf366588cd7"
+    },
+    {
+      "case_id": "fba27e148855043e7fdbe24e71200094fea7e03552bd0503d834ac9f29ac14dc",
+      "goal": "Select the checkbox labeled 'Select all'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+        "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "mail_inbox",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Mail Inbox"
+      },
+      "partition": "regression",
+      "screen_group": "66eb80b0e8cc72d8b74b6a25cec5b6e5c45d6965b1854f71484bfcf366588cd7"
+    },
+    {
+      "case_id": "4abf9be007e2ce508b9719a550a0fc825c682d90b262baf16571557d8e6dd265",
+      "goal": "Select the menuitem labeled 'More'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+        "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "mail_inbox",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Mail Inbox"
+      },
+      "partition": "regression",
+      "screen_group": "66eb80b0e8cc72d8b74b6a25cec5b6e5c45d6965b1854f71484bfcf366588cd7"
+    },
+    {
+      "case_id": "53fd2868d878dbb372196f69aee39e5993e8d89b9cd8ae11d2e49ef49a4d7b3a",
+      "goal": "Select the button labeled 'Back'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+        "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "desktop_settings",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "System Settings"
+      },
+      "partition": "regression",
+      "screen_group": "2d2a7a508a5e2056fa25a4fdf242ed92b3efd0b700f6f036b2f1133777e1bb30"
+    },
+    {
+      "case_id": "e07e7d310fdeabf186c93b871d2e176dd69f570a17fc620c113e15cf0f1e6750",
+      "goal": "Select the textbox labeled 'Find a setting'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+        "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "desktop_settings",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "System Settings"
+      },
+      "partition": "regression",
+      "screen_group": "2d2a7a508a5e2056fa25a4fdf242ed92b3efd0b700f6f036b2f1133777e1bb30"
+    },
+    {
+      "case_id": "3e305b27c5f652bf270f9babaf1304b8a5ca439c1ced09494b6ced2f1c57902b",
+      "goal": "Select the checkbox labeled 'Bluetooth'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+        "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "desktop_settings",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "System Settings"
+      },
+      "partition": "regression",
+      "screen_group": "2d2a7a508a5e2056fa25a4fdf242ed92b3efd0b700f6f036b2f1133777e1bb30"
+    },
+    {
+      "case_id": "3efe36373e6fee5af6b354e2d345afe8c66da9d2571d04db5019afe9eb4b882c",
+      "goal": "Select the tab labeled 'Display'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+        "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "desktop_settings",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "System Settings"
+      },
+      "partition": "regression",
+      "screen_group": "2d2a7a508a5e2056fa25a4fdf242ed92b3efd0b700f6f036b2f1133777e1bb30"
+    },
+    {
+      "case_id": "9f3eb16ed2b1f58593530d86c9ec5ea72b68c3fb07c09371fd702299e3728840",
+      "goal": "Select the link labeled 'Advanced'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+        "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "desktop_settings",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "System Settings"
+      },
+      "partition": "regression",
+      "screen_group": "2d2a7a508a5e2056fa25a4fdf242ed92b3efd0b700f6f036b2f1133777e1bb30"
+    },
+    {
+      "case_id": "739833821770335d1fba1cdddbf1d673d01fb22e66f18a385966e4158ec4186a",
+      "goal": "Select the button labeled 'Back'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+        "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "file_manager",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "File Manager"
+      },
+      "partition": "regression",
+      "screen_group": "a5c0907c249283a25d457c2265c8f5159c0c54c359388b31d7ba4e50ac823b67"
+    },
+    {
+      "case_id": "fef7ee842474df7d08bca44b1049f20480a446acce5ad7a5e2781fffea4d164c",
+      "goal": "Select the textbox labeled 'Search files'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+        "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "file_manager",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "File Manager"
+      },
+      "partition": "regression",
+      "screen_group": "a5c0907c249283a25d457c2265c8f5159c0c54c359388b31d7ba4e50ac823b67"
+    },
+    {
+      "case_id": "04df99594a696cdff053eaf49520c57eb593faec331d25a4f02a70974c023b76",
+      "goal": "Select the button labeled 'New folder'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+        "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "file_manager",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "File Manager"
+      },
+      "partition": "regression",
+      "screen_group": "a5c0907c249283a25d457c2265c8f5159c0c54c359388b31d7ba4e50ac823b67"
+    },
+    {
+      "case_id": "6935982a509ab8e4ac8209ed9c768f2f9fd09c2baa6468d316ac1a09d1873390",
+      "goal": "Select the combobox labeled 'View'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+        "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "file_manager",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "File Manager"
+      },
+      "partition": "regression",
+      "screen_group": "a5c0907c249283a25d457c2265c8f5159c0c54c359388b31d7ba4e50ac823b67"
+    },
+    {
+      "case_id": "6efefd6e9be72040b1a713970d86b7160ad5dde5dd67e4fd6c0fff92ce2d6a84",
+      "goal": "Select the tab labeled 'Details'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+        "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "file_manager",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "native_like",
+        "title": "File Manager"
+      },
+      "partition": "regression",
+      "screen_group": "a5c0907c249283a25d457c2265c8f5159c0c54c359388b31d7ba4e50ac823b67"
+    },
+    {
+      "case_id": "a5af3b33b7b4311bfae9fef9ff3b44a33b9174e9a185493f201febc53a6317de",
+      "goal": "Select the button labeled 'Today'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+        "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "calendar",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Team Calendar"
+      },
+      "partition": "regression",
+      "screen_group": "dd4fb0db4bae02b02a22353fe1973e6279f7bd9a82d28526d7cf21600a3a1677"
+    },
+    {
+      "case_id": "0baba07274d6814591f7b2001f37f72e9e1576c379b43b77279ff91d30c5f5dc",
+      "goal": "Select the button labeled 'New event'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+        "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "calendar",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Team Calendar"
+      },
+      "partition": "regression",
+      "screen_group": "dd4fb0db4bae02b02a22353fe1973e6279f7bd9a82d28526d7cf21600a3a1677"
+    },
+    {
+      "case_id": "24bb8bcbb3429df05fa0d4973c7171154801b639debeabf9dd1f1ad4f28235dc",
+      "goal": "Select the combobox labeled 'Month'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+        "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "calendar",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Team Calendar"
+      },
+      "partition": "regression",
+      "screen_group": "dd4fb0db4bae02b02a22353fe1973e6279f7bd9a82d28526d7cf21600a3a1677"
+    },
+    {
+      "case_id": "4d65220d410bb53eed3da6e3ba45eb5ef0d215b9243ec3adbb24ad0494a867fb",
+      "goal": "Select the textbox labeled 'Search calendar'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+        "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "calendar",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Team Calendar"
+      },
+      "partition": "regression",
+      "screen_group": "dd4fb0db4bae02b02a22353fe1973e6279f7bd9a82d28526d7cf21600a3a1677"
+    },
+    {
+      "case_id": "17f3c1816ad63f1541fdbd33551684013d9b61880a3e51f560e2f18ee6c46b43",
+      "goal": "Select the link labeled 'Settings'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+        "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "calendar",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "existing_five_screen_regression",
+        "surface": "web_like",
+        "title": "Team Calendar"
+      },
+      "partition": "regression",
+      "screen_group": "dd4fb0db4bae02b02a22353fe1973e6279f7bd9a82d28526d7cf21600a3a1677"
+    },
+    {
+      "case_id": "ccd185e7e8408b7ba8fb356a84a0c26f9b96e6793ba3ab917f9d680ce76453d7",
+      "goal": "Select the button labeled 'Refresh'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-006.png",
+        "sha256": "087de010c4a9e9ddb4e654bcab85c4babfbb6c171de5d55267a8aa205ef2942d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "analytics_dashboard",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Analytics Dashboard"
+      },
+      "partition": "regression",
+      "screen_group": "b809a715a855aed8634271e22a04f7afcfb6f56d1433a8420ab62dd68667c62f"
+    },
+    {
+      "case_id": "e0f24ccbe1dcef33f1ad81249a8c2beb1fec6ea2468c75e370fb9ac77ddb8a44",
+      "goal": "Select the combobox labeled 'Date range'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-006.png",
+        "sha256": "087de010c4a9e9ddb4e654bcab85c4babfbb6c171de5d55267a8aa205ef2942d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "analytics_dashboard",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Analytics Dashboard"
+      },
+      "partition": "regression",
+      "screen_group": "b809a715a855aed8634271e22a04f7afcfb6f56d1433a8420ab62dd68667c62f"
+    },
+    {
+      "case_id": "e910fb2d7d5badd7510e6765157bacd2422548eb9a722b65f834416d2a452c4c",
+      "goal": "Select the button labeled 'Export'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-006.png",
+        "sha256": "087de010c4a9e9ddb4e654bcab85c4babfbb6c171de5d55267a8aa205ef2942d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "analytics_dashboard",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Analytics Dashboard"
+      },
+      "partition": "regression",
+      "screen_group": "b809a715a855aed8634271e22a04f7afcfb6f56d1433a8420ab62dd68667c62f"
+    },
+    {
+      "case_id": "67fd66b020c2d54f7834f55fab89eb17ce4962517198c098b01c4698496c70ad",
+      "goal": "Select the checkbox labeled 'Alerts'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-006.png",
+        "sha256": "087de010c4a9e9ddb4e654bcab85c4babfbb6c171de5d55267a8aa205ef2942d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "analytics_dashboard",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Analytics Dashboard"
+      },
+      "partition": "regression",
+      "screen_group": "b809a715a855aed8634271e22a04f7afcfb6f56d1433a8420ab62dd68667c62f"
+    },
+    {
+      "case_id": "3f49d1bb2e159ab843977e7585e53a516a2d1be641b34fe17d770bef93b4898f",
+      "goal": "Select the tab labeled 'Reports'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-006.png",
+        "sha256": "087de010c4a9e9ddb4e654bcab85c4babfbb6c171de5d55267a8aa205ef2942d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "analytics_dashboard",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Analytics Dashboard"
+      },
+      "partition": "regression",
+      "screen_group": "b809a715a855aed8634271e22a04f7afcfb6f56d1433a8420ab62dd68667c62f"
+    },
+    {
+      "case_id": "a62395fd944015fa80350f20c2f928549bdf65de628f043a267c5033098d9202",
+      "goal": "Select the button labeled 'Undo'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-007.png",
+        "sha256": "cc9f5ca95d8f89d3bf9648c1ff6b934815d1dc1397999214e7852d4a36a294cc",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "document_editor",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Document Editor"
+      },
+      "partition": "regression",
+      "screen_group": "6d4192b1b859348e6e39b39dbb5f993894471b26d465d31cd2d86bc83ef137a0"
+    },
+    {
+      "case_id": "5beed1062ef32bff73475bc997f3fc10786f1f024c2b85211410e5e9ddadbdf5",
+      "goal": "Select the button labeled 'Save'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-007.png",
+        "sha256": "cc9f5ca95d8f89d3bf9648c1ff6b934815d1dc1397999214e7852d4a36a294cc",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "document_editor",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Document Editor"
+      },
+      "partition": "regression",
+      "screen_group": "6d4192b1b859348e6e39b39dbb5f993894471b26d465d31cd2d86bc83ef137a0"
+    },
+    {
+      "case_id": "da672599b7ffb2761e6c62b6458e94d07bac41d69bb3c2b8a00098f1099712db",
+      "goal": "Select the button labeled 'Share'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-007.png",
+        "sha256": "cc9f5ca95d8f89d3bf9648c1ff6b934815d1dc1397999214e7852d4a36a294cc",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "document_editor",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Document Editor"
+      },
+      "partition": "regression",
+      "screen_group": "6d4192b1b859348e6e39b39dbb5f993894471b26d465d31cd2d86bc83ef137a0"
+    },
+    {
+      "case_id": "3996dd4ee194d01a6ce43b29dd36670f68b287192fb606df0dc2401990e86659",
+      "goal": "Select the combobox labeled 'Zoom'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-007.png",
+        "sha256": "cc9f5ca95d8f89d3bf9648c1ff6b934815d1dc1397999214e7852d4a36a294cc",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "document_editor",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Document Editor"
+      },
+      "partition": "regression",
+      "screen_group": "6d4192b1b859348e6e39b39dbb5f993894471b26d465d31cd2d86bc83ef137a0"
+    },
+    {
+      "case_id": "34fca61a47d37f2bb40ddddb46fc6a3d64b2ef1c023e2d38458c561dd0e76cee",
+      "goal": "Select the link labeled 'Comments'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-007.png",
+        "sha256": "cc9f5ca95d8f89d3bf9648c1ff6b934815d1dc1397999214e7852d4a36a294cc",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "document_editor",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Document Editor"
+      },
+      "partition": "regression",
+      "screen_group": "6d4192b1b859348e6e39b39dbb5f993894471b26d465d31cd2d86bc83ef137a0"
+    },
+    {
+      "case_id": "70cc44390b8adc535fce7b1772ff0552850cbc110c474fe63f9baf9a5caf20cb",
+      "goal": "Select the button labeled 'New chat'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-008.png",
+        "sha256": "b932f104987a67640dab1d8c8c42e9ad3bb4e73108cc89cf1534dc23aa7a3bb2",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "team_chat",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Team Chat"
+      },
+      "partition": "regression",
+      "screen_group": "41dc046b072826e39fd9a060e0682954a3e058fc347a786b837641729306eac4"
+    },
+    {
+      "case_id": "e4577cf493b506cbc5728f5ebd80a5555a2570998d7122ac437c56aa9c47bff7",
+      "goal": "Select the textbox labeled 'Search'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-008.png",
+        "sha256": "b932f104987a67640dab1d8c8c42e9ad3bb4e73108cc89cf1534dc23aa7a3bb2",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "team_chat",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Team Chat"
+      },
+      "partition": "regression",
+      "screen_group": "41dc046b072826e39fd9a060e0682954a3e058fc347a786b837641729306eac4"
+    },
+    {
+      "case_id": "0f3286827b1dfa4ce28540331c6ef3116aa519e83ba8ffba2858639241697e68",
+      "goal": "Select the tab labeled 'Inbox'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-008.png",
+        "sha256": "b932f104987a67640dab1d8c8c42e9ad3bb4e73108cc89cf1534dc23aa7a3bb2",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "team_chat",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Team Chat"
+      },
+      "partition": "regression",
+      "screen_group": "41dc046b072826e39fd9a060e0682954a3e058fc347a786b837641729306eac4"
+    },
+    {
+      "case_id": "1fdfc69c70a374b65068d41fa177c49719c4fa17b0805e6c8869e2339e3d02d5",
+      "goal": "Select the checkbox labeled 'Mute'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-008.png",
+        "sha256": "b932f104987a67640dab1d8c8c42e9ad3bb4e73108cc89cf1534dc23aa7a3bb2",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "team_chat",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Team Chat"
+      },
+      "partition": "regression",
+      "screen_group": "41dc046b072826e39fd9a060e0682954a3e058fc347a786b837641729306eac4"
+    },
+    {
+      "case_id": "4f0652a3ee929d8c41f2582774902f6615819b284c4e2dd0473f5b6531e4b8f0",
+      "goal": "Select the link labeled 'Help'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-008.png",
+        "sha256": "b932f104987a67640dab1d8c8c42e9ad3bb4e73108cc89cf1534dc23aa7a3bb2",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "team_chat",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Team Chat"
+      },
+      "partition": "regression",
+      "screen_group": "41dc046b072826e39fd9a060e0682954a3e058fc347a786b837641729306eac4"
+    },
+    {
+      "case_id": "9bb41f1d5f924425baae5f0da50d68761581248f45b6ed6e1bf6edd745146c78",
+      "goal": "Select the textbox labeled 'Search products'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-009.png",
+        "sha256": "28cc001c3894c6019170c994fdea97ae97e59c6a5e02d37dedaf95abf7565283",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "storefront",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sample Store"
+      },
+      "partition": "regression",
+      "screen_group": "4d21338f8620a826f496c9fdfe00c1d44026d2941bee221897dbe8a0cc647da2"
+    },
+    {
+      "case_id": "a8606ca313d96a31c9e210c2e1e13c97069ea0bbad53af1a236b93d7117b88ae",
+      "goal": "Select the combobox labeled 'Category'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-009.png",
+        "sha256": "28cc001c3894c6019170c994fdea97ae97e59c6a5e02d37dedaf95abf7565283",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "storefront",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sample Store"
+      },
+      "partition": "regression",
+      "screen_group": "4d21338f8620a826f496c9fdfe00c1d44026d2941bee221897dbe8a0cc647da2"
+    },
+    {
+      "case_id": "0fed9e12e453975c294820260a51016e461573f00eb47163e7fdb01491b1826e",
+      "goal": "Select the tab labeled 'Deals'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-009.png",
+        "sha256": "28cc001c3894c6019170c994fdea97ae97e59c6a5e02d37dedaf95abf7565283",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "storefront",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sample Store"
+      },
+      "partition": "regression",
+      "screen_group": "4d21338f8620a826f496c9fdfe00c1d44026d2941bee221897dbe8a0cc647da2"
+    },
+    {
+      "case_id": "12898b2965145e097fd114122ac48e8fa4806980e43f956ebfd4f5501579bf08",
+      "goal": "Select the checkbox labeled 'Compare'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-009.png",
+        "sha256": "28cc001c3894c6019170c994fdea97ae97e59c6a5e02d37dedaf95abf7565283",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "storefront",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sample Store"
+      },
+      "partition": "regression",
+      "screen_group": "4d21338f8620a826f496c9fdfe00c1d44026d2941bee221897dbe8a0cc647da2"
+    },
+    {
+      "case_id": "27ea900de2122d78bcfef9c10f628c5bb424d5dc76443ec125707f3be35775ea",
+      "goal": "Select the link labeled 'Cart'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-009.png",
+        "sha256": "28cc001c3894c6019170c994fdea97ae97e59c6a5e02d37dedaf95abf7565283",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "storefront",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sample Store"
+      },
+      "partition": "regression",
+      "screen_group": "4d21338f8620a826f496c9fdfe00c1d44026d2941bee221897dbe8a0cc647da2"
+    },
+    {
+      "case_id": "c9747fed4f96a7fdf872e2661c9a13674048e8b81d3ab2da5e6ac57a1e971c20",
+      "goal": "Select the button labeled 'Run'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-010.png",
+        "sha256": "4b79ee26c4f0a8ecca7d979e85a9c824a91fbf9aba3c784d1da550825ce22e16",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "developer_console",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Developer Console"
+      },
+      "partition": "regression",
+      "screen_group": "96bac9778020279c6588208a929dffcaae403af51e8b601a793e7a7d70f2584e"
+    },
+    {
+      "case_id": "fb45b1d0d731d077f0f6d9db521a125cfd398cc97d6212fb16ad3e849284f905",
+      "goal": "Select the button labeled 'Stop'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-010.png",
+        "sha256": "4b79ee26c4f0a8ecca7d979e85a9c824a91fbf9aba3c784d1da550825ce22e16",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "developer_console",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Developer Console"
+      },
+      "partition": "regression",
+      "screen_group": "96bac9778020279c6588208a929dffcaae403af51e8b601a793e7a7d70f2584e"
+    },
+    {
+      "case_id": "b884e7251152f31447290815fd0ee5a1560a3104dd59e3276f042fcda3fa20bf",
+      "goal": "Select the combobox labeled 'Environment'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-010.png",
+        "sha256": "4b79ee26c4f0a8ecca7d979e85a9c824a91fbf9aba3c784d1da550825ce22e16",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "developer_console",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Developer Console"
+      },
+      "partition": "regression",
+      "screen_group": "96bac9778020279c6588208a929dffcaae403af51e8b601a793e7a7d70f2584e"
+    },
+    {
+      "case_id": "cc85a7f78a0d854e5a5478916b72b054d11a229300ffa81717c39d4091577366",
+      "goal": "Select the tab labeled 'Logs'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-010.png",
+        "sha256": "4b79ee26c4f0a8ecca7d979e85a9c824a91fbf9aba3c784d1da550825ce22e16",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "developer_console",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Developer Console"
+      },
+      "partition": "regression",
+      "screen_group": "96bac9778020279c6588208a929dffcaae403af51e8b601a793e7a7d70f2584e"
+    },
+    {
+      "case_id": "f6d4c9581656d1bf43689c01bbc77927073cca0bf7120c858b0379487fab258a",
+      "goal": "Select the checkbox labeled 'Auto scroll'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-010.png",
+        "sha256": "4b79ee26c4f0a8ecca7d979e85a9c824a91fbf9aba3c784d1da550825ce22e16",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "developer_console",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Developer Console"
+      },
+      "partition": "regression",
+      "screen_group": "96bac9778020279c6588208a929dffcaae403af51e8b601a793e7a7d70f2584e"
+    },
+    {
+      "case_id": "ba5daafde2ba9720daa57e8ce0a844a589c3f4a6265c514be2af5e6b6be55941",
+      "goal": "Select the button labeled 'Upload'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-011.png",
+        "sha256": "44b97a83d2273a99d66c44d3aa08a53268d71cf2fa7ccf7ced11cc74dc35adbe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "media_library",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Media Library"
+      },
+      "partition": "regression",
+      "screen_group": "1d264d45e64fe8ba7d6f98dc324fa674c6e170f0c04464bf3b580bd4e24f9b04"
+    },
+    {
+      "case_id": "2c3e807cc3d1f813ff6cff58d910c3a19e6e90abea8e63ee554600cca39345f8",
+      "goal": "Select the textbox labeled 'Search media'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-011.png",
+        "sha256": "44b97a83d2273a99d66c44d3aa08a53268d71cf2fa7ccf7ced11cc74dc35adbe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "media_library",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Media Library"
+      },
+      "partition": "regression",
+      "screen_group": "1d264d45e64fe8ba7d6f98dc324fa674c6e170f0c04464bf3b580bd4e24f9b04"
+    },
+    {
+      "case_id": "b3f414f71eeba863ea7ce0a985f77b007c785c8bc2845344640d89a3ec671420",
+      "goal": "Select the tab labeled 'Grid'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-011.png",
+        "sha256": "44b97a83d2273a99d66c44d3aa08a53268d71cf2fa7ccf7ced11cc74dc35adbe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "media_library",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Media Library"
+      },
+      "partition": "regression",
+      "screen_group": "1d264d45e64fe8ba7d6f98dc324fa674c6e170f0c04464bf3b580bd4e24f9b04"
+    },
+    {
+      "case_id": "0a7250dec90865b5b3ba7d97ec639b63baa4964de843880ec18e2563504cec25",
+      "goal": "Select the combobox labeled 'Sort'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-011.png",
+        "sha256": "44b97a83d2273a99d66c44d3aa08a53268d71cf2fa7ccf7ced11cc74dc35adbe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "media_library",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Media Library"
+      },
+      "partition": "regression",
+      "screen_group": "1d264d45e64fe8ba7d6f98dc324fa674c6e170f0c04464bf3b580bd4e24f9b04"
+    },
+    {
+      "case_id": "b288f5dfed86ccbd158fba317f0402db9b36cf22b85e3d908b3c42e8ae10fe59",
+      "goal": "Select the checkbox labeled 'Favorites'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-011.png",
+        "sha256": "44b97a83d2273a99d66c44d3aa08a53268d71cf2fa7ccf7ced11cc74dc35adbe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "media_library",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Media Library"
+      },
+      "partition": "regression",
+      "screen_group": "1d264d45e64fe8ba7d6f98dc324fa674c6e170f0c04464bf3b580bd4e24f9b04"
+    },
+    {
+      "case_id": "18eaf3b52af14b1358081ceecbea33393bc83ee58ca8bdd05e4fcbc77281f5eb",
+      "goal": "Select the button labeled 'Zoom in'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-012.png",
+        "sha256": "1f026af8bc494da0535b091c80040e0c894754d7ce1761296177cf9039af788b",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "city_map",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "City Map"
+      },
+      "partition": "regression",
+      "screen_group": "5fccb4126014a46a31f3467a647ed5181773bf33c69a0737ae54059de8a96074"
+    },
+    {
+      "case_id": "1ef98ce2b6ddb6bb51717f5b78402dd6b51694c90868f933086ad67b72d68816",
+      "goal": "Select the textbox labeled 'Search places'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-012.png",
+        "sha256": "1f026af8bc494da0535b091c80040e0c894754d7ce1761296177cf9039af788b",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "city_map",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "City Map"
+      },
+      "partition": "regression",
+      "screen_group": "5fccb4126014a46a31f3467a647ed5181773bf33c69a0737ae54059de8a96074"
+    },
+    {
+      "case_id": "816e55c33204784b1dfc60ed969c39e58e91c5255a7aaea288af37943b85cf50",
+      "goal": "Select the combobox labeled 'Layers'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-012.png",
+        "sha256": "1f026af8bc494da0535b091c80040e0c894754d7ce1761296177cf9039af788b",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "city_map",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "City Map"
+      },
+      "partition": "regression",
+      "screen_group": "5fccb4126014a46a31f3467a647ed5181773bf33c69a0737ae54059de8a96074"
+    },
+    {
+      "case_id": "78110e4225fee8b47a8a034d389b6d54f50a241b4b0f21447ddd1f1c874823bf",
+      "goal": "Select the checkbox labeled 'Transit'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-012.png",
+        "sha256": "1f026af8bc494da0535b091c80040e0c894754d7ce1761296177cf9039af788b",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "city_map",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "City Map"
+      },
+      "partition": "regression",
+      "screen_group": "5fccb4126014a46a31f3467a647ed5181773bf33c69a0737ae54059de8a96074"
+    },
+    {
+      "case_id": "98f13707acc08ab7b63e7678a01b82526f6a162720337dac7a7aaef3b012b9fe",
+      "goal": "Select the link labeled 'Directions'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-012.png",
+        "sha256": "1f026af8bc494da0535b091c80040e0c894754d7ce1761296177cf9039af788b",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "city_map",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "City Map"
+      },
+      "partition": "regression",
+      "screen_group": "5fccb4126014a46a31f3467a647ed5181773bf33c69a0737ae54059de8a96074"
+    },
+    {
+      "case_id": "41187c7866c55752228c06169a6651c619488511d597ef5295e2aee0d81aed99",
+      "goal": "Select the button labeled 'Previous'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-013.png",
+        "sha256": "56e54eb6662c0621a54da58099a6109cfaf9281aa33841ea4e554e0a99d37bfa",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "installer",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Application Installer"
+      },
+      "partition": "holdout",
+      "screen_group": "2501138be716d0db6a044ec765de1415271add6dfb4538b6907d00e76ba1441e"
+    },
+    {
+      "case_id": "1d50a25ac41354661eccf83dd07fd7aeb470149537d4bfa3af69cd4abe63365a",
+      "goal": "Select the button labeled 'Install'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-013.png",
+        "sha256": "56e54eb6662c0621a54da58099a6109cfaf9281aa33841ea4e554e0a99d37bfa",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "installer",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Application Installer"
+      },
+      "partition": "holdout",
+      "screen_group": "2501138be716d0db6a044ec765de1415271add6dfb4538b6907d00e76ba1441e"
+    },
+    {
+      "case_id": "0102192955de7f31c230db408b8898d86e7b3784e79fc556a8ed9e396c0f1232",
+      "goal": "Select the button labeled 'Cancel'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-013.png",
+        "sha256": "56e54eb6662c0621a54da58099a6109cfaf9281aa33841ea4e554e0a99d37bfa",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "installer",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Application Installer"
+      },
+      "partition": "holdout",
+      "screen_group": "2501138be716d0db6a044ec765de1415271add6dfb4538b6907d00e76ba1441e"
+    },
+    {
+      "case_id": "49a3d1e66c2eda17c5e1cd862a42d16f7f28444b159db58152f398e1a073b3ad",
+      "goal": "Select the checkbox labeled 'Desktop shortcut'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-013.png",
+        "sha256": "56e54eb6662c0621a54da58099a6109cfaf9281aa33841ea4e554e0a99d37bfa",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "installer",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Application Installer"
+      },
+      "partition": "holdout",
+      "screen_group": "2501138be716d0db6a044ec765de1415271add6dfb4538b6907d00e76ba1441e"
+    },
+    {
+      "case_id": "b3f8f4e6d6f439e17341914c37184faf0a462d5c9a15a1d3db91a03f90565aa9",
+      "goal": "Select the combobox labeled 'Install for'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-013.png",
+        "sha256": "56e54eb6662c0621a54da58099a6109cfaf9281aa33841ea4e554e0a99d37bfa",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "installer",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Application Installer"
+      },
+      "partition": "holdout",
+      "screen_group": "2501138be716d0db6a044ec765de1415271add6dfb4538b6907d00e76ba1441e"
+    },
+    {
+      "case_id": "bc1a48e9ced05a08dff25e0b405a67fda6ae648fc3b159f459765b151482446b",
+      "goal": "Select the tab labeled 'Overview'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-014.png",
+        "sha256": "5bc4b3a52b41a2eb0940ee5fe342e988ac54bf01ac34fc5abc1f89446b5f0c8c",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "traffic_report",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Traffic Report"
+      },
+      "partition": "holdout",
+      "screen_group": "1bdabdd2874917d2705e9647e8e2332fc995dfeb2b437125f367ef17530b6fb4"
+    },
+    {
+      "case_id": "bbd882e2370c9204426fe9ab3453079559bfa92475e066b91096ad723ab64828",
+      "goal": "Select the tab labeled 'Sources'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-014.png",
+        "sha256": "5bc4b3a52b41a2eb0940ee5fe342e988ac54bf01ac34fc5abc1f89446b5f0c8c",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "traffic_report",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Traffic Report"
+      },
+      "partition": "holdout",
+      "screen_group": "1bdabdd2874917d2705e9647e8e2332fc995dfeb2b437125f367ef17530b6fb4"
+    },
+    {
+      "case_id": "6c9519369dd87ee6af6904b9db2fba1ce5bc69f27c6589a40d096c0000ecf045",
+      "goal": "Select the combobox labeled 'Last 30 days'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-014.png",
+        "sha256": "5bc4b3a52b41a2eb0940ee5fe342e988ac54bf01ac34fc5abc1f89446b5f0c8c",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "traffic_report",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Traffic Report"
+      },
+      "partition": "holdout",
+      "screen_group": "1bdabdd2874917d2705e9647e8e2332fc995dfeb2b437125f367ef17530b6fb4"
+    },
+    {
+      "case_id": "b042b32aff8523bd090a820b201ab90bfdecd14dcf396d50897ffe6f0a342f9e",
+      "goal": "Select the button labeled 'Download'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-014.png",
+        "sha256": "5bc4b3a52b41a2eb0940ee5fe342e988ac54bf01ac34fc5abc1f89446b5f0c8c",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "traffic_report",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Traffic Report"
+      },
+      "partition": "holdout",
+      "screen_group": "1bdabdd2874917d2705e9647e8e2332fc995dfeb2b437125f367ef17530b6fb4"
+    },
+    {
+      "case_id": "88b90a116f94876b6549c8f278f4204bfd70c73e6a9997253ea4509a94b8bdcd",
+      "goal": "Select the checkbox labeled 'Compare'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-014.png",
+        "sha256": "5bc4b3a52b41a2eb0940ee5fe342e988ac54bf01ac34fc5abc1f89446b5f0c8c",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "traffic_report",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Traffic Report"
+      },
+      "partition": "holdout",
+      "screen_group": "1bdabdd2874917d2705e9647e8e2332fc995dfeb2b437125f367ef17530b6fb4"
+    },
+    {
+      "case_id": "43e04330b838959842f131489ccb549537e4129a3efda43ab77e518d27f5f58b",
+      "goal": "Select the button labeled 'Mute A'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-015.png",
+        "sha256": "cfbab0c4e50a9fc6027dc2b62b45bc7d3f3341d9f27a9647fe3855681e5e1848",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "audio_mixer",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Audio Mixer"
+      },
+      "partition": "holdout",
+      "screen_group": "87a1ee83b287bc58f4f14a4a0973fa434aef41815cc36e5bdb38e1e80314cb02"
+    },
+    {
+      "case_id": "6e3b38599fde82fc172bd7ef5aa46eaf46122c96aeae08a00d8d4a1163ca66fb",
+      "goal": "Select the button labeled 'Mute B'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-015.png",
+        "sha256": "cfbab0c4e50a9fc6027dc2b62b45bc7d3f3341d9f27a9647fe3855681e5e1848",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "audio_mixer",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Audio Mixer"
+      },
+      "partition": "holdout",
+      "screen_group": "87a1ee83b287bc58f4f14a4a0973fa434aef41815cc36e5bdb38e1e80314cb02"
+    },
+    {
+      "case_id": "5e0e0eff09a647173135b11003ec29ccee5dca5257340d790bd04d0f111c26cf",
+      "goal": "Select the button labeled 'Mute C'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-015.png",
+        "sha256": "cfbab0c4e50a9fc6027dc2b62b45bc7d3f3341d9f27a9647fe3855681e5e1848",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "audio_mixer",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Audio Mixer"
+      },
+      "partition": "holdout",
+      "screen_group": "87a1ee83b287bc58f4f14a4a0973fa434aef41815cc36e5bdb38e1e80314cb02"
+    },
+    {
+      "case_id": "2083fbb3d531e2d09b6bd7e16a039423362fca282e96aade22ed5cf288585d36",
+      "goal": "Select the combobox labeled 'Output'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-015.png",
+        "sha256": "cfbab0c4e50a9fc6027dc2b62b45bc7d3f3341d9f27a9647fe3855681e5e1848",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "audio_mixer",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Audio Mixer"
+      },
+      "partition": "holdout",
+      "screen_group": "87a1ee83b287bc58f4f14a4a0973fa434aef41815cc36e5bdb38e1e80314cb02"
+    },
+    {
+      "case_id": "f69a996aee3be0b29bb2cf6c261b704ff4472683b65eb4a6cd8263af8fb2586e",
+      "goal": "Select the checkbox labeled 'Monitor'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-015.png",
+        "sha256": "cfbab0c4e50a9fc6027dc2b62b45bc7d3f3341d9f27a9647fe3855681e5e1848",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "audio_mixer",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Audio Mixer"
+      },
+      "partition": "holdout",
+      "screen_group": "87a1ee83b287bc58f4f14a4a0973fa434aef41815cc36e5bdb38e1e80314cb02"
+    },
+    {
+      "case_id": "2c57c627633279ba5c1f8f9299a56506afeb23193132bad959930fc8cae6af64",
+      "goal": "Select the button labeled 'Add card'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-016.png",
+        "sha256": "4967accf5a096282ab3bd4d9664c879179f2d3b2ce8c2b3107becf4fc3ff5cc7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "kanban",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sprint Board"
+      },
+      "partition": "holdout",
+      "screen_group": "641b6c9c726ad7a91ac1c127b4ea9c5883bc3d5d0950ffa1c3305ef5fc63b2a4"
+    },
+    {
+      "case_id": "7ec3870024dfe6b4fa9cf34f0c0965ebaacdc8751f9c8ba0c69128625ef1ada7",
+      "goal": "Select the textbox labeled 'Search cards'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-016.png",
+        "sha256": "4967accf5a096282ab3bd4d9664c879179f2d3b2ce8c2b3107becf4fc3ff5cc7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "kanban",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sprint Board"
+      },
+      "partition": "holdout",
+      "screen_group": "641b6c9c726ad7a91ac1c127b4ea9c5883bc3d5d0950ffa1c3305ef5fc63b2a4"
+    },
+    {
+      "case_id": "3ab1bdd7ba5978231a334e69553e1f487f6a9bb544591c5b1e67f6de7c84d570",
+      "goal": "Select the combobox labeled 'Assignee'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-016.png",
+        "sha256": "4967accf5a096282ab3bd4d9664c879179f2d3b2ce8c2b3107becf4fc3ff5cc7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "kanban",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sprint Board"
+      },
+      "partition": "holdout",
+      "screen_group": "641b6c9c726ad7a91ac1c127b4ea9c5883bc3d5d0950ffa1c3305ef5fc63b2a4"
+    },
+    {
+      "case_id": "8bf44fb2bfbd3bd302405f78b275c1d5b9c41ee23bda3a79adbdd645a954d541",
+      "goal": "Select the checkbox labeled 'My items'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-016.png",
+        "sha256": "4967accf5a096282ab3bd4d9664c879179f2d3b2ce8c2b3107becf4fc3ff5cc7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "kanban",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sprint Board"
+      },
+      "partition": "holdout",
+      "screen_group": "641b6c9c726ad7a91ac1c127b4ea9c5883bc3d5d0950ffa1c3305ef5fc63b2a4"
+    },
+    {
+      "case_id": "df77fda99bc9e3c32c728a49110dbcaa46db12dc803b7f3d7f7cf2d77afae831",
+      "goal": "Select the menuitem labeled 'Board menu'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-016.png",
+        "sha256": "4967accf5a096282ab3bd4d9664c879179f2d3b2ce8c2b3107becf4fc3ff5cc7",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "kanban",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Sprint Board"
+      },
+      "partition": "holdout",
+      "screen_group": "641b6c9c726ad7a91ac1c127b4ea9c5883bc3d5d0950ffa1c3305ef5fc63b2a4"
+    },
+    {
+      "case_id": "91b8d946c8bd899b3af3eaf07922306c7c58eba439665804b3521364d8abd2c7",
+      "goal": "Select the button labeled 'New query'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-017.png",
+        "sha256": "f49fb07bf8c9ce90f68c9359d30d5a5e0c3cb5c9dff4e2f0a472a3e4253c3a31",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "database_admin",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Database Admin"
+      },
+      "partition": "holdout",
+      "screen_group": "40dc69f5217a1ad819a5bd96d2268edb8a7dceac0f46e12ceee9fe716d0a68bf"
+    },
+    {
+      "case_id": "8691a7706dc8c9a76cc30c71fad38ead5c08d7d6a446c85ce4b6ec2ac21f7e41",
+      "goal": "Select the button labeled 'Run query'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-017.png",
+        "sha256": "f49fb07bf8c9ce90f68c9359d30d5a5e0c3cb5c9dff4e2f0a472a3e4253c3a31",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "database_admin",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Database Admin"
+      },
+      "partition": "holdout",
+      "screen_group": "40dc69f5217a1ad819a5bd96d2268edb8a7dceac0f46e12ceee9fe716d0a68bf"
+    },
+    {
+      "case_id": "1bc8a743e5fa1610046ad12eea6c77e74cbcdd605fc1a0c40c3f597862e0e951",
+      "goal": "Select the combobox labeled 'Database'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-017.png",
+        "sha256": "f49fb07bf8c9ce90f68c9359d30d5a5e0c3cb5c9dff4e2f0a472a3e4253c3a31",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "database_admin",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Database Admin"
+      },
+      "partition": "holdout",
+      "screen_group": "40dc69f5217a1ad819a5bd96d2268edb8a7dceac0f46e12ceee9fe716d0a68bf"
+    },
+    {
+      "case_id": "c23fa7e68d599ed3e93a43afab22fede59093a189935015af8f64257f72d3afd",
+      "goal": "Select the tab labeled 'Results'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-017.png",
+        "sha256": "f49fb07bf8c9ce90f68c9359d30d5a5e0c3cb5c9dff4e2f0a472a3e4253c3a31",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "database_admin",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Database Admin"
+      },
+      "partition": "holdout",
+      "screen_group": "40dc69f5217a1ad819a5bd96d2268edb8a7dceac0f46e12ceee9fe716d0a68bf"
+    },
+    {
+      "case_id": "7218f8b7ecd8c17694a78efe32e739e5db00fa059436922f4b4525ca1e6f0212",
+      "goal": "Select the checkbox labeled 'Limit 100'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-017.png",
+        "sha256": "f49fb07bf8c9ce90f68c9359d30d5a5e0c3cb5c9dff4e2f0a472a3e4253c3a31",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "database_admin",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Database Admin"
+      },
+      "partition": "holdout",
+      "screen_group": "40dc69f5217a1ad819a5bd96d2268edb8a7dceac0f46e12ceee9fe716d0a68bf"
+    },
+    {
+      "case_id": "1050448afc6a1a53e4c52703c5038998fc3664344285aa5257436b4538a39621",
+      "goal": "Select the textbox labeled 'Search city'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-018.png",
+        "sha256": "16c0d871bc0896299340c06f2deae91ffa49d9db2b874810fb66f407d8f8d8d4",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "weather",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Weather Center"
+      },
+      "partition": "holdout",
+      "screen_group": "e133afe30b446408873a2769f6dcce4e6c0d5e6e24824a79e5f5c05f5c6e392a"
+    },
+    {
+      "case_id": "5b8397446d707d452bac5492aac025264bc81c174d52096873fcc0d1af610364",
+      "goal": "Select the button labeled 'Use location'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-018.png",
+        "sha256": "16c0d871bc0896299340c06f2deae91ffa49d9db2b874810fb66f407d8f8d8d4",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "weather",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Weather Center"
+      },
+      "partition": "holdout",
+      "screen_group": "e133afe30b446408873a2769f6dcce4e6c0d5e6e24824a79e5f5c05f5c6e392a"
+    },
+    {
+      "case_id": "378a380ce56d1c64edfbe158db878ee1defafa896d7848c064f80cbc2b21508c",
+      "goal": "Select the tab labeled 'Hourly'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-018.png",
+        "sha256": "16c0d871bc0896299340c06f2deae91ffa49d9db2b874810fb66f407d8f8d8d4",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "weather",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Weather Center"
+      },
+      "partition": "holdout",
+      "screen_group": "e133afe30b446408873a2769f6dcce4e6c0d5e6e24824a79e5f5c05f5c6e392a"
+    },
+    {
+      "case_id": "a88e9595ad20c668e2e5e9114d3e4080edc91db7e4820ee996297b333736de7a",
+      "goal": "Select the tab labeled 'Ten day'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-018.png",
+        "sha256": "16c0d871bc0896299340c06f2deae91ffa49d9db2b874810fb66f407d8f8d8d4",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "weather",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Weather Center"
+      },
+      "partition": "holdout",
+      "screen_group": "e133afe30b446408873a2769f6dcce4e6c0d5e6e24824a79e5f5c05f5c6e392a"
+    },
+    {
+      "case_id": "adc0a181bdbcf400c3afd0bb6e3cb3d037881463b563ce38638d8b712b3bcf02",
+      "goal": "Select the link labeled 'Map'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-018.png",
+        "sha256": "16c0d871bc0896299340c06f2deae91ffa49d9db2b874810fb66f407d8f8d8d4",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "weather",
+        "precision_case": "normal",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Weather Center"
+      },
+      "partition": "holdout",
+      "screen_group": "e133afe30b446408873a2769f6dcce4e6c0d5e6e24824a79e5f5c05f5c6e392a"
+    },
+    {
+      "case_id": "494dd96e226b614627f91529db8b35c282722e3b65919d4b1ed3837a47bc928d",
+      "goal": "Select the button labeled 'Back'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-019.png",
+        "sha256": "cb5ea1c13cad32918ba6360c3e2004f1a2b06b1d5c66165d675693f294ed1859",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "accessibility",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Accessibility"
+      },
+      "partition": "holdout",
+      "screen_group": "e41ec98d64adb5e38d32b7a4ca17b4181b26c1593a1486ca36a229151806834a"
+    },
+    {
+      "case_id": "c6ef88805aa532d1f6971d51adf7a2a20a5ec71cadcd1f30bb1edd91cf75ffd9",
+      "goal": "Select the textbox labeled 'Find option'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-019.png",
+        "sha256": "cb5ea1c13cad32918ba6360c3e2004f1a2b06b1d5c66165d675693f294ed1859",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "accessibility",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Accessibility"
+      },
+      "partition": "holdout",
+      "screen_group": "e41ec98d64adb5e38d32b7a4ca17b4181b26c1593a1486ca36a229151806834a"
+    },
+    {
+      "case_id": "7e66152bfedd3379683878c52f01c673f181ffe5433f2f46201067865f932d9e",
+      "goal": "Select the checkbox labeled 'High contrast'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-019.png",
+        "sha256": "cb5ea1c13cad32918ba6360c3e2004f1a2b06b1d5c66165d675693f294ed1859",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "accessibility",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Accessibility"
+      },
+      "partition": "holdout",
+      "screen_group": "e41ec98d64adb5e38d32b7a4ca17b4181b26c1593a1486ca36a229151806834a"
+    },
+    {
+      "case_id": "f52aee973d5b0d5ed99e3b57049da4a979b5d503b75cc5f0599f5b138fb053c2",
+      "goal": "Select the checkbox labeled 'Screen reader'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-019.png",
+        "sha256": "cb5ea1c13cad32918ba6360c3e2004f1a2b06b1d5c66165d675693f294ed1859",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "accessibility",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Accessibility"
+      },
+      "partition": "holdout",
+      "screen_group": "e41ec98d64adb5e38d32b7a4ca17b4181b26c1593a1486ca36a229151806834a"
+    },
+    {
+      "case_id": "dd0689dad27a0c5beefd1adf0f10af19f107b43a2d712685e12d26f69e6ec706",
+      "goal": "Select the link labeled 'Keyboard help'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-019.png",
+        "sha256": "cb5ea1c13cad32918ba6360c3e2004f1a2b06b1d5c66165d675693f294ed1859",
+        "width": 1280
+      },
+      "layout": {
+        "density": "standard",
+        "layout_id": "accessibility",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Accessibility"
+      },
+      "partition": "holdout",
+      "screen_group": "e41ec98d64adb5e38d32b7a4ca17b4181b26c1593a1486ca36a229151806834a"
+    },
+    {
+      "case_id": "48fa65211bde0eb3272af531706613b65c81d933983ee72d660ea3c790205d09",
+      "goal": "Select the textbox labeled 'From'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-020.png",
+        "sha256": "1ec74be1a60fa758598da0cc6ba0d42c3320715c5fc1d90657f4a8b62b7c89fe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "travel_booking",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Travel Booking"
+      },
+      "partition": "holdout",
+      "screen_group": "64bd125e194fff72122ac62b931f8b98e57c40a9b3624f17bd0b3bd5f79ede5b"
+    },
+    {
+      "case_id": "bd8f859338a81456c3fa961657bdb3e0dc5bbf7af54463dcb9f128f1e175f566",
+      "goal": "Select the textbox labeled 'To'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-020.png",
+        "sha256": "1ec74be1a60fa758598da0cc6ba0d42c3320715c5fc1d90657f4a8b62b7c89fe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "travel_booking",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Travel Booking"
+      },
+      "partition": "holdout",
+      "screen_group": "64bd125e194fff72122ac62b931f8b98e57c40a9b3624f17bd0b3bd5f79ede5b"
+    },
+    {
+      "case_id": "5dd197ed000be5d3f55bc1c46f7c05a83d8287a920325748553d1450fe427551",
+      "goal": "Select the combobox labeled 'Travel date'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-020.png",
+        "sha256": "1ec74be1a60fa758598da0cc6ba0d42c3320715c5fc1d90657f4a8b62b7c89fe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "travel_booking",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Travel Booking"
+      },
+      "partition": "holdout",
+      "screen_group": "64bd125e194fff72122ac62b931f8b98e57c40a9b3624f17bd0b3bd5f79ede5b"
+    },
+    {
+      "case_id": "bf417b6cb9fc4c36457e9ccc75aed58a784f33999a87461538481ac63f5a6c12",
+      "goal": "Select the checkbox labeled 'Round trip'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-020.png",
+        "sha256": "1ec74be1a60fa758598da0cc6ba0d42c3320715c5fc1d90657f4a8b62b7c89fe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "travel_booking",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Travel Booking"
+      },
+      "partition": "holdout",
+      "screen_group": "64bd125e194fff72122ac62b931f8b98e57c40a9b3624f17bd0b3bd5f79ede5b"
+    },
+    {
+      "case_id": "5597590e6cab33bef68757717e6f6fbd2795e26596e879b765c8f62d395344dc",
+      "goal": "Select the button labeled 'Search'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-020.png",
+        "sha256": "1ec74be1a60fa758598da0cc6ba0d42c3320715c5fc1d90657f4a8b62b7c89fe",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "travel_booking",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Travel Booking"
+      },
+      "partition": "holdout",
+      "screen_group": "64bd125e194fff72122ac62b931f8b98e57c40a9b3624f17bd0b3bd5f79ede5b"
+    },
+    {
+      "case_id": "a4d4a61782a7868ba25a9f7c634a41297073e663b355bbe800e3ead3999a175f",
+      "goal": "Select the textbox labeled 'Filter process'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-021.png",
+        "sha256": "1dfae38125797351fe28aafb18d03b3a90abdd79cc713c091708d821dafe5c67",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "system_monitor",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "System Monitor"
+      },
+      "partition": "holdout",
+      "screen_group": "920e7ba0adece56012bcb5967294ef495d884d2d82d9951b568105aacc752815"
+    },
+    {
+      "case_id": "827ea8415a16a479dc3c430301ad204dd80de71473360f37bd58612445cde5e6",
+      "goal": "Select the button labeled 'End task'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-021.png",
+        "sha256": "1dfae38125797351fe28aafb18d03b3a90abdd79cc713c091708d821dafe5c67",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "system_monitor",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "System Monitor"
+      },
+      "partition": "holdout",
+      "screen_group": "920e7ba0adece56012bcb5967294ef495d884d2d82d9951b568105aacc752815"
+    },
+    {
+      "case_id": "d3a81cec4c63071c207a3f4ec69051bb22873cea8c27069f421819f25a52a2f1",
+      "goal": "Select the tab labeled 'Processes'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-021.png",
+        "sha256": "1dfae38125797351fe28aafb18d03b3a90abdd79cc713c091708d821dafe5c67",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "system_monitor",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "System Monitor"
+      },
+      "partition": "holdout",
+      "screen_group": "920e7ba0adece56012bcb5967294ef495d884d2d82d9951b568105aacc752815"
+    },
+    {
+      "case_id": "64130e178c438081c9949ed78358628aac585461610a10ab8061750f58720b11",
+      "goal": "Select the tab labeled 'Performance'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-021.png",
+        "sha256": "1dfae38125797351fe28aafb18d03b3a90abdd79cc713c091708d821dafe5c67",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "system_monitor",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "System Monitor"
+      },
+      "partition": "holdout",
+      "screen_group": "920e7ba0adece56012bcb5967294ef495d884d2d82d9951b568105aacc752815"
+    },
+    {
+      "case_id": "56c67a12ea572456ee2b7afab0e77af3d53c4b306083ef98f0ff06a0467b5c44",
+      "goal": "Select the checkbox labeled 'Group by app'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-021.png",
+        "sha256": "1dfae38125797351fe28aafb18d03b3a90abdd79cc713c091708d821dafe5c67",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "system_monitor",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "System Monitor"
+      },
+      "partition": "holdout",
+      "screen_group": "920e7ba0adece56012bcb5967294ef495d884d2d82d9951b568105aacc752815"
+    },
+    {
+      "case_id": "e15448043786713c87b5c7651550d0742b2c70e209eb08043e8316f0c852082a",
+      "goal": "Select the button labeled 'Save'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-022.png",
+        "sha256": "3a462c3b49ab35959f88df29fbb5885efbd0dd3d459f776d497673f23f92b00d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "form_builder",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Form Builder"
+      },
+      "partition": "holdout",
+      "screen_group": "80707f75b393a6467b72faf355604dae984fc319e6da531fa31ddbffb70fb735"
+    },
+    {
+      "case_id": "38ec0a5d5040311b599560d63449a9f6c7405a4213916df6dfc5aa82c83ba1c0",
+      "goal": "Select the button labeled 'Save as'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-022.png",
+        "sha256": "3a462c3b49ab35959f88df29fbb5885efbd0dd3d459f776d497673f23f92b00d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "form_builder",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Form Builder"
+      },
+      "partition": "holdout",
+      "screen_group": "80707f75b393a6467b72faf355604dae984fc319e6da531fa31ddbffb70fb735"
+    },
+    {
+      "case_id": "e3da61590c45c48408d081ea0b33e1ea1ba42d30b93758da7307bc193b6e29b6",
+      "goal": "Select the button labeled 'Preview'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-022.png",
+        "sha256": "3a462c3b49ab35959f88df29fbb5885efbd0dd3d459f776d497673f23f92b00d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "form_builder",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Form Builder"
+      },
+      "partition": "holdout",
+      "screen_group": "80707f75b393a6467b72faf355604dae984fc319e6da531fa31ddbffb70fb735"
+    },
+    {
+      "case_id": "c90769118e169a32a8a5a02cb269279dbd64dc595fab71f4539d741ea883d574",
+      "goal": "Select the tab labeled 'Fields'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-022.png",
+        "sha256": "3a462c3b49ab35959f88df29fbb5885efbd0dd3d459f776d497673f23f92b00d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "form_builder",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Form Builder"
+      },
+      "partition": "holdout",
+      "screen_group": "80707f75b393a6467b72faf355604dae984fc319e6da531fa31ddbffb70fb735"
+    },
+    {
+      "case_id": "c106bc3dc9110e54f6ed6d8fdbfe03cfd57ec3b143b8399d83776743f5f2f4d1",
+      "goal": "Select the checkbox labeled 'Required'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-022.png",
+        "sha256": "3a462c3b49ab35959f88df29fbb5885efbd0dd3d459f776d497673f23f92b00d",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "form_builder",
+        "precision_case": "ambiguous",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Form Builder"
+      },
+      "partition": "holdout",
+      "screen_group": "80707f75b393a6467b72faf355604dae984fc319e6da531fa31ddbffb70fb735"
+    },
+    {
+      "case_id": "7924d55fca2d941c127e3724b619361b2c61f496c93d160aa40465afb22acfb9",
+      "goal": "Select the button labeled 'Add item'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-023.png",
+        "sha256": "92e841c3b0047896eb2fbf91c5fb734a0fb90f7c5a499d4eb8964e1b60f438d9",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "inventory",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Inventory"
+      },
+      "partition": "holdout",
+      "screen_group": "b21d3b5ec9b14c090d28c2e9524071292e6d41397a1f90516b8a791a6d9196b7"
+    },
+    {
+      "case_id": "0e6acdc106613771a9bda5549b4cef22fffafa659554d2ea0312e7cfb70799ac",
+      "goal": "Select the textbox labeled 'Search SKU'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-023.png",
+        "sha256": "92e841c3b0047896eb2fbf91c5fb734a0fb90f7c5a499d4eb8964e1b60f438d9",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "inventory",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Inventory"
+      },
+      "partition": "holdout",
+      "screen_group": "b21d3b5ec9b14c090d28c2e9524071292e6d41397a1f90516b8a791a6d9196b7"
+    },
+    {
+      "case_id": "9a79656444ce068ea04aa037536bc346e80e25b11b6f72e29743d27b665438d0",
+      "goal": "Select the combobox labeled 'Warehouse'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-023.png",
+        "sha256": "92e841c3b0047896eb2fbf91c5fb734a0fb90f7c5a499d4eb8964e1b60f438d9",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "inventory",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Inventory"
+      },
+      "partition": "holdout",
+      "screen_group": "b21d3b5ec9b14c090d28c2e9524071292e6d41397a1f90516b8a791a6d9196b7"
+    },
+    {
+      "case_id": "5975f2920c58f50c46c8ebd77bc10d988cf6b7e1de9d006a98030d48a1f92184",
+      "goal": "Select the checkbox labeled 'Low stock'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-023.png",
+        "sha256": "92e841c3b0047896eb2fbf91c5fb734a0fb90f7c5a499d4eb8964e1b60f438d9",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "inventory",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Inventory"
+      },
+      "partition": "holdout",
+      "screen_group": "b21d3b5ec9b14c090d28c2e9524071292e6d41397a1f90516b8a791a6d9196b7"
+    },
+    {
+      "case_id": "36246ebab9662aa04ba8f3bf337a249bc00e218b21808dc26014b3ee4bef65e4",
+      "goal": "Select the button labeled 'Export'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-023.png",
+        "sha256": "92e841c3b0047896eb2fbf91c5fb734a0fb90f7c5a499d4eb8964e1b60f438d9",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "inventory",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "web_like",
+        "title": "Inventory"
+      },
+      "partition": "holdout",
+      "screen_group": "b21d3b5ec9b14c090d28c2e9524071292e6d41397a1f90516b8a791a6d9196b7"
+    },
+    {
+      "case_id": "16569828748081d8df255c6e8523d3a33e5fdcb6ee16f84eb445d6ae6111bf31",
+      "goal": "Select the textbox labeled 'Type a command'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-024.png",
+        "sha256": "88dce62abbca0ae44660553e3f9da1c0e61ce69ac54f0f80ca0796c9f7073352",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "command_palette",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Command Palette"
+      },
+      "partition": "holdout",
+      "screen_group": "ec22de3dce5a67de2236bcb1244a57a11f337456a692dd4baef4d385cb613290"
+    },
+    {
+      "case_id": "8f6134bd3faa7751365fec373e81fb06c1732feb261ebd790c6068cb680fd90b",
+      "goal": "Select the menuitem labeled 'Open file'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-024.png",
+        "sha256": "88dce62abbca0ae44660553e3f9da1c0e61ce69ac54f0f80ca0796c9f7073352",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "command_palette",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Command Palette"
+      },
+      "partition": "holdout",
+      "screen_group": "ec22de3dce5a67de2236bcb1244a57a11f337456a692dd4baef4d385cb613290"
+    },
+    {
+      "case_id": "55c9035f06fe478952e780feb14c1e814101d366ff2a5b5416c2dfdcfe00a4f0",
+      "goal": "Select the menuitem labeled 'Open folder'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-024.png",
+        "sha256": "88dce62abbca0ae44660553e3f9da1c0e61ce69ac54f0f80ca0796c9f7073352",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "command_palette",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Command Palette"
+      },
+      "partition": "holdout",
+      "screen_group": "ec22de3dce5a67de2236bcb1244a57a11f337456a692dd4baef4d385cb613290"
+    },
+    {
+      "case_id": "b46616442acfb2ec570298d3110924b249d207484306400f73e85269c607e4de",
+      "goal": "Select the menuitem labeled 'Toggle panel'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-024.png",
+        "sha256": "88dce62abbca0ae44660553e3f9da1c0e61ce69ac54f0f80ca0796c9f7073352",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "command_palette",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Command Palette"
+      },
+      "partition": "holdout",
+      "screen_group": "ec22de3dce5a67de2236bcb1244a57a11f337456a692dd4baef4d385cb613290"
+    },
+    {
+      "case_id": "1300d671edbbdf4cbd82f7f2a3e377b81bb16e47070fcd37e7b68d5f88c6687a",
+      "goal": "Select the menuitem labeled 'Preferences'",
+      "image": {
+        "height": 720,
+        "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/holdout/case-024.png",
+        "sha256": "88dce62abbca0ae44660553e3f9da1c0e61ce69ac54f0f80ca0796c9f7073352",
+        "width": 1280
+      },
+      "layout": {
+        "density": "dense",
+        "layout_id": "command_palette",
+        "precision_case": "small",
+        "source_kind": "privacy_safe_synthetic",
+        "source_provenance": "public_synthetic_new",
+        "surface": "native_like",
+        "title": "Command Palette"
+      },
+      "partition": "holdout",
+      "screen_group": "ec22de3dce5a67de2236bcb1244a57a11f337456a692dd4baef4d385cb613290"
+    }
+  ],
+  "content_sha256": "2d31d8a3467a4dd3e7e69fe8c7c59bd3ee5037a2711198cc83ff662aadb3861a",
+  "contract_version": "portfolio_hybrid_v1_1_provider_corpus_v2",
+  "provider_boundary": {
+    "filter_complete": true,
+    "opaque_case_ids": true,
+    "opaque_screen_groups": true,
+    "path_scope": "provider_safe_only"
+  },
+  "safety": {
+    "artifact_is_authorization": false,
+    "display_only": true,
+    "execute_binding_enabled": false
+  },
+  "source_parent_ref": {
+    "artifact_id": "portfolio-hybrid-v1-1-corpus-parent",
+    "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
+    "contract_version": "portfolio_hybrid_v1_1_corpus_parent_ref_v1",
+    "file_sha256": "8503010496a426893456e903b9d768f2a281ef0509f11230d312b073c0760757"
+  }
+}
