@@ -88,6 +88,44 @@ def test_observe_stage_defaults_to_learning_quality_understanding_profile() -> N
     assert locate["provider_mode"] == "local_grounding"
 
 
+def test_qwen_understanding_profile_launch_uses_complete_binding_context_capacity(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    profile = profile_for_stage("understanding")
+    captured: dict[str, object] = {}
+    resolved_paths: dict[str, Path] = {}
+    for key in ("start_script", "model_path", "mmproj_path", "server_path"):
+        configured_path = str(profile[key])
+        placeholder_path = tmp_path / Path(configured_path).name
+        placeholder_path.touch()
+        resolved_paths[configured_path] = placeholder_path
+
+    def fake_launch_model_server_process(*, profile, log_path, command):
+        captured.update(profile=profile, log_path=log_path, command=command)
+        return {"pid": 12345}
+
+    monkeypatch.setattr(
+        model_server,
+        "_resolve_path",
+        lambda value: resolved_paths[str(value)],
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_launch_model_server_process",
+        fake_launch_model_server_process,
+    )
+
+    result = model_server.start_model_server(profile)
+
+    assert profile["profile_id"] == "qwen3_vl_8b_q4_k_m"
+    assert profile["context_size"] == 10240
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[command.index("-ContextSize") + 1] == "10240"
+    assert result == {"pid": 12345}
+
+
 def test_vision_config_uses_learning_quality_understanding_profile() -> None:
     vision_config = json.loads(Path("configs/vision.json").read_text(encoding="utf-8"))
     local_understanding = vision_config["vision"]["local_understanding"]

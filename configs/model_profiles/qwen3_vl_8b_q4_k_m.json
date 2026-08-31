@@ -14,7 +14,7 @@
   "stop_script": "scripts/model_servers/stop_local_vision_server.ps1",
   "pid_file": "logs/qwen3-vl-8b-q4_k_m-server.pid",
   "port": 13240,
-  "context_size": 8192,
+  "context_size": 10240,
   "gpu_layers": 99,
   "gpu_memory_gib": 7,
   "image_min_tokens": 1024,
