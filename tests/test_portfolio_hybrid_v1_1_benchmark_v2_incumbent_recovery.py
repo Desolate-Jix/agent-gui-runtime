@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,16 @@ from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.workflow_service import (
     LearningWorkflowStageOperationError,
     _benchmark_v2_incumbent_child_slot,
+    _project_benchmark_v2_incumbent_pre_reservation_recovery,
+    cancel_learning_workflow_stage_operation,
     compose_test_learning_workflow_service_unit,
+    start_learning_workflow_stage_operation,
+    transition_learning_workflow_run,
+)
+from app.learn.workflow_store import LearningWorkflowRunStore
+from app.learn.workflow_worker import (
+    LearningStageWorkerRegistry,
+    compose_test_benchmark_worker_supervision_root,
 )
 from app.learn.workflow_state import LearningWorkflowTransitionError
 
@@ -137,6 +147,188 @@ def test_lookup_incumbent_existing_incomplete_slot_requires_recovery() -> None:
             window_binding=_binding(),
         )
     assert store.mutation_calls == 0
+
+
+def test_recover_incumbent_pre_reservation_start_safe_stops_without_model_launch(
+    tmp_path: Path,
+) -> None:
+    binding = _binding()
+    provider_case_ref = _case("case-pre-reservation")
+    slot = _benchmark_v2_incumbent_child_slot(
+        provider_case_ref=provider_case_ref,
+        window_binding=binding,
+    )
+    capture_path = tmp_path / "artifacts" / "screenshots" / "capture.png"
+    capture_path.parent.mkdir(parents=True)
+    capture_path.write_bytes(b"not-used-by-recovery")
+    start_intent = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_run_start_intent_v1",
+            "provider_case_ref": deepcopy(slot["provider_case_ref"]),
+            "parent_run_id": binding["run_id"],
+            "parent_stage": binding["stage"],
+            "parent_operation_id": binding["operation_id"],
+            "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+            "capture_ref": deepcopy(binding["capture_ref"]),
+            "run_id": slot["run_id"],
+            "stage": slot["stage"],
+            "operation_id": slot["operation_id"],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path / "worker-journals",
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=root.journal_root,
+        benchmark_supervision_root=root,
+    )
+    composition = compose_test_learning_workflow_service_unit(
+        store=store,
+        worker_registry=registry,
+        project_root=tmp_path,
+        benchmark_supervision_root=root,
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    service = incumbent.BenchmarkV2IncumbentWorkflowService(composition)
+    current = transition_learning_workflow_run(
+        store=store,
+        project_root=tmp_path,
+        run_id=str(slot["run_id"]),
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+        reason="benchmark_v2 incumbent child capture binding",
+        evidence_refs={"benchmark_v2_incumbent_child_start_intent": start_intent},
+    )
+    current = transition_learning_workflow_run(
+        store=store,
+        project_root=tmp_path,
+        run_id=str(slot["run_id"]),
+        expected_revision=int(current["revision"]),
+        stage="bind_capture",
+        outcome="completed",
+        reason="benchmark_v2 incumbent child capture bound",
+        evidence_refs={
+            "image_path": str(capture_path),
+            "benchmark_v2_incumbent_child_start_intent": start_intent,
+        },
+    )
+    current = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id=str(slot["run_id"]),
+        expected_revision=int(current["revision"]),
+        stage=str(slot["stage"]),
+        operation_id=str(slot["operation_id"]),
+        reason="benchmark_v2 incumbent child workflow service start",
+        lease_seconds=1,
+        now=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    )["workflow_state"]
+
+    recovered = service.recover_incumbent_pre_reservation(
+        provider_case_ref=provider_case_ref,
+        window_binding=binding,
+    )
+    replay = service.recover_incumbent_pre_reservation(
+        provider_case_ref=provider_case_ref,
+        window_binding=binding,
+    )
+    corrupt_terminal = deepcopy(store.get(str(slot["run_id"])))
+    corrupt_terminal["stages"][str(slot["stage"])]["evidence_refs"][
+        "stage_execution"
+    ]["result_outcome"] = "completed"
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="recovery stage execution is invalid",
+    ):
+        _project_benchmark_v2_incumbent_pre_reservation_recovery(
+            composition=composition,
+            workflow_state=corrupt_terminal,
+            slot=slot,
+        )
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="child start lineage",
+    ):
+        service.recover_incumbent_pre_reservation(
+            provider_case_ref=_case("case-pre-reservation", SHA_B),
+            window_binding=binding,
+        )
+
+    assert recovered == replay
+    assert recovered["status"] == "safe_stopped"
+    assert recovered["operation_id"] == slot["operation_id"]
+    assert recovered["artifact_is_authorization"] is False
+    assert recovered["execute_binding_enabled"] is False
+    assert store.get(str(slot["run_id"]))["terminal"] is True
+    assert not list(root.journal_root.glob("*.benchmark-reservation.json"))
+    assert not list(root.journal_root.glob("*.benchmark-owner.json"))
+    assert not list(root.journal_root.glob("*.worker.json"))
+
+
+def test_recover_incumbent_pre_reservation_ignores_regular_terminal(
+    tmp_path: Path,
+) -> None:
+    binding = _binding()
+    provider_case_ref = _case("case-regular-terminal")
+    slot = _benchmark_v2_incumbent_child_slot(
+        provider_case_ref=provider_case_ref,
+        window_binding=binding,
+    )
+    store = LearningWorkflowRunStore()
+    current = store.transition(
+        run_id=str(slot["run_id"]),
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+        evidence_refs={},
+    )
+    current = store.transition(
+        run_id=str(slot["run_id"]),
+        expected_revision=int(current["revision"]),
+        stage="bind_capture",
+        outcome="completed",
+        evidence_refs={"image_path": "unused.png"},
+    )
+    current = start_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id=str(slot["run_id"]),
+        expected_revision=int(current["revision"]),
+        stage=str(slot["stage"]),
+        operation_id=str(slot["operation_id"]),
+    )["workflow_state"]
+    cancel_learning_workflow_stage_operation(
+        store=store,
+        project_root=tmp_path,
+        run_id=str(slot["run_id"]),
+        expected_revision=int(current["revision"]),
+        stage=str(slot["stage"]),
+        operation_id=str(slot["operation_id"]),
+        reason="regular terminal",
+    )
+    composition = compose_test_learning_workflow_service_unit(
+        store=store,
+        worker_registry=object(),
+        project_root=tmp_path,
+        benchmark_supervision_root=object(),
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+
+    assert incumbent.BenchmarkV2IncumbentWorkflowService(
+        composition
+    ).recover_incumbent_pre_reservation(
+        provider_case_ref=provider_case_ref,
+        window_binding=binding,
+    ) is None
 
 
 def test_start_uses_five_unique_child_slots_and_replays_same_case(

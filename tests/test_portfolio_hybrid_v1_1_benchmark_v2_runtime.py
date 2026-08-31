@@ -2539,6 +2539,146 @@ def test_actual_cleanup_reconciles_hybrid_started_before_any_incumbent_call(
     }
 
 
+def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_incumbent_pre_reservation_recovery,
+    )
+    from app.learn.workflow_service import _benchmark_v2_incumbent_child_slot
+
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-pre-reservation-recovery"})
+    attempt_dir = (tmp_path / "attempt-pre-reservation-recovery").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+        run_id="parent-run-pre-reservation",
+        operation_id="parent-operation-pre-reservation",
+        window_binding_ref={"id": "window-pre", "content_sha256": "a" * 64},
+        capture_ref={"id": "capture-pre", "content_sha256": "b" * 64},
+        owner_journal_ref={"content_sha256": "c" * 64},
+        expected_uia_root_ref={"content_sha256": "d" * 64},
+    )
+    provider_case_ref = deepcopy(group["case_refs"][0])
+    parent_intent_sha = "e" * 64
+    child_slot = _benchmark_v2_incumbent_child_slot(
+        provider_case_ref=provider_case_ref,
+        window_binding=binding,
+    )
+
+    class RecoveringService(_ActualService):
+        def __init__(self, operations, *, tamper_child_identity: bool = False):
+            super().__init__(operations)
+            self.tamper_child_identity = tamper_child_identity
+
+        def recover_incumbent_pre_reservation(
+            self, *, provider_case_ref, window_binding
+        ):
+            return compose_benchmark_v2_incumbent_pre_reservation_recovery(
+                run_id=(
+                    "tampered-child-run"
+                    if self.tamper_child_identity
+                    else str(child_slot["run_id"])
+                ),
+                stage=str(window_binding["stage"]),
+                operation_id=(
+                    "tampered-child-operation"
+                    if self.tamper_child_identity
+                    else str(child_slot["operation_id"])
+                ),
+                provider_case_ref=provider_case_ref,
+                window_binding_ref=window_binding["window_binding_ref"],
+                capture_ref=window_binding["capture_ref"],
+                child_start_intent_ref={"content_sha256": "1" * 64},
+                stage_execution_ref={"content_sha256": "2" * 64},
+                reservation_absence_ref={"content_sha256": "3" * 64},
+                workflow_state_ref={
+                    "run_id": (
+                        "tampered-child-run"
+                        if self.tamper_child_identity
+                        else str(child_slot["run_id"])
+                    ),
+                    "revision": 4,
+                    "content_sha256": "4" * 64,
+                },
+            )
+
+        def lookup_incumbent_observe(self, **_kwargs):
+            raise AssertionError("recovered pre-reservation start must not be looked up")
+
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_screen_group_service_intents",
+        lambda **_kwargs: [
+            {
+                "provider_group": deepcopy(group),
+                "window_binding": deepcopy(binding),
+                "content_sha256": parent_intent_sha,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_incumbent_call_intents",
+        lambda **_kwargs: [
+            {
+                "provider_case_ref": deepcopy(provider_case_ref),
+                "window_binding": deepcopy(binding),
+                "service_intent_ref": {"content_sha256": parent_intent_sha},
+            }
+        ],
+    )
+
+    wrong_service = RecoveringService([], tamper_child_identity=True)
+    wrong_service.start_hybrid_operation(screen_group=group, window_binding=binding)
+    with pytest.raises(
+        ValueError,
+        match="pre-reservation recovery lineage differs",
+    ):
+        runtime_module._reconcile_actual_operations(
+            attempt_dir=attempt_dir,
+            service=wrong_service,
+        )
+
+    service = RecoveringService([])
+    service.start_hybrid_operation(screen_group=group, window_binding=binding)
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+
+    receipt = runtime.cleanup_attempt(
+        attempt=attempt_ref,
+        reason="pre_reservation_start_failed",
+    )
+    replay = runtime.cleanup_attempt(
+        attempt=attempt_ref,
+        reason="pre_reservation_start_failed",
+    )
+
+    assert replay == receipt
+    assert receipt["service_terminal_ref"]["parent_kind"] == (
+        "actual_operations_cleanup_aggregate"
+    )
+    assert receipt["resource_counts"] == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+    assert service.cancel_calls == 1
+    iterator.close()
+
+
 def test_actual_cleanup_fails_closed_when_durable_hybrid_intent_is_not_terminal(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

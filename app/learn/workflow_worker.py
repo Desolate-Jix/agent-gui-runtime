@@ -450,6 +450,16 @@ _WINDOWS_RESERVED_ARTIFACT_STEMS = frozenset(
     }
 )
 _BENCHMARK_OPERATION_ARTIFACT_KEY_PREFIX = "operation-key-v1-"
+_BENCHMARK_OPERATION_STATE_SUFFIXES = (
+    ".benchmark-reservation.json",
+    ".benchmark-anchor-confirmation.json",
+    ".benchmark-provider.json",
+    ".benchmark-provider-cleanup.json",
+    ".benchmark-store-decision.json",
+    ".benchmark-pre-anchor-abort.json",
+    ".benchmark-pre-anchor-abort-receipt.json",
+    ".benchmark-controller-abandoned-revalidation.json",
+)
 
 
 def _benchmark_operation_artifact_path(
@@ -4140,6 +4150,78 @@ class LearningStageWorkerRegistry:
                     expected_journal_root=self._result_root,
                 )
                 return deepcopy(value)
+
+    def attest_benchmark_pre_reservation_absence(
+        self,
+        *,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        supervision_root: BenchmarkWorkerSupervisionRoot,
+    ) -> dict[str, Any]:
+        root = self._require_benchmark_root(supervision_root)
+        key = (
+            _required_text(run_id, "run_id"),
+            _required_text(stage, "stage"),
+            _required_text(operation_id, "operation_id"),
+        )
+        with hold_benchmark_worker_controller(
+            supervision_root=root,
+            run_id=key[0],
+            stage=key[1],
+            operation_id=key[2],
+        ):
+            with self._lock:
+                durable_artifact_present = any(
+                    _benchmark_operation_artifact_path(
+                        self._result_root,
+                        key[2],
+                        suffix,
+                    ).exists()
+                    for suffix in _BENCHMARK_OPERATION_STATE_SUFFIXES
+                )
+                worker_ids = list(self._workers_by_operation.get(key, []))
+                matching_records = [
+                    worker_id
+                    for worker_id, record in self._records.items()
+                    if (
+                        record.get("run_id"),
+                        record.get("stage"),
+                        record.get("operation_id"),
+                    )
+                    == key
+                ]
+                if (
+                    key in self._benchmark_reservations
+                    or key in self._benchmark_provider_journals
+                    or key in self._benchmark_provider_cleanup_journals
+                    or durable_artifact_present
+                    or worker_ids
+                    or matching_records
+                ):
+                    raise LearningStageWorkerError(
+                        "benchmark pre-reservation operation has durable worker state"
+                    )
+                return seal_immutable(
+                    {
+                        "contract_version": (
+                            "benchmark_worker_pre_reservation_absence_v1"
+                        ),
+                        "authority_kind": root.authority_kind,
+                        "supervision_inputs_ref": _benchmark_supervision_inputs_ref(
+                            root
+                        ),
+                        "run_id": key[0],
+                        "stage": key[1],
+                        "operation_id": key[2],
+                        "reservation_present": False,
+                        "provider_journal_present": False,
+                        "provider_cleanup_journal_present": False,
+                        "worker_ids": [],
+                        "artifact_is_authorization": False,
+                        "execute_binding_enabled": False,
+                    }
+                )
 
     def inspect_benchmark_worker_launch_owner(
         self,

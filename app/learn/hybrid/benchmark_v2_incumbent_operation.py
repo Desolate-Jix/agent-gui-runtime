@@ -57,6 +57,9 @@ BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT = (
 BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT = (
     "benchmark_v2_actual_operations_stable_zero_v1"
 )
+BENCHMARK_V2_INCUMBENT_PRE_RESERVATION_RECOVERY_CONTRACT = (
+    "benchmark_v2_incumbent_pre_reservation_recovery_v1"
+)
 BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT = (
     "benchmark_v2_provider_dispatch_context_projection_v1"
 )
@@ -2018,6 +2021,124 @@ def replay_benchmark_v2_incumbent_terminal(
     return deepcopy(current)
 
 
+def compose_benchmark_v2_incumbent_pre_reservation_recovery(
+    *,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    provider_case_ref: Mapping[str, object],
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    child_start_intent_ref: Mapping[str, object],
+    stage_execution_ref: Mapping[str, object],
+    reservation_absence_ref: Mapping[str, object],
+    workflow_state_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    return validate_benchmark_v2_incumbent_pre_reservation_recovery(
+        _seal(
+            {
+                "contract_version": (
+                    BENCHMARK_V2_INCUMBENT_PRE_RESERVATION_RECOVERY_CONTRACT
+                ),
+                "status": "safe_stopped",
+                "run_id": run_id,
+                "stage": stage,
+                "operation_id": operation_id,
+                "provider_case_ref": deepcopy(dict(provider_case_ref)),
+                "window_binding_ref": deepcopy(dict(window_binding_ref)),
+                "capture_ref": deepcopy(dict(capture_ref)),
+                "child_start_intent_ref": deepcopy(dict(child_start_intent_ref)),
+                "stage_execution_ref": deepcopy(dict(stage_execution_ref)),
+                "reservation_absence_ref": deepcopy(
+                    dict(reservation_absence_ref)
+                ),
+                "workflow_state_ref": deepcopy(dict(workflow_state_ref)),
+                "reason": "startup_failed_before_reservation",
+                **_NON_AUTHORIZING_SAFETY,
+            }
+        )
+    )
+
+
+def validate_benchmark_v2_incumbent_pre_reservation_recovery(
+    value: object,
+) -> dict[str, Any]:
+    receipt = _closed(
+        value,
+        {
+            "contract_version",
+            "status",
+            "run_id",
+            "stage",
+            "operation_id",
+            "provider_case_ref",
+            "window_binding_ref",
+            "capture_ref",
+            "child_start_intent_ref",
+            "stage_execution_ref",
+            "reservation_absence_ref",
+            "workflow_state_ref",
+            "reason",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark incumbent pre-reservation recovery",
+    )
+    provider_case_ref = _closed(
+        receipt["provider_case_ref"],
+        {"case_id", "case_content_sha256"},
+        "benchmark incumbent pre-reservation provider case ref",
+    )
+    workflow_state_ref = _closed(
+        receipt["workflow_state_ref"],
+        {"run_id", "revision", "content_sha256"},
+        "benchmark incumbent pre-reservation workflow state ref",
+    )
+    if (
+        receipt["contract_version"]
+        != BENCHMARK_V2_INCUMBENT_PRE_RESERVATION_RECOVERY_CONTRACT
+        or receipt["status"] != "safe_stopped"
+        or receipt["reason"] != "startup_failed_before_reservation"
+        or receipt["artifact_is_authorization"] is not False
+        or receipt["execute_binding_enabled"] is not False
+        or workflow_state_ref["run_id"] != receipt["run_id"]
+    ):
+        raise ValueError("benchmark incumbent pre-reservation recovery is invalid")
+    for name in ("run_id", "stage", "operation_id"):
+        _text(receipt[name], f"benchmark incumbent pre-reservation {name}")
+    _text(provider_case_ref["case_id"], "benchmark incumbent pre-reservation case id")
+    _sha(
+        provider_case_ref["case_content_sha256"],
+        "benchmark incumbent pre-reservation case SHA",
+    )
+    _revision(
+        workflow_state_ref["revision"],
+        "benchmark incumbent pre-reservation workflow revision",
+    )
+    _sha(
+        workflow_state_ref["content_sha256"],
+        "benchmark incumbent pre-reservation workflow state SHA",
+    )
+    for name in ("window_binding_ref", "capture_ref"):
+        _identity_ref(receipt[name], f"benchmark incumbent pre-reservation {name}")
+    for name in (
+        "child_start_intent_ref",
+        "stage_execution_ref",
+        "reservation_absence_ref",
+    ):
+        _content_ref(receipt[name], f"benchmark incumbent pre-reservation {name}")
+    _sha(
+        receipt["content_sha256"],
+        "benchmark incumbent pre-reservation content SHA",
+    )
+    body = deepcopy(receipt)
+    digest = body.pop("content_sha256")
+    if content_sha256(body) != digest:
+        raise ValueError("benchmark incumbent pre-reservation recovery SHA differs")
+    return receipt
+
+
 def validate_benchmark_v2_actual_operations_stable_zero(
     value: object,
 ) -> dict[str, Any]:
@@ -2347,6 +2468,24 @@ class BenchmarkV2IncumbentWorkflowService:
         )
 
         return _start_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            provider_case_ref=provider_case_ref,
+            window_binding=window_binding,
+        )
+
+    def recover_incumbent_pre_reservation(
+        self,
+        *,
+        provider_case_ref: Mapping[str, object],
+        window_binding: Mapping[str, object],
+    ) -> dict[str, Any] | None:
+        _validate_provider_case_ref(provider_case_ref)
+        validate_benchmark_v2_workflow_window_binding(window_binding)
+        from app.learn.workflow_service import (
+            _recover_benchmark_v2_incumbent_pre_reservation_workflow_service,
+        )
+
+        return _recover_benchmark_v2_incumbent_pre_reservation_workflow_service(
             composition=self._composition,
             provider_case_ref=provider_case_ref,
             window_binding=window_binding,

@@ -28,6 +28,7 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     get_production_benchmark_v2_workflow_service,
     validate_benchmark_v2_actual_operations_stable_zero,
     validate_benchmark_v2_hybrid_screen_group_start,
+    validate_benchmark_v2_incumbent_pre_reservation_recovery,
     validate_benchmark_v2_provider_dispatch_context_projection,
     validate_benchmark_v2_workflow_window_binding,
     validate_benchmark_v2_workflow_service_operation_ref,
@@ -1948,6 +1949,7 @@ class _BenchmarkV2ProductionRuntime:
         window_cleanup: Mapping[str, object] | None = None
         cleanup_errors: list[BaseException] = []
         actual_attestations: list[Mapping[str, object]] = []
+        actual_pre_reservation_recoveries: list[Mapping[str, object]] = []
         actual_terminals: list[Mapping[str, object]] = []
         partial_actual_terminals: list[Mapping[str, object]] = []
         unresolved_actual_operations = 0
@@ -1962,6 +1964,7 @@ class _BenchmarkV2ProductionRuntime:
                     (
                         actual_terminals,
                         actual_attestations,
+                        actual_pre_reservation_recoveries,
                         partial_actual_terminals,
                         unresolved_actual_operations,
                     ) = _reconcile_actual_operations(
@@ -2342,7 +2345,11 @@ class _BenchmarkV2ProductionRuntime:
                 cleanup_errors,
             )
 
-        if actual_attestations and not partial_actual_terminals:
+        if (
+            actual_attestations
+            and not actual_pre_reservation_recoveries
+            and not partial_actual_terminals
+        ):
             if len(actual_attestations) == 1:
                 service_terminal_ref = _cleanup_parent_ref(
                     actual_attestations[0],
@@ -2363,8 +2370,12 @@ class _BenchmarkV2ProductionRuntime:
                     parent_kind="actual_operations_stable_zero_aggregate",
                     name="actual operations stable-zero aggregate",
                 )
-        elif partial_actual_terminals:
-            if not actual_attestations and len(partial_actual_terminals) == 1:
+        elif partial_actual_terminals or actual_pre_reservation_recoveries:
+            if (
+                not actual_attestations
+                and not actual_pre_reservation_recoveries
+                and len(partial_actual_terminals) == 1
+            ):
                 service_terminal_ref = _cleanup_parent_ref(
                     partial_actual_terminals[0],
                     parent_kind="workflow_service_terminal",
@@ -2378,6 +2389,13 @@ class _BenchmarkV2ProductionRuntime:
                             "full_group_attestation_refs": [
                                 _content_ref(item, name="actual group attestation")
                                 for item in actual_attestations
+                            ],
+                            "pre_reservation_recovery_refs": [
+                                _content_ref(
+                                    item,
+                                    name="actual pre-reservation recovery",
+                                )
+                                for item in actual_pre_reservation_recoveries
                             ],
                             "partial_workflow_terminal_refs": [
                                 _content_ref(
@@ -3140,6 +3158,7 @@ def _reconcile_actual_operations(
     list[dict[str, Any]],
     list[dict[str, Any]],
     list[dict[str, Any]],
+    list[dict[str, Any]],
     int,
 ]:
     intents = _read_actual_incumbent_call_intents(attempt_dir=attempt_dir)
@@ -3157,6 +3176,11 @@ def _reconcile_actual_operations(
         targets.setdefault(parent_sha, {})[key] = intent
     lookup_hybrid = getattr(service, "lookup_hybrid_operation", None)
     lookup = getattr(service, "lookup_incumbent_observe", None)
+    recover_pre_reservation = getattr(
+        service,
+        "recover_incumbent_pre_reservation",
+        None,
+    )
     cancel = getattr(service, "cancel_operation", None)
     attest = getattr(service, "attest_actual_operations_stable_zero", None)
     if not callable(cancel) or (
@@ -3167,6 +3191,7 @@ def _reconcile_actual_operations(
         raise RuntimeError("WorkflowService actual operation recovery is unavailable")
     terminals: list[dict[str, Any]] = []
     attestations: list[dict[str, Any]] = []
+    pre_reservation_recoveries: list[dict[str, Any]] = []
     partial_terminals: list[dict[str, Any]] = []
     unresolved_operations = 0
     for intent in screen_group_intents:
@@ -3203,6 +3228,44 @@ def _reconcile_actual_operations(
         parent_sha = str(intent["content_sha256"])
         for key in sorted(targets.get(parent_sha, {})):
             call_intent = targets[parent_sha][key]
+            recovery_value = (
+                recover_pre_reservation(
+                    provider_case_ref=deepcopy(call_intent["provider_case_ref"]),
+                    window_binding=deepcopy(call_intent["window_binding"]),
+                )
+                if callable(recover_pre_reservation)
+                else None
+            )
+            if recovery_value is not None:
+                from app.learn.workflow_service import (
+                    _benchmark_v2_incumbent_child_slot,
+                )
+
+                recovery = validate_benchmark_v2_incumbent_pre_reservation_recovery(
+                    recovery_value
+                )
+                expected_child_slot = _benchmark_v2_incumbent_child_slot(
+                    provider_case_ref=call_intent["provider_case_ref"],
+                    window_binding=call_intent["window_binding"],
+                )
+                if (
+                    recovery["provider_case_ref"]
+                    != call_intent["provider_case_ref"]
+                    or recovery["run_id"] != expected_child_slot["run_id"]
+                    or recovery["stage"]
+                    != expected_child_slot["stage"]
+                    or recovery["operation_id"]
+                    != expected_child_slot["operation_id"]
+                    or recovery["window_binding_ref"]
+                    != call_intent["window_binding"]["window_binding_ref"]
+                    or recovery["capture_ref"]
+                    != call_intent["window_binding"]["capture_ref"]
+                ):
+                    raise ValueError(
+                        "benchmark actual pre-reservation recovery lineage differs"
+                    )
+                pre_reservation_recoveries.append(recovery)
+                continue
             step_value = lookup(
                 provider_case_ref=deepcopy(call_intent["provider_case_ref"]),
                 window_binding=deepcopy(call_intent["window_binding"]),
@@ -3253,7 +3316,13 @@ def _reconcile_actual_operations(
                 _validate_partial_actual_terminal_cleanup(terminal)
             partial_terminals.extend(group_terminals)
         terminals.extend(group_terminals)
-    return terminals, attestations, partial_terminals, unresolved_operations
+    return (
+        terminals,
+        attestations,
+        pre_reservation_recoveries,
+        partial_terminals,
+        unresolved_operations,
+    )
 
 
 def _validate_actual_incumbent_step(
@@ -3952,27 +4021,40 @@ def _validate_actual_operations_cleanup_aggregate(
 ) -> None:
     fields = {
         "full_group_attestation_refs",
+        "pre_reservation_recovery_refs",
         "partial_workflow_terminal_refs",
     }
     if not isinstance(value, Mapping) or set(value) != fields:
         raise ValueError("actual operations cleanup aggregate is not closed")
     full_values = value.get("full_group_attestation_refs")
+    recovery_values = value.get("pre_reservation_recovery_refs")
     partial_values = value.get("partial_workflow_terminal_refs")
-    if not isinstance(full_values, list) or not isinstance(partial_values, list):
+    if (
+        not isinstance(full_values, list)
+        or not isinstance(recovery_values, list)
+        or not isinstance(partial_values, list)
+    ):
         raise ValueError("actual operations cleanup aggregate refs are invalid")
-    if not partial_values or len(full_values) + len(partial_values) < 2:
+    if (
+        not partial_values
+        or len(full_values) + len(recovery_values) + len(partial_values) < 2
+    ):
         raise ValueError("actual operations cleanup aggregate is incomplete")
 
     attestations = [
         validate_benchmark_v2_actual_operations_stable_zero(item)
         for item in full_values
     ]
+    recoveries = [
+        validate_benchmark_v2_incumbent_pre_reservation_recovery(item)
+        for item in recovery_values
+    ]
     partial_terminals = [
         _validate_partial_actual_terminal_cleanup(item) for item in partial_values
     ]
     producer_shas = [
         str(item["content_sha256"])
-        for item in [*attestations, *partial_terminals]
+        for item in [*attestations, *recoveries, *partial_terminals]
     ]
     if len(set(producer_shas)) != len(producer_shas):
         raise ValueError("actual operations cleanup aggregate producer is duplicated")
@@ -3981,6 +4063,14 @@ def _validate_actual_operations_cleanup_aggregate(
         operation
         for attestation in attestations
         for operation in attestation["operation_refs"]
+    ] + [
+        {
+            "run_id": recovery["run_id"],
+            "stage": recovery["stage"],
+            "operation_id": recovery["operation_id"],
+            "content_sha256": recovery["content_sha256"],
+        }
+        for recovery in recoveries
     ] + [terminal["operation_ref"] for terminal in partial_terminals]
     operation_keys = [
         (operation["run_id"], operation["stage"], operation["operation_id"])

@@ -534,6 +534,49 @@ def test_benchmark_worker_projects_semantic_operation_id_to_safe_journal_paths(
     assert confirmation_files[0].name.startswith("operation-")
 
 
+def test_benchmark_pre_reservation_absence_reloads_durable_reservation(
+    tmp_path: Path,
+) -> None:
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path,
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    stale = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    writer = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    source = _benchmark_handler_payload_source()
+    writer.prepare_benchmark_worker_identity(
+        run_id="run-pre-reservation-race",
+        stage="screen_understanding",
+        operation_id="operation-pre-reservation-race",
+        workflow_revision=3,
+        task_kind="vision_observe_screen",
+        handler_payload_source=source,
+        supervision_root=root,
+    )
+
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="durable worker state",
+    ):
+        stale.attest_benchmark_pre_reservation_absence(
+            run_id="run-pre-reservation-race",
+            stage="screen_understanding",
+            operation_id="operation-pre-reservation-race",
+            supervision_root=root,
+        )
+
+
 def test_benchmark_operation_artifact_path_is_collision_safe_and_legacy_compatible(
     tmp_path: Path,
 ) -> None:

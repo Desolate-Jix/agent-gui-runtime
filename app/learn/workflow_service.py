@@ -120,6 +120,11 @@ class _LearningWorkflowRegistryOwner:
     def inspect_benchmark_identity(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.inspect_prepared_benchmark_worker_identity(**kwargs)
 
+    def attest_benchmark_pre_reservation_absence(
+        self, **kwargs: Any
+    ) -> dict[str, Any]:
+        return self._registry.attest_benchmark_pre_reservation_absence(**kwargs)
+
     def confirm_benchmark_anchor(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.confirm_prepared_benchmark_worker_anchor(**kwargs)
 
@@ -3471,6 +3476,301 @@ def _benchmark_v2_incumbent_child_slot(
     )
 
 
+def _benchmark_v2_incumbent_child_start_intent(
+    slot: Mapping[str, object],
+) -> dict[str, Any]:
+    parent_binding = slot["parent_window_binding"]
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_run_start_intent_v1",
+            "provider_case_ref": deepcopy(slot["provider_case_ref"]),
+            "parent_run_id": str(parent_binding["run_id"]),
+            "parent_stage": str(parent_binding["stage"]),
+            "parent_operation_id": str(parent_binding["operation_id"]),
+            "window_binding_ref": deepcopy(parent_binding["window_binding_ref"]),
+            "capture_ref": deepcopy(parent_binding["capture_ref"]),
+            "run_id": str(slot["run_id"]),
+            "stage": str(slot["stage"]),
+            "operation_id": str(slot["operation_id"]),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _validate_benchmark_v2_pre_reservation_stage_execution(
+    stage_execution: Mapping[str, object],
+    *,
+    stage: str,
+    operation_id: str,
+    terminal: bool,
+) -> None:
+    fields = {
+        "contract_version",
+        "operation_id",
+        "stage",
+        "owner",
+        "started_at",
+        "lease_expires_at",
+    }
+    if terminal:
+        fields.update({"finished_at", "result_outcome", "recovery_status"})
+    if (
+        set(stage_execution) != fields
+        or stage_execution.get("contract_version")
+        != LEARNING_WORKFLOW_STAGE_OPERATION_CONTRACT_VERSION
+        or stage_execution.get("owner") != "backend_lease"
+        or stage_execution.get("stage") != stage
+        or stage_execution.get("operation_id") != operation_id
+        or (
+            terminal
+            and (
+                stage_execution.get("result_outcome") != "safe_stopped"
+                or stage_execution.get("recovery_status")
+                != "pre_reservation_start_failed"
+            )
+        )
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 pre-reservation recovery stage execution is invalid"
+        )
+    started_at = _parse_utc_datetime(
+        stage_execution.get("started_at"),
+        field="started_at",
+    )
+    lease_expires_at = _parse_utc_datetime(
+        stage_execution.get("lease_expires_at"),
+        field="lease_expires_at",
+    )
+    if started_at >= lease_expires_at:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 pre-reservation recovery stage execution is invalid"
+        )
+    if terminal:
+        finished_at = _parse_utc_datetime(
+            stage_execution.get("finished_at"),
+            field="finished_at",
+        )
+        if lease_expires_at >= finished_at:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 pre-reservation recovery stage execution is invalid"
+            )
+
+
+def _project_benchmark_v2_incumbent_pre_reservation_recovery(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    workflow_state: Mapping[str, object],
+    slot: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        content_sha256 as benchmark_content_sha256,
+    )
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_incumbent_pre_reservation_recovery,
+    )
+
+    stage = str(slot["stage"])
+    stage_execution = _benchmark_v2_stage_execution(workflow_state, stage)
+    _validate_benchmark_v2_pre_reservation_stage_execution(
+        stage_execution,
+        stage=stage,
+        operation_id=str(slot["operation_id"]),
+        terminal=True,
+    )
+    stages = workflow_state.get("stages")
+    stage_record = stages.get(stage) if isinstance(stages, Mapping) else None
+    evidence = (
+        stage_record.get("evidence_refs")
+        if isinstance(stage_record, Mapping)
+        else None
+    )
+    absence = (
+        evidence.get("benchmark_v2_pre_reservation_absence")
+        if isinstance(evidence, Mapping)
+        else None
+    )
+    if (
+        workflow_state.get("terminal") is not True
+        or not isinstance(stage_record, Mapping)
+        or stage_record.get("status") != "safe_stopped"
+        or stage_execution.get("recovery_status")
+        != "pre_reservation_start_failed"
+        or not isinstance(absence, Mapping)
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 pre-reservation recovery state is invalid"
+        )
+    bind_capture = workflow_state.get("stages", {}).get("bind_capture")
+    bind_evidence = (
+        bind_capture.get("evidence_refs")
+        if isinstance(bind_capture, Mapping)
+        else None
+    )
+    start_intent = _benchmark_v2_incumbent_child_start_intent(slot)
+    if (
+        not isinstance(bind_capture, Mapping)
+        or bind_capture.get("status") != "completed"
+        or not isinstance(bind_evidence, Mapping)
+        or bind_evidence.get("benchmark_v2_incumbent_child_start_intent")
+        != start_intent
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 pre-reservation child start lineage is ambiguous"
+        )
+    root = composition.benchmark_supervision_root
+    if root is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 pre-reservation supervision root is unavailable"
+        )
+    live_absence = _LearningWorkflowRegistryOwner(
+        composition.worker_registry
+    ).attest_benchmark_pre_reservation_absence(
+        run_id=str(slot["run_id"]),
+        stage=stage,
+        operation_id=str(slot["operation_id"]),
+        supervision_root=root,
+    )
+    if dict(absence) != live_absence:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 pre-reservation absence re-attestation differs"
+        )
+    return compose_benchmark_v2_incumbent_pre_reservation_recovery(
+        run_id=str(slot["run_id"]),
+        stage=stage,
+        operation_id=str(slot["operation_id"]),
+        provider_case_ref=slot["provider_case_ref"],
+        window_binding_ref=slot["parent_window_binding"]["window_binding_ref"],
+        capture_ref=slot["parent_window_binding"]["capture_ref"],
+        child_start_intent_ref={"content_sha256": start_intent["content_sha256"]},
+        stage_execution_ref={
+            "content_sha256": benchmark_content_sha256(stage_execution)
+        },
+        reservation_absence_ref={
+            "content_sha256": str(absence["content_sha256"])
+        },
+        workflow_state_ref={
+            "run_id": str(workflow_state["run_id"]),
+            "revision": int(workflow_state["revision"]),
+            "content_sha256": benchmark_content_sha256(dict(workflow_state)),
+        },
+    )
+
+
+def _recover_benchmark_v2_incumbent_pre_reservation_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    provider_case_ref: Mapping[str, object],
+    window_binding: Mapping[str, object],
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    _require_minted_learning_workflow_service_composition(composition)
+    slot = _benchmark_v2_incumbent_child_slot(
+        provider_case_ref=provider_case_ref,
+        window_binding=window_binding,
+    )
+    run_id = str(slot["run_id"])
+    stage = str(slot["stage"])
+    operation_id = str(slot["operation_id"])
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=run_id,
+        operation_id=operation_id,
+    ):
+        try:
+            current = composition.store.get(run_id)
+        except LearningWorkflowTransitionError as error:
+            if str(error) == "workflow run not found":
+                return None
+            raise
+        if current.get("terminal") is True:
+            terminal_execution = _benchmark_v2_stage_execution(current, stage)
+            if terminal_execution.get("recovery_status") is None:
+                return None
+            return _project_benchmark_v2_incumbent_pre_reservation_recovery(
+                composition=composition,
+                workflow_state=current,
+                slot=slot,
+            )
+        if (
+            current.get("run_id") != run_id
+            or current.get("current_stage") != stage
+        ):
+            return None
+        stage_execution = _benchmark_v2_stage_execution(current, stage)
+        if _has_benchmark_v2_incumbent_marker(stage_execution):
+            return None
+        _validate_benchmark_v2_pre_reservation_stage_execution(
+            stage_execution,
+            stage=stage,
+            operation_id=operation_id,
+            terminal=False,
+        )
+        bind_capture = current.get("stages", {}).get("bind_capture")
+        bind_evidence = (
+            bind_capture.get("evidence_refs")
+            if isinstance(bind_capture, Mapping)
+            else None
+        )
+        expected_start_intent = _benchmark_v2_incumbent_child_start_intent(slot)
+        if (
+            not isinstance(bind_capture, Mapping)
+            or bind_capture.get("status") != "completed"
+            or not isinstance(bind_evidence, Mapping)
+            or bind_evidence.get("benchmark_v2_incumbent_child_start_intent")
+            != expected_start_intent
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 pre-reservation child start lineage is ambiguous"
+            )
+        recovered_at = _utc_datetime(now)
+        lease_expires_at = _parse_utc_datetime(
+            stage_execution.get("lease_expires_at"),
+            field="lease_expires_at",
+        )
+        if recovered_at <= lease_expires_at:
+            return None
+        root = composition.benchmark_supervision_root
+        if root is None:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 pre-reservation supervision root is unavailable"
+            )
+        absence = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).attest_benchmark_pre_reservation_absence(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            supervision_root=root,
+        )
+        recovered_execution = deepcopy(stage_execution)
+        recovered_execution.update(
+            {
+                "finished_at": recovered_at.isoformat(),
+                "result_outcome": "safe_stopped",
+                "recovery_status": "pre_reservation_start_failed",
+            }
+        )
+        recovered = transition_learning_workflow_run(
+            store=composition.store,
+            project_root=composition.project_root,
+            run_id=run_id,
+            expected_revision=int(current["revision"]),
+            stage=stage,
+            outcome="safe_stopped",
+            reason="benchmark_v2 startup failed before worker reservation",
+            evidence_refs={
+                "stage_execution": recovered_execution,
+                "benchmark_v2_pre_reservation_absence": absence,
+            },
+        )
+        return _project_benchmark_v2_incumbent_pre_reservation_recovery(
+            composition=composition,
+            workflow_state=recovered,
+            slot=slot,
+        )
+
+
 def _lookup_benchmark_v2_incumbent_workflow_service(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -4134,22 +4434,7 @@ def _ensure_benchmark_v2_incumbent_child_workflow_run(
     run_id = str(slot["run_id"])
     stage = str(slot["stage"])
     operation_id = str(slot["operation_id"])
-    start_intent = seal_immutable(
-        {
-            "contract_version": "benchmark_v2_incumbent_child_run_start_intent_v1",
-            "provider_case_ref": deepcopy(slot["provider_case_ref"]),
-            "parent_run_id": str(parent_binding["run_id"]),
-            "parent_stage": str(parent_binding["stage"]),
-            "parent_operation_id": str(parent_binding["operation_id"]),
-            "window_binding_ref": deepcopy(parent_binding["window_binding_ref"]),
-            "capture_ref": deepcopy(parent_binding["capture_ref"]),
-            "run_id": run_id,
-            "stage": stage,
-            "operation_id": operation_id,
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-        }
-    )
+    start_intent = _benchmark_v2_incumbent_child_start_intent(slot)
     try:
         current = composition.store.get(run_id)
     except LearningWorkflowTransitionError as error:
