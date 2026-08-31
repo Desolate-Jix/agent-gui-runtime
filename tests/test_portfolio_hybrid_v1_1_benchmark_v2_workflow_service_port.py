@@ -3297,3 +3297,140 @@ def test_s3_service_facade_has_no_handler_provider_model_or_action_imports() -> 
                 if any(token in called.casefold() for token in forbidden):
                     violations.append(f"{name}:call:{called}:{node.lineno}")
     assert violations == []
+
+
+def test_s3_managed_vista_failure_uses_only_actual_dispatch_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+
+    failure_response = {
+        "success": False,
+        "message": "calibration_batch_resource_blocked",
+        "data": {
+            "contract_version": "learning_calibration_sequence_result_v1",
+            "failure_category": "calibration_batch_resource_blocked",
+            "batch_count": 0,
+            "resource_preflight": {
+                "resource_mode": "critical",
+                "model_launch_allowed": False,
+            },
+            "no_live_click_authorization": True,
+            "dry_run": True,
+        },
+        "error": {
+            "code": "calibration_batch_resource_blocked",
+            "details": "calibration_batch_resource_blocked",
+        },
+    }
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "outcome": "failed",
+        "result": failure_response,
+        "orchestration": {
+            "benchmark_v2_vista_batch_count": 0,
+            "benchmark_v2_provider_dispatch_receipt_refs": [
+                {"provider": "omni", "content_sha256": "a" * 64},
+                {"provider": "qwen", "content_sha256": "b" * 64},
+            ],
+            "benchmark_v2_provider_dispatch_context_refs": {
+                "omni": {"provider": "omni"},
+                "qwen": {"provider": "qwen"},
+            },
+        },
+    }
+
+    captured: dict[str, object] = {}
+
+    def validate_dispatch(**kwargs):
+        captured.update(kwargs)
+        return deepcopy(dict(kwargs["response"]))
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_validate_benchmark_v2_dispatch_response",
+        validate_dispatch,
+    )
+
+    class _Composition:
+        composition_kind = "production"
+        benchmark_v2_worker_binding_resolver = object()
+
+    adopted = workflow_service._validate_benchmark_v2_hybrid_adoption(
+        composition=_Composition(),
+        response=response,
+        window_binding={},
+        task_kind="panel_learning_calibration_sequence",
+        provider_dispatch_context_refs={
+            "omni": {"provider": "omni"},
+            "qwen": {"provider": "qwen"},
+        },
+    )
+    assert adopted == response
+    assert captured["expected_provider_counts"] == {"omni": 1, "qwen": 1}
+
+
+def test_s3_completed_vista_dispatch_count_remains_positive_and_exact() -> None:
+    from app.learn import workflow_service
+
+    completed = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "outcome": "completed",
+        "result": {
+            "calibration_sequence": {
+                "contract_version": "learning_calibration_sequence_result_v1",
+                "status": "completed",
+                "batch_count": 2,
+            }
+        },
+        "orchestration": {"benchmark_v2_vista_batch_count": 2},
+    }
+    assert workflow_service._benchmark_v2_expected_dispatch_counts(
+        task_kind="panel_learning_calibration_sequence",
+        response=completed,
+    ) == {"omni": 1, "qwen": 1, "vista": 2}
+
+    completed["orchestration"]["benchmark_v2_vista_batch_count"] = 0
+    completed["result"]["calibration_sequence"]["batch_count"] = 0
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="batch_count",
+    ):
+        workflow_service._benchmark_v2_expected_dispatch_counts(
+            task_kind="panel_learning_calibration_sequence",
+            response=completed,
+        )
+
+    failed_after_two_batches = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "outcome": "failed",
+        "result": {
+            "success": False,
+            "data": {
+                "contract_version": "learning_calibration_sequence_result_v1",
+                "failure_category": "calibration_worker_response_invalid",
+                "batch_count": 2,
+            },
+        },
+        "orchestration": {"benchmark_v2_vista_batch_count": 2},
+    }
+    assert workflow_service._benchmark_v2_expected_dispatch_counts(
+        task_kind="panel_learning_calibration_sequence",
+        response=failed_after_two_batches,
+    ) == {"omni": 1, "qwen": 1, "vista": 2}
+
+    failed_after_two_batches["result"]["data"]["batch_count"] = 1
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="failure batch_count",
+    ):
+        workflow_service._benchmark_v2_expected_dispatch_counts(
+            task_kind="panel_learning_calibration_sequence",
+            response=failed_after_two_batches,
+        )

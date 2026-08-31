@@ -2237,15 +2237,18 @@ def execute_learning_stage_worker_task(
         and model_lease is not None
     ):
         try:
+            provider_result = (
+                deepcopy(response)
+                if isinstance(response, dict) and response.get("success") is False
+                else _hybrid_calibration_result(response)
+            )
             vista_receipt = _release_hybrid_vista_lease(
                 model_lease,
                 lineage=supervisor_lineage,
                 predecessor_sha256=_artifact_digest(
                     orchestration.get("fusion_result")
                 ),
-                provider_result_sha256=_artifact_digest(
-                    _hybrid_calibration_result(response)
-                ),
+                provider_result_sha256=_artifact_digest(provider_result),
             )
         except BaseException as error:
             lifecycle_evidence = {
@@ -3003,37 +3006,62 @@ def _run_learning_stage_worker_entry(
                         "Hybrid dispatch context lineage is invalid"
                     )
                 provider_context_refs = deepcopy(provider_context_refs)
-                context_ref = compose_benchmark_dispatch_context_ref(
-                    context=validated_dispatch
-                )
                 provider = str(validated_dispatch["provider"])
-                prior_context_ref = provider_context_refs.get(provider)
-                if prior_context_ref not in (None, context_ref):
-                    raise LearningStageWorkerError(
-                        "Hybrid dispatch context lineage differs"
+                if dispatch_refs:
+                    context_ref = compose_benchmark_dispatch_context_ref(
+                        context=validated_dispatch
                     )
-                provider_context_refs[provider] = context_ref
+                    prior_context_ref = provider_context_refs.get(provider)
+                    if prior_context_ref not in (None, context_ref):
+                        raise LearningStageWorkerError(
+                            "Hybrid dispatch context lineage differs"
+                        )
+                    provider_context_refs[provider] = context_ref
+                else:
+                    provider_context_refs.pop(provider, None)
                 orchestration[
                     "benchmark_v2_provider_dispatch_context_refs"
                 ] = provider_context_refs
                 if task_kind == "panel_learning_calibration_sequence":
                     managed_result = response.get("result")
-                    sequence = (
-                        _hybrid_calibration_result(managed_result)
-                        if isinstance(managed_result, dict)
-                        else None
-                    )
-                    batch_count = (
-                        sequence.get("batch_count")
-                        if isinstance(sequence, dict)
-                        else None
-                    )
-                    if (
-                        isinstance(batch_count, bool)
-                        or not isinstance(batch_count, int)
-                        or batch_count < 1
-                        or len(dispatch_refs) != batch_count
-                    ):
+                    managed_outcome = response.get("outcome")
+                    if managed_outcome == "completed":
+                        sequence = (
+                            _hybrid_calibration_result(managed_result)
+                            if isinstance(managed_result, dict)
+                            else None
+                        )
+                        batch_count = (
+                            sequence.get("batch_count")
+                            if isinstance(sequence, dict)
+                            else None
+                        )
+                        valid_batch_count = (
+                            not isinstance(batch_count, bool)
+                            and isinstance(batch_count, int)
+                            and batch_count >= 1
+                        )
+                    elif managed_outcome == "failed":
+                        failure_data = (
+                            managed_result.get("data")
+                            if isinstance(managed_result, dict)
+                            and managed_result.get("success") is False
+                            else None
+                        )
+                        batch_count = (
+                            failure_data.get("batch_count")
+                            if isinstance(failure_data, dict)
+                            else None
+                        )
+                        valid_batch_count = (
+                            not isinstance(batch_count, bool)
+                            and isinstance(batch_count, int)
+                            and batch_count >= 0
+                        )
+                    else:
+                        batch_count = None
+                        valid_batch_count = False
+                    if not valid_batch_count or len(dispatch_refs) != batch_count:
                         raise LearningStageWorkerError(
                             "Hybrid VISTA dispatch receipts differ from batch_count"
                         )

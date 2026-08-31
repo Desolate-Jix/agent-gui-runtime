@@ -7408,6 +7408,176 @@ def test_hybrid_vista_handler_failure_still_releases_exact_lease(
     assert response["result"]["model_lifecycle"]["vista_cleanup_receipt"]["cleanup_status"] == "verified"
 
 
+def test_hybrid_vista_managed_preflight_failure_completes_worker_without_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    run_id = "run-vista-managed-preflight-failure"
+    operation_id = f"operation-{run_id}"
+    task_kind = "panel_learning_calibration_sequence"
+    lineage = _hybrid_lineage(run_id=run_id, task_kind=task_kind)
+    omni_inventory = {"contract_version": "hybrid_omni_inventory_v1", "items": []}
+    qwen_bindings = {"contract_version": "hybrid_qwen_bindings_v1", "items": []}
+    fusion_result = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    supervisor = _hybrid_supervisor(
+        run_id=run_id,
+        task_kind=task_kind,
+        lease_path=tmp_path / "vista-managed-failure-lease.json",
+    )
+    vista_lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": "vista-managed-failure-incarnation",
+        "profile": {"profile_id": "vista"},
+        "process_identities": [{"pid": 4210, "create_time_ns": 100_000_000_000}],
+        "process_scope_name": supervisor["process_scope_name"],
+    }
+    workflow_worker._publish_supervised_vista_acquiring(
+        supervisor,
+        predecessor_sha256=content_sha256(fusion_result),
+        profile_id="vista",
+    )
+
+    def acquire_vista(*args, **kwargs):
+        del args, kwargs
+        workflow_worker._publish_supervised_vista_lease(
+            supervisor,
+            vista_lease,
+            predecessor_sha256=content_sha256(fusion_result),
+        )
+        return vista_lease
+
+    failure_response = {
+        "success": False,
+        "message": "calibration_batch_resource_blocked",
+        "data": {
+            "contract_version": "learning_calibration_sequence_result_v1",
+            "failure_category": "calibration_batch_resource_blocked",
+            "batch_count": 0,
+            "resource_preflight": {
+                "resource_mode": "critical",
+                "model_launch_allowed": False,
+                "reason_codes": ["insufficient_gpu_memory_for_profile"],
+            },
+            "no_live_click_authorization": True,
+            "dry_run": True,
+        },
+        "error": {
+            "code": "calibration_batch_resource_blocked",
+            "details": "calibration_batch_resource_blocked",
+        },
+    }
+    monkeypatch.setattr(
+        workflow_worker,
+        "_ensure_learning_stage_model_ready",
+        acquire_vista,
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "run_learning_calibration_sequence",
+        lambda *args, **kwargs: deepcopy(failure_response),
+    )
+    release_calls: list[dict[str, object]] = []
+
+    def release_vista(lease, **kwargs):
+        assert lease == vista_lease
+        release_calls.append(deepcopy(kwargs))
+        return _hybrid_cleanup_inventory(
+            "vista",
+            lineage=kwargs["lineage"],
+            predecessor_sha256=kwargs["predecessor_sha256"],
+            provider_result_sha256=kwargs["provider_result_sha256"],
+        )
+
+    monkeypatch.setattr(model_server, "release_hybrid_vista_model_lease", release_vista)
+    operation_ref = {
+        "run_id": run_id,
+        "stage": "screen_understanding",
+        "operation_id": operation_id,
+        "revision": 7,
+        "window_binding_ref": {"id": "window-binding/managed", "content_sha256": "a" * 64},
+        "capture_ref": {"id": "capture/managed", "content_sha256": "b" * 64},
+    }
+    dispatch_context = attestation.compose_benchmark_dispatch_context(
+        provider="vista",
+        operation_ref=operation_ref,
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-managed-failure",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(operation_ref),
+    )
+    prior_dispatch_refs = [
+        {"provider": "omni", "content_sha256": "e" * 64},
+        {"provider": "qwen", "content_sha256": "f" * 64},
+    ]
+    result_path = tmp_path / "managed-failure-result.json"
+    completion_event = Event()
+    workflow_worker._run_learning_stage_worker_entry(
+        str(result_path),
+        task_kind,
+        {
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "_benchmark_v2_dispatch_context": dispatch_context,
+            "_hybrid_orchestration": {
+                "run_id": run_id,
+                "qwen_bindings": qwen_bindings,
+                "fusion_result": fusion_result,
+                "qwen_gpu_cleanup_receipt": _hybrid_cleanup_receipt(
+                    "qwen",
+                    lineage=lineage,
+                    predecessor=omni_inventory,
+                    provider_result=qwen_bindings,
+                ),
+                "benchmark_v2_provider_dispatch_receipt_refs": prior_dispatch_refs,
+                "benchmark_v2_provider_dispatch_context_refs": {
+                    "omni": {"provider": "omni"},
+                    "qwen": {"provider": "qwen"},
+                },
+            },
+            "_hybrid_supervisor": supervisor,
+        },
+        "model-request-managed-failure",
+        {
+            "worker_id": "worker-managed-failure",
+            "run_id": run_id,
+            "stage": "screen_understanding",
+            "operation_id": operation_id,
+            "task_kind": task_kind,
+            "model_request_id": "model-request-managed-failure",
+            "payload_sha256": "d" * 64,
+        },
+        Event(),
+        completion_event,
+    )
+
+    envelope = json.loads(result_path.read_text(encoding="utf-8"))
+    assert completion_event.is_set()
+    assert envelope["status"] == "completed", envelope
+    response = envelope["response"]
+    assert response["outcome"] == "failed"
+    assert response["result"] == failure_response
+    assert response["orchestration"]["benchmark_v2_vista_batch_count"] == 0
+    assert response["orchestration"]["benchmark_v2_provider_dispatch_receipt_refs"] == prior_dispatch_refs
+    assert set(response["orchestration"]["benchmark_v2_provider_dispatch_context_refs"]) == {
+        "omni",
+        "qwen",
+    }
+    assert response["orchestration"]["vista_cleanup_receipt"]["cleanup_status"] == "verified"
+    assert release_calls[0]["provider_result_sha256"] == content_sha256(failure_response)
+    lease_document = json.loads(Path(supervisor["provider_lease_path"]).read_text(encoding="utf-8"))
+    assert lease_document["state"] == "released"
+
+
 def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_termination(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

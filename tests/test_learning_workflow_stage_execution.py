@@ -2991,6 +2991,105 @@ def test_hybrid_stage_failure_is_explicit_safe_stop(task_kind: str) -> None:
     assert decision["reason"].startswith("SAFE_STOP")
 
 
+def test_hybrid_calibration_failure_requires_exact_vista_cleanup_lineage() -> None:
+    from app.learn.workflow_service import (
+        _interpret_hybrid_post_calibration_worker_result,
+    )
+    from app.learn.recognition.uei.canonical import content_sha256
+
+    lineage = _hybrid_supervised_lineage(
+        run_id="run-hybrid-calibration-failure",
+        workflow_revision=11,
+        operation_id="operation-hybrid-calibration-failure",
+    )
+    failure = {
+        "success": False,
+        "message": "calibration_batch_resource_blocked",
+        "data": {
+            "contract_version": "learning_calibration_sequence_result_v1",
+            "failure_category": "calibration_batch_resource_blocked",
+            "batch_count": 0,
+            "resource_preflight": {
+                "resource_mode": "critical",
+                "model_launch_allowed": False,
+                "reason_codes": ["insufficient_gpu_memory_for_profile"],
+            },
+            "no_live_click_authorization": True,
+            "dry_run": True,
+        },
+        "error": {
+            "code": "calibration_batch_resource_blocked",
+            "details": "calibration_batch_resource_blocked",
+        },
+    }
+    fusion = {"contract_version": "hybrid_fusion_result_v1", "items": []}
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "outcome": "failed",
+        "result": failure,
+        "orchestration": {
+            "fusion_result": fusion,
+            "vista_cleanup_receipt": _observed_hybrid_cleanup_receipt(
+                "vista",
+                lineage=lineage,
+                predecessor=fusion,
+                provider_result=failure,
+            ),
+        },
+        "supervisor_lineage": lineage,
+    }
+
+    decision = _interpret_hybrid_post_calibration_worker_result(
+        stage="screen_understanding",
+        task_kind="panel_learning_calibration_sequence",
+        response=response,
+    )
+    assert decision is not None
+    assert decision["outcome"] == "safe_stopped"
+
+    tampered = deepcopy(response)
+    tampered["orchestration"]["vista_cleanup_receipt"][
+        "provider_result_sha256"
+    ] = "0" * 64
+    tampered["orchestration"]["vista_cleanup_receipt"][
+        "content_sha256"
+    ] = content_sha256(tampered["orchestration"]["vista_cleanup_receipt"])
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="lineage mismatch",
+    ):
+        _interpret_hybrid_post_calibration_worker_result(
+            stage="screen_understanding",
+            task_kind="panel_learning_calibration_sequence",
+            response=tampered,
+        )
+
+    stale_lineage = deepcopy(response)
+    stale_lineage["orchestration"]["vista_cleanup_receipt"]["lineage"] = (
+        _hybrid_supervised_lineage(
+            run_id="run-hybrid-calibration-failure-stale",
+            workflow_revision=11,
+            operation_id="operation-hybrid-calibration-failure-stale",
+        )
+    )
+    stale_lineage["orchestration"]["vista_cleanup_receipt"][
+        "content_sha256"
+    ] = content_sha256(
+        stale_lineage["orchestration"]["vista_cleanup_receipt"]
+    )
+    with pytest.raises(
+        LearningWorkflowStageOperationError,
+        match="lineage mismatch",
+    ):
+        _interpret_hybrid_post_calibration_worker_result(
+            stage="screen_understanding",
+            task_kind="panel_learning_calibration_sequence",
+            response=stale_lineage,
+        )
+
+
 def test_hybrid_calibration_continues_only_to_managed_review_projection() -> None:
     from app.learn import workflow_worker
     from app.learn.workflow_service import (

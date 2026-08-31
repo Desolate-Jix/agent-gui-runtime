@@ -17,7 +17,11 @@ from app.learn.calibration_artifact import (
 from app.learn.calibration_sequence import (
     LEARNING_CALIBRATION_SEQUENCE_REQUEST_CONTRACT_VERSION,
 )
-from app.learn.hybrid.gpu_lifecycle import assert_next_provider_safe_to_start
+from app.learn.hybrid.gpu_lifecycle import (
+    assert_next_provider_safe_to_start,
+    validate_hybrid_cleanup_receipt,
+    validate_hybrid_lineage,
+)
 from app.learn.hybrid.review_projection import project_hybrid_review
 from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 from app.learn.workflow_continuation import (
@@ -4808,7 +4812,7 @@ def _benchmark_v2_expected_dispatch_counts(
             "benchmark_v2 Hybrid dispatch task is invalid"
         )
     batch_count = orchestration.get("benchmark_v2_vista_batch_count")
-    if isinstance(batch_count, bool) or not isinstance(batch_count, int) or batch_count < 1:
+    if isinstance(batch_count, bool) or not isinstance(batch_count, int) or batch_count < 0:
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 VISTA batch_count is unavailable"
         )
@@ -4818,12 +4822,29 @@ def _benchmark_v2_expected_dispatch_counts(
             raise LearningWorkflowStageOperationError(
                 "benchmark_v2 VISTA result is unavailable"
             )
-        sequence = _hybrid_calibration_sequence_payload(result)
-        if sequence.get("batch_count") != batch_count:
-            raise LearningWorkflowStageOperationError(
-                "benchmark_v2 VISTA receipt count differs from calibration batch_count"
-            )
-    return {"omni": 1, "qwen": 1, "vista": batch_count}
+        if response.get("outcome") == "failed":
+            failure_data = result.get("data") if result.get("success") is False else None
+            if (
+                not isinstance(failure_data, Mapping)
+                or failure_data.get("batch_count") != batch_count
+            ):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 VISTA receipt count differs from calibration failure batch_count"
+                )
+        else:
+            sequence = _hybrid_calibration_sequence_payload(result)
+            if batch_count < 1 or sequence.get("batch_count") != batch_count:
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 VISTA receipt count differs from calibration batch_count"
+                )
+    elif batch_count < 1:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 VISTA batch_count is unavailable"
+        )
+    expected = {"omni": 1, "qwen": 1}
+    if batch_count:
+        expected["vista"] = batch_count
+    return expected
 
 
 def _validate_benchmark_v2_hybrid_adoption(
@@ -8436,6 +8457,33 @@ def _interpret_hybrid_post_calibration_worker_result(
             "Hybrid post-calibration result lost orchestration lineage"
         )
     if response.get("outcome") != "completed":
+        if (
+            task_kind == "panel_learning_calibration_sequence"
+            and result.get("success") is False
+        ):
+            vista_cleanup_receipt = orchestration.get("vista_cleanup_receipt")
+            if not isinstance(vista_cleanup_receipt, dict):
+                raise LearningWorkflowStageOperationError(
+                    "Hybrid calibration failure lost VISTA cleanup receipt"
+                )
+            try:
+                verified_cleanup = validate_hybrid_cleanup_receipt(
+                    vista_cleanup_receipt
+                )
+                expected_lineage = validate_hybrid_lineage(
+                    response.get("supervisor_lineage")
+                )
+                if (
+                    verified_cleanup.get("provider") != "vista"
+                    or verified_cleanup.get("lineage") != expected_lineage
+                    or verified_cleanup.get("provider_result_sha256")
+                    != content_sha256(result)
+                ):
+                    raise ValueError(
+                        "Hybrid calibration failure cleanup lineage mismatch"
+                    )
+            except (TypeError, ValueError) as error:
+                raise LearningWorkflowStageOperationError(str(error)) from error
         return {
             "stage": stage,
             "task_kind": task_kind,
