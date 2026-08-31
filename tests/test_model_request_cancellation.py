@@ -3111,6 +3111,35 @@ def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
         and item["additionalProperties"] is False
         for item in bindings_schema["prefixItems"]
     )
+    ambiguity_item_schema = schema["properties"]["ambiguity_sets"]["items"]
+    assert ambiguity_item_schema == {
+        "type": "object",
+        "properties": {
+            "contract_version": {"const": "hybrid_semantic_ambiguity_set_v1"},
+            "candidate_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 2,
+                "uniqueItems": True,
+            },
+        },
+        "required": ["contract_version", "candidate_ids"],
+        "additionalProperties": False,
+    }
+    orphan_semantics_schema = schema["properties"]["orphan_semantics"]
+    assert orphan_semantics_schema["maxItems"] == 64
+    assert orphan_semantics_schema["items"] == {
+        "type": "object",
+        "properties": {
+            "semantic_id": {"type": "string", "pattern": "^semantic/"},
+            "role": {"type": "string"},
+            "label": {"type": "string"},
+            "description": {"type": "string"},
+            "reason": {"const": "ORPHAN_SEMANTIC"},
+        },
+        "required": ["semantic_id", "role", "label", "description", "reason"],
+        "additionalProperties": False,
+    }
 
 
 def test_qwen_binding_response_schema_rejects_missing_candidate_inventory() -> None:

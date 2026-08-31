@@ -417,6 +417,8 @@ def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
         "relation",
         "ambiguity",
     ]
+    ambiguity_fields = ["contract_version", "candidate_ids"]
+    orphan_fields = ["semantic_id", "role", "label", "description", "reason"]
 
     def _binding_schema(candidate_id: str) -> dict[str, Any]:
         return {
@@ -444,8 +446,41 @@ def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
                     _binding_schema(candidate_id) for candidate_id in candidate_ids
                 ],
             },
-            "ambiguity_sets": {"type": "array"},
-            "orphan_semantics": {"type": "array"},
+            "ambiguity_sets": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "contract_version": {
+                            "const": "hybrid_semantic_ambiguity_set_v1"
+                        },
+                        "candidate_ids": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "uniqueItems": True,
+                        },
+                    },
+                    "required": ambiguity_fields,
+                    "additionalProperties": False,
+                },
+            },
+            "orphan_semantics": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "semantic_id": {"type": "string", "pattern": "^semantic/"},
+                        "role": {"type": "string"},
+                        "label": {"type": "string"},
+                        "description": {"type": "string"},
+                        "reason": {"const": "ORPHAN_SEMANTIC"},
+                    },
+                    "required": orphan_fields,
+                    "additionalProperties": False,
+                },
+            },
         },
         "required": ["bindings", "ambiguity_sets", "orphan_semantics"],
         "additionalProperties": False,
