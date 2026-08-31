@@ -6168,7 +6168,7 @@ def _validate_benchmark_v2_hybrid_provider_cleanup(
     cleanup: object,
     worker_record: Mapping[str, object],
 ) -> dict[str, Any]:
-    fields = {
+    common_fields = {
         "contract_version",
         "status",
         "outcome",
@@ -6183,14 +6183,30 @@ def _validate_benchmark_v2_hybrid_provider_cleanup(
         "acquisition_owner_ref",
         "acquisition_intent_ref",
         "runtime_owner_ref",
-        "cleanup_receipt_ref",
         "content_sha256",
     }
-    if not isinstance(cleanup, Mapping) or set(cleanup) != fields:
+    if not isinstance(cleanup, Mapping):
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 hybrid provider cleanup is not closed"
         )
     projection = deepcopy(dict(cleanup))
+    vista_not_acquired = (
+        projection.get("outcome") == "verified_not_acquired"
+        and worker_record.get("task_kind")
+        == "panel_learning_calibration_sequence"
+    )
+    evidence_ref_name = (
+        "recovered_lease_ref" if vista_not_acquired else "cleanup_receipt_ref"
+    )
+    outcome_fields = (
+        {"provider", "task_kind", evidence_ref_name}
+        if vista_not_acquired
+        else {evidence_ref_name}
+    )
+    if set(projection) != common_fields | outcome_fields:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 hybrid provider cleanup is not closed"
+        )
     if (
         projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
         or projection.get("status") != "cleanup_verified"
@@ -6198,6 +6214,14 @@ def _validate_benchmark_v2_hybrid_provider_cleanup(
         not in {"verified_not_acquired", "verified_exact_process_exited"}
         or projection.get("authority_kind")
         != "benchmark_v2_workflow_service_dispatch_cleanup"
+        or (
+            vista_not_acquired
+            and (
+                projection.get("provider") != "vista"
+                or projection.get("task_kind")
+                != "panel_learning_calibration_sequence"
+            )
+        )
         or any(
             projection.get(name) != worker_record.get(name)
             for name in (
@@ -6219,7 +6243,7 @@ def _validate_benchmark_v2_hybrid_provider_cleanup(
         "acquisition_owner_ref",
         "acquisition_intent_ref",
         "runtime_owner_ref",
-        "cleanup_receipt_ref",
+        evidence_ref_name,
     ):
         ref = projection.get(name)
         if (
@@ -6235,6 +6259,13 @@ def _validate_benchmark_v2_hybrid_provider_cleanup(
             raise LearningWorkflowStageOperationError(
                 f"benchmark_v2 hybrid provider cleanup {name} is invalid"
             )
+    if (
+        vista_not_acquired
+        and projection["reservation_ref"] != projection["acquisition_intent_ref"]
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 VISTA no-acquisition cleanup lineage differs"
+        )
     return projection
 
 

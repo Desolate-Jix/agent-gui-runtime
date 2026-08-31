@@ -1290,6 +1290,369 @@ def test_completed_vista_predispatch_cleanup_materializes_and_persists_exactly(
     assert (root / f"{worker_id}.worker.json").read_bytes() == journal_before_tamper
 
 
+def test_completed_vista_no_acquisition_cleanup_materializes_production_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn import workflow_worker as worker_module
+    from app.learn.workflow_worker import LearningStageWorkerError, LearningStageWorkerRegistry
+
+    root = tmp_path / "vista-no-acquisition-workers"
+    root.mkdir()
+    worker_id = "worker-vista-no-acquisition"
+    model_request_id = "request-vista-no-acquisition"
+    lineage = worker_module._hybrid_provider_lineage(
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        workflow_revision=0,
+    )
+    scope_name = process_scope_name(lineage, "vista")
+    scope_cleanup = {
+        "contract_version": "hybrid_windows_process_scope_v1",
+        "scope_name": scope_name,
+        "authority": "windows_job_object",
+        "cleanup_status": "verified",
+        "observed_member_pids_before": [],
+        "observed_member_identities_before": [],
+        "member_pids_after": [],
+        "member_identities_after": [],
+        "active_listeners_after": [],
+        "pid_file_after": None,
+        "stable_zero_observations": 3,
+        "samples": [
+            {"pids": [], "process_identities": [], "listeners": []},
+            {"pids": [], "process_identities": [], "listeners": []},
+            {"pids": [], "process_identities": [], "listeners": []},
+        ],
+        "scope_absent_after_owner_close": False,
+    }
+    predecessor = "1" * 64
+    runtime_path = root / f"{worker_id}.provider-runtime.json"
+    owner_path = root / f"{worker_id}.provider-owner.json"
+    lease_path = root / f"{worker_id}.provider-lease.json"
+    runtime_owner = seal_immutable(
+        {
+            "contract_version": "hybrid_supervised_provider_runtime_v1",
+            "state": "acquiring",
+            "worker_id": worker_id,
+            "model_request_id": model_request_id,
+            "provider": "vista",
+            "lineage": deepcopy(lineage),
+            "process_scope_name": scope_name,
+            "provider_identity": None,
+            "cleanup_observation": None,
+        }
+    )
+    owner = seal_immutable(
+        {
+            "contract_version": "hybrid_supervised_provider_owner_v1",
+            "worker_id": worker_id,
+            "model_request_id": model_request_id,
+            "task_kind": "panel_learning_calibration_sequence",
+            "provider": "vista",
+            "lineage": deepcopy(lineage),
+            "process_scope_name": scope_name,
+            "provider_runtime_file": runtime_path.name,
+            "predecessor_sha256": predecessor,
+        }
+    )
+    recovered_lease = seal_immutable(
+        {
+            "contract_version": "hybrid_supervised_provider_lease_v2",
+            "state": "recovered",
+            "worker_id": worker_id,
+            "lineage": deepcopy(lineage),
+            "process_scope_name": scope_name,
+            "predecessor_sha256": predecessor,
+            "profile_id": None,
+            "model_lease": None,
+            "cleanup_receipt": None,
+            "scope_cleanup_evidence": deepcopy(scope_cleanup),
+        }
+    )
+    for path, value in (
+        (runtime_path, runtime_owner),
+        (owner_path, owner),
+        (lease_path, recovered_lease),
+    ):
+        path.write_text(
+            json.dumps(value, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+
+    vista_context = _context(tmp_path, provider="vista", revision=7)
+    vista_context_ref = attestation.compose_benchmark_dispatch_context_ref(
+        context=vista_context
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda _value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, _value: _runtime_attestation(
+            attestation, provider=provider
+        ),
+    )
+    pre_vista_contexts = {}
+    pre_vista_receipts = []
+    for provider, revision in (("omni", 4), ("qwen", 5)):
+        context = _context(tmp_path, provider=provider, revision=revision)
+        with attestation.install_benchmark_dispatch_attestor(
+            dispatch_context=context
+        ):
+            receipt = attestation.attest_benchmark_provider_dispatch(
+                provider=provider,
+                operation_ref=deepcopy(context["operation_ref"]),
+                window_binding=deepcopy(context["window_binding"]),
+                provider_runtime={"provider": provider},
+            )
+        pre_vista_contexts[provider] = (
+            attestation.compose_benchmark_dispatch_context_ref(context=context)
+        )
+        pre_vista_receipts.append(
+            {"provider": provider, "content_sha256": receipt["content_sha256"]}
+        )
+
+    result = {
+        "contract_version": "learning_stage_worker_result_v2",
+        "worker_id": worker_id,
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "model_request_id": model_request_id,
+        "payload_sha256": "f" * 64,
+        "status": "completed",
+        "response": {
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": "panel_learning_calibration_sequence",
+            "outcome": "failed",
+            "orchestration": {
+                "benchmark_v2_vista_batch_count": 0,
+                "benchmark_v2_provider_dispatch_context_refs": pre_vista_contexts,
+                "benchmark_v2_provider_dispatch_receipt_refs": pre_vista_receipts,
+            },
+            "result": {
+                "contract_version": "learning_hybrid_stage_failure_v1",
+                "failure_reason": (
+                    "model resource preflight blocked locate: "
+                    "unattributed_wddm_gpu_memory_use, "
+                    "insufficient_gpu_memory_for_profile"
+                ),
+                "model_lifecycle": {"status": "model_lease_not_acquired"},
+            },
+        },
+    }
+    result_path = root / f"{worker_id}.result.json"
+    result_path.write_text(
+        json.dumps(result, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    record = {
+        **result,
+        "contract_version": "learning_stage_worker_v1",
+        "started_at": "2026-08-31T00:00:00+00:00",
+        "finished_at": "2026-08-31T00:00:01+00:00",
+        "result_path": str(result_path),
+        "journal_path": str(root / f"{worker_id}.worker.json"),
+        "provider_lease_path": str(lease_path),
+        "provider_owner_path": str(owner_path),
+        "provider_runtime_path": str(runtime_path),
+        "provider_scope_name": scope_name,
+        "provider_scope": None,
+        "provider": "vista",
+        "provider_lineage": deepcopy(lineage),
+        "provider_profile_id": None,
+        "provider_recovery_blocked": False,
+        "workflow_revision": 0,
+        "payload": None,
+        "process": None,
+        "worker_result": result,
+        "result_adoption": {
+            "contract_version": "learning_stage_worker_result_adoption_v1",
+            "worker_id": worker_id,
+            "run_id": "run-1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-1",
+            "task_kind": "panel_learning_calibration_sequence",
+            "model_request_id": model_request_id,
+            "payload_sha256": "f" * 64,
+            "result_sha256": worker_module._payload_sha256(result),
+            "adopted_at": "2026-08-31T00:00:02+00:00",
+        },
+    }
+    registry = LearningStageWorkerRegistry(result_root=root)
+    registry._records[worker_id] = record
+    registry._workers_by_operation[("run-1", "screen_understanding", "operation-1")] = [
+        worker_id
+    ]
+
+    projection = registry.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=vista_context_ref,
+    )
+    assert projection["outcome"] == "verified_not_acquired"
+    assert projection["provider"] == "vista"
+    assert projection["task_kind"] == "panel_learning_calibration_sequence"
+    assert projection["reservation_ref"] == {
+        "content_sha256": vista_context["content_sha256"]
+    }
+    assert projection["acquisition_intent_ref"] == {
+        "content_sha256": vista_context["content_sha256"]
+    }
+    assert projection["acquisition_owner_ref"] == {
+        "content_sha256": owner["content_sha256"]
+    }
+    assert projection["runtime_owner_ref"] == {
+        "content_sha256": runtime_owner["content_sha256"]
+    }
+    assert "cleanup_receipt_ref" not in projection
+    assert projection["recovered_lease_ref"] == {
+        "content_sha256": recovered_lease["content_sha256"]
+    }
+    restarted = LearningStageWorkerRegistry(result_root=root)
+    assert restarted.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=vista_context_ref,
+    ) == projection
+
+    confused_projection = dict(projection)
+    confused_projection.pop("content_sha256")
+    confused_projection["cleanup_receipt_ref"] = confused_projection.pop(
+        "recovered_lease_ref"
+    )
+    with pytest.raises(LearningStageWorkerError, match="not closed"):
+        worker_module._validate_hybrid_benchmark_provider_cleanup_projection(
+            seal_immutable(confused_projection), identity=record
+        )
+
+    reconciliation = {
+        "contract_version": "hybrid_supervisor_reconciliation_v2",
+        "status": "verified",
+        "scope_cleanup_evidence": deepcopy(scope_cleanup),
+        "recovered_lease_ref": {
+            "content_sha256": recovered_lease["content_sha256"]
+        },
+    }
+    original_lease_bytes = lease_path.read_bytes()
+    original_owner_bytes = owner_path.read_bytes()
+    tampered_lease = deepcopy(recovered_lease)
+    tampered_lease["scope_cleanup_evidence"]["stable_zero_observations"] = 2
+    lease_path.write_text(json.dumps(tampered_lease, sort_keys=True), encoding="utf-8")
+    with pytest.raises(LearningStageWorkerError):
+        worker_module._project_vista_no_acquisition_reconciliation(
+            record, reconciliation
+        )
+    lease_path.write_bytes(original_lease_bytes)
+
+    cross_run_owner = seal_immutable(
+        {
+            key: deepcopy(value)
+            for key, value in owner.items()
+            if key != "content_sha256"
+        }
+    )
+    cross_run_owner["lineage"]["run_id"] = "run-foreign"
+    cross_run_owner = seal_immutable(
+        {key: value for key, value in cross_run_owner.items() if key != "content_sha256"}
+    )
+    owner_path.write_text(json.dumps(cross_run_owner, sort_keys=True), encoding="utf-8")
+    with pytest.raises(LearningStageWorkerError):
+        worker_module._project_vista_no_acquisition_reconciliation(
+            record, reconciliation
+        )
+    owner_path.write_bytes(original_owner_bytes)
+
+    acquired_lease = seal_immutable(
+        {
+            **{
+                key: deepcopy(value)
+                for key, value in recovered_lease.items()
+                if key != "content_sha256"
+            },
+            "model_lease": {"contract_version": "unexpected_acquired_lease"},
+        }
+    )
+    lease_path.write_text(json.dumps(acquired_lease, sort_keys=True), encoding="utf-8")
+    with pytest.raises(LearningStageWorkerError):
+        worker_module._project_vista_no_acquisition_reconciliation(
+            record, reconciliation
+        )
+    lease_path.write_bytes(original_lease_bytes)
+
+    active_listener_lease = deepcopy(recovered_lease)
+    active_listener_lease.pop("content_sha256")
+    active_listener_lease["scope_cleanup_evidence"]["active_listeners_after"] = [
+        {"host": "127.0.0.1", "port": 8080}
+    ]
+    active_listener_lease = seal_immutable(active_listener_lease)
+    lease_path.write_text(
+        json.dumps(active_listener_lease, sort_keys=True), encoding="utf-8"
+    )
+    active_listener_reconciliation = {
+        **reconciliation,
+        "scope_cleanup_evidence": deepcopy(
+            active_listener_lease["scope_cleanup_evidence"]
+        ),
+        "recovered_lease_ref": {
+            "content_sha256": active_listener_lease["content_sha256"]
+        },
+    }
+    with pytest.raises(LearningStageWorkerError, match="stable-zero"):
+        worker_module._project_vista_no_acquisition_reconciliation(
+            record, active_listener_reconciliation
+        )
+    lease_path.write_bytes(original_lease_bytes)
+
+    valid_result = deepcopy(record["worker_result"])
+    journal_before_dispatch_tamper = Path(record["journal_path"]).read_bytes()
+    for mutation in ("batch", "context", "receipt", "cleanup", "lifecycle"):
+        tampered_result = deepcopy(valid_result)
+        orchestration = tampered_result["response"]["orchestration"]
+        if mutation == "batch":
+            orchestration["benchmark_v2_vista_batch_count"] = 1
+        elif mutation == "context":
+            orchestration["benchmark_v2_provider_dispatch_context_refs"]["vista"] = (
+                deepcopy(vista_context_ref)
+            )
+        elif mutation == "receipt":
+            orchestration["benchmark_v2_provider_dispatch_receipt_refs"].append(
+                {"provider": "vista", "content_sha256": "0" * 64}
+            )
+        elif mutation == "cleanup":
+            orchestration["vista_cleanup_receipt"] = {
+                "content_sha256": "0" * 64
+            }
+        else:
+            tampered_result["response"]["lifecycle_evidence"] = {
+                "status": "ambiguous"
+            }
+        record["worker_result"] = tampered_result
+        with pytest.raises(LearningStageWorkerError):
+            registry.materialize_completed_hybrid_provider_cleanup(
+                worker_id=worker_id,
+                run_id="run-1",
+                stage="screen_understanding",
+                operation_id="operation-1",
+                dispatch_context_ref=vista_context_ref,
+            )
+        assert Path(record["journal_path"]).read_bytes() == journal_before_dispatch_tamper
+
+
 def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

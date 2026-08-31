@@ -2538,6 +2538,9 @@ def _reconcile_supervised_vista_record(record: dict[str, Any]) -> dict[str, Any]
                 "contract_version": "hybrid_supervisor_reconciliation_v2",
                 "status": "verified",
                 "scope_cleanup_evidence": deepcopy(evidence),
+                "recovered_lease_ref": {
+                    "content_sha256": document["content_sha256"]
+                },
             }
         if document.get("state") in {"acquiring", "recovery_required"}:
             return _reconcile_vista_scope_without_lease(record, document)
@@ -2567,6 +2570,125 @@ def _reconcile_supervised_vista_record(record: dict[str, Any]) -> dict[str, Any]
             "details": str(error),
             "scope_reconciliation": fallback,
         }
+
+
+def _project_vista_no_acquisition_reconciliation(
+    record: dict[str, Any], reconciliation: Mapping[str, object]
+) -> dict[str, Any]:
+    scope = reconciliation.get("scope_cleanup_evidence")
+    samples = scope.get("samples") if isinstance(scope, Mapping) else None
+    empty_scope_fields = (
+        "observed_member_pids_before",
+        "observed_member_identities_before",
+        "member_pids_after",
+        "member_identities_after",
+        "active_listeners_after",
+    )
+    if (
+        set(reconciliation)
+        != {"contract_version", "status", "scope_cleanup_evidence", "recovered_lease_ref"}
+        or reconciliation.get("contract_version")
+        != "hybrid_supervisor_reconciliation_v2"
+        or reconciliation.get("status") != "verified"
+        or not isinstance(scope, Mapping)
+        or set(scope)
+        != {
+            "contract_version", "scope_name", "authority", "cleanup_status",
+            *empty_scope_fields, "pid_file_after", "stable_zero_observations",
+            "samples", "scope_absent_after_owner_close",
+        }
+        or scope.get("contract_version") != "hybrid_windows_process_scope_v1"
+        or scope.get("scope_name") != record.get("provider_scope_name")
+        or scope.get("authority") != "windows_job_object"
+        or scope.get("cleanup_status") != "verified"
+        or any(scope.get(name) != [] for name in empty_scope_fields)
+        or scope.get("pid_file_after") is not None
+        or isinstance(scope.get("stable_zero_observations"), bool)
+        or not isinstance(scope.get("stable_zero_observations"), int)
+        or scope["stable_zero_observations"] < 3
+        or not isinstance(samples, list)
+        or len(samples) < 3
+        or any(
+            sample != {"pids": [], "process_identities": [], "listeners": []}
+            for sample in samples
+        )
+        or not isinstance(scope.get("scope_absent_after_owner_close"), bool)
+    ):
+        raise LearningStageWorkerError(
+            "recovered Hybrid VISTA stable-zero evidence is invalid"
+        )
+
+    worker_id = _required_text(record.get("worker_id"), "worker_id")
+    owner_path = Path(str(record.get("provider_owner_path") or ""))
+    runtime_path = Path(str(record.get("provider_runtime_path") or ""))
+    owner = _load_hybrid_provider_owner(
+        owner_path,
+        identity={name: str(record[name]) for name in (
+            "worker_id", "run_id", "stage", "operation_id", "task_kind",
+            "model_request_id", "payload_sha256",
+        )},
+        workflow_revision=int(record["workflow_revision"]),
+        journal_scope_name=str(record["provider_scope_name"]),
+        runtime_file=runtime_path.name,
+    )
+    runtime = _read_json_object(runtime_path, label="Hybrid VISTA runtime owner")
+    context = {
+        "provider_lease_path": str(record.get("provider_lease_path") or ""),
+        "worker_id": worker_id,
+        "process_scope_name": str(record.get("provider_scope_name") or ""),
+    }
+    lease = _load_supervised_vista_lease(context)
+    lineage = owner["lineage"]
+    expected_owner = seal_immutable({
+        "contract_version": HYBRID_PROVIDER_OWNER_CONTRACT_VERSION,
+        "worker_id": worker_id,
+        "task_kind": record["task_kind"],
+        "model_request_id": record["model_request_id"],
+        "provider": "vista",
+        "lineage": lineage,
+        "process_scope_name": record["provider_scope_name"],
+        "provider_runtime_file": runtime_path.name,
+        "predecessor_sha256": owner["predecessor_sha256"],
+    })
+    expected_runtime = seal_immutable({
+        "contract_version": HYBRID_PROVIDER_RUNTIME_CONTRACT_VERSION,
+        "state": "acquiring",
+        "worker_id": worker_id,
+        "model_request_id": record["model_request_id"],
+        "provider": "vista",
+        "lineage": lineage,
+        "process_scope_name": record["provider_scope_name"],
+        "provider_identity": None,
+        "cleanup_observation": None,
+    })
+    expected_lease = seal_immutable({
+        "contract_version": "hybrid_supervised_provider_lease_v2",
+        "state": "recovered",
+        "worker_id": worker_id,
+        "lineage": lineage,
+        "process_scope_name": record["provider_scope_name"],
+        "profile_id": lease.get("profile_id"),
+        "predecessor_sha256": owner["predecessor_sha256"],
+        "model_lease": None,
+        "cleanup_receipt": None,
+        "scope_cleanup_evidence": deepcopy(dict(scope)),
+    })
+    if (
+        owner != expected_owner
+        or runtime != expected_runtime
+        or lease != expected_lease
+        or reconciliation.get("recovered_lease_ref")
+        != {"content_sha256": lease["content_sha256"]}
+    ):
+        raise LearningStageWorkerError(
+            "recovered Hybrid VISTA owner lineage is invalid"
+        )
+    return {
+        "outcome": "verified_not_acquired",
+        "acquisition_owner_ref": {"content_sha256": owner["content_sha256"]},
+        "runtime_owner_ref": {"content_sha256": runtime["content_sha256"]},
+        "recovered_lease_ref": {"content_sha256": lease["content_sha256"]},
+    }
 
 
 def _reconcile_vista_scope_without_lease(
@@ -8602,6 +8724,7 @@ class LearningStageWorkerRegistry:
                     not isinstance(result_contexts, Mapping)
                     or set(result_contexts) != {"omni", "qwen"}
                     or "vista" in result_contexts
+                    or orchestration.get("vista_cleanup_receipt") is not None
                 ) or has_vista_receipt:
                     raise LearningStageWorkerError(
                         "completed Hybrid VISTA cleanup has dispatch evidence"
@@ -8665,12 +8788,19 @@ class LearningStageWorkerRegistry:
                 )
 
                 try:
-                    authoritative = project_authoritative_vista_supervisor_cleanup(
-                        record=record,
-                        supervisor_reconciliation=reconciliation,
-                    )
+                    if "recovered_lease_ref" in reconciliation:
+                        authoritative = (
+                            _project_vista_no_acquisition_reconciliation(
+                                record, reconciliation
+                            )
+                        )
+                    else:
+                        authoritative = project_authoritative_vista_supervisor_cleanup(
+                            record=record,
+                            supervisor_reconciliation=reconciliation,
+                        )
                     cooperative_cleanup = _hybrid_vista_cleanup_evidence(record)
-                except (TypeError, ValueError) as error:
+                except (LearningStageWorkerError, TypeError, ValueError) as error:
                     raise LearningStageWorkerError(
                         "completed Hybrid VISTA cleanup evidence is invalid"
                     ) from error
@@ -8692,31 +8822,6 @@ class LearningStageWorkerRegistry:
                     if isinstance(result_lifecycle, Mapping)
                     else None
                 )
-                runtime_identity = authoritative.get("runtime_identity")
-                acquisition_owner_ref = authoritative.get("acquisition_owner_ref")
-                authoritative_receipt = authoritative.get("cleanup_receipt")
-                if (
-                    cooperative_cleanup.get("cleanup_status") != "verified"
-                    or not isinstance(exact_receipt, Mapping)
-                    or not isinstance(managed_result, Mapping)
-                    or managed_result.get("contract_version")
-                    != "learning_hybrid_stage_failure_v1"
-                    or not isinstance(result_lifecycle, Mapping)
-                    or (
-                        isinstance(lifecycle_receipt, Mapping)
-                        and isinstance(result_receipt, Mapping)
-                        and lifecycle_receipt != result_receipt
-                    )
-                    or exact_receipt != authoritative_receipt
-                    or not isinstance(runtime_identity, Mapping)
-                    or not isinstance(acquisition_owner_ref, Mapping)
-                    or not isinstance(runtime_identity.get("content_sha256"), str)
-                    or not isinstance(acquisition_owner_ref.get("content_sha256"), str)
-                    or not isinstance(exact_receipt.get("content_sha256"), str)
-                ):
-                    raise LearningStageWorkerError(
-                        "completed Hybrid VISTA cleanup evidence differs"
-                    )
                 identity_fields = (
                     "run_id",
                     "stage",
@@ -8725,22 +8830,77 @@ class LearningStageWorkerRegistry:
                     "model_request_id",
                     "payload_sha256",
                 )
-                projection = seal_immutable(
-                    {
-                        "contract_version": "benchmark_provider_cleanup_ref_v1",
-                        "status": "cleanup_verified",
-                        "outcome": "verified_exact_process_exited",
-                        "authority_kind": (
-                            "benchmark_v2_workflow_service_dispatch_cleanup"
+                if authoritative.get("outcome") == "verified_not_acquired":
+                    if (
+                        set(authoritative)
+                        != {
+                            "outcome", "acquisition_owner_ref",
+                            "runtime_owner_ref", "recovered_lease_ref",
+                        }
+                        or cooperative_cleanup
+                        != {
+                            "contract_version": (
+                                "hybrid_vista_cooperative_cleanup_v1"
+                            ),
+                            "cleanup_status": "not_acquired",
+                            "vista_cleanup_receipt": None,
+                        }
+                        or exact_receipt is not None
+                    ):
+                        raise LearningStageWorkerError(
+                            "completed Hybrid VISTA cleanup evidence differs"
+                        )
+                    projection_specific = {
+                        "outcome": "verified_not_acquired",
+                        "provider": "vista",
+                        "task_kind": "panel_learning_calibration_sequence",
+                        "acquisition_owner_ref": deepcopy(
+                            dict(authoritative["acquisition_owner_ref"])
                         ),
-                        **{name: str(record[name]) for name in identity_fields},
-                        "reservation_ref": {
-                            "content_sha256": context["content_sha256"]
-                        },
-                        "acquisition_owner_ref": deepcopy(dict(acquisition_owner_ref)),
-                        "acquisition_intent_ref": {
-                            "content_sha256": context["content_sha256"]
-                        },
+                        "runtime_owner_ref": deepcopy(
+                            dict(authoritative["runtime_owner_ref"])
+                        ),
+                        "recovered_lease_ref": deepcopy(
+                            dict(authoritative["recovered_lease_ref"])
+                        ),
+                    }
+                else:
+                    runtime_identity = authoritative.get("runtime_identity")
+                    acquisition_owner_ref = authoritative.get(
+                        "acquisition_owner_ref"
+                    )
+                    authoritative_receipt = authoritative.get("cleanup_receipt")
+                    if (
+                        cooperative_cleanup.get("cleanup_status") != "verified"
+                        or not isinstance(exact_receipt, Mapping)
+                        or not isinstance(managed_result, Mapping)
+                        or managed_result.get("contract_version")
+                        != "learning_hybrid_stage_failure_v1"
+                        or not isinstance(result_lifecycle, Mapping)
+                        or (
+                            isinstance(lifecycle_receipt, Mapping)
+                            and isinstance(result_receipt, Mapping)
+                            and lifecycle_receipt != result_receipt
+                        )
+                        or exact_receipt != authoritative_receipt
+                        or not isinstance(runtime_identity, Mapping)
+                        or not isinstance(acquisition_owner_ref, Mapping)
+                        or not isinstance(
+                            runtime_identity.get("content_sha256"), str
+                        )
+                        or not isinstance(
+                            acquisition_owner_ref.get("content_sha256"), str
+                        )
+                        or not isinstance(exact_receipt.get("content_sha256"), str)
+                    ):
+                        raise LearningStageWorkerError(
+                            "completed Hybrid VISTA cleanup evidence differs"
+                        )
+                    projection_specific = {
+                        "outcome": "verified_exact_process_exited",
+                        "acquisition_owner_ref": deepcopy(
+                            dict(acquisition_owner_ref)
+                        ),
                         "runtime_owner_ref": {
                             "content_sha256": runtime_identity["content_sha256"]
                         },
@@ -8748,7 +8908,21 @@ class LearningStageWorkerRegistry:
                             "content_sha256": exact_receipt["content_sha256"]
                         },
                     }
-                )
+                context_owner_ref = {
+                    "content_sha256": context["content_sha256"]
+                }
+                projection_body = {
+                    "contract_version": "benchmark_provider_cleanup_ref_v1",
+                    "status": "cleanup_verified",
+                    "authority_kind": (
+                        "benchmark_v2_workflow_service_dispatch_cleanup"
+                    ),
+                    **{name: str(record[name]) for name in identity_fields},
+                    "reservation_ref": deepcopy(context_owner_ref),
+                    "acquisition_intent_ref": deepcopy(context_owner_ref),
+                    **projection_specific,
+                }
+                projection = seal_immutable(projection_body)
                 projection = _validate_hybrid_benchmark_provider_cleanup_projection(
                     projection, identity=record
                 )
@@ -12415,7 +12589,7 @@ def _validate_hybrid_benchmark_provider_cleanup_projection(
     *,
     identity: Mapping[str, object],
 ) -> dict[str, Any]:
-    fields = {
+    common_fields = {
         "contract_version",
         "status",
         "outcome",
@@ -12430,20 +12604,44 @@ def _validate_hybrid_benchmark_provider_cleanup_projection(
         "acquisition_owner_ref",
         "acquisition_intent_ref",
         "runtime_owner_ref",
-        "cleanup_receipt_ref",
         "content_sha256",
     }
-    if not isinstance(value, Mapping) or set(value) != fields:
+    if not isinstance(value, Mapping):
         raise LearningStageWorkerError(
             "benchmark Hybrid provider cleanup projection is not closed"
         )
     projection = deepcopy(dict(value))
+    vista_not_acquired = (
+        projection.get("outcome") == "verified_not_acquired"
+        and identity.get("task_kind") == "panel_learning_calibration_sequence"
+    )
+    evidence_ref_name = (
+        "recovered_lease_ref" if vista_not_acquired else "cleanup_receipt_ref"
+    )
+    outcome_fields = (
+        {"provider", "task_kind", evidence_ref_name}
+        if vista_not_acquired
+        else {evidence_ref_name}
+    )
+    if set(projection) != common_fields | outcome_fields:
+        raise LearningStageWorkerError(
+            "benchmark Hybrid provider cleanup projection is not closed"
+        )
     if (
         projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
         or projection.get("status") != "cleanup_verified"
-        or projection.get("outcome") != "verified_exact_process_exited"
+        or projection.get("outcome")
+        not in {"verified_not_acquired", "verified_exact_process_exited"}
         or projection.get("authority_kind")
         != "benchmark_v2_workflow_service_dispatch_cleanup"
+        or (
+            vista_not_acquired
+            and (
+                projection.get("provider") != "vista"
+                or projection.get("task_kind")
+                != "panel_learning_calibration_sequence"
+            )
+        )
         or any(
             projection.get(name) != identity.get(name)
             for name in (
@@ -12465,10 +12663,17 @@ def _validate_hybrid_benchmark_provider_cleanup_projection(
         "acquisition_owner_ref",
         "acquisition_intent_ref",
         "runtime_owner_ref",
-        "cleanup_receipt_ref",
+        evidence_ref_name,
     ):
         _benchmark_exact_ref(
             projection.get(name), f"benchmark Hybrid provider cleanup {name}"
+        )
+    if (
+        vista_not_acquired
+        and projection["reservation_ref"] != projection["acquisition_intent_ref"]
+    ):
+        raise LearningStageWorkerError(
+            "benchmark Hybrid provider no-acquisition cleanup lineage differs"
         )
     return projection
 
@@ -13111,10 +13316,13 @@ def _hybrid_vista_cleanup_evidence(record: dict[str, Any]) -> dict[str, Any]:
         }
     if (
         response.get("outcome") == "failed"
-        and isinstance(model_lifecycle, dict)
-        and model_lifecycle.get("status") == "model_lease_not_acquired"
-        and "cancelled before model acquisition"
-        in str(managed_result.get("failure_reason") or "")
+        and isinstance(managed_result, dict)
+        and managed_result.get("contract_version")
+        == "learning_hybrid_stage_failure_v1"
+        and isinstance(managed_result.get("failure_reason"), str)
+        and bool(managed_result["failure_reason"].strip())
+        and model_lifecycle == {"status": "model_lease_not_acquired"}
+        and lifecycle is None
     ):
         return {
             "contract_version": "hybrid_vista_cooperative_cleanup_v1",

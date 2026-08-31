@@ -4586,3 +4586,71 @@ def test_s3_completed_vista_dispatch_count_remains_positive_and_exact() -> None:
             task_kind="panel_learning_calibration_sequence",
             response=failed_after_two_batches,
         )
+def test_vista_not_acquired_provider_cleanup_uses_typed_recovered_lease_ref() -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    worker = {
+        "run_id": "run-vista-not-acquired",
+        "stage": "screen_understanding",
+        "operation_id": "operation-vista-not-acquired",
+        "worker_id": "worker-vista-not-acquired",
+        "model_request_id": "request-vista-not-acquired",
+        "payload_sha256": "1" * 64,
+        "task_kind": "panel_learning_calibration_sequence",
+    }
+    projection = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_not_acquired",
+            "provider": "vista",
+            "task_kind": "panel_learning_calibration_sequence",
+            "authority_kind": "benchmark_v2_workflow_service_dispatch_cleanup",
+            **{name: worker[name] for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )},
+            "reservation_ref": {"content_sha256": "2" * 64},
+            "acquisition_owner_ref": {"content_sha256": "3" * 64},
+            "acquisition_intent_ref": {"content_sha256": "2" * 64},
+            "runtime_owner_ref": {"content_sha256": "4" * 64},
+            "recovered_lease_ref": {"content_sha256": "5" * 64},
+        }
+    )
+
+    assert workflow_service._validate_benchmark_v2_hybrid_provider_cleanup(
+        cleanup=projection,
+        worker_record=worker,
+    ) == projection
+
+    confused = dict(projection)
+    confused.pop("content_sha256")
+    confused["cleanup_receipt_ref"] = confused.pop("recovered_lease_ref")
+    with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+        workflow_service._validate_benchmark_v2_hybrid_provider_cleanup(
+            cleanup=seal_immutable(confused),
+            worker_record=worker,
+        )
+    with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+        workflow_service._validate_benchmark_v2_hybrid_provider_cleanup(
+            cleanup=projection,
+            worker_record={**worker, "task_kind": "panel_learning_hybrid_qwen_binding"},
+        )
+
+    qwen_projection = dict(projection)
+    qwen_projection.pop("content_sha256")
+    qwen_projection.pop("provider")
+    qwen_projection.pop("task_kind")
+    qwen_projection["cleanup_receipt_ref"] = qwen_projection.pop(
+        "recovered_lease_ref"
+    )
+    qwen_projection = seal_immutable(qwen_projection)
+    assert workflow_service._validate_benchmark_v2_hybrid_provider_cleanup(
+        cleanup=qwen_projection,
+        worker_record={**worker, "task_kind": "panel_learning_hybrid_qwen_binding"},
+    ) == qwen_projection

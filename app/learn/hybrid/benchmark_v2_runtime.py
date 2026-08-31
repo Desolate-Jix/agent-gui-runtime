@@ -4330,7 +4330,7 @@ def _validate_cleanup_parent_semantics(
         _validate_review_no_provider_cleanup_parent(producer)
         return "provider_cleanup", str(contract)
     if contract == "benchmark_provider_cleanup_ref_v1":
-        fields = {
+        common_fields = {
             "contract_version",
             "status",
             "outcome",
@@ -4345,13 +4345,27 @@ def _validate_cleanup_parent_semantics(
             "acquisition_owner_ref",
             "acquisition_intent_ref",
             "runtime_owner_ref",
-            "cleanup_receipt_ref",
             "content_sha256",
         }
+        outcome = producer.get("outcome")
+        if outcome == "verified_exact_process_exited":
+            evidence_ref_name = "cleanup_receipt_ref"
+        elif outcome == "verified_not_acquired" and set(producer) == (
+            common_fields | {"provider", "task_kind", "recovered_lease_ref"}
+        ):
+            evidence_ref_name = "recovered_lease_ref"
+        else:
+            evidence_ref_name = "cleanup_receipt_ref"
         if (
-            set(producer) != fields
+            set(producer)
+            != common_fields
+            | (
+                {"provider", "task_kind", evidence_ref_name}
+                if evidence_ref_name == "recovered_lease_ref"
+                else {evidence_ref_name}
+            )
             or producer.get("status") != "cleanup_verified"
-            or producer.get("outcome")
+            or outcome
             not in {"verified_not_acquired", "verified_exact_process_exited"}
             or not all(
                 isinstance(producer.get(field), str) and producer.get(field)
@@ -4372,7 +4386,19 @@ def _validate_cleanup_parent_semantics(
                     "acquisition_owner_ref",
                     "acquisition_intent_ref",
                     "runtime_owner_ref",
-                    "cleanup_receipt_ref",
+                    evidence_ref_name,
+                )
+            )
+            or (
+                evidence_ref_name == "recovered_lease_ref"
+                and (
+                    producer.get("authority_kind")
+                    != "benchmark_v2_workflow_service_dispatch_cleanup"
+                    or producer.get("provider") != "vista"
+                    or producer.get("task_kind")
+                    != "panel_learning_calibration_sequence"
+                    or producer.get("reservation_ref")
+                    != producer.get("acquisition_intent_ref")
                 )
             )
         ):

@@ -2880,3 +2880,101 @@ def test_partial_actual_cleanup_rejects_missing_or_foreign_cleanup_lineage(
         attempt_ref=attempt_ref,
     )
     assert not any(event["event_kind"] == "attempt_terminal" for event in events)
+
+
+def test_partial_actual_vista_not_acquired_cleanup_uses_recovered_lease() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime
+
+    binding = {
+        "run_id": "run-vista-not-acquired",
+        "stage": "screen_understanding",
+        "operation_id": "operation-vista-not-acquired",
+        "window_binding_ref": {
+            "id": "window-vista-not-acquired",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": "capture-vista-not-acquired",
+            "content_sha256": "b" * 64,
+        },
+    }
+    operation = _actual_operation(
+        mode="hybrid_v1_1",
+        operation_id=str(binding["operation_id"]),
+        request_ref={"id": "request-vista-not-acquired", "content_sha256": "c" * 64},
+        binding=binding,
+        revision=3,
+        status="safe_stopped",
+    )
+    worker = operation["worker_ref"]
+    provider_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_not_acquired",
+            "provider": "vista",
+            "task_kind": "panel_learning_calibration_sequence",
+            "authority_kind": "benchmark_v2_workflow_service_dispatch_cleanup",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "reservation_ref": {"content_sha256": "2" * 64},
+            "acquisition_owner_ref": {"content_sha256": "3" * 64},
+            "acquisition_intent_ref": {"content_sha256": "2" * 64},
+            "runtime_owner_ref": {"content_sha256": "4" * 64},
+            "recovered_lease_ref": {"content_sha256": "5" * 64},
+        }
+    )
+    worker_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "worker_status": "completed",
+            "runtime_attached": False,
+            "result_available": True,
+            "authoritative_worker_record_sha256": "6" * 64,
+            "provider_cleanup_ref": {
+                "content_sha256": provider_cleanup["content_sha256"]
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    terminal = incumbent.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation,
+        observed_task_kind="panel_learning_calibration_sequence",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={
+            "worker_cleanup_ref": worker_cleanup,
+            "provider_cleanup_ref": provider_cleanup,
+        },
+    )
+
+    assert runtime._validate_partial_actual_terminal_cleanup(terminal) == terminal
+
+    confused = dict(provider_cleanup)
+    confused.pop("content_sha256")
+    confused["cleanup_receipt_ref"] = confused.pop("recovered_lease_ref")
+    confused = _sealed(confused)
+    confused_terminal = deepcopy(terminal)
+    confused_terminal["cleanup_refs"]["provider_cleanup_ref"] = confused
+    confused_terminal["cleanup_refs"]["worker_cleanup_ref"][
+        "provider_cleanup_ref"
+    ] = {"content_sha256": confused["content_sha256"]}
+    confused_terminal["cleanup_refs"]["worker_cleanup_ref"].pop("content_sha256")
+    confused_terminal["cleanup_refs"]["worker_cleanup_ref"] = _sealed(
+        confused_terminal["cleanup_refs"]["worker_cleanup_ref"]
+    )
+    confused_terminal.pop("content_sha256")
+    confused_terminal = _sealed(confused_terminal)
+    with pytest.raises(ValueError, match="provider cleanup"):
+        runtime._validate_partial_actual_terminal_cleanup(confused_terminal)
