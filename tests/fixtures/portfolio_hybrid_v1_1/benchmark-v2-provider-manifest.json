@@ -187,7 +187,7 @@
         "role": "qwen_binding"
       },
       {
-        "file_sha256": "d342fb97d93914429d3f4e2f4ed63700302a03ce4b19fff44c05d61d4b7b55f2",
+        "file_sha256": "f0a655604abee17c578fb80a5fd979a9fa25954230b9a471ca0c2fd188caae4f",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
       },
