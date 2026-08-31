@@ -445,6 +445,8 @@ def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
                 "prefixItems": [
                     _binding_schema(candidate_id) for candidate_id in candidate_ids
                 ],
+                "minItems": len(candidate_ids),
+                "maxItems": len(candidate_ids),
             },
             "ambiguity_sets": {
                 "type": "array",

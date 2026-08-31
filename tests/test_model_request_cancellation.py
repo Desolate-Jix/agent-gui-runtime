@@ -3093,7 +3093,14 @@ def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
         "orphan_semantics",
     }
     bindings_schema = schema["properties"]["bindings"]
-    assert set(bindings_schema) == {"type", "prefixItems"}
+    assert set(bindings_schema) == {
+        "type",
+        "prefixItems",
+        "minItems",
+        "maxItems",
+    }
+    assert bindings_schema["minItems"] == candidate_count
+    assert bindings_schema["maxItems"] == candidate_count
     assert [
         item["properties"]["candidate_id"]["const"]
         for item in bindings_schema["prefixItems"]
@@ -3256,6 +3263,8 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
     assert schema["required"] == ["bindings", "ambiguity_sets", "orphan_semantics"]
     bindings_schema = schema["properties"]["bindings"]
     assert "items" not in bindings_schema
+    assert bindings_schema["minItems"] == len(candidate_ids)
+    assert bindings_schema["maxItems"] == len(candidate_ids)
     assert [
         item["properties"]["candidate_id"]["const"]
         for item in bindings_schema["prefixItems"]
