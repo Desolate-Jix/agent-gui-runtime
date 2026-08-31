@@ -7324,6 +7324,136 @@ def test_hybrid_vista_completion_releases_before_review_receipt(
     assert response["lifecycle_evidence"]["vista_cleanup_receipt"] == receipt
 
 
+def _hybrid_calibration_worker_handoff(tmp_path: Path) -> tuple[dict, dict, dict]:
+    from tests.test_learning_calibration_sequence import _hybrid_sequence_payload
+
+    sequence_payload = _hybrid_sequence_payload(tmp_path)
+    task_kind = "panel_learning_calibration_sequence"
+    run_id = sequence_payload["run_id"]
+    injected_keys = {
+        "hybrid_fusion_result",
+        "capture_bundle",
+        "omni_inventory",
+        "qwen_bindings",
+        "qwen_cleanup_receipt",
+        "hybrid_capture_bundle_ref",
+        "run_id",
+        "workflow_revision",
+    }
+    worker_payload = {
+        key: deepcopy(value)
+        for key, value in sequence_payload.items()
+        if key not in injected_keys
+    }
+    orchestration = {
+        "fusion_result": deepcopy(sequence_payload["hybrid_fusion_result"]),
+        "capture_bundle": deepcopy(sequence_payload["capture_bundle"]),
+        "omni_inventory": deepcopy(sequence_payload["omni_inventory"]),
+        "qwen_bindings": deepcopy(sequence_payload["qwen_bindings"]),
+        "qwen_cleanup_receipt": deepcopy(sequence_payload["qwen_cleanup_receipt"]),
+        "hybrid_capture_bundle_ref": deepcopy(
+            sequence_payload["hybrid_capture_bundle_ref"]
+        ),
+        "run_id": run_id,
+        "workflow_revision": sequence_payload["workflow_revision"],
+        "project_root": sequence_payload["project_root"],
+    }
+    orchestration["capture_bundle"]["bundle_ref"] = deepcopy(
+        sequence_payload["hybrid_capture_bundle_ref"]
+    )
+    orchestration["qwen_gpu_cleanup_receipt"] = _hybrid_cleanup_receipt(
+        "qwen",
+        lineage=_hybrid_lineage(run_id=run_id, task_kind=task_kind),
+        predecessor=orchestration["omni_inventory"],
+        provider_result=orchestration["qwen_bindings"],
+    )
+    worker_payload["_hybrid_orchestration"] = orchestration
+    worker_payload["_hybrid_supervisor"] = _hybrid_supervisor(
+        run_id=run_id,
+        task_kind=task_kind,
+        lease_path=tmp_path / "vista-bundle-shape-lease.json",
+    )
+    return deepcopy(sequence_payload["capture_bundle"]), orchestration, worker_payload
+
+
+def test_hybrid_calibration_handoff_strips_only_builder_bundle_ref(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn import calibration_sequence, workflow_worker
+
+    authoritative_bundle, orchestration, worker_payload = (
+        _hybrid_calibration_worker_handoff(tmp_path)
+    )
+    orchestration_before = deepcopy(orchestration)
+    received_payloads: list[dict] = []
+    actual_handler = calibration_sequence.run_learning_calibration_sequence
+
+    def recording_handler(payload, **kwargs):
+        received_payloads.append(deepcopy(payload))
+        return actual_handler(payload, **kwargs)
+
+    class Cancelled:
+        @staticmethod
+        def is_set() -> bool:
+            return True
+
+    monkeypatch.setattr(
+        calibration_sequence, "run_learning_calibration_sequence", recording_handler
+    )
+    monkeypatch.setattr(
+        workflow_worker, "_ensure_learning_stage_model_ready", lambda *args, **kwargs: None
+    )
+
+    response = workflow_worker.execute_learning_stage_worker_task(
+        "panel_learning_calibration_sequence",
+        worker_payload,
+        cancellation_event=Cancelled(),
+    )
+
+    assert received_payloads[0]["capture_bundle"] == authoritative_bundle
+    assert "bundle_ref" not in received_payloads[0]["capture_bundle"]
+    assert worker_payload["_hybrid_orchestration"] == orchestration_before
+    assert response["orchestration"] == orchestration_before
+    assert response["result"]["data"]["failure_category"] == "calibration_cancelled"
+
+
+def test_hybrid_calibration_handoff_keeps_non_envelope_tamper_rejectable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn import calibration_sequence, workflow_worker
+
+    _, orchestration, worker_payload = _hybrid_calibration_worker_handoff(tmp_path)
+    orchestration["capture_bundle"]["run_id"] = "tampered-run-id"
+    received_payloads: list[dict] = []
+    actual_handler = calibration_sequence.run_learning_calibration_sequence
+
+    def recording_handler(payload, **kwargs):
+        received_payloads.append(deepcopy(payload))
+        return actual_handler(payload, **kwargs)
+
+    monkeypatch.setattr(
+        calibration_sequence, "run_learning_calibration_sequence", recording_handler
+    )
+    monkeypatch.setattr(
+        workflow_worker, "_ensure_learning_stage_model_ready", lambda *args, **kwargs: None
+    )
+
+    response = workflow_worker.execute_learning_stage_worker_task(
+        "panel_learning_calibration_sequence",
+        worker_payload,
+    )
+
+    assert "bundle_ref" not in received_payloads[0]["capture_bundle"]
+    assert received_payloads[0]["capture_bundle"]["run_id"] == "tampered-run-id"
+    assert response["outcome"] == "failed"
+    assert (
+        "capture bundle does not match authoritative artifact store"
+        in response["result"]["failure_reason"]
+    )
+
+
 def test_hybrid_vista_handler_failure_still_releases_exact_lease(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

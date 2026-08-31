@@ -2011,13 +2011,16 @@ def execute_learning_stage_worker_task(
         and isinstance(orchestration, dict)
     ):
         execution_payload["learning_pipeline_mode"] = "hybrid_v1_1"
+        capture_bundle = deepcopy(orchestration.get("capture_bundle"))
+        if isinstance(capture_bundle, dict):
+            capture_bundle.pop("bundle_ref", None)
         execution_payload.setdefault(
             "hybrid_fusion_result",
             deepcopy(orchestration.get("fusion_result")),
         )
         execution_payload.setdefault(
             "capture_bundle",
-            deepcopy(orchestration.get("capture_bundle")),
+            capture_bundle,
         )
         for key in (
             "omni_inventory",
