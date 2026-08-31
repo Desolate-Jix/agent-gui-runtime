@@ -3668,12 +3668,6 @@ def _validate_partial_actual_terminal_cleanup(
     ):
         raise ValueError("partial actual terminal cleanup worker is stale")
     worker_contract = worker_cleanup.get("contract_version")
-    if (
-        worker_contract == "benchmark_worker_cleanup_receipt_v1"
-        and worker_cleanup.get("reservation_ref")
-        != provider_cleanup.get("reservation_ref")
-    ):
-        raise ValueError("partial actual cleanup reservation is stale")
     if worker_contract in {
         "benchmark_v2_hybrid_worker_cleanup_ref_v1",
         "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1",

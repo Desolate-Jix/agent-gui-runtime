@@ -634,7 +634,7 @@ def _actual_service_step(
     )
 
 
-def test_service_terminal_accepts_runtime_jcs_cleanup_with_windows_create_time(
+def test_partial_terminal_accepts_runtime_jcs_and_phase_specific_reservations(
 ) -> None:
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
 
@@ -705,7 +705,7 @@ def test_service_terminal_accepts_runtime_jcs_cleanup_with_windows_create_time(
             "worker_id": worker["worker_id"],
             "model_request_id": worker["model_request_id"],
             "payload_sha256": worker["payload_sha256"],
-            "reservation_ref": worker_cleanup["reservation_ref"],
+            "reservation_ref": {"content_sha256": "c" * 64},
             "acquisition_owner_ref": {"content_sha256": "8" * 64},
             "acquisition_intent_ref": {"content_sha256": "9" * 64},
             "runtime_owner_ref": {"content_sha256": "a" * 64},
@@ -725,6 +725,7 @@ def test_service_terminal_accepts_runtime_jcs_cleanup_with_windows_create_time(
 
     assert runtime_module._validate_service_terminal(terminal) == terminal
     assert len(runtime_module._provider_cleanup_refs(terminal)) == 2
+    assert runtime_module._validate_partial_actual_terminal_cleanup(terminal) == terminal
 
     forged = deepcopy(terminal)
     forged_cleanup = deepcopy(worker_cleanup)
@@ -3255,7 +3256,6 @@ def test_partial_actual_review_no_provider_cleanup_is_exact_and_non_authorizing(
         "missing_provider_cleanup",
         "foreign_worker_cleanup",
         "foreign_provider_cleanup",
-        "foreign_reservation",
     ),
 )
 def test_partial_actual_cleanup_rejects_missing_or_foreign_cleanup_lineage(
@@ -3289,11 +3289,6 @@ def test_partial_actual_cleanup_rejects_missing_or_foreign_cleanup_lineage(
             screen_group=provider_group,
             window_binding=binding,
         )
-        if mutation == "foreign_reservation":
-            service.start_incumbent_observe(
-                provider_case_ref=provider_group["case_refs"][0],
-                window_binding=binding,
-            )
         raise RuntimeError("partial actual operation")
 
     monkeypatch.setattr(
@@ -3317,11 +3312,7 @@ def test_partial_actual_cleanup_rejects_missing_or_foreign_cleanup_lineage(
             if "worker" in mutation
             else "provider_cleanup_ref"
         )
-        if mutation == "foreign_reservation":
-            cleanup = terminal["cleanup_refs"]["provider_cleanup_ref"]
-            cleanup["reservation_ref"] = {"content_sha256": "e" * 64}
-            cleanup["content_sha256"] = content_sha256(cleanup)
-        elif mutation.startswith("missing"):
+        if mutation.startswith("missing"):
             terminal["cleanup_refs"][cleanup_name] = None
         else:
             cleanup = terminal["cleanup_refs"][cleanup_name]
