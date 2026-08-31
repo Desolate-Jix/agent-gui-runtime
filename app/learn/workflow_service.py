@@ -5590,7 +5590,7 @@ def _materialize_benchmark_v2_hybrid_completed_cleanup(
         else None
     )
     if (
-        provider not in {"omni", "vista"}
+        provider not in {"omni", "qwen", "vista"}
         or not isinstance(context_ref, Mapping)
     ):
         if composition.composition_kind == "test":
@@ -7223,7 +7223,10 @@ def _cancel_benchmark_v2_hybrid_workflow_service(
                 and worker_record.get("result_available") is True
                 and worker_record.get("result_adopted") is True
                 and worker_record.get("task_kind")
-                == "panel_learning_calibration_sequence"
+                in {
+                    "panel_learning_hybrid_qwen_binding",
+                    "panel_learning_calibration_sequence",
+                }
             ):
                 if (
                     worker_record.get("benchmark_provider_cleanup_ref") is not None

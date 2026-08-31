@@ -1151,6 +1151,159 @@ def test_completed_vista_predispatch_cleanup_materializes_and_persists_exactly(
     assert (root / f"{worker_id}.worker.json").read_bytes() == journal_before_tamper
 
 
+def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.workflow_worker import LearningStageWorkerError, LearningStageWorkerRegistry
+
+    root = tmp_path / "qwen-workers"
+    root.mkdir()
+    worker_id = "worker-qwen-completed"
+    contexts = {
+        provider: _context(tmp_path, provider=provider, revision=revision)
+        for provider, revision in (("omni", 4), ("qwen", 5))
+    }
+    runtime = _runtime_attestation(attestation, provider="qwen")
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda _value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, _value: (
+            runtime if provider == "qwen" else _runtime_attestation(attestation, provider=provider)
+        ),
+    )
+    receipts: dict[str, dict[str, object]] = {}
+    for provider, context in contexts.items():
+        with attestation.install_benchmark_dispatch_attestor(dispatch_context=context):
+            receipts[provider] = attestation.attest_benchmark_provider_dispatch(
+                provider=provider,
+                operation_ref=deepcopy(context["operation_ref"]),
+                window_binding=deepcopy(context["window_binding"]),
+                provider_runtime={"provider": provider},
+            )
+    result = {
+        "contract_version": "learning_stage_worker_result_v2",
+        "worker_id": worker_id,
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "model_request_id": "request-qwen-completed",
+        "payload_sha256": "f" * 64,
+        "status": "completed",
+        "response": {
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": "panel_learning_hybrid_qwen_binding",
+            "outcome": "failed",
+            "orchestration": {
+                "benchmark_v2_provider_dispatch_context_refs": {
+                    provider: attestation.compose_benchmark_dispatch_context_ref(context=context)
+                    for provider, context in contexts.items()
+                },
+                "benchmark_v2_provider_dispatch_receipt_refs": [
+                    {"provider": provider, "content_sha256": receipt["content_sha256"]}
+                    for provider, receipt in receipts.items()
+                ],
+            },
+            "result": {"failure_reason": "provider failed"},
+        },
+    }
+    result_path = root / f"{worker_id}.result.json"
+    result_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    record = {
+        **result,
+        "contract_version": "learning_stage_worker_v1",
+        "started_at": "2026-08-28T00:00:00+00:00",
+        "finished_at": "2026-08-28T00:00:01+00:00",
+        "result_path": str(result_path),
+        "journal_path": str(root / f"{worker_id}.worker.json"),
+        "payload": None,
+        "process": None,
+        "runtime_attached": False,
+        "result_available": True,
+        "worker_result": result,
+        "result_adopted": True,
+        "result_adoption": {
+            "contract_version": "learning_stage_worker_result_adoption_v1",
+            "worker_id": worker_id,
+            "run_id": "run-1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-1",
+            "task_kind": "panel_learning_hybrid_qwen_binding",
+            "model_request_id": "request-qwen-completed",
+            "payload_sha256": "f" * 64,
+            "result_sha256": "a" * 64,
+            "adopted_at": "2026-08-28T00:00:02+00:00",
+        },
+    }
+    monkeypatch.setattr(
+        attestation,
+        "project_authoritative_benchmark_provider_cleanup",
+        lambda **_kwargs: {
+            "runtime_identity": deepcopy(runtime["runtime_identity"]),
+            "authoritative_cleanup_contract": "qwen_cleanup_v1",
+            "authoritative_cleanup_ref": {"content_sha256": "b" * 64},
+        },
+    )
+    registry = LearningStageWorkerRegistry(result_root=root)
+    registry._records[worker_id] = record
+    registry._workers_by_operation[("run-1", "screen_understanding", "operation-1")] = [worker_id]
+    qwen_ref = attestation.compose_benchmark_dispatch_context_ref(context=contexts["qwen"])
+    projection = registry.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=qwen_ref,
+    )
+    assert record["benchmark_provider_cleanup_ref"] == projection
+    assert registry.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=qwen_ref,
+    ) == projection
+    attachment = LearningStageWorkerRegistry(result_root=root).attachment_by_operation(
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+    )
+    assert attachment is not None
+    assert attachment["benchmark_provider_cleanup_ref"] == projection
+
+    valid_result = deepcopy(record["worker_result"])
+    for mutation in ("missing", "duplicate", "foreign", "tampered_context"):
+        tampered = deepcopy(valid_result)
+        orchestration = tampered["response"]["orchestration"]
+        receipt_refs = orchestration["benchmark_v2_provider_dispatch_receipt_refs"]
+        if mutation == "missing":
+            receipt_refs.pop()
+        elif mutation == "duplicate":
+            receipt_refs.append(deepcopy(receipt_refs[0]))
+        elif mutation == "foreign":
+            receipt_refs.append({"provider": "vista", "content_sha256": "0" * 64})
+        else:
+            orchestration["benchmark_v2_provider_dispatch_context_refs"]["omni"] = deepcopy(qwen_ref)
+        result_path.write_text(json.dumps(tampered, sort_keys=True), encoding="utf-8")
+        record["worker_result"] = tampered
+        with pytest.raises(LearningStageWorkerError, match="dispatch"):
+            registry.materialize_completed_hybrid_provider_cleanup(
+                worker_id=worker_id,
+                run_id="run-1",
+                stage="screen_understanding",
+                operation_id="operation-1",
+                dispatch_context_ref=qwen_ref,
+            )
+
+
 @pytest.mark.parametrize("mutation", ["provider", "operation", "window"])
 def test_stale_or_cross_provider_inputs_fail_before_attestation_or_journal(
     tmp_path: Path,

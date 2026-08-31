@@ -1341,7 +1341,7 @@ class _S3Registry:
         context_ref = kwargs.get("dispatch_context_ref")
         if (
             not isinstance(context_ref, dict)
-            or context_ref.get("provider") != "omni"
+            or context_ref.get("provider") not in {"omni", "qwen"}
             or not isinstance(context_ref.get("dispatch_context"), dict)
         ):
             raise AssertionError("completed Hybrid cleanup lost its service context")
@@ -4195,10 +4195,88 @@ def test_s3_safe_stopped_completed_vista_cancel_materializes_cleanup_before_proj
         store.close()
 
 
+def test_s3_safe_stopped_completed_qwen_cancel_materializes_cleanup_before_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    registry.start(
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload=_hybrid_worker_payload(),
+    )
+    registry.complete_current({"outcome": "failed"})
+    worker = registry.current
+    assert worker is not None
+    worker["result_adopted"] = True
+    current = store.get("run-h1")
+    materialized = _s3_provider_cleanup_ref(worker)
+    worker_cleanup = {"content_sha256": "f" * 64}
+    calls: list[str] = []
+    try:
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_terminal_prepared_context",
+            lambda **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_service_context",
+            lambda **_kwargs: (
+                current,
+                {"safe": "stopped"},
+                {"provider_dispatch_context_refs": {"qwen": {}}},
+                worker,
+                {"stage": "screen_understanding"},
+            ),
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_service_status",
+            lambda **_kwargs: "safe_stopped",
+        )
+
+        def _materialize(**_kwargs: object) -> dict[str, object]:
+            calls.append("materialize")
+            return {**worker, "benchmark_provider_cleanup_ref": deepcopy(materialized)}
+
+        monkeypatch.setattr(
+            workflow_service,
+            "_materialize_benchmark_v2_hybrid_completed_cleanup",
+            _materialize,
+        )
+
+        def _project(**kwargs: object) -> dict[str, object]:
+            calls.append("project")
+            assert kwargs["worker_record"]["benchmark_provider_cleanup_ref"] == materialized
+            return {
+                "status": "safe_stopped",
+                "cleanup_refs": {
+                    "worker_cleanup_ref": worker_cleanup,
+                    "provider_cleanup_ref": materialized,
+                },
+            }
+
+        monkeypatch.setattr(workflow_service, "_project_benchmark_v2_hybrid_step", _project)
+        result = workflow_service._cancel_benchmark_v2_hybrid_workflow_service(
+            composition=composition,
+            operation_ref={"run_id": "run-h1", "operation_id": "operation-h1"},
+        )
+        assert result["cleanup_refs"]["worker_cleanup_ref"] == worker_cleanup
+        assert result["cleanup_refs"]["provider_cleanup_ref"] == materialized
+        assert calls == ["materialize", "project"]
+    finally:
+        store.close()
+
+
 @pytest.mark.parametrize(
     "task_kind",
     (
-        "panel_learning_hybrid_qwen_binding",
         "panel_learning_hybrid_fusion",
         "panel_learning_hybrid_review_projection",
     ),

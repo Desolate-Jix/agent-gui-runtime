@@ -8473,7 +8473,7 @@ class LearningStageWorkerRegistry:
         operation_id: str,
         dispatch_context_ref: Mapping[str, object],
     ) -> dict[str, Any]:
-        """只从已完成 worker 的持久化 Omni 证据补建清理投影。"""
+        """只从已完成 worker 的持久化 provider 证据补建清理投影。"""
 
         worker = _required_text(worker_id, "worker_id")
         operation_key = (
@@ -8498,6 +8498,7 @@ class LearningStageWorkerRegistry:
         provider = exact_context_ref["provider"]
         expected_task_kind = {
             "omni": "panel_learning_hybrid_omni_discovery",
+            "qwen": "panel_learning_hybrid_qwen_binding",
             "vista": "panel_learning_calibration_sequence",
         }.get(provider)
         if expected_task_kind is None:
@@ -8776,51 +8777,171 @@ class LearningStageWorkerRegistry:
                 if isinstance(orchestration, Mapping)
                 else None
             )
-            result_context_ref = (
-                result_contexts.get("omni")
-                if isinstance(result_contexts, Mapping)
-                else None
-            )
-            try:
-                exact_result_context_ref = validate_benchmark_dispatch_context_ref(
-                    result_context_ref
-                )
-            except (TypeError, ValueError) as error:
-                raise LearningStageWorkerError(
-                    "completed Hybrid cleanup worker context is invalid"
-                ) from error
-            if exact_result_context_ref != exact_context_ref:
-                raise LearningStageWorkerError(
-                    "completed Hybrid cleanup service and worker contexts differ"
-                )
-            operation_identity = {
-                name: deepcopy(context_operation[name])
-                for name in (
-                    "run_id",
-                    "stage",
-                    "operation_id",
-                    "window_binding_ref",
-                    "capture_ref",
-                )
-            }
-            try:
-                validate_benchmark_dispatch_receipt_refs(
-                    receipt_journal_path=Path(context["receipt_journal_path"]),
-                    receipt_refs=(
-                        orchestration.get(
-                            "benchmark_v2_provider_dispatch_receipt_refs"
+            if provider == "qwen":
+                if (
+                    not isinstance(result_contexts, Mapping)
+                    or set(result_contexts) != {"omni", "qwen"}
+                ):
+                    raise LearningStageWorkerError(
+                        "completed Hybrid Qwen cleanup worker contexts are invalid"
+                    )
+                try:
+                    exact_result_contexts = {
+                        expected_provider: validate_benchmark_dispatch_context_ref(
+                            result_contexts.get(expected_provider)
                         )
-                        if isinstance(orchestration, Mapping)
-                        else None
-                    ),
-                    operation_identity=operation_identity,
-                    expected_provider_counts={"omni": 1},
-                    expected_dispatch_contexts={"omni": context},
+                        for expected_provider in ("omni", "qwen")
+                    }
+                    if (
+                        exact_result_contexts["qwen"] != exact_context_ref
+                        or any(
+                            exact_result_contexts[expected_provider][
+                                "dispatch_context"
+                            ]["operation_ref"][field]
+                            != context_operation[field]
+                            or exact_result_contexts[expected_provider][
+                                "dispatch_context"
+                            ]["receipt_journal_path"]
+                            != context["receipt_journal_path"]
+                            for expected_provider in ("omni", "qwen")
+                            for field in (
+                                "run_id",
+                                "stage",
+                                "operation_id",
+                                "window_binding_ref",
+                                "capture_ref",
+                            )
+                        )
+                    ):
+                        raise ValueError("Qwen dispatch contexts differ")
+                    validate_benchmark_dispatch_receipt_refs(
+                        receipt_journal_path=Path(context["receipt_journal_path"]),
+                        receipt_refs=orchestration.get(
+                            "benchmark_v2_provider_dispatch_receipt_refs"
+                        ),
+                        operation_identity={
+                            name: deepcopy(context_operation[name])
+                            for name in (
+                                "run_id",
+                                "stage",
+                                "operation_id",
+                                "window_binding_ref",
+                                "capture_ref",
+                            )
+                        },
+                        expected_provider_counts={"omni": 1, "qwen": 1},
+                        expected_dispatch_contexts={
+                            name: exact_result_contexts[name]["dispatch_context"]
+                            for name in ("omni", "qwen")
+                        },
+                    )
+                except (OSError, TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid Qwen cleanup dispatch evidence is invalid"
+                    ) from error
+            else:
+                result_context_ref = (
+                    result_contexts.get(provider)
+                    if isinstance(result_contexts, Mapping)
+                    else None
                 )
-            except (OSError, TypeError, ValueError) as error:
-                raise LearningStageWorkerError(
-                    "completed Hybrid cleanup dispatch receipt is invalid"
-                ) from error
+                try:
+                    exact_result_context_ref = validate_benchmark_dispatch_context_ref(
+                        result_context_ref
+                    )
+                except (TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid cleanup worker context is invalid"
+                    ) from error
+                if exact_result_context_ref != exact_context_ref:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid cleanup service and worker contexts differ"
+                    )
+                operation_identity = {
+                    name: deepcopy(context_operation[name])
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "window_binding_ref",
+                        "capture_ref",
+                    )
+                }
+                try:
+                    validate_benchmark_dispatch_receipt_refs(
+                        receipt_journal_path=Path(context["receipt_journal_path"]),
+                        receipt_refs=(
+                            orchestration.get(
+                                "benchmark_v2_provider_dispatch_receipt_refs"
+                            )
+                            if isinstance(orchestration, Mapping)
+                            else None
+                        ),
+                        operation_identity=operation_identity,
+                        expected_provider_counts={provider: 1},
+                        expected_dispatch_contexts={provider: context},
+                    )
+                except (OSError, TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid cleanup dispatch receipt is invalid"
+                    ) from error
+
+            if provider == "qwen":
+                if (
+                    public.get("result_adopted") is not True
+                    or not isinstance(record.get("result_adoption"), Mapping)
+                ):
+                    raise LearningStageWorkerError(
+                        "completed Hybrid Qwen cleanup adoption is invalid"
+                    )
+                try:
+                    _validated_result_adoption(
+                        dict(record["result_adoption"]),
+                        identity={
+                            name: str(record[name])
+                            for name in (
+                                "worker_id",
+                                "run_id",
+                                "stage",
+                                "operation_id",
+                                "task_kind",
+                                "model_request_id",
+                                "payload_sha256",
+                            )
+                        },
+                    )
+                except (TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid Qwen cleanup adoption is invalid"
+                    ) from error
+                projection = self._compose_hybrid_benchmark_provider_cleanup(
+                    record=record,
+                    worker_termination={
+                        "worker_id": record["worker_id"],
+                        "model_request_id": record["model_request_id"],
+                    },
+                    dispatch_context=context,
+                )
+                if projection is None:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid cleanup projection is unavailable"
+                    )
+                existing = record.get("benchmark_provider_cleanup_ref")
+                if isinstance(existing, Mapping):
+                    validated_existing = (
+                        _validate_hybrid_benchmark_provider_cleanup_projection(
+                            existing,
+                            identity=record,
+                        )
+                    )
+                    if validated_existing != projection:
+                        raise LearningStageWorkerError(
+                            "completed Hybrid cleanup projection replay differs"
+                        )
+                else:
+                    record["benchmark_provider_cleanup_ref"] = deepcopy(projection)
+                    self._persist_record_journal(record)
+                return deepcopy(projection)
 
             runtime_path = record.get("provider_runtime_path")
             if not isinstance(runtime_path, str) or not runtime_path:
