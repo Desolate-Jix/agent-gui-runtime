@@ -3291,6 +3291,105 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
     assert base64.b64decode(image_url.split(",", 1)[1]) == screenshot_bytes
 
 
+def test_qwen_binding_runner_preserves_hash_bound_parse_failure_diagnostics(
+    monkeypatch,
+) -> None:
+    from app.learn.recognition.uei.canonical import content_sha256
+    from app.learn.workflow_worker import _hybrid_managed_failure_result
+
+    profile = {
+        "profile_id": "qwen-trace",
+        "endpoint": "http://127.0.0.1:13240/v1/chat/completions",
+        "model_name": "qwen-trace-model",
+    }
+    screenshot_bytes = b"diagnostic-image"
+    screenshot_sha256 = __import__("hashlib").sha256(screenshot_bytes).hexdigest()
+    raw_content = '{"bindings":[{"label":"快速申请"}'
+    usage = {
+        "prompt_tokens": 5644,
+        "completion_tokens": 4096,
+        "total_tokens": 9740,
+    }
+    response_payload = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": raw_content},
+            }
+        ],
+        "usage": usage,
+    }
+    response_bytes = json.dumps(response_payload).encode("utf-8")
+    seen: dict = {}
+
+    def fake_urlopen(request, timeout):
+        seen["request"] = json.loads(request.data.decode("utf-8"))
+        seen["timeout"] = timeout
+        return _FakeResponse(response_payload)
+
+    monkeypatch.setenv("AGENT_GUI_MODEL_REQUEST_ID", "request-qwen-trace")
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda stage: profile)
+    monkeypatch.setattr(
+        model_server.urllib.request,
+        "urlopen",
+        fake_urlopen,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Qwen binding response is not a closed JSON object",
+    ) as failure:
+        model_server.run_qwen_binding_model(
+            request={"candidates": []},
+            screenshot_bytes=screenshot_bytes,
+            screenshot_media_type="image/png",
+            screenshot_sha256=screenshot_sha256,
+        )
+
+    diagnostics = getattr(failure.value, "diagnostics", None)
+    assert isinstance(diagnostics, dict)
+    assert diagnostics["contract_version"] == "qwen_binding_response_failure_trace_v1"
+    assert diagnostics["artifact_is_authorization"] is False
+    assert diagnostics["execute_binding_enabled"] is False
+    assert diagnostics["evidence_use"] == "benchmark_non_authorizing_diagnostic"
+    assert diagnostics["request_lineage"] == {
+        "model_request_id": "request-qwen-trace",
+        "request_content_sha256": content_sha256({"candidates": []}),
+        "screenshot_sha256": screenshot_sha256,
+        "profile_id": "qwen-trace",
+        "model_id": "qwen-trace-model",
+    }
+    assert diagnostics["http_response"] == {
+        "response_body_bytes": len(response_bytes),
+        "response_body_sha256": __import__("hashlib")
+        .sha256(response_bytes)
+        .hexdigest(),
+        "raw_message_content": raw_content,
+        "raw_message_content_utf8_bytes": len(raw_content.encode("utf-8")),
+        "raw_message_content_sha256": __import__("hashlib")
+        .sha256(raw_content.encode("utf-8"))
+        .hexdigest(),
+        "finish_reason": "length",
+        "usage": usage,
+    }
+    assert diagnostics["parse_error"]["type"] == "JSONDecodeError"
+    assert diagnostics["parse_error"]["line"] == 1
+    assert diagnostics["parse_error"]["column"] == len(raw_content) + 1
+    assert diagnostics["parse_error"]["position"] == len(raw_content)
+    assert diagnostics["content_sha256"] == content_sha256(diagnostics)
+    assert seen["request"]["max_tokens"] == 4096
+    assert seen["request"]["temperature"] == 0.0
+    assert seen["request"]["response_format"]["type"] == "json_object"
+
+    projected = _hybrid_managed_failure_result(
+        task_kind="panel_learning_hybrid_qwen_binding",
+        error=failure.value,
+        orchestration={},
+        lifecycle_evidence={"status": "verified"},
+    )
+    assert projected["result"]["diagnostics"] == diagnostics
+
+
 @pytest.mark.parametrize(
     "error",
     [

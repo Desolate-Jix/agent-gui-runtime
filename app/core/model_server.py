@@ -629,7 +629,47 @@ def run_qwen_binding_model(
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as error:
-        raise ValueError("Qwen binding response is not a closed JSON object") from error
+        raw_content_bytes = content.encode("utf-8")
+        choice = choices[0]
+        usage = response_payload.get("usage")
+        diagnostics = seal_immutable(
+            {
+                "contract_version": "qwen_binding_response_failure_trace_v1",
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "evidence_use": "benchmark_non_authorizing_diagnostic",
+                "request_lineage": {
+                    "model_request_id": request_id or None,
+                    "request_content_sha256": content_sha256(request),
+                    "screenshot_sha256": screenshot_sha256,
+                    "profile_id": str(profile.get("profile_id") or ""),
+                    "model_id": str(body_payload["model"]),
+                },
+                "http_response": {
+                    "response_body_bytes": len(response_bytes),
+                    "response_body_sha256": sha256(response_bytes).hexdigest(),
+                    "raw_message_content": content,
+                    "raw_message_content_utf8_bytes": len(raw_content_bytes),
+                    "raw_message_content_sha256": sha256(raw_content_bytes).hexdigest(),
+                    "finish_reason": (
+                        choice.get("finish_reason")
+                        if isinstance(choice.get("finish_reason"), str)
+                        else None
+                    ),
+                    "usage": deepcopy(usage) if isinstance(usage, dict) else None,
+                },
+                "parse_error": {
+                    "type": type(error).__name__,
+                    "message": str(error),
+                    "line": error.lineno,
+                    "column": error.colno,
+                    "position": error.pos,
+                },
+            }
+        )
+        failure = ValueError("Qwen binding response is not a closed JSON object")
+        failure.diagnostics = diagnostics
+        raise failure from error
     if not isinstance(parsed, dict):
         raise ValueError("Qwen binding response is not an object")
     return parsed
