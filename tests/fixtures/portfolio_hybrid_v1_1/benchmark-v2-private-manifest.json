@@ -7,7 +7,7 @@
       "app/learn/hybrid/benchmark_scorer_v2.py": "94f2686e8df3f77ec9b076712c4d0ecc7d09062ff7230432b6c8af2efbc426e2",
       "app/learn/hybrid/benchmark_v2_actual.py": "2374a8cd3d92e38b423fea24f6bac6f5180258d8ece2f3125985fff75bdb1e94",
       "app/learn/hybrid/benchmark_v2_contracts.py": "2499d9c0f87ca16298e900dd05843ad6445f674dfd0aea35bc2508512bf18989",
-      "app/learn/hybrid/benchmark_v2_dispatch_attestation.py": "45dc21eff370ed58954b2f4f2f9a037c38a3ec8281a739dfd9066c525389d968",
+      "app/learn/hybrid/benchmark_v2_dispatch_attestation.py": "6a38722cf1f5fbb82f4c9ea6da08841579cd7006885927119aea8c736f9b8752",
       "app/learn/hybrid/benchmark_v2_durable_claim.py": "20a64caab578d73f0b3505b3ed9fb82f84dbefd182936a1cc9e07d26c0137a65",
       "app/learn/hybrid/benchmark_v2_holdout.py": "9afc37625eeff737390ac91c3cadac8f75c5a1b05e67bf89880d75c48636b4b4",
       "app/learn/hybrid/benchmark_v2_incumbent_operation.py": "619717b7077ea5abc261c1b4890699239b971d9cd8bd491e0cea3fea481f9653",
@@ -32,7 +32,7 @@
       "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
       "app/learn/workflow_service.py": "456d4b2c5aaf3a306f23a5d46caa17ef5763f1825ddf75203c5eeea9de3751ed",
-      "app/learn/workflow_worker.py": "3203994d2917730f60dcbbd2cb481b42374b7cdd890dbdbe3e9f12eb8f5a2fe8",
+      "app/learn/workflow_worker.py": "afa169a2dee61e3484997bdab6526105b157366cbe93379b19b89184100f48a9",
       "app/operation/observe/screen_reader.py": "1804ca6fe539da7bdf0e81ebf8c3d2ee991bc2f14bbe18865755419a8a603437",
       "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py": "09c29c94743e0f03e3ddcae6b2e657416705ed39d35a090579c091a45a2321e8",
       "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "d49dcccb79bbc0d0f338a1774a2f41f8bdc6b5ef8c71d2ab9a81623811454e9b",
@@ -59,7 +59,7 @@
       "tests/test_learning_workflow_stage_worker.py": "5fdcf727b462d3c78906d2f6726f8e6f9410c2fa2eefe6ee6f0b64aa8f5e3eec",
       "tests/test_model_request_cancellation.py": "104be1c889cdb1b4528381dfb0d0e693e9598bfee770c3a333784b1072e47f71",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py": "d2ba7c1b170f50b36f0c17fbfaa93626bbcacaf37fb2d51de30ac109fb93c2c1",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "83b45c49ae065cee4fd6b293738bd9ca74bc8cd4b6e78e10d3dd07c61689753e",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "2ed15ca59a8962ec8bbf9fd6654c4b7ab848dbe160a17734fa13828d5ce2f5aa",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_estimand.py": "33e6462b86c481836e360e9192cda707dac20db89ba1d976fdbd42346fbe2a1a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "6ad6b5c55c549ad63fd245e78814a5fe0bed29bf7c1b9a900473662f4f6a34fd",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py": "0de0b5880516f82f9410cfc5384b7b24162366fe7c7395b4458c1bca773e9dcb",
@@ -81,7 +81,7 @@
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "7a7a642d236b74e80b2713065e7ab7a092e5127f543156e75613f2bcd13f3e92",
+  "content_sha256": "81c08ea8d099dd6beb3792a9a899f276bd729558c6bb0ca1032d8e2e39c8b1f3",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -116,7 +116,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "741a1ac315062fda9ca82fe1996ef1dbb4a9607e7d64c03bdd7b824be0055ac0",
+    "file_sha256": "adabf83fdeac59891012c90a552dfd00334f2d2c4fa7b4e1249fca991b53cbca",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
