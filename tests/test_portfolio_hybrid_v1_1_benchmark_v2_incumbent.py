@@ -739,6 +739,54 @@ def source_bundle(tmp_path: Path, validated_provider_snapshot):
     store.close()
 
 
+def test_spawned_incumbent_child_reuses_only_its_deterministic_parent_binding(
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+    from app.learn.hybrid.benchmark_v2_worker_binding import (
+        resolve_spawned_worker_binding_operation_id,
+    )
+
+    payload = deepcopy(source_bundle["authoritative_payload"])
+    serialized = payload["_benchmark_v2_window_binding"]
+    parent_run_id = "benchmark-v2-run-parent"
+    parent_operation_id = str(serialized["operation_id"])
+    stage = "screen_understanding"
+    case_id = payload["metadata"]["case_id"]
+    token = content_sha256(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
+            "parent_run_id": parent_run_id,
+            "parent_stage": stage,
+            "parent_operation_id": parent_operation_id,
+            "case_id": case_id,
+        }
+    )
+    separator = "::benchmark-v2-incumbent::"
+    worker_identity = {
+        "run_id": f"{parent_run_id}{separator}{token}",
+        "stage": stage,
+        "operation_id": f"{parent_operation_id}{separator}{token}",
+    }
+
+    assert resolve_spawned_worker_binding_operation_id(
+        serialized=serialized,
+        worker_identity=worker_identity,
+        observation_payload=payload,
+    ) == parent_operation_id
+
+    stale_identity = deepcopy(worker_identity)
+    stale_identity["operation_id"] = (
+        f"{parent_operation_id}{separator}{'f' * 64}"
+    )
+    with pytest.raises(ValueError, match="child binding identity"):
+        resolve_spawned_worker_binding_operation_id(
+            serialized=serialized,
+            worker_identity=stale_identity,
+            observation_payload=payload,
+        )
+
+
 def test_resolver_is_opaque_exact_and_returns_a_deepcopy(
     tmp_path: Path, validated_provider_snapshot
 ) -> None:

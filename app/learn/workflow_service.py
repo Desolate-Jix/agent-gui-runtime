@@ -1398,36 +1398,23 @@ def _benchmark_v2_incumbent_parent_binding_identity(
 ) -> tuple[str, str]:
     """从确定性子槽恢复原 Task5 窗口 authority 身份。"""
 
-    separator = _BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR
-    if separator not in run_id and separator not in operation_id:
-        return run_id, operation_id
-    if separator not in run_id or separator not in operation_id:
-        raise LearningWorkflowStageOperationError(
-            "benchmark_v2 incumbent child binding identity is incomplete"
-        )
-    parent_run_id, run_token = run_id.rsplit(separator, 1)
-    parent_operation_id, operation_token = operation_id.rsplit(separator, 1)
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        resolve_benchmark_v2_incumbent_parent_identity,
+    )
+
     case_ref = request.get("provider_case_ref")
     case_id = case_ref.get("case_id") if isinstance(case_ref, Mapping) else None
-    expected_token = content_sha256(
-        {
-            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
-            "parent_run_id": parent_run_id,
-            "parent_stage": stage,
-            "parent_operation_id": parent_operation_id,
-            "case_id": case_id,
-        }
-    )
-    if (
-        not parent_run_id
-        or not parent_operation_id
-        or run_token != operation_token
-        or run_token != expected_token
-    ):
-        raise LearningWorkflowStageOperationError(
-            "benchmark_v2 incumbent child binding identity is stale"
+    try:
+        return resolve_benchmark_v2_incumbent_parent_identity(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            case_id=str(case_id or ""),
         )
-    return parent_run_id, parent_operation_id
+    except ValueError as error:
+        raise LearningWorkflowStageOperationError(
+            str(error)
+        ) from error
 
 def _benchmark_v2_sidecars(
     workflow_state: Mapping[str, object], stage: str

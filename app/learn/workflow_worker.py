@@ -3148,6 +3148,7 @@ def _run_learning_stage_worker_entry(
                 )
             from app.learn.hybrid.benchmark_v2_worker_binding import (
                 install_spawned_worker_window_binding,
+                resolve_spawned_worker_binding_operation_id,
                 validate_spawned_worker_observation_payload,
             )
 
@@ -3155,9 +3156,14 @@ def _run_learning_stage_worker_entry(
                 payload=execution_payload,
                 serialized=serialized_binding,
             )
+            binding_operation_id = resolve_spawned_worker_binding_operation_id(
+                serialized=serialized_binding,
+                worker_identity=identity,
+                observation_payload=execution_payload,
+            )
             binding_context = install_spawned_worker_window_binding(
                 serialized=serialized_binding,
-                worker_operation_id=str(identity.get("operation_id") or ""),
+                worker_operation_id=binding_operation_id,
             )
             binding_lifecycle = binding_context.__enter__()
             binding_entered = True

@@ -1129,6 +1129,39 @@ def _normal_clear_receipt(
     return value
 
 
+def resolve_spawned_worker_binding_operation_id(
+    *,
+    serialized: Mapping[str, object],
+    worker_identity: Mapping[str, object],
+    observation_payload: Mapping[str, object],
+) -> str:
+    """仅允许确定性 incumbent 子槽复用其父 Task5 窗口绑定。"""
+
+    sealed = _validate_serialized(serialized)
+    run_id = _required_text(worker_identity.get("run_id"), "worker run id")
+    stage = _required_text(worker_identity.get("stage"), "worker stage")
+    operation_id = _required_text(
+        worker_identity.get("operation_id"), "worker operation id"
+    )
+    metadata = observation_payload.get("metadata")
+    case_id = metadata.get("case_id") if isinstance(metadata, Mapping) else None
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        resolve_benchmark_v2_incumbent_parent_identity,
+    )
+
+    _parent_run_id, parent_operation_id = (
+        resolve_benchmark_v2_incumbent_parent_identity(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            case_id=_required_text(case_id, "benchmark incumbent case id"),
+        )
+    )
+    if parent_operation_id != sealed["operation_id"]:
+        raise ValueError("benchmark_v2 incumbent child binding identity differs")
+    return parent_operation_id
+
+
 @contextmanager
 def install_spawned_worker_window_binding(
     *,

@@ -69,6 +69,7 @@ BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT = (
 BENCHMARK_V2_ADOPTED_RESULT_PROJECTION_CONTRACT = (
     "benchmark_v2_adopted_result_projection_v1"
 )
+BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR = "::benchmark-v2-incumbent::"
 
 BENCHMARK_V2_INCUMBENT_PAYLOAD_PROJECTION_RULES = {
     "task": {"literal": "observe_screen"},
@@ -400,6 +401,45 @@ def _seal(body: Mapping[str, object]) -> dict[str, Any]:
 
 def _payload_sha256(value: Mapping[str, object]) -> str:
     return hashlib.sha256(canonical_json_bytes(dict(value))).hexdigest()
+
+
+def resolve_benchmark_v2_incumbent_parent_identity(
+    *,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    case_id: str,
+) -> tuple[str, str]:
+    """验证确定性 incumbent 子槽并恢复其父 operation 身份。"""
+
+    run = _text(run_id, "benchmark incumbent run id")
+    stage_value = _text(stage, "benchmark incumbent stage")
+    operation = _text(operation_id, "benchmark incumbent operation id")
+    case = _text(case_id, "benchmark incumbent case id")
+    separator = BENCHMARK_V2_INCUMBENT_CHILD_SEPARATOR
+    if separator not in run and separator not in operation:
+        return run, operation
+    if separator not in run or separator not in operation:
+        raise ValueError("benchmark_v2 incumbent child binding identity is incomplete")
+    parent_run_id, run_token = run.rsplit(separator, 1)
+    parent_operation_id, operation_token = operation.rsplit(separator, 1)
+    expected_token = content_sha256(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
+            "parent_run_id": parent_run_id,
+            "parent_stage": stage_value,
+            "parent_operation_id": parent_operation_id,
+            "case_id": case,
+        }
+    )
+    if (
+        not parent_run_id
+        or not parent_operation_id
+        or run_token != operation_token
+        or run_token != expected_token
+    ):
+        raise ValueError("benchmark_v2 incumbent child binding identity is stale")
+    return parent_run_id, parent_operation_id
 
 
 def _validate_non_authorizing_safety(value: object, name: str) -> dict[str, bool]:
