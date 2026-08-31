@@ -1301,6 +1301,24 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
     root = tmp_path / "qwen-workers"
     root.mkdir()
     worker_id = "worker-qwen-completed"
+
+    class _ProcessProbe:
+        def __init__(self, *, alive: bool, exitcode: int | None) -> None:
+            self.alive = alive
+            self.exitcode = exitcode
+            self.join_calls: list[float | int | None] = []
+            self.close_calls = 0
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+        def join(self, timeout: float | int | None = None) -> None:
+            self.join_calls.append(timeout)
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    dead_process = _ProcessProbe(alive=False, exitcode=0)
     contexts = {
         provider: _context(tmp_path, provider=provider, revision=revision)
         for provider, revision in (("omni", 4), ("qwen", 5))
@@ -1365,7 +1383,7 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
         "result_path": str(result_path),
         "journal_path": str(root / f"{worker_id}.worker.json"),
         "payload": None,
-        "process": None,
+        "process": dead_process,
         "runtime_attached": False,
         "result_available": True,
         "worker_result": result,
@@ -1399,18 +1417,25 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
         lambda exact_record: reconciliation_calls.append(exact_record["worker_id"])
         or deepcopy(reconciliation),
     )
+    projection_processes: list[object] = []
+
+    def project_cleanup(**kwargs):
+        projection_processes.append(kwargs["record"].get("process"))
+        if (
+            kwargs["record"].get("process") is not None
+            or kwargs["record"].get("supervisor_reconciliation") != reconciliation
+        ):
+            return None
+        return {
+            "runtime_identity": deepcopy(runtime["runtime_identity"]),
+            "authoritative_cleanup_contract": "qwen_cleanup_v1",
+            "authoritative_cleanup_ref": {"content_sha256": "b" * 64},
+        }
+
     monkeypatch.setattr(
         attestation,
         "project_authoritative_benchmark_provider_cleanup",
-        lambda **kwargs: (
-            {
-                "runtime_identity": deepcopy(runtime["runtime_identity"]),
-                "authoritative_cleanup_contract": "qwen_cleanup_v1",
-                "authoritative_cleanup_ref": {"content_sha256": "b" * 64},
-            }
-            if kwargs["record"].get("supervisor_reconciliation") == reconciliation
-            else None
-        ),
+        project_cleanup,
     )
     registry = LearningStageWorkerRegistry(result_root=root)
     registry._records[worker_id] = record
@@ -1423,9 +1448,45 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
         operation_id="operation-1",
         dispatch_context_ref=qwen_ref,
     )
+    assert dead_process.join_calls == [0]
+    assert dead_process.close_calls == 1
+    assert record["process"] is None
+    assert projection_processes == [None]
     assert reconciliation_calls == [worker_id]
     assert record["supervisor_reconciliation"] == reconciliation
     assert record["benchmark_provider_cleanup_ref"] == projection
+
+    live_process = _ProcessProbe(alive=True, exitcode=None)
+    record["process"] = live_process
+    with pytest.raises(LearningStageWorkerError, match="process remains active"):
+        registry.materialize_completed_hybrid_provider_cleanup(
+            worker_id=worker_id,
+            run_id="run-1",
+            stage="screen_understanding",
+            operation_id="operation-1",
+            dispatch_context_ref=qwen_ref,
+        )
+    assert record["process"] is live_process
+    assert live_process.join_calls == []
+    assert live_process.close_calls == 0
+    assert projection_processes == [None]
+
+    ambiguous_process = _ProcessProbe(alive=False, exitcode=None)
+    record["process"] = ambiguous_process
+    with pytest.raises(LearningStageWorkerError, match="process state is indeterminate"):
+        registry.materialize_completed_hybrid_provider_cleanup(
+            worker_id=worker_id,
+            run_id="run-1",
+            stage="screen_understanding",
+            operation_id="operation-1",
+            dispatch_context_ref=qwen_ref,
+        )
+    assert record["process"] is ambiguous_process
+    assert ambiguous_process.join_calls == [0]
+    assert ambiguous_process.close_calls == 0
+    assert projection_processes == [None]
+    record["process"] = None
+
     assert registry.materialize_completed_hybrid_provider_cleanup(
         worker_id=worker_id,
         run_id="run-1",

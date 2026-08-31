@@ -8914,6 +8914,7 @@ class LearningStageWorkerRegistry:
                     raise LearningStageWorkerError(
                         "completed Hybrid Qwen cleanup adoption is invalid"
                     ) from error
+                _detach_proven_dead_worker_process(record)
                 reconciliation = _reconcile_hybrid_provider_scope_record(record)
                 provider_cleanup_evidence = reconciliation.get(
                     "provider_cleanup_evidence"
@@ -9847,6 +9848,43 @@ def _close_provider_scope(record: dict[str, Any]) -> None:
         scope.close()
     finally:
         record["provider_scope"] = None
+
+
+def _detach_proven_dead_worker_process(record: dict[str, Any]) -> None:
+    process = record.get("process")
+    if process is None:
+        return
+    is_alive = getattr(process, "is_alive", None)
+    join = getattr(process, "join", None)
+    if not callable(is_alive) or not callable(join):
+        raise LearningStageWorkerError(
+            "completed Hybrid cleanup worker process state is indeterminate"
+        )
+    try:
+        if is_alive():
+            raise LearningStageWorkerError(
+                "completed Hybrid cleanup worker process remains active"
+            )
+        join(timeout=0)
+        exitcode = getattr(process, "exitcode", None)
+        if is_alive() or isinstance(exitcode, bool) or not isinstance(exitcode, int):
+            raise LearningStageWorkerError(
+                "completed Hybrid cleanup worker process state is indeterminate"
+            )
+        close = getattr(process, "close", None)
+        if close is not None:
+            if not callable(close):
+                raise LearningStageWorkerError(
+                    "completed Hybrid cleanup worker process state is indeterminate"
+                )
+            close()
+    except LearningStageWorkerError:
+        raise
+    except Exception as error:
+        raise LearningStageWorkerError(
+            "completed Hybrid cleanup worker process state is indeterminate"
+        ) from error
+    record["process"] = None
 
 
 def _cleanup_failed_worker_start(
