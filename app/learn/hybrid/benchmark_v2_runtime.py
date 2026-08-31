@@ -578,7 +578,17 @@ class _ActualScreenGroupService:
             if call_kind == "start":
                 returned = current
             elif current["operation_ref"] != operation_ref:
-                returned = current
+                if call_kind == "adopt" and _is_actual_incumbent_read_only_advance(
+                    current_step=current,
+                    advanced_operation=operation_ref,
+                ):
+                    returned = mutate(
+                        "adopt_and_terminalize_incumbent",
+                        operation_ref=operation_ref,
+                        worker_ref=worker_ref,
+                    )
+                else:
+                    returned = current
             elif call_kind == "poll":
                 returned = mutate(
                     "poll_incumbent_observe",
@@ -733,6 +743,40 @@ class _ActualScreenGroupService:
         if not callable(method):
             raise TypeError(f"WorkflowService {name} is unavailable")
         return method(**deepcopy(kwargs))
+
+
+def _is_actual_incumbent_read_only_advance(
+    *,
+    current_step: Mapping[str, object],
+    advanced_operation: Mapping[str, object],
+) -> bool:
+    """确认 lookup 的 pending 与已记录 advanced 仅有只读状态差异。"""
+
+    if (
+        current_step.get("mode") != "incumbent_qwen_only"
+        or current_step.get("status") != "pending"
+        or advanced_operation.get("mode") != "incumbent_qwen_only"
+        or advanced_operation.get("status") != "advanced"
+        or current_step.get("adopted_result_projection") is not None
+        or current_step.get("terminal_receipt") is not None
+        or current_step.get("cleanup_refs")
+        != {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+    ):
+        return False
+    current_operation = current_step.get("operation_ref")
+    if not isinstance(current_operation, Mapping):
+        return False
+    stable_current = {
+        name: deepcopy(value)
+        for name, value in current_operation.items()
+        if name not in {"status", "content_sha256"}
+    }
+    stable_advanced = {
+        name: deepcopy(value)
+        for name, value in advanced_operation.items()
+        if name not in {"status", "content_sha256"}
+    }
+    return stable_current == stable_advanced
 
 
 class _ActualScreenGroupWindowOwner:
