@@ -152,7 +152,7 @@
         "role": "hybrid_contracts"
       },
       {
-        "file_sha256": "2374a8cd3d92e38b423fea24f6bac6f5180258d8ece2f3125985fff75bdb1e94",
+        "file_sha256": "63d1ce5fd082dd1874ac0673b3ec2b1de6388b499cdb10ddf57948d16536f1e8",
         "relative_path": "app/learn/hybrid/benchmark_v2_actual.py",
         "role": "benchmark_actual"
       },
@@ -192,7 +192,7 @@
         "role": "qwen_binding"
       },
       {
-        "file_sha256": "fcde5bb57aefcee60c6c37762bd974471f58bfeeef362bcf98cab10329070845",
+        "file_sha256": "dc15ed82547abd4b48f17be0da4b0c7f91e71ba07f6732e8b5de823d1b310e31",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
       },
