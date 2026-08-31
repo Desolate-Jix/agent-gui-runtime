@@ -392,6 +392,11 @@ def _validated_service_step(
             successor_step=step,
         ):
             pass
+        elif _is_incumbent_durable_projection_successor_step(
+            predecessor_step=predecessor_step,
+            successor_step=step,
+        ):
+            pass
         elif operation["predecessor_content_sha256"] != predecessor[
             "content_sha256"
         ]:
@@ -453,6 +458,103 @@ def _is_incumbent_read_only_poll_transition(
         and successor_step.get("cleanup_refs")
         == {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
     )
+
+
+def _is_incumbent_durable_projection_successor_step(
+    *,
+    predecessor_step: Mapping[str, object],
+    successor_step: Mapping[str, object],
+) -> bool:
+    predecessor_operation = predecessor_step.get("operation_ref")
+    successor_operation = successor_step.get("operation_ref")
+    if not isinstance(predecessor_operation, Mapping) or not isinstance(
+        successor_operation, Mapping
+    ):
+        return False
+    stable_step_fields = (
+        "mode",
+        "worker_ref",
+        "observed_task_kind",
+        "provider_dispatch_context_projection",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+    )
+    if not all(
+        successor_step.get(name) == predecessor_step.get(name)
+        for name in stable_step_fields
+    ):
+        return False
+    if successor_operation.get("status") in {"advanced", "cleanup_pending"} and (
+        successor_step.get("adopted_result_projection") is not None
+        or successor_step.get("terminal_receipt") is not None
+        or successor_step.get("cleanup_refs")
+        != {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+    ):
+        return False
+    return _is_incumbent_durable_projection_successor_operation(
+        predecessor_operation=predecessor_operation,
+        successor_operation=successor_operation,
+    )
+
+
+def _is_incumbent_durable_projection_successor_operation(
+    *,
+    predecessor_operation: Mapping[str, object],
+    successor_operation: Mapping[str, object],
+) -> bool:
+    allowed_status_transitions = {
+        "pending": {"advanced", "cleanup_pending", "cancelled", "safe_stopped"},
+        "advanced": {
+            "advanced",
+            "complete",
+            "cleanup_pending",
+            "cancelled",
+            "safe_stopped",
+        },
+        "cleanup_pending": {"cleanup_pending", "cancelled", "safe_stopped"},
+    }
+    predecessor_status = predecessor_operation.get("status")
+    successor_status = successor_operation.get("status")
+    if (
+        predecessor_operation.get("mode") != "incumbent_qwen_only"
+        or successor_operation.get("mode") != "incumbent_qwen_only"
+        or successor_status not in allowed_status_transitions.get(
+            predecessor_status, set()
+        )
+    ):
+        return False
+    immutable = (
+        "contract_version",
+        "mode",
+        "run_id",
+        "stage",
+        "operation_id",
+        "request_ref",
+        "window_binding_ref",
+        "capture_ref",
+        "worker_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+    )
+    if any(
+        successor_operation.get(name) != predecessor_operation.get(name)
+        for name in immutable
+    ):
+        return False
+    for name in ("workflow_state_ref", "stage_execution_ref"):
+        predecessor_ref = predecessor_operation.get(name)
+        successor_ref = successor_operation.get(name)
+        if not isinstance(predecessor_ref, Mapping) or not isinstance(
+            successor_ref, Mapping
+        ):
+            return False
+        if successor_ref.get("revision", -1) <= predecessor_ref.get("revision", -1):
+            return False
+        if successor_ref.get("content_sha256") == predecessor_ref.get(
+            "content_sha256"
+        ):
+            return False
+    return True
 
 
 def _wait_for_next_poll(*, deadline: float, interval: float, label: str) -> float:

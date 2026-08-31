@@ -3654,6 +3654,11 @@ def _validate_actual_terminal_successor(
         if returned != current:
             raise ValueError("benchmark actual cleanup same-ref replay differs")
         return
+    if benchmark_v2_actual._is_incumbent_durable_projection_successor_operation(
+        predecessor_operation=current,
+        successor_operation=returned,
+    ):
+        return
     if (
         returned["predecessor_content_sha256"] != current["content_sha256"]
         or returned["workflow_state_ref"]["revision"]

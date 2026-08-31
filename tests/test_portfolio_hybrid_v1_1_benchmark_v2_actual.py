@@ -1236,6 +1236,8 @@ def _operation_ref(
     revision: int,
     predecessor: Mapping[str, object] | None,
     run_id: str | None = None,
+    predecessor_content_sha256: str | None = None,
+    workflow_content_sha256: str | None = None,
 ) -> dict[str, object]:
     operation_run_id = run_id or str(window_binding["run_id"])
     return incumbent.compose_benchmark_v2_workflow_service_operation_ref(
@@ -1246,7 +1248,8 @@ def _operation_ref(
         workflow_state_ref={
             "run_id": operation_run_id,
             "revision": revision,
-            "content_sha256": f"{revision % 10}" * 64,
+            "content_sha256": workflow_content_sha256
+            or f"{revision % 10}" * 64,
         },
         stage_execution_ref={
             "run_id": operation_run_id,
@@ -1261,6 +1264,7 @@ def _operation_ref(
         worker_ref=worker_ref,
         status=status,
         predecessor_operation_ref=predecessor,
+        predecessor_content_sha256=predecessor_content_sha256,
     )
 
 
@@ -1390,6 +1394,181 @@ def test_incumbent_child_lineage_drift_is_rejected(fault: str) -> None:
             expected_run_id=str(child["run_id"]),
             expected_operation_id=str(child["operation_id"]),
             predecessor_step=predecessor,
+        )
+
+
+def _durable_projection_case(
+    *, mode: str = "incumbent_qwen_only"
+) -> tuple[dict[str, object], dict[str, object], dict[str, object], dict[str, object]]:
+    binding = _window_binding()
+    request_ref = _identity(f"{mode}-durable-projection")
+    worker_ref = _sealed_parent(f"{mode}-durable-worker")
+    current = _operation_ref(
+        mode=mode,
+        operation_id=(
+            str(binding["operation_id"])
+            if mode == "hybrid_v1_1"
+            else "incumbent-durable-operation"
+        ),
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=worker_ref,
+        status="advanced",
+        revision=7,
+        predecessor=None,
+        run_id=None if mode == "hybrid_v1_1" else "incumbent-durable-run",
+    )
+    return binding, request_ref, worker_ref, current
+
+
+def _validate_durable_projection_step(
+    *,
+    binding: Mapping[str, object],
+    request_ref: Mapping[str, object],
+    current: Mapping[str, object],
+    successor: Mapping[str, object],
+) -> dict[str, object]:
+    return actual._validated_service_step(
+        _step(successor, task_kind="vision_observe_screen"),
+        expected_mode=str(current["mode"]),
+        binding=binding,
+        request_ref=request_ref,
+        expected_run_id=str(current["run_id"]),
+        expected_operation_id=str(current["operation_id"]),
+        predecessor_step=_step(current, task_kind="vision_observe_screen"),
+    )
+
+
+@pytest.mark.parametrize(("status", "revision"), (("advanced", 8), ("complete", 11)))
+def test_incumbent_durable_projection_accepts_monotonic_successor(
+    status: str, revision: int
+) -> None:
+    binding, request_ref, worker_ref, current = _durable_projection_case()
+    successor = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=worker_ref,
+        status=status,
+        revision=revision,
+        predecessor=None,
+        run_id=str(current["run_id"]),
+        predecessor_content_sha256="d" * 64,
+    )
+
+    assert _validate_durable_projection_step(
+        binding=binding,
+        request_ref=request_ref,
+        current=current,
+        successor=successor,
+    )["operation_ref"] == successor
+
+
+@pytest.mark.parametrize(
+    "fault",
+    (
+        "same_revision",
+        "decreasing_revision",
+        "unchanged_state_hash",
+        "changed_worker",
+        "regressive_status",
+    ),
+)
+def test_incumbent_durable_projection_rejects_lineage_fault(fault: str) -> None:
+    binding, request_ref, worker_ref, current = _durable_projection_case()
+    revision = {"same_revision": 7, "decreasing_revision": 6}.get(fault, 8)
+    successor = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=(
+            _sealed_parent("different-incumbent-worker")
+            if fault == "changed_worker"
+            else worker_ref
+        ),
+        status="pending" if fault == "regressive_status" else "advanced",
+        revision=revision,
+        predecessor=None,
+        run_id=str(current["run_id"]),
+        predecessor_content_sha256="d" * 64,
+        workflow_content_sha256=(
+            str(current["workflow_state_ref"]["content_sha256"])
+            if fault == "unchanged_state_hash"
+            else None
+        ),
+    )
+
+    with pytest.raises(ValueError, match="predecessor.*stale"):
+        _validate_durable_projection_step(
+            binding=binding,
+            request_ref=request_ref,
+            current=current,
+            successor=successor,
+        )
+
+
+@pytest.mark.parametrize("successor_status", ("advanced", "complete"))
+def test_incumbent_cleanup_pending_cannot_resume_adoption(
+    successor_status: str,
+) -> None:
+    binding, request_ref, worker_ref, _ = _durable_projection_case()
+    current = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id="incumbent-durable-operation",
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=worker_ref,
+        status="cleanup_pending",
+        revision=8,
+        predecessor=None,
+        run_id="incumbent-durable-run",
+    )
+    successor = _operation_ref(
+        mode="incumbent_qwen_only",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=worker_ref,
+        status=successor_status,
+        revision=9,
+        predecessor=None,
+        run_id=str(current["run_id"]),
+        predecessor_content_sha256="d" * 64,
+    )
+
+    with pytest.raises(ValueError, match="predecessor.*stale"):
+        _validate_durable_projection_step(
+            binding=binding,
+            request_ref=request_ref,
+            current=current,
+            successor=successor,
+        )
+
+
+def test_hybrid_projection_keeps_strict_public_predecessor_chain() -> None:
+    binding, request_ref, worker_ref, current = _durable_projection_case(
+        mode="hybrid_v1_1"
+    )
+    successor = _operation_ref(
+        mode="hybrid_v1_1",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        window_binding=binding,
+        worker_ref=worker_ref,
+        status="advanced",
+        revision=8,
+        predecessor=None,
+        predecessor_content_sha256="d" * 64,
+    )
+
+    with pytest.raises(ValueError, match="predecessor.*stale"):
+        _validate_durable_projection_step(
+            binding=binding,
+            request_ref=request_ref,
+            current=current,
+            successor=successor,
         )
 
 

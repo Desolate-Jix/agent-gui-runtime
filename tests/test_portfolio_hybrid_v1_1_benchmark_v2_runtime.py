@@ -582,6 +582,7 @@ def _actual_operation(
     revision: int,
     status: str = "pending",
     predecessor: Mapping[str, object] | None = None,
+    predecessor_content_sha256: str | None = None,
 ) -> dict[str, object]:
     return incumbent.compose_benchmark_v2_workflow_service_operation_ref(
         mode=mode,
@@ -612,6 +613,7 @@ def _actual_operation(
         ),
         status=status,
         predecessor_operation_ref=predecessor,
+        predecessor_content_sha256=predecessor_content_sha256,
     )
 
 
@@ -942,6 +944,118 @@ def test_actual_cleanup_terminal_operation_requires_exact_replay(
         runtime_module._validate_actual_terminal_successor(
             terminal=successor,
             supplied=terminal,
+        )
+
+
+def _actual_cleanup_projection_case(
+    *, mode: str
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    request_ref = {"id": f"{mode}-cleanup-request", "content_sha256": "a" * 64}
+    binding = {
+        "run_id": f"{mode}-cleanup-run",
+        "stage": (
+            "screen_understanding"
+            if mode == "incumbent_qwen_only"
+            else "provider_execution"
+        ),
+        "operation_id": f"{mode}-cleanup-operation",
+        "window_binding_ref": {
+            "id": f"{mode}-cleanup-binding",
+            "content_sha256": "b" * 64,
+        },
+        "capture_ref": {
+            "id": f"{mode}-cleanup-capture",
+            "content_sha256": "c" * 64,
+        },
+    }
+    current = _actual_operation(
+        mode=mode,
+        operation_id=str(binding["operation_id"]),
+        request_ref=request_ref,
+        binding=binding,
+        revision=8,
+        status="advanced",
+    )
+    return request_ref, binding, current
+
+
+@pytest.mark.parametrize("current_status", ("advanced", "cleanup_pending"))
+def test_actual_incumbent_cleanup_accepts_monotonic_durable_projection(
+    current_status: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    request_ref, binding, current = _actual_cleanup_projection_case(
+        mode="incumbent_qwen_only"
+    )
+    if current_status == "cleanup_pending":
+        current = _actual_operation(
+            mode="incumbent_qwen_only",
+            operation_id=str(binding["operation_id"]),
+            request_ref=request_ref,
+            binding=binding,
+            revision=8,
+            status=current_status,
+        )
+    returned = _actual_operation(
+        mode="incumbent_qwen_only",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        binding=binding,
+        status="cancelled",
+        revision=11,
+        predecessor_content_sha256="d" * 64,
+    )
+
+    runtime_module._validate_actual_terminal_successor(
+        terminal=returned,
+        supplied=current,
+    )
+
+
+def test_actual_incumbent_cleanup_rejects_nonadvancing_durable_projection() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    request_ref, binding, current = _actual_cleanup_projection_case(
+        mode="incumbent_qwen_only"
+    )
+    returned = _actual_operation(
+        mode="incumbent_qwen_only",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        binding=binding,
+        status="cancelled",
+        revision=8,
+        predecessor_content_sha256="d" * 64,
+    )
+
+    with pytest.raises(ValueError, match="cleanup successor lineage is stale"):
+        runtime_module._validate_actual_terminal_successor(
+            terminal=returned,
+            supplied=current,
+        )
+
+
+def test_actual_hybrid_cleanup_keeps_strict_public_predecessor_chain() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    request_ref, binding, current = _actual_cleanup_projection_case(
+        mode="hybrid_v1_1"
+    )
+    returned = _actual_operation(
+        mode="hybrid_v1_1",
+        operation_id=str(current["operation_id"]),
+        request_ref=request_ref,
+        binding=binding,
+        status="cancelled",
+        revision=11,
+        predecessor_content_sha256="d" * 64,
+    )
+
+    with pytest.raises(ValueError, match="cleanup successor lineage is stale"):
+        runtime_module._validate_actual_terminal_successor(
+            terminal=returned,
+            supplied=current,
         )
 
 
