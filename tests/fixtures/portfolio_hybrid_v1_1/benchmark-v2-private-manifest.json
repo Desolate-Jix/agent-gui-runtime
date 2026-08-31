@@ -39,7 +39,7 @@
       "scripts/project_portfolio_hybrid_v1_1_provider_corpus_v2.py": "abe1012430d7541642f3958d3878f9ee346cd638656c38f075caec569e0a829b",
       "scripts/review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py": "acff255c88c15e578e9d23fde720ce78ff71e97315ece060b2f32fffe210b4c0",
       "scripts/run_omniparser_learn_smoke.py": "85a5b0cfb07b1049f65530b44c8943582ecdac2749a6a9ea17963ec109142035",
-      "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py": "fe2fe12bef59e6ab01b3295f97e11344e84062dd7d1d2275d02884b949f1d29f",
+      "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py": "b04223faac3a85032843f8dbc7c73c9c4ce5655169d29a6a782e803a74957cc8",
       "scripts/run_uei_omniparser_shadow_worker.py": "0e742ad76ef8185696f50bb270ada5cce726bc7e650e4dcb304f675236d625ab",
       "scripts/score_portfolio_hybrid_v1_1_benchmark_v2_private.py": "ece7b542100c3cbc342fe2c0dedf9d17dceee7c6e6b937d722bb4a29d2de8cb4",
       "scripts/seal_portfolio_hybrid_v1_1_benchmark_v2.py": "6f1cf6d090b31de8c4197f0e1b01a569d1e033248db24f22ed1045f56e18b41b"
@@ -66,7 +66,7 @@
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_leakage.py": "36f525278fbeb7a889d48fd30c6294c185c4af95c466d3796415257665dc354d",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_lifecycle.py": "b05eb03931d267ceb0d9e4fbb478676ee5c21930cb5b8e8f75cff05db6334312",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_pathless.py": "4465bccc225b8ec61593b79aae7f9ead89c644a38c1a27b55fb36793fea65bac",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py": "6b1a1239b24aa162fc79a7e630cc5e89eaa0e2e6c799026a3839d1148cc67711",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py": "a74e45bdf7a619cf3edcae8756b9bf3d81e5d45c13fe77a00989ecdb7006c6ee",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py": "47e68e0c9ac6a38f60ad71df16ba25b6228ceb8863127825f8841dd7ed3acd75",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime_recovery.py": "fa5564bbf33557536f2cf797705bbf727bac4ca880949d5f9259250676cfbbef",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py": "3982efd07de8c47c83c9abc45e5fd8ebf39bca5517d391746b30b60b47da9f72",
@@ -79,7 +79,7 @@
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "cf7a311a613660fe8ed6a674adffa1375d2e1859b91cae9b177d97fec1d809c8",
+  "content_sha256": "188aa936b3224de7b48da0bd7b5935212bc95c3f7fb1ce9e251cf97ac12a53c3",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -114,7 +114,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "afc96bf237cfe1b04f3aeaeaf5c0efaff635616bd7957596248ab27a7b303116",
+    "file_sha256": "a4654bdaee345aeabe42f44c296d2f09cfe9c8da5ee399670a19f7f5e3bfa888",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {

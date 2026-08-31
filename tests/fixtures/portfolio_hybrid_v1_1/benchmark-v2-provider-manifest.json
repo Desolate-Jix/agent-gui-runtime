@@ -257,7 +257,7 @@
         "role": "omniparser_learn_smoke"
       },
       {
-        "file_sha256": "fe2fe12bef59e6ab01b3295f97e11344e84062dd7d1d2275d02884b949f1d29f",
+        "file_sha256": "b04223faac3a85032843f8dbc7c73c9c4ce5655169d29a6a782e803a74957cc8",
         "relative_path": "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
         "role": "benchmark_runner"
       },
