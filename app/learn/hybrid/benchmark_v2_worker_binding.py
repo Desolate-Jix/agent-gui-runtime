@@ -1129,6 +1129,46 @@ def _normal_clear_receipt(
     return value
 
 
+def _spawned_worker_parent_binding_identity(
+    serialized: Mapping[str, object],
+) -> tuple[str, str, str]:
+    """从 exact Task5 server authority 恢复父 run/stage/operation。"""
+
+    sealed = _validate_serialized(serialized)
+    authority_root = Path(str(sealed["owner_journal_path"])).parent.resolve()
+    authority_path = _authority_file(authority_root, str(sealed["payload_sha256"]))
+    try:
+        candidate = json.loads(authority_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "worker binding authority document is unavailable or corrupt"
+        ) from error
+    if not isinstance(candidate, Mapping):
+        raise ValueError("worker binding authority document is not closed")
+    authority_kind = _required_text(
+        candidate.get("authority_kind"), "worker binding authority kind"
+    )
+    run_id = _required_text(candidate.get("run_id"), "worker binding authority run id")
+    stage = _required_text(candidate.get("stage"), "worker binding authority stage")
+    operation_id = _required_text(
+        candidate.get("operation_id"), "worker binding authority operation id"
+    )
+    authority, _owner = _load_server_binding_authority(
+        resolver=_ServerWorkerWindowBindingResolver(
+            authority_root=authority_root,
+            authority_kind=authority_kind,
+        ),
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        window_binding_ref=candidate.get("window_binding_ref"),
+        capture_ref=candidate.get("capture_ref"),
+    )
+    if authority.get("serialized_window_binding") != sealed:
+        raise ValueError("worker binding authority serialized binding differs")
+    return run_id, stage, operation_id
+
+
 def resolve_spawned_worker_binding_operation_id(
     *,
     serialized: Mapping[str, object],
@@ -1149,7 +1189,7 @@ def resolve_spawned_worker_binding_operation_id(
         resolve_benchmark_v2_incumbent_parent_identity,
     )
 
-    _parent_run_id, parent_operation_id = (
+    parent_run_id, parent_operation_id = (
         resolve_benchmark_v2_incumbent_parent_identity(
             run_id=run_id,
             stage=stage,
@@ -1157,7 +1197,8 @@ def resolve_spawned_worker_binding_operation_id(
             case_id=_required_text(case_id, "benchmark incumbent case id"),
         )
     )
-    if parent_operation_id != sealed["operation_id"]:
+    authority_parent = _spawned_worker_parent_binding_identity(sealed)
+    if authority_parent != (parent_run_id, stage, parent_operation_id):
         raise ValueError("benchmark_v2 incumbent child binding identity differs")
     return parent_operation_id
 

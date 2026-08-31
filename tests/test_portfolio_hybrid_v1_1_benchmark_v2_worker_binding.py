@@ -32,6 +32,7 @@ from app.learn.hybrid.benchmark_v2_worker_binding import (
     compose_test_server_worker_window_binding_resolver,
     install_spawned_worker_window_binding,
     publish_server_worker_window_binding,
+    resolve_spawned_worker_binding_operation_id,
     resolve_server_worker_window_binding,
     serialize_worker_window_binding,
     validate_benchmark_v2_worker_window_binding_adoption_from_resolver,
@@ -123,6 +124,71 @@ def _payload_sha(value: dict[str, object]) -> str:
 def _reseal(value: dict[str, object]) -> dict[str, object]:
     value["payload_sha256"] = _payload_sha(value)
     return value
+
+
+def test_incumbent_child_binding_requires_exact_task5_parent_authority(
+    tmp_path: Path,
+) -> None:
+    with _owned(tmp_path, "incumbent-parent") as (owner, _journal):
+        run_id = "run-incumbent-parent"
+        stage = "screen_understanding"
+        case_id = "case-incumbent-parent"
+        capture_ref = {
+            "id": "capture-incumbent-parent",
+            "content_sha256": owner["screenshot_sha256"],
+        }
+        authority = publish_server_worker_window_binding(
+            publisher=compose_test_server_worker_window_binding_publisher(
+                authority_root=tmp_path
+            ),
+            run_id=run_id,
+            stage=stage,
+            operation_id=owner["operation_id"],
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        serialized = authority["serialized_window_binding"]
+        payload = {"metadata": {"case_id": case_id}}
+
+        def child_identity(parent_run_id: str, parent_stage: str) -> dict[str, str]:
+            token = content_sha256(
+                {
+                    "contract_version": (
+                        "benchmark_v2_incumbent_child_slot_identity_v1"
+                    ),
+                    "parent_run_id": parent_run_id,
+                    "parent_stage": parent_stage,
+                    "parent_operation_id": owner["operation_id"],
+                    "case_id": case_id,
+                }
+            )
+            suffix = f"::benchmark-v2-incumbent::{token}"
+            return {
+                "run_id": f"{parent_run_id}{suffix}",
+                "stage": parent_stage,
+                "operation_id": f"{owner['operation_id']}{suffix}",
+            }
+
+        assert resolve_spawned_worker_binding_operation_id(
+            serialized=serialized,
+            worker_identity=child_identity(run_id, stage),
+            observation_payload=payload,
+        ) == owner["operation_id"]
+        for unrelated in (
+            child_identity("run-unrelated", stage),
+            child_identity(run_id, "stage-unrelated"),
+            {
+                "run_id": "run-unrelated",
+                "stage": stage,
+                "operation_id": owner["operation_id"],
+            },
+        ):
+            with pytest.raises(ValueError, match="child binding identity"):
+                resolve_spawned_worker_binding_operation_id(
+                    serialized=serialized,
+                    worker_identity=unrelated,
+                    observation_payload=payload,
+                )
 
 
 def _spawn_snapshot(path: str) -> None:
