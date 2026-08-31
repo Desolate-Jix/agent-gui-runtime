@@ -940,6 +940,217 @@ def test_completed_omni_cleanup_materializes_after_clean_registry_restart(
         )
 
 
+def test_completed_vista_predispatch_cleanup_materializes_and_persists_exactly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed VISTA worker may prove cleanup without a dispatch receipt."""
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from app.learn import workflow_worker as worker_module
+    from app.learn.workflow_worker import LearningStageWorkerError, LearningStageWorkerRegistry
+
+    context = _context(tmp_path, provider="vista", revision=7)
+    context_ref = attestation.compose_benchmark_dispatch_context_ref(context=context)
+    root = tmp_path / "vista-workers"
+    root.mkdir()
+    worker_id = "worker-vista-predispatch"
+    cleanup_receipt = seal_immutable({"receipt": "vista-cleanup"})
+    result = {
+        "contract_version": "learning_stage_worker_result_v2",
+        "worker_id": worker_id,
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "model_request_id": "request-vista-predispatch",
+        "payload_sha256": "f" * 64,
+        "status": "completed",
+        "response": {
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": "panel_learning_calibration_sequence",
+            "outcome": "failed",
+            "lifecycle_evidence": {},
+            "orchestration": {
+                "benchmark_v2_vista_batch_count": 0,
+                "benchmark_v2_provider_dispatch_context_refs": {},
+                "benchmark_v2_provider_dispatch_receipt_refs": [],
+            },
+            "result": {
+                "contract_version": "learning_hybrid_stage_failure_v1",
+                "model_lifecycle": {},
+            },
+        },
+    }
+    result_path = root / f"{worker_id}.result.json"
+    result_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    record = {
+        **result,
+        "contract_version": "learning_stage_worker_v1",
+        "started_at": "2026-08-28T00:00:00+00:00",
+        "finished_at": "2026-08-28T00:00:01+00:00",
+        "result_path": str(result_path),
+        "journal_path": str(root / f"{worker_id}.worker.json"),
+        "payload": None,
+        "process": None,
+        "worker_result": result,
+    }
+    reconciliation = {
+        "contract_version": "hybrid_supervisor_reconciliation_v1",
+        "status": "verified",
+        "cleanup_receipt": cleanup_receipt,
+    }
+    authoritative = {
+        "runtime_identity": {"content_sha256": "a" * 64},
+        "acquisition_owner_ref": {"content_sha256": "b" * 64},
+        "cleanup_receipt": cleanup_receipt,
+    }
+    monkeypatch.setattr(
+        worker_module,
+        "_reconcile_supervised_vista_record",
+        lambda _record: deepcopy(reconciliation),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_hybrid_vista_cleanup_evidence",
+        lambda _record: {
+            "contract_version": "hybrid_vista_cooperative_cleanup_v1",
+            "cleanup_status": "verified",
+            "vista_cleanup_receipt": deepcopy(cleanup_receipt),
+        },
+    )
+    monkeypatch.setattr(
+        attestation,
+        "project_authoritative_vista_supervisor_cleanup",
+        lambda **_kwargs: deepcopy(authoritative),
+    )
+    monkeypatch.setattr(
+        attestation,
+        "read_latest_benchmark_dispatch_receipt",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda _value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, _value: _runtime_attestation(
+            attestation, provider=provider
+        ),
+    )
+    pre_vista_contexts = {}
+    pre_vista_receipts = []
+    for provider, revision in (("omni", 4), ("qwen", 5)):
+        pre_context = _context(tmp_path, provider=provider, revision=revision)
+        with attestation.install_benchmark_dispatch_attestor(
+            dispatch_context=pre_context
+        ):
+            receipt = attestation.attest_benchmark_provider_dispatch(
+                provider=provider,
+                operation_ref=deepcopy(pre_context["operation_ref"]),
+                window_binding=deepcopy(pre_context["window_binding"]),
+                provider_runtime={"provider": provider},
+            )
+        pre_vista_contexts[provider] = (
+            attestation.compose_benchmark_dispatch_context_ref(context=pre_context)
+        )
+        pre_vista_receipts.append(
+            {"provider": provider, "content_sha256": receipt["content_sha256"]}
+        )
+    result["response"]["orchestration"][
+        "benchmark_v2_provider_dispatch_context_refs"
+    ] = pre_vista_contexts
+    result["response"]["orchestration"][
+        "benchmark_v2_provider_dispatch_receipt_refs"
+    ] = pre_vista_receipts
+    result["response"]["lifecycle_evidence"] = {
+        "vista_cleanup_receipt": deepcopy(cleanup_receipt)
+    }
+    result["response"]["result"]["model_lifecycle"] = {
+        "vista_cleanup_receipt": deepcopy(cleanup_receipt)
+    }
+    result_path.write_text(json.dumps(result, sort_keys=True), encoding="utf-8")
+    registry = LearningStageWorkerRegistry(result_root=root)
+    registry._records[worker_id] = record
+    registry._workers_by_operation[("run-1", "screen_understanding", "operation-1")] = [worker_id]
+    with pytest.raises(LearningStageWorkerError, match="adoption"):
+        registry.materialize_completed_hybrid_provider_cleanup(
+            worker_id=worker_id,
+            run_id="run-1",
+            stage="screen_understanding",
+            operation_id="operation-1",
+            dispatch_context_ref=context_ref,
+        )
+    record["result_adoption"] = {
+        "contract_version": "learning_stage_worker_result_adoption_v1",
+        "worker_id": worker_id,
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "model_request_id": "request-vista-predispatch",
+        "payload_sha256": "f" * 64,
+        "result_sha256": worker_module._payload_sha256(result),
+        "adopted_at": "2026-08-28T00:00:02+00:00",
+    }
+    projection = registry.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=context_ref,
+    )
+    assert projection["reservation_ref"] == {"content_sha256": context["content_sha256"]}
+    assert projection["acquisition_intent_ref"] == {"content_sha256": context["content_sha256"]}
+    assert projection["cleanup_receipt_ref"] == {
+        "content_sha256": cleanup_receipt["content_sha256"]
+    }
+    assert registry.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=context_ref,
+    ) == projection
+    restarted = LearningStageWorkerRegistry(result_root=root)
+    attachment = restarted.attachment_by_operation(
+        run_id="run-1", stage="screen_understanding", operation_id="operation-1"
+    )
+    assert attachment is not None
+    assert attachment["benchmark_provider_cleanup_ref"] == projection
+    assert restarted.materialize_completed_hybrid_provider_cleanup(
+        worker_id=worker_id,
+        run_id="run-1",
+        stage="screen_understanding",
+        operation_id="operation-1",
+        dispatch_context_ref=context_ref,
+    ) == projection
+
+    monkeypatch.setattr(
+        worker_module,
+        "_hybrid_vista_cleanup_evidence",
+        lambda _record: {
+            "contract_version": "hybrid_vista_cooperative_cleanup_v1",
+            "cleanup_status": "verified",
+            "vista_cleanup_receipt": seal_immutable({"receipt": "tampered"}),
+        },
+    )
+    journal_before_tamper = (root / f"{worker_id}.worker.json").read_bytes()
+    with pytest.raises(LearningStageWorkerError, match="evidence"):
+        registry.materialize_completed_hybrid_provider_cleanup(
+            worker_id=worker_id,
+            run_id="run-1",
+            stage="screen_understanding",
+            operation_id="operation-1",
+            dispatch_context_ref=context_ref,
+        )
+    assert (root / f"{worker_id}.worker.json").read_bytes() == journal_before_tamper
+
+
 @pytest.mark.parametrize("mutation", ["provider", "operation", "window"])
 def test_stale_or_cross_provider_inputs_fail_before_attestation_or_journal(
     tmp_path: Path,

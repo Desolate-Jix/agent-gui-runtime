@@ -3877,6 +3877,225 @@ def test_s3_hybrid_cancel_replays_and_leaves_zero_resources(tmp_path: Path) -> N
         store.close()
 
 
+def test_s3_vista_completed_cleanup_materialization_uses_vista_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Service materialization must not silently skip VISTA's pre-dispatch path."""
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    context = attestation.compose_benchmark_dispatch_context(
+        provider="vista",
+        operation_ref={
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-h1",
+            "revision": 4,
+            "window_binding_ref": deepcopy(_s3_window_binding()["window_binding_ref"]),
+            "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
+        },
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-h1",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(
+            {
+                "run_id": "run-h1",
+                "stage": "screen_understanding",
+                "operation_id": "operation-h1",
+                "revision": 4,
+                "window_binding_ref": deepcopy(
+                    _s3_window_binding()["window_binding_ref"]
+                ),
+                "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
+            }
+        ),
+    )
+    worker = registry.start(
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        task_kind="panel_learning_calibration_sequence",
+        payload=_hybrid_worker_payload(),
+    )
+    registry.complete_current({"outcome": "failed"})
+    worker = registry.current
+    assert worker is not None
+    calls: list[dict[str, object]] = []
+
+    def _materialize(**kwargs: object) -> dict[str, object]:
+        calls.append(deepcopy(dict(kwargs)))
+        worker["benchmark_provider_cleanup_ref"] = _s3_provider_cleanup_ref(worker)
+        return deepcopy(worker["benchmark_provider_cleanup_ref"])
+
+    monkeypatch.setattr(registry, "materialize_completed_hybrid_provider_cleanup", _materialize)
+    refreshed = workflow_service._materialize_benchmark_v2_hybrid_completed_cleanup(
+        composition=composition,
+        binding={
+            "provider_dispatch_context_refs": {
+                "vista": attestation.compose_benchmark_dispatch_context_ref(context=context)
+            }
+        },
+        worker_record=worker,
+    )
+    assert len(calls) == 1
+    assert calls[0]["dispatch_context_ref"]["provider"] == "vista"
+    assert refreshed["benchmark_provider_cleanup_ref"] == worker["benchmark_provider_cleanup_ref"]
+    store.close()
+
+
+def test_s3_safe_stopped_completed_vista_cancel_materializes_cleanup_before_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    worker = registry.start(
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        task_kind="panel_learning_calibration_sequence",
+        payload=_hybrid_worker_payload(),
+    )
+    registry.complete_current({"outcome": "failed"})
+    worker = registry.current
+    assert worker is not None
+    worker["result_adopted"] = True
+    current = store.get("run-h1")
+    stage_execution = {"safe": "stopped"}
+    binding = {"provider_dispatch_context_refs": {"vista": {}}}
+    supplied = {"stage": "screen_understanding"}
+    materialized = _s3_provider_cleanup_ref(worker)
+    worker["benchmark_provider_cleanup_ref"] = deepcopy(materialized)
+    calls: list[str] = []
+    try:
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_terminal_prepared_context",
+            lambda **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_service_context",
+            lambda **_kwargs: (current, stage_execution, binding, worker, supplied),
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_service_status",
+            lambda **_kwargs: "safe_stopped",
+        )
+
+        def _materialize(**_kwargs: object) -> dict[str, object]:
+            calls.append("materialize")
+            return {**worker, "benchmark_provider_cleanup_ref": deepcopy(materialized)}
+
+        monkeypatch.setattr(
+            workflow_service,
+            "_materialize_benchmark_v2_hybrid_completed_cleanup",
+            _materialize,
+        )
+
+        def _project(**kwargs: object) -> dict[str, object]:
+            calls.append("project")
+            assert kwargs["worker_record"]["benchmark_provider_cleanup_ref"] == materialized
+            return {"status": "safe_stopped", "cleanup_refs": {"provider_cleanup_ref": materialized}}
+
+        monkeypatch.setattr(workflow_service, "_project_benchmark_v2_hybrid_step", _project)
+        result = workflow_service._cancel_benchmark_v2_hybrid_workflow_service(
+            composition=composition,
+            operation_ref={"run_id": "run-h1", "operation_id": "operation-h1"},
+        )
+        replay = workflow_service._cancel_benchmark_v2_hybrid_workflow_service(
+            composition=composition,
+            operation_ref={"run_id": "run-h1", "operation_id": "operation-h1"},
+        )
+        assert result["cleanup_refs"]["provider_cleanup_ref"] == materialized
+        assert replay == result
+        assert calls == ["materialize", "project", "materialize", "project"]
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "task_kind",
+    (
+        "panel_learning_hybrid_qwen_binding",
+        "panel_learning_hybrid_fusion",
+        "panel_learning_hybrid_review_projection",
+    ),
+)
+def test_s3_safe_stopped_non_vista_cancel_does_not_materialize_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    task_kind: str,
+) -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    registry.start(
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        task_kind=task_kind,
+        payload=_hybrid_worker_payload(),
+    )
+    registry.complete_current({"outcome": "failed"})
+    worker = registry.current
+    assert worker is not None
+    worker["result_adopted"] = True
+    current = store.get("run-h1")
+    try:
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_terminal_prepared_context",
+            lambda **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_service_context",
+            lambda **_kwargs: (
+                current,
+                {"safe": "stopped"},
+                {"provider_dispatch_context_refs": {}},
+                worker,
+                {"stage": "screen_understanding"},
+            ),
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_hybrid_service_status",
+            lambda **_kwargs: "safe_stopped",
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_materialize_benchmark_v2_hybrid_completed_cleanup",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("non-VISTA cleanup materialization")
+            ),
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_project_benchmark_v2_hybrid_step",
+            lambda **_kwargs: {"status": "safe_stopped"},
+        )
+        assert workflow_service._cancel_benchmark_v2_hybrid_workflow_service(
+            composition=composition,
+            operation_ref={"run_id": "run-h1", "operation_id": "operation-h1"},
+        ) == {"status": "safe_stopped"}
+    finally:
+        store.close()
+
+
 def test_s3_service_facade_has_no_handler_provider_model_or_action_imports() -> None:
     source = Path("app/learn/workflow_service.py").read_text(encoding="utf-8")
     tree = ast.parse(source)

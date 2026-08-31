@@ -8189,6 +8189,7 @@ class LearningStageWorkerRegistry:
             _required_text(operation_id, "operation_id"),
         )
         from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+            read_latest_benchmark_dispatch_receipt,
             validate_benchmark_dispatch_context_ref,
             validate_benchmark_dispatch_receipt_refs,
         )
@@ -8201,9 +8202,14 @@ class LearningStageWorkerRegistry:
             raise LearningStageWorkerError(
                 "completed Hybrid cleanup dispatch context is invalid"
             ) from error
-        if exact_context_ref["provider"] != "omni":
+        provider = exact_context_ref["provider"]
+        expected_task_kind = {
+            "omni": "panel_learning_hybrid_omni_discovery",
+            "vista": "panel_learning_calibration_sequence",
+        }.get(provider)
+        if expected_task_kind is None:
             raise LearningStageWorkerError(
-                "completed Hybrid cleanup is limited to the Omni blocker"
+                "completed Hybrid cleanup provider is unsupported"
             )
         context = exact_context_ref["dispatch_context"]
         context_operation = context["operation_ref"]
@@ -8236,8 +8242,7 @@ class LearningStageWorkerRegistry:
                 record.get("run_id") != operation_key[0]
                 or record.get("stage") != operation_key[1]
                 or record.get("operation_id") != operation_key[2]
-                or record.get("task_kind")
-                != "panel_learning_hybrid_omni_discovery"
+                or record.get("task_kind") != expected_task_kind
                 or public.get("status") != "completed"
                 or public.get("runtime_attached") is not False
                 or public.get("result_available") is not True
@@ -8252,6 +8257,227 @@ class LearningStageWorkerRegistry:
                     "completed Hybrid cleanup worker is not terminal-safe"
                 )
             orchestration = response.get("orchestration")
+            if provider == "vista":
+                if (
+                    public.get("result_adopted") is not True
+                    or not isinstance(record.get("result_adoption"), Mapping)
+                    or response.get("outcome") != "failed"
+                    or not isinstance(orchestration, Mapping)
+                    or orchestration.get("benchmark_v2_vista_batch_count") != 0
+                ):
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup adoption is invalid"
+                    )
+                try:
+                    _validated_result_adoption(
+                        dict(record["result_adoption"]),
+                        identity={
+                            name: str(record[name])
+                            for name in (
+                                "worker_id",
+                                "run_id",
+                                "stage",
+                                "operation_id",
+                                "task_kind",
+                                "model_request_id",
+                                "payload_sha256",
+                            )
+                        },
+                    )
+                except (TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup adoption is invalid"
+                    ) from error
+                result_contexts = (
+                    orchestration.get("benchmark_v2_provider_dispatch_context_refs")
+                )
+                receipt_refs = (
+                    orchestration.get("benchmark_v2_provider_dispatch_receipt_refs")
+                )
+                has_vista_receipt = (
+                    isinstance(receipt_refs, Mapping)
+                    and "vista" in receipt_refs
+                ) or (
+                    isinstance(receipt_refs, list)
+                    and any(
+                        isinstance(ref, Mapping) and ref.get("provider") == "vista"
+                        for ref in receipt_refs
+                    )
+                )
+                if (
+                    not isinstance(result_contexts, Mapping)
+                    or set(result_contexts) != {"omni", "qwen"}
+                    or "vista" in result_contexts
+                ) or has_vista_receipt:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup has dispatch evidence"
+                    )
+                operation_identity = {
+                    name: deepcopy(context_operation[name])
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "window_binding_ref",
+                        "capture_ref",
+                    )
+                }
+                try:
+                    exact_pre_vista_contexts = {
+                        expected_provider: validate_benchmark_dispatch_context_ref(
+                            result_contexts.get(expected_provider)
+                        )
+                        for expected_provider in ("omni", "qwen")
+                    }
+                    if any(
+                        exact_pre_vista_contexts[name]["provider"] != name
+                        or any(
+                            exact_pre_vista_contexts[name]["dispatch_context"][
+                                "operation_ref"
+                            ][field]
+                            != operation_identity[field]
+                            for field in operation_identity
+                        )
+                        or exact_pre_vista_contexts[name]["dispatch_context"][
+                            "receipt_journal_path"
+                        ]
+                        != context["receipt_journal_path"]
+                        for name in ("omni", "qwen")
+                    ):
+                        raise ValueError("VISTA pre-dispatch contexts differ")
+                    validate_benchmark_dispatch_receipt_refs(
+                        receipt_journal_path=Path(context["receipt_journal_path"]),
+                        receipt_refs=receipt_refs,
+                        operation_identity=operation_identity,
+                        expected_provider_counts={"omni": 1, "qwen": 1},
+                        expected_dispatch_contexts={
+                            name: exact_pre_vista_contexts[name]["dispatch_context"]
+                            for name in ("omni", "qwen")
+                        },
+                    )
+                except (OSError, TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup dispatch evidence is invalid"
+                    ) from error
+                if read_latest_benchmark_dispatch_receipt(
+                    dispatch_context=context
+                ) is not None:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup dispatch receipt is present"
+                    )
+                reconciliation = _reconcile_supervised_vista_record(record)
+                from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+                    project_authoritative_vista_supervisor_cleanup,
+                )
+
+                try:
+                    authoritative = project_authoritative_vista_supervisor_cleanup(
+                        record=record,
+                        supervisor_reconciliation=reconciliation,
+                    )
+                    cooperative_cleanup = _hybrid_vista_cleanup_evidence(record)
+                except (TypeError, ValueError) as error:
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup evidence is invalid"
+                    ) from error
+                exact_receipt = cooperative_cleanup.get("vista_cleanup_receipt")
+                lifecycle = response.get("lifecycle_evidence")
+                managed_result = response.get("result")
+                result_lifecycle = (
+                    managed_result.get("model_lifecycle")
+                    if isinstance(managed_result, Mapping)
+                    else None
+                )
+                lifecycle_receipt = (
+                    lifecycle.get("vista_cleanup_receipt")
+                    if isinstance(lifecycle, Mapping)
+                    else None
+                )
+                result_receipt = (
+                    result_lifecycle.get("vista_cleanup_receipt")
+                    if isinstance(result_lifecycle, Mapping)
+                    else None
+                )
+                runtime_identity = authoritative.get("runtime_identity")
+                acquisition_owner_ref = authoritative.get("acquisition_owner_ref")
+                authoritative_receipt = authoritative.get("cleanup_receipt")
+                if (
+                    cooperative_cleanup.get("cleanup_status") != "verified"
+                    or not isinstance(exact_receipt, Mapping)
+                    or not isinstance(managed_result, Mapping)
+                    or managed_result.get("contract_version")
+                    != "learning_hybrid_stage_failure_v1"
+                    or not isinstance(result_lifecycle, Mapping)
+                    or (
+                        isinstance(lifecycle_receipt, Mapping)
+                        and isinstance(result_receipt, Mapping)
+                        and lifecycle_receipt != result_receipt
+                    )
+                    or exact_receipt != authoritative_receipt
+                    or not isinstance(runtime_identity, Mapping)
+                    or not isinstance(acquisition_owner_ref, Mapping)
+                    or not isinstance(runtime_identity.get("content_sha256"), str)
+                    or not isinstance(acquisition_owner_ref.get("content_sha256"), str)
+                    or not isinstance(exact_receipt.get("content_sha256"), str)
+                ):
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup evidence differs"
+                    )
+                identity_fields = (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                )
+                projection = seal_immutable(
+                    {
+                        "contract_version": "benchmark_provider_cleanup_ref_v1",
+                        "status": "cleanup_verified",
+                        "outcome": "verified_exact_process_exited",
+                        "authority_kind": (
+                            "benchmark_v2_workflow_service_dispatch_cleanup"
+                        ),
+                        **{name: str(record[name]) for name in identity_fields},
+                        "reservation_ref": {
+                            "content_sha256": context["content_sha256"]
+                        },
+                        "acquisition_owner_ref": deepcopy(dict(acquisition_owner_ref)),
+                        "acquisition_intent_ref": {
+                            "content_sha256": context["content_sha256"]
+                        },
+                        "runtime_owner_ref": {
+                            "content_sha256": runtime_identity["content_sha256"]
+                        },
+                        "cleanup_receipt_ref": {
+                            "content_sha256": exact_receipt["content_sha256"]
+                        },
+                    }
+                )
+                projection = _validate_hybrid_benchmark_provider_cleanup_projection(
+                    projection, identity=record
+                )
+                existing = record.get("benchmark_provider_cleanup_ref")
+                if existing is not None and not isinstance(existing, Mapping):
+                    raise LearningStageWorkerError(
+                        "completed Hybrid VISTA cleanup projection is invalid"
+                    )
+                if isinstance(existing, Mapping):
+                    validated_existing = (
+                        _validate_hybrid_benchmark_provider_cleanup_projection(
+                            existing,
+                            identity=record,
+                        )
+                    )
+                    if validated_existing != projection:
+                        raise LearningStageWorkerError(
+                            "completed Hybrid cleanup projection replay differs"
+                        )
+                else:
+                    record["benchmark_provider_cleanup_ref"] = deepcopy(projection)
+                    self._persist_record_journal(record)
+                return deepcopy(projection)
             result_contexts = (
                 orchestration.get("benchmark_v2_provider_dispatch_context_refs")
                 if isinstance(orchestration, Mapping)

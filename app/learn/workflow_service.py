@@ -5584,11 +5584,14 @@ def _materialize_benchmark_v2_hybrid_completed_cleanup(
         if isinstance(context_refs, Mapping) and isinstance(provider, str)
         else None
     )
-    if provider != "omni" or not isinstance(context_ref, Mapping):
+    if (
+        provider not in {"omni", "vista"}
+        or not isinstance(context_ref, Mapping)
+    ):
         if composition.composition_kind == "test":
             return deepcopy(dict(worker_record))
         raise LearningWorkflowStageOperationError(
-            "expired benchmark_v2 Hybrid cleanup lacks its Omni service context"
+            "expired benchmark_v2 Hybrid cleanup lacks its service context"
         )
     _LearningWorkflowRegistryOwner(
         composition.worker_registry
@@ -6897,7 +6900,11 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 field="lease_expires_at",
             )
             lease_expired = checked_at > lease_expires_at
-            if lease_expired:
+            if (
+                lease_expired
+                and worker_record.get("task_kind")
+                != "panel_learning_calibration_sequence"
+            ):
                 worker_record = (
                     _materialize_benchmark_v2_hybrid_completed_cleanup(
                         composition=composition,
@@ -7159,6 +7166,31 @@ def _cancel_benchmark_v2_hybrid_workflow_service(
             worker_record=worker_record,
         )
         if status in {"complete", "safe_stopped"}:
+            if (
+                status == "safe_stopped"
+                and worker_record.get("status") == "completed"
+                and worker_record.get("runtime_attached") is False
+                and worker_record.get("result_available") is True
+                and worker_record.get("result_adopted") is True
+                and worker_record.get("task_kind")
+                == "panel_learning_calibration_sequence"
+            ):
+                if (
+                    worker_record.get("benchmark_provider_cleanup_ref") is not None
+                    and not isinstance(
+                        worker_record.get("benchmark_provider_cleanup_ref"), Mapping
+                    )
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 Hybrid completed provider cleanup is invalid"
+                    )
+                worker_record = (
+                    _materialize_benchmark_v2_hybrid_completed_cleanup(
+                        composition=composition,
+                        binding=binding,
+                        worker_record=worker_record,
+                    )
+                )
             return _project_benchmark_v2_hybrid_step(
                 composition=composition,
                 workflow_state=current,
