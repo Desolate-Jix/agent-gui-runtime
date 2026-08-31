@@ -147,6 +147,11 @@
         "role": "calibration_sequence"
       },
       {
+        "file_sha256": "f87a0b952d9bdd51726aaed2ea1d745c1173141ebf9f3badb5c672de11c0f9e5",
+        "relative_path": "app/learn/hybrid/contracts.py",
+        "role": "hybrid_contracts"
+      },
+      {
         "file_sha256": "2374a8cd3d92e38b423fea24f6bac6f5180258d8ece2f3125985fff75bdb1e94",
         "relative_path": "app/learn/hybrid/benchmark_v2_actual.py",
         "role": "benchmark_actual"
@@ -187,7 +192,7 @@
         "role": "qwen_binding"
       },
       {
-        "file_sha256": "f0a655604abee17c578fb80a5fd979a9fa25954230b9a471ca0c2fd188caae4f",
+        "file_sha256": "1b6c7dd9e411f1fa4aa92d3c4906fffeb0fccdc8ec249a12e48f3205116c61b4",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
       },
@@ -232,12 +237,12 @@
         "role": "uei_projections"
       },
       {
-        "file_sha256": "821df19314d0636ddc09e5da8510863badfaa2227b10917f26d9f1b5614b5583",
+        "file_sha256": "2dacaafdce9f8e75beba9b4bb976a1ec69cc45ed2eb1aa264b2df63c85e25687",
         "relative_path": "app/learn/workflow_service.py",
         "role": "workflow_service"
       },
       {
-        "file_sha256": "7b5c5f945d2259dd4b5298a99283a6f0b4375be6030eddeddc51c86dd196a702",
+        "file_sha256": "9523d5cbd6e694d148582fb760da8d33e96378ba3d94f6397cf78b7ea287d472",
         "relative_path": "app/learn/workflow_worker.py",
         "role": "workflow_worker"
       },
