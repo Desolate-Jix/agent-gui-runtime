@@ -10842,6 +10842,174 @@ def test_benchmark_provider_cleanup_cancelled_before_launch_uses_production_rece
     ).read_bytes() == terminal_bytes
 
 
+def test_benchmark_provider_cleanup_launched_worker_exit_aborts_unmaterialized_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import model_server
+    from app.learn import workflow_worker as worker_module
+
+    registry_root = tmp_path / "registry"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    provider_path = next(registry_root.glob("*.benchmark-provider.json"))
+    provider = json.loads(provider_path.read_text(encoding="utf-8"))
+    prepared_observation = model_server.observe_qwen_model_request_acquisition(
+        anchored["model_request_id"],
+        acquisition_intent_ref=provider["acquisition_intent_ref"],
+        runtime_owner_ref=provider["runtime_owner_ref"],
+    )
+    assert prepared_observation["materialization_state"] == (
+        "prepared_never_materialized"
+    )
+    assert prepared_observation["materialization_revision"] == 0
+    source = anchored["handler_payload_source"]
+    original = {
+        **anchored,
+        "reservation_state": "reserved",
+        "abort_observation_ref": None,
+        "predecessor_content_sha256": source["content_sha256"],
+        "content_sha256": anchored["predecessor_content_sha256"],
+    }
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root,
+        reservation=original,
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"],
+        predecessor_content_sha256=None,
+    )
+    context = multiprocessing.get_context("spawn")
+    ready_queue = context.Queue()
+    process = None
+
+    def gated_process_factory(*, args, name, **_kwargs):
+        return context.Process(
+            target=_benchmark_real_gated_worker,
+            args=(args[-1], ready_queue),
+            name=name,
+        )
+
+    try:
+        registry = LearningStageWorkerRegistry(
+            result_root=registry_root,
+            process_factory=gated_process_factory,
+            benchmark_supervision_root=root,
+        )
+        started = registry.launch_prepared_benchmark_worker(
+            reservation_ref={"content_sha256": anchored["content_sha256"]},
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+        process = registry._records[started["worker_id"]]["process"]
+        assert ready_queue.get(timeout=15) == {
+            "gate_released": True,
+            "pid": process.pid,
+        }
+        observed = registry.observe_benchmark_worker_cleanup(
+            worker_id=anchored["worker_id"],
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id=anchored["operation_id"],
+            terminate=True,
+            expected_operation_anchor=anchor,
+            supervision_root=root,
+        )
+        verified = registry.verify_benchmark_worker_cleanup_receipt(
+            worker_id=anchored["worker_id"],
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id=anchored["operation_id"],
+            receipt=observed,
+            expected_operation_anchor=anchor,
+            supervision_root=root,
+        )
+        assert verified["outcome"] == "verified_exact_worker_exited"
+        cleanup_path = (
+            registry_root / f"{anchored['worker_id']}.benchmark-cleanup.json"
+        )
+        hidden_cleanup_path = cleanup_path.with_suffix(".hidden")
+        cleanup_path.replace(hidden_cleanup_path)
+        abort_calls: list[str] = []
+        real_abort = worker_module.abort_qwen_model_request_acquisition
+        monkeypatch.setattr(
+            worker_module,
+            "abort_qwen_model_request_acquisition",
+            lambda request_id, **_kwargs: abort_calls.append(request_id),
+        )
+        pending = registry.reconcile_benchmark_provider_cleanup(
+            worker_id=anchored["worker_id"],
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id=anchored["operation_id"],
+        )
+        assert pending["status"] == "cleanup_pending"
+        assert pending["cleanup_receipt_ref"] is None
+        assert abort_calls == []
+        hidden_cleanup_path.replace(cleanup_path)
+        monkeypatch.setattr(
+            worker_module,
+            "abort_qwen_model_request_acquisition",
+            real_abort,
+        )
+        _install_benchmark_provider_abort_primitive(
+            tmp_path,
+            monkeypatch,
+            request_id=anchored["model_request_id"],
+        )
+
+        cleanup = registry.reconcile_benchmark_provider_cleanup(
+            worker_id=anchored["worker_id"],
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id=anchored["operation_id"],
+        )
+
+        assert cleanup["status"] == "cleanup_verified"
+        assert cleanup["outcome"] == "verified_not_acquired"
+        assert cleanup["cleanup_receipt_ref"] is not None
+        aborted_observation = model_server.observe_qwen_model_request_acquisition(
+            anchored["model_request_id"],
+            acquisition_intent_ref=provider["acquisition_intent_ref"],
+            runtime_owner_ref=provider["runtime_owner_ref"],
+        )
+        assert aborted_observation["materialization_state"] == (
+            "aborted_never_materialized"
+        )
+        assert aborted_observation["materialization_revision"] == 1
+        restarted = LearningStageWorkerRegistry(
+            result_root=registry_root,
+            process_factory=_fake_process_factory,
+            benchmark_supervision_root=root,
+        )
+        assert restarted.reconcile_benchmark_provider_cleanup(
+            worker_id=anchored["worker_id"],
+            run_id=anchored["run_id"],
+            stage=anchored["stage"],
+            operation_id=anchored["operation_id"],
+        ) == cleanup
+    finally:
+        if process is not None:
+            try:
+                alive = process.is_alive()
+            except ValueError:
+                alive = False
+            if alive:
+                process.terminate()
+                process.join(timeout=15)
+                assert not process.is_alive()
+                process.close()
+        ready_queue.close()
+        ready_queue.join_thread()
+
+
 def test_benchmark_provider_cleanup_materialization_without_lease_stays_pending(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

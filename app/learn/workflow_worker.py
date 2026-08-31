@@ -4842,6 +4842,98 @@ class LearningStageWorkerRegistry:
             )
         return receipt
 
+    def _validate_benchmark_provider_launched_worker_cleanup(
+        self,
+        *,
+        current: Mapping[str, object],
+        provider_journal: Mapping[str, object],
+    ) -> dict[str, Any]:
+        """重验 launched worker 的精确退出证明，授权收敛未物化 B2。"""
+
+        reservation = self._validate_benchmark_reservation(dict(current))
+        root = self._benchmark_supervision_root
+        if root is None or reservation.get("reservation_state") != "launched":
+            raise LearningStageWorkerError(
+                "benchmark provider launched cleanup authority is missing"
+            )
+        persisted = self._validate_benchmark_reservation(
+            _read_json_object(
+                self._benchmark_reservation_path(reservation["operation_id"]),
+                label="benchmark provider launched reservation",
+            )
+        )
+        if persisted != reservation:
+            raise LearningStageWorkerError(
+                "benchmark provider launched reservation is not durable"
+            )
+        anchored = self._benchmark_anchored_reservation(reservation)
+        if provider_journal.get("reservation_ref") != {
+            "content_sha256": anchored["content_sha256"]
+        }:
+            raise LearningStageWorkerError(
+                "benchmark provider anchored reservation lineage does not match"
+            )
+        original_body = deepcopy(reservation)
+        original_body.pop("content_sha256")
+        original_body["reservation_state"] = "reserved"
+        original_body["abort_observation_ref"] = None
+        original_body["predecessor_content_sha256"] = reservation[
+            "handler_payload_source"
+        ]["content_sha256"]
+        original = seal_immutable(original_body)
+        expected_anchored = _benchmark_transitioned_reservation(
+            original, "anchored"
+        )
+        expected_launching = self._transition_benchmark_reservation(
+            expected_anchored, "launching"
+        )
+        expected_launched = self._transition_benchmark_reservation(
+            expected_launching, "launched"
+        )
+        if anchored != expected_anchored or reservation != expected_launched:
+            raise LearningStageWorkerError(
+                "benchmark provider launched reservation lineage is invalid"
+            )
+        source = original["handler_payload_source"]
+        operation_anchor = compose_benchmark_worker_operation_anchor_v1(
+            supervision_root=root,
+            reservation=original,
+            handler_payload_source=source,
+            window_binding_ref=source["window_binding_ref"],
+            capture_ref=source["capture_ref"],
+            predecessor_content_sha256=None,
+        )
+        receipt = _validate_benchmark_cleanup_receipt(
+            _read_json_object(
+                self._result_root
+                / f"{reservation['worker_id']}.benchmark-cleanup.json",
+                label="benchmark provider B1 launched cleanup receipt",
+            ),
+            result_root=self._result_root,
+            worker_id=reservation["worker_id"],
+            run_id=reservation["run_id"],
+            stage=reservation["stage"],
+            operation_id=reservation["operation_id"],
+            operation_anchor=operation_anchor,
+            original_reservation=original,
+            current_reservation=reservation,
+            supervision_root=root,
+        )
+        if receipt.get("outcome") != "verified_exact_worker_exited":
+            raise LearningStageWorkerError(
+                "benchmark provider B1 launched cleanup receipt is invalid"
+            )
+        _benchmark_cleanup_replay_live_reattest(
+            result_root=self._result_root,
+            worker_id=reservation["worker_id"],
+            run_id=reservation["run_id"],
+            stage=reservation["stage"],
+            operation_id=reservation["operation_id"],
+            original_reservation=original,
+            validated_receipt=receipt,
+        )
+        return receipt
+
     def reconcile_benchmark_provider_cleanup(
         self,
         *,
@@ -4921,9 +5013,7 @@ class LearningStageWorkerRegistry:
                 )
             provider = self._validate_benchmark_provider_journal(provider)
             snapshot_ref = current["content_sha256"]
-            cancellation_candidate = (
-                current.get("reservation_state") == "cancelled_before_launch"
-            )
+            cleanup_authority_state = current.get("reservation_state")
 
         try:
             acquisition_observation = (
@@ -4954,14 +5044,23 @@ class LearningStageWorkerRegistry:
             return self._benchmark_provider_cleanup_projection(
                 provider, receipt=None
             )
-        cancellation_valid = False
-        if cancellation_candidate:
+        cleanup_authority_valid = False
+        abort_reason = "benchmark_operation_cleanup_not_verified"
+        if cleanup_authority_state in {"cancelled_before_launch", "launched"}:
             try:
-                self._validate_benchmark_provider_cancelled_before_launch(
-                    current=current,
-                    provider_journal=provider,
-                )
-                cancellation_valid = True
+                if cleanup_authority_state == "cancelled_before_launch":
+                    self._validate_benchmark_provider_cancelled_before_launch(
+                        current=current,
+                        provider_journal=provider,
+                    )
+                    abort_reason = "benchmark_operation_cancelled_before_launch"
+                else:
+                    self._validate_benchmark_provider_launched_worker_cleanup(
+                        current=current,
+                        provider_journal=provider,
+                    )
+                    abort_reason = "benchmark_operation_exact_worker_exited"
+                cleanup_authority_valid = True
             except LearningStageWorkerError:
                 return self._benchmark_provider_cleanup_projection(
                     provider, receipt=None
@@ -4982,7 +5081,7 @@ class LearningStageWorkerRegistry:
                 expected_journal_root=self._result_root,
             )
         abort_allowed = (
-            cancellation_valid
+            cleanup_authority_valid
             and acquisition_observation["materialization_state"]
             == "prepared_never_materialized"
             and acquisition_observation["materialization_revision"] == 0
@@ -4993,7 +5092,7 @@ class LearningStageWorkerRegistry:
                     provider["model_request_id"],
                     acquisition_intent_ref=provider["acquisition_intent_ref"],
                     runtime_owner_ref=provider["runtime_owner_ref"],
-                    reason="benchmark_operation_cancelled_before_launch",
+                    reason=abort_reason,
                 )
                 if (
                     not isinstance(abort_result, Mapping)
