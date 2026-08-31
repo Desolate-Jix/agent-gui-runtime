@@ -3372,6 +3372,69 @@ def test_s3_managed_vista_failure_uses_only_actual_dispatch_counts(
     assert captured["expected_provider_counts"] == {"omni": 1, "qwen": 1}
 
 
+@pytest.mark.parametrize("vista_dispatch_count", [0, 1])
+def test_s3_managed_vista_handler_failure_uses_committed_dispatch_count(
+    monkeypatch: pytest.MonkeyPatch,
+    vista_dispatch_count: int,
+) -> None:
+    from app.learn import workflow_service
+
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_calibration_sequence",
+        "outcome": "failed",
+        "result": {
+            "contract_version": "learning_hybrid_stage_failure_v1",
+            "failure_reason": "controlled VISTA failure",
+            "error_type": "RuntimeError",
+            "error_notes": [],
+            "model_lifecycle": {
+                "vista_cleanup_receipt": {"cleanup_status": "verified"}
+            },
+        },
+        "orchestration": {
+            "benchmark_v2_vista_batch_count": vista_dispatch_count,
+            "benchmark_v2_provider_dispatch_receipt_refs": [
+                {"provider": "omni", "content_sha256": "a" * 64},
+                {"provider": "qwen", "content_sha256": "b" * 64},
+                *[
+                    {"provider": "vista", "content_sha256": "c" * 64}
+                    for _ in range(vista_dispatch_count)
+                ],
+            ],
+        },
+    }
+    captured: dict[str, object] = {}
+
+    def validate_dispatch(**kwargs):
+        captured.update(kwargs)
+        return deepcopy(dict(kwargs["response"]))
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_validate_benchmark_v2_dispatch_response",
+        validate_dispatch,
+    )
+
+    class _Composition:
+        composition_kind = "production"
+        benchmark_v2_worker_binding_resolver = object()
+
+    adopted = workflow_service._validate_benchmark_v2_hybrid_adoption(
+        composition=_Composition(),
+        response=response,
+        window_binding={},
+        task_kind="panel_learning_calibration_sequence",
+        provider_dispatch_context_refs={},
+    )
+    assert adopted == response
+    expected_counts = {"omni": 1, "qwen": 1}
+    if vista_dispatch_count:
+        expected_counts["vista"] = vista_dispatch_count
+    assert captured["expected_provider_counts"] == expected_counts
+
+
 def test_s3_completed_vista_dispatch_count_remains_positive_and_exact() -> None:
     from app.learn import workflow_service
 

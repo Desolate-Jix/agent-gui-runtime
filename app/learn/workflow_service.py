@@ -4823,13 +4823,42 @@ def _benchmark_v2_expected_dispatch_counts(
                 "benchmark_v2 VISTA result is unavailable"
             )
         if response.get("outcome") == "failed":
-            failure_data = result.get("data") if result.get("success") is False else None
-            if (
-                not isinstance(failure_data, Mapping)
-                or failure_data.get("batch_count") != batch_count
-            ):
+            if result.get("success") is False:
+                failure_data = result.get("data")
+                if (
+                    not isinstance(failure_data, Mapping)
+                    or failure_data.get("batch_count") != batch_count
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 VISTA receipt count differs from calibration failure batch_count"
+                    )
+            elif result.get("contract_version") == "learning_hybrid_stage_failure_v1":
+                receipt_refs = orchestration.get(
+                    "benchmark_v2_provider_dispatch_receipt_refs"
+                )
+                failure_reason = result.get("failure_reason")
+                error_type = result.get("error_type")
+                model_lifecycle = result.get("model_lifecycle")
+                if (
+                    not isinstance(receipt_refs, list)
+                    or any(not isinstance(item, Mapping) for item in receipt_refs)
+                    or not isinstance(failure_reason, str)
+                    or not failure_reason.strip()
+                    or not isinstance(error_type, str)
+                    or not error_type.strip()
+                    or not isinstance(model_lifecycle, Mapping)
+                    or sum(
+                        item.get("provider") == "vista"
+                        for item in receipt_refs
+                    )
+                    != batch_count
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 VISTA handler failure dispatch count is invalid"
+                    )
+            else:
                 raise LearningWorkflowStageOperationError(
-                    "benchmark_v2 VISTA receipt count differs from calibration failure batch_count"
+                    "benchmark_v2 VISTA failure result contract is invalid"
                 )
         else:
             sequence = _hybrid_calibration_sequence_payload(result)

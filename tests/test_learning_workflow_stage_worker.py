@@ -7578,6 +7578,126 @@ def test_hybrid_vista_managed_preflight_failure_completes_worker_without_dispatc
     assert lease_document["state"] == "released"
 
 
+@pytest.mark.parametrize("vista_dispatch_count", [0, 1])
+def test_benchmark_vista_handler_failure_preserves_exact_committed_dispatch_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    vista_dispatch_count: int,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    run_id = f"run-vista-handler-failure-{vista_dispatch_count}"
+    operation_id = f"operation-{run_id}"
+    task_kind = "panel_learning_calibration_sequence"
+    prior_dispatch_refs = [
+        {"provider": "omni", "content_sha256": "e" * 64},
+        {"provider": "qwen", "content_sha256": "f" * 64},
+    ]
+    vista_dispatch_refs = [
+        {"provider": "vista", "content_sha256": "1" * 64}
+        for _ in range(vista_dispatch_count)
+    ]
+    managed_failure = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": task_kind,
+        "outcome": "failed",
+        "result": {
+            "contract_version": "learning_hybrid_stage_failure_v1",
+            "failure_reason": "controlled VISTA failure",
+            "error_type": "RuntimeError",
+            "error_notes": [],
+            "model_lifecycle": {
+                "vista_cleanup_receipt": {"cleanup_status": "verified"}
+            },
+        },
+        "orchestration": {
+            "benchmark_v2_provider_dispatch_receipt_refs": prior_dispatch_refs,
+            "benchmark_v2_provider_dispatch_context_refs": {
+                "omni": {"provider": "omni"},
+                "qwen": {"provider": "qwen"},
+            },
+        },
+    }
+    monkeypatch.setattr(
+        workflow_worker,
+        "execute_learning_stage_worker_task",
+        lambda *args, **kwargs: deepcopy(managed_failure),
+    )
+    monkeypatch.setattr(
+        attestation,
+        "current_benchmark_dispatch_receipt_refs",
+        lambda: deepcopy(vista_dispatch_refs),
+    )
+    operation_ref = {
+        "run_id": run_id,
+        "stage": "screen_understanding",
+        "operation_id": operation_id,
+        "revision": 7,
+        "window_binding_ref": {
+            "id": "window-binding/handler-failure",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": "capture/handler-failure",
+            "content_sha256": "b" * 64,
+        },
+    }
+    dispatch_context = attestation.compose_benchmark_dispatch_context(
+        provider="vista",
+        operation_ref=operation_ref,
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-handler-failure",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(operation_ref),
+    )
+    result_path = tmp_path / f"handler-failure-{vista_dispatch_count}.json"
+    completion_event = Event()
+
+    workflow_worker._run_learning_stage_worker_entry(
+        str(result_path),
+        task_kind,
+        {"_benchmark_v2_dispatch_context": dispatch_context},
+        f"model-request-handler-failure-{vista_dispatch_count}",
+        {
+            "worker_id": f"worker-handler-failure-{vista_dispatch_count}",
+            "run_id": run_id,
+            "stage": "screen_understanding",
+            "operation_id": operation_id,
+            "task_kind": task_kind,
+            "model_request_id": (
+                f"model-request-handler-failure-{vista_dispatch_count}"
+            ),
+            "payload_sha256": "d" * 64,
+        },
+        Event(),
+        completion_event,
+    )
+
+    envelope = json.loads(result_path.read_text(encoding="utf-8"))
+    assert completion_event.is_set()
+    assert envelope["status"] == "completed", envelope
+    response = envelope["response"]
+    assert response["result"] == managed_failure["result"]
+    orchestration = response["orchestration"]
+    assert orchestration["benchmark_v2_vista_batch_count"] == vista_dispatch_count
+    assert orchestration["benchmark_v2_provider_dispatch_receipt_refs"] == [
+        *prior_dispatch_refs,
+        *vista_dispatch_refs,
+    ]
+    contexts = orchestration["benchmark_v2_provider_dispatch_context_refs"]
+    assert set(contexts) == (
+        {"omni", "qwen", "vista"}
+        if vista_dispatch_count
+        else {"omni", "qwen"}
+    )
+
+
 def test_hybrid_vista_registry_cancel_waits_for_cooperative_cleanup_without_termination(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

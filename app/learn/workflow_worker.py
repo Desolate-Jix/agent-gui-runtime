@@ -3042,22 +3042,31 @@ def _run_learning_stage_worker_entry(
                             and batch_count >= 1
                         )
                     elif managed_outcome == "failed":
-                        failure_data = (
-                            managed_result.get("data")
-                            if isinstance(managed_result, dict)
+                        if (
+                            isinstance(managed_result, dict)
                             and managed_result.get("success") is False
-                            else None
-                        )
-                        batch_count = (
-                            failure_data.get("batch_count")
-                            if isinstance(failure_data, dict)
-                            else None
-                        )
-                        valid_batch_count = (
-                            not isinstance(batch_count, bool)
-                            and isinstance(batch_count, int)
-                            and batch_count >= 0
-                        )
+                        ):
+                            failure_data = managed_result.get("data")
+                            batch_count = (
+                                failure_data.get("batch_count")
+                                if isinstance(failure_data, dict)
+                                else None
+                            )
+                            valid_batch_count = (
+                                not isinstance(batch_count, bool)
+                                and isinstance(batch_count, int)
+                                and batch_count >= 0
+                            )
+                        elif (
+                            isinstance(managed_result, dict)
+                            and managed_result.get("contract_version")
+                            == "learning_hybrid_stage_failure_v1"
+                        ):
+                            batch_count = len(dispatch_refs)
+                            valid_batch_count = True
+                        else:
+                            batch_count = None
+                            valid_batch_count = False
                     else:
                         batch_count = None
                         valid_batch_count = False
