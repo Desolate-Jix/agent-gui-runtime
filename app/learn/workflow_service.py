@@ -1725,11 +1725,23 @@ def _resolve_benchmark_v2_result_binding(
     )
 
     try:
+        binding_run_id, binding_operation_id = (
+            _benchmark_v2_incumbent_parent_binding_identity(
+                run_id=str(operation["run_id"]),
+                stage=str(operation["stage"]),
+                operation_id=str(operation["operation_id"]),
+                request={
+                    "provider_case_ref": operation["handler_payload_source"][
+                        "provider_case_ref"
+                    ]
+                },
+            )
+        )
         resolution = resolve_server_worker_window_binding(
             resolver=composition.benchmark_v2_worker_binding_resolver,
-            run_id=operation["run_id"],
+            run_id=binding_run_id,
             stage=operation["stage"],
-            operation_id=operation["operation_id"],
+            operation_id=binding_operation_id,
             window_binding_ref=operation["window_binding_ref"],
             capture_ref=operation["capture_ref"],
             worker_process_identity=launch_owner["process_identity"],

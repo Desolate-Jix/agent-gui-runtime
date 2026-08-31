@@ -789,6 +789,66 @@ def test_incumbent_child_identity_resolves_only_its_deterministic_parent(
         )
 
 
+def test_incumbent_result_binding_resolves_task5_with_parent_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+
+    operation = _prepared_document(source_bundle)
+    parent_run_id = str(operation["run_id"])
+    parent_operation_id = str(operation["operation_id"])
+    case_id = str(
+        operation["handler_payload_source"]["provider_case_ref"]["case_id"]
+    )
+    child_token = content_sha256(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
+            "parent_run_id": parent_run_id,
+            "parent_stage": operation["stage"],
+            "parent_operation_id": parent_operation_id,
+            "case_id": case_id,
+        }
+    )
+    separator = "::benchmark-v2-incumbent::"
+    operation["run_id"] = f"{parent_run_id}{separator}{child_token}"
+    operation["operation_id"] = f"{parent_operation_id}{separator}{child_token}"
+    process_identity = {"pid": 123, "create_time_ns": 456}
+    normal_binding_ref = {"content_sha256": "b" * 64}
+    calls: list[dict[str, object]] = []
+
+    def resolve_binding(**kwargs):
+        calls.append(deepcopy(kwargs))
+        return {
+            "worker_process_identity": deepcopy(process_identity),
+            "normal_binding_evidence_ref": deepcopy(normal_binding_ref),
+        }
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        resolve_binding,
+    )
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
+        store=object(),
+        worker_registry=object(),
+        project_root=tmp_path,
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+
+    workflow_service._resolve_benchmark_v2_result_binding(
+        composition=composition,
+        operation=operation,
+        result_identity={"normal_binding_evidence_ref": normal_binding_ref},
+        launch_owner={"process_identity": process_identity},
+    )
+
+    assert calls[0]["run_id"] == parent_run_id
+    assert calls[0]["operation_id"] == parent_operation_id
+
+
 def test_resolver_is_opaque_exact_and_returns_a_deepcopy(
     tmp_path: Path, validated_provider_snapshot
 ) -> None:
