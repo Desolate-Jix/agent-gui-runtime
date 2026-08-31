@@ -7255,6 +7255,7 @@ def _cancel_benchmark_v2_hybrid_workflow_service(
                 and worker_record.get("result_adopted") is True
                 and worker_record.get("task_kind")
                 in {
+                    "panel_learning_hybrid_omni_discovery",
                     "panel_learning_hybrid_qwen_binding",
                     "panel_learning_calibration_sequence",
                 }
