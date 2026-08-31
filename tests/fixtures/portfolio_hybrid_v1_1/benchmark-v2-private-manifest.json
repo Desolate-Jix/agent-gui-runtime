@@ -30,8 +30,8 @@
       "app/learn/recognition/uei/builtin_learning_projection.py": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
       "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
-      "app/learn/workflow_service.py": "ae4d2653234d0741d5c69a3d93082e27f9986f3dd3548fd4089512cf18df7ccf",
-      "app/learn/workflow_worker.py": "9cd2871c80d4f02d51224be7ea6150745b2af856e534431ceefd9511219686cc",
+      "app/learn/workflow_service.py": "59d311609f71413d6f131299273ec5cd4b721326206807be2b9965d86fcd4ec8",
+      "app/learn/workflow_worker.py": "fe12db3c3b6577637cbfc34302f9d385ef6c69f5a67a20e95a070735b639456b",
       "app/operation/observe/screen_reader.py": "1804ca6fe539da7bdf0e81ebf8c3d2ee991bc2f14bbe18865755419a8a603437",
       "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py": "09c29c94743e0f03e3ddcae6b2e657416705ed39d35a090579c091a45a2321e8",
       "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "d49dcccb79bbc0d0f338a1774a2f41f8bdc6b5ef8c71d2ab9a81623811454e9b",
@@ -54,7 +54,7 @@
       "tests/test_learn_hybrid_qwen_binding.py": "610d03c1d7eb8da3042ed993bc42ef89bb18ec0344ec8dd36344d84de9c1911f",
       "tests/test_learn_hybrid_windows_process_scope.py": "6af6c5971e9861ca4e0d34a95521e7798f50a2542621a3659a335f28a58702e9",
       "tests/test_learning_workflow_stage_execution.py": "4129bfa58768b270da359711cba4cbedb31e7ce9445b37cdf4d60ed5f350a4d7",
-      "tests/test_learning_workflow_stage_worker.py": "052f986340af10d0bc9b2e7f41026b2f4bcc15857dfa1257b2546f88b520b279",
+      "tests/test_learning_workflow_stage_worker.py": "a797a70522e48d5a6335b49959b61dfb81d567395f38ad45c067fbfdaad8c6d9",
       "tests/test_model_request_cancellation.py": "104be1c889cdb1b4528381dfb0d0e693e9598bfee770c3a333784b1072e47f71",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py": "d2ba7c1b170f50b36f0c17fbfaa93626bbcacaf37fb2d51de30ac109fb93c2c1",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "acf0cb251c88c0dea8ff4c24e14a4453031498712180813b8f7dd601eedb2ba0",
@@ -73,13 +73,13 @@
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py": "90cffd347d0d30f2d8a68fb6d3c4bea5519f0163f571adf6d5ff01c8e12f565f",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py": "6efcef2bfa4b5ec112a1f257f9f6e5aa411dcbe8d17f505ce9c4c15dea10c22a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py": "7258c3d0fd798118685e170dd7a59d797162dea9ac3cb3b23bd75e19fea824a5",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "483e3f0f749967dc63852e7f6810322c06fd0a70e457248e9c162aa134b11202",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "2a8c6124ecf043971c251ff2dadc1ac852d1cd85d0d3169a067c8e84ac347412",
       "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py": "f8cee28ff6981629f52cc71ee5f6a66b3fe33c7619cc8e040b7ab81ab7c0165b",
       "tests/test_uei_v1_projections.py": "0eb30a772d8dba22786450cfc60cd35ff33e5424f8c30069e460a2ab188a09f4"
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "da0b30a04dadfa15ed5bed993088eefffcde190edd9bd36197bad7904d6aa24d",
+  "content_sha256": "cf7a311a613660fe8ed6a674adffa1375d2e1859b91cae9b177d97fec1d809c8",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -114,7 +114,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "e3fdc16e77f6e03913a259ef8ea9966ab92d5f890a5d82ff833a2a7618be5b80",
+    "file_sha256": "afc96bf237cfe1b04f3aeaeaf5c0efaff635616bd7957596248ab27a7b303116",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
