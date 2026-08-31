@@ -644,6 +644,19 @@ def project_authoritative_benchmark_provider_cleanup(
 def _authoritative_qwen_cleanup(
     record: Mapping[str, object], worker_termination: Mapping[str, object]
 ) -> dict[str, Any] | None:
+    acquisition_cleanup = _authoritative_qwen_acquisition_cleanup(
+        record, worker_termination
+    )
+    if acquisition_cleanup is not None:
+        return acquisition_cleanup
+    return _authoritative_completed_qwen_reconciliation_cleanup(
+        record, worker_termination
+    )
+
+
+def _authoritative_qwen_acquisition_cleanup(
+    record: Mapping[str, object], worker_termination: Mapping[str, object]
+) -> dict[str, Any] | None:
     cancellation = worker_termination.get("model_request_cancellation")
     results = cancellation.get("provider_results") if isinstance(cancellation, Mapping) else None
     request_id = str(record.get("model_request_id") or "")
@@ -762,6 +775,257 @@ def _authoritative_qwen_cleanup(
         "runtime_identity": identity,
         "authoritative_cleanup_ref": {"content_sha256": cleanup["content_sha256"]},
         "authoritative_cleanup_contract": cleanup["contract_version"],
+    }
+
+
+def _authoritative_completed_qwen_reconciliation_cleanup(
+    record: Mapping[str, object], worker_termination: Mapping[str, object]
+) -> dict[str, Any] | None:
+    """仅从已完成 worker 的已封存 owner 与本轮 fresh reconciliation 证明清理。"""
+
+    worker_result = record.get("worker_result")
+    response = (
+        worker_result.get("response")
+        if isinstance(worker_result, Mapping)
+        else None
+    )
+    reconciliation = record.get("supervisor_reconciliation")
+    provider_evidence = (
+        reconciliation.get("provider_cleanup_evidence")
+        if isinstance(reconciliation, Mapping)
+        else None
+    )
+    request_id = str(record.get("model_request_id") or "")
+    if (
+        record.get("status") != "completed"
+        or record.get("task_kind") != "panel_learning_hybrid_qwen_binding"
+        or record.get("process") is not None
+        or not isinstance(record.get("result_adoption"), Mapping)
+        or not isinstance(worker_result, Mapping)
+        or worker_result.get("status") != "completed"
+        or not isinstance(response, Mapping)
+        or response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+        or response.get("task_kind") != record.get("task_kind")
+        or response.get("outcome") == "completed"
+        or not request_id
+        or worker_termination.get("worker_id") != record.get("worker_id")
+        or worker_termination.get("model_request_id") != request_id
+        or not isinstance(reconciliation, Mapping)
+        or set(reconciliation)
+        != {
+            "contract_version",
+            "status",
+            "provider_cleanup_evidence",
+            "scope_cleanup_evidence",
+        }
+        or reconciliation.get("contract_version")
+        != "hybrid_supervisor_reconciliation_v3"
+        or reconciliation.get("status") != "verified"
+        or not isinstance(provider_evidence, Mapping)
+        or set(provider_evidence)
+        != {
+            "contract_version",
+            "status",
+            "model_lease",
+            "owner_tombstone",
+            "scope_cleanup_evidence",
+        }
+        or provider_evidence.get("contract_version")
+        != "hybrid_qwen_abnormal_reconciliation_v1"
+        or provider_evidence.get("status") != "verified"
+    ):
+        return None
+
+    runtime_path_value = record.get("provider_runtime_path")
+    lineage_value = record.get("provider_lineage")
+    scope_name = str(record.get("provider_scope_name") or "")
+    if not isinstance(runtime_path_value, str) or not runtime_path_value or not scope_name:
+        return None
+    from app.core.model_server import (
+        _load_qwen_runtime_owner,
+        _qwen_acquisition_artifact_paths,
+        _validate_exact_qwen_cleanup_evidence,
+    )
+    from app.learn.hybrid.gpu_lifecycle import validate_hybrid_lineage
+
+    try:
+        acquisition_paths = _qwen_acquisition_artifact_paths(request_id)
+        if set(acquisition_paths) != {
+            "intent",
+            "owner",
+            "ledger",
+            "ledger_revision_zero",
+            "ledger_winner",
+            "abort",
+            "aborted_tombstone",
+            "lease_binding",
+            "lease_state_snapshot",
+            "release_observation",
+            "termination_observation",
+            "cleanup_receipt",
+        } or any(path.exists() for path in acquisition_paths.values()):
+            return None
+        lineage = validate_hybrid_lineage(lineage_value)
+        owner = _load_qwen_runtime_owner(Path(runtime_path_value))
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    owner_fields = {
+        "contract_version",
+        "state",
+        "model_request_id",
+        "lineage",
+        "process_scope_name",
+        "model_lease",
+        "profile",
+        "release_result",
+        "tombstone_sha256",
+        "scope_cleanup",
+        "content_sha256",
+    }
+    lease = owner.get("model_lease")
+    release = owner.get("release_result")
+    tombstone = provider_evidence.get("owner_tombstone")
+    fresh_scope_cleanup = provider_evidence.get("scope_cleanup_evidence")
+    if (
+        set(owner) != owner_fields
+        or owner.get("contract_version") != "hybrid_qwen_model_owner_v1"
+        or owner.get("state") != "released"
+        or owner.get("model_request_id") != request_id
+        or owner.get("lineage") != lineage
+        or owner.get("process_scope_name") != scope_name
+        or provider_evidence.get("model_lease") != lease
+        or owner.get("scope_cleanup") != fresh_scope_cleanup
+        or reconciliation.get("scope_cleanup_evidence") != fresh_scope_cleanup
+        or not isinstance(release, Mapping)
+        or not isinstance(tombstone, Mapping)
+        or set(tombstone)
+        != {
+            "contract_version",
+            "status",
+            "owner_request_id",
+            "profile_id",
+            "lease_id",
+            "incarnation_id",
+            "server_termination",
+            "release_result",
+            "finalization_token",
+        }
+        or owner.get("tombstone_sha256") != content_sha256(tombstone)
+        or tombstone.get("contract_version")
+        != "qwen_model_request_owner_receipt_v1"
+        or tombstone.get("status") != "finalized"
+        or tombstone.get("owner_request_id") != request_id
+        or tombstone.get("lease_id")
+        != (lease.get("lease_id") if isinstance(lease, Mapping) else None)
+        or tombstone.get("incarnation_id")
+        != (lease.get("incarnation_id") if isinstance(lease, Mapping) else None)
+        or tombstone.get("profile_id")
+        != (lease.get("profile_id") if isinstance(lease, Mapping) else None)
+        or tombstone.get("release_result") != release
+        or tombstone.get("server_termination") != release.get("server_termination")
+        or not isinstance(tombstone.get("finalization_token"), str)
+        or not tombstone.get("finalization_token")
+    ):
+        return None
+    try:
+        exact_lease = _validate_exact_qwen_cleanup_evidence(release, lease)
+    except (TypeError, ValueError):
+        return None
+
+    required_scope_fields = {
+        "contract_version",
+        "scope_name",
+        "authority",
+        "cleanup_status",
+        "member_pids_after",
+        "member_identities_after",
+        "active_listeners_after",
+        "pid_file_after",
+        "stable_zero_observations",
+        "samples",
+    }
+    if (
+        not isinstance(fresh_scope_cleanup, Mapping)
+        or not required_scope_fields.issubset(fresh_scope_cleanup)
+        or fresh_scope_cleanup.get("contract_version")
+        != "hybrid_windows_process_scope_v1"
+        or fresh_scope_cleanup.get("scope_name") != scope_name
+        or fresh_scope_cleanup.get("cleanup_status") != "verified"
+        or fresh_scope_cleanup.get("member_pids_after") != []
+        or fresh_scope_cleanup.get("member_identities_after") != []
+        or fresh_scope_cleanup.get("active_listeners_after") != []
+        or fresh_scope_cleanup.get("pid_file_after") is not None
+        or not isinstance(fresh_scope_cleanup.get("stable_zero_observations"), int)
+        or fresh_scope_cleanup["stable_zero_observations"] < 3
+        or not isinstance(fresh_scope_cleanup.get("samples"), list)
+        or len(fresh_scope_cleanup["samples"]) < 3
+    ):
+        return None
+
+    acquisition = release.get("hybrid_process_scope_acquisition")
+    release_scope_cleanup = release.get("hybrid_process_scope_cleanup")
+    if (
+        not isinstance(acquisition, Mapping)
+        or set(acquisition)
+        != {
+            "contract_version",
+            "scope_name",
+            "member_pids",
+            "server_process_identity",
+        }
+        or acquisition.get("contract_version")
+        != "hybrid_process_scope_acquisition_v1"
+        or acquisition.get("scope_name") != scope_name
+        or acquisition.get("server_process_identity")
+        != exact_lease.get("server_process_identity")
+        or release.get("hybrid_process_scope_name") != scope_name
+        or not isinstance(release_scope_cleanup, Mapping)
+        or release_scope_cleanup.get("contract_version")
+        != "hybrid_windows_process_scope_v1"
+        or release_scope_cleanup.get("scope_name") != scope_name
+        or release_scope_cleanup.get("cleanup_status") != "verified"
+        or release_scope_cleanup.get("member_pids_after") != []
+        or release_scope_cleanup.get("member_identities_after") != []
+        or release_scope_cleanup.get("active_listeners_after") != []
+    ):
+        return None
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(str(exact_lease.get("server_base_url") or ""))
+    host = str(parsed.hostname or "")
+    port = int(parsed.port or 0)
+    try:
+        process = _process_identity(exact_lease.get("server_process_identity"))
+        identity = compose_benchmark_provider_runtime_identity(
+            provider="qwen",
+            lease_identity={
+                "lease_id": exact_lease["lease_id"],
+                "incarnation_id": exact_lease["incarnation_id"],
+                "owner_request_id": exact_lease["owner_request_id"],
+            },
+            profile_ref={"content_sha256": exact_lease["profile_sha256"]},
+            listener_owner={
+                "host": host,
+                "port": port,
+                "process_identities": [process],
+            },
+            process_identities=[process],
+            process_scope={
+                "scope_name": scope_name,
+                "member_pids": list(acquisition["member_pids"]),
+                "process_identities": [process],
+            },
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    return {
+        "runtime_identity": identity,
+        "authoritative_cleanup_ref": {
+            "content_sha256": owner["content_sha256"]
+        },
+        "authoritative_cleanup_contract": owner["contract_version"],
     }
 
 

@@ -150,6 +150,143 @@ def _runtime_attestation(
     }
 
 
+def _completed_qwen_reconciliation_fixture(
+    tmp_path: Path,
+    *,
+    request_id: str = "request-qwen-completed",
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    process = {"pid": 101, "create_time_ns": 202}
+    scope_name = "scope-qwen"
+    lineage = {
+        "run_id": "run-1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-1",
+        "workflow_revision": 0,
+        "stage_execution_id": "stage-execution-1",
+    }
+    lease = {
+        "contract_version": "qwen_model_server_lease_v2",
+        "lease_id": "lease-qwen",
+        "owner_request_id": request_id,
+        "profile_id": "profile-qwen",
+        "incarnation_id": "incarnation-qwen",
+        "server_base_url": "http://127.0.0.1:8080/v1",
+        "server_model_id": "qwen.gguf",
+        "profile_sha256": "e" * 64,
+        "server_process_identity": process,
+    }
+    acquisition = {
+        "contract_version": "hybrid_process_scope_acquisition_v1",
+        "scope_name": scope_name,
+        "member_pids": [101],
+        "server_process_identity": process,
+    }
+    scope_cleanup = {
+        "contract_version": "hybrid_windows_process_scope_v1",
+        "scope_name": scope_name,
+        "authority": "windows_job_object",
+        "cleanup_status": "verified",
+        "observed_member_pids_before": [],
+        "observed_member_identities_before": [],
+        "member_pids_after": [],
+        "member_identities_after": [],
+        "active_listeners_after": [],
+        "pid_file_after": None,
+        "stable_zero_observations": 3,
+        "samples": [
+            {"pids": [], "process_identities": [], "listeners": []},
+            {"pids": [], "process_identities": [], "listeners": []},
+            {"pids": [], "process_identities": [], "listeners": []},
+        ],
+        "scope_absent_after_owner_close": True,
+    }
+    release = {
+        "status": "released",
+        "lease": deepcopy(lease),
+        "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": {"status": "proven_absent", "reason": "no_such_process", "identity": None},
+        "after": {"status": "unreachable", "base_url": lease["server_base_url"]},
+        "process_identity": deepcopy(process),
+        "hybrid_process_scope_name": scope_name,
+        "hybrid_process_scope_acquisition": deepcopy(acquisition),
+        "hybrid_process_scope_cleanup": deepcopy(scope_cleanup),
+        "hybrid_descendant_cleanup": {
+            "status": "verified",
+            "descendant_identities": [],
+            "probes": [],
+            "process_scope_cleanup": deepcopy(scope_cleanup),
+        },
+    }
+    tombstone = {
+        "contract_version": "qwen_model_request_owner_receipt_v1",
+        "status": "finalized",
+        "owner_request_id": request_id,
+        "profile_id": lease["profile_id"],
+        "lease_id": lease["lease_id"],
+        "incarnation_id": lease["incarnation_id"],
+        "server_termination": release["server_termination"],
+        "release_result": deepcopy(release),
+        "finalization_token": "token-qwen",
+    }
+    runtime_owner = seal_immutable(
+        {
+            "contract_version": "hybrid_qwen_model_owner_v1",
+            "state": "released",
+            "model_request_id": request_id,
+            "lineage": deepcopy(lineage),
+            "process_scope_name": scope_name,
+            "model_lease": deepcopy(lease),
+            "profile": {"profile_id": "profile-qwen"},
+            "release_result": deepcopy(release),
+            "tombstone_sha256": seal_immutable(tombstone)["content_sha256"],
+            "scope_cleanup": deepcopy(scope_cleanup),
+        }
+    )
+    runtime_path = tmp_path / "completed-qwen.provider-runtime.json"
+    runtime_path.write_text(
+        json.dumps(runtime_owner, ensure_ascii=False, sort_keys=True),
+        encoding="utf-8",
+    )
+    reconciliation = {
+        "contract_version": "hybrid_supervisor_reconciliation_v3",
+        "status": "verified",
+        "provider_cleanup_evidence": {
+            "contract_version": "hybrid_qwen_abnormal_reconciliation_v1",
+            "status": "verified",
+            "model_lease": deepcopy(lease),
+            "owner_tombstone": deepcopy(tombstone),
+            "scope_cleanup_evidence": deepcopy(scope_cleanup),
+        },
+        "scope_cleanup_evidence": deepcopy(scope_cleanup),
+    }
+    record = {
+        "worker_id": "worker-qwen-completed",
+        "status": "completed",
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "model_request_id": request_id,
+        "provider_runtime_path": str(runtime_path),
+        "provider_lineage": deepcopy(lineage),
+        "provider_scope_name": scope_name,
+        "supervisor_reconciliation": reconciliation,
+        "process": None,
+        "result_adoption": {"contract_version": "learning_stage_worker_result_adoption_v1"},
+        "worker_result": {
+            "contract_version": "learning_stage_worker_result_v2",
+            "status": "completed",
+            "response": {
+                "contract_version": "learning_hybrid_managed_stage_result_v1",
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "task_kind": "panel_learning_hybrid_qwen_binding",
+                "outcome": "failed",
+            },
+        },
+    }
+    return record, runtime_owner, reconciliation
+
+
 def _cross_process_dispatch_worker(
     project_root: str,
     start_event,
@@ -1156,6 +1293,7 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn import workflow_worker as worker_module
     from app.learn.workflow_worker import LearningStageWorkerError, LearningStageWorkerRegistry
 
     root = tmp_path / "qwen-workers"
@@ -1243,14 +1381,34 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
             "adopted_at": "2026-08-28T00:00:02+00:00",
         },
     }
+    reconciliation_calls: list[str] = []
+    reconciliation = {
+        "contract_version": "hybrid_supervisor_reconciliation_v3",
+        "status": "verified",
+        "provider_cleanup_evidence": {
+            "contract_version": "hybrid_qwen_abnormal_reconciliation_v1",
+            "status": "verified",
+        },
+        "scope_cleanup_evidence": {},
+    }
+    monkeypatch.setattr(
+        worker_module,
+        "_reconcile_hybrid_provider_scope_record",
+        lambda exact_record: reconciliation_calls.append(exact_record["worker_id"])
+        or deepcopy(reconciliation),
+    )
     monkeypatch.setattr(
         attestation,
         "project_authoritative_benchmark_provider_cleanup",
-        lambda **_kwargs: {
-            "runtime_identity": deepcopy(runtime["runtime_identity"]),
-            "authoritative_cleanup_contract": "qwen_cleanup_v1",
-            "authoritative_cleanup_ref": {"content_sha256": "b" * 64},
-        },
+        lambda **kwargs: (
+            {
+                "runtime_identity": deepcopy(runtime["runtime_identity"]),
+                "authoritative_cleanup_contract": "qwen_cleanup_v1",
+                "authoritative_cleanup_ref": {"content_sha256": "b" * 64},
+            }
+            if kwargs["record"].get("supervisor_reconciliation") == reconciliation
+            else None
+        ),
     )
     registry = LearningStageWorkerRegistry(result_root=root)
     registry._records[worker_id] = record
@@ -1263,6 +1421,8 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
         operation_id="operation-1",
         dispatch_context_ref=qwen_ref,
     )
+    assert reconciliation_calls == [worker_id]
+    assert record["supervisor_reconciliation"] == reconciliation
     assert record["benchmark_provider_cleanup_ref"] == projection
     assert registry.materialize_completed_hybrid_provider_cleanup(
         worker_id=worker_id,
@@ -1302,6 +1462,128 @@ def test_completed_qwen_cleanup_materializes_with_cumulative_dispatch_evidence(
                 operation_id="operation-1",
                 dispatch_context_ref=qwen_ref,
             )
+
+
+def test_completed_qwen_cleanup_uses_sealed_runtime_owner_when_acquisition_sidecars_are_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+    from app.core import model_server
+
+    record, runtime_owner, _reconciliation = _completed_qwen_reconciliation_fixture(
+        tmp_path
+    )
+    monkeypatch.setattr(
+        "app.core.model_server._find_qwen_owner_record",
+        lambda _request_id: None,
+    )
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+
+    projected = module.project_authoritative_benchmark_provider_cleanup(
+        provider="qwen",
+        record=record,
+        worker_termination={
+            "worker_id": "worker-qwen-completed",
+            "model_request_id": record["model_request_id"],
+        },
+    )
+
+    assert projected is not None
+    assert projected["runtime_identity"]["content_sha256"] == (
+        module.compose_benchmark_provider_runtime_identity(
+            provider="qwen",
+            lease_identity={
+                "lease_id": "lease-qwen",
+                "incarnation_id": "incarnation-qwen",
+                "owner_request_id": record["model_request_id"],
+            },
+            profile_ref={"content_sha256": "e" * 64},
+            listener_owner={
+                "host": "127.0.0.1",
+                "port": 8080,
+                "process_identities": [{"pid": 101, "create_time_ns": 202}],
+            },
+            process_identities=[{"pid": 101, "create_time_ns": 202}],
+            process_scope={
+                "scope_name": "scope-qwen",
+                "member_pids": [101],
+                "process_identities": [{"pid": 101, "create_time_ns": 202}],
+            },
+        )["content_sha256"]
+    )
+    assert projected["authoritative_cleanup_contract"] == (
+        "hybrid_qwen_model_owner_v1"
+    )
+    assert projected["authoritative_cleanup_ref"] == {
+        "content_sha256": runtime_owner["content_sha256"]
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_reconciliation",
+        "indeterminate_reconciliation",
+        "indeterminate_provider_evidence",
+        "tampered_runtime_owner",
+        "stale_lineage",
+        "stale_scope_cleanup",
+        "partial_acquisition_artifact",
+    ],
+)
+def test_completed_qwen_reconciliation_cleanup_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as module
+    from app.core import model_server
+
+    record, runtime_owner, reconciliation = _completed_qwen_reconciliation_fixture(
+        tmp_path
+    )
+    monkeypatch.setattr(
+        "app.core.model_server._find_qwen_owner_record",
+        lambda _request_id: None,
+    )
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "leases")
+    if mutation == "missing_reconciliation":
+        record.pop("supervisor_reconciliation")
+    elif mutation == "indeterminate_reconciliation":
+        reconciliation["status"] = "indeterminate"
+    elif mutation == "indeterminate_provider_evidence":
+        reconciliation["provider_cleanup_evidence"]["status"] = "indeterminate"
+    elif mutation == "tampered_runtime_owner":
+        runtime_owner["state"] = "acquired"
+        Path(str(record["provider_runtime_path"])).write_text(
+            json.dumps(runtime_owner, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+    elif mutation == "stale_lineage":
+        record["provider_lineage"]["operation_id"] = "operation-stale"
+    elif mutation == "stale_scope_cleanup":
+        reconciliation["provider_cleanup_evidence"]["scope_cleanup_evidence"][
+            "stable_zero_observations"
+        ] = 4
+    else:
+        paths = model_server._qwen_acquisition_artifact_paths(
+            str(record["model_request_id"])
+        )
+        paths["intent"].parent.mkdir(parents=True)
+        paths["intent"].write_text("{}", encoding="utf-8")
+
+    assert (
+        module.project_authoritative_benchmark_provider_cleanup(
+            provider="qwen",
+            record=record,
+            worker_termination={
+                "worker_id": "worker-qwen-completed",
+                "model_request_id": record["model_request_id"],
+            },
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("mutation", ["provider", "operation", "window"])

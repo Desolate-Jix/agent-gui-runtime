@@ -8914,6 +8914,23 @@ class LearningStageWorkerRegistry:
                     raise LearningStageWorkerError(
                         "completed Hybrid Qwen cleanup adoption is invalid"
                     ) from error
+                reconciliation = _reconcile_hybrid_provider_scope_record(record)
+                provider_cleanup_evidence = reconciliation.get(
+                    "provider_cleanup_evidence"
+                )
+                if (
+                    reconciliation.get("contract_version")
+                    != "hybrid_supervisor_reconciliation_v3"
+                    or reconciliation.get("status") != "verified"
+                    or not isinstance(provider_cleanup_evidence, Mapping)
+                    or provider_cleanup_evidence.get("contract_version")
+                    != "hybrid_qwen_abnormal_reconciliation_v1"
+                    or provider_cleanup_evidence.get("status") != "verified"
+                ):
+                    raise LearningStageWorkerError(
+                        "completed Hybrid Qwen cleanup reconciliation is indeterminate"
+                    )
+                record["supervisor_reconciliation"] = deepcopy(reconciliation)
                 projection = self._compose_hybrid_benchmark_provider_cleanup(
                     record=record,
                     worker_termination={
