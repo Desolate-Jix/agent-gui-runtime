@@ -210,6 +210,7 @@ def test_canonical_service_surface_has_only_exact_keyword_inputs() -> None:
         "poll_incumbent_observe": ("operation_ref",),
         "adopt_and_terminalize_incumbent": ("operation_ref", "worker_ref"),
         "cancel_operation": ("operation_ref",),
+        "attest_completed_hybrid_cleanup": ("operation_ref",),
         "attest_actual_operations_stable_zero": ("operation_refs",),
     }
     for method_name, names in expected.items():
@@ -3824,6 +3825,164 @@ def test_s3_terminal_prepared_retry_resumes_without_false_terminal_claim(
         assert registry.adopt_calls == 1
         assert registry.start_calls == 1
     finally:
+        store.close()
+
+
+def test_completed_review_hybrid_cleanup_is_separate_and_replay_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3ReviewNoProviderRegistry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    monkeypatch.setattr(
+        workflow_service,
+        "build_learning_pipeline_initial_worker_request",
+        lambda **_kwargs: {
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "payload": _hybrid_worker_payload(),
+        },
+    )
+
+    def _continue(**_kwargs):
+        state = store.get("run-h1")
+        evidence_path = tmp_path / "artifacts" / "completed-review.json"
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_text("{}", encoding="utf-8")
+        finished = workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="completed",
+            reason="completed review projection",
+            evidence_refs={"trial_path": "artifacts/completed-review.json"},
+        )
+        return {
+            "stage_finished": True,
+            "outcome": "completed",
+            "next_stage_operation": None,
+            "next_stage_worker": None,
+            "workflow_state": finished["workflow_state"],
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        registry.complete_current({"outcome": "completed", "success": True})
+        returned = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+        revision_before = store.get("run-h1")["revision"]
+        step_before = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        cleanup = service.attest_completed_hybrid_cleanup(
+            operation_ref=returned["operation_ref"]
+        )
+        cleanup_replay = service.attest_completed_hybrid_cleanup(
+            operation_ref=returned["operation_ref"]
+        )
+        step_after = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert returned["status"] == "complete"
+        assert returned["cleanup_refs"] == {
+            "worker_cleanup_ref": None,
+            "provider_cleanup_ref": None,
+        }
+        assert cleanup["contract_version"] == (
+            "benchmark_v2_actual_completed_hybrid_cleanup_v1"
+        )
+        assert cleanup["operation_ref"] == returned["operation_ref"]
+        assert cleanup["cleanup_status"] == "stable_zero"
+        assert cleanup["worker_cleanup_ref"]["contract_version"] == (
+            "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+        )
+        assert cleanup["provider_cleanup_ref"]["contract_version"] == (
+            "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+        )
+        assert canonical_json_bytes(cleanup_replay) == canonical_json_bytes(cleanup)
+        for path in (
+            ("worker_cleanup_ref",),
+            ("provider_cleanup_ref",),
+            ("provider_cleanup_ref", "live_absence_observation"),
+        ):
+            tampered = deepcopy(cleanup)
+            target = tampered
+            for name in path:
+                target = target[name]
+            target["unexpected"] = True
+            _reseal(target)
+            if len(path) == 2:
+                _reseal(tampered["provider_cleanup_ref"])
+            _reseal(tampered)
+            with pytest.raises(ValueError, match="not closed"):
+                incumbent.validate_benchmark_v2_actual_completed_hybrid_cleanup(
+                    tampered
+                )
+        authorizing = deepcopy(cleanup)
+        authorizing["artifact_is_authorization"] = True
+        _reseal(authorizing)
+        with pytest.raises(ValueError, match="cleanup is invalid"):
+            incumbent.validate_benchmark_v2_actual_completed_hybrid_cleanup(
+                authorizing
+            )
+        stale_provider = deepcopy(cleanup)
+        stale_provider["provider_cleanup_ref"]["operation_id"] = "other-operation"
+        _reseal(stale_provider["provider_cleanup_ref"])
+        _reseal(stale_provider)
+        with pytest.raises(ValueError, match="provider cleanup is stale"):
+            incumbent.validate_benchmark_v2_actual_completed_hybrid_cleanup(
+                stale_provider
+            )
+        assert canonical_json_bytes(step_after) == canonical_json_bytes(step_before)
+        assert store.get("run-h1")["revision"] == revision_before
+        assert registry.cancel_calls == 2
+        assert registry.review_no_provider_cleanup_calls == 2
+        assert registry.active_resources == 0
+    finally:
+        store.close()
+
+
+def test_completed_hybrid_cleanup_rejects_nonterminal_without_side_effects(
+    tmp_path: Path,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="cleanup bridge is unavailable",
+        ):
+            service.attest_completed_hybrid_cleanup(
+                operation_ref=initial["operation_ref"]
+            )
+
+        assert registry.cancel_calls == 0
+    finally:
+        service.cancel_operation(operation_ref=initial["operation_ref"])
         store.close()
 
 

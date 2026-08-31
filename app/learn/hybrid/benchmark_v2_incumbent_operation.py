@@ -60,6 +60,9 @@ BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT = (
 BENCHMARK_V2_INCUMBENT_PRE_RESERVATION_RECOVERY_CONTRACT = (
     "benchmark_v2_incumbent_pre_reservation_recovery_v1"
 )
+BENCHMARK_V2_ACTUAL_COMPLETED_HYBRID_CLEANUP_CONTRACT = (
+    "benchmark_v2_actual_completed_hybrid_cleanup_v1"
+)
 BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT = (
     "benchmark_v2_provider_dispatch_context_projection_v1"
 )
@@ -2139,6 +2142,259 @@ def validate_benchmark_v2_incumbent_pre_reservation_recovery(
     return receipt
 
 
+def compose_benchmark_v2_actual_completed_hybrid_cleanup(
+    *,
+    operation_ref: Mapping[str, object],
+    worker_cleanup_ref: Mapping[str, object],
+    provider_cleanup_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    operation = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+    return validate_benchmark_v2_actual_completed_hybrid_cleanup(
+        _seal(
+            {
+                "contract_version": (
+                    BENCHMARK_V2_ACTUAL_COMPLETED_HYBRID_CLEANUP_CONTRACT
+                ),
+                "operation_ref": operation,
+                "worker_cleanup_ref": deepcopy(dict(worker_cleanup_ref)),
+                "provider_cleanup_ref": deepcopy(dict(provider_cleanup_ref)),
+                "cleanup_status": "stable_zero",
+                **_NON_AUTHORIZING_SAFETY,
+            }
+        )
+    )
+
+
+def validate_benchmark_v2_actual_completed_hybrid_cleanup(
+    value: object,
+) -> dict[str, Any]:
+    receipt = _closed(
+        value,
+        {
+            "contract_version",
+            "operation_ref",
+            "worker_cleanup_ref",
+            "provider_cleanup_ref",
+            "cleanup_status",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark actual completed Hybrid cleanup",
+    )
+    operation = validate_benchmark_v2_workflow_service_operation_ref(
+        receipt["operation_ref"]
+    )
+    worker_cleanup = _closed(
+        receipt["worker_cleanup_ref"],
+        {
+            "contract_version",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "backend_compute_termination",
+            "model_service_compute_termination",
+            "cancellation_ref",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark actual completed Hybrid worker cleanup",
+    )
+    provider_cleanup = _closed(
+        receipt["provider_cleanup_ref"],
+        {
+            "contract_version",
+            "status",
+            "outcome",
+            "authority_kind",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "task_kind",
+            "provider_role",
+            "worker_status",
+            "runtime_attached",
+            "result_available",
+            "result_adopted",
+            "continuation_phase",
+            "cancellation_backend_termination",
+            "cancellation_model_request_termination",
+            "service_binding_ref",
+            "terminal_prepared_continuation_receipt_ref",
+            "returned_worker_ref",
+            "worker_cleanup_ref",
+            "live_absence_observation",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark actual completed Hybrid provider cleanup",
+    )
+    worker = _closed(
+        operation["worker_ref"],
+        {
+            "contract_version",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "task_kind",
+            "content_sha256",
+        },
+        "benchmark actual completed Hybrid worker ref",
+    )
+    operation_identity = ("run_id", "stage", "operation_id")
+    worker_identity = ("worker_id", "model_request_id", "payload_sha256")
+    if (
+        receipt["contract_version"]
+        != BENCHMARK_V2_ACTUAL_COMPLETED_HYBRID_CLEANUP_CONTRACT
+        or operation["mode"] != "hybrid_v1_1"
+        or operation["status"] != "complete"
+        or receipt["cleanup_status"] != "stable_zero"
+        or receipt["artifact_is_authorization"] is not False
+        or receipt["execute_binding_enabled"] is not False
+        or worker.get("contract_version")
+        != "benchmark_v2_workflow_service_generic_worker_ref_v1"
+        or worker.get("content_sha256") != content_sha256(worker)
+    ):
+        raise ValueError("benchmark actual completed Hybrid cleanup is invalid")
+    if (
+        worker_cleanup.get("contract_version")
+        != "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+        or worker_cleanup.get("backend_compute_termination")
+        not in {"not_running", "terminated"}
+        or worker_cleanup.get("model_service_compute_termination")
+        not in {"request_not_active", "terminated"}
+        or worker_cleanup.get("artifact_is_authorization") is not False
+        or worker_cleanup.get("execute_binding_enabled") is not False
+        or any(worker_cleanup.get(name) != operation[name] for name in operation_identity)
+        or any(worker_cleanup.get(name) != worker[name] for name in worker_identity)
+    ):
+        raise ValueError("benchmark actual completed Hybrid worker cleanup is stale")
+    _content_ref(
+        worker_cleanup.get("cancellation_ref"),
+        "benchmark actual completed Hybrid cancellation ref",
+    )
+    if worker_cleanup.get("content_sha256") != content_sha256(worker_cleanup):
+        raise ValueError("benchmark actual completed Hybrid worker cleanup SHA differs")
+    provider_identity = (*operation_identity, *worker_identity)
+    if (
+        provider_cleanup.get("contract_version")
+        != "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+        or provider_cleanup.get("status") != "cleanup_verified"
+        or provider_cleanup.get("outcome")
+        != "verified_review_provider_not_applicable"
+        or provider_cleanup.get("authority_kind")
+        != "benchmark_v2_workflow_service_review_no_provider_cleanup"
+        or provider_cleanup.get("task_kind")
+        != "panel_learning_hybrid_review_projection"
+        or provider_cleanup.get("provider_role") != "review"
+        or provider_cleanup.get("worker_status") != "completed"
+        or provider_cleanup.get("runtime_attached") is not False
+        or provider_cleanup.get("result_available") is not True
+        or provider_cleanup.get("result_adopted") is not True
+        or provider_cleanup.get("continuation_phase") != "terminal_prepared"
+        or provider_cleanup.get("cancellation_backend_termination")
+        != worker_cleanup["backend_compute_termination"]
+        or provider_cleanup.get("cancellation_model_request_termination")
+        != worker_cleanup["model_service_compute_termination"]
+        or provider_cleanup.get("worker_cleanup_ref")
+        != {"content_sha256": worker_cleanup["content_sha256"]}
+        or provider_cleanup.get("returned_worker_ref") != worker
+        or provider_cleanup.get("artifact_is_authorization") is not False
+        or provider_cleanup.get("execute_binding_enabled") is not False
+        or any(provider_cleanup.get(name) != operation[name] for name in operation_identity)
+        or any(provider_cleanup.get(name) != worker[name] for name in worker_identity)
+    ):
+        raise ValueError("benchmark actual completed Hybrid provider cleanup is stale")
+    for name in (
+        "service_binding_ref",
+        "terminal_prepared_continuation_receipt_ref",
+    ):
+        _content_ref(
+            provider_cleanup.get(name),
+            f"benchmark actual completed Hybrid {name}",
+        )
+    returned_worker = _closed(
+        provider_cleanup.get("returned_worker_ref"),
+        set(worker),
+        "benchmark actual completed Hybrid returned worker ref",
+    )
+    observation = _closed(
+        provider_cleanup.get("live_absence_observation"),
+        {
+            "contract_version",
+            "run_id",
+            "stage",
+            "operation_id",
+            "worker_id",
+            "model_request_id",
+            "payload_sha256",
+            "task_kind",
+            "provider_role",
+            "current_worker_ref",
+            "latest_operation_worker_ref",
+            "review_dispatch_context_absent",
+            "review_dispatch_receipt_absent",
+            "provider_scope_absent",
+            "provider_journal_absent",
+            "provider_cleanup_journal_absent",
+            "deterministic_provider_lease_artifact_absent",
+            "deterministic_provider_owner_artifact_absent",
+            "deterministic_provider_runtime_artifact_absent",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark actual completed Hybrid live absence observation",
+    )
+    if (
+        returned_worker != worker
+        or observation.get("contract_version")
+        != "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
+        or observation.get("provider_role") != "review"
+        or observation.get("current_worker_ref") != worker
+        or observation.get("latest_operation_worker_ref") != worker
+        or any(observation.get(name) != provider_cleanup[name] for name in provider_identity)
+        or any(
+            observation.get(name) is not True
+            for name in (
+                "review_dispatch_context_absent",
+                "review_dispatch_receipt_absent",
+                "provider_scope_absent",
+                "provider_journal_absent",
+                "provider_cleanup_journal_absent",
+                "deterministic_provider_lease_artifact_absent",
+                "deterministic_provider_owner_artifact_absent",
+                "deterministic_provider_runtime_artifact_absent",
+            )
+        )
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or observation.get("content_sha256") != content_sha256(observation)
+        or provider_cleanup.get("content_sha256") != content_sha256(provider_cleanup)
+    ):
+        raise ValueError(
+            "benchmark actual completed Hybrid live absence observation is stale"
+        )
+    _sha(receipt["content_sha256"], "benchmark actual completed Hybrid cleanup SHA")
+    if receipt["content_sha256"] != content_sha256(receipt):
+        raise ValueError("benchmark actual completed Hybrid cleanup SHA differs")
+    receipt["operation_ref"] = operation
+    receipt["worker_cleanup_ref"] = worker_cleanup
+    receipt["provider_cleanup_ref"] = provider_cleanup
+    return receipt
+
+
 def validate_benchmark_v2_actual_operations_stable_zero(
     value: object,
 ) -> dict[str, Any]:
@@ -2566,6 +2822,21 @@ class BenchmarkV2IncumbentWorkflowService:
         )
 
         return _cancel_benchmark_v2_incumbent_workflow_service(
+            composition=self._composition,
+            operation_ref=current,
+        )
+
+    def attest_completed_hybrid_cleanup(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        from app.learn.workflow_service import (
+            _attest_benchmark_v2_actual_completed_hybrid_cleanup,
+        )
+
+        return _attest_benchmark_v2_actual_completed_hybrid_cleanup(
             composition=self._composition,
             operation_ref=current,
         )

@@ -633,6 +633,158 @@ def _actual_service_step(
     )
 
 
+def _actual_completed_review_step(
+    group: Mapping[str, object], binding: Mapping[str, object]
+) -> dict[str, object]:
+    operation_id = str(binding["operation_id"])
+    worker = _sealed(
+        {
+            "contract_version": "benchmark_v2_workflow_service_generic_worker_ref_v1",
+            "run_id": str(binding["run_id"]),
+            "stage": str(binding["stage"]),
+            "operation_id": operation_id,
+            "worker_id": f"worker-{operation_id}",
+            "model_request_id": f"request-{operation_id}",
+            "payload_sha256": hashlib.sha256(operation_id.encode()).hexdigest(),
+            "task_kind": "panel_learning_hybrid_review_projection",
+        }
+    )
+    operation = incumbent.compose_benchmark_v2_workflow_service_operation_ref(
+        mode="hybrid_v1_1",
+        run_id=str(binding["run_id"]),
+        stage=str(binding["stage"]),
+        operation_id=operation_id,
+        workflow_state_ref={
+            "run_id": str(binding["run_id"]),
+            "revision": 2,
+            "content_sha256": "2" * 64,
+        },
+        stage_execution_ref={
+            "run_id": str(binding["run_id"]),
+            "stage": str(binding["stage"]),
+            "operation_id": operation_id,
+            "revision": 2,
+            "content_sha256": "7" * 64,
+        },
+        request_ref=group["request_ref"],
+        window_binding_ref=binding["window_binding_ref"],
+        capture_ref=binding["capture_ref"],
+        worker_ref=worker,
+        status="complete",
+    )
+    return incumbent.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation,
+        observed_task_kind="panel_learning_hybrid_review_projection",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={"worker_cleanup_ref": None, "provider_cleanup_ref": None},
+    )
+
+
+def _actual_completed_review_cleanup(
+    operation: Mapping[str, object],
+) -> dict[str, object]:
+    worker = operation["worker_ref"]
+    worker_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            **{
+                name: operation[name]
+                for name in ("run_id", "stage", "operation_id")
+            },
+            **{
+                name: worker[name]
+                for name in ("worker_id", "model_request_id", "payload_sha256")
+            },
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+            "cancellation_ref": {"content_sha256": "c" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    observation = _sealed(
+        {
+            "contract_version": (
+                "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
+            ),
+            **{
+                name: operation[name]
+                for name in ("run_id", "stage", "operation_id")
+            },
+            **{
+                name: worker[name]
+                for name in (
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                    "task_kind",
+                )
+            },
+            "provider_role": "review",
+            "current_worker_ref": deepcopy(worker),
+            "latest_operation_worker_ref": deepcopy(worker),
+            "review_dispatch_context_absent": True,
+            "review_dispatch_receipt_absent": True,
+            "provider_scope_absent": True,
+            "provider_journal_absent": True,
+            "provider_cleanup_journal_absent": True,
+            "deterministic_provider_lease_artifact_absent": True,
+            "deterministic_provider_owner_artifact_absent": True,
+            "deterministic_provider_runtime_artifact_absent": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    provider_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_no_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_review_provider_not_applicable",
+            "authority_kind": (
+                "benchmark_v2_workflow_service_review_no_provider_cleanup"
+            ),
+            **{
+                name: operation[name]
+                for name in ("run_id", "stage", "operation_id")
+            },
+            **{
+                name: worker[name]
+                for name in (
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                    "task_kind",
+                )
+            },
+            "provider_role": "review",
+            "worker_status": "completed",
+            "runtime_attached": False,
+            "result_available": True,
+            "result_adopted": True,
+            "continuation_phase": "terminal_prepared",
+            "cancellation_backend_termination": "not_running",
+            "cancellation_model_request_termination": "request_not_active",
+            "service_binding_ref": {"content_sha256": "a" * 64},
+            "terminal_prepared_continuation_receipt_ref": {
+                "content_sha256": "b" * 64
+            },
+            "returned_worker_ref": deepcopy(worker),
+            "worker_cleanup_ref": {
+                "content_sha256": worker_cleanup["content_sha256"]
+            },
+            "live_absence_observation": observation,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    return incumbent.compose_benchmark_v2_actual_completed_hybrid_cleanup(
+        operation_ref=operation,
+        worker_cleanup_ref=worker_cleanup,
+        provider_cleanup_ref=provider_cleanup,
+    )
+
+
 @pytest.mark.parametrize(
     ("mode", "status"),
     (
@@ -688,6 +840,46 @@ def test_actual_cleanup_terminal_operation_requires_exact_replay(
             terminal=successor,
             supplied=terminal,
         )
+
+
+def test_legacy_three_field_actual_cleanup_aggregate_remains_valid() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    service = _ActualService([])
+    terminals = []
+    for index in range(2):
+        binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+            run_id=f"legacy-run-{index}",
+            operation_id=f"legacy-operation-{index}",
+            window_binding_ref={
+                "id": f"legacy-window-{index}",
+                "content_sha256": f"{index + 1}" * 64,
+            },
+            capture_ref={
+                "id": f"legacy-capture-{index}",
+                "content_sha256": f"{index + 3}" * 64,
+            },
+            owner_journal_ref={"content_sha256": f"{index + 5}" * 64},
+            expected_uia_root_ref={"content_sha256": f"{index + 7}" * 64},
+        )
+        group = {
+            "request_ref": {
+                "id": f"legacy-request-{index}",
+                "content_sha256": "a" * 64,
+            }
+        }
+        step = _actual_service_step(group, binding)
+        terminals.append(
+            service.cancel_operation(operation_ref=step["operation_ref"])
+        )
+
+    runtime_module._validate_actual_operations_cleanup_aggregate(
+        {
+            "full_group_attestation_refs": [],
+            "pre_reservation_recovery_refs": [],
+            "partial_workflow_terminal_refs": terminals,
+        }
+    )
 
 
 class _ActualService:
@@ -2577,6 +2769,29 @@ def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation
         def __init__(self, operations, *, tamper_child_identity: bool = False):
             super().__init__(operations)
             self.tamper_child_identity = tamper_child_identity
+            self.completed_hybrid_cleanup_calls = 0
+
+        def start_hybrid_operation(self, *, screen_group, window_binding):
+            self.start_calls += 1
+            self.current = _actual_completed_review_step(
+                screen_group,
+                window_binding,
+            )
+            self.started_operation_ref = deepcopy(self.current["operation_ref"])
+            return deepcopy(self.current)
+
+        def cancel_operation(self, *, operation_ref):
+            self.cancel_calls += 1
+            self.cancelled_operation_refs.append(deepcopy(dict(operation_ref)))
+            assert self.current is not None
+            assert operation_ref == self.current["operation_ref"]
+            return deepcopy(self.current)
+
+        def attest_completed_hybrid_cleanup(self, *, operation_ref):
+            self.completed_hybrid_cleanup_calls += 1
+            assert self.current is not None
+            assert operation_ref == self.current["operation_ref"]
+            return _actual_completed_review_cleanup(operation_ref)
 
         def recover_incumbent_pre_reservation(
             self, *, provider_case_ref, window_binding
@@ -2649,6 +2864,12 @@ def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation
 
     service = RecoveringService([])
     service.start_hybrid_operation(screen_group=group, window_binding=binding)
+    reconciled = runtime_module._reconcile_actual_operations(
+        attempt_dir=attempt_dir,
+        service=service,
+    )
+    assert [len(reconciled[index]) for index in range(5)] == [1, 0, 1, 1, 0]
+    assert reconciled[5] == 0
     monkeypatch.setattr(
         runtime_module,
         "get_production_benchmark_v2_workflow_service",
@@ -2675,7 +2896,10 @@ def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation
         "listeners": 0,
         "leases": 0,
     }
-    assert service.cancel_calls == 1
+    assert service.cancel_calls == 2
+    assert service.completed_hybrid_cleanup_calls == 2
+    assert service.stable_zero_calls == 0
+    assert len(service.cancelled_operation_refs) == 2
     iterator.close()
 
 

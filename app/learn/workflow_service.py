@@ -4157,6 +4157,151 @@ def _attest_benchmark_v2_actual_operations_stable_zero(
     return validate_benchmark_v2_actual_operations_stable_zero(receipt)
 
 
+def _attest_benchmark_v2_actual_completed_hybrid_cleanup(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_actual_completed_hybrid_cleanup,
+        validate_benchmark_v2_workflow_service_operation_ref,
+    )
+
+    _require_minted_learning_workflow_service_composition(composition)
+    supplied = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=str(supplied["run_id"]),
+        operation_id=str(supplied["operation_id"]),
+    ):
+        current, stage_execution, binding, worker_record, exact = (
+            _benchmark_v2_hybrid_service_context(
+                composition=composition,
+                operation_ref=supplied,
+            )
+        )
+        status = _benchmark_v2_hybrid_service_status(
+            workflow_state=current,
+            stage=str(exact["stage"]),
+            worker_record=worker_record,
+        )
+        step = _project_benchmark_v2_hybrid_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            binding=binding,
+            worker_record=worker_record,
+            status=status,
+        )
+        if (
+            status != "complete"
+            or step["operation_ref"] != exact
+            or step["observed_task_kind"]
+            != "panel_learning_hybrid_review_projection"
+            or step["cleanup_refs"]
+            != {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+            or worker_record.get("status") != "completed"
+            or worker_record.get("runtime_attached") is not False
+            or worker_record.get("result_available") is not True
+            or worker_record.get("result_adopted") is not True
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 completed Hybrid cleanup bridge is unavailable"
+            )
+        receipt_value = binding.get("continuation_receipt")
+        receipt = _validate_benchmark_v2_hybrid_continuation_receipt(receipt_value)
+        returned_worker_ref = _benchmark_v2_hybrid_worker_ref(worker_record)
+        if (
+            receipt.get("receipt_phase") != "terminal_prepared"
+            or receipt.get("returned_worker_ref") != returned_worker_ref
+            or exact["worker_ref"] != returned_worker_ref
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 completed Hybrid continuation lineage is stale"
+            )
+        cancellation = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).cancel_worker(
+            run_id=str(exact["run_id"]),
+            stage=str(exact["stage"]),
+            operation_id=str(exact["operation_id"]),
+        )
+        if (
+            cancellation.get("backend_compute_termination")
+            not in {"not_running", "terminated"}
+            or cancellation.get("model_service_compute_termination")
+            not in {"request_not_active", "terminated"}
+            or cancellation.get("worker_id") != returned_worker_ref["worker_id"]
+            or cancellation.get("model_request_id")
+            != returned_worker_ref["model_request_id"]
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 completed Hybrid worker absence is indeterminate"
+            )
+        cancellation_projection = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_completed_hybrid_cancellation_projection_v1"
+                ),
+                "run_id": returned_worker_ref["run_id"],
+                "stage": returned_worker_ref["stage"],
+                "operation_id": returned_worker_ref["operation_id"],
+                "worker_id": returned_worker_ref["worker_id"],
+                "model_request_id": returned_worker_ref["model_request_id"],
+                "payload_sha256": returned_worker_ref["payload_sha256"],
+                "backend_compute_termination": str(
+                    cancellation["backend_compute_termination"]
+                ),
+                "model_service_compute_termination": str(
+                    cancellation["model_service_compute_termination"]
+                ),
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        worker_cleanup_ref = seal_immutable(
+            {
+                "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+                "run_id": returned_worker_ref["run_id"],
+                "stage": returned_worker_ref["stage"],
+                "operation_id": returned_worker_ref["operation_id"],
+                "worker_id": returned_worker_ref["worker_id"],
+                "model_request_id": returned_worker_ref["model_request_id"],
+                "payload_sha256": returned_worker_ref["payload_sha256"],
+                "backend_compute_termination": str(
+                    cancellation["backend_compute_termination"]
+                ),
+                "model_service_compute_termination": str(
+                    cancellation["model_service_compute_termination"]
+                ),
+                "cancellation_ref": {
+                    "content_sha256": cancellation_projection["content_sha256"]
+                },
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        provider_cleanup_ref = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).attest_completed_review_no_provider_cleanup(
+            worker_id=str(worker_record["worker_id"]),
+            run_id=str(worker_record["run_id"]),
+            stage=str(worker_record["stage"]),
+            operation_id=str(worker_record["operation_id"]),
+            service_binding_ref={"content_sha256": str(binding["content_sha256"])},
+            terminal_prepared_continuation_receipt_ref={
+                "content_sha256": str(receipt["content_sha256"])
+            },
+            returned_worker_ref=returned_worker_ref,
+            worker_cleanup_ref=worker_cleanup_ref,
+        )
+        return compose_benchmark_v2_actual_completed_hybrid_cleanup(
+            operation_ref=exact,
+            worker_cleanup_ref=worker_cleanup_ref,
+            provider_cleanup_ref=provider_cleanup_ref,
+        )
+
+
 def _benchmark_v2_workflow_service_phase_status(
     operation: Mapping[str, object],
     *,

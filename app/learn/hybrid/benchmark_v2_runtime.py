@@ -26,6 +26,7 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     compose_benchmark_v2_hybrid_screen_group_start,
     compose_benchmark_v2_workflow_window_binding,
     get_production_benchmark_v2_workflow_service,
+    validate_benchmark_v2_actual_completed_hybrid_cleanup,
     validate_benchmark_v2_actual_operations_stable_zero,
     validate_benchmark_v2_hybrid_screen_group_start,
     validate_benchmark_v2_incumbent_pre_reservation_recovery,
@@ -1950,6 +1951,7 @@ class _BenchmarkV2ProductionRuntime:
         cleanup_errors: list[BaseException] = []
         actual_attestations: list[Mapping[str, object]] = []
         actual_pre_reservation_recoveries: list[Mapping[str, object]] = []
+        actual_completed_hybrid_cleanups: list[Mapping[str, object]] = []
         actual_terminals: list[Mapping[str, object]] = []
         partial_actual_terminals: list[Mapping[str, object]] = []
         unresolved_actual_operations = 0
@@ -1965,6 +1967,7 @@ class _BenchmarkV2ProductionRuntime:
                         actual_terminals,
                         actual_attestations,
                         actual_pre_reservation_recoveries,
+                        actual_completed_hybrid_cleanups,
                         partial_actual_terminals,
                         unresolved_actual_operations,
                     ) = _reconcile_actual_operations(
@@ -2348,6 +2351,7 @@ class _BenchmarkV2ProductionRuntime:
         if (
             actual_attestations
             and not actual_pre_reservation_recoveries
+            and not actual_completed_hybrid_cleanups
             and not partial_actual_terminals
         ):
             if len(actual_attestations) == 1:
@@ -2370,16 +2374,32 @@ class _BenchmarkV2ProductionRuntime:
                     parent_kind="actual_operations_stable_zero_aggregate",
                     name="actual operations stable-zero aggregate",
                 )
-        elif partial_actual_terminals or actual_pre_reservation_recoveries:
+        elif (
+            partial_actual_terminals
+            or actual_pre_reservation_recoveries
+            or actual_completed_hybrid_cleanups
+        ):
             if (
                 not actual_attestations
                 and not actual_pre_reservation_recoveries
+                and not actual_completed_hybrid_cleanups
                 and len(partial_actual_terminals) == 1
             ):
                 service_terminal_ref = _cleanup_parent_ref(
                     partial_actual_terminals[0],
                     parent_kind="workflow_service_terminal",
                     name="partial actual workflow service terminal",
+                )
+            elif (
+                not actual_attestations
+                and not actual_pre_reservation_recoveries
+                and not partial_actual_terminals
+                and len(actual_completed_hybrid_cleanups) == 1
+            ):
+                service_terminal_ref = _cleanup_parent_ref(
+                    actual_completed_hybrid_cleanups[0],
+                    parent_kind="actual_completed_hybrid_cleanup",
+                    name="actual completed Hybrid cleanup",
                 )
             else:
                 service_terminal_ref = _cleanup_parent_ref(
@@ -2396,6 +2416,13 @@ class _BenchmarkV2ProductionRuntime:
                                     name="actual pre-reservation recovery",
                                 )
                                 for item in actual_pre_reservation_recoveries
+                            ],
+                            "completed_hybrid_cleanup_refs": [
+                                _content_ref(
+                                    item,
+                                    name="actual completed Hybrid cleanup",
+                                )
+                                for item in actual_completed_hybrid_cleanups
                             ],
                             "partial_workflow_terminal_refs": [
                                 _content_ref(
@@ -2419,19 +2446,52 @@ class _BenchmarkV2ProductionRuntime:
                 if isinstance(service_terminal, Mapping)
                 else None
             )
-        if actual_terminals:
-            provider_cleanup_refs = [
-                _cleanup_parent_ref(
-                    terminal["cleanup_refs"][name],
-                    parent_kind=parent_kind,
-                    name=f"actual {name}",
+        if actual_terminals or actual_completed_hybrid_cleanups:
+            provider_cleanup_refs = []
+            completed_operation_shas = {
+                str(item["operation_ref"]["content_sha256"])
+                for item in actual_completed_hybrid_cleanups
+            }
+            for terminal in actual_terminals:
+                cleanup = terminal["cleanup_refs"]
+                if all(
+                    isinstance(cleanup.get(name), Mapping)
+                    for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+                ):
+                    provider_cleanup_refs.extend(
+                        _cleanup_parent_ref(
+                            cleanup[name],
+                            parent_kind=parent_kind,
+                            name=f"actual {name}",
+                        )
+                        for name, parent_kind in (
+                            ("worker_cleanup_ref", "worker_cleanup"),
+                            ("provider_cleanup_ref", "provider_cleanup"),
+                        )
+                    )
+                elif (
+                    cleanup
+                    == {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+                    and str(terminal["operation_ref"]["content_sha256"])
+                    in completed_operation_shas
+                ):
+                    continue
+                else:
+                    raise ValueError(
+                        "actual terminal cleanup has no exact cleanup proof"
+                    )
+            for completed_cleanup in actual_completed_hybrid_cleanups:
+                provider_cleanup_refs.extend(
+                    _cleanup_parent_ref(
+                        completed_cleanup[name],
+                        parent_kind=parent_kind,
+                        name=f"actual completed Hybrid {name}",
+                    )
+                    for name, parent_kind in (
+                        ("worker_cleanup_ref", "worker_cleanup"),
+                        ("provider_cleanup_ref", "provider_cleanup"),
+                    )
                 )
-                for terminal in actual_terminals
-                for name, parent_kind in (
-                    ("worker_cleanup_ref", "worker_cleanup"),
-                    ("provider_cleanup_ref", "provider_cleanup"),
-                )
-            ]
         else:
             provider_cleanup_refs = _provider_cleanup_refs(service_terminal)
         counts = dict(self.resource_counts())
@@ -3159,6 +3219,7 @@ def _reconcile_actual_operations(
     list[dict[str, Any]],
     list[dict[str, Any]],
     list[dict[str, Any]],
+    list[dict[str, Any]],
     int,
 ]:
     intents = _read_actual_incumbent_call_intents(attempt_dir=attempt_dir)
@@ -3183,6 +3244,11 @@ def _reconcile_actual_operations(
     )
     cancel = getattr(service, "cancel_operation", None)
     attest = getattr(service, "attest_actual_operations_stable_zero", None)
+    attest_completed_hybrid = getattr(
+        service,
+        "attest_completed_hybrid_cleanup",
+        None,
+    )
     if not callable(cancel) or (
         any(targets.values()) and not callable(lookup)
     ) or (
@@ -3192,6 +3258,7 @@ def _reconcile_actual_operations(
     terminals: list[dict[str, Any]] = []
     attestations: list[dict[str, Any]] = []
     pre_reservation_recoveries: list[dict[str, Any]] = []
+    completed_hybrid_cleanups: list[dict[str, Any]] = []
     partial_terminals: list[dict[str, Any]] = []
     unresolved_operations = 0
     for intent in screen_group_intents:
@@ -3313,13 +3380,40 @@ def _reconcile_actual_operations(
             attestations.append(attestation)
         else:
             for terminal in group_terminals:
+                operation = terminal["operation_ref"]
+                cleanup = terminal["cleanup_refs"]
+                completed_without_inline_cleanup = (
+                    operation["mode"] == "hybrid_v1_1"
+                    and operation["status"] == "complete"
+                    and cleanup
+                    == {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+                )
+                if completed_without_inline_cleanup:
+                    if not callable(attest_completed_hybrid):
+                        raise RuntimeError(
+                            "WorkflowService completed Hybrid cleanup attestation is unavailable"
+                        )
+                    completed_cleanup = (
+                        validate_benchmark_v2_actual_completed_hybrid_cleanup(
+                            attest_completed_hybrid(
+                                operation_ref=deepcopy(operation)
+                            )
+                        )
+                    )
+                    if completed_cleanup["operation_ref"] != operation:
+                        raise ValueError(
+                            "benchmark actual completed Hybrid cleanup lineage differs"
+                        )
+                    completed_hybrid_cleanups.append(completed_cleanup)
+                    continue
                 _validate_partial_actual_terminal_cleanup(terminal)
-            partial_terminals.extend(group_terminals)
+                partial_terminals.append(terminal)
         terminals.extend(group_terminals)
     return (
         terminals,
         attestations,
         pre_reservation_recoveries,
+        completed_hybrid_cleanups,
         partial_terminals,
         unresolved_operations,
     )
@@ -3996,6 +4090,7 @@ def _cleanup_parent_ref(
         "actual_operations_stable_zero",
         "actual_operations_stable_zero_aggregate",
         "actual_operations_cleanup_aggregate",
+        "actual_completed_hybrid_cleanup",
     }:
         raise ValueError("benchmark cleanup parent kind is invalid")
     producer = _sealed_parent(value, name=name)
@@ -4019,25 +4114,35 @@ def _cleanup_parent_ref(
 def _validate_actual_operations_cleanup_aggregate(
     value: Mapping[str, object],
 ) -> None:
-    fields = {
+    legacy_fields = {
         "full_group_attestation_refs",
         "pre_reservation_recovery_refs",
         "partial_workflow_terminal_refs",
     }
-    if not isinstance(value, Mapping) or set(value) != fields:
+    fields = legacy_fields | {"completed_hybrid_cleanup_refs"}
+    if not isinstance(value, Mapping) or frozenset(value) not in {
+        frozenset(legacy_fields),
+        frozenset(fields),
+    }:
         raise ValueError("actual operations cleanup aggregate is not closed")
     full_values = value.get("full_group_attestation_refs")
     recovery_values = value.get("pre_reservation_recovery_refs")
+    completed_values = value.get("completed_hybrid_cleanup_refs", [])
     partial_values = value.get("partial_workflow_terminal_refs")
     if (
         not isinstance(full_values, list)
         or not isinstance(recovery_values, list)
+        or not isinstance(completed_values, list)
         or not isinstance(partial_values, list)
     ):
         raise ValueError("actual operations cleanup aggregate refs are invalid")
     if (
-        not partial_values
-        or len(full_values) + len(recovery_values) + len(partial_values) < 2
+        not (partial_values or completed_values)
+        or len(full_values)
+        + len(recovery_values)
+        + len(completed_values)
+        + len(partial_values)
+        < 2
     ):
         raise ValueError("actual operations cleanup aggregate is incomplete")
 
@@ -4049,12 +4154,21 @@ def _validate_actual_operations_cleanup_aggregate(
         validate_benchmark_v2_incumbent_pre_reservation_recovery(item)
         for item in recovery_values
     ]
+    completed_cleanups = [
+        validate_benchmark_v2_actual_completed_hybrid_cleanup(item)
+        for item in completed_values
+    ]
     partial_terminals = [
         _validate_partial_actual_terminal_cleanup(item) for item in partial_values
     ]
     producer_shas = [
         str(item["content_sha256"])
-        for item in [*attestations, *recoveries, *partial_terminals]
+        for item in [
+            *attestations,
+            *recoveries,
+            *completed_cleanups,
+            *partial_terminals,
+        ]
     ]
     if len(set(producer_shas)) != len(producer_shas):
         raise ValueError("actual operations cleanup aggregate producer is duplicated")
@@ -4071,6 +4185,8 @@ def _validate_actual_operations_cleanup_aggregate(
             "content_sha256": recovery["content_sha256"],
         }
         for recovery in recoveries
+    ] + [
+        cleanup["operation_ref"] for cleanup in completed_cleanups
     ] + [terminal["operation_ref"] for terminal in partial_terminals]
     operation_keys = [
         (operation["run_id"], operation["stage"], operation["operation_id"])
@@ -4082,13 +4198,35 @@ def _validate_actual_operations_cleanup_aggregate(
     ) != len(operation_shas):
         raise ValueError("actual operations cleanup aggregate operation is duplicated")
 
-    partial_cleanup_shas = [
+    cleanup_shas = [
         str(terminal["cleanup_refs"][name]["content_sha256"])
         for terminal in partial_terminals
         for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+    ] + [
+        str(cleanup[name]["content_sha256"])
+        for cleanup in completed_cleanups
+        for name in ("worker_cleanup_ref", "provider_cleanup_ref")
     ]
-    if len(set(partial_cleanup_shas)) != len(partial_cleanup_shas):
+    if len(set(cleanup_shas)) != len(cleanup_shas):
         raise ValueError("actual operations cleanup aggregate proof is duplicated")
+    completed_bindings = {
+        (
+            cleanup["operation_ref"]["window_binding_ref"]["content_sha256"],
+            cleanup["operation_ref"]["capture_ref"]["content_sha256"],
+        )
+        for cleanup in completed_cleanups
+    }
+    if completed_cleanups and any(
+        (
+            recovery["window_binding_ref"]["content_sha256"],
+            recovery["capture_ref"]["content_sha256"],
+        )
+        not in completed_bindings
+        for recovery in recoveries
+    ):
+        raise ValueError(
+            "actual operations cleanup recovery parent binding is stale"
+        )
 
 
 def _validate_review_no_provider_cleanup_parent(
@@ -4261,6 +4399,9 @@ def _validate_cleanup_parent_semantics(
     if contract == "benchmark_v2_actual_operations_stable_zero_v1":
         validate_benchmark_v2_actual_operations_stable_zero(producer)
         return "actual_operations_stable_zero", str(contract)
+    if contract == "benchmark_v2_actual_completed_hybrid_cleanup_v1":
+        validate_benchmark_v2_actual_completed_hybrid_cleanup(producer)
+        return "actual_completed_hybrid_cleanup", str(contract)
     if contract == "benchmark_v2_runtime_resource_ref_v1":
         fields = {
             "contract_version",
