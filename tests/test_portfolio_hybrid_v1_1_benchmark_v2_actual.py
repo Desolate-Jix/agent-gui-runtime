@@ -480,10 +480,15 @@ def _offline_c3_inputs(monkeypatch):
         )
 
     monkeypatch.setattr(predictions, "_parse_provider_inputs", parse_provider_inputs)
+
+    def provider_case_index(_corpus, *, partition="regression"):
+        assert partition == "regression"
+        return provider_cases, case_context, digest
+
     monkeypatch.setattr(
         predictions,
         "_provider_case_index",
-        lambda _corpus: (provider_cases, case_context, digest),
+        provider_case_index,
     )
     monkeypatch.setattr(
         predictions,
