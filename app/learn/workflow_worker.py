@@ -162,6 +162,12 @@ _BENCHMARK_PROVIDER_JOURNAL_VERSION = "benchmark_provider_registry_journal_v1"
 _BENCHMARK_PROVIDER_CLEANUP_JOURNAL_VERSION = (
     "benchmark_provider_cleanup_registry_journal_v1"
 )
+_BENCHMARK_V2_REVIEW_NO_PROVIDER_ABSENCE_CONTRACT = (
+    "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
+)
+_BENCHMARK_V2_REVIEW_NO_PROVIDER_CLEANUP_CONTRACT = (
+    "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+)
 _BENCHMARK_PRIVATE_MARKERS = frozenset({
     "_benchmark_worker_supervision",
     "_benchmark_worker_bootstrap",
@@ -7531,6 +7537,13 @@ class LearningStageWorkerRegistry:
             payload["benchmark_provider_cleanup_ref"] = deepcopy(
                 record["benchmark_provider_cleanup_ref"]
             )
+        if isinstance(record.get("benchmark_v2_no_provider_cleanup_ref"), dict):
+            payload["benchmark_v2_no_provider_cleanup_ref"] = deepcopy(
+                record["benchmark_v2_no_provider_cleanup_ref"]
+            )
+            payload["benchmark_v2_no_provider_cleanup_state"] = "sealed"
+        elif record.get("benchmark_v2_no_provider_cleanup_state") == "sealed":
+            payload["benchmark_v2_no_provider_cleanup_state"] = "sealed"
         _write_json_atomic(journal_path, payload)
 
     def _cleanup_failed_start_or_retain(
@@ -8170,6 +8183,286 @@ class LearningStageWorkerRegistry:
             if record is not None:
                 return self._public_record(record)
         return None
+
+    @staticmethod
+    def _review_dispatch_presence(record: Mapping[str, object]) -> tuple[bool, bool]:
+        def contains_review(value: object) -> bool:
+            if isinstance(value, Mapping):
+                if value.get("provider") == "review" or "review" in value:
+                    return True
+                return any(contains_review(child) for child in value.values())
+            if isinstance(value, list):
+                return any(contains_review(child) for child in value)
+            return False
+
+        context_present = False
+        receipt_present = False
+        sources: list[Mapping[str, object]] = []
+        payload = record.get("payload")
+        if isinstance(payload, Mapping):
+            sources.append(payload)
+        worker_result = record.get("worker_result")
+        response = (
+            worker_result.get("response")
+            if isinstance(worker_result, Mapping)
+            else None
+        )
+        if isinstance(response, Mapping):
+            sources.append(response)
+        for source in sources:
+            if "_benchmark_v2_dispatch_context" in source:
+                context_present = True
+            orchestration = source.get("orchestration")
+            private_orchestration = source.get("_hybrid_orchestration")
+            for container in (source, orchestration, private_orchestration):
+                if not isinstance(container, Mapping):
+                    continue
+                for name in (
+                    "benchmark_v2_provider_dispatch_context_refs",
+                    "_benchmark_v2_provider_dispatch_context_refs",
+                ):
+                    if name in container and contains_review(container[name]):
+                        context_present = True
+                for name in (
+                    "benchmark_v2_provider_dispatch_receipt_refs",
+                    "_benchmark_v2_provider_dispatch_receipt_refs",
+                ):
+                    if name in container and contains_review(container[name]):
+                        receipt_present = True
+        return context_present, receipt_present
+
+    def attest_completed_review_no_provider_cleanup(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        service_binding_ref: Mapping[str, object],
+        terminal_prepared_continuation_receipt_ref: Mapping[str, object],
+        returned_worker_ref: Mapping[str, object],
+        worker_cleanup_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        worker = _required_text(worker_id, "worker_id")
+        operation_key = (
+            _required_text(run_id, "run_id"),
+            _required_text(stage, "stage"),
+            _required_text(operation_id, "operation_id"),
+        )
+        binding_ref = _benchmark_exact_ref(
+            dict(service_binding_ref),
+            "benchmark review no-provider cleanup service binding ref",
+        )
+        continuation_ref = _benchmark_exact_ref(
+            dict(terminal_prepared_continuation_receipt_ref),
+            "benchmark review no-provider cleanup continuation receipt ref",
+        )
+        with self._lock:
+            record = self._records.get(worker)
+            latest = self._latest_operation_record(operation_key)
+            if record is None or latest is not record:
+                raise LearningStageWorkerError(
+                    "benchmark review no-provider cleanup current ownership differs"
+                )
+            self._refresh_record(record)
+            public = self._public_record(record)
+            if (
+                record.get("benchmark_v2_no_provider_cleanup_state") == "sealed"
+                and not isinstance(
+                    record.get("benchmark_v2_no_provider_cleanup_ref"), Mapping
+                )
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark review no-provider cleanup persisted proof is missing"
+                )
+            returned = _validate_benchmark_v2_review_worker_ref(
+                returned_worker_ref,
+                identity=record,
+            )
+            cleanup_fields = {
+                "contract_version",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+                "backend_compute_termination",
+                "model_service_compute_termination",
+                "cancellation_ref",
+                "artifact_is_authorization",
+                "execute_binding_enabled",
+                "content_sha256",
+            }
+            cleanup = deepcopy(dict(worker_cleanup_ref))
+            if (
+                set(cleanup) != cleanup_fields
+                or cleanup.get("contract_version")
+                != "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+                or cleanup.get("backend_compute_termination")
+                not in {"not_running", "terminated"}
+                or cleanup.get("model_service_compute_termination")
+                not in {"request_not_active", "terminated"}
+                or any(
+                    cleanup.get(name) != record.get(name)
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                    )
+                )
+                or cleanup.get("artifact_is_authorization") is not False
+                or cleanup.get("execute_binding_enabled") is not False
+                or cleanup.get("content_sha256") != content_sha256(cleanup)
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark review no-provider cleanup worker cleanup lineage differs"
+                )
+            _benchmark_exact_ref(
+                cleanup.get("cancellation_ref"),
+                "benchmark review no-provider cleanup cancellation ref",
+            )
+            process = record.get("process")
+            process_alive = bool(
+                process is not None
+                and callable(getattr(process, "is_alive", None))
+                and process.is_alive()
+            )
+            expected_role = HYBRID_STAGE_HANDLER_REGISTRY.get(
+                str(record.get("task_kind") or ""), {}
+            ).get("provider")
+            context_present, receipt_present = self._review_dispatch_presence(record)
+            artifact_paths = {
+                "lease": self._result_root / f"{worker}.provider-lease.json",
+                "owner": self._result_root / f"{worker}.provider-owner.json",
+                "runtime": self._result_root / f"{worker}.provider-runtime.json",
+            }
+            provider_journal = self._benchmark_provider_journals.get(operation_key)
+            cleanup_journal = self._benchmark_provider_cleanup_journals.get(
+                operation_key
+            )
+            if (
+                record.get("task_kind")
+                != "panel_learning_hybrid_review_projection"
+                or expected_role != "review"
+                or record.get("status") != "completed"
+                or public.get("runtime_attached") is not False
+                or public.get("result_available") is not True
+                or public.get("result_adopted") is not True
+                or process_alive
+                or record.get("provider_scope") is not None
+                or record.get("provider_scope_name") is not None
+                or record.get("provider_owner_path") is not None
+                or record.get("provider_runtime_path") is not None
+                or record.get("benchmark_provider_cleanup_ref") is not None
+                or provider_journal is not None
+                or cleanup_journal is not None
+                or context_present
+                or receipt_present
+                or any(path.exists() for path in artifact_paths.values())
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark review no-provider cleanup live artifact absence differs"
+                )
+            observation = seal_immutable(
+                {
+                    "contract_version": (
+                        _BENCHMARK_V2_REVIEW_NO_PROVIDER_ABSENCE_CONTRACT
+                    ),
+                    **{
+                        name: record[name]
+                        for name in (
+                            "run_id",
+                            "stage",
+                            "operation_id",
+                            "worker_id",
+                            "model_request_id",
+                            "payload_sha256",
+                            "task_kind",
+                        )
+                    },
+                    "provider_role": "review",
+                    "current_worker_ref": deepcopy(returned),
+                    "latest_operation_worker_ref": deepcopy(returned),
+                    "review_dispatch_context_absent": True,
+                    "review_dispatch_receipt_absent": True,
+                    "provider_scope_absent": True,
+                    "provider_journal_absent": True,
+                    "provider_cleanup_journal_absent": True,
+                    "deterministic_provider_lease_artifact_absent": True,
+                    "deterministic_provider_owner_artifact_absent": True,
+                    "deterministic_provider_runtime_artifact_absent": True,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            projection = seal_immutable(
+                {
+                    "contract_version": (
+                        _BENCHMARK_V2_REVIEW_NO_PROVIDER_CLEANUP_CONTRACT
+                    ),
+                    "status": "cleanup_verified",
+                    "outcome": "verified_review_provider_not_applicable",
+                    "authority_kind": (
+                        "benchmark_v2_workflow_service_review_no_provider_cleanup"
+                    ),
+                    **{
+                        name: record[name]
+                        for name in (
+                            "run_id",
+                            "stage",
+                            "operation_id",
+                            "worker_id",
+                            "model_request_id",
+                            "payload_sha256",
+                            "task_kind",
+                        )
+                    },
+                    "provider_role": "review",
+                    "worker_status": "completed",
+                    "runtime_attached": False,
+                    "result_available": True,
+                    "result_adopted": True,
+                    "continuation_phase": "terminal_prepared",
+                    "cancellation_backend_termination": cleanup[
+                        "backend_compute_termination"
+                    ],
+                    "cancellation_model_request_termination": cleanup[
+                        "model_service_compute_termination"
+                    ],
+                    "service_binding_ref": binding_ref,
+                    "terminal_prepared_continuation_receipt_ref": continuation_ref,
+                    "returned_worker_ref": deepcopy(returned),
+                    "worker_cleanup_ref": {
+                        "content_sha256": cleanup["content_sha256"]
+                    },
+                    "live_absence_observation": observation,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            projection = _validate_benchmark_v2_review_no_provider_cleanup_projection(
+                projection,
+                identity=record,
+            )
+            existing = record.get("benchmark_v2_no_provider_cleanup_ref")
+            if existing is not None:
+                persisted = _validate_benchmark_v2_review_no_provider_cleanup_projection(
+                    existing,
+                    identity=record,
+                )
+                if persisted != projection:
+                    raise LearningStageWorkerError(
+                        "benchmark review no-provider cleanup replay lineage differs"
+                    )
+                return persisted
+            record["benchmark_v2_no_provider_cleanup_ref"] = deepcopy(projection)
+            record["benchmark_v2_no_provider_cleanup_state"] = "sealed"
+            self._persist_record_journal(record)
+            return deepcopy(projection)
 
     def materialize_completed_hybrid_provider_cleanup(
         self,
@@ -12004,6 +12297,224 @@ def _validate_hybrid_benchmark_provider_cleanup_projection(
     return projection
 
 
+def _validate_benchmark_v2_review_worker_ref(
+    value: object,
+    *,
+    identity: Mapping[str, object],
+) -> dict[str, Any]:
+    fields = {
+        "contract_version",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup worker ref is not closed"
+        )
+    worker_ref = deepcopy(dict(value))
+    if (
+        worker_ref.get("contract_version")
+        != "benchmark_v2_workflow_service_generic_worker_ref_v1"
+        or worker_ref.get("task_kind")
+        != "panel_learning_hybrid_review_projection"
+        or any(
+            worker_ref.get(name) != identity.get(name)
+            for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+                "task_kind",
+            )
+        )
+        or worker_ref.get("content_sha256") != content_sha256(worker_ref)
+    ):
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup worker lineage differs"
+        )
+    return worker_ref
+
+
+def _validate_benchmark_v2_review_no_provider_absence(
+    value: object,
+    *,
+    identity: Mapping[str, object],
+    returned_worker_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    fields = {
+        "contract_version",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+        "provider_role",
+        "current_worker_ref",
+        "latest_operation_worker_ref",
+        "review_dispatch_context_absent",
+        "review_dispatch_receipt_absent",
+        "provider_scope_absent",
+        "provider_journal_absent",
+        "provider_cleanup_journal_absent",
+        "deterministic_provider_lease_artifact_absent",
+        "deterministic_provider_owner_artifact_absent",
+        "deterministic_provider_runtime_artifact_absent",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup absence observation is not closed"
+        )
+    observation = deepcopy(dict(value))
+    identity_fields = (
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+    )
+    if (
+        observation.get("contract_version")
+        != _BENCHMARK_V2_REVIEW_NO_PROVIDER_ABSENCE_CONTRACT
+        or observation.get("provider_role") != "review"
+        or any(
+            observation.get(name) != identity.get(name) for name in identity_fields
+        )
+        or observation.get("current_worker_ref") != returned_worker_ref
+        or observation.get("latest_operation_worker_ref") != returned_worker_ref
+        or any(
+            observation.get(name) is not True
+            for name in (
+                "review_dispatch_context_absent",
+                "review_dispatch_receipt_absent",
+                "provider_scope_absent",
+                "provider_journal_absent",
+                "provider_cleanup_journal_absent",
+                "deterministic_provider_lease_artifact_absent",
+                "deterministic_provider_owner_artifact_absent",
+                "deterministic_provider_runtime_artifact_absent",
+            )
+        )
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or observation.get("content_sha256") != content_sha256(observation)
+    ):
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup absence lineage differs"
+        )
+    return observation
+
+
+def _validate_benchmark_v2_review_no_provider_cleanup_projection(
+    value: object,
+    *,
+    identity: Mapping[str, object],
+) -> dict[str, Any]:
+    fields = {
+        "contract_version",
+        "status",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+        "provider_role",
+        "worker_status",
+        "runtime_attached",
+        "result_available",
+        "result_adopted",
+        "continuation_phase",
+        "cancellation_backend_termination",
+        "cancellation_model_request_termination",
+        "service_binding_ref",
+        "terminal_prepared_continuation_receipt_ref",
+        "returned_worker_ref",
+        "worker_cleanup_ref",
+        "live_absence_observation",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup projection is not closed"
+        )
+    projection = deepcopy(dict(value))
+    returned_worker_ref = _validate_benchmark_v2_review_worker_ref(
+        projection.get("returned_worker_ref"), identity=identity
+    )
+    identity_fields = (
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+    )
+    if (
+        projection.get("contract_version")
+        != _BENCHMARK_V2_REVIEW_NO_PROVIDER_CLEANUP_CONTRACT
+        or projection.get("status") != "cleanup_verified"
+        or projection.get("outcome")
+        != "verified_review_provider_not_applicable"
+        or projection.get("authority_kind")
+        != "benchmark_v2_workflow_service_review_no_provider_cleanup"
+        or projection.get("provider_role") != "review"
+        or projection.get("worker_status") != "completed"
+        or projection.get("runtime_attached") is not False
+        or projection.get("result_available") is not True
+        or projection.get("result_adopted") is not True
+        or projection.get("continuation_phase") != "terminal_prepared"
+        or projection.get("cancellation_backend_termination")
+        not in {"not_running", "terminated"}
+        or projection.get("cancellation_model_request_termination")
+        not in {"request_not_active", "terminated"}
+        or any(projection.get(name) != identity.get(name) for name in identity_fields)
+        or projection.get("artifact_is_authorization") is not False
+        or projection.get("execute_binding_enabled") is not False
+        or projection.get("content_sha256") != content_sha256(projection)
+    ):
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup projection lineage differs"
+        )
+    for name in (
+        "service_binding_ref",
+        "terminal_prepared_continuation_receipt_ref",
+        "worker_cleanup_ref",
+    ):
+        _benchmark_exact_ref(
+            projection.get(name), f"benchmark review no-provider cleanup {name}"
+        )
+    projection["returned_worker_ref"] = returned_worker_ref
+    projection["live_absence_observation"] = (
+        _validate_benchmark_v2_review_no_provider_absence(
+            projection.get("live_absence_observation"),
+            identity=identity,
+            returned_worker_ref=returned_worker_ref,
+        )
+    )
+    return projection
+
+
 def _load_worker_journal(
     *,
     journal_path: Path,
@@ -12080,6 +12591,25 @@ def _load_worker_journal(
                 provider_cleanup_ref,
                 identity=identity,
             )
+        )
+    no_provider_cleanup_ref = payload.get("benchmark_v2_no_provider_cleanup_ref")
+    no_provider_cleanup_state = payload.get(
+        "benchmark_v2_no_provider_cleanup_state"
+    )
+    if no_provider_cleanup_state not in {None, "sealed"}:
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup persisted state is invalid"
+        )
+    if no_provider_cleanup_ref is not None:
+        no_provider_cleanup_ref = (
+            _validate_benchmark_v2_review_no_provider_cleanup_projection(
+                no_provider_cleanup_ref,
+                identity=identity,
+            )
+        )
+    if (no_provider_cleanup_ref is None) != (no_provider_cleanup_state is None):
+        raise LearningStageWorkerError(
+            "benchmark review no-provider cleanup persisted proof is missing"
         )
 
     result_path = (result_root / result_file).resolve()
@@ -12208,6 +12738,8 @@ def _load_worker_journal(
         "completion_event": None,
         "result_adoption": result_adoption,
         "benchmark_provider_cleanup_ref": provider_cleanup_ref,
+        "benchmark_v2_no_provider_cleanup_ref": no_provider_cleanup_ref,
+        "benchmark_v2_no_provider_cleanup_state": no_provider_cleanup_state,
         "start_cleanup_evidence": (
             deepcopy(payload.get("start_cleanup_evidence"))
             if isinstance(payload.get("start_cleanup_evidence"), dict)

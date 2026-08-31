@@ -2643,6 +2643,145 @@ def test_prepared_attempt_without_actual_intent_does_not_construct_workflow_serv
     iterator.close()
 
 
+def test_partial_actual_review_no_provider_cleanup_is_exact_and_non_authorizing() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    binding = {
+        "run_id": "run-partial-review",
+        "stage": "screen_understanding",
+        "operation_id": "operation-partial-review",
+        "window_binding_ref": {
+            "id": "window-partial-review",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": "capture-partial-review",
+            "content_sha256": "b" * 64,
+        },
+    }
+    operation = _actual_operation(
+        mode="hybrid_v1_1",
+        operation_id=str(binding["operation_id"]),
+        request_ref={"id": "request-partial-review", "content_sha256": "c" * 64},
+        binding=binding,
+        revision=3,
+        status="safe_stopped",
+    )
+    worker = operation["worker_ref"]
+    returned_worker_ref = _sealed(
+        {
+            "contract_version": "benchmark_v2_workflow_service_generic_worker_ref_v1",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "task_kind": "panel_learning_hybrid_review_projection",
+        }
+    )
+    worker_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+            "cancellation_ref": {"content_sha256": "d" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    absence = _sealed(
+        {
+            "contract_version": (
+                "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
+            ),
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "provider_role": "review",
+            "current_worker_ref": returned_worker_ref,
+            "latest_operation_worker_ref": returned_worker_ref,
+            "review_dispatch_context_absent": True,
+            "review_dispatch_receipt_absent": True,
+            "provider_scope_absent": True,
+            "provider_journal_absent": True,
+            "provider_cleanup_journal_absent": True,
+            "deterministic_provider_lease_artifact_absent": True,
+            "deterministic_provider_owner_artifact_absent": True,
+            "deterministic_provider_runtime_artifact_absent": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    provider_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_no_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_review_provider_not_applicable",
+            "authority_kind": (
+                "benchmark_v2_workflow_service_review_no_provider_cleanup"
+            ),
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "provider_role": "review",
+            "worker_status": "completed",
+            "runtime_attached": False,
+            "result_available": True,
+            "result_adopted": True,
+            "continuation_phase": "terminal_prepared",
+            "cancellation_backend_termination": "not_running",
+            "cancellation_model_request_termination": "request_not_active",
+            "service_binding_ref": {"content_sha256": "e" * 64},
+            "terminal_prepared_continuation_receipt_ref": {
+                "content_sha256": "f" * 64
+            },
+            "returned_worker_ref": returned_worker_ref,
+            "worker_cleanup_ref": {
+                "content_sha256": worker_cleanup["content_sha256"]
+            },
+            "live_absence_observation": absence,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    terminal = incumbent.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation,
+        observed_task_kind="panel_learning_hybrid_review_projection",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={
+            "worker_cleanup_ref": worker_cleanup,
+            "provider_cleanup_ref": provider_cleanup,
+        },
+    )
+
+    assert runtime_module._validate_partial_actual_terminal_cleanup(terminal) == terminal
+
+    foreign = deepcopy(terminal)
+    foreign_cleanup = deepcopy(provider_cleanup)
+    foreign_cleanup["run_id"] = "foreign-run"
+    foreign_cleanup["content_sha256"] = content_sha256(foreign_cleanup)
+    foreign["cleanup_refs"]["provider_cleanup_ref"] = foreign_cleanup
+    foreign["content_sha256"] = content_sha256(foreign)
+    with pytest.raises(ValueError, match="cleanup.*stale"):
+        runtime_module._validate_partial_actual_terminal_cleanup(foreign)
+
+
 @pytest.mark.parametrize(
     "mutation",
     (

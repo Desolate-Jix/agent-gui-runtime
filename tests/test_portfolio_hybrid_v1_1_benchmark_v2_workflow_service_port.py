@@ -1466,6 +1466,114 @@ def _s3_vista_supervisor_cleanup_receipt(
     return receipt, lineage
 
 
+class _S3ReviewNoProviderRegistry(_S3Registry):
+    def __init__(self) -> None:
+        super().__init__()
+        self.review_no_provider_cleanup_calls = 0
+
+    def cancel_by_operation(self, **kwargs) -> dict[str, object]:
+        self.cancel_calls += 1
+        current = self._owned(kwargs)
+        if current["status"] != "completed":
+            raise AssertionError("review worker must already be completed")
+        self.active_resources = 0
+        return {
+            **deepcopy(current),
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+            "model_request_cancellation": {"status": "request_not_active"},
+        }
+
+    def attest_completed_review_no_provider_cleanup(
+        self, **kwargs
+    ) -> dict[str, object]:
+        self.review_no_provider_cleanup_calls += 1
+        current = self._owned(kwargs)
+        worker_ref = kwargs["returned_worker_ref"]
+        worker_cleanup = kwargs["worker_cleanup_ref"]
+        observation = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
+                ),
+                **{
+                    name: current[name]
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                    )
+                },
+                "task_kind": "panel_learning_hybrid_review_projection",
+                "provider_role": "review",
+                "current_worker_ref": deepcopy(worker_ref),
+                "latest_operation_worker_ref": deepcopy(worker_ref),
+                "review_dispatch_context_absent": True,
+                "review_dispatch_receipt_absent": True,
+                "provider_scope_absent": True,
+                "provider_journal_absent": True,
+                "provider_cleanup_journal_absent": True,
+                "deterministic_provider_lease_artifact_absent": True,
+                "deterministic_provider_owner_artifact_absent": True,
+                "deterministic_provider_runtime_artifact_absent": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        projection = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+                ),
+                "status": "cleanup_verified",
+                "outcome": "verified_review_provider_not_applicable",
+                "authority_kind": (
+                    "benchmark_v2_workflow_service_review_no_provider_cleanup"
+                ),
+                **{
+                    name: current[name]
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                    )
+                },
+                "task_kind": "panel_learning_hybrid_review_projection",
+                "provider_role": "review",
+                "worker_status": "completed",
+                "runtime_attached": False,
+                "result_available": True,
+                "result_adopted": True,
+                "continuation_phase": "terminal_prepared",
+                "cancellation_backend_termination": worker_cleanup[
+                    "backend_compute_termination"
+                ],
+                "cancellation_model_request_termination": worker_cleanup[
+                    "model_service_compute_termination"
+                ],
+                "service_binding_ref": deepcopy(kwargs["service_binding_ref"]),
+                "terminal_prepared_continuation_receipt_ref": deepcopy(
+                    kwargs["terminal_prepared_continuation_receipt_ref"]
+                ),
+                "returned_worker_ref": deepcopy(worker_ref),
+                "worker_cleanup_ref": {
+                    "content_sha256": worker_cleanup["content_sha256"]
+                },
+                "live_absence_observation": observation,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        current["benchmark_v2_no_provider_cleanup_ref"] = deepcopy(projection)
+        return projection
+
+
 def _s3_service(
     tmp_path: Path,
     registry: _S3Registry,
@@ -3769,6 +3877,68 @@ def test_s3_terminal_prepared_state_remains_cancellable_with_zero_resources(
         assert continuation_calls == 1
         assert registry.status_calls == 1
         assert registry.adopt_calls == 1
+        assert registry.cancel_calls == 1
+        assert registry.active_resources == 0
+    finally:
+        store.close()
+
+
+def test_s3_terminal_prepared_review_without_provider_projects_exact_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3ReviewNoProviderRegistry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    monkeypatch.setattr(
+        workflow_service,
+        "build_learning_pipeline_initial_worker_request",
+        lambda **_kwargs: {
+            "task_kind": "panel_learning_hybrid_review_projection",
+            "payload": _hybrid_worker_payload(),
+        },
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("transient terminal continuation failure")
+        ),
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current({"outcome": "completed", "success": True})
+        with pytest.raises(RuntimeError, match="transient terminal continuation failure"):
+            service.continue_hybrid_operation(operation_ref=consumed_ref)
+
+        terminal = service.cancel_operation(operation_ref=consumed_ref)
+        replay = service.cancel_operation(operation_ref=terminal["operation_ref"])
+
+        provider_cleanup = terminal["cleanup_refs"]["provider_cleanup_ref"]
+        worker_cleanup = terminal["cleanup_refs"]["worker_cleanup_ref"]
+        assert terminal["status"] == "safe_stopped"
+        assert provider_cleanup["contract_version"] == (
+            "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+        )
+        assert provider_cleanup["worker_cleanup_ref"] == {
+            "content_sha256": worker_cleanup["content_sha256"]
+        }
+        assert provider_cleanup["returned_worker_ref"] == terminal["operation_ref"][
+            "worker_ref"
+        ]
+        assert provider_cleanup["live_absence_observation"][
+            "review_dispatch_context_absent"
+        ] is True
+        assert provider_cleanup["live_absence_observation"][
+            "review_dispatch_receipt_absent"
+        ] is True
+        assert canonical_json_bytes(replay) == canonical_json_bytes(terminal)
+        assert registry.review_no_provider_cleanup_calls == 2
         assert registry.cancel_calls == 1
         assert registry.active_resources == 0
     finally:

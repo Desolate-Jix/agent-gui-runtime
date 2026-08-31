@@ -109,6 +109,11 @@ class _LearningWorkflowRegistryOwner:
     ) -> dict[str, Any]:
         return self._registry.materialize_completed_hybrid_provider_cleanup(**kwargs)
 
+    def attest_completed_review_no_provider_cleanup(
+        self, **kwargs: Any
+    ) -> dict[str, Any]:
+        return self._registry.attest_completed_review_no_provider_cleanup(**kwargs)
+
     def prepare_benchmark_identity(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.prepare_benchmark_worker_identity(**kwargs)
 
@@ -6078,6 +6083,51 @@ def _project_benchmark_v2_hybrid_step(
                         worker_record=worker_record,
                         provider_cleanup_ref=provider_cleanup_ref,
                     )
+                )
+            if (
+                worker_record.get("task_kind")
+                == "panel_learning_hybrid_review_projection"
+                and worker_record.get("status") == "completed"
+                and worker_record.get("runtime_attached") is False
+                and worker_record.get("result_available") is True
+                and worker_record.get("result_adopted") is True
+            ):
+                if provider_cleanup_ref is not None:
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 review cleanup cannot reuse provider lineage"
+                    )
+                receipt_value = binding.get("continuation_receipt")
+                receipt = _validate_benchmark_v2_hybrid_continuation_receipt(
+                    receipt_value
+                )
+                returned_worker_ref = _benchmark_v2_hybrid_worker_ref(worker_record)
+                if (
+                    receipt.get("receipt_phase") != "terminal_prepared"
+                    or receipt.get("returned_worker_ref") != returned_worker_ref
+                    or not isinstance(worker_cleanup_ref, Mapping)
+                    or worker_cleanup_ref.get("backend_compute_termination")
+                    not in {"not_running", "terminated"}
+                    or worker_cleanup_ref.get("model_service_compute_termination")
+                    not in {"request_not_active", "terminated"}
+                ):
+                    raise LearningWorkflowStageOperationError(
+                        "benchmark_v2 review no-provider cleanup gate is incomplete"
+                    )
+                provider_cleanup_ref = _LearningWorkflowRegistryOwner(
+                    composition.worker_registry
+                ).attest_completed_review_no_provider_cleanup(
+                    worker_id=str(worker_record["worker_id"]),
+                    run_id=str(worker_record["run_id"]),
+                    stage=str(worker_record["stage"]),
+                    operation_id=str(worker_record["operation_id"]),
+                    service_binding_ref={
+                        "content_sha256": str(binding["content_sha256"])
+                    },
+                    terminal_prepared_continuation_receipt_ref={
+                        "content_sha256": str(receipt["content_sha256"])
+                    },
+                    returned_worker_ref=returned_worker_ref,
+                    worker_cleanup_ref=deepcopy(dict(worker_cleanup_ref)),
                 )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))

@@ -7047,6 +7047,142 @@ def test_hybrid_next_provider_guard_runs_before_handler_or_model_acquisition(
     assert "handler" not in calls
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "foreign_proof",
+        "missing_proof",
+        "provider_lease_appeared",
+        "review_dispatch_receipt_appeared",
+    ),
+)
+def test_benchmark_v2_review_no_provider_cleanup_replays_and_reattests_absence(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    started = registry.start(
+        run_id="run-review-cleanup",
+        stage="screen_understanding",
+        operation_id="operation-review-cleanup",
+        task_kind="panel_learning_hybrid_review_projection",
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 7,
+            "_hybrid_orchestration": {
+                "benchmark_v2_provider_dispatch_context_refs": {},
+                "benchmark_v2_provider_dispatch_receipt_refs": {},
+            },
+        },
+        authoritative_workflow_revision=7,
+    )
+    finished = _finish_fake_worker(
+        registry,
+        started,
+        response={
+            "outcome": "completed",
+            "orchestration": {
+                "benchmark_v2_provider_dispatch_context_refs": {},
+                "benchmark_v2_provider_dispatch_receipt_refs": {},
+            },
+        },
+    )
+    registry.adopt_result(
+        worker_id=str(started["worker_id"]),
+        run_id="run-review-cleanup",
+        stage="screen_understanding",
+        operation_id="operation-review-cleanup",
+    )
+    returned_worker_ref = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_workflow_service_generic_worker_ref_v1",
+            **{
+                name: finished[name]
+                for name in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                    "task_kind",
+                )
+            },
+        }
+    )
+    worker_cleanup = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            **{
+                name: finished[name]
+                for name in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                )
+            },
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+            "cancellation_ref": {"content_sha256": "c" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    kwargs = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": "run-review-cleanup",
+        "stage": "screen_understanding",
+        "operation_id": "operation-review-cleanup",
+        "service_binding_ref": {"content_sha256": "a" * 64},
+        "terminal_prepared_continuation_receipt_ref": {
+            "content_sha256": "b" * 64
+        },
+        "returned_worker_ref": returned_worker_ref,
+        "worker_cleanup_ref": worker_cleanup,
+    }
+
+    first = registry.attest_completed_review_no_provider_cleanup(**kwargs)
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    replay = restarted.attest_completed_review_no_provider_cleanup(**kwargs)
+    assert json.dumps(replay, sort_keys=True) == json.dumps(first, sort_keys=True)
+
+    if mutation == "foreign_proof":
+        restarted._records[str(started["worker_id"])][
+            "benchmark_v2_no_provider_cleanup_ref"
+        ] = seal_immutable({**first, "run_id": "foreign-run"})
+    elif mutation == "missing_proof":
+        restarted._records[str(started["worker_id"])].pop(
+            "benchmark_v2_no_provider_cleanup_ref"
+        )
+    elif mutation == "provider_lease_appeared":
+        (tmp_path / f"{started['worker_id']}.provider-lease.json").write_text(
+            "{}", encoding="utf-8"
+        )
+    else:
+        restarted._records[str(started["worker_id"])]["worker_result"][
+            "response"
+        ]["orchestration"]["benchmark_v2_provider_dispatch_receipt_refs"] = {
+            "review": [{"content_sha256": "d" * 64}]
+        }
+
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="review no-provider cleanup.*(lineage|artifact|differs|missing)",
+    ):
+        restarted.attest_completed_review_no_provider_cleanup(**kwargs)
+
+
 def test_hybrid_cross_run_cleanup_receipt_replay_rejects_before_acquisition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -3466,6 +3466,27 @@ def _validate_partial_actual_terminal_cleanup(
     )
     if worker_kind != "worker_cleanup" or provider_kind != "provider_cleanup":
         raise ValueError("partial actual terminal cleanup kind is stale")
+    if (
+        provider_cleanup.get("contract_version")
+        == "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+    ):
+        if (
+            terminal.get("status") != "safe_stopped"
+            or terminal.get("observed_task_kind")
+            != "panel_learning_hybrid_review_projection"
+            or operation.get("mode") != "hybrid_v1_1"
+            or worker_cleanup.get("contract_version")
+            != "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+            or provider_cleanup.get("worker_cleanup_ref")
+            != {"content_sha256": worker_cleanup.get("content_sha256")}
+            or provider_cleanup.get("cancellation_backend_termination")
+            != worker_cleanup.get("backend_compute_termination")
+            or provider_cleanup.get("cancellation_model_request_termination")
+            != worker_cleanup.get("model_service_compute_termination")
+        ):
+            raise ValueError(
+                "partial actual review no-provider cleanup lineage is stale"
+            )
     operation_identity = ("run_id", "stage", "operation_id")
     worker_identity = ("worker_id", "model_request_id", "payload_sha256")
     if any(
@@ -3980,6 +4001,160 @@ def _validate_actual_operations_cleanup_aggregate(
         raise ValueError("actual operations cleanup aggregate proof is duplicated")
 
 
+def _validate_review_no_provider_cleanup_parent(
+    producer: Mapping[str, object],
+) -> None:
+    fields = {
+        "contract_version",
+        "status",
+        "outcome",
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+        "provider_role",
+        "worker_status",
+        "runtime_attached",
+        "result_available",
+        "result_adopted",
+        "continuation_phase",
+        "cancellation_backend_termination",
+        "cancellation_model_request_termination",
+        "service_binding_ref",
+        "terminal_prepared_continuation_receipt_ref",
+        "returned_worker_ref",
+        "worker_cleanup_ref",
+        "live_absence_observation",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if (
+        set(producer) != fields
+        or producer.get("status") != "cleanup_verified"
+        or producer.get("outcome")
+        != "verified_review_provider_not_applicable"
+        or producer.get("authority_kind")
+        != "benchmark_v2_workflow_service_review_no_provider_cleanup"
+        or producer.get("task_kind")
+        != "panel_learning_hybrid_review_projection"
+        or producer.get("provider_role") != "review"
+        or producer.get("worker_status") != "completed"
+        or producer.get("runtime_attached") is not False
+        or producer.get("result_available") is not True
+        or producer.get("result_adopted") is not True
+        or producer.get("continuation_phase") != "terminal_prepared"
+        or producer.get("cancellation_backend_termination")
+        not in {"not_running", "terminated"}
+        or producer.get("cancellation_model_request_termination")
+        not in {"request_not_active", "terminated"}
+        or producer.get("artifact_is_authorization") is not False
+        or producer.get("execute_binding_enabled") is not False
+        or not _cleanup_identity_fields_are_nonempty(producer)
+        or any(
+            not _is_exact_sha_ref(producer.get(name))
+            for name in (
+                "service_binding_ref",
+                "terminal_prepared_continuation_receipt_ref",
+                "worker_cleanup_ref",
+            )
+        )
+    ):
+        raise ValueError("review no-provider cleanup receipt is invalid")
+    returned_worker = producer.get("returned_worker_ref")
+    worker_fields = {
+        "contract_version",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+        "content_sha256",
+    }
+    identity_fields = (
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+    )
+    if (
+        not isinstance(returned_worker, Mapping)
+        or set(returned_worker) != worker_fields
+        or returned_worker.get("contract_version")
+        != "benchmark_v2_workflow_service_generic_worker_ref_v1"
+        or any(
+            returned_worker.get(name) != producer.get(name)
+            for name in identity_fields
+        )
+        or returned_worker.get("content_sha256") != content_sha256(returned_worker)
+    ):
+        raise ValueError("review no-provider cleanup returned worker is stale")
+    observation = producer.get("live_absence_observation")
+    observation_fields = {
+        "contract_version",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "task_kind",
+        "provider_role",
+        "current_worker_ref",
+        "latest_operation_worker_ref",
+        "review_dispatch_context_absent",
+        "review_dispatch_receipt_absent",
+        "provider_scope_absent",
+        "provider_journal_absent",
+        "provider_cleanup_journal_absent",
+        "deterministic_provider_lease_artifact_absent",
+        "deterministic_provider_owner_artifact_absent",
+        "deterministic_provider_runtime_artifact_absent",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    if (
+        not isinstance(observation, Mapping)
+        or set(observation) != observation_fields
+        or observation.get("contract_version")
+        != "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
+        or observation.get("provider_role") != "review"
+        or any(
+            observation.get(name) != producer.get(name) for name in identity_fields
+        )
+        or observation.get("current_worker_ref") != returned_worker
+        or observation.get("latest_operation_worker_ref") != returned_worker
+        or any(
+            observation.get(name) is not True
+            for name in (
+                "review_dispatch_context_absent",
+                "review_dispatch_receipt_absent",
+                "provider_scope_absent",
+                "provider_journal_absent",
+                "provider_cleanup_journal_absent",
+                "deterministic_provider_lease_artifact_absent",
+                "deterministic_provider_owner_artifact_absent",
+                "deterministic_provider_runtime_artifact_absent",
+            )
+        )
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or observation.get("content_sha256") != content_sha256(observation)
+        or producer.get("content_sha256") != content_sha256(producer)
+    ):
+        raise ValueError("review no-provider cleanup absence observation is stale")
+
+
 def _validate_cleanup_parent_semantics(
     producer: Mapping[str, object], *, name: str
 ) -> tuple[str, str]:
@@ -4151,6 +4326,9 @@ def _validate_cleanup_parent_semantics(
         ):
             raise ValueError("incumbent exited worker cleanup receipt is invalid")
         return "worker_cleanup", str(contract)
+    if contract == "benchmark_v2_hybrid_no_provider_cleanup_ref_v1":
+        _validate_review_no_provider_cleanup_parent(producer)
+        return "provider_cleanup", str(contract)
     if contract == "benchmark_provider_cleanup_ref_v1":
         fields = {
             "contract_version",
