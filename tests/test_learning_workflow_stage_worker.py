@@ -466,6 +466,124 @@ def _benchmark_registry_fixture(
     return registry, root, store, source, reservation, anchor
 
 
+def test_benchmark_worker_projects_semantic_operation_id_to_safe_journal_paths(
+    tmp_path: Path,
+) -> None:
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path,
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    source = _benchmark_handler_payload_source()
+    operation_id = (
+        "benchmark-v2-run-73c815bb"
+        "::benchmark-v2-incumbent::"
+        "4c1b59"
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+
+    reservation = registry.prepare_benchmark_worker_identity(
+        run_id="benchmark-v2-run-73c815bb::benchmark-v2-incumbent::4c1b59",
+        stage="screen_understanding",
+        operation_id=operation_id,
+        workflow_revision=3,
+        task_kind="vision_observe_screen",
+        handler_payload_source=source,
+        supervision_root=root,
+    )
+    reservation_files = list(tmp_path.glob("*.benchmark-reservation.json"))
+    assert len(reservation_files) == 1
+    assert ":" not in reservation_files[0].name
+    assert reservation_files[0].name.startswith("operation-")
+    assert reservation["operation_id"] == operation_id
+
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+        benchmark_supervision_root=root,
+    )
+    assert restarted.inspect_prepared_benchmark_worker_identity(
+        run_id=reservation["run_id"],
+        stage=reservation["stage"],
+        operation_id=operation_id,
+        supervision_root=root,
+    ) == reservation
+
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root,
+        reservation=reservation,
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"],
+        predecessor_content_sha256=None,
+    )
+    restarted.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    confirmation_files = list(tmp_path.glob("*.benchmark-anchor-confirmation.json"))
+    assert len(confirmation_files) == 1
+    assert ":" not in confirmation_files[0].name
+    assert confirmation_files[0].name.startswith("operation-")
+
+
+def test_benchmark_operation_artifact_path_is_collision_safe_and_legacy_compatible(
+    tmp_path: Path,
+) -> None:
+    from app.learn.workflow_worker import _benchmark_operation_artifact_path
+
+    suffix = ".benchmark-reservation.json"
+    legacy = _benchmark_operation_artifact_path(
+        tmp_path,
+        "operation-benchmark-worker",
+        suffix,
+    )
+    unsafe = ["a:b", "a?b", "CON", "界面操作", "x" * 97]
+    projected = [
+        _benchmark_operation_artifact_path(tmp_path, operation_id, suffix)
+        for operation_id in unsafe
+    ]
+
+    assert legacy.name == f"operation-benchmark-worker{suffix}"
+    assert len({path.name for path in projected}) == len(unsafe)
+    assert all(path.name.startswith("operation-") for path in projected)
+    assert all(
+        not any(character in path.name for character in '<>:"/\\|?*')
+        for path in projected
+    )
+    assert projected == [
+        _benchmark_operation_artifact_path(tmp_path, operation_id, suffix)
+        for operation_id in unsafe
+    ]
+    generated_stem = projected[0].name.removesuffix(suffix)
+    assert _benchmark_operation_artifact_path(
+        tmp_path,
+        generated_stem,
+        suffix,
+    ) != projected[0]
+    assert _benchmark_operation_artifact_path(
+        tmp_path,
+        generated_stem.upper(),
+        suffix,
+    ).name.casefold() != projected[0].name.casefold()
+    assert _benchmark_operation_artifact_path(
+        tmp_path,
+        "Operation-Case",
+        suffix,
+    ).name.casefold() != _benchmark_operation_artifact_path(
+        tmp_path,
+        "operation-case",
+        suffix,
+    ).name.casefold()
+
+
 def _anchored_benchmark_provider_fixture(
     tmp_path: Path,
 ) -> tuple[

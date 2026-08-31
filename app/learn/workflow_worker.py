@@ -439,6 +439,57 @@ def _benchmark_supervision_inputs_ref(
     }
 
 
+_WINDOWS_RESERVED_ARTIFACT_STEMS = frozenset(
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{index}" for index in range(1, 10)),
+        *(f"LPT{index}" for index in range(1, 10)),
+    }
+)
+_BENCHMARK_OPERATION_ARTIFACT_KEY_PREFIX = "operation-key-v1-"
+
+
+def _benchmark_operation_artifact_path(
+    root: Path,
+    operation_id: str,
+    suffix: str,
+) -> Path:
+    """将语义 operation id 投影为稳定且可跨 Windows 持久化的文件名。"""
+
+    if not isinstance(operation_id, str) or not operation_id:
+        raise LearningStageWorkerError("benchmark operation id is invalid")
+    if not isinstance(suffix, str) or not suffix.startswith(".benchmark-"):
+        raise LearningStageWorkerError("benchmark operation artifact suffix is invalid")
+    safe_ascii = all(
+        character.isascii()
+        and (character.isalnum() or character in {"-", "_", "."})
+        for character in operation_id
+    )
+    reserved_stem = operation_id.split(".", 1)[0].upper()
+    if (
+        safe_ascii
+        and operation_id == operation_id.lower()
+        and len(operation_id) <= 96
+        and reserved_stem not in _WINDOWS_RESERVED_ARTIFACT_STEMS
+        and not operation_id.casefold().startswith(
+            _BENCHMARK_OPERATION_ARTIFACT_KEY_PREFIX
+        )
+    ):
+        stem = operation_id
+    else:
+        digest = content_sha256(
+            {
+                "contract_version": "benchmark_worker_operation_artifact_key_v1",
+                "operation_id": operation_id,
+            }
+        )
+        stem = f"{_BENCHMARK_OPERATION_ARTIFACT_KEY_PREFIX}{digest}"
+    return root / f"{stem}{suffix}"
+
+
 def _validate_benchmark_reservation_supervision(
     reservation: Mapping[str, object],
     *,
@@ -501,8 +552,10 @@ def _benchmark_controller_abandoned_revalidate(
 
     reservation = None
     reservation_ref = None
-    reservation_path = root.journal_root / (
-        f"{operation_id}.benchmark-reservation.json"
+    reservation_path = _benchmark_operation_artifact_path(
+        root.journal_root,
+        operation_id,
+        ".benchmark-reservation.json",
     )
     if reservation_path.exists():
         try:
@@ -626,10 +679,10 @@ def _benchmark_controller_abandoned_revalidate(
         "artifact_is_authorization": False,
     })
     _write_json_atomic(
-        root.journal_root
-        / (
-            f"{operation_id}"
-            ".benchmark-controller-abandoned-revalidation.json"
+        _benchmark_operation_artifact_path(
+            root.journal_root,
+            operation_id,
+            ".benchmark-controller-abandoned-revalidation.json",
         ),
         observation,
     )
@@ -3510,7 +3563,11 @@ class LearningStageWorkerRegistry:
         return deepcopy(value)
 
     def _benchmark_reservation_path(self, operation_id: str) -> Path:
-        return self._result_root / f"{operation_id}.benchmark-reservation.json"
+        return _benchmark_operation_artifact_path(
+            self._result_root,
+            operation_id,
+            ".benchmark-reservation.json",
+        )
 
     def _validate_benchmark_reservation_identity_reuse(
         self,
@@ -4190,7 +4247,11 @@ class LearningStageWorkerRegistry:
                     expected_operation_anchor, supervision_root=root,
                     expected_reservation=initial,
                 )
-                confirmation_path = self._result_root / f"{initial['operation_id']}.benchmark-anchor-confirmation.json"
+                confirmation_path = _benchmark_operation_artifact_path(
+                    self._result_root,
+                    initial["operation_id"],
+                    ".benchmark-anchor-confirmation.json",
+                )
                 if current["reservation_state"] == "anchored":
                     receipt = _compose_benchmark_anchor_confirmation(
                         reservation=initial,
@@ -4409,8 +4470,10 @@ class LearningStageWorkerRegistry:
                         "benchmark provider acquisition Registry journal changed"
                     )
                 return self._benchmark_provider_journal_projection(persisted)
-            path = self._result_root / (
-                f"{current['operation_id']}.benchmark-provider.json"
+            path = _benchmark_operation_artifact_path(
+                self._result_root,
+                current["operation_id"],
+                ".benchmark-provider.json",
             )
             if path.exists():
                 persisted = self._validate_benchmark_provider_journal(
@@ -4923,8 +4986,11 @@ class LearningStageWorkerRegistry:
                 )
             if current_provider != provider:
                 _write_json_atomic(
-                    self._result_root
-                    / f"{operation}.benchmark-provider.json",
+                    _benchmark_operation_artifact_path(
+                        self._result_root,
+                        operation,
+                        ".benchmark-provider.json",
+                    ),
                     current_provider,
                 )
                 self._benchmark_provider_journals[key] = deepcopy(
@@ -5004,8 +5070,10 @@ class LearningStageWorkerRegistry:
                 return self._benchmark_provider_cleanup_projection(
                     provider, receipt=receipt
                 )
-            path = self._result_root / (
-                f"{operation}.benchmark-provider-cleanup.json"
+            path = _benchmark_operation_artifact_path(
+                self._result_root,
+                operation,
+                ".benchmark-provider-cleanup.json",
             )
             if path.exists():
                 persisted = self._validate_benchmark_provider_cleanup_journal(
@@ -6268,7 +6336,11 @@ class LearningStageWorkerRegistry:
             })
             with self._lock:
                 current = self._benchmark_reservations.get((run, stage_value, operation))
-                receipt_path = self._result_root / f"{operation}.benchmark-pre-anchor-abort-receipt.json"
+                receipt_path = _benchmark_operation_artifact_path(
+                    self._result_root,
+                    operation,
+                    ".benchmark-pre-anchor-abort-receipt.json",
+                )
                 if current is not None and current.get("reservation_state") == "aborted_before_anchor":
                     if receipt_path.exists():
                         receipt = _read_json_object(
@@ -6283,7 +6355,11 @@ class LearningStageWorkerRegistry:
                             result_root=self._result_root,
                             reason=reason,
                         )
-                    observation_path = self._result_root / f"{operation}.benchmark-pre-anchor-abort.json"
+                    observation_path = _benchmark_operation_artifact_path(
+                        self._result_root,
+                        operation,
+                        ".benchmark-pre-anchor-abort.json",
+                    )
                     if not observation_path.exists():
                         raise LearningStageWorkerError("benchmark pre-anchor abort replay does not match")
                     observation = _validate_benchmark_pre_anchor_abort_observation(
@@ -6315,7 +6391,11 @@ class LearningStageWorkerRegistry:
                 absence = self._persist_benchmark_pre_anchor_absence_observations(
                     reservation=current,
                 )
-                decision_path = self._result_root / f"{operation}.benchmark-store-decision.json"
+                decision_path = _benchmark_operation_artifact_path(
+                    self._result_root,
+                    operation,
+                    ".benchmark-store-decision.json",
+                )
                 _write_json_atomic(decision_path, decision)
                 observation = seal_immutable({
                     "contract_version": "benchmark_worker_pre_anchor_abort_observation_v1",
@@ -6338,7 +6418,11 @@ class LearningStageWorkerRegistry:
                         "provider_absence_observation_ref"
                     ]["content_sha256"],
                 })
-                observation_path = self._result_root / f"{operation}.benchmark-pre-anchor-abort.json"
+                observation_path = _benchmark_operation_artifact_path(
+                    self._result_root,
+                    operation,
+                    ".benchmark-pre-anchor-abort.json",
+                )
                 _write_json_atomic(observation_path, observation)
                 aborted_body = deepcopy(current); aborted_body.pop("content_sha256")
                 aborted_body["reservation_state"] = "aborted_before_anchor"
@@ -12314,9 +12398,10 @@ def _validate_persisted_benchmark_store_decision(
     decision: dict[str, Any],
 ) -> dict[str, Any]:
     persisted = _validate_benchmark_artifact_ref(
-        path=(
-            result_root
-            / f"{reservation['operation_id']}.benchmark-store-decision.json"
+        path=_benchmark_operation_artifact_path(
+            result_root,
+            reservation["operation_id"],
+            ".benchmark-store-decision.json",
         ),
         ref={"content_sha256": decision["content_sha256"]},
         contract_version="benchmark_worker_store_anchor_decision_v1",
@@ -12354,9 +12439,10 @@ def _validate_benchmark_pre_anchor_abort_observation(
     observation_ref = aborted_reservation.get("abort_observation_ref")
     try:
         observation = _validate_benchmark_artifact_ref(
-            path=(
-                result_root
-                / f"{reservation['operation_id']}.benchmark-pre-anchor-abort.json"
+            path=_benchmark_operation_artifact_path(
+                result_root,
+                reservation["operation_id"],
+                ".benchmark-pre-anchor-abort.json",
             ),
             ref=observation_ref,
             contract_version="benchmark_worker_pre_anchor_abort_observation_v1",
