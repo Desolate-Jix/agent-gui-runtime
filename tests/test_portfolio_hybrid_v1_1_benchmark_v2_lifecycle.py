@@ -641,7 +641,7 @@ def _parent_bundle(tmp_path: Path, *, operation_id: str = "operation-a") -> list
             "contract_version": "benchmark_worker_owner_journal_v1",
             "authority_kind": "test_only",
             "operation_anchor_ref": {"content_sha256": operation_anchor["anchor_identity_sha256"]},
-            "reservation_ref": {"content_sha256": launched_reservation["content_sha256"]},
+            "reservation_ref": {"content_sha256": launching_reservation["content_sha256"]},
             "supervision_ref": {"content_sha256": actual_supervision["content_sha256"]},
             "run_id": run_id,
             "stage": stage,
@@ -826,7 +826,7 @@ def _parent_bundle(tmp_path: Path, *, operation_id: str = "operation-a") -> list
             "operation_id": operation_id,
             "worker_id": worker_id,
             "model_request_id": model_request_id,
-            "reservation_ref": worker_owner["reservation_ref"],
+            "reservation_ref": {"content_sha256": anchored_reservation["content_sha256"]},
             "payload_sha256": payload_sha,
         }
     )
@@ -1050,7 +1050,7 @@ def _parent_bundle(tmp_path: Path, *, operation_id: str = "operation-a") -> list
             "worker_id": worker_id,
             "model_request_id": model_request_id,
             "payload_sha256": payload_sha,
-            "reservation_ref": worker_owner["reservation_ref"],
+            "reservation_ref": {"content_sha256": anchored_reservation["content_sha256"]},
             "runtime_owner_ref": {"content_sha256": runtime_owner["content_sha256"]},
             "acquisition_owner_ref": {"content_sha256": acquisition_owner["content_sha256"]},
             "acquisition_intent_ref": {"content_sha256": acquisition_intent["content_sha256"]},
@@ -1208,7 +1208,7 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
             "operation_id": cancelled["operation_id"],
             "worker_id": cancelled["worker_id"],
             "model_request_id": cancelled["model_request_id"],
-            "reservation_ref": {"content_sha256": cancelled["content_sha256"]},
+            "reservation_ref": {"content_sha256": anchored["content_sha256"]},
             "payload_sha256": cancelled["payload_sha256"],
         }
     )
@@ -1322,7 +1322,7 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
             "worker_id": cancelled["worker_id"],
             "model_request_id": cancelled["model_request_id"],
             "payload_sha256": cancelled["payload_sha256"],
-            "reservation_ref": {"content_sha256": cancelled["content_sha256"]},
+            "reservation_ref": {"content_sha256": anchored["content_sha256"]},
             "runtime_owner_ref": {"content_sha256": runtime_owner["content_sha256"]},
             "acquisition_owner_ref": {"content_sha256": acquisition_owner["content_sha256"]},
             "acquisition_intent_ref": {"content_sha256": intent["content_sha256"]},
@@ -2017,6 +2017,29 @@ def test_verify_lifecycle_canonical_fixture_is_deterministic_and_non_authorizing
     assert first["execute_binding_enabled"] is False
     assert first["content_sha256"] == lifecycle._content_sha256(first)
     assert {path: path.read_bytes() for path in [*parents, *samples, *probes]} == before
+
+
+def test_verify_lifecycle_rejects_provider_ref_from_wrong_reservation_phase(tmp_path: Path) -> None:
+    parents, samples, probes = _happy_inputs(tmp_path)
+    launching = json.loads(
+        next(
+            path
+            for path in parents
+            if path.name == "operation-a.benchmark-reservation-launching.json"
+        ).read_text(encoding="utf-8")
+    )
+    provider_journal = next(path for path in parents if path.name == "provider-journal.json")
+    _mutate(
+        provider_journal,
+        lambda value: value.__setitem__(
+            "reservation_ref", {"content_sha256": launching["content_sha256"]}
+        ),
+    )
+
+    result = _verify(parents, samples, probes)
+
+    assert result["status"] == "failed"
+    assert any(item["code"] == "cross_reservation_parent" for item in result["findings"])
 
 
 def test_task4_fixture_uses_current_upstream_derived_root_and_rejects_identity_drift(tmp_path: Path) -> None:

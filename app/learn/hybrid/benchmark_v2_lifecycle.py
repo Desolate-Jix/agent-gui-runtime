@@ -2177,6 +2177,25 @@ def _validate_b1_source_anchor_raw(
     return source, anchor, expected
 
 
+def _validate_b1_launched_reservation_chain(
+    roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
+) -> dict[str, dict[str, Any]]:
+    reservations = [value for _path, value in roles.get("b1_reservation", [])]
+    by_state = {str(value.get("reservation_state")): value for value in reservations}
+    if set(by_state) != {"reserved", "anchored", "launching", "launched"} or len(reservations) != 4:
+        raise _EvidenceError("b1_reservation_chain_invalid", "B1 launched reservation states differ")
+    previous = by_state["reserved"]
+    for state in ("anchored", "launching", "launched"):
+        current = by_state[state]
+        transitioned = {key: deepcopy(value) for key, value in previous.items() if key != "content_sha256"}
+        transitioned["reservation_state"] = state
+        transitioned["predecessor_content_sha256"] = previous["content_sha256"]
+        if current != seal_immutable(transitioned):
+            raise _EvidenceError("b1_reservation_chain_invalid", "B1 reservation predecessor differs")
+        previous = current
+    return by_state
+
+
 def _validate_b1_launched_raw(
     *,
     roles: Mapping[str, list[tuple[Path, dict[str, Any]]]],
@@ -2184,6 +2203,7 @@ def _validate_b1_launched_raw(
     primary_owner: Mapping[str, object],
     cleanup: Mapping[str, object],
     assignment: Mapping[str, object],
+    reservation_chain: Mapping[str, Mapping[str, object]],
 ) -> None:
     expected_policy = {
         "kill_on_job_close": True,
@@ -2201,24 +2221,12 @@ def _validate_b1_launched_raw(
         or assignment.get("observed_member_identities") != [identity]
     ):
         raise _EvidenceError("b1_assignment_constraint_mismatch", "B1 assignment exact constraints differ")
-    reservations = [value for _path, value in roles.get("b1_reservation", [])]
-    by_state = {str(value.get("reservation_state")): value for value in reservations}
-    if set(by_state) != {"reserved", "anchored", "launching", "launched"} or len(reservations) != 4:
-        raise _EvidenceError("b1_reservation_chain_invalid", "B1 launched reservation states differ")
+    by_state = dict(reservation_chain)
     _source, operation_anchor, expected = _validate_b1_source_anchor_raw(
         roles=roles,
         digest_index=digest_index,
         reserved=by_state["reserved"],
     )
-    previous = by_state["reserved"]
-    for state in ("anchored", "launching", "launched"):
-        current = by_state[state]
-        transitioned = {key: deepcopy(value) for key, value in previous.items() if key != "content_sha256"}
-        transitioned["reservation_state"] = state
-        transitioned["predecessor_content_sha256"] = previous["content_sha256"]
-        if current != seal_immutable(transitioned):
-            raise _EvidenceError("b1_reservation_chain_invalid", "B1 reservation predecessor differs")
-        previous = current
     if cleanup.get("reservation_ref", {}).get("content_sha256") != by_state["launched"]["content_sha256"]:
         raise _EvidenceError("b1_cleanup_lineage_mismatch", "B1 cleanup reservation differs")
     resolved_anchor = _resolved_parent(digest_index, cleanup.get("operation_anchor_ref"), "B1 operation anchor")
@@ -2297,7 +2305,7 @@ def _validate_b1_launched_raw(
         or launch.get("phase") != "gate_released"
         or launch.get("gate_state") != "released"
         or launch.get("reservation_ref")
-        != {"content_sha256": by_state["launched"].get("content_sha256")}
+        != {"content_sha256": by_state["launching"].get("content_sha256")}
         or launch.get("supervision_ref") != {"content_sha256": actual.get("content_sha256")}
         or launch.get("operation_anchor_ref")
         != {"content_sha256": operation_anchor.get("anchor_identity_sha256")}
@@ -2868,13 +2876,17 @@ def _derive_parent_facts(
         if value.get("phase") == "cleanup_finalization_intent"
     ]
     if worker_cleanup.get("outcome") == "verified_exact_worker_exited":
+        reservation_chain = _validate_b1_launched_reservation_chain(roles)
+        launching_reservation_ref = {
+            "content_sha256": reservation_chain["launching"]["content_sha256"]
+        }
         primary_candidates = [
             value
             for value in terminal_owner_candidates
             if value.get("worker_id") == worker_cleanup.get("worker_id")
             and value.get("operation_id") == worker_cleanup.get("operation_id")
             and value.get("process_identity") == worker_cleanup.get("process_identity")
-            and value.get("reservation_ref") == worker_cleanup.get("reservation_ref")
+            and value.get("reservation_ref") == launching_reservation_ref
             and value.get("supervision_ref") == worker_cleanup.get("supervision_ref")
         ]
         if len(primary_candidates) != 1:
@@ -2906,6 +2918,7 @@ def _derive_parent_facts(
             primary_owner=primary_owner,
             cleanup=worker_cleanup,
             assignment=assignment,
+            reservation_chain=reservation_chain,
         )
     else:
         if assignment is not None or roles.get("b1_owner"):
@@ -2916,6 +2929,10 @@ def _derive_parent_facts(
             digest_index=digest_index,
             cleanup=worker_cleanup,
         )
+        reservation_chain = {
+            str(value.get("reservation_state")): value
+            for _path, value in roles.get("b1_reservation", [])
+        }
 
     normal = _one(roles, "task5_normal_clear")
     binding_status = "verified"
@@ -2947,13 +2964,32 @@ def _derive_parent_facts(
             findings.append(_finding(code, "failed", [str(document["content_sha256"]) for document in lineage_documents]))
     if authority.get("operation_id") != primary_owner.get("operation_id") or root.get("operation_id") != primary_owner.get("operation_id"):
         findings.append(_finding("cross_operation_parent", "failed", [str(root["content_sha256"]), str(authority["content_sha256"]), str(primary_owner["content_sha256"])]))
-    primary_reservation_ref = (
-        primary_owner.get("reservation_ref")
-        if worker_cleanup.get("outcome") == "verified_exact_worker_exited"
-        else worker_cleanup.get("reservation_ref")
-    )
-    reservation_refs = [primary_reservation_ref, runtime_owner.get("reservation_ref"), provider_journal.get("reservation_ref")]
-    if len({_content_ref(item, "reservation ref")["content_sha256"] for item in reservation_refs}) != 1:
+    expected_worker_ref = {
+        "content_sha256": reservation_chain[
+            "launching"
+            if worker_cleanup.get("outcome") == "verified_exact_worker_exited"
+            else "cancelled_before_launch"
+        ]["content_sha256"]
+    }
+    expected_cleanup_ref = {
+        "content_sha256": reservation_chain[
+            "launched"
+            if worker_cleanup.get("outcome") == "verified_exact_worker_exited"
+            else "cancelled_before_launch"
+        ]["content_sha256"]
+    }
+    expected_provider_ref = {
+        "content_sha256": reservation_chain["anchored"]["content_sha256"]
+    }
+    if (
+        (
+            worker_cleanup.get("outcome") == "verified_exact_worker_exited"
+            and primary_owner.get("reservation_ref") != expected_worker_ref
+        )
+        or worker_cleanup.get("reservation_ref") != expected_cleanup_ref
+        or runtime_owner.get("reservation_ref") != expected_provider_ref
+        or provider_journal.get("reservation_ref") != expected_provider_ref
+    ):
         findings.append(_finding("cross_reservation_parent", "failed", [str(document["content_sha256"]) for document in lineage_documents]))
     if (
         provider_journal.get("runtime_owner_ref", {}).get("content_sha256") != runtime_owner.get("content_sha256")
