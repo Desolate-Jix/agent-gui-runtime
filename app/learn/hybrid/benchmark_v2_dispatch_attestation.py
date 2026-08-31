@@ -847,6 +847,109 @@ def _authoritative_vista_cleanup(
     }
 
 
+def project_authoritative_vista_supervisor_cleanup(
+    *,
+    record: Mapping[str, object],
+    supervisor_reconciliation: Mapping[str, object],
+) -> dict[str, Any]:
+    """从持久化 VISTA supervisor 回执投影未 dispatch 的精确清理父证据。"""
+
+    reconciliation_fields = {
+        "contract_version",
+        "status",
+        "cleanup_receipt",
+    }
+    if (
+        set(supervisor_reconciliation) != reconciliation_fields
+        or supervisor_reconciliation.get("contract_version")
+        not in {
+            "hybrid_supervisor_reconciliation_v1",
+            "hybrid_supervisor_reconciliation_v2",
+        }
+        or supervisor_reconciliation.get("status") != "verified"
+    ):
+        raise ValueError("VISTA supervisor cleanup reconciliation is invalid")
+    from app.learn.hybrid.gpu_lifecycle import (
+        validate_hybrid_cleanup_receipt,
+        validate_hybrid_lineage,
+    )
+
+    receipt = validate_hybrid_cleanup_receipt(
+        supervisor_reconciliation.get("cleanup_receipt")
+    )
+    provider_lineage = validate_hybrid_lineage(record.get("provider_lineage"))
+    evidence = receipt.get("source_cleanup_evidence")
+    if (
+        record.get("provider") != "vista"
+        or receipt.get("provider") != "vista"
+        or receipt.get("lineage") != provider_lineage
+        or not isinstance(evidence, Mapping)
+        or evidence.get("status") != "verified"
+    ):
+        raise ValueError("VISTA supervisor cleanup lineage differs")
+    authoritative = _authoritative_vista_cleanup(
+        record,
+        {
+            "cooperative_cleanup": {
+                "vista_cleanup_receipt": deepcopy(receipt),
+            }
+        },
+    )
+    if (
+        not isinstance(authoritative, Mapping)
+        or authoritative.get("authoritative_cleanup_contract")
+        != "hybrid_provider_cleanup_receipt_v2"
+        or authoritative.get("authoritative_cleanup_ref")
+        != {"content_sha256": receipt["content_sha256"]}
+    ):
+        raise ValueError("VISTA supervisor cleanup runtime identity is invalid")
+    model_lease = evidence.get("model_lease")
+    acquisition = (
+        model_lease.get("process_scope_acquisition")
+        if isinstance(model_lease, Mapping)
+        else None
+    )
+    lease_identity = receipt.get("provider_lease_identity")
+    profile = (
+        model_lease.get("profile") if isinstance(model_lease, Mapping) else None
+    )
+    if (
+        not isinstance(model_lease, Mapping)
+        or not isinstance(acquisition, Mapping)
+        or not isinstance(lease_identity, Mapping)
+        or not isinstance(profile, Mapping)
+    ):
+        raise ValueError("VISTA supervisor cleanup acquisition owner is missing")
+    scope_names = (
+        record.get("provider_scope_name"),
+        lease_identity.get("process_scope_name"),
+        model_lease.get("process_scope_name"),
+        acquisition.get("scope_name"),
+    )
+    identities = model_lease.get("process_identities")
+    member_pids = acquisition.get("member_pids")
+    if (
+        any(not isinstance(value, str) or not value for value in scope_names)
+        or len(set(scope_names)) != 1
+        or lease_identity.get("profile_id") != profile.get("profile_id")
+        or not isinstance(identities, list)
+        or not isinstance(member_pids, list)
+        or any(
+            not isinstance(identity, Mapping)
+            or identity.get("pid") not in member_pids
+            for identity in identities
+        )
+    ):
+        raise ValueError("VISTA supervisor cleanup process scope differs")
+    return {
+        "runtime_identity": deepcopy(authoritative["runtime_identity"]),
+        "acquisition_owner_ref": {
+            "content_sha256": content_sha256(dict(acquisition))
+        },
+        "cleanup_receipt": deepcopy(receipt),
+    }
+
+
 def _authoritative_omni_cleanup(
     record: Mapping[str, object], worker_termination: Mapping[str, object]
 ) -> dict[str, Any] | None:

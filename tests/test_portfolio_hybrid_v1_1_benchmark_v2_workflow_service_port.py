@@ -1393,6 +1393,79 @@ def _s3_provider_cleanup_ref(worker: dict[str, object]) -> dict[str, object]:
     )
 
 
+def _s3_vista_supervisor_cleanup_receipt(
+    worker: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+
+    lineage_body = {
+        "run_id": str(worker["run_id"]),
+        "workflow_revision": 0,
+        "operation_id": str(worker["operation_id"]),
+        "stage": str(worker["stage"]),
+    }
+    lineage = {
+        **lineage_body,
+        "stage_execution_id": hashlib.sha256(
+            json.dumps(
+                lineage_body,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    process_identity = {"pid": 404, "create_time_ns": 505}
+    process_scope_name = f"Local\\AgentGuiHybrid-vista-{'f' * 64}"
+    model_lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": "vista-incarnation-h1",
+        "process_identities": [deepcopy(process_identity)],
+        "process_scope_name": process_scope_name,
+        "profile": {
+            "profile_id": "vista_4b_transformers",
+            "host": "127.0.0.1",
+            "port": 13244,
+        },
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": process_scope_name,
+            "member_pids": [process_identity["pid"]],
+            "process_identities": [deepcopy(process_identity)],
+        },
+    }
+    inventory = {
+        "contract_version": "hybrid_provider_process_inventory_v2",
+        "provider": "vista",
+        "observer_contract": "hybrid_vista_cleanup_observer_v1",
+        "release_status": "verified",
+        "termination_reason": "failed_worker_reconciled",
+        "lineage": lineage,
+        "provider_lease_identity": {
+            "incarnation_id": model_lease["incarnation_id"],
+            "profile_id": "vista_4b_transformers",
+            "process_identities": [deepcopy(process_identity)],
+            "process_scope_name": process_scope_name,
+        },
+        "predecessor_sha256": "7" * 64,
+        "provider_result_sha256": "8" * 64,
+        "provider_processes_after": [],
+        "helper_processes_after": [],
+        "orphan_descendant_pids": [],
+        "active_listeners_after": [],
+        "lease_files_after": [],
+        "source_cleanup_evidence": {
+            "status": "verified",
+            "model_lease": model_lease,
+        },
+    }
+    receipt = release_hybrid_provider(
+        "vista",
+        process_inventory=lambda _provider: inventory,
+    )
+    return receipt, lineage
+
+
 def _s3_service(
     tmp_path: Path,
     registry: _S3Registry,
@@ -2628,6 +2701,368 @@ def test_s3_lost_response_retry_replays_consumed_ref_without_second_producer(
         assert registry.start_calls == 2
     finally:
         store.close()
+
+
+def test_s3_expired_pending_vista_recovery_projects_verified_cleanup_without_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+    registry = _S3Registry()
+    store, composition, service, _started = _s3_service(tmp_path, registry)
+
+    def _continue(**kwargs):
+        state = store.get("run-h1")
+        current = registry.current
+        assert current is not None
+        binding = _s3_window_binding()
+        operation_ref = {
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-h1",
+            "revision": int(state["revision"]),
+            "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+            "capture_ref": deepcopy(binding["capture_ref"]),
+        }
+        context = attestation.compose_benchmark_dispatch_context(
+            provider="vista",
+            operation_ref=operation_ref,
+            window_binding={
+                "contract_version": "test_window_binding_v1",
+                "exact_hwnd": 101,
+                "process_identity": {"pid": 202, "create_time_ns": 303},
+                "job_name": "job-h1",
+                "payload_sha256": "c" * 64,
+            },
+            receipt_journal_path=attestation._fixed_dispatch_journal_path(
+                operation_ref
+            ),
+        )
+        sink = kwargs.get("_benchmark_dispatch_context_sink")
+        assert callable(sink)
+        sink(context)
+        worker = workflow_service.start_guarded_learning_stage_worker(
+            composition=composition,
+            run_id="run-h1",
+            expected_revision=int(state["revision"]),
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            task_kind="panel_learning_calibration_sequence",
+            payload={
+                "learning_pipeline_mode": "hybrid_v1_1",
+                "workflow_revision": current["payload"]["workflow_revision"],
+                "_hybrid_orchestration": deepcopy(
+                    current["payload"]["_hybrid_orchestration"]
+                ),
+                "sequence_index": 3,
+                "_benchmark_v2_dispatch_context": deepcopy(context),
+            },
+            reuse_active_identical=True,
+        )
+        return {
+            "stage_finished": False,
+            "next_worker": worker,
+            "workflow_state": state,
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        consumed_ref = deepcopy(initial["operation_ref"])
+        registry.complete_current({"success": True, "stage": "omni"})
+
+        returned = service.continue_hybrid_operation(
+            operation_ref=consumed_ref
+        )
+        assert returned["status"] == "pending"
+        assert returned["observed_task_kind"] == (
+            "panel_learning_calibration_sequence"
+        )
+        worker = registry.current
+        assert worker is not None
+        cleanup_receipt, provider_lineage = (
+            _s3_vista_supervisor_cleanup_receipt(worker)
+        )
+        worker.update(
+            {
+                "status": "failed",
+                "runtime_attached": False,
+                "result_available": False,
+                "result_adopted": False,
+                "provider": "vista",
+                "provider_lineage": provider_lineage,
+                "provider_scope_name": cleanup_receipt[
+                    "provider_lease_identity"
+                ]["process_scope_name"],
+                "workflow_revision": 0,
+                "pid": None,
+                "recovered_from_journal": True,
+                "supervisor_reconciliation": {
+                    "contract_version": "hybrid_supervisor_reconciliation_v1",
+                    "status": "verified",
+                    "cleanup_receipt": cleanup_receipt,
+                },
+            }
+        )
+        registry.active_resources = 0
+        state = store.get("run-h1")
+        execution = state["stages"]["screen_understanding"]["evidence_refs"][
+            "stage_execution"
+        ]
+        recovered = workflow_service.recover_guarded_learning_workflow_stage_operation(
+            composition=composition,
+            run_id="run-h1",
+            expected_revision=int(state["revision"]),
+            now=datetime.fromisoformat(execution["lease_expires_at"])
+            + timedelta(seconds=1),
+        )
+        assert recovered["recovery_status"] == "expired_operation_failed"
+
+        projected = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        assert projected is not None
+        assert projected["status"] == "safe_stopped"
+        assert projected["observed_task_kind"] == (
+            "panel_learning_calibration_sequence"
+        )
+        assert projected["operation_ref"]["predecessor_content_sha256"] == (
+            consumed_ref["content_sha256"]
+        )
+        worker_ref = projected["operation_ref"]["worker_ref"]
+        worker_cleanup = projected["cleanup_refs"]["worker_cleanup_ref"]
+        provider_cleanup = projected["cleanup_refs"]["provider_cleanup_ref"]
+        assert worker_cleanup["backend_compute_termination"] == "not_running"
+        assert worker_cleanup["model_service_compute_termination"] == "terminated"
+        assert worker_cleanup["cancellation_ref"] == {
+            "content_sha256": cleanup_receipt["content_sha256"]
+        }
+        recovered_execution = store.get("run-h1")["stages"][
+            "screen_understanding"
+        ]["evidence_refs"]["stage_execution"]
+        vista_context = recovered_execution["benchmark_v2_workflow_service_hybrid"][
+            "provider_dispatch_context_refs"
+        ]["vista"]["dispatch_context"]
+        assert provider_cleanup["reservation_ref"] == {
+            "content_sha256": vista_context["content_sha256"]
+        }
+        assert provider_cleanup["acquisition_intent_ref"] == (
+            provider_cleanup["reservation_ref"]
+        )
+        acquisition = cleanup_receipt["source_cleanup_evidence"]["model_lease"][
+            "process_scope_acquisition"
+        ]
+        assert provider_cleanup["acquisition_owner_ref"] == {
+            "content_sha256": content_sha256(acquisition)
+        }
+        assert provider_cleanup["cleanup_receipt_ref"] == {
+            "content_sha256": cleanup_receipt["content_sha256"]
+        }
+        for cleanup_name in ("worker_cleanup_ref", "provider_cleanup_ref"):
+            cleanup_ref = projected["cleanup_refs"][cleanup_name]
+            assert isinstance(cleanup_ref, dict)
+            for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            ):
+                assert cleanup_ref[name] == worker_ref[name]
+
+        replay = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        cancelled = service.cancel_operation(
+            operation_ref=projected["operation_ref"]
+        )
+        assert canonical_json_bytes(replay) == canonical_json_bytes(projected)
+        assert canonical_json_bytes(cancelled) == canonical_json_bytes(projected)
+        assert registry.start_calls == 2
+        assert registry.adopt_calls == 1
+        assert registry.cancel_calls == 0
+        assert registry.active_resources == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "violation",
+    (
+        "worker_not_recovered",
+        "reconciliation_not_verified",
+        "receipt_lineage",
+        "receipt_residue",
+        "lease_identity",
+        "record_scope_name",
+        "lease_scope_name",
+        "receipt_scope_name",
+        "acquisition_scope_name",
+        "profile_id",
+        "member_pids_missing_provider_pid",
+        "worker_workflow_revision",
+        "binding_workflow_revision",
+        "provider_lineage_workflow_revision",
+    ),
+)
+def test_s3_expired_vista_cleanup_projection_rejects_tampered_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    violation: str,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+    registry = _S3Registry()
+    worker = registry.start(
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        task_kind="panel_learning_calibration_sequence",
+        payload=_hybrid_worker_payload(),
+    )
+    cleanup_receipt, provider_lineage = _s3_vista_supervisor_cleanup_receipt(
+        worker
+    )
+    worker.update(
+        {
+            "status": "failed",
+            "runtime_attached": False,
+            "result_available": False,
+            "result_adopted": False,
+            "provider": "vista",
+            "provider_lineage": provider_lineage,
+            "provider_scope_name": cleanup_receipt[
+                "provider_lease_identity"
+            ]["process_scope_name"],
+            "workflow_revision": 0,
+            "pid": None,
+            "recovered_from_journal": True,
+            "supervisor_reconciliation": {
+                "contract_version": "hybrid_supervisor_reconciliation_v1",
+                "status": "verified",
+                "cleanup_receipt": cleanup_receipt,
+            },
+        }
+    )
+    context = attestation.compose_benchmark_dispatch_context(
+        provider="vista",
+        operation_ref={
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-h1",
+            "revision": 4,
+            "window_binding_ref": deepcopy(
+                _s3_window_binding()["window_binding_ref"]
+            ),
+            "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
+        },
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-h1",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(
+            {
+                "run_id": "run-h1",
+                "stage": "screen_understanding",
+                "operation_id": "operation-h1",
+                "revision": 4,
+                "window_binding_ref": deepcopy(
+                    _s3_window_binding()["window_binding_ref"]
+                ),
+                "capture_ref": deepcopy(_s3_window_binding()["capture_ref"]),
+            }
+        ),
+    )
+    screen_group = _screen_group()
+    if violation == "binding_workflow_revision":
+        capture_bundle = deepcopy(screen_group["capture_bundle"])
+        capture_bundle["workflow_revision"] = 1
+        screen_group = _screen_group(capture_bundle=capture_bundle)
+    binding = workflow_service._benchmark_v2_hybrid_binding_with_dispatch_context(
+        binding=workflow_service._compose_benchmark_v2_hybrid_service_binding(
+            screen_group=screen_group,
+            window_binding=_s3_window_binding(),
+        ),
+        context=context,
+    )
+    if violation == "worker_not_recovered":
+        worker["recovered_from_journal"] = False
+    elif violation == "reconciliation_not_verified":
+        worker["supervisor_reconciliation"]["status"] = "indeterminate"
+    elif violation == "record_scope_name":
+        worker["provider_scope_name"] = (
+            f"Local\\AgentGuiHybrid-vista-{'e' * 64}"
+        )
+    elif violation == "worker_workflow_revision":
+        worker["workflow_revision"] = 1
+    else:
+        tampered = deepcopy(cleanup_receipt)
+        tampered.pop("content_sha256")
+        if violation == "receipt_lineage":
+            tampered["lineage"]["operation_id"] = "operation-other"
+        elif violation == "receipt_residue":
+            tampered["orphan_provider_pids"] = [404]
+        elif violation == "lease_scope_name":
+            tampered["source_cleanup_evidence"]["model_lease"][
+                "process_scope_name"
+            ] = f"Local\\AgentGuiHybrid-vista-{'e' * 64}"
+        elif violation == "receipt_scope_name":
+            tampered["provider_lease_identity"]["process_scope_name"] = (
+                f"Local\\AgentGuiHybrid-vista-{'e' * 64}"
+            )
+        elif violation == "acquisition_scope_name":
+            tampered["source_cleanup_evidence"]["model_lease"][
+                "process_scope_acquisition"
+            ]["scope_name"] = f"Local\\AgentGuiHybrid-vista-{'e' * 64}"
+        elif violation == "profile_id":
+            tampered["source_cleanup_evidence"]["model_lease"]["profile"][
+                "profile_id"
+            ] = "vista_other"
+        elif violation == "member_pids_missing_provider_pid":
+            tampered["source_cleanup_evidence"]["model_lease"][
+                "process_scope_acquisition"
+            ]["member_pids"] = [999]
+        elif violation == "provider_lineage_workflow_revision":
+            tampered["lineage"]["workflow_revision"] = 1
+            worker["provider_lineage"] = deepcopy(tampered["lineage"])
+        else:
+            tampered["source_cleanup_evidence"]["model_lease"][
+                "incarnation_id"
+            ] = "vista-incarnation-other"
+        worker["supervisor_reconciliation"]["cleanup_receipt"] = (
+            seal_immutable(tampered)
+        )
+
+    with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+        workflow_service._project_benchmark_v2_hybrid_expired_failure_cleanup(
+            workflow_state={
+                "stages": {"screen_understanding": {"status": "failed"}}
+            },
+            stage_execution={
+                "result_outcome": "failed",
+                "recovery_status": "expired_operation_failed",
+            },
+            binding=binding,
+            worker_record=worker,
+        )
 
 
 def test_s3_early_failure_persists_predecessor_before_terminal_transition(

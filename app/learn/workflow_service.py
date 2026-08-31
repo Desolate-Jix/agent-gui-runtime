@@ -5416,6 +5416,7 @@ def _benchmark_v2_hybrid_continuation_predecessor(
     binding: Mapping[str, object],
     worker_record: Mapping[str, object],
     status: str,
+    recovered_cleanup_verified: bool = False,
 ) -> str | None:
     current = _validate_benchmark_v2_hybrid_service_binding(binding)
     receipt = current.get("continuation_receipt")
@@ -5431,6 +5432,11 @@ def _benchmark_v2_hybrid_continuation_predecessor(
     status_matches = (
         validated_receipt["receipt_phase"] == "returned"
         and validated_receipt["returned_status"] == status
+    ) or (
+        recovered_cleanup_verified
+        and validated_receipt["receipt_phase"] == "returned"
+        and validated_receipt["returned_status"] == "pending"
+        and status == "safe_stopped"
     ) or (
         validated_receipt["receipt_phase"] == "terminal_prepared"
         and status in {"complete", "safe_stopped"}
@@ -5599,6 +5605,157 @@ def _materialize_benchmark_v2_hybrid_completed_cleanup(
     )
 
 
+def _project_benchmark_v2_hybrid_expired_failure_cleanup(
+    *,
+    workflow_state: Mapping[str, object],
+    stage_execution: Mapping[str, object],
+    binding: Mapping[str, object],
+    worker_record: Mapping[str, object],
+) -> dict[str, dict[str, Any]] | None:
+    if (
+        stage_execution.get("result_outcome") != "failed"
+        or stage_execution.get("recovery_status") != "expired_operation_failed"
+    ):
+        return None
+    stage = str(worker_record.get("stage") or "")
+    stages = workflow_state.get("stages")
+    stage_record = stages.get(stage) if isinstance(stages, Mapping) else None
+    if (
+        not isinstance(stage_record, Mapping)
+        or stage_record.get("status") != "failed"
+        or worker_record.get("task_kind")
+        != "panel_learning_calibration_sequence"
+        or worker_record.get("status") != "failed"
+        or worker_record.get("runtime_attached") is not False
+        or worker_record.get("result_available") is not False
+        or worker_record.get("result_adopted") is not False
+        or worker_record.get("recovered_from_journal") is not True
+        or worker_record.get("pid") is not None
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid worker cleanup state is invalid"
+        )
+    reconciliation = worker_record.get("supervisor_reconciliation")
+    if not isinstance(reconciliation, Mapping):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid supervisor cleanup is missing"
+        )
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        project_authoritative_vista_supervisor_cleanup,
+        validate_benchmark_dispatch_context_ref,
+    )
+
+    try:
+        authoritative = project_authoritative_vista_supervisor_cleanup(
+            record=worker_record,
+            supervisor_reconciliation=reconciliation,
+        )
+    except (TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(str(error)) from error
+    provider_lineage = worker_record.get("provider_lineage")
+    worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+    if not isinstance(provider_lineage, Mapping) or any(
+        provider_lineage.get(name) != worker_identity[name]
+        for name in ("run_id", "stage", "operation_id")
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid provider lineage differs"
+        )
+    lineage_revision = provider_lineage.get("workflow_revision")
+    worker_revision = worker_record.get("workflow_revision")
+    binding_revision = _benchmark_v2_hybrid_lineage_workflow_revision(binding)
+    if (
+        isinstance(lineage_revision, bool)
+        or not isinstance(lineage_revision, int)
+        or isinstance(worker_revision, bool)
+        or not isinstance(worker_revision, int)
+        or lineage_revision != worker_revision
+        or lineage_revision != binding_revision
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid workflow revision differs"
+        )
+    context_refs = binding.get("provider_dispatch_context_refs")
+    context_ref_value = (
+        context_refs.get("vista") if isinstance(context_refs, Mapping) else None
+    )
+    try:
+        context_ref = validate_benchmark_dispatch_context_ref(context_ref_value)
+    except (TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid VISTA context is invalid"
+        ) from error
+    context = context_ref["dispatch_context"]
+    context_operation = context["operation_ref"]
+    if any(
+        context_operation.get(name) != worker_identity[name]
+        for name in ("run_id", "stage", "operation_id")
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid VISTA context lineage differs"
+        )
+    runtime_identity = authoritative.get("runtime_identity")
+    cleanup_receipt = authoritative.get("cleanup_receipt")
+    acquisition_owner_ref = authoritative.get("acquisition_owner_ref")
+    if (
+        not isinstance(runtime_identity, Mapping)
+        or not isinstance(cleanup_receipt, Mapping)
+        or not isinstance(acquisition_owner_ref, Mapping)
+    ):
+        raise LearningWorkflowStageOperationError(
+            "expired benchmark_v2 Hybrid VISTA cleanup projection is incomplete"
+        )
+    identity_fields = (
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+    )
+    worker_cleanup_ref = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            **{name: str(worker_identity[name]) for name in identity_fields},
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "terminated",
+            "cancellation_ref": {
+                "content_sha256": str(cleanup_receipt["content_sha256"])
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    context_owner_ref = {"content_sha256": str(context["content_sha256"])}
+    provider_cleanup_ref = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_exact_process_exited",
+            "authority_kind": (
+                "benchmark_v2_workflow_service_dispatch_cleanup"
+            ),
+            **{name: str(worker_identity[name]) for name in identity_fields},
+            "reservation_ref": deepcopy(context_owner_ref),
+            "acquisition_owner_ref": deepcopy(dict(acquisition_owner_ref)),
+            "acquisition_intent_ref": deepcopy(context_owner_ref),
+            "runtime_owner_ref": {
+                "content_sha256": str(runtime_identity["content_sha256"])
+            },
+            "cleanup_receipt_ref": {
+                "content_sha256": str(cleanup_receipt["content_sha256"])
+            },
+        }
+    )
+    return {
+        "worker_cleanup_ref": worker_cleanup_ref,
+        "provider_cleanup_ref": _validate_benchmark_v2_hybrid_provider_cleanup(
+            cleanup=provider_cleanup_ref,
+            worker_record=worker_record,
+        ),
+    }
+
+
 def _benchmark_v2_hybrid_service_status(
     *,
     workflow_state: Mapping[str, object],
@@ -5633,6 +5790,7 @@ def _project_benchmark_v2_hybrid_operation_ref(
     binding: Mapping[str, object],
     worker_record: Mapping[str, object],
     status: str,
+    recovered_cleanup_verified: bool = False,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_contracts import (
         content_sha256 as benchmark_content_sha256,
@@ -5671,6 +5829,7 @@ def _project_benchmark_v2_hybrid_operation_ref(
                 binding=current_binding,
                 worker_record=worker_record,
                 status=status,
+                recovered_cleanup_verified=recovered_cleanup_verified,
             )
         ),
     )
@@ -5726,12 +5885,24 @@ def _benchmark_v2_hybrid_service_context(
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 hybrid service operation status is stale"
         )
+    recovered_cleanup_verified = False
+    if current_status == "safe_stopped":
+        recovered_cleanup_verified = isinstance(
+            _project_benchmark_v2_hybrid_expired_failure_cleanup(
+                workflow_state=current,
+                stage_execution=stage_execution,
+                binding=binding,
+                worker_record=worker_record,
+            ),
+            Mapping,
+        )
     expected = _project_benchmark_v2_hybrid_operation_ref(
         workflow_state=current,
         stage_execution=stage_execution,
         binding=binding,
         worker_record=worker_record,
         status=supplied["status"],
+        recovered_cleanup_verified=recovered_cleanup_verified,
     )
     if supplied != expected:
         raise LearningWorkflowStageOperationError(
@@ -5838,55 +6009,71 @@ def _project_benchmark_v2_hybrid_step(
         )
     worker_cleanup_ref = None
     provider_cleanup_ref = None
+    recovered_cleanup_verified = False
     if status == "safe_stopped":
-        cancellation = stage_execution.get("cancellation")
-        if isinstance(cancellation, Mapping):
-            worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
-            worker_cleanup_ref = seal_immutable(
-                {
-                    "contract_version": (
-                        "benchmark_v2_hybrid_worker_cleanup_ref_v1"
-                    ),
-                    "run_id": worker_identity["run_id"],
-                    "stage": worker_identity["stage"],
-                    "operation_id": worker_identity["operation_id"],
-                    "worker_id": worker_identity["worker_id"],
-                    "model_request_id": worker_identity["model_request_id"],
-                    "payload_sha256": worker_identity["payload_sha256"],
-                    "backend_compute_termination": str(
-                        cancellation.get("backend_compute_termination")
-                        or "not_covered"
-                    ),
-                    "model_service_compute_termination": str(
-                        cancellation.get("model_service_compute_termination")
-                        or "not_covered"
-                    ),
-                    "cancellation_ref": {
-                        "content_sha256": content_sha256(dict(cancellation))
-                    },
-                    "artifact_is_authorization": False,
-                    "execute_binding_enabled": False,
-                }
-            )
-        provider_cleanup_value = worker_record.get(
-            "benchmark_provider_cleanup_ref"
-        )
-        if isinstance(provider_cleanup_value, Mapping):
-            provider_cleanup_ref = _validate_benchmark_v2_hybrid_provider_cleanup(
-                cleanup=provider_cleanup_value,
+        recovered_cleanup = (
+            _project_benchmark_v2_hybrid_expired_failure_cleanup(
+                workflow_state=workflow_state,
+                stage_execution=stage_execution,
+                binding=binding,
                 worker_record=worker_record,
             )
-        if (
-            worker_cleanup_ref is None
-            and isinstance(provider_cleanup_ref, Mapping)
-            and worker_record.get("result_adopted") is True
-        ):
-            worker_cleanup_ref = (
-                _compose_benchmark_v2_hybrid_completed_worker_cleanup_ref(
-                    worker_record=worker_record,
-                    provider_cleanup_ref=provider_cleanup_ref,
+        )
+        if isinstance(recovered_cleanup, Mapping):
+            worker_cleanup_ref = recovered_cleanup["worker_cleanup_ref"]
+            provider_cleanup_ref = recovered_cleanup["provider_cleanup_ref"]
+            recovered_cleanup_verified = True
+        else:
+            cancellation = stage_execution.get("cancellation")
+            if isinstance(cancellation, Mapping):
+                worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+                worker_cleanup_ref = seal_immutable(
+                    {
+                        "contract_version": (
+                            "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+                        ),
+                        "run_id": worker_identity["run_id"],
+                        "stage": worker_identity["stage"],
+                        "operation_id": worker_identity["operation_id"],
+                        "worker_id": worker_identity["worker_id"],
+                        "model_request_id": worker_identity["model_request_id"],
+                        "payload_sha256": worker_identity["payload_sha256"],
+                        "backend_compute_termination": str(
+                            cancellation.get("backend_compute_termination")
+                            or "not_covered"
+                        ),
+                        "model_service_compute_termination": str(
+                            cancellation.get("model_service_compute_termination")
+                            or "not_covered"
+                        ),
+                        "cancellation_ref": {
+                            "content_sha256": content_sha256(dict(cancellation))
+                        },
+                        "artifact_is_authorization": False,
+                        "execute_binding_enabled": False,
+                    }
                 )
+            provider_cleanup_value = worker_record.get(
+                "benchmark_provider_cleanup_ref"
             )
+            if isinstance(provider_cleanup_value, Mapping):
+                provider_cleanup_ref = (
+                    _validate_benchmark_v2_hybrid_provider_cleanup(
+                        cleanup=provider_cleanup_value,
+                        worker_record=worker_record,
+                    )
+                )
+            if (
+                worker_cleanup_ref is None
+                and isinstance(provider_cleanup_ref, Mapping)
+                and worker_record.get("result_adopted") is True
+            ):
+                worker_cleanup_ref = (
+                    _compose_benchmark_v2_hybrid_completed_worker_cleanup_ref(
+                        worker_record=worker_record,
+                        provider_cleanup_ref=provider_cleanup_ref,
+                    )
+                )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:
@@ -5908,6 +6095,7 @@ def _project_benchmark_v2_hybrid_step(
             binding=binding,
             worker_record=worker_record,
             status=status,
+            recovered_cleanup_verified=recovered_cleanup_verified,
         ),
         observed_task_kind=str(worker_record["task_kind"]),
         provider_dispatch_context_projection=provider_context_projection,
