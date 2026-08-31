@@ -1571,6 +1571,8 @@ def test_cleanup_open_attempts_recovers_after_cleanup_file_fsync_before_append(
     summary = runner.run_cli(
         [
             "--cleanup-open-attempts",
+            "--provider-manifest",
+            str(_manifest(tmp_path)),
             "--partition",
             "regression",
             "--ledger-root",
@@ -1590,6 +1592,7 @@ def test_cleanup_open_attempts_recovers_after_cleanup_file_fsync_before_append(
     cleanup_calls = [
         value for name, value in runtime.calls if name == "cleanup_attempt"
     ]
+    assert runtime.calls[0][0] == "load_provider_manifest"
     assert len(cleanup_calls) == 2
     assert cleanup_calls[0][1] == cleanup_calls[1][1]
     assert all(value == 0 for value in runtime.resource_counts().values())
@@ -2255,6 +2258,8 @@ def test_cleanup_recovers_open_attempt_from_ledger_when_output_is_missing(
     result = runner.run_cli(
         [
             "--cleanup-open-attempts",
+            "--provider-manifest",
+            str(_manifest(tmp_path)),
             "--partition",
             "regression",
             "--ledger-root",
@@ -2270,6 +2275,10 @@ def test_cleanup_recovers_open_attempt_from_ledger_when_output_is_missing(
     ]
     assert _read_chain(ledger)[-1]["event"]["event_type"] == "cleanup"
     assert not (attempt_dir / "body.json").exists()
+    assert [name for name, _ in runtime.calls[:2]] == [
+        "load_provider_manifest",
+        "cleanup_attempt",
+    ]
     assert all(value == 0 for value in runtime.resource_counts().values())
 
 
@@ -2323,6 +2332,8 @@ def test_cleanup_open_attempts_rejects_mismatched_authoritative_receipt(
         runner.run_cli(
             [
                 "--cleanup-open-attempts",
+                "--provider-manifest",
+                str(_manifest(tmp_path)),
                 "--partition",
                 "regression",
                 "--ledger-root",

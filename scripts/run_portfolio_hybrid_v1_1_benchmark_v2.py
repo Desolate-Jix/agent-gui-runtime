@@ -2731,6 +2731,9 @@ def _open_attempts(path: Path, *, partition: str) -> list[dict[str, object]]:
 def _cleanup_open_attempts(args: argparse.Namespace, runtime: object) -> dict[str, object]:
     if args.partition != "regression":
         raise ValueError("Task 9 open-attempt cleanup is regression-only")
+    loaded = runtime.load_provider_manifest(path=Path(args.provider_manifest))
+    if not isinstance(loaded, Mapping):
+        raise ValueError("provider manifest must be an object")
     ledger_root = Path(args.ledger_root).resolve()
     cleaned_refs: list[dict[str, str]] = []
     for ledger in sorted(ledger_root.rglob("*.jsonl")) if ledger_root.exists() else []:
@@ -3481,10 +3484,15 @@ def run_cli(argv: Sequence[str]) -> dict[str, object]:
             probe_kind="cancel" if args.run_cancel_probe else "timeout",
         )
     if args.cleanup_open_attempts:
-        _require(args, "partition", "ledger_root", "output_root")
-        _reject(
+        _require(
             args,
             "provider_manifest",
+            "partition",
+            "ledger_root",
+            "output_root",
+        )
+        _reject(
+            args,
             "providers",
             "attempt_ledger",
             "regression_run_ref",
