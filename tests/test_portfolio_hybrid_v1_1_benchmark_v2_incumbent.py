@@ -3165,6 +3165,115 @@ def test_cleanup_parent_projection_rejects_resealed_schema_and_lineage_drift(
     assert operation == original
 
 
+def test_b2_pending_cleanup_keeps_exact_lineage_without_becoming_evidence(
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _result_ready_document(
+        source_bundle,
+        result_identity={"content_sha256": "a" * 64},
+    )
+    worker = operation["worker_ref"]
+    pending = seal_immutable(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_pending",
+            "outcome": "indeterminate",
+            "authority_kind": "test",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "reservation_ref": operation["provider_reservation_ref"],
+            "acquisition_owner_ref": operation["acquisition_owner_ref"],
+            "acquisition_intent_ref": operation["acquisition_intent_ref"],
+            "runtime_owner_ref": operation["runtime_owner_ref"],
+            "cleanup_receipt_ref": None,
+        }
+    )
+
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="B2 cleanup lineage differs",
+    ):
+        workflow_service._validate_benchmark_v2_provider_cleanup_parent(
+            cleanup=pending,
+            operation=operation,
+            result_identity=None,
+            authority_kind="test",
+            allowed_outcomes={"verified_exact_process_exited"},
+        )
+
+    accepted = workflow_service._validate_benchmark_v2_provider_cleanup_parent(
+        cleanup=pending,
+        operation=operation,
+        result_identity=None,
+        authority_kind="test",
+        allowed_outcomes={"verified_exact_process_exited"},
+        allow_pending=True,
+    )
+    assert accepted == pending
+    assert accepted["cleanup_receipt_ref"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("reservation_ref", {"content_sha256": "f" * 64}),
+        ("outcome", "verified_exact_process_exited"),
+        ("cleanup_receipt_ref", {"content_sha256": "e" * 64}),
+    ],
+)
+def test_b2_pending_cleanup_rejects_resealed_authority_drift(
+    source_bundle: dict[str, object],
+    field: str,
+    value: object,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    operation = _result_ready_document(
+        source_bundle,
+        result_identity={"content_sha256": "a" * 64},
+    )
+    worker = operation["worker_ref"]
+    body = {
+        "contract_version": "benchmark_provider_cleanup_ref_v1",
+        "status": "cleanup_pending",
+        "outcome": "indeterminate",
+        "authority_kind": "test",
+        "run_id": operation["run_id"],
+        "stage": operation["stage"],
+        "operation_id": operation["operation_id"],
+        "worker_id": worker["worker_id"],
+        "model_request_id": worker["model_request_id"],
+        "payload_sha256": worker["payload_sha256"],
+        "reservation_ref": operation["provider_reservation_ref"],
+        "acquisition_owner_ref": operation["acquisition_owner_ref"],
+        "acquisition_intent_ref": operation["acquisition_intent_ref"],
+        "runtime_owner_ref": operation["runtime_owner_ref"],
+        "cleanup_receipt_ref": None,
+    }
+    body[field] = value
+
+    with pytest.raises(
+        workflow_service.LearningWorkflowStageOperationError,
+        match="B2 cleanup lineage differs",
+    ):
+        workflow_service._validate_benchmark_v2_provider_cleanup_parent(
+            cleanup=seal_immutable(body),
+            operation=operation,
+            result_identity=None,
+            authority_kind="test",
+            allowed_outcomes={"verified_exact_process_exited"},
+            allow_pending=True,
+        )
+
+
 def test_b1_not_launched_cleanup_rejects_correctly_resealed_wrong_reservation(
     source_bundle: dict[str, object],
 ) -> None:

@@ -1962,6 +1962,7 @@ def _validate_benchmark_v2_provider_cleanup_parent(
     result_identity: Mapping[str, object] | None,
     authority_kind: str,
     allowed_outcomes: set[str],
+    allow_pending: bool = False,
 ) -> dict[str, Any]:
     projection = _benchmark_v2_sealed_mapping(
         cleanup, "benchmark_v2 incumbent B2 cleanup"
@@ -1985,11 +1986,20 @@ def _validate_benchmark_v2_provider_cleanup_parent(
         "content_sha256",
     }
     worker = operation["worker_ref"]
+    terminal_shape = (
+        projection.get("status") == "cleanup_verified"
+        and projection.get("outcome") in allowed_outcomes
+    )
+    pending_shape = (
+        allow_pending
+        and projection.get("status") == "cleanup_pending"
+        and projection.get("outcome") == "indeterminate"
+        and projection.get("cleanup_receipt_ref") is None
+    )
     if (
         set(projection) != exact_fields
         or projection.get("contract_version") != "benchmark_provider_cleanup_ref_v1"
-        or projection.get("status") != "cleanup_verified"
-        or projection.get("outcome") not in allowed_outcomes
+        or not (terminal_shape or pending_shape)
         or projection.get("authority_kind") != authority_kind
         or any(
             projection.get(name) != operation[name]
@@ -3200,6 +3210,7 @@ def _cancel_benchmark_v2_incumbent_operation(
                     "verified_not_acquired",
                     "verified_exact_process_exited",
                 },
+                allow_pending=True,
             )
             if launch_owner["assignment_state"] == "proven":
                 if any(
