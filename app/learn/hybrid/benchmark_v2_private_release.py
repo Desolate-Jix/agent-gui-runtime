@@ -50,6 +50,7 @@ _CODE_PATHS = (
     "app/api/panel.py",
     "app/core/model_server.py",
     "app/learn/calibration_sequence.py",
+    "app/learn/hybrid/contracts.py",
     "app/learn/hybrid/benchmark_scorer_v2.py",
     "app/learn/hybrid/benchmark_v2_private_release.py",
     "app/learn/hybrid/benchmark_v2_pathless.py",
@@ -97,6 +98,7 @@ _CONFIG_PATHS = (
     "configs/model_profiles/learn_mode_omniparser_v2.json",
 )
 _TEST_PATHS = (
+    "tests/test_learn_hybrid_contracts.py",
     "tests/test_learn_hybrid_qwen_binding.py",
     "tests/test_learn_hybrid_windows_process_scope.py",
     "tests/test_learning_workflow_stage_execution.py",
@@ -127,6 +129,7 @@ _RELEASE_CODE_REFS = (
     ("panel_service", "app/api/panel.py"),
     ("model_server", "app/core/model_server.py"),
     ("calibration_sequence", "app/learn/calibration_sequence.py"),
+    ("hybrid_contracts", "app/learn/hybrid/contracts.py"),
     ("benchmark_actual", "app/learn/hybrid/benchmark_v2_actual.py"),
     ("dispatch_attestation", "app/learn/hybrid/benchmark_v2_dispatch_attestation.py"),
     ("durable_claim", "app/learn/hybrid/benchmark_v2_durable_claim.py"),
