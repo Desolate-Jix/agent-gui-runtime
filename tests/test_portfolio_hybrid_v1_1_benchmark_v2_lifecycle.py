@@ -1277,40 +1277,6 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
         }
     )
     acquisition_observation_path = _write_json(tmp_path / "acquisition-observation.json", acquisition_observation)
-    scope_cleanup = {
-        "contract_version": "hybrid_windows_process_scope_v1",
-        "scope_name": "Local\\NoProvider-a",
-        "authority": "windows_job_object",
-        "scope_absent_after_owner_close": True,
-        "cleanup_status": "verified",
-        "observed_member_pids_before": [],
-        "observed_member_identities_before": [],
-        "member_pids_after": [],
-        "member_identities_after": [],
-        "active_listeners_after": [],
-        "pid_file_after": None,
-        "stable_zero_observations": 3,
-        "samples": [
-            {"pids": [], "process_identities": [], "listeners": []},
-            {"pids": [], "process_identities": [], "listeners": []},
-            {"pids": [], "process_identities": [], "listeners": []},
-        ],
-    }
-    production_tombstone = seal_immutable(
-        {
-            "contract_version": "hybrid_qwen_aborted_acquisition_tombstone_v1",
-            "status": "aborted_before_lease",
-            "model_request_id": cancelled["model_request_id"],
-            "provider": "qwen",
-            "lineage": {"run_id": cancelled["run_id"], "operation_id": cancelled["operation_id"]},
-            "process_scope_name": scope_cleanup["scope_name"],
-            "profile_sha256": "b" * 64,
-            "listener_port": 9601,
-            "pid_file": str((tmp_path / "not-created.pid").resolve()),
-            "scope_cleanup_evidence": scope_cleanup,
-        }
-    )
-    production_tombstone_path = _write_json(tmp_path / "production-aborted-owner-tombstone.json", production_tombstone)
     abort_tombstone = seal_immutable(
         {
             "contract_version": "benchmark_provider_aborted_acquisition_tombstone_v1",
@@ -1332,7 +1298,7 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
             "acquisition_intent_ref": {"content_sha256": intent["content_sha256"]},
             "runtime_owner_ref": {"content_sha256": runtime_owner["content_sha256"]},
             "materialization_ledger_ref": {"content_sha256": ledger["content_sha256"]},
-            "owner_tombstone_ref": {"content_sha256": production_tombstone["content_sha256"]},
+            "owner_tombstone_ref": {"content_sha256": abort_tombstone["content_sha256"]},
             "reason": abort_tombstone["reason"],
             "owner_state": "acquisition_aborted",
         }
@@ -1367,7 +1333,6 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
         }
     )
     provider_journal_path = _write_json(tmp_path / "provider-journal.json", provider_journal)
-    scope_ref = {"content_sha256": lifecycle.content_sha256(scope_cleanup)}
     provider_cleanup = seal_immutable(
         {
             "contract_version": "qwen_model_request_cleanup_receipt_v1",
@@ -1382,13 +1347,13 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
             "job_scope_ref": None,
             "finalization_token": None,
             "lease_state_ref": None,
-            "owner_tombstone_ref": {"content_sha256": production_tombstone["content_sha256"]},
+            "owner_tombstone_ref": {"content_sha256": abort_tombstone["content_sha256"]},
             "release_reason": abort_tombstone["reason"],
             "termination_observation_ref": None,
-            "scope_stable_zero_ref": scope_ref,
-            "listener_stable_zero_ref": scope_ref,
+            "scope_stable_zero_ref": None,
+            "listener_stable_zero_ref": None,
             "no_active_lease_observation_ref": {"content_sha256": no_active["content_sha256"]},
-            "no_owned_runtime_observation_ref": {"content_sha256": production_tombstone["content_sha256"]},
+            "no_owned_runtime_observation_ref": {"content_sha256": abort_tombstone["content_sha256"]},
         }
     )
     provider_cleanup_path = _write_json(tmp_path / "provider-cleanup.json", provider_cleanup)
@@ -1414,7 +1379,6 @@ def _not_launched_parent_bundle(tmp_path: Path) -> list[Path]:
         ledger_path,
         prepared_observation_path,
         acquisition_observation_path,
-        production_tombstone_path,
         abort_tombstone_path,
         acquisition_abort_path,
         no_active_path,
@@ -2535,6 +2499,81 @@ def test_verify_lifecycle_not_launched_not_acquired_is_not_fabricated_zero(tmp_p
     assert result["cleanup_summary"]["provider"] == "verified_not_acquired"
     assert result["cleanup_summary"]["binding"] == "not_applicable_not_launched"
     assert all(item["pid"] not in {4101, 4201} for item in result["gpu_summary"]["owned_process_vram"])
+
+
+@pytest.mark.parametrize(
+    ("contract_version", "field", "replacement"),
+    [
+        (
+            "benchmark_provider_acquisition_abort_v1",
+            "model_request_id",
+            "request-unrelated",
+        ),
+        (
+            "benchmark_provider_acquisition_abort_v1",
+            "acquisition_intent_ref",
+            {"content_sha256": "a" * 64},
+        ),
+        (
+            "benchmark_provider_acquisition_abort_v1",
+            "runtime_owner_ref",
+            {"content_sha256": "b" * 64},
+        ),
+        (
+            "qwen_model_request_cleanup_receipt_v1",
+            "model_request_id",
+            "request-unrelated",
+        ),
+        (
+            "qwen_model_request_cleanup_receipt_v1",
+            "acquisition_intent_ref",
+            {"content_sha256": "a" * 64},
+        ),
+        (
+            "qwen_model_request_cleanup_receipt_v1",
+            "runtime_owner_ref",
+            {"content_sha256": "b" * 64},
+        ),
+    ],
+)
+def test_verify_lifecycle_not_acquired_rejects_identity_substitution(
+    tmp_path: Path,
+    contract_version: str,
+    field: str,
+    replacement: object,
+) -> None:
+    parents = _not_launched_parent_bundle(tmp_path / "parents")
+    target = next(
+        path
+        for path in parents
+        if json.loads(path.read_text(encoding="utf-8")).get("contract_version")
+        == contract_version
+    )
+    _mutate(target, lambda value: value.__setitem__(field, replacement))
+    start = datetime(2026, 8, 27, tzinfo=timezone.utc)
+    external = (5101, 5101000, DEVICE, 100)
+    samples = [
+        _sample(tmp_path / "baseline.json", at=start, rows=[external]),
+        _sample(
+            tmp_path / "not-launched-in-flight.json",
+            at=start + timedelta(seconds=1),
+            rows=[(3101, 3101000, DEVICE, 0), external],
+        ),
+        _sample(tmp_path / "post.json", at=start + timedelta(seconds=2), rows=[external]),
+    ]
+    probes = [
+        path
+        for provider in ("omni", "qwen", "vista")
+        for kind in ("cancel", "timeout")
+        for path in _probe_bundle(
+            tmp_path / f"probe-{provider}-{kind}.json",
+            provider=provider,
+            kind=kind,
+        )
+    ]
+
+    result = _verify(parents, samples, probes)
+    assert result["status"] == "failed"
 
 
 def test_verify_lifecycle_not_launched_requires_production_none_semantics(tmp_path: Path) -> None:

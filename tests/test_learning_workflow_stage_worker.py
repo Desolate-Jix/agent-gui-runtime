@@ -10959,10 +10959,9 @@ def test_benchmark_provider_cleanup_launched_worker_exit_aborts_unmaterialized_r
             "abort_qwen_model_request_acquisition",
             real_abort,
         )
-        _install_benchmark_provider_abort_primitive(
-            tmp_path,
-            monkeypatch,
-            request_id=anchored["model_request_id"],
+        model_server._transition_qwen_model_request_materialization(
+            anchored["model_request_id"],
+            transition="abort",
         )
 
         cleanup = registry.reconcile_benchmark_provider_cleanup(

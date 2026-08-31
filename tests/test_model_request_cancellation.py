@@ -3906,9 +3906,6 @@ def test_qwen_cleanup_sidecar_abort_replays_byte_identically_and_blocks_launch(
 ) -> None:
     request_id = "benchmark-abort-replay"
     owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
-    runtime_path = _install_benchmark_qwen_abort_primitive(
-        tmp_path, monkeypatch, request_id
-    )
     arguments = {
         "acquisition_intent_ref": owner["acquisition_intent_ref"],
         "runtime_owner_ref": owner["runtime_owner_ref"],
@@ -3916,18 +3913,18 @@ def test_qwen_cleanup_sidecar_abort_replays_byte_identically_and_blocks_launch(
     }
 
     first_abort = model_server.abort_qwen_model_request_acquisition(request_id, **arguments)
-    production_tombstone_path = runtime_path.with_name(
-        f"{runtime_path.stem}.aborted.json"
-    )
-    production_tombstone_bytes = production_tombstone_path.read_bytes()
+    tombstone_path = model_server._qwen_acquisition_artifact_paths(request_id)[
+        "aborted_tombstone"
+    ]
+    tombstone_bytes = tombstone_path.read_bytes()
     first_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
     second_abort = model_server.abort_qwen_model_request_acquisition(request_id, **arguments)
     second_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
 
     assert first_abort == second_abort
-    assert production_tombstone_path.read_bytes() == production_tombstone_bytes
-    assert json.loads(production_tombstone_bytes)["contract_version"] == (
-        "hybrid_qwen_aborted_acquisition_tombstone_v1"
+    assert tombstone_path.read_bytes() == tombstone_bytes
+    assert json.loads(tombstone_bytes)["contract_version"] == (
+        "benchmark_provider_aborted_acquisition_tombstone_v1"
     )
     assert first_receipt == second_receipt
     assert first_receipt["contract_version"] == "qwen_model_request_cleanup_receipt_v1"
@@ -3935,12 +3932,53 @@ def test_qwen_cleanup_sidecar_abort_replays_byte_identically_and_blocks_launch(
     assert set(first_receipt) == model_server._QWEN_CLEANUP_RECEIPT_FIELDS
     assert first_receipt["lease_ref"] is None
     assert first_receipt["server_process_identity"] is None
+    assert first_receipt["scope_stable_zero_ref"] is None
+    assert first_receipt["listener_stable_zero_ref"] is None
     assert first_receipt["no_active_lease_observation_ref"] is not None
     assert first_receipt["no_owned_runtime_observation_ref"] is not None
     with pytest.raises(RuntimeError, match="conflicts|aborted"):
         model_server._transition_qwen_model_request_materialization(
             request_id, transition="launch"
         )
+
+
+def test_qwen_cleanup_sidecar_abort_without_runtime_uses_materialization_ledger(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    request_id = "benchmark-abort-without-provider-runtime"
+    owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
+    arguments = {
+        "acquisition_intent_ref": owner["acquisition_intent_ref"],
+        "runtime_owner_ref": owner["runtime_owner_ref"],
+        "reason": "exact_worker_exited_before_provider_start",
+    }
+
+    first_abort = model_server.abort_qwen_model_request_acquisition(
+        request_id, **arguments
+    )
+    first_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+    second_abort = model_server.abort_qwen_model_request_acquisition(
+        request_id, **arguments
+    )
+    second_receipt = model_server.observe_qwen_model_request_cleanup(request_id)
+    paths = model_server._qwen_acquisition_artifact_paths(request_id)
+    tombstone = json.loads(paths["aborted_tombstone"].read_text(encoding="utf-8"))
+
+    assert first_abort == second_abort
+    assert first_abort["owner_tombstone_ref"] == {
+        "content_sha256": tombstone["content_sha256"]
+    }
+    assert first_receipt == second_receipt
+    assert first_receipt["outcome"] == "verified_not_acquired"
+    assert first_receipt["owner_tombstone_ref"] == first_abort[
+        "owner_tombstone_ref"
+    ]
+    assert first_receipt["scope_stable_zero_ref"] is None
+    assert first_receipt["listener_stable_zero_ref"] is None
+    assert first_receipt["no_owned_runtime_observation_ref"] == first_abort[
+        "owner_tombstone_ref"
+    ]
 
 
 @pytest.mark.parametrize("first_transition", ["abort", "launch"])
@@ -4466,13 +4504,18 @@ def test_qwen_cleanup_sidecar_old_finalized_owner_cannot_terminalize_new_launch_
     assert observation["outcome"] == "indeterminate"
 
 
-def test_qwen_cleanup_sidecar_not_acquired_requires_production_abort_primitive(
+def test_qwen_cleanup_sidecar_not_acquired_ignores_unrelated_hybrid_context(
     tmp_path,
     monkeypatch,
 ) -> None:
-    request_id = "benchmark-abort-without-production-primitive"
+    request_id = "benchmark-abort-unrelated-hybrid-context"
     owner = _prepare_benchmark_qwen_owner(tmp_path, monkeypatch, request_id)
-    monkeypatch.delenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", raising=False)
+    monkeypatch.setenv(
+        "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH",
+        str(tmp_path / "missing-runtime.json"),
+    )
+    monkeypatch.delenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", raising=False)
+    monkeypatch.delenv("AGENT_GUI_HYBRID_LINEAGE_JSON", raising=False)
     model_server.abort_qwen_model_request_acquisition(
         request_id,
         acquisition_intent_ref=owner["acquisition_intent_ref"],
@@ -4480,9 +4523,13 @@ def test_qwen_cleanup_sidecar_not_acquired_requires_production_abort_primitive(
         reason="cancelled",
     )
 
+    ledger = model_server._load_qwen_model_request_materialization_ledger(request_id)
     observation = model_server.observe_qwen_model_request_cleanup(request_id)
-    assert observation["status"] == "cleanup_pending"
-    assert observation["outcome"] == "indeterminate"
+    assert ledger["state"] == "aborted_never_materialized"
+    assert ledger["revision"] == 1
+    assert observation["outcome"] == "verified_not_acquired"
+    assert observation["scope_stable_zero_ref"] is None
+    assert observation["listener_stable_zero_ref"] is None
 
 
 @pytest.mark.parametrize("completed_writes", [1, 2, 3, 4])

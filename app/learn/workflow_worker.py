@@ -5080,11 +5080,17 @@ class LearningStageWorkerRegistry:
                 supervision_root=self._benchmark_supervision_root,
                 expected_journal_root=self._result_root,
             )
-        abort_allowed = (
-            cleanup_authority_valid
-            and acquisition_observation["materialization_state"]
-            == "prepared_never_materialized"
-            and acquisition_observation["materialization_revision"] == 0
+        abort_allowed = cleanup_authority_valid and (
+            (
+                acquisition_observation["materialization_state"]
+                == "prepared_never_materialized"
+                and acquisition_observation["materialization_revision"] == 0
+            )
+            or (
+                acquisition_observation["materialization_state"]
+                == "aborted_never_materialized"
+                and acquisition_observation["materialization_revision"] == 1
+            )
         )
         if abort_allowed:
             try:
@@ -5104,6 +5110,7 @@ class LearningStageWorkerRegistry:
                     != provider["acquisition_intent_ref"]
                     or abort_result.get("runtime_owner_ref")
                     != provider["runtime_owner_ref"]
+                    or abort_result.get("owner_tombstone_ref") is None
                     or abort_result.get("owner_state") != "acquisition_aborted"
                     or content_sha256(abort_result)
                     != abort_result.get("content_sha256")
@@ -5111,6 +5118,10 @@ class LearningStageWorkerRegistry:
                     raise LearningStageWorkerError(
                         "benchmark provider production abort is invalid"
                     )
+                _benchmark_exact_ref(
+                    abort_result.get("owner_tombstone_ref"),
+                    "benchmark provider abort owner tombstone ref",
+                )
             except LearningStageWorkerError:
                 raise
             except (OSError, RuntimeError, ValueError, UnicodeError):

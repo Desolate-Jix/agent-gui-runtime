@@ -849,23 +849,6 @@ def abort_qwen_model_request_acquisition(
             acquisition_intent_ref=supplied_intent_ref,
             runtime_owner_ref=supplied_runtime_owner,
         )
-        production_abort = _consume_qwen_abort_without_lease_primitive(
-            normalized_request_id,
-            invoke=True,
-        )
-        if production_abort is None:
-            return seal_immutable(
-                {
-                    "contract_version": "benchmark_provider_acquisition_abort_v1",
-                    "model_request_id": normalized_request_id,
-                    "acquisition_intent_ref": supplied_intent_ref,
-                    "runtime_owner_ref": supplied_runtime_owner,
-                    "materialization_ledger_ref": _qwen_content_ref(head),
-                    "owner_tombstone_ref": None,
-                    "reason": normalized_reason,
-                    "owner_state": "acquisition_aborted",
-                }
-            )
         paths = _qwen_acquisition_artifact_paths(normalized_request_id)
         tombstone = seal_immutable(
             {
@@ -894,7 +877,7 @@ def abort_qwen_model_request_acquisition(
                 "acquisition_intent_ref": supplied_intent_ref,
                 "runtime_owner_ref": supplied_runtime_owner,
                 "materialization_ledger_ref": _qwen_content_ref(head),
-                "owner_tombstone_ref": _qwen_content_ref(production_abort),
+                "owner_tombstone_ref": _qwen_content_ref(tombstone),
                 "reason": normalized_reason,
                 "owner_state": "acquisition_aborted",
             }
@@ -1838,13 +1821,6 @@ def _build_qwen_model_request_cleanup_receipt_locked(
     if ledger["state"] == "aborted_never_materialized":
         if terminal_owner is not None:
             return None
-        production_tombstone = _consume_qwen_abort_without_lease_primitive(
-            request_id,
-            invoke=False,
-        )
-        if production_tombstone is None:
-            return None
-        production_scope = production_tombstone["scope_cleanup_evidence"]
         tombstone = _load_optional_qwen_sealed_artifact(paths["aborted_tombstone"])
         abort_result = _load_optional_qwen_sealed_artifact(paths["abort"])
         if (
@@ -1895,11 +1871,12 @@ def _build_qwen_model_request_cleanup_receipt_locked(
             or abort_result.get("materialization_ledger_ref")
             != _qwen_content_ref(ledger)
             or abort_result.get("owner_tombstone_ref")
-            != _qwen_content_ref(production_tombstone)
+            != _qwen_content_ref(tombstone)
             or abort_result.get("reason") != tombstone.get("reason")
             or abort_result.get("owner_state") != "acquisition_aborted"
         ):
             return None
+        owner_tombstone_ref = _qwen_content_ref(tombstone)
         receipt = {
             "contract_version": "qwen_model_request_cleanup_receipt_v1",
             "outcome": "verified_not_acquired",
@@ -1913,19 +1890,13 @@ def _build_qwen_model_request_cleanup_receipt_locked(
             "job_scope_ref": None,
             "finalization_token": None,
             "lease_state_ref": None,
-            "owner_tombstone_ref": _qwen_content_ref(production_tombstone),
+            "owner_tombstone_ref": deepcopy(owner_tombstone_ref),
             "release_reason": tombstone["reason"],
             "termination_observation_ref": None,
-            "scope_stable_zero_ref": _qwen_content_ref(
-                seal_immutable(production_scope)
-            ),
-            "listener_stable_zero_ref": _qwen_content_ref(
-                seal_immutable(production_scope)
-            ),
+            "scope_stable_zero_ref": None,
+            "listener_stable_zero_ref": None,
             "no_active_lease_observation_ref": _qwen_content_ref(no_active),
-            "no_owned_runtime_observation_ref": _qwen_content_ref(
-                production_tombstone
-            ),
+            "no_owned_runtime_observation_ref": deepcopy(owner_tombstone_ref),
         }
         return _validate_qwen_model_request_cleanup_receipt(
             seal_immutable(receipt), owner=owner, ledger=ledger
@@ -2131,13 +2102,13 @@ def _validate_qwen_model_request_cleanup_receipt(
             "finalization_token",
             "lease_state_ref",
             "termination_observation_ref",
+            "scope_stable_zero_ref",
+            "listener_stable_zero_ref",
         }
         if any(receipt.get(field) is not None for field in null_fields):
             raise ValueError("Qwen not-acquired receipt shape is invalid")
         if (
             receipt.get("owner_tombstone_ref") is None
-            or receipt.get("scope_stable_zero_ref") is None
-            or receipt.get("listener_stable_zero_ref") is None
             or receipt.get("no_active_lease_observation_ref") is None
             or receipt.get("no_owned_runtime_observation_ref") is None
         ):

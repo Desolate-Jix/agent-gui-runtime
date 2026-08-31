@@ -2744,17 +2744,11 @@ def _validate_b2_not_acquired_raw(
         or ledger.get("predecessor_content_sha256") != prepared.get("content_sha256")
     ):
         raise _EvidenceError("b2_abort_ledger_invalid", "B2 abort materialization lineage differs")
-    production_tombstone = _resolved_parent(
+    tombstone = _resolved_parent(
         digest_index, cleanup.get("owner_tombstone_ref"), "B2 no-owner tombstone"
     )
     no_owned = _resolved_parent(
         digest_index, cleanup.get("no_owned_runtime_observation_ref"), "B2 no-owned runtime"
-    )
-    stable = _resolved_parent(
-        digest_index, cleanup.get("scope_stable_zero_ref"), "B2 not-acquired stable zero"
-    )
-    listener = _resolved_parent(
-        digest_index, cleanup.get("listener_stable_zero_ref"), "B2 not-acquired listener zero"
     )
     no_active = _resolved_parent(
         digest_index, cleanup.get("no_active_lease_observation_ref"), "B2 not-acquired no-active lease"
@@ -2763,20 +2757,14 @@ def _validate_b2_not_acquired_raw(
     abort_results = [value for _path, value in roles.get("b2_acquisition_abort", [])]
     if len(abort_tombstones) != 1 or len(abort_results) != 1:
         raise _EvidenceError("b2_abort_parent_missing", "B2 abort parents are missing or ambiguous")
-    tombstone = abort_tombstones[0]
+    indexed_tombstone = abort_tombstones[0]
     abort = abort_results[0]
     if (
-        production_tombstone != no_owned
-        or production_tombstone.get("contract_version")
-        != "hybrid_qwen_aborted_acquisition_tombstone_v1"
-        or production_tombstone.get("status") != "aborted_before_lease"
-        or production_tombstone.get("model_request_id") != runtime_owner.get("model_request_id")
-        or production_tombstone.get("provider") != "qwen"
-        or production_tombstone.get("lineage")
-        != {"run_id": runtime_owner.get("run_id"), "operation_id": runtime_owner.get("operation_id")}
-        or production_tombstone.get("process_scope_name") != stable.get("scope_name")
-        or production_tombstone.get("scope_cleanup_evidence")
-        != {key: value for key, value in stable.items() if key != "content_sha256"}
+        tombstone != indexed_tombstone
+        or tombstone != no_owned
+        or tombstone.get("contract_version")
+        != "benchmark_provider_aborted_acquisition_tombstone_v1"
+        or tombstone.get("model_request_id") != runtime_owner.get("model_request_id")
         or tombstone.get("historical_process_identity") is not None
         or tombstone.get("historical_socket_ref") is not None
         or tombstone.get("historical_job_scope_ref") is not None
@@ -2784,22 +2772,21 @@ def _validate_b2_not_acquired_raw(
         or tombstone.get("acquisition_intent_ref") != {"content_sha256": intent.get("content_sha256")}
         or tombstone.get("runtime_owner_ref") != {"content_sha256": runtime_owner.get("content_sha256")}
         or abort.get("owner_state") != "acquisition_aborted"
+        or abort.get("model_request_id") != runtime_owner.get("model_request_id")
         or abort.get("acquisition_intent_ref") != {"content_sha256": intent.get("content_sha256")}
         or abort.get("runtime_owner_ref") != {"content_sha256": runtime_owner.get("content_sha256")}
         or abort.get("materialization_ledger_ref") != {"content_sha256": ledger.get("content_sha256")}
         or abort.get("owner_tombstone_ref")
-        != {"content_sha256": production_tombstone.get("content_sha256")}
+        != {"content_sha256": tombstone.get("content_sha256")}
         or abort.get("reason") != tombstone.get("reason")
+        or cleanup.get("model_request_id") != runtime_owner.get("model_request_id")
+        or cleanup.get("acquisition_intent_ref")
+        != {"content_sha256": intent.get("content_sha256")}
+        or cleanup.get("runtime_owner_ref")
+        != {"content_sha256": runtime_owner.get("content_sha256")}
         or cleanup.get("release_reason") != tombstone.get("reason")
-        or stable != listener
-        or stable.get("authority") != "windows_job_object"
-        or stable.get("scope_absent_after_owner_close") is not True
-        or stable.get("cleanup_status") != "verified"
-        or stable.get("member_pids_after") != []
-        or stable.get("member_identities_after") != []
-        or stable.get("active_listeners_after") != []
-        or stable.get("pid_file_after") is not None
-        or stable.get("stable_zero_observations", 0) < 3
+        or cleanup.get("scope_stable_zero_ref") is not None
+        or cleanup.get("listener_stable_zero_ref") is not None
         or no_active.get("active_lease_count") != 0
         or no_active.get("model_request_id") != runtime_owner.get("model_request_id")
         or prepared_observation.get("acquisition_owner_ref")
@@ -2808,15 +2795,6 @@ def _validate_b2_not_acquired_raw(
         != {"content_sha256": acquisition_owner.get("content_sha256")}
     ):
         raise _EvidenceError("b2_not_acquired_lineage_mismatch", "B2 not-acquired raw parent chain differs")
-    samples = stable.get("samples")
-    if not isinstance(samples, list) or len(samples) < 3 or any(
-        not isinstance(sample, Mapping)
-        or sample.get("pids") != []
-        or sample.get("process_identities") != []
-        or sample.get("listeners") != []
-        for sample in samples[-3:]
-    ):
-        raise _EvidenceError("b2_cleanup_residue", "B2 not-acquired ordered stable-zero samples differ")
 
 
 def _derive_parent_facts(
