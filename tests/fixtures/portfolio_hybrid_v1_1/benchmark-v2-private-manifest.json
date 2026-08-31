@@ -31,7 +31,7 @@
       "app/learn/recognition/uei/builtin_learning_projection.py": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
       "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
-      "app/learn/workflow_service.py": "0070d08e1fddf339df9af314a2b45c3869fb285c4133c93df9a88706d2edcf54",
+      "app/learn/workflow_service.py": "67a9e2994d065c18701b1bce27decc7bd48536468031474f9e8430cfedeb399a",
       "app/learn/workflow_worker.py": "3404f2c83e38111145334850ca7f3319abf396b350724b81a0caf812470097cc",
       "app/operation/observe/screen_reader.py": "1804ca6fe539da7bdf0e81ebf8c3d2ee991bc2f14bbe18865755419a8a603437",
       "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py": "09c29c94743e0f03e3ddcae6b2e657416705ed39d35a090579c091a45a2321e8",
@@ -75,13 +75,13 @@
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py": "21eb7e54c9fab35ab4c13dd34ceaf779d6d04048fcaed839310f0eaf9b38e32b",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py": "6efcef2bfa4b5ec112a1f257f9f6e5aa411dcbe8d17f505ce9c4c15dea10c22a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py": "7258c3d0fd798118685e170dd7a59d797162dea9ac3cb3b23bd75e19fea824a5",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "c14cb5d2e764e75da7a0a545bff5ee7164fdf88f0e561de63f5a37d7d2249f07",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "a7d6fec2353f94348fffabe0aff261ac5fe9e17c2c09dd2794eb1bd2dfdc3572",
       "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py": "f8cee28ff6981629f52cc71ee5f6a66b3fe33c7619cc8e040b7ab81ab7c0165b",
       "tests/test_uei_v1_projections.py": "0eb30a772d8dba22786450cfc60cd35ff33e5424f8c30069e460a2ab188a09f4"
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "e6c9e236dd40fa2664782142f80f08383aedac8af332e504cdb92c67e0a36fa7",
+  "content_sha256": "d4ad447b6dfb66546dc38afedde5535973d1fb8fb4844a770f21aec526b21bb4",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -116,7 +116,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "fe92484f3660095529855361f28efa280488ec654422ceec27d74eab8ee9faf5",
+    "file_sha256": "bbfa026eff05489b674d94b67efcd7276630d4aad3fe2b1338e0cc5034ebd5db",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
