@@ -2054,11 +2054,10 @@ def test_fresh_runtime_cleanup_recovers_exact_incumbent_from_durable_call_intent
         project_root=tmp_path,
         authority_root=tmp_path / "runtime_state" / "binding-authority",
     )
-    with pytest.raises(BaseExceptionGroup, match="indeterminate|stable-zero"):
-        recovered_runtime.cleanup_attempt(
-            attempt=attempt,
-            reason="hard_crash_during_incumbent",
-        )
+    receipt = recovered_runtime.cleanup_attempt(
+        attempt=attempt,
+        reason="hard_crash_during_incumbent",
+    )
 
     assert delegate.incumbent_start_calls == 1
     assert delegate.start_calls == 1
@@ -2074,6 +2073,11 @@ def test_fresh_runtime_cleanup_recovers_exact_incumbent_from_durable_call_intent
     }
     assert delegate.incumbent_lookup_calls >= 2
     assert windows.active == 0
+    assert receipt["cleanup_status"] == "stable_zero"
+    assert receipt["service_terminal_ref"]["parent_kind"] == (
+        "actual_operations_cleanup_aggregate"
+    )
+    assert len(receipt["provider_cleanup_refs"]) == 4
     events = runtime_module.read_benchmark_v2_attempt_journal(
         journal_path=runtime_module._benchmark_v2_attempt_journal_path(
             project_root=tmp_path,
@@ -2081,7 +2085,7 @@ def test_fresh_runtime_cleanup_recovers_exact_incumbent_from_durable_call_intent
         ),
         attempt_ref=attempt,
     )
-    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    assert [event["event_kind"] for event in events].count("attempt_terminal") == 1
     del iterator
 
 
@@ -2173,15 +2177,19 @@ def test_fresh_actual_cleanup_attests_each_screen_group_without_cross_group_merg
         project_root=tmp_path,
         authority_root=tmp_path / "runtime_state" / "binding-authority",
     )
-    with pytest.raises(BaseExceptionGroup, match="indeterminate|stable-zero"):
-        recovered_runtime.cleanup_attempt(
-            attempt=attempt,
-            reason="second_group_crash",
-        )
+    receipt = recovered_runtime.cleanup_attempt(
+        attempt=attempt,
+        reason="second_group_crash",
+    )
 
-    assert delegate.stable_zero_operation_counts == [6, 2]
+    assert delegate.stable_zero_operation_counts == [6]
     assert delegate.cancel_calls == 8
     assert windows.active == 0
+    assert receipt["cleanup_status"] == "stable_zero"
+    assert receipt["service_terminal_ref"]["parent_kind"] == (
+        "actual_operations_cleanup_aggregate"
+    )
+    assert len(receipt["provider_cleanup_refs"]) == 16
     events = runtime_module.read_benchmark_v2_attempt_journal(
         journal_path=runtime_module._benchmark_v2_attempt_journal_path(
             project_root=tmp_path,
@@ -2189,7 +2197,7 @@ def test_fresh_actual_cleanup_attests_each_screen_group_without_cross_group_merg
         ),
         attempt_ref=attempt,
     )
-    assert "attempt_terminal" not in [event["event_kind"] for event in events]
+    assert [event["event_kind"] for event in events].count("attempt_terminal") == 1
     del iterator
 
 

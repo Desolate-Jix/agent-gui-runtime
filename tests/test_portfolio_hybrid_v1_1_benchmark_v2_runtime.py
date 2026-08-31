@@ -443,7 +443,45 @@ class _Windows:
             raise RuntimeError("transient cleanup failure")
         self.active -= 1
         self.closed.append(reason)
-        receipt = _sealed({"cleanup_status": "verified", "reason": reason})
+        matching_owners = [
+            owner
+            for owner in self.launched
+            if str(Path(str(owner["journal_path"])).resolve()) == journal_key
+        ]
+        if len(matching_owners) != 1:
+            raise AssertionError("window cleanup fixture owner is ambiguous")
+        owner = matching_owners[0]
+        receipt = _sealed(
+            {
+                "contract_version": "portfolio_hybrid_benchmark_v2_window_cleanup_v1",
+                "owner_id": owner["owner_id"],
+                "reason": reason,
+                "exact_hwnd": owner["hwnd"],
+                "process_identity": deepcopy(owner["process_identity"]),
+                "cleanup_subject_kind": "ready_window",
+                "finalization_intent_sha256": "1" * 64,
+                "process_event_sha256": "2" * 64,
+                "ready_event_sha256": "3" * 64,
+                "publication_content_sha256": "4" * 64,
+                "cleanup_status": "verified",
+                "shutdown_event_name": f"shutdown-{Path(journal_path).stem}",
+                "shutdown_event_signaled": True,
+                "shutdown_event_error_code": None,
+                "shutdown_event_handle_closed": True,
+                "enum_windows_exact_hwnd_absent": True,
+                "matching_owned_windows_after": [],
+                "member_pids_after": [],
+                "stable_zero_observations": 2,
+                "scope_absent_after_owner_close": True,
+                "process_handle_closed": True,
+                "job_handle_closed": True,
+                "active_listeners_after": [],
+                "listener_or_lease_residue": [],
+                "outer_owner_python_finally_observed": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
         self.cleanup_by_journal[journal_key] = deepcopy(receipt)
         return receipt
 
@@ -595,6 +633,63 @@ def _actual_service_step(
     )
 
 
+@pytest.mark.parametrize(
+    ("mode", "status"),
+    (
+        ("hybrid_v1_1", "complete"),
+        ("hybrid_v1_1", "safe_stopped"),
+        ("incumbent_qwen_only", "cancelled"),
+    ),
+)
+def test_actual_cleanup_terminal_operation_requires_exact_replay(
+    mode: str,
+    status: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    request_ref = {"id": "terminal-replay-request", "content_sha256": "a" * 64}
+    binding = {
+        "run_id": "terminal-replay-run",
+        "stage": "provider_execution",
+        "operation_id": "terminal-replay-operation",
+        "window_binding_ref": {
+            "id": "terminal-replay-binding",
+            "content_sha256": "b" * 64,
+        },
+        "capture_ref": {
+            "id": "terminal-replay-capture",
+            "content_sha256": "c" * 64,
+        },
+    }
+    terminal = _actual_operation(
+        mode=mode,
+        operation_id=str(binding["operation_id"]),
+        request_ref=request_ref,
+        binding=binding,
+        revision=3,
+        status=status,
+    )
+    runtime_module._validate_actual_terminal_successor(
+        terminal=deepcopy(terminal),
+        supplied=deepcopy(terminal),
+    )
+    successor = _actual_operation(
+        mode=mode,
+        operation_id=str(binding["operation_id"]),
+        request_ref=request_ref,
+        binding=binding,
+        revision=4,
+        status=status,
+        predecessor=terminal,
+    )
+
+    with pytest.raises(ValueError, match="terminal replay differs"):
+        runtime_module._validate_actual_terminal_successor(
+            terminal=successor,
+            supplied=terminal,
+        )
+
+
 class _ActualService:
     def __init__(
         self,
@@ -690,25 +785,28 @@ class _ActualService:
     def cancel_operation(self, *, operation_ref):
         self.cancel_calls += 1
         self.cancelled_operation_refs.append(deepcopy(dict(operation_ref)))
-        terminal_operation = _actual_operation(
-            mode=str(operation_ref["mode"]),
-            operation_id=str(operation_ref["operation_id"]),
-            request_ref=operation_ref["request_ref"],
-            binding={
-                "run_id": operation_ref["run_id"],
-                "stage": operation_ref["stage"],
-                "operation_id": operation_ref["operation_id"],
-                "window_binding_ref": operation_ref["window_binding_ref"],
-                "capture_ref": operation_ref["capture_ref"],
-            },
-            revision=int(operation_ref["workflow_state_ref"]["revision"]) + 1,
-            status=(
-                "safe_stopped"
-                if str(operation_ref["mode"]) == "hybrid_v1_1"
-                else "cancelled"
-            ),
-            predecessor=operation_ref,
-        )
+        if operation_ref["status"] in {"complete", "cancelled", "safe_stopped"}:
+            terminal_operation = deepcopy(dict(operation_ref))
+        else:
+            terminal_operation = _actual_operation(
+                mode=str(operation_ref["mode"]),
+                operation_id=str(operation_ref["operation_id"]),
+                request_ref=operation_ref["request_ref"],
+                binding={
+                    "run_id": operation_ref["run_id"],
+                    "stage": operation_ref["stage"],
+                    "operation_id": operation_ref["operation_id"],
+                    "window_binding_ref": operation_ref["window_binding_ref"],
+                    "capture_ref": operation_ref["capture_ref"],
+                },
+                revision=int(operation_ref["workflow_state_ref"]["revision"]) + 1,
+                status=(
+                    "safe_stopped"
+                    if str(operation_ref["mode"]) == "hybrid_v1_1"
+                    else "cancelled"
+                ),
+                predecessor=operation_ref,
+            )
         if self.authoritative_cleanup:
             worker = terminal_operation["worker_ref"]
             reservation_ref = {
@@ -738,11 +836,20 @@ class _ActualService:
                     {
                         "contract_version": "benchmark_worker_cleanup_receipt_v1",
                         "outcome": "verified_not_launched",
+                        "operation_anchor_ref": {"content_sha256": "6" * 64},
                         "run_id": terminal_operation["run_id"],
                         "stage": terminal_operation["stage"],
                         "operation_id": terminal_operation["operation_id"],
                         "worker_id": worker["worker_id"],
                         "reservation_ref": reservation_ref,
+                        "supervision_ref": None,
+                        "process_identity": None,
+                        "assignment_proven_ref": None,
+                        "finalization_intent_ref": None,
+                        "exact_handle_observation_refs": None,
+                        "job_absence_observation_ref": None,
+                        "worker_absence_observation_ref": None,
+                        "supervisor_absence_observation_ref": None,
                         "reservation_abort_ref": {"content_sha256": "d" * 64},
                         "artifact_is_authorization": False,
                         "execute_binding_enabled": False,
@@ -782,6 +889,7 @@ class _ActualService:
             {
                 "status": terminal_operation["status"],
                 "operation_ref": terminal_operation,
+                "provider_dispatch_context_projection": None,
                 "cleanup_refs": cleanup,
             }
         )
@@ -2350,3 +2458,286 @@ def test_actual_incumbent_result_fsync_failure_recovers_by_lookup_and_cancels_ex
     assert windows.active == 1
     iterator.close()
     assert windows.active == 0
+
+
+def test_actual_cleanup_reconciles_hybrid_started_before_any_incumbent_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-partial-hybrid-cleanup"})
+    attempt_dir = (tmp_path / "attempt-partial-hybrid-cleanup").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    service = _ActualService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+
+    def fail_after_hybrid_start(
+        *, provider_group, service, window_owner, lifecycle, prediction_sink
+    ):
+        del lifecycle, prediction_sink
+        binding = window_owner.open_screen_group(provider_group=provider_group)
+        service.start_hybrid_operation(
+            screen_group=provider_group,
+            window_binding=binding,
+        )
+        raise RuntimeError("failed before first incumbent call")
+
+    monkeypatch.setattr(
+        runtime_module.benchmark_v2_actual,
+        "run_screen_group",
+        fail_after_hybrid_start,
+    )
+
+    with pytest.raises(RuntimeError, match="before first incumbent"):
+        runtime.run_actual_screen_group(
+            provider_group=group,
+            attempt_ref=attempt_ref,
+            attempt_dir=attempt_dir,
+        )
+
+    actual_root = attempt_dir / "actual-screen-groups"
+    assert list(actual_root.glob("*.service-intent.json"))
+    assert list(actual_root.glob("*.service-result.json"))
+    assert not (actual_root / "incumbent-calls").exists()
+
+    receipt = runtime.cleanup_attempt(
+        attempt=attempt_ref,
+        reason="partial_actual_group_failed",
+    )
+    replay = runtime.cleanup_attempt(
+        attempt=attempt_ref,
+        reason="partial_actual_group_failed",
+    )
+
+    assert replay == receipt
+    assert service.cancel_calls == 1
+    assert [item["mode"] for item in service.cancelled_operation_refs] == [
+        "hybrid_v1_1"
+    ]
+    assert service.stable_zero_calls == 0
+    assert service.stable_zero_operation_counts == []
+    assert receipt["service_terminal_ref"]["parent_kind"] == (
+        "workflow_service_terminal"
+    )
+    assert len(receipt["provider_cleanup_refs"]) == 2
+    assert receipt["resource_counts"] == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+
+
+def test_actual_cleanup_fails_closed_when_durable_hybrid_intent_is_not_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-partial-hybrid-unresolved"})
+    attempt_dir = (tmp_path / "attempt-partial-hybrid-unresolved").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    service = _ActualService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+
+    def fail_after_hybrid_start(
+        *, provider_group, service, window_owner, lifecycle, prediction_sink
+    ):
+        del lifecycle, prediction_sink
+        binding = window_owner.open_screen_group(provider_group=provider_group)
+        service.start_hybrid_operation(
+            screen_group=provider_group,
+            window_binding=binding,
+        )
+        raise RuntimeError("lost durable Hybrid lookup")
+
+    monkeypatch.setattr(
+        runtime_module.benchmark_v2_actual,
+        "run_screen_group",
+        fail_after_hybrid_start,
+    )
+
+    with pytest.raises(RuntimeError, match="lost durable Hybrid lookup"):
+        runtime.run_actual_screen_group(
+            provider_group=group,
+            attempt_ref=attempt_ref,
+            attempt_dir=attempt_dir,
+        )
+    service.current = None
+
+    with pytest.raises(ValueError, match="resource counts are not stable-zero"):
+        runtime.cleanup_attempt(
+            attempt=attempt_ref,
+            reason="unresolved_actual_group_failed",
+        )
+
+    events = runtime_module.read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt_ref,
+        ),
+        attempt_ref=attempt_ref,
+    )
+    assert service.cancel_calls == 0
+    assert service.stable_zero_calls == 0
+    assert not any(event["event_kind"] == "attempt_terminal" for event in events)
+
+
+def test_prepared_attempt_without_actual_intent_does_not_construct_workflow_service(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-prepared-without-actual-intent"})
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=(tmp_path / "attempt-prepared-without-actual-intent").resolve(),
+    )
+
+    def unexpected_service_construction():
+        raise AssertionError("prepared attempt must not construct WorkflowService")
+
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        unexpected_service_construction,
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_provider_case_resolver",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("prepared attempt must not resolve provider corpus")
+        ),
+    )
+
+    receipt = runtime.cleanup_attempt(
+        attempt=attempt_ref,
+        reason="prepared_without_actual_intent",
+    )
+
+    assert receipt["cleanup_status"] == "stable_zero"
+    assert receipt["service_terminal_ref"] is None
+    assert receipt["provider_cleanup_refs"] == []
+    iterator.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "missing_worker_cleanup",
+        "missing_provider_cleanup",
+        "foreign_worker_cleanup",
+        "foreign_provider_cleanup",
+        "foreign_reservation",
+    ),
+)
+def test_partial_actual_cleanup_rejects_missing_or_foreign_cleanup_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": f"attempt-partial-{mutation}"})
+    attempt_dir = (tmp_path / f"attempt-partial-{mutation}").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    service = _DurableIncumbentService([])
+    monkeypatch.setattr(
+        runtime_module,
+        "get_production_benchmark_v2_workflow_service",
+        lambda: service,
+    )
+
+    def fail_after_hybrid_start(
+        *, provider_group, service, window_owner, lifecycle, prediction_sink
+    ):
+        del lifecycle, prediction_sink
+        binding = window_owner.open_screen_group(provider_group=provider_group)
+        service.start_hybrid_operation(
+            screen_group=provider_group,
+            window_binding=binding,
+        )
+        if mutation == "foreign_reservation":
+            service.start_incumbent_observe(
+                provider_case_ref=provider_group["case_refs"][0],
+                window_binding=binding,
+            )
+        raise RuntimeError("partial actual operation")
+
+    monkeypatch.setattr(
+        runtime_module.benchmark_v2_actual,
+        "run_screen_group",
+        fail_after_hybrid_start,
+    )
+    with pytest.raises(RuntimeError, match="partial actual operation"):
+        runtime.run_actual_screen_group(
+            provider_group=group,
+            attempt_ref=attempt_ref,
+            attempt_dir=attempt_dir,
+        )
+
+    valid_cancel = service.cancel_operation
+
+    def invalid_cancel(*, operation_ref):
+        terminal = valid_cancel(operation_ref=operation_ref)
+        cleanup_name = (
+            "worker_cleanup_ref"
+            if "worker" in mutation
+            else "provider_cleanup_ref"
+        )
+        if mutation == "foreign_reservation":
+            cleanup = terminal["cleanup_refs"]["provider_cleanup_ref"]
+            cleanup["reservation_ref"] = {"content_sha256": "e" * 64}
+            cleanup["content_sha256"] = content_sha256(cleanup)
+        elif mutation.startswith("missing"):
+            terminal["cleanup_refs"][cleanup_name] = None
+        else:
+            cleanup = terminal["cleanup_refs"][cleanup_name]
+            cleanup["run_id"] = "foreign-run"
+            cleanup["content_sha256"] = content_sha256(cleanup)
+        terminal["content_sha256"] = content_sha256(terminal)
+        return terminal
+
+    service.cancel_operation = invalid_cancel
+
+    with pytest.raises(BaseExceptionGroup, match="cleanup.*indeterminate"):
+        runtime.cleanup_attempt(
+            attempt=attempt_ref,
+            reason="reject_partial_cleanup_lineage",
+        )
+
+    events = runtime_module.read_benchmark_v2_attempt_journal(
+        journal_path=runtime_module._benchmark_v2_attempt_journal_path(
+            project_root=tmp_path,
+            attempt_ref=attempt_ref,
+        ),
+        attempt_ref=attempt_ref,
+    )
+    assert not any(event["event_kind"] == "attempt_terminal" for event in events)

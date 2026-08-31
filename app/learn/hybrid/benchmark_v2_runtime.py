@@ -1948,19 +1948,27 @@ class _BenchmarkV2ProductionRuntime:
         cleanup_errors: list[BaseException] = []
         actual_attestations: list[Mapping[str, object]] = []
         actual_terminals: list[Mapping[str, object]] = []
+        partial_actual_terminals: list[Mapping[str, object]] = []
+        unresolved_actual_operations = 0
         durable_service_operation = _service_operation_from_events(events)
         actual_directory = _actual_attempt_directory_from_events(events)
-        if (
-            actual_directory is not None
-            and (actual_directory / _ACTUAL_DIRECTORY / "incumbent-calls").is_dir()
-        ):
+        if actual_directory is not None:
             try:
-                actual_terminals, actual_attestations = _reconcile_actual_operations(
-                    attempt_dir=actual_directory,
-                    service=get_production_benchmark_v2_workflow_service(),
+                actual_intents = _read_actual_screen_group_service_intents(
+                    attempt_dir=actual_directory
                 )
-                if actual_terminals:
-                    service_terminal = actual_terminals[-1]
+                if actual_intents:
+                    (
+                        actual_terminals,
+                        actual_attestations,
+                        partial_actual_terminals,
+                        unresolved_actual_operations,
+                    ) = _reconcile_actual_operations(
+                        attempt_dir=actual_directory,
+                        service=get_production_benchmark_v2_workflow_service(),
+                    )
+                    if actual_terminals:
+                        service_terminal = actual_terminals[-1]
             except BaseException as error:
                 cleanup_errors.append(error)
         if isinstance(state, dict):
@@ -2333,7 +2341,7 @@ class _BenchmarkV2ProductionRuntime:
                 cleanup_errors,
             )
 
-        if actual_attestations:
+        if actual_attestations and not partial_actual_terminals:
             if len(actual_attestations) == 1:
                 service_terminal_ref = _cleanup_parent_ref(
                     actual_attestations[0],
@@ -2354,6 +2362,45 @@ class _BenchmarkV2ProductionRuntime:
                     parent_kind="actual_operations_stable_zero_aggregate",
                     name="actual operations stable-zero aggregate",
                 )
+        elif partial_actual_terminals:
+            if not actual_attestations and len(partial_actual_terminals) == 1:
+                service_terminal_ref = _cleanup_parent_ref(
+                    partial_actual_terminals[0],
+                    parent_kind="workflow_service_terminal",
+                    name="partial actual workflow service terminal",
+                )
+            else:
+                service_terminal_ref = _cleanup_parent_ref(
+                    _runtime_resource_ref(
+                        "actual_operations_cleanup_aggregate",
+                        {
+                            "full_group_attestation_refs": [
+                                _content_ref(item, name="actual group attestation")
+                                for item in actual_attestations
+                            ],
+                            "partial_workflow_terminal_refs": [
+                                _content_ref(
+                                    item,
+                                    name="partial actual workflow service terminal",
+                                )
+                                for item in partial_actual_terminals
+                            ],
+                        },
+                    ),
+                    parent_kind="actual_operations_cleanup_aggregate",
+                    name="actual operations cleanup aggregate",
+                )
+        else:
+            service_terminal_ref = (
+                _cleanup_parent_ref(
+                    service_terminal,
+                    parent_kind="workflow_service_terminal",
+                    name="workflow service terminal result",
+                )
+                if isinstance(service_terminal, Mapping)
+                else None
+            )
+        if actual_terminals:
             provider_cleanup_refs = [
                 _cleanup_parent_ref(
                     terminal["cleanup_refs"][name],
@@ -2367,17 +2414,9 @@ class _BenchmarkV2ProductionRuntime:
                 )
             ]
         else:
-            service_terminal_ref = (
-                _cleanup_parent_ref(
-                    service_terminal,
-                    parent_kind="workflow_service_terminal",
-                    name="workflow service terminal result",
-                )
-                if isinstance(service_terminal, Mapping)
-                else None
-            )
             provider_cleanup_refs = _provider_cleanup_refs(service_terminal)
-        counts = self.resource_counts()
+        counts = dict(self.resource_counts())
+        counts["service_operations"] += unresolved_actual_operations
         receipt = compose_benchmark_v2_attempt_cleanup_receipt(
             attempt_ref=attempt_ref,
             reason=normalized_reason,
@@ -3096,7 +3135,12 @@ def _read_actual_screen_group_service_intents(
 
 def _reconcile_actual_operations(
     *, attempt_dir: Path, service: object
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    int,
+]:
     intents = _read_actual_incumbent_call_intents(attempt_dir=attempt_dir)
     screen_group_intents = _read_actual_screen_group_service_intents(
         attempt_dir=attempt_dir
@@ -3114,7 +3158,7 @@ def _reconcile_actual_operations(
     lookup = getattr(service, "lookup_incumbent_observe", None)
     cancel = getattr(service, "cancel_operation", None)
     attest = getattr(service, "attest_actual_operations_stable_zero", None)
-    if not callable(cancel) or not callable(attest) or (
+    if not callable(cancel) or (
         any(targets.values()) and not callable(lookup)
     ) or (
         screen_group_intents and not callable(lookup_hybrid)
@@ -3122,6 +3166,8 @@ def _reconcile_actual_operations(
         raise RuntimeError("WorkflowService actual operation recovery is unavailable")
     terminals: list[dict[str, Any]] = []
     attestations: list[dict[str, Any]] = []
+    partial_terminals: list[dict[str, Any]] = []
+    unresolved_operations = 0
     for intent in screen_group_intents:
         group_terminals: list[dict[str, Any]] = []
         step_value = lookup_hybrid(
@@ -3151,6 +3197,8 @@ def _reconcile_actual_operations(
             )["operation_ref"] != terminal["operation_ref"]:
                 raise ValueError("benchmark actual Hybrid cleanup lookup differs")
             group_terminals.append(terminal)
+        else:
+            unresolved_operations += 1
         parent_sha = str(intent["content_sha256"])
         for key in sorted(targets.get(parent_sha, {})):
             call_intent = targets[parent_sha][key]
@@ -3159,6 +3207,7 @@ def _reconcile_actual_operations(
                 window_binding=deepcopy(call_intent["window_binding"]),
             )
             if step_value is None:
+                unresolved_operations += 1
                 continue
             step = _validate_actual_incumbent_step(
                 step_value,
@@ -3182,19 +3231,28 @@ def _reconcile_actual_operations(
             )["operation_ref"] != terminal["operation_ref"]:
                 raise ValueError("benchmark actual incumbent cleanup lookup differs")
             group_terminals.append(terminal)
-        operation_refs = [
-            deepcopy(item["operation_ref"]) for item in group_terminals
-        ]
-        attestation = validate_benchmark_v2_actual_operations_stable_zero(
-            attest(operation_refs=deepcopy(operation_refs))
-        )
-        if attestation["operation_refs"] != operation_refs:
-            raise ValueError(
-                "benchmark actual cleanup attestation operation lineage differs"
+        if len(group_terminals) == 6 and len(targets.get(parent_sha, {})) == 5:
+            if not callable(attest):
+                raise RuntimeError(
+                    "WorkflowService actual stable-zero attestation is unavailable"
+                )
+            operation_refs = [
+                deepcopy(item["operation_ref"]) for item in group_terminals
+            ]
+            attestation = validate_benchmark_v2_actual_operations_stable_zero(
+                attest(operation_refs=deepcopy(operation_refs))
             )
+            if attestation["operation_refs"] != operation_refs:
+                raise ValueError(
+                    "benchmark actual cleanup attestation operation lineage differs"
+                )
+            attestations.append(attestation)
+        else:
+            for terminal in group_terminals:
+                _validate_partial_actual_terminal_cleanup(terminal)
+            partial_terminals.extend(group_terminals)
         terminals.extend(group_terminals)
-        attestations.append(attestation)
-    return terminals, attestations
+    return terminals, attestations, partial_terminals, unresolved_operations
 
 
 def _validate_actual_incumbent_step(
@@ -3366,6 +3424,10 @@ def _validate_actual_terminal_successor(
     )
     if any(returned[name] != current[name] for name in immutable):
         raise ValueError("benchmark actual cleanup full operation lineage is stale")
+    if current["status"] in {"complete", "cancelled", "safe_stopped"}:
+        if returned != current:
+            raise ValueError("benchmark actual cleanup terminal replay differs")
+        return
     if returned["content_sha256"] == current["content_sha256"]:
         if returned != current:
             raise ValueError("benchmark actual cleanup same-ref replay differs")
@@ -3378,6 +3440,68 @@ def _validate_actual_terminal_successor(
         <= current["stage_execution_ref"]["revision"]
     ):
         raise ValueError("benchmark actual cleanup successor lineage is stale")
+
+
+def _validate_partial_actual_terminal_cleanup(
+    value: Mapping[str, object],
+) -> dict[str, Any]:
+    terminal = _validate_service_terminal(value)
+    operation = validate_benchmark_v2_workflow_service_operation_ref(
+        terminal["operation_ref"]
+    )
+    worker = operation["worker_ref"]
+    cleanup = terminal["cleanup_refs"]
+    worker_cleanup = cleanup.get("worker_cleanup_ref")
+    provider_cleanup = cleanup.get("provider_cleanup_ref")
+    if not isinstance(worker_cleanup, Mapping) or not isinstance(
+        provider_cleanup, Mapping
+    ):
+        raise ValueError("partial actual terminal cleanup proof is unavailable")
+    worker_kind, _ = _validate_cleanup_parent_semantics(
+        worker_cleanup, name="partial actual worker cleanup"
+    )
+    provider_kind, _ = _validate_cleanup_parent_semantics(
+        provider_cleanup, name="partial actual provider cleanup"
+    )
+    if worker_kind != "worker_cleanup" or provider_kind != "provider_cleanup":
+        raise ValueError("partial actual terminal cleanup kind is stale")
+    operation_identity = ("run_id", "stage", "operation_id")
+    worker_identity = ("worker_id", "model_request_id", "payload_sha256")
+    if any(
+        worker_cleanup.get(name) != operation[name]
+        for name in operation_identity
+    ) or any(
+        provider_cleanup.get(name) != operation[name]
+        for name in operation_identity
+    ):
+        raise ValueError("partial actual terminal cleanup operation is stale")
+    if worker_cleanup.get("worker_id") != worker["worker_id"] or any(
+        provider_cleanup.get(name) != worker[name] for name in worker_identity
+    ):
+        raise ValueError("partial actual terminal cleanup worker is stale")
+    worker_contract = worker_cleanup.get("contract_version")
+    if (
+        worker_contract == "benchmark_worker_cleanup_receipt_v1"
+        and worker_cleanup.get("reservation_ref")
+        != provider_cleanup.get("reservation_ref")
+    ):
+        raise ValueError("partial actual cleanup reservation is stale")
+    if worker_contract in {
+        "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+        "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1",
+    } and any(
+        worker_cleanup.get(name) != worker[name] for name in worker_identity
+    ):
+        raise ValueError("partial actual Hybrid worker cleanup is stale")
+    if (
+        worker_contract == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+        and worker_cleanup.get("provider_cleanup_ref")
+        != {"content_sha256": provider_cleanup["content_sha256"]}
+    ):
+        raise ValueError(
+            "partial actual completed worker provider cleanup is stale"
+        )
+    return terminal
 
 
 def _validate_actual_projection(
@@ -3780,6 +3904,7 @@ def _cleanup_parent_ref(
         "provider_cleanup",
         "actual_operations_stable_zero",
         "actual_operations_stable_zero_aggregate",
+        "actual_operations_cleanup_aggregate",
     }:
         raise ValueError("benchmark cleanup parent kind is invalid")
     producer = _sealed_parent(value, name=name)
@@ -3798,6 +3923,60 @@ def _cleanup_parent_ref(
             "execute_binding_enabled": False,
         }
     )
+
+
+def _validate_actual_operations_cleanup_aggregate(
+    value: Mapping[str, object],
+) -> None:
+    fields = {
+        "full_group_attestation_refs",
+        "partial_workflow_terminal_refs",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise ValueError("actual operations cleanup aggregate is not closed")
+    full_values = value.get("full_group_attestation_refs")
+    partial_values = value.get("partial_workflow_terminal_refs")
+    if not isinstance(full_values, list) or not isinstance(partial_values, list):
+        raise ValueError("actual operations cleanup aggregate refs are invalid")
+    if not partial_values or len(full_values) + len(partial_values) < 2:
+        raise ValueError("actual operations cleanup aggregate is incomplete")
+
+    attestations = [
+        validate_benchmark_v2_actual_operations_stable_zero(item)
+        for item in full_values
+    ]
+    partial_terminals = [
+        _validate_partial_actual_terminal_cleanup(item) for item in partial_values
+    ]
+    producer_shas = [
+        str(item["content_sha256"])
+        for item in [*attestations, *partial_terminals]
+    ]
+    if len(set(producer_shas)) != len(producer_shas):
+        raise ValueError("actual operations cleanup aggregate producer is duplicated")
+
+    operations = [
+        operation
+        for attestation in attestations
+        for operation in attestation["operation_refs"]
+    ] + [terminal["operation_ref"] for terminal in partial_terminals]
+    operation_keys = [
+        (operation["run_id"], operation["stage"], operation["operation_id"])
+        for operation in operations
+    ]
+    operation_shas = [str(operation["content_sha256"]) for operation in operations]
+    if len(set(operation_keys)) != len(operation_keys) or len(
+        set(operation_shas)
+    ) != len(operation_shas):
+        raise ValueError("actual operations cleanup aggregate operation is duplicated")
+
+    partial_cleanup_shas = [
+        str(terminal["cleanup_refs"][name]["content_sha256"])
+        for terminal in partial_terminals
+        for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+    ]
+    if len(set(partial_cleanup_shas)) != len(partial_cleanup_shas):
+        raise ValueError("actual operations cleanup aggregate proof is duplicated")
 
 
 def _validate_cleanup_parent_semantics(
@@ -3828,19 +4007,25 @@ def _validate_cleanup_parent_semantics(
         body = producer.get("value")
         if (
             set(producer) != fields
-            or producer.get("resource_kind")
-            != "actual_group_stable_zero_attestations"
             or producer.get("artifact_is_authorization") is not False
             or producer.get("execute_binding_enabled") is not False
             or not isinstance(body, Mapping)
-            or set(body) != {"group_attestation_refs"}
-            or not isinstance(body.get("group_attestation_refs"), list)
-            or len(body["group_attestation_refs"]) < 2
         ):
-            raise ValueError("actual operations stable-zero aggregate is invalid")
-        for item in body["group_attestation_refs"]:
-            validate_benchmark_v2_actual_operations_stable_zero(item)
-        return "actual_operations_stable_zero_aggregate", str(contract)
+            raise ValueError("actual operations cleanup aggregate is invalid")
+        if producer.get("resource_kind") == "actual_group_stable_zero_attestations":
+            if (
+                set(body) != {"group_attestation_refs"}
+                or not isinstance(body.get("group_attestation_refs"), list)
+                or len(body["group_attestation_refs"]) < 2
+            ):
+                raise ValueError("actual operations stable-zero aggregate is invalid")
+            for item in body["group_attestation_refs"]:
+                validate_benchmark_v2_actual_operations_stable_zero(item)
+            return "actual_operations_stable_zero_aggregate", str(contract)
+        if producer.get("resource_kind") == "actual_operations_cleanup_aggregate":
+            _validate_actual_operations_cleanup_aggregate(body)
+            return "actual_operations_cleanup_aggregate", str(contract)
+        raise ValueError("actual operations cleanup aggregate is invalid")
     if contract == "benchmark_v2_hybrid_worker_cleanup_ref_v1":
         fields = {
             "contract_version",
