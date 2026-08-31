@@ -2,7 +2,7 @@
   "artifact_inventory": {
     "code_sha256_by_path": {
       "app/api/panel.py": "5eadccc1ff615d1d1ddb70d121da3a8d877d45201be00943f7677a895b681af3",
-      "app/core/model_server.py": "5a13199d310c4a51f317790792c1b94d829cfaf5ed0577c0aa4dcfe2e393cf43",
+      "app/core/model_server.py": "087a47deba2458c2aa4691a44feb0bd07221d83ed7ecbe9e8b437bd56f5c3a1e",
       "app/learn/calibration_sequence.py": "da160b06cf639a83d161e970482f980b9f60a1562ecd104122f36a99ec446258",
       "app/learn/hybrid/benchmark_scorer_v2.py": "94f2686e8df3f77ec9b076712c4d0ecc7d09062ff7230432b6c8af2efbc426e2",
       "app/learn/hybrid/benchmark_v2_actual.py": "2374a8cd3d92e38b423fea24f6bac6f5180258d8ece2f3125985fff75bdb1e94",
@@ -32,7 +32,7 @@
       "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
       "app/learn/workflow_service.py": "456d4b2c5aaf3a306f23a5d46caa17ef5763f1825ddf75203c5eeea9de3751ed",
-      "app/learn/workflow_worker.py": "afa169a2dee61e3484997bdab6526105b157366cbe93379b19b89184100f48a9",
+      "app/learn/workflow_worker.py": "7ee789eb8e55477d22500682ec25f4a91a54c9e3ec13cd203a243486f58ce908",
       "app/operation/observe/screen_reader.py": "1804ca6fe539da7bdf0e81ebf8c3d2ee991bc2f14bbe18865755419a8a603437",
       "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py": "09c29c94743e0f03e3ddcae6b2e657416705ed39d35a090579c091a45a2321e8",
       "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "d49dcccb79bbc0d0f338a1774a2f41f8bdc6b5ef8c71d2ab9a81623811454e9b",
@@ -57,9 +57,9 @@
       "tests/test_learn_hybrid_windows_process_scope.py": "6af6c5971e9861ca4e0d34a95521e7798f50a2542621a3659a335f28a58702e9",
       "tests/test_learning_workflow_stage_execution.py": "41bba1810f1c1c4cb604943e2e8c48636c64a228b34a3a8cf98132ddb871f8f4",
       "tests/test_learning_workflow_stage_worker.py": "5fdcf727b462d3c78906d2f6726f8e6f9410c2fa2eefe6ee6f0b64aa8f5e3eec",
-      "tests/test_model_request_cancellation.py": "e92983a598e4c69c34c0707adbc9987096c27f6b1a0bf392476935ff600bd632",
+      "tests/test_model_request_cancellation.py": "aa81be5d1d75212cbfb8fac3ed14551806fea693040db0667fdffcdd409beaea",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py": "d2ba7c1b170f50b36f0c17fbfaa93626bbcacaf37fb2d51de30ac109fb93c2c1",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "6523dfb8a8a3838f37c923c87bc3db2074a198996ce50ae8e239598b10dcb884",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "81d0b5455a0e553122b3686ffb1ad179d31c14c9c53dcc342217f5df12f6b853",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_estimand.py": "33e6462b86c481836e360e9192cda707dac20db89ba1d976fdbd42346fbe2a1a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "6ad6b5c55c549ad63fd245e78814a5fe0bed29bf7c1b9a900473662f4f6a34fd",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py": "0de0b5880516f82f9410cfc5384b7b24162366fe7c7395b4458c1bca773e9dcb",
@@ -81,7 +81,7 @@
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "7a24d2604fbfb720251f7002cf8252d2686ecb170c8854daedcd8ef8c3f89749",
+  "content_sha256": "66c5ead7bd0e3ecabd0d7b0ea9ce318204a3432d2042f2841468eff97f3a57e6",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -116,7 +116,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "8bb6a1508952c9b6f1c8b4d8df2feadb820d6a5908da1b589846b510a93808db",
+    "file_sha256": "3daedf79c8aeaeda2e38ab0b48b96e0b0eef528fb998cf9771531789b3af3898",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
