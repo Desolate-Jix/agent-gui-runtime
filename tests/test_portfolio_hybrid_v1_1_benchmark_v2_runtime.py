@@ -2614,6 +2614,119 @@ def test_actual_incumbent_calls_are_durable_case_scoped_and_lookup_recovered(
     iterator.close()
 
 
+def test_actual_incumbent_pending_poll_is_resampled_after_worker_progress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-incumbent-poll-progress"})
+    attempt_dir = (tmp_path / "attempt-incumbent-poll-progress").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    binding = runtime.open_screen_group(provider_group=group)
+
+    class _ProgressingIncumbentService(_DurableIncumbentService):
+        worker_completed = False
+
+        def poll_incumbent_observe(self, *, operation_ref):
+            if not self.worker_completed:
+                self.incumbent_poll_calls += 1
+                case_id = str(operation_ref["request_ref"]["id"])
+                return deepcopy(self.incumbent_current[case_id])
+            return super().poll_incumbent_observe(operation_ref=operation_ref)
+
+    delegate = _ProgressingIncumbentService([])
+    result_path = attempt_dir / "actual-screen-groups" / "group.service-result.json"
+    service = runtime_module._ActualScreenGroupService(
+        delegate=delegate,
+        group=group,
+        binding=binding,
+        intent_ref=_sealed({"kind": "screen-group-service-intent"}),
+        result_path=result_path,
+    )
+    case_ref = group["case_refs"][0]
+    started = service.start_incumbent_observe(
+        provider_case_ref=case_ref,
+        window_binding=binding,
+    )
+    pending = service.poll_incumbent_observe(
+        operation_ref=started["operation_ref"]
+    )
+    assert pending["operation_ref"]["status"] == "pending"
+
+    delegate.worker_completed = True
+    restarted = runtime_module._ActualScreenGroupService(
+        delegate=delegate,
+        group=group,
+        binding=binding,
+        intent_ref=_sealed({"kind": "screen-group-service-intent"}),
+        result_path=result_path,
+    )
+    advanced = restarted.poll_incumbent_observe(
+        operation_ref=started["operation_ref"]
+    )
+
+    assert advanced["operation_ref"]["status"] == "advanced"
+    assert delegate.incumbent_poll_calls == 2
+    iterator.close()
+
+
+def test_actual_incumbent_recorded_advanced_poll_replays_over_pending_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-incumbent-poll-replay"})
+    attempt_dir = (tmp_path / "attempt-incumbent-poll-replay").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    binding = runtime.open_screen_group(provider_group=group)
+    delegate = _DurableIncumbentService([])
+    result_path = attempt_dir / "actual-screen-groups" / "group.service-result.json"
+    service = runtime_module._ActualScreenGroupService(
+        delegate=delegate,
+        group=group,
+        binding=binding,
+        intent_ref=_sealed({"kind": "screen-group-service-intent"}),
+        result_path=result_path,
+    )
+    case_ref = group["case_refs"][0]
+    started = service.start_incumbent_observe(
+        provider_case_ref=case_ref,
+        window_binding=binding,
+    )
+    advanced = service.poll_incumbent_observe(
+        operation_ref=started["operation_ref"]
+    )
+    case_id = str(case_ref["case_id"])
+    delegate.incumbent_current[case_id] = deepcopy(started)
+
+    restarted = runtime_module._ActualScreenGroupService(
+        delegate=delegate,
+        group=group,
+        binding=binding,
+        intent_ref=_sealed({"kind": "screen-group-service-intent"}),
+        result_path=result_path,
+    )
+    replay = restarted.poll_incumbent_observe(
+        operation_ref=started["operation_ref"]
+    )
+
+    assert replay == advanced
+    assert delegate.incumbent_poll_calls == 1
+    iterator.close()
+
+
 @pytest.mark.parametrize("call_kind", ("start", "poll", "adopt"))
 def test_actual_incumbent_lost_response_uses_lookup_without_duplicate_mutation(
     monkeypatch: pytest.MonkeyPatch,

@@ -516,6 +516,12 @@ class _ActualScreenGroupService:
             provider_case_ref=provider_case_ref,
             binding=self._binding,
         )
+        if (
+            call_kind == "poll"
+            and recorded is not None
+            and recorded["service_step"]["operation_ref"]["status"] != "pending"
+        ):
+            return deepcopy(recorded["service_step"])
         lookup = getattr(self._delegate, "lookup_incumbent_observe", None)
         if not callable(lookup):
             raise RuntimeError("WorkflowService lookup_incumbent_observe is unavailable")
@@ -567,7 +573,7 @@ class _ActualScreenGroupService:
                 binding=self._binding,
                 expected_operation=operation_ref,
             )
-            if recorded is not None:
+            if recorded is not None and call_kind != "poll":
                 return current
             if call_kind == "start":
                 returned = current
@@ -590,6 +596,11 @@ class _ActualScreenGroupService:
             binding=self._binding,
             expected_operation=operation_ref,
         )
+        if call_kind == "poll" and (
+            recorded is not None
+            or step["operation_ref"]["status"] == "pending"
+        ):
+            return step
         result = _sealed_record(
             {
                 "contract_version": _ACTUAL_CALL_RESULT_CONTRACT,
