@@ -69,6 +69,9 @@ from app.learn.recognition.uei.builtin_learning_projection import (
     seal_builtin_ocr_evidence,
     seal_builtin_uia_evidence,
 )
+from app.learn.recognition.uei.canonical import (
+    content_sha256 as runtime_content_sha256,
+)
 from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.store import UEIObjectStore
 
@@ -3979,6 +3982,20 @@ def _sealed_parent(value: Mapping[str, object], *, name: str) -> dict[str, Any]:
     return result
 
 
+def _runtime_sealed_parent(
+    value: Mapping[str, object], *, name: str
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError(f"{name} must be a sealed object")
+    result = deepcopy(dict(value))
+    digest = result.get("content_sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise ValueError(f"{name} content SHA is invalid")
+    if len(result) > 1 and runtime_content_sha256(result) != digest:
+        raise ValueError(f"{name} content SHA differs")
+    return result
+
+
 def _benchmark_v2_attempt_journal_path(
     *, project_root: Path, attempt_ref: Mapping[str, object]
 ) -> Path:
@@ -4093,7 +4110,11 @@ def _cleanup_parent_ref(
         "actual_completed_hybrid_cleanup",
     }:
         raise ValueError("benchmark cleanup parent kind is invalid")
-    producer = _sealed_parent(value, name=name)
+    producer = (
+        _runtime_sealed_parent(value, name=name)
+        if parent_kind in {"worker_cleanup", "provider_cleanup"}
+        else _sealed_parent(value, name=name)
+    )
     inferred_kind, producer_contract = _validate_cleanup_parent_semantics(
         producer, name=name
     )
@@ -5703,7 +5724,7 @@ def _validate_service_terminal(
         raise ValueError("workflow service terminal cleanup lineage is unavailable")
     for name in ("worker_cleanup_ref", "provider_cleanup_ref"):
         if cleanup[name] is not None:
-            cleanup[name] = _sealed_parent(
+            cleanup[name] = _runtime_sealed_parent(
                 cleanup[name], name=f"workflow service {name}"
             )
     terminal["cleanup_refs"] = cleanup

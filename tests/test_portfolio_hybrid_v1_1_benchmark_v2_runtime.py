@@ -26,6 +26,7 @@ from app.learn.hybrid.benchmark_v2_provider_corpus import (
     validate_preloaded_provider_corpus,
 )
 from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
+from app.learn.recognition.uei.canonical import seal_immutable as runtime_seal_immutable
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
 
 
@@ -631,6 +632,107 @@ def _actual_service_step(
         terminal_receipt=None,
         cleanup_refs={"worker_cleanup_ref": None, "provider_cleanup_ref": None},
     )
+
+
+def test_service_terminal_accepts_runtime_jcs_cleanup_with_windows_create_time(
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    group = {
+        "request_ref": {
+            "id": "request/runtime-jcs-cleanup",
+            "content_sha256": "c" * 64,
+        }
+    }
+    binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+        run_id="run-runtime-jcs-cleanup",
+        operation_id="operation-runtime-jcs-cleanup",
+        window_binding_ref={
+            "id": "window/runtime-jcs-cleanup",
+            "content_sha256": "d" * 64,
+        },
+        capture_ref={
+            "id": "capture/runtime-jcs-cleanup",
+            "content_sha256": "e" * 64,
+        },
+        owner_journal_ref={"content_sha256": "f" * 64},
+        expected_uia_root_ref={"content_sha256": "0" * 64},
+    )
+    operation = _actual_operation(
+        mode="incumbent_qwen_only",
+        operation_id=str(binding["operation_id"]),
+        request_ref=group["request_ref"],
+        binding=binding,
+        revision=2,
+        status="safe_stopped",
+    )
+    worker = operation["worker_ref"]
+    worker_cleanup = runtime_seal_immutable(
+        {
+            "contract_version": "benchmark_worker_cleanup_receipt_v1",
+            "outcome": "verified_exact_worker_exited",
+            "operation_anchor_ref": {"content_sha256": "1" * 64},
+            "reservation_ref": {"content_sha256": "2" * 64},
+            "supervision_ref": {"content_sha256": "3" * 64},
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "process_identity": {
+                "pid": 94884,
+                "create_time_ns": 1_788_198_854_639_404_288,
+            },
+            "assignment_proven_ref": {"content_sha256": "4" * 64},
+            "finalization_intent_ref": {"content_sha256": "5" * 64},
+            "exact_handle_observation_refs": {},
+            "job_absence_observation_ref": {"content_sha256": "6" * 64},
+            "worker_absence_observation_ref": {"content_sha256": "7" * 64},
+            "supervisor_absence_observation_ref": None,
+            "reservation_abort_ref": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    provider_cleanup = runtime_seal_immutable(
+        {
+            "contract_version": "benchmark_provider_cleanup_ref_v1",
+            "status": "cleanup_verified",
+            "outcome": "verified_not_acquired",
+            "authority_kind": "production_workflow_service",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "reservation_ref": worker_cleanup["reservation_ref"],
+            "acquisition_owner_ref": {"content_sha256": "8" * 64},
+            "acquisition_intent_ref": {"content_sha256": "9" * 64},
+            "runtime_owner_ref": {"content_sha256": "a" * 64},
+            "cleanup_receipt_ref": {"content_sha256": "b" * 64},
+        }
+    )
+    terminal = incumbent.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation,
+        observed_task_kind="vision_observe_screen",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={
+            "worker_cleanup_ref": worker_cleanup,
+            "provider_cleanup_ref": provider_cleanup,
+        },
+    )
+
+    assert runtime_module._validate_service_terminal(terminal) == terminal
+    assert len(runtime_module._provider_cleanup_refs(terminal)) == 2
+
+    forged = deepcopy(terminal)
+    forged_cleanup = deepcopy(worker_cleanup)
+    forged_cleanup["content_sha256"] = content_sha256(forged_cleanup)
+    forged["cleanup_refs"]["worker_cleanup_ref"] = forged_cleanup
+    forged["content_sha256"] = content_sha256(forged)
+    with pytest.raises(ValueError, match="worker_cleanup_ref content SHA differs"):
+        runtime_module._validate_service_terminal(forged)
 
 
 def _actual_completed_review_step(
