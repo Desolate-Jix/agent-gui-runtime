@@ -162,6 +162,9 @@ _BENCHMARK_PROVIDER_JOURNAL_VERSION = "benchmark_provider_registry_journal_v1"
 _BENCHMARK_PROVIDER_CLEANUP_JOURNAL_VERSION = (
     "benchmark_provider_cleanup_registry_journal_v1"
 )
+_BENCHMARK_INCUMBENT_PROVIDER_SCOPE_CONTEXT_VERSION = (
+    "benchmark_v2_incumbent_provider_scope_context_v1"
+)
 _BENCHMARK_V2_REVIEW_NO_PROVIDER_ABSENCE_CONTRACT = (
     "benchmark_v2_hybrid_no_provider_live_absence_observation_v1"
 )
@@ -841,6 +844,13 @@ def _recover_benchmark_controller_local_entry(
 def _join_benchmark_failed_launch_process(process: object | None) -> dict[str, Any]:
     if process is None:
         return {"not_applicable": True}
+    if getattr(process, "pid", None) is None:
+        return {
+            "not_started": True,
+            "join_timeout_seconds": 0,
+            "alive_after": False,
+            "exitcode": None,
+        }
     process.join(5)
     alive_after = bool(process.is_alive())
     result = {
@@ -1953,6 +1963,196 @@ def _hybrid_provider_lineage(
             ).encode("utf-8")
         ).hexdigest(),
     }
+
+
+def _compose_benchmark_incumbent_provider_scope_context(
+    *,
+    reservation: Mapping[str, object],
+    provider_journal: Mapping[str, object],
+    operation_anchor: Mapping[str, object],
+    supervision: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    identity_fields = (
+        "authority_kind",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+    )
+    if (
+        reservation.get("task_kind") != "vision_observe_screen"
+        or any(
+            provider_journal.get(name) != reservation.get(name)
+            for name in identity_fields
+        )
+        or provider_journal.get("reservation_ref")
+        != {"content_sha256": reservation.get("content_sha256")}
+    ):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope lineage differs"
+        )
+    lineage = _hybrid_provider_lineage(
+        run_id=str(reservation["run_id"]),
+        workflow_revision=int(reservation["workflow_revision"]),
+        operation_id=str(reservation["operation_id"]),
+        stage=str(reservation["stage"]),
+    )
+    return seal_immutable(
+        {
+            "contract_version": _BENCHMARK_INCUMBENT_PROVIDER_SCOPE_CONTEXT_VERSION,
+            "provider": "qwen",
+            **{name: deepcopy(reservation[name]) for name in identity_fields},
+            "workflow_revision": int(reservation["workflow_revision"]),
+            "reservation_ref": deepcopy(provider_journal["reservation_ref"]),
+            "operation_anchor_ref": {
+                "content_sha256": operation_anchor["anchor_identity_sha256"]
+            },
+            "supervision_ref": {
+                "content_sha256": supervision["content_sha256"]
+            },
+            "acquisition_owner_ref": deepcopy(
+                provider_journal["acquisition_owner_ref"]
+            ),
+            "acquisition_intent_ref": deepcopy(
+                provider_journal["acquisition_intent_ref"]
+            ),
+            "runtime_owner_ref": {
+                "content_sha256": provider_journal["runtime_owner_ref"][
+                    "content_sha256"
+                ]
+            },
+            "lineage": lineage,
+            "process_scope_name": process_scope_name(lineage, "qwen"),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _validate_benchmark_incumbent_provider_scope_context(
+    value: object,
+    *,
+    identity: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    if not isinstance(value, Mapping):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope context is required"
+        )
+    context = deepcopy(dict(value))
+    identity_fields = (
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+    )
+    exact_fields = {
+        "contract_version",
+        "provider",
+        "authority_kind",
+        *identity_fields,
+        "workflow_revision",
+        "reservation_ref",
+        "operation_anchor_ref",
+        "supervision_ref",
+        "acquisition_owner_ref",
+        "acquisition_intent_ref",
+        "runtime_owner_ref",
+        "lineage",
+        "process_scope_name",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    lineage = context.get("lineage")
+    workflow_revision = context.get("workflow_revision")
+    if (
+        isinstance(workflow_revision, bool)
+        or not isinstance(workflow_revision, int)
+        or workflow_revision < 0
+    ):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope context is invalid"
+        )
+    expected_lineage = _hybrid_provider_lineage(
+        run_id=str(identity.get("run_id") or ""),
+        workflow_revision=workflow_revision,
+        operation_id=str(identity.get("operation_id") or ""),
+        stage=str(identity.get("stage") or ""),
+    )
+    if (
+        set(context) != exact_fields
+        or context.get("contract_version")
+        != _BENCHMARK_INCUMBENT_PROVIDER_SCOPE_CONTEXT_VERSION
+        or context.get("provider") != "qwen"
+        or identity.get("task_kind") != "vision_observe_screen"
+        or context.get("authority_kind")
+        not in {"production_workflow_service", "test_only"}
+        or context.get("artifact_is_authorization") is not False
+        or context.get("execute_binding_enabled") is not False
+        or context.get("content_sha256") != content_sha256(context)
+        or any(context.get(name) != identity.get(name) for name in identity_fields)
+        or lineage != expected_lineage
+        or context.get("process_scope_name")
+        != process_scope_name(expected_lineage, "qwen")
+        or any(
+            not isinstance(context.get(name), Mapping)
+            or set(context[name]) != {"content_sha256"}
+            for name in (
+                "reservation_ref",
+                "operation_anchor_ref",
+                "supervision_ref",
+                "acquisition_owner_ref",
+                "acquisition_intent_ref",
+                "runtime_owner_ref",
+            )
+        )
+    ):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope context is invalid"
+        )
+    return context
+
+
+def _compose_benchmark_incumbent_provider_runtime(
+    context: Mapping[str, object],
+) -> dict[str, Any]:
+    return seal_immutable(
+        {
+            "contract_version": "hybrid_supervised_provider_runtime_v1",
+            "state": "acquiring",
+            "worker_id": context["worker_id"],
+            "provider": "qwen",
+            "model_request_id": context["model_request_id"],
+            "process_scope_name": context["process_scope_name"],
+            "lineage": deepcopy(context["lineage"]),
+            "benchmark_provider_scope_context_ref": {
+                "content_sha256": context["content_sha256"]
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _validate_benchmark_incumbent_provider_runtime(
+    value: object,
+    *,
+    context: Mapping[str, object],
+) -> dict[str, Any]:
+    expected = _compose_benchmark_incumbent_provider_runtime(context)
+    if not isinstance(value, Mapping) or dict(value) != expected:
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider runtime is invalid"
+        )
+    return deepcopy(expected)
 
 
 def _write_hybrid_provider_owner(
@@ -3080,29 +3280,86 @@ def _run_learning_stage_worker_entry(
     previous_provider_runtime = os.environ.get("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH")
     previous_hybrid_lineage = os.environ.get("AGENT_GUI_HYBRID_LINEAGE_JSON")
     os.environ["AGENT_GUI_MODEL_REQUEST_ID"] = model_request_id
-    supervisor = payload.get("_hybrid_supervisor")
-    process_scope_name = (
-        str(supervisor.get("process_scope_name") or "").strip()
-        if isinstance(supervisor, dict)
-        else ""
-    )
-    if process_scope_name:
-        os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = process_scope_name
-        os.environ["AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"] = str(
-            supervisor.get("provider_runtime_path") or ""
-        )
-        os.environ["AGENT_GUI_HYBRID_LINEAGE_JSON"] = json.dumps(
-            supervisor.get("lineage"),
-            sort_keys=True,
-            separators=(",", ":"),
-        )
     binding_context = None
     dispatch_context_manager = None
     binding_lifecycle: dict[str, object] | None = None
     binding_entered = False
     dispatch_entered = False
     try:
+        supervisor = payload.get("_hybrid_supervisor")
+        benchmark_provider_scope = payload.get("_benchmark_v2_provider_scope")
+        if supervisor is not None and benchmark_provider_scope is not None:
+            raise LearningStageWorkerError(
+                "benchmark provider scope cannot replace a Hybrid supervisor"
+            )
+        if benchmark_provider_scope is not None:
+            benchmark_provider_scope = (
+                _validate_benchmark_incumbent_provider_scope_context(
+                    benchmark_provider_scope,
+                    identity=identity,
+                )
+            )
+            scope_context_path = payload.get(
+                "_benchmark_v2_provider_scope_path"
+            )
+            if not isinstance(scope_context_path, str) or not scope_context_path:
+                raise LearningStageWorkerError(
+                    "benchmark incumbent provider scope path is required"
+                )
+            persisted_scope_context = _read_json_object(
+                Path(scope_context_path),
+                label="benchmark incumbent provider scope context",
+            )
+            if persisted_scope_context != benchmark_provider_scope:
+                raise LearningStageWorkerError(
+                    "benchmark incumbent provider scope context differs"
+                )
+            provider_runtime_path = payload.get(
+                "_benchmark_v2_provider_runtime_path"
+            )
+            if not isinstance(provider_runtime_path, str) or not provider_runtime_path:
+                raise LearningStageWorkerError(
+                    "benchmark incumbent provider runtime path is required"
+                )
+            _validate_benchmark_incumbent_provider_runtime(
+                _read_json_object(
+                    Path(provider_runtime_path),
+                    label="benchmark incumbent provider runtime",
+                ),
+                context=benchmark_provider_scope,
+            )
+            supervisor = {
+                "process_scope_name": benchmark_provider_scope[
+                    "process_scope_name"
+                ],
+                "provider_runtime_path": provider_runtime_path,
+                "lineage": benchmark_provider_scope["lineage"],
+            }
+        process_scope_name = (
+            str(supervisor.get("process_scope_name") or "").strip()
+            if isinstance(supervisor, dict)
+            else ""
+        )
+        if process_scope_name:
+            os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = process_scope_name
+            provider_runtime_path = str(
+                supervisor.get("provider_runtime_path") or ""
+            )
+            if provider_runtime_path:
+                os.environ["AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"] = (
+                    provider_runtime_path
+                )
+            else:
+                os.environ.pop("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", None)
+            os.environ["AGENT_GUI_HYBRID_LINEAGE_JSON"] = json.dumps(
+                supervisor.get("lineage"),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         execution_payload = deepcopy(payload)
+        execution_payload.pop("_benchmark_v2_provider_scope", None)
+        execution_payload.pop("_benchmark_v2_provider_scope_path", None)
+        execution_payload.pop("_benchmark_v2_provider_runtime_path", None)
         has_dispatch_context = "_benchmark_v2_dispatch_context" in execution_payload
         dispatch_context = execution_payload.pop(
             "_benchmark_v2_dispatch_context", None
@@ -5910,6 +6167,34 @@ class LearningStageWorkerRegistry:
             supervisor_process_identity=supervisor_identity,
             startup_gate_timeout_ms=15_000,
         )
+        provider_journal = self._benchmark_provider_journals.get(
+            (current["run_id"], current["stage"], current["operation_id"])
+        )
+        provider_scope_context = None
+        provider_scope_context_path = None
+        provider_runtime = None
+        provider_runtime_path = None
+        if provider_journal is not None:
+            provider_journal = self._validate_benchmark_provider_journal(
+                provider_journal
+            )
+            provider_scope_context = _compose_benchmark_incumbent_provider_scope_context(
+                reservation=current,
+                provider_journal=provider_journal,
+                operation_anchor=anchor,
+                supervision=supervision,
+            )
+            provider_scope_context_path = (
+                self._result_root
+                / f"{current['worker_id']}.benchmark-provider-scope.json"
+            )
+            provider_runtime = _compose_benchmark_incumbent_provider_runtime(
+                provider_scope_context
+            )
+            provider_runtime_path = (
+                self._result_root
+                / f"{current['worker_id']}.benchmark-provider-runtime.json"
+            )
         event_name = f"Local\\AgentGuiBenchmarkWorkerGate-{content_sha256({'scope_name': scope_name})}"
         beacon_path = self._result_root / f"{current['worker_id']}.benchmark-beacon.json"
         owner_path = self._result_root / f"{current['worker_id']}.benchmark-owner.json"
@@ -5924,6 +6209,7 @@ class LearningStageWorkerRegistry:
         launch_identity_anchor = None
         owner = None
         gate_released = False
+        provider_scope = None
         operation_key = (current["run_id"], current["stage"], current["operation_id"])
         try:
             event_handle = win32event.CreateEvent(None, True, False, event_name)
@@ -5954,9 +6240,35 @@ class LearningStageWorkerRegistry:
                 "supervision_ref": {"content_sha256": supervision["content_sha256"]},
                 "startup_gate_timeout_ms": 15_000,
             }
+            child_payload = deepcopy(authoritative_payload)
+            if provider_scope_context is not None:
+                assert provider_scope_context_path is not None
+                assert provider_runtime is not None
+                assert provider_runtime_path is not None
+                provider_scope = WindowsProcessScope(
+                    provider_scope_context["process_scope_name"],
+                    create=True,
+                )
+                _write_json_create_only(
+                    provider_scope_context_path,
+                    provider_scope_context,
+                )
+                _write_json_create_only(
+                    provider_runtime_path,
+                    provider_runtime,
+                )
+                child_payload["_benchmark_v2_provider_scope"] = deepcopy(
+                    provider_scope_context
+                )
+                child_payload["_benchmark_v2_provider_scope_path"] = str(
+                    provider_scope_context_path
+                )
+                child_payload["_benchmark_v2_provider_runtime_path"] = str(
+                    provider_runtime_path
+                )
             process = self._process_factory(
                 target=_run_learning_stage_worker_entry,
-                args=(str(result_path), current["task_kind"], deepcopy(authoritative_payload),
+                args=(str(result_path), current["task_kind"], child_payload,
                       current["model_request_id"], deepcopy(identity), None, None, bootstrap),
                 name=f"learning-stage-{current['stage']}-{current['worker_id'][:8]}",
             )
@@ -6048,6 +6360,21 @@ class LearningStageWorkerRegistry:
                 "recovered_from_journal": False,
                 "benchmark_owner_path": str(owner_path), "benchmark_beacon_path": str(beacon_path),
                 "benchmark_event_handle": event_handle, "benchmark_scope": scope,
+                "benchmark_provider_scope": provider_scope,
+                "benchmark_provider_scope_context": deepcopy(
+                    provider_scope_context
+                ),
+                "benchmark_provider_scope_context_path": (
+                    str(provider_scope_context_path)
+                    if provider_scope_context_path is not None
+                    else None
+                ),
+                "benchmark_provider_runtime_path": (
+                    str(provider_runtime_path)
+                    if provider_runtime_path is not None
+                    else None
+                ),
+                "benchmark_provider_scope_cleanup_ref": None,
                 "benchmark_anchor": deepcopy(anchor), "benchmark_supervision": supervision,
                 "benchmark_reservation": launched,
             }
@@ -6082,6 +6409,12 @@ class LearningStageWorkerRegistry:
                 "benchmark_process": process,
                 "benchmark_event_handle": event_handle,
                 "benchmark_scope": scope,
+                "benchmark_provider_scope": provider_scope,
+                "benchmark_provider_scope_name": (
+                    provider_scope_context["process_scope_name"]
+                    if isinstance(provider_scope_context, dict)
+                    else None
+                ),
                 "beacon_path": beacon_path,
                 "attempt": 0,
                 "step_states": {
@@ -6115,6 +6448,17 @@ class LearningStageWorkerRegistry:
                     else current["content_sha256"]
                 ),
             }
+            if provider_scope is not None:
+                cleanup_entry["step_states"].update(
+                    {
+                        name: {"status": "pending"}
+                        for name in (
+                            "provider_job_terminate",
+                            "provider_job_stable_zero",
+                            "provider_job_close",
+                        )
+                    }
+                )
             self._failed_start_cleanups[operation_key] = cleanup_entry
             cleanup_observation = self._retry_benchmark_failed_launch_cleanup(
                 operation_key
@@ -6174,6 +6518,7 @@ class LearningStageWorkerRegistry:
         states = entry["step_states"]
         process = entry["benchmark_process"]
         scope = entry["benchmark_scope"]
+        provider_scope = entry.get("benchmark_provider_scope")
         event_handle = entry["benchmark_event_handle"]
         failures: list[dict[str, str]] = []
         if (
@@ -6194,12 +6539,22 @@ class LearningStageWorkerRegistry:
                 "status": "completed",
                 "result": {"superseded_by_stable_zero_closed_job": True},
             }
+        if (
+            "provider_job_stable_zero" in states
+            and states["provider_job_stable_zero"].get("status") == "completed"
+            and states["provider_job_close"].get("status") == "completed"
+        ):
+            states["provider_job_terminate"] = {
+                "status": "completed",
+                "result": {"superseded_by_stable_zero_closed_job": True},
+            }
 
         def attempt(
             name: str,
             action: Callable[[], object],
             *,
             close_resource: str | None = None,
+            close_target: object | None = None,
         ) -> None:
             if states[name].get("status") == "completed":
                 return
@@ -6220,8 +6575,8 @@ class LearningStageWorkerRegistry:
                         "status": "completed",
                         "result": {"already_closed": True},
                     }
-                    if close_resource == "job_close" and scope is not None:
-                        scope._closed = True
+                    if close_resource == "job_close" and close_target is not None:
+                        close_target._closed = True
                     return
                 failure = {
                     "step": name,
@@ -6254,8 +6609,21 @@ class LearningStageWorkerRegistry:
                 return False
             return {"terminate_called": True}
 
+        def terminate_provider_job() -> dict[str, Any]:
+            if provider_scope is None:
+                return {"not_applicable": True}
+            result = _benchmark_failed_launch_job_terminate(provider_scope)
+            if result is False:
+                return False
+            return {"terminate_called": True}
+
         attempt("process_terminate", terminate_process)
         attempt("job_terminate", terminate_job)
+        if "provider_job_terminate" in states:
+            attempt(
+                "provider_job_terminate",
+                terminate_provider_job,
+            )
         attempt(
             "process_join",
             lambda: _join_benchmark_failed_launch_process(process),
@@ -6274,6 +6642,13 @@ class LearningStageWorkerRegistry:
                 ),
                 close_resource="process_close",
             )
+            if "provider_job_stable_zero" in states:
+                attempt(
+                    "provider_job_stable_zero",
+                    lambda: _benchmark_failed_launch_job_stable_zero(
+                        provider_scope
+                    ),
+                )
         attempt(
             "event_close",
             lambda: (
@@ -6296,6 +6671,21 @@ class LearningStageWorkerRegistry:
                     else _benchmark_failed_launch_job_close(scope)
                 ),
                 close_resource="job_close",
+                close_target=scope,
+            )
+        if (
+            "provider_job_stable_zero" in states
+            and states["provider_job_stable_zero"].get("status") == "completed"
+        ):
+            attempt(
+                "provider_job_close",
+                lambda: (
+                    {"not_applicable": True}
+                    if provider_scope is None
+                    else _benchmark_failed_launch_job_close(provider_scope)
+                ),
+                close_resource="job_close",
+                close_target=provider_scope,
             )
         verified = all(
             state.get("status") == "completed" for state in states.values()
@@ -6309,6 +6699,15 @@ class LearningStageWorkerRegistry:
             "operation_id": entry["operation_id"],
             "worker_id": entry["worker_id"],
             "scope_name": entry["scope_name"],
+            **(
+                {
+                    "provider_scope_name": entry[
+                        "benchmark_provider_scope_name"
+                    ]
+                }
+                if entry.get("benchmark_provider_scope_name")
+                else {}
+            ),
             "process_identity": deepcopy(entry["process_identity"]),
             "assignment_observation_ref": deepcopy(
                 entry["assignment_observation_ref"]
@@ -7444,6 +7843,13 @@ class LearningStageWorkerRegistry:
                 stable_zero_ref = {
                     "content_sha256": stable_zero["content_sha256"]
                 }
+                provider_scope_close_ref = _close_benchmark_incumbent_provider_scope(
+                    record,
+                    terminate=terminate,
+                )
+                if provider_scope_close_ref is not None:
+                    handle_refs["incumbent_provider_job"] = provider_scope_close_ref
+                    self._persist_record_journal(record)
                 intent = seal_immutable({
                     "contract_version": "benchmark_worker_cleanup_finalization_intent_v1",
                     "supervision_ref": {"content_sha256": record["benchmark_supervision"]["content_sha256"]},
@@ -7940,6 +8346,18 @@ class LearningStageWorkerRegistry:
         if isinstance(record.get("benchmark_provider_cleanup_ref"), dict):
             payload["benchmark_provider_cleanup_ref"] = deepcopy(
                 record["benchmark_provider_cleanup_ref"]
+            )
+        if isinstance(record.get("benchmark_provider_scope_context_path"), str):
+            payload["benchmark_provider_scope_context_file"] = Path(
+                record["benchmark_provider_scope_context_path"]
+            ).name
+        if isinstance(record.get("benchmark_provider_runtime_path"), str):
+            payload["benchmark_provider_runtime_file"] = Path(
+                record["benchmark_provider_runtime_path"]
+            ).name
+        if isinstance(record.get("benchmark_provider_scope_cleanup_ref"), dict):
+            payload["benchmark_provider_scope_cleanup_ref"] = deepcopy(
+                record["benchmark_provider_scope_cleanup_ref"]
             )
         if isinstance(record.get("benchmark_v2_no_provider_cleanup_ref"), dict):
             payload["benchmark_v2_no_provider_cleanup_ref"] = deepcopy(
@@ -10264,6 +10682,10 @@ class LearningStageWorkerRegistry:
                 "provider_scope",
                 "benchmark_event_handle",
                 "benchmark_scope",
+                "benchmark_provider_scope",
+                "benchmark_provider_scope_context",
+                "benchmark_provider_scope_context_path",
+                "benchmark_provider_runtime_path",
                 "benchmark_anchor",
                 "benchmark_supervision",
                 "benchmark_reservation",
@@ -10304,6 +10726,323 @@ def _close_provider_scope(record: dict[str, Any]) -> None:
         scope.close()
     finally:
         record["provider_scope"] = None
+
+
+def _close_benchmark_incumbent_provider_scope(
+    record: dict[str, Any],
+    *,
+    terminate: bool,
+) -> dict[str, Any] | None:
+    context = record.get("benchmark_provider_scope_context")
+    context_path = record.get("benchmark_provider_scope_context_path")
+    if context is None and context_path is None:
+        return None
+    if not isinstance(context, dict) or not isinstance(context_path, str):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope context is unavailable"
+        )
+    existing = record.get("benchmark_provider_scope_cleanup_ref")
+    if isinstance(existing, dict):
+        return deepcopy(existing)
+    worker_id = _required_text(record.get("worker_id"), "benchmark worker_id")
+    base = Path(context_path).parent
+    intent_path = base / f"{worker_id}.benchmark-provider-scope-close-intent.json"
+    observation_path = base / f"{worker_id}.benchmark-provider-scope-close.json"
+    if observation_path.exists():
+        observation = _read_json_object(
+            observation_path,
+            label="benchmark incumbent provider scope close observation",
+        )
+        ref = {"content_sha256": observation["content_sha256"]}
+        _validate_benchmark_incumbent_provider_scope_close_ref(
+            result_root=base,
+            worker_id=worker_id,
+            ref=ref,
+        )
+        record["benchmark_provider_scope_cleanup_ref"] = ref
+        return deepcopy(ref)
+
+    scope = record.get("benchmark_provider_scope")
+    intent = None
+    if intent_path.exists():
+        intent = _read_json_object(
+            intent_path,
+            label="benchmark incumbent provider scope close intent",
+        )
+        if (
+            set(intent)
+            != {
+                "contract_version",
+                "provider_scope_context_ref",
+                "process_scope_name",
+                "members_before",
+                "termination_planned",
+                "close_planned",
+                "artifact_is_authorization",
+                "execute_binding_enabled",
+                "content_sha256",
+            }
+            or intent.get("contract_version")
+            != "benchmark_v2_incumbent_provider_scope_close_intent_v1"
+            or intent.get("provider_scope_context_ref")
+            != {"content_sha256": context["content_sha256"]}
+            or intent.get("process_scope_name") != context["process_scope_name"]
+            or not isinstance(intent.get("members_before"), list)
+            or any(
+                isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+                for pid in intent["members_before"]
+            )
+            or not isinstance(intent.get("termination_planned"), bool)
+            or (
+                intent["termination_planned"]
+                and not intent["members_before"]
+            )
+            or intent.get("close_planned") is not True
+            or intent.get("artifact_is_authorization") is not False
+            or intent.get("execute_binding_enabled") is not False
+            or intent.get("content_sha256") != content_sha256(intent)
+        ):
+            raise LearningStageWorkerError(
+                "benchmark incumbent provider scope close intent is invalid"
+            )
+    elif scope is None:
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope close intent is unavailable"
+        )
+
+    used_live_scope = scope is not None
+    if scope is not None:
+        members_before = scope.pids()
+        if intent is None:
+            intent = seal_immutable(
+                {
+                    "contract_version": (
+                        "benchmark_v2_incumbent_provider_scope_close_intent_v1"
+                    ),
+                    "provider_scope_context_ref": {
+                        "content_sha256": context["content_sha256"]
+                    },
+                    "process_scope_name": context["process_scope_name"],
+                    "members_before": members_before,
+                    "termination_planned": bool(terminate and members_before),
+                    "close_planned": True,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            _write_json_create_only(intent_path, intent)
+        current_members = scope.pids()
+        if current_members:
+            if intent.get("termination_planned") is not True:
+                raise LearningStageWorkerError(
+                    "benchmark incumbent provider Job gained members after close intent"
+                )
+            scope.terminate()
+        stable_zero_evidence: list[object] = []
+        for _ in range(3):
+            stable_zero_evidence.append(scope.pids())
+            time.sleep(0.05)
+        if any(stable_zero_evidence):
+            raise LearningStageWorkerError(
+                "benchmark incumbent provider Job did not reach stable zero"
+            )
+        scope.close()
+        record["benchmark_provider_scope"] = None
+        stable_zero_evidence_kind = "member_samples"
+
+    assert isinstance(intent, dict)
+    absence_samples = [
+        _benchmark_cleanup_replay_job_probe(context["process_scope_name"])
+        for _ in range(3)
+    ]
+    if any(sample.get("outcome") != "job_name_absent" for sample in absence_samples):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider Job absence is indeterminate"
+        )
+    if not used_live_scope:
+        stable_zero_evidence = deepcopy(absence_samples)
+        stable_zero_evidence_kind = "job_absence_samples"
+    observation = seal_immutable(
+        {
+            "contract_version": (
+                "benchmark_v2_incumbent_provider_scope_close_observation_v1"
+            ),
+            "provider_scope_context_ref": {
+                "content_sha256": context["content_sha256"]
+            },
+            "close_intent_ref": {"content_sha256": intent["content_sha256"]},
+            "process_scope_name": context["process_scope_name"],
+            "stable_zero_evidence_kind": stable_zero_evidence_kind,
+            "stable_zero_evidence": stable_zero_evidence,
+            "absence_samples": absence_samples,
+            "outcome": "verified_scope_closed_and_absent",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    _write_json_create_only(observation_path, observation)
+    ref = {"content_sha256": observation["content_sha256"]}
+    record["benchmark_provider_scope_cleanup_ref"] = ref
+    return deepcopy(ref)
+
+
+def _validate_benchmark_incumbent_provider_scope_close_ref(
+    *,
+    result_root: Path,
+    worker_id: str,
+    ref: object,
+) -> dict[str, Any]:
+    context_path = result_root / f"{worker_id}.benchmark-provider-scope.json"
+    context = _read_json_object(
+        context_path,
+        label="benchmark incumbent provider scope context",
+    )
+    context = _validate_benchmark_incumbent_provider_scope_context(
+        context,
+        identity={
+            **{
+                field: context.get(field)
+                for field in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                )
+            },
+            "task_kind": "vision_observe_screen",
+        },
+    )
+    if context.get("worker_id") != worker_id:
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope worker identity differs"
+        )
+    close_ref = _benchmark_exact_ref(
+        ref,
+        "benchmark incumbent provider scope close ref",
+    )
+    observation = _validate_benchmark_artifact_ref(
+        path=result_root / f"{worker_id}.benchmark-provider-scope-close.json",
+        ref=close_ref,
+        contract_version=(
+            "benchmark_v2_incumbent_provider_scope_close_observation_v1"
+        ),
+    )
+    intent_ref = _benchmark_exact_ref(
+        observation.get("close_intent_ref"),
+        "benchmark incumbent provider scope close intent ref",
+    )
+    intent = _validate_benchmark_artifact_ref(
+        path=(
+            result_root
+            / f"{worker_id}.benchmark-provider-scope-close-intent.json"
+        ),
+        ref=intent_ref,
+        contract_version=(
+            "benchmark_v2_incumbent_provider_scope_close_intent_v1"
+        ),
+    )
+    if (
+        set(intent)
+        != {
+            "contract_version",
+            "provider_scope_context_ref",
+            "process_scope_name",
+            "members_before",
+            "termination_planned",
+            "close_planned",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        or intent.get("provider_scope_context_ref")
+        != {"content_sha256": context["content_sha256"]}
+        or intent.get("process_scope_name") != context["process_scope_name"]
+        or not isinstance(intent.get("members_before"), list)
+        or any(
+            isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+            for pid in intent["members_before"]
+        )
+        or not isinstance(intent.get("termination_planned"), bool)
+        or (
+            intent["termination_planned"]
+            and not intent["members_before"]
+        )
+        or intent.get("close_planned") is not True
+        or intent.get("artifact_is_authorization") is not False
+        or intent.get("execute_binding_enabled") is not False
+    ):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope close intent is invalid"
+        )
+    samples = observation.get("absence_samples")
+    if (
+        set(observation)
+        != {
+            "contract_version",
+            "provider_scope_context_ref",
+            "close_intent_ref",
+            "process_scope_name",
+            "stable_zero_evidence_kind",
+            "stable_zero_evidence",
+            "absence_samples",
+            "outcome",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        or observation.get("provider_scope_context_ref")
+        != {"content_sha256": context["content_sha256"]}
+        or observation.get("close_intent_ref") != intent_ref
+        or observation.get("process_scope_name") != context["process_scope_name"]
+        or observation.get("stable_zero_evidence_kind")
+        not in {"member_samples", "job_absence_samples"}
+        or observation.get("outcome") != "verified_scope_closed_and_absent"
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or not isinstance(samples, list)
+        or len(samples) != 3
+    ):
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope close observation is invalid"
+        )
+    for sample in samples:
+        if (
+            not isinstance(sample, dict)
+            or set(sample)
+            != {
+                "contract_version",
+                "scope_name",
+                "outcome",
+                "member_pids",
+                "temporary_handle_close",
+                "error",
+                "content_sha256",
+            }
+            or sample.get("contract_version")
+            != "benchmark_worker_cleanup_replay_job_probe_v1"
+            or sample.get("scope_name") != context["process_scope_name"]
+            or sample.get("outcome") != "job_name_absent"
+            or sample.get("member_pids") is not None
+            or sample.get("temporary_handle_close") != "not_opened"
+            or sample.get("error") is not None
+            or sample.get("content_sha256") != content_sha256(sample)
+        ):
+            raise LearningStageWorkerError(
+                "benchmark incumbent provider scope absence sample is invalid"
+            )
+    stable_zero_evidence = observation.get("stable_zero_evidence")
+    if observation["stable_zero_evidence_kind"] == "member_samples":
+        if stable_zero_evidence != [[], [], []]:
+            raise LearningStageWorkerError(
+                "benchmark incumbent provider stable-zero evidence is invalid"
+            )
+    elif stable_zero_evidence != samples:
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider absence recovery evidence is invalid"
+        )
+    return observation
 
 
 def _detach_proven_dead_worker_process(record: dict[str, Any]) -> None:
@@ -11548,10 +12287,13 @@ def _validate_benchmark_launch_owner_cleanup_intent(
         "beacon_file": "closed_explicitly",
         "owner_job": "open",
     }
+    exact_handle_keys = {"worker_process", "startup_event", "beacon_file"}
+    if (result_root / f"{worker_id}.benchmark-provider-scope.json").exists():
+        exact_handle_keys.add("incumbent_provider_job")
     handle_refs = _benchmark_launch_owner_exact_ref_map(
         intent.get("exact_handle_observation_refs"),
         label="launch owner handle refs",
-        exact_keys={"worker_process", "startup_event", "beacon_file"},
+        exact_keys=exact_handle_keys,
     )
     if (
         set(intent) != exact_intent_fields
@@ -11576,6 +12318,12 @@ def _validate_benchmark_launch_owner_cleanup_intent(
     ):
         raise LearningStageWorkerError(
             "benchmark launch owner cleanup intent is invalid"
+        )
+    if "incumbent_provider_job" in handle_refs:
+        _validate_benchmark_incumbent_provider_scope_close_ref(
+            result_root=result_root,
+            worker_id=worker_id,
+            ref=handle_refs["incumbent_provider_job"],
         )
     exit_ref = _benchmark_exact_ref(
         intent.get("exit_observation_ref"),
@@ -12333,24 +13081,40 @@ def _validate_benchmark_launched_cleanup_receipt(
             "beacon_file": "closed_explicitly",
             "owner_job": "open",
         }
+        expected_intent_handle_keys = {
+            "worker_process",
+            "startup_event",
+            "beacon_file",
+        }
+        if (
+            result_root / f"{worker_id}.benchmark-provider-scope.json"
+        ).exists():
+            expected_intent_handle_keys.add("incumbent_provider_job")
+        expected_receipt_handle_keys = (
+            expected_intent_handle_keys,
+            {*expected_intent_handle_keys, "owner_job"},
+        )
         if (
             intent.get("exact_owned_handles") != expected_owned
             or not isinstance(intent_handle_refs, dict)
             or set(intent_handle_refs)
-            != {"worker_process", "startup_event", "beacon_file"}
+            != expected_intent_handle_keys
             or not isinstance(receipt_handle_refs, dict)
             or set(receipt_handle_refs)
-            not in (
-                {"worker_process", "startup_event", "beacon_file"},
-                {"worker_process", "startup_event", "beacon_file", "owner_job"},
-            )
+            not in expected_receipt_handle_keys
             or any(
                 receipt_handle_refs.get(kind) != intent_handle_refs.get(kind)
-                for kind in ("worker_process", "startup_event", "beacon_file")
+                for kind in expected_intent_handle_keys
             )
         ):
             raise LearningStageWorkerError(
                 "benchmark cleanup receipt handle refs are invalid"
+            )
+        if "incumbent_provider_job" in intent_handle_refs:
+            _validate_benchmark_incumbent_provider_scope_close_ref(
+                result_root=result_root,
+                worker_id=worker_id,
+                ref=intent_handle_refs["incumbent_provider_job"],
             )
         predecessor = exit_observation["content_sha256"]
         for kind, suffix in (
@@ -13277,6 +14041,73 @@ def _load_worker_journal(
             "benchmark review no-provider cleanup persisted proof is missing"
         )
 
+    benchmark_provider_scope_context = None
+    benchmark_provider_scope_context_path = None
+    benchmark_provider_runtime_path = None
+    benchmark_provider_scope_cleanup_ref = payload.get(
+        "benchmark_provider_scope_cleanup_ref"
+    )
+    benchmark_context_file = payload.get(
+        "benchmark_provider_scope_context_file"
+    )
+    benchmark_runtime_file = payload.get("benchmark_provider_runtime_file")
+    if benchmark_context_file is not None or benchmark_runtime_file is not None:
+        benchmark_context_file = _required_text(
+            benchmark_context_file,
+            "benchmark_provider_scope_context_file",
+        )
+        benchmark_runtime_file = _required_text(
+            benchmark_runtime_file,
+            "benchmark_provider_runtime_file",
+        )
+        if (
+            benchmark_context_file
+            != f"{worker_id}.benchmark-provider-scope.json"
+            or benchmark_runtime_file
+            != f"{worker_id}.benchmark-provider-runtime.json"
+            or Path(benchmark_context_file).name != benchmark_context_file
+            or Path(benchmark_runtime_file).name != benchmark_runtime_file
+        ):
+            raise LearningStageWorkerError(
+                "benchmark incumbent provider journal paths are invalid"
+            )
+        context_candidate = (result_root / benchmark_context_file).resolve()
+        runtime_candidate = (result_root / benchmark_runtime_file).resolve()
+        if (
+            context_candidate.parent != result_root.resolve()
+            or runtime_candidate.parent != result_root.resolve()
+        ):
+            raise LearningStageWorkerError(
+                "benchmark incumbent provider journal path escapes result root"
+            )
+        benchmark_provider_scope_context = (
+            _validate_benchmark_incumbent_provider_scope_context(
+                _read_json_object(
+                    context_candidate,
+                    label="benchmark incumbent provider scope context",
+                ),
+                identity=identity,
+            )
+        )
+        benchmark_provider_scope_context_path = str(context_candidate)
+        benchmark_provider_runtime_path = str(runtime_candidate)
+        if benchmark_provider_scope_cleanup_ref is not None:
+            benchmark_provider_scope_cleanup_ref = {
+                "content_sha256": _benchmark_exact_ref(
+                    benchmark_provider_scope_cleanup_ref,
+                    "benchmark incumbent provider scope cleanup ref",
+                )["content_sha256"]
+            }
+            _validate_benchmark_incumbent_provider_scope_close_ref(
+                result_root=result_root,
+                worker_id=worker_id,
+                ref=benchmark_provider_scope_cleanup_ref,
+            )
+    elif benchmark_provider_scope_cleanup_ref is not None:
+        raise LearningStageWorkerError(
+            "benchmark incumbent provider scope cleanup context is missing"
+        )
+
     result_path = (result_root / result_file).resolve()
     if result_path.parent != result_root.resolve():
         raise LearningStageWorkerError(
@@ -13405,6 +14236,15 @@ def _load_worker_journal(
         "benchmark_provider_cleanup_ref": provider_cleanup_ref,
         "benchmark_v2_no_provider_cleanup_ref": no_provider_cleanup_ref,
         "benchmark_v2_no_provider_cleanup_state": no_provider_cleanup_state,
+        "benchmark_provider_scope": None,
+        "benchmark_provider_scope_context": benchmark_provider_scope_context,
+        "benchmark_provider_scope_context_path": (
+            benchmark_provider_scope_context_path
+        ),
+        "benchmark_provider_runtime_path": benchmark_provider_runtime_path,
+        "benchmark_provider_scope_cleanup_ref": (
+            benchmark_provider_scope_cleanup_ref
+        ),
         "start_cleanup_evidence": (
             deepcopy(payload.get("start_cleanup_evidence"))
             if isinstance(payload.get("start_cleanup_evidence"), dict)

@@ -4203,6 +4203,7 @@ def test_benchmark_worker_cleanup_replay_process_probe_exact_incarnation_decisio
 def test_benchmark_worker_cleanup_replay_job_probe_rejects_live_empty_name(
 ) -> None:
     from app.learn import workflow_worker as worker_module
+
     from app.learn.hybrid.windows_process_scope import WindowsProcessScope
 
     scope_name = "Local\\AgentGuiBenchmarkWorkerTest-" + "c" * 64
@@ -10908,7 +10909,63 @@ def test_benchmark_provider_cleanup_launched_worker_exit_aborts_unmaterialized_r
             authoritative_payload={"capture_live": False},
             supervision_root=root,
         )
-        process = registry._records[started["worker_id"]]["process"]
+        record = registry._records[started["worker_id"]]
+        process = record["process"]
+        provider_scope_context = record["benchmark_provider_scope_context"]
+        assert provider_scope_context["provider"] == "qwen"
+        assert provider_scope_context["reservation_ref"] == {
+            "content_sha256": anchored["content_sha256"]
+        }
+        assert provider_scope_context["acquisition_owner_ref"] == provider[
+            "acquisition_owner_ref"
+        ]
+        assert provider_scope_context["runtime_owner_ref"] == {
+            "content_sha256": provider["runtime_owner_ref"]["content_sha256"]
+        }
+        assert provider_scope_context["operation_anchor_ref"] == {
+            "content_sha256": anchor["anchor_identity_sha256"]
+        }
+        assert provider_scope_context["supervision_ref"] == {
+            "content_sha256": record["benchmark_supervision"]["content_sha256"]
+        }
+        assert record["benchmark_provider_scope"].name == provider_scope_context[
+            "process_scope_name"
+        ]
+        assert record["benchmark_scope"].name != provider_scope_context[
+            "process_scope_name"
+        ]
+        assert record["payload"] == {"capture_live": False}
+        assert started["payload_sha256"] == anchored["payload_sha256"]
+        persisted_scope = json.loads(
+            Path(record["benchmark_provider_scope_context_path"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        assert persisted_scope == provider_scope_context
+        provider_runtime_path = Path(record["benchmark_provider_runtime_path"])
+        assert provider_runtime_path != Path(
+            record["benchmark_provider_scope_context_path"]
+        )
+        context_bytes = Path(
+            record["benchmark_provider_scope_context_path"]
+        ).read_bytes()
+        model_server._publish_qwen_runtime_start_intent(
+            provider_runtime_path,
+            request_id=anchored["model_request_id"],
+            profile={
+                "profile_id": "benchmark-runtime-rewrite-test",
+                "endpoint": "http://127.0.0.1:19001/v1",
+                "pid_file": str(tmp_path / "benchmark-runtime-rewrite.pid"),
+            },
+            expected_lineage=provider_scope_context["lineage"],
+            expected_scope_name=provider_scope_context["process_scope_name"],
+        )
+        assert json.loads(provider_runtime_path.read_text(encoding="utf-8"))[
+            "contract_version"
+        ] == "hybrid_qwen_acquisition_intent_v1"
+        assert Path(
+            record["benchmark_provider_scope_context_path"]
+        ).read_bytes() == context_bytes
         assert ready_queue.get(timeout=15) == {
             "gate_released": True,
             "pid": process.pid,
@@ -10932,6 +10989,24 @@ def test_benchmark_provider_cleanup_launched_worker_exit_aborts_unmaterialized_r
             supervision_root=root,
         )
         assert verified["outcome"] == "verified_exact_worker_exited"
+        assert record["benchmark_provider_scope"] is None
+        provider_close_ref = verified["exact_handle_observation_refs"][
+            "incumbent_provider_job"
+        ]
+        cleanup_intent = json.loads(
+            (
+                registry_root
+                / f"{anchored['worker_id']}.benchmark-cleanup-intent.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert cleanup_intent["exact_handle_observation_refs"][
+            "incumbent_provider_job"
+        ] == provider_close_ref
+        assert worker_module._validate_benchmark_incumbent_provider_scope_close_ref(
+            result_root=registry_root,
+            worker_id=anchored["worker_id"],
+            ref=provider_close_ref,
+        )["outcome"] == "verified_scope_closed_and_absent"
         cleanup_path = (
             registry_root / f"{anchored['worker_id']}.benchmark-cleanup.json"
         )
@@ -10988,6 +11063,14 @@ def test_benchmark_provider_cleanup_launched_worker_exit_aborts_unmaterialized_r
             process_factory=_fake_process_factory,
             benchmark_supervision_root=root,
         )
+        recovered_record = restarted._records[anchored["worker_id"]]
+        assert recovered_record["benchmark_provider_scope_cleanup_ref"] == (
+            provider_close_ref
+        )
+        assert recovered_record["benchmark_provider_scope_context"] == (
+            provider_scope_context
+        )
+        assert recovered_record["benchmark_provider_scope"] is None
         assert restarted.reconcile_benchmark_provider_cleanup(
             worker_id=anchored["worker_id"],
             run_id=anchored["run_id"],
@@ -11007,6 +11090,442 @@ def test_benchmark_provider_cleanup_launched_worker_exit_aborts_unmaterialized_r
                 process.close()
         ready_queue.close()
         ready_queue.join_thread()
+
+
+def test_benchmark_incumbent_provider_scope_is_internal_and_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    identity = {
+        "worker_id": "worker-benchmark-provider-scope",
+        "run_id": "run-benchmark-provider-scope",
+        "stage": "screen_understanding",
+        "operation_id": "operation-benchmark-provider-scope",
+        "task_kind": "vision_observe_screen",
+        "model_request_id": "model-request-benchmark-provider-scope",
+        "payload_sha256": "a" * 64,
+    }
+    lineage = workflow_worker._hybrid_provider_lineage(
+        run_id=identity["run_id"],
+        workflow_revision=7,
+        operation_id=identity["operation_id"],
+        stage=identity["stage"],
+    )
+    context = seal_immutable(
+        {
+            "contract_version": (
+                "benchmark_v2_incumbent_provider_scope_context_v1"
+            ),
+            "provider": "qwen",
+            "authority_kind": "test_only",
+            **{
+                name: identity[name]
+                for name in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "worker_id",
+                    "model_request_id",
+                    "payload_sha256",
+                )
+            },
+            "workflow_revision": 7,
+            "reservation_ref": {"content_sha256": "b" * 64},
+            "operation_anchor_ref": {"content_sha256": "c" * 64},
+            "supervision_ref": {"content_sha256": "d" * 64},
+            "acquisition_owner_ref": {"content_sha256": "e" * 64},
+            "acquisition_intent_ref": {"content_sha256": "f" * 64},
+            "runtime_owner_ref": {"content_sha256": "1" * 64},
+            "lineage": lineage,
+            "process_scope_name": process_scope_name(lineage, "qwen"),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    observed: list[dict[str, object]] = []
+    context_path = tmp_path / "benchmark-provider-scope.json"
+    context_path.write_text(
+        json.dumps(context, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    runtime_path = tmp_path / "benchmark-provider-runtime.json"
+    runtime_path.write_text(
+        json.dumps(
+            workflow_worker._compose_benchmark_incumbent_provider_runtime(
+                context
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def execute(task_kind, payload, **_kwargs):
+        model_server._validate_qwen_runtime_acquiring(
+            identity["model_request_id"]
+        )
+        observed.append(
+            {
+                "task_kind": task_kind,
+                "payload": deepcopy(payload),
+                "scope_name": os.environ.get(
+                    "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"
+                ),
+                "provider_runtime": os.environ.get(
+                    "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"
+                ),
+            }
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        workflow_worker,
+        "execute_learning_stage_worker_task",
+        execute,
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", "stale-path")
+    result_path = tmp_path / "valid-result.json"
+    workflow_worker._run_learning_stage_worker_entry(
+        str(result_path),
+        identity["task_kind"],
+        {
+            "capture_live": False,
+            "_benchmark_v2_provider_scope": context,
+            "_benchmark_v2_provider_scope_path": str(context_path),
+            "_benchmark_v2_provider_runtime_path": str(runtime_path),
+        },
+        identity["model_request_id"],
+        identity,
+        Event(),
+        Event(),
+    )
+    assert json.loads(result_path.read_text(encoding="utf-8"))["status"] == (
+        "completed"
+    )
+    assert observed == [
+        {
+            "task_kind": "vision_observe_screen",
+            "payload": {"capture_live": False},
+            "scope_name": context["process_scope_name"],
+            "provider_runtime": str(runtime_path),
+        }
+    ]
+    assert os.environ["AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"] == "stale-path"
+
+    invalid = deepcopy(context)
+    invalid.pop("content_sha256")
+    invalid["authority_kind"] = "untrusted_caller"
+    invalid = seal_immutable(invalid)
+    invalid_path = tmp_path / "invalid-result.json"
+    workflow_worker._run_learning_stage_worker_entry(
+        str(invalid_path),
+        identity["task_kind"],
+        {
+            "capture_live": False,
+            "_benchmark_v2_provider_scope": invalid,
+            "_benchmark_v2_provider_scope_path": str(context_path),
+            "_benchmark_v2_provider_runtime_path": str(runtime_path),
+        },
+        identity["model_request_id"],
+        identity,
+        Event(),
+        Event(),
+    )
+    invalid_result = json.loads(invalid_path.read_text(encoding="utf-8"))
+    assert invalid_result["status"] == "failed"
+    assert "provider scope context is invalid" in invalid_result["error"][
+        "details"
+    ]
+    assert len(observed) == 1
+
+
+def test_benchmark_incumbent_provider_scope_close_write_failure_replays_from_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pywintypes
+
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import (
+        WindowsProcessScope,
+        process_scope_name,
+    )
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    worker_id = "worker-provider-close-replay"
+    lineage = workflow_worker._hybrid_provider_lineage(
+        run_id="run-provider-close-replay",
+        workflow_revision=3,
+        operation_id="operation-provider-close-replay",
+        stage="screen_understanding",
+    )
+    context = seal_immutable(
+        {
+            "contract_version": (
+                "benchmark_v2_incumbent_provider_scope_context_v1"
+            ),
+            "provider": "qwen",
+            "authority_kind": "test_only",
+            "run_id": "run-provider-close-replay",
+            "stage": "screen_understanding",
+            "operation_id": "operation-provider-close-replay",
+            "worker_id": worker_id,
+            "model_request_id": "model-request-provider-close-replay",
+            "payload_sha256": "a" * 64,
+            "workflow_revision": 3,
+            "reservation_ref": {"content_sha256": "b" * 64},
+            "operation_anchor_ref": {"content_sha256": "c" * 64},
+            "supervision_ref": {"content_sha256": "d" * 64},
+            "acquisition_owner_ref": {"content_sha256": "e" * 64},
+            "acquisition_intent_ref": {"content_sha256": "f" * 64},
+            "runtime_owner_ref": {"content_sha256": "1" * 64},
+            "lineage": lineage,
+            "process_scope_name": process_scope_name(lineage, "qwen"),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    context_path = tmp_path / f"{worker_id}.benchmark-provider-scope.json"
+    context_path.write_text(
+        json.dumps(context, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    record = {
+        "worker_id": worker_id,
+        "benchmark_provider_scope": WindowsProcessScope(
+            context["process_scope_name"],
+            create=True,
+        ),
+        "benchmark_provider_scope_context": context,
+        "benchmark_provider_scope_context_path": str(context_path),
+        "benchmark_provider_scope_cleanup_ref": None,
+    }
+    real_write = workflow_worker._write_json_create_only
+    injected = {"done": False}
+
+    def fail_close_observation_once(path, payload):
+        if (
+            not injected["done"]
+            and str(path).endswith(".benchmark-provider-scope-close.json")
+        ):
+            injected["done"] = True
+            raise OSError("injected-provider-close-observation-write-failure")
+        return real_write(path, payload)
+
+    monkeypatch.setattr(
+        workflow_worker,
+        "_write_json_create_only",
+        fail_close_observation_once,
+    )
+    with pytest.raises(
+        OSError,
+        match="injected-provider-close-observation-write-failure",
+    ):
+        workflow_worker._close_benchmark_incumbent_provider_scope(
+            record,
+            terminate=False,
+        )
+    assert record["benchmark_provider_scope"] is None
+    assert (
+        tmp_path / f"{worker_id}.benchmark-provider-scope-close-intent.json"
+    ).exists()
+    with pytest.raises(pywintypes.error):
+        WindowsProcessScope(context["process_scope_name"], create=False)
+
+    monkeypatch.setattr(
+        workflow_worker,
+        "_write_json_create_only",
+        real_write,
+    )
+    ref = workflow_worker._close_benchmark_incumbent_provider_scope(
+        record,
+        terminate=False,
+    )
+    assert workflow_worker._validate_benchmark_incumbent_provider_scope_close_ref(
+        result_root=tmp_path,
+        worker_id=worker_id,
+        ref=ref,
+    )["outcome"] == "verified_scope_closed_and_absent"
+
+
+def test_benchmark_incumbent_provider_scope_persists_intent_before_termination(
+    tmp_path: Path,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    worker_id = "worker-provider-terminate-cut"
+    lineage = workflow_worker._hybrid_provider_lineage(
+        run_id="run-provider-terminate-cut",
+        workflow_revision=5,
+        operation_id="operation-provider-terminate-cut",
+        stage="screen_understanding",
+    )
+    context = seal_immutable(
+        {
+            "contract_version": (
+                "benchmark_v2_incumbent_provider_scope_context_v1"
+            ),
+            "provider": "qwen",
+            "authority_kind": "test_only",
+            "run_id": "run-provider-terminate-cut",
+            "stage": "screen_understanding",
+            "operation_id": "operation-provider-terminate-cut",
+            "worker_id": worker_id,
+            "model_request_id": "model-request-provider-terminate-cut",
+            "payload_sha256": "a" * 64,
+            "workflow_revision": 5,
+            "reservation_ref": {"content_sha256": "b" * 64},
+            "operation_anchor_ref": {"content_sha256": "c" * 64},
+            "supervision_ref": {"content_sha256": "d" * 64},
+            "acquisition_owner_ref": {"content_sha256": "e" * 64},
+            "acquisition_intent_ref": {"content_sha256": "f" * 64},
+            "runtime_owner_ref": {"content_sha256": "1" * 64},
+            "lineage": lineage,
+            "process_scope_name": process_scope_name(lineage, "qwen"),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    context_path = tmp_path / f"{worker_id}.benchmark-provider-scope.json"
+    context_path.write_text(
+        json.dumps(context, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    class TerminationCutScope:
+        def pids(self):
+            return [4242]
+
+        def terminate(self):
+            raise RuntimeError("injected-provider-termination-cut")
+
+    record = {
+        "worker_id": worker_id,
+        "benchmark_provider_scope": TerminationCutScope(),
+        "benchmark_provider_scope_context": context,
+        "benchmark_provider_scope_context_path": str(context_path),
+        "benchmark_provider_scope_cleanup_ref": None,
+    }
+    with pytest.raises(RuntimeError, match="injected-provider-termination-cut"):
+        workflow_worker._close_benchmark_incumbent_provider_scope(
+            record,
+            terminate=True,
+        )
+    intent_path = (
+        tmp_path / f"{worker_id}.benchmark-provider-scope-close-intent.json"
+    )
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    assert intent["members_before"] == [4242]
+    assert intent["termination_planned"] is True
+
+    record["benchmark_provider_scope"] = None
+    ref = workflow_worker._close_benchmark_incumbent_provider_scope(
+        record,
+        terminate=True,
+    )
+    assert workflow_worker._validate_benchmark_incumbent_provider_scope_close_ref(
+        result_root=tmp_path,
+        worker_id=worker_id,
+        ref=ref,
+    )["stable_zero_evidence_kind"] == "job_absence_samples"
+
+
+def test_benchmark_incumbent_provider_scope_launch_failure_is_retry_owned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pywintypes
+
+    from app.core import model_server
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    registry_root = tmp_path / "registry"
+    monkeypatch.setattr(model_server, "MODEL_SERVER_LEASE_DIR", tmp_path / "qwen")
+    registry, root, anchored, runtime_owner = _anchored_benchmark_provider_fixture(
+        registry_root
+    )
+    registry.prepare_benchmark_provider_acquisition(
+        reservation_ref={"content_sha256": anchored["content_sha256"]},
+        runtime_owner_ref=runtime_owner,
+    )
+    source = anchored["handler_payload_source"]
+    original = {
+        **anchored,
+        "reservation_state": "reserved",
+        "abort_observation_ref": None,
+        "predecessor_content_sha256": source["content_sha256"],
+        "content_sha256": anchored["predecessor_content_sha256"],
+    }
+    anchor = compose_benchmark_worker_operation_anchor_v1(
+        supervision_root=root,
+        reservation=original,
+        handler_payload_source=source,
+        window_binding_ref=source["window_binding_ref"],
+        capture_ref=source["capture_ref"],
+        predecessor_content_sha256=None,
+    )
+
+    class StartFailureProcess:
+        pid = None
+        exitcode = None
+
+        def start(self) -> None:
+            raise RuntimeError("injected-provider-scope-launch-failure")
+
+        def is_alive(self) -> bool:
+            return False
+
+        def close(self) -> None:
+            return None
+
+    def fail_process_factory(**_kwargs):
+        return StartFailureProcess()
+
+    registry = LearningStageWorkerRegistry(
+        result_root=registry_root,
+        process_factory=fail_process_factory,
+        benchmark_supervision_root=root,
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="injected-provider-scope-launch-failure",
+    ):
+        registry.launch_prepared_benchmark_worker(
+            reservation_ref={"content_sha256": anchored["content_sha256"]},
+            expected_operation_anchor=anchor,
+            authoritative_payload={"capture_live": False},
+            supervision_root=root,
+        )
+
+    cleanup = json.loads(
+        next(
+            registry_root.glob("*.benchmark-launch-failure-cleanup.json")
+        ).read_text(encoding="utf-8")
+    )
+    assert cleanup["cleanup_status"] == "verified"
+    assert cleanup["provider_job_terminate"]["status"] == "completed"
+    assert cleanup["provider_job_stable_zero"] == {
+        "status": "completed",
+        "result": {"samples": [[], [], []]},
+    }
+    assert cleanup["provider_job_close"]["status"] == "completed"
+    assert cleanup["process_join"] == {
+        "status": "completed",
+        "result": {
+            "not_started": True,
+            "join_timeout_seconds": 0,
+            "alive_after": False,
+            "exitcode": None,
+        },
+    }
+    with pytest.raises(pywintypes.error):
+        WindowsProcessScope(cleanup["provider_scope_name"], create=False)
 
 
 def test_benchmark_provider_cleanup_materialization_without_lease_stays_pending(
