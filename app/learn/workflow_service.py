@@ -7702,14 +7702,58 @@ def _managed_hybrid_large_review_projection(
         candidate_id = proposal.get("candidate_id")
         candidate = inventory_by_id.get(candidate_id)
         roi_source = proposal.get("roi_ref")
+        source_bbox_ref = proposal.get("candidate_bbox_ref")
+        affine_transform_ref = proposal.get("affine_transform_ref")
         point = proposal.get("canonical_point")
         if (
-            not isinstance(candidate, dict)
+            not isinstance(candidate_id, str)
+            or not isinstance(candidate, dict)
             or not isinstance(roi_source, dict)
-            or not isinstance(point, dict)
+            or not isinstance(source_bbox_ref, dict)
+            or not isinstance(affine_transform_ref, dict)
         ):
             raise LearningWorkflowStageOperationError(
                 "managed Hybrid review proposal lost parent evidence"
+            )
+        if (
+            source_bbox_ref.get("content_sha256")
+            != content_sha256(source_bbox_ref)
+            or source_bbox_ref.get("candidate_id") != candidate_id
+            or source_bbox_ref.get("coordinate_space")
+            != candidate.get("coordinate_space")
+            or source_bbox_ref.get("xyxy") != candidate.get("bbox_original")
+            or roi_source.get("content_sha256") != content_sha256(roi_source)
+            or roi_source.get("candidate_id") != candidate_id
+            or affine_transform_ref.get("content_sha256")
+            != content_sha256(affine_transform_ref)
+            or affine_transform_ref.get("candidate_id") != candidate_id
+            or affine_transform_ref.get("roi_ref")
+            != {
+                "id": roi_source.get("roi_id"),
+                "content_sha256": roi_source.get("content_sha256"),
+            }
+        ):
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review proposal parent evidence is invalid"
+            )
+        status = proposal.get("status")
+        if status not in {
+            "PROPOSED",
+            "VISTA_FAILED",
+            "VISTA_OUT_OF_BOUNDS",
+            "TRANSFORM_INVALID",
+        }:
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review proposal status is invalid"
+            )
+        if status == "PROPOSED":
+            if not isinstance(point, dict):
+                raise LearningWorkflowStageOperationError(
+                    "managed Hybrid review proposed point is missing"
+                )
+        elif point is not None:
+            raise LearningWorkflowStageOperationError(
+                "managed Hybrid review non-proposed point is invalid"
             )
         bbox_ref = seal_immutable(
             {
@@ -7737,13 +7781,13 @@ def _managed_hybrid_large_review_projection(
                 "fusion_state": "BOUND",
                 "candidate_bbox_ref": bbox_ref,
                 "roi_ref": roi_ref,
-                "point": deepcopy(point),
+                "point": deepcopy(point) if status == "PROPOSED" else None,
                 "confidence": 0.0,
                 "evidence": [
                     "managed_hybrid_review_projection/"
                     + str(managed_projection.get("content_sha256") or "")
                 ],
-                "status": proposal.get("status"),
+                "status": status,
                 "review_required": True,
             }
         )

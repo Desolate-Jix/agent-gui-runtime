@@ -817,16 +817,14 @@ def validate_vista_proposals(
             raise ValueError("ROI is not sealed and permitted for this candidate/capture")
         if canonical_json_bytes(roi_ref) != canonical_json_bytes(permitted_rois[candidate_id]):
             raise ValueError("proposal ROI does not match permitted ROI context")
-        point_value = _object(
-            proposal["point"],
-            name=f"VISTA proposal[{index}].point",
-            fields={"coordinate_space", "xy"},
-        )
-        _coordinate_space(
-            point_value["coordinate_space"],
-            name=f"VISTA proposal[{index}].point.coordinate_space",
-        )
-        point = _point(point_value["xy"], name=f"VISTA proposal[{index}].point.xy")
+        status = proposal["status"]
+        if status not in {
+            "PROPOSED",
+            "VISTA_FAILED",
+            "VISTA_OUT_OF_BOUNDS",
+            "TRANSFORM_INVALID",
+        }:
+            raise ValueError("unknown VISTA status")
         image_size = result["capture_identity"]["image_size"]
         for geometry_name, geometry in (("candidate bbox", candidate_bbox), ("ROI", roi)):
             if (
@@ -836,25 +834,35 @@ def validate_vista_proposals(
                 or geometry[3] > image_size["height"]
             ):
                 raise ValueError(f"VISTA {geometry_name} must be inside capture bounds")
-        if not (
-            roi[0] <= point[0] <= roi[2]
-            and roi[1] <= point[1] <= roi[3]
-            and candidate_bbox[0] <= point[0] <= candidate_bbox[2]
-            and candidate_bbox[1] <= point[1] <= candidate_bbox[3]
-        ):
-            raise ValueError("VISTA point must be inside ROI and candidate bbox")
+        if status == "PROPOSED":
+            if proposal["point"] is None:
+                raise ValueError("PROPOSED VISTA proposal requires a point")
+            point_value = _object(
+                proposal["point"],
+                name=f"VISTA proposal[{index}].point",
+                fields={"coordinate_space", "xy"},
+            )
+            _coordinate_space(
+                point_value["coordinate_space"],
+                name=f"VISTA proposal[{index}].point.coordinate_space",
+            )
+            point = _point(
+                point_value["xy"], name=f"VISTA proposal[{index}].point.xy"
+            )
+            if not (
+                roi[0] <= point[0] <= roi[2]
+                and roi[1] <= point[1] <= roi[3]
+                and candidate_bbox[0] <= point[0] <= candidate_bbox[2]
+                and candidate_bbox[1] <= point[1] <= candidate_bbox[3]
+            ):
+                raise ValueError("VISTA point must be inside ROI and candidate bbox")
+        elif proposal["point"] is not None:
+            raise ValueError("non-PROPOSED VISTA proposal must not contain a point")
         _confidence(proposal["confidence"], name=f"VISTA proposal[{index}].confidence")
         if not isinstance(proposal["evidence"], list) or not all(
             isinstance(item, str) and item for item in proposal["evidence"]
         ):
             raise ValueError(f"VISTA proposal[{index}].evidence must be a string list")
-        if proposal["status"] not in {
-            "PROPOSED",
-            "VISTA_FAILED",
-            "VISTA_OUT_OF_BOUNDS",
-            "TRANSFORM_INVALID",
-        }:
-            raise ValueError("unknown VISTA status")
         if proposal["review_required"] is not True:
             raise ValueError("VISTA proposal must remain review_required")
         result["proposals"][index] = proposal

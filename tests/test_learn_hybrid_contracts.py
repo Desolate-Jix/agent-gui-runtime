@@ -417,6 +417,65 @@ def test_only_bound_fusion_candidate_is_vista_eligible():
         validate_fusion_result(value, inventory, bindings)
 
 
+def test_vista_accepts_out_of_bounds_status_with_exact_parents_and_null_point():
+    inventory = inventory_fixture()
+    bindings = binding_fixture(inventory=inventory)
+    fusion = fusion_fixture(inventory=inventory)
+    vista = vista_fixture(inventory=inventory)
+    proposal = vista["proposals"][0]
+    expected_bbox_ref = deepcopy(proposal["candidate_bbox_ref"])
+    expected_roi_ref = deepcopy(proposal["roi_ref"])
+    proposal["status"] = "VISTA_OUT_OF_BOUNDS"
+    proposal["point"] = None
+
+    validated = validate_vista_proposals(
+        vista,
+        fusion,
+        inventory,
+        bindings,
+        {inventory["candidates"][0]["candidate_id"]: permitted_roi_fixture(inventory)},
+    )
+
+    assert validated["proposals"][0]["status"] == "VISTA_OUT_OF_BOUNDS"
+    assert validated["proposals"][0]["point"] is None
+    assert validated["proposals"][0]["candidate_bbox_ref"] == expected_bbox_ref
+    assert validated["proposals"][0]["roi_ref"] == expected_roi_ref
+
+
+def test_vista_rejects_proposed_status_without_a_point():
+    inventory = inventory_fixture()
+    bindings = binding_fixture(inventory=inventory)
+    fusion = fusion_fixture(inventory=inventory)
+    vista = vista_fixture(inventory=inventory)
+    vista["proposals"][0]["point"] = None
+
+    with pytest.raises(ValueError, match="PROPOSED VISTA proposal requires a point"):
+        validate_vista_proposals(
+            vista,
+            fusion,
+            inventory,
+            bindings,
+            {inventory["candidates"][0]["candidate_id"]: permitted_roi_fixture(inventory)},
+        )
+
+
+def test_vista_rejects_non_proposed_status_with_a_point():
+    inventory = inventory_fixture()
+    bindings = binding_fixture(inventory=inventory)
+    fusion = fusion_fixture(inventory=inventory)
+    vista = vista_fixture(inventory=inventory)
+    vista["proposals"][0]["status"] = "VISTA_OUT_OF_BOUNDS"
+
+    with pytest.raises(ValueError, match="non-PROPOSED VISTA proposal must not contain a point"):
+        validate_vista_proposals(
+            vista,
+            fusion,
+            inventory,
+            bindings,
+            {inventory["candidates"][0]["candidate_id"]: permitted_roi_fixture(inventory)},
+        )
+
+
 def test_vista_rejects_non_bound_candidate_even_if_submitted():
     inventory = inventory_fixture()
     bindings = binding_fixture(inventory=inventory)

@@ -3376,6 +3376,192 @@ def test_public_hybrid_review_continuation_persists_authoritative_trial(
     ] == hashlib.sha256(trial_path.read_bytes()).hexdigest()
 
 
+def test_public_hybrid_review_continuation_persists_out_of_bounds_vista_without_authorization(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """捕获 Task 8 将已验证的 VISTA 越界提议误当作父证据丢失。"""
+
+    from app.learn.hybrid.fusion import fuse_hybrid_candidates
+    from app.learn.hybrid.contracts import load_hybrid_config
+    from app.learn.hybrid.omni_candidates import build_omni_candidate_ledger
+    from app.learn.hybrid.qwen_binding import run_qwen_candidate_binding
+    from app.learn.hybrid.vista_refinement import (
+        build_vista_requests,
+        validate_vista_proposal,
+    )
+    from app.learn.workflow_tasks.hybrid_review import run_hybrid_review_projection_task
+    from app.learn.recognition.uei.canonical import seal_immutable
+    from scripts.prove_portfolio_hybrid_v1_1_persistence import (
+        _build_capture,
+        _create_capture_image,
+        _fake_qwen_cleanup_receipt,
+        fake_omni_runner,
+        fake_qwen_runner,
+    )
+
+    store, bind_state = _store_at_completed_bind_capture()
+    config_path = tmp_path / "configs" / "learn_hybrid_v1_1.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_bytes(Path("configs/learn_hybrid_v1_1.json").read_bytes())
+    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    client = TestClient(app)
+    operation = client.post(
+        "/panel/start_learning_workflow_stage_operation",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": bind_state["revision"],
+            "stage": "screen_understanding",
+            "reason": "public managed Hybrid OOB review",
+            "lease_seconds": 600,
+            "learning_pipeline_mode": "hybrid_v1_1",
+        },
+    ).json()["data"]
+    workflow_revision = operation["workflow_state"]["revision"]
+    image_path = _create_capture_image(tmp_path)
+    bundle = _build_capture(
+        tmp_path,
+        image_path=image_path,
+        run_id="run-stage-operation",
+        revision=workflow_revision,
+    )
+    safe_result = fake_omni_runner(capture_bundle=deepcopy(bundle))
+    ledger = build_omni_candidate_ledger(
+        safe_result=safe_result,
+        capture_bundle=bundle,
+    )
+    inventory_value = deepcopy(ledger)
+    inventory_value.pop("hybrid_capture_bundle_ref", None)
+    inventory_value.pop("content_sha256", None)
+    inventory_value["contract_version"] = "hybrid_omni_inventory_v1"
+    inventory = seal_immutable(inventory_value)
+    bindings = run_qwen_candidate_binding(
+        {
+            "project_root": str(tmp_path),
+            "run_id": bundle["run_id"],
+            "workflow_revision": bundle["workflow_revision"],
+            "hybrid_capture_bundle_ref": deepcopy(bundle["bundle_ref"]),
+            "capture_image_path": image_path.relative_to(tmp_path).as_posix(),
+            "omni_inventory": deepcopy(inventory),
+        },
+        model_runner=fake_qwen_runner,
+    )
+    fusion = seal_immutable(
+        fuse_hybrid_candidates(
+            config=load_hybrid_config(tmp_path),
+            capture_bundle=bundle,
+            omni_inventory=inventory,
+            qwen_bindings=bindings,
+        )
+    )
+    cleanup = _fake_qwen_cleanup_receipt()
+    requests = build_vista_requests(
+        fusion,
+        bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        qwen_cleanup_receipt=cleanup,
+        expected_workflow_revision=workflow_revision,
+    )
+    assert len(requests) == 1
+    request = requests[0]
+    bbox = request["candidate_bbox_ref"]["xyxy"]
+    raw_vista = {
+        "status": "PROPOSED",
+        "candidate_id": request["candidate_id"],
+        "capture_id": request["capture_id"],
+        "capture_sha256": request["capture_sha256"],
+        "source_revision": request["source_revision"],
+        "affine_transform_ref": deepcopy(request["affine_transform_ref"]),
+        "point_coordinate_space": "capture_pixel_xyxy",
+        "point": [bbox[0] - 1, (bbox[1] + bbox[3]) / 2],
+    }
+    proposal = validate_vista_proposal(request=request, raw_result=raw_vista)
+    assert proposal["status"] == "VISTA_OUT_OF_BOUNDS"
+    assert "canonical_point" not in proposal
+    projection = run_hybrid_review_projection_task(
+        {
+            "qwen_cleanup_receipt": cleanup,
+            "hybrid_vista_requests": [request],
+            "hybrid_vista_results": [
+                {
+                    "hybrid_vista_request": request,
+                    "hybrid_vista_proposal": proposal,
+                }
+            ],
+            "hybrid_capture_bundle_ref": deepcopy(bundle["bundle_ref"]),
+        }
+    )
+    lineage = _hybrid_supervised_lineage(
+        run_id="run-stage-operation",
+        workflow_revision=workflow_revision,
+        operation_id=operation["operation_id"],
+    )
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_review_projection",
+        "outcome": "completed",
+        "result": projection,
+        "orchestration": {
+            "run_id": "run-stage-operation",
+            "workflow_revision": workflow_revision,
+            "hybrid_capture_bundle_ref": deepcopy(bundle["bundle_ref"]),
+            "capture_bundle": deepcopy(bundle),
+            "capture_image_path": image_path.relative_to(tmp_path).as_posix(),
+            "omni_inventory": deepcopy(inventory),
+            "qwen_bindings": deepcopy(bindings),
+            "fusion_result": deepcopy(fusion),
+        },
+        "supervisor_lineage": lineage,
+        "lifecycle_evidence": {},
+    }
+
+    class _AdoptedRegistry:
+        def read_adopted_result(self, **_kwargs):
+            return {
+                "receipt": {
+                    "task_kind": "panel_learning_hybrid_review_projection",
+                    "result_sha256": "d" * 64,
+                },
+                "response": deepcopy(response),
+            }
+
+    monkeypatch.setattr(panel_api, "learning_stage_worker_registry", _AdoptedRegistry())
+    continued = client.post(
+        "/panel/continue_learning_stage_worker_result",
+        json={
+            "run_id": "run-stage-operation",
+            "expected_revision": workflow_revision,
+            "stage": "screen_understanding",
+            "operation_id": operation["operation_id"],
+            "worker_id": "worker-public-hybrid-review-oob",
+        },
+    ).json()
+
+    assert continued["success"] is True
+    trial_path = tmp_path / continued["data"]["workflow_state"]["stages"][
+        "screen_understanding"
+    ]["evidence_refs"]["trial_path"]
+    trial = json.loads(trial_path.read_text(encoding="utf-8"))
+    task8 = trial["hybrid_review_projection"]
+    candidate = task8["candidates"][0]
+    vista = candidate["model_proposal"]["vista_proposal"]
+
+    assert trial["managed_hybrid_review_projection"]["proposals"][0]["status"] == "VISTA_OUT_OF_BOUNDS"
+    assert "canonical_point" not in trial["managed_hybrid_review_projection"]["proposals"][0]
+    assert vista["status"] == "VISTA_OUT_OF_BOUNDS"
+    assert vista["point"] is None
+    assert candidate["human_point_proposal"] is None
+    assert candidate["reviewed_by_human"] is False
+    assert candidate["action_candidates"] == []
+    assert task8["artifact_is_authorization"] is False
+    assert task8["execute_binding_enabled"] is False
+    assert task8["final_submit_forbidden"] is True
+    assert task8["real_action_requires_gate"] is True
+
+
 def test_explicit_incumbent_mode_preserves_continuation_byte_for_byte() -> None:
     from app.learn.workflow_continuation import interpret_learning_stage_worker_result
 
