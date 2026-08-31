@@ -31,8 +31,8 @@
       "app/learn/recognition/uei/builtin_learning_projection.py": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
       "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
-      "app/learn/workflow_service.py": "2dacaafdce9f8e75beba9b4bb976a1ec69cc45ed2eb1aa264b2df63c85e25687",
-      "app/learn/workflow_worker.py": "9523d5cbd6e694d148582fb760da8d33e96378ba3d94f6397cf78b7ea287d472",
+      "app/learn/workflow_service.py": "456d4b2c5aaf3a306f23a5d46caa17ef5763f1825ddf75203c5eeea9de3751ed",
+      "app/learn/workflow_worker.py": "3203994d2917730f60dcbbd2cb481b42374b7cdd890dbdbe3e9f12eb8f5a2fe8",
       "app/operation/observe/screen_reader.py": "1804ca6fe539da7bdf0e81ebf8c3d2ee991bc2f14bbe18865755419a8a603437",
       "scripts/assemble_portfolio_hybrid_v1_1_benchmark_v2_report.py": "09c29c94743e0f03e3ddcae6b2e657416705ed39d35a090579c091a45a2321e8",
       "scripts/authorize_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "d49dcccb79bbc0d0f338a1774a2f41f8bdc6b5ef8c71d2ab9a81623811454e9b",
@@ -59,7 +59,7 @@
       "tests/test_learning_workflow_stage_worker.py": "5fdcf727b462d3c78906d2f6726f8e6f9410c2fa2eefe6ee6f0b64aa8f5e3eec",
       "tests/test_model_request_cancellation.py": "104be1c889cdb1b4528381dfb0d0e693e9598bfee770c3a333784b1072e47f71",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py": "d2ba7c1b170f50b36f0c17fbfaa93626bbcacaf37fb2d51de30ac109fb93c2c1",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "151b87ef291f88220097d40853ef77c884acc5f0cc9c4818f5effe8d4dd03eb4",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "83b45c49ae065cee4fd6b293738bd9ca74bc8cd4b6e78e10d3dd07c61689753e",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_estimand.py": "33e6462b86c481836e360e9192cda707dac20db89ba1d976fdbd42346fbe2a1a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "6ad6b5c55c549ad63fd245e78814a5fe0bed29bf7c1b9a900473662f4f6a34fd",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py": "0de0b5880516f82f9410cfc5384b7b24162366fe7c7395b4458c1bca773e9dcb",
@@ -75,13 +75,13 @@
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py": "21eb7e54c9fab35ab4c13dd34ceaf779d6d04048fcaed839310f0eaf9b38e32b",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py": "6efcef2bfa4b5ec112a1f257f9f6e5aa411dcbe8d17f505ce9c4c15dea10c22a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py": "7258c3d0fd798118685e170dd7a59d797162dea9ac3cb3b23bd75e19fea824a5",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "9426ffcdeb93bc663285a33a0fb9bf80768cd4666a9ade9e3f6ea61184cc3560",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "bdcc301dee488b0eb8e5ef8ce0ab25dee9020461b1f1029341308489131774b4",
       "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py": "f8cee28ff6981629f52cc71ee5f6a66b3fe33c7619cc8e040b7ab81ab7c0165b",
       "tests/test_uei_v1_projections.py": "0eb30a772d8dba22786450cfc60cd35ff33e5424f8c30069e460a2ab188a09f4"
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "f5f55c4e88f770a5dd0287590fb8a0b7ebe3366d9faf9cca15bd309677987fcb",
+  "content_sha256": "7a7a642d236b74e80b2713065e7ab7a092e5127f543156e75613f2bcd13f3e92",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -116,7 +116,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "de0c7f724fc92e84400d9b6681334ed57744ef9cb58ac35418976741a68e8b21",
+    "file_sha256": "741a1ac315062fda9ca82fe1996ef1dbb4a9607e7d64c03bdd7b824be0055ac0",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
