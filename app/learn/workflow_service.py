@@ -4537,6 +4537,8 @@ _BENCHMARK_V2_HYBRID_SERVICE_BINDING_FIELD = (
 _BENCHMARK_V2_HYBRID_CONTINUATION_RECEIPT_CONTRACT = (
     "benchmark_v2_workflow_service_hybrid_continuation_receipt_v1"
 )
+_BENCHMARK_V2_HYBRID_LEASE_SECONDS = 600
+_BENCHMARK_V2_HYBRID_LEASE_RENEWAL_WINDOW_SECONDS = 300
 
 _BENCHMARK_V2_PROVIDER_TASKS = {
     "panel_learning_hybrid_omni_discovery": "omni",
@@ -6340,6 +6342,72 @@ def _replay_benchmark_v2_hybrid_consumed_operation_ref(
     )
 
 
+def _renew_benchmark_v2_hybrid_pending_lease_if_needed(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    workflow_state: Mapping[str, object],
+    stage_execution: Mapping[str, object],
+    binding: Mapping[str, object],
+    worker_record: Mapping[str, object],
+    consumed_operation_ref: Mapping[str, object],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    checked_at = _utc_datetime(None)
+    lease_expires_at = _parse_utc_datetime(
+        stage_execution.get("lease_expires_at"),
+        field="lease_expires_at",
+    )
+    if checked_at > lease_expires_at:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid lease expired before heartbeat"
+        )
+    if lease_expires_at - checked_at > timedelta(
+        seconds=_BENCHMARK_V2_HYBRID_LEASE_RENEWAL_WINDOW_SECONDS
+    ):
+        return (
+            deepcopy(dict(workflow_state)),
+            deepcopy(dict(stage_execution)),
+            deepcopy(dict(binding)),
+        )
+
+    stage = str(consumed_operation_ref["stage"])
+    current = _persist_benchmark_v2_hybrid_continuation_receipt(
+        composition=composition,
+        workflow_state=workflow_state,
+        stage=stage,
+        binding=binding,
+        consumed_operation_ref=consumed_operation_ref,
+        worker_record=worker_record,
+        returned_status="pending",
+    )
+    persisted_execution = _benchmark_v2_stage_execution(current, stage)
+    persisted_binding = _benchmark_v2_hybrid_service_binding_from_execution(
+        persisted_execution
+    )
+    if persisted_binding is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid renewal receipt was not persisted"
+        )
+    heartbeat = heartbeat_guarded_learning_workflow_stage_operation(
+        composition=composition,
+        run_id=str(consumed_operation_ref["run_id"]),
+        expected_revision=int(current["revision"]),
+        stage=stage,
+        operation_id=str(consumed_operation_ref["operation_id"]),
+        lease_seconds=_BENCHMARK_V2_HYBRID_LEASE_SECONDS,
+        now=checked_at,
+    )
+    current = deepcopy(dict(heartbeat["workflow_state"]))
+    renewed_execution = _benchmark_v2_stage_execution(current, stage)
+    renewed_binding = _benchmark_v2_hybrid_service_binding_from_execution(
+        renewed_execution
+    )
+    if renewed_binding is None:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid renewal lost its service binding"
+        )
+    return current, renewed_execution, renewed_binding
+
+
 def _benchmark_v2_hybrid_terminal_prepared_context(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -6801,6 +6869,16 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                     "benchmark_v2 hybrid advanced status is stale"
                 )
             if status == "pending":
+                current, stage_execution, binding = (
+                    _renew_benchmark_v2_hybrid_pending_lease_if_needed(
+                        composition=composition,
+                        workflow_state=current,
+                        stage_execution=stage_execution,
+                        binding=binding,
+                        worker_record=worker_record,
+                        consumed_operation_ref=supplied,
+                    )
+                )
                 return _project_benchmark_v2_hybrid_step(
                     composition=composition,
                     workflow_state=current,

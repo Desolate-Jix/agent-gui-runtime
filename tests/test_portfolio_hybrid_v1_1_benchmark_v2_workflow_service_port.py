@@ -3065,6 +3065,193 @@ def test_s3_expired_vista_cleanup_projection_rejects_tampered_evidence(
         )
 
 
+@pytest.mark.parametrize(
+    ("remaining_seconds", "expected_heartbeats"),
+    ((301, 0), (300, 1)),
+)
+def test_s3_pending_hybrid_renews_only_inside_window_after_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    remaining_seconds: int,
+    expected_heartbeats: int,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    heartbeat_calls = 0
+    real_heartbeat = (
+        workflow_service.heartbeat_guarded_learning_workflow_stage_operation
+    )
+
+    def _heartbeat(**kwargs):
+        nonlocal heartbeat_calls
+        heartbeat_calls += 1
+        return real_heartbeat(**kwargs)
+
+    monkeypatch.setattr(
+        workflow_service,
+        "heartbeat_guarded_learning_workflow_stage_operation",
+        _heartbeat,
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        execution = store.get("run-h1")["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        original_expiry = datetime.fromisoformat(execution["lease_expires_at"])
+        checked_at = original_expiry - timedelta(seconds=remaining_seconds)
+        real_utc_datetime = workflow_service._utc_datetime
+        monkeypatch.setattr(
+            workflow_service,
+            "_utc_datetime",
+            lambda value: (
+                checked_at if value is None else real_utc_datetime(value)
+            ),
+        )
+
+        returned = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+        current = store.get("run-h1")
+        renewed_execution = current["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+
+        assert returned["status"] == "pending"
+        assert heartbeat_calls == expected_heartbeats
+        if expected_heartbeats == 0:
+            assert returned["operation_ref"] == initial["operation_ref"]
+            assert "heartbeat_count" not in renewed_execution
+            assert (
+                renewed_execution["lease_expires_at"]
+                == execution["lease_expires_at"]
+            )
+            return
+
+        receipt = renewed_execution["benchmark_v2_workflow_service_hybrid"][
+            "continuation_receipt"
+        ]
+        assert receipt["receipt_phase"] == "returned"
+        assert receipt["returned_status"] == "pending"
+        assert receipt["consumed_operation_ref_sha256"] == initial[
+            "operation_ref"
+        ]["content_sha256"]
+        assert renewed_execution["heartbeat_count"] == 1
+        assert datetime.fromisoformat(
+            renewed_execution["lease_expires_at"]
+        ) == checked_at + timedelta(seconds=600)
+        assert returned["operation_ref"]["predecessor_content_sha256"] == initial[
+            "operation_ref"
+        ]["content_sha256"]
+        replay = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+        assert canonical_json_bytes(replay) == canonical_json_bytes(returned)
+        assert heartbeat_calls == 1
+        assert registry.start_calls == 1
+        assert registry.adopt_calls == 0
+    finally:
+        store.close()
+
+
+def test_s3_pending_hybrid_replays_receipt_when_heartbeat_response_is_lost(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    heartbeat_calls = 0
+    real_heartbeat = (
+        workflow_service.heartbeat_guarded_learning_workflow_stage_operation
+    )
+    try:
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        execution = store.get("run-h1")["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        original_expiry = datetime.fromisoformat(execution["lease_expires_at"])
+        checked_at = original_expiry - timedelta(seconds=300)
+        real_utc_datetime = workflow_service._utc_datetime
+        monkeypatch.setattr(
+            workflow_service,
+            "_utc_datetime",
+            lambda value: (
+                checked_at if value is None else real_utc_datetime(value)
+            ),
+        )
+        expected_consumed_refs = [
+            initial["operation_ref"]["content_sha256"]
+        ]
+
+        def _flaky_heartbeat(**kwargs):
+            nonlocal heartbeat_calls
+            heartbeat_calls += 1
+            current_execution = store.get("run-h1")["stages"][
+                "screen_understanding"
+            ]["evidence_refs"]["stage_execution"]
+            receipt = current_execution[
+                "benchmark_v2_workflow_service_hybrid"
+            ]["continuation_receipt"]
+            assert receipt["consumed_operation_ref_sha256"] == (
+                expected_consumed_refs[-1]
+            )
+            if heartbeat_calls == 1:
+                raise RuntimeError("lost heartbeat response after receipt")
+            return real_heartbeat(**kwargs)
+
+        monkeypatch.setattr(
+            workflow_service,
+            "heartbeat_guarded_learning_workflow_stage_operation",
+            _flaky_heartbeat,
+        )
+
+        with pytest.raises(
+            RuntimeError, match="lost heartbeat response after receipt"
+        ):
+            service.continue_hybrid_operation(
+                operation_ref=initial["operation_ref"]
+            )
+
+        after_failure = store.get("run-h1")["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        assert "heartbeat_count" not in after_failure
+        replay = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+        assert replay["status"] == "pending"
+        assert heartbeat_calls == 1
+        expected_consumed_refs.append(
+            replay["operation_ref"]["content_sha256"]
+        )
+
+        renewed = service.continue_hybrid_operation(
+            operation_ref=replay["operation_ref"]
+        )
+        renewed_execution = store.get("run-h1")["stages"][
+            "screen_understanding"
+        ]["evidence_refs"]["stage_execution"]
+        assert renewed["status"] == "pending"
+        assert heartbeat_calls == 2
+        assert renewed_execution["heartbeat_count"] == 1
+        assert renewed["operation_ref"]["predecessor_content_sha256"] == replay[
+            "operation_ref"
+        ]["content_sha256"]
+        assert registry.start_calls == 1
+        assert registry.adopt_calls == 0
+    finally:
+        store.close()
+
+
 def test_s3_early_failure_persists_predecessor_before_terminal_transition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
