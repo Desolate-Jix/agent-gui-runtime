@@ -1207,6 +1207,79 @@ def test_cleanup_parent_projection_accepts_production_actual_provider_and_aggreg
     )
 
 
+def test_cleanup_parent_projection_accepts_production_workflow_service_step_terminal() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_workflow_service_step,
+    )
+
+    _, terminals = _actual_stable_zero_from_existing_service_helper(
+        suffix="workflow-step"
+    )
+    terminal = terminals[0]
+    step = compose_benchmark_v2_workflow_service_step(
+        operation_ref=terminal["operation_ref"],
+        observed_task_kind="server-managed-hybrid-cleanup",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs=terminal["cleanup_refs"],
+    )
+
+    parent = runtime_module._cleanup_parent_ref(
+        step,
+        parent_kind="workflow_service_terminal",
+        name="production workflow service step terminal",
+    )
+
+    assert parent["producer_contract_version"] == (
+        "benchmark_v2_workflow_service_step_v1"
+    )
+    assert parent["producer_content_sha256"] == step["content_sha256"]
+    assert parent["parent_kind"] == "workflow_service_terminal"
+
+
+def test_cleanup_parent_projection_rejects_pending_workflow_service_step() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_workflow_service_step,
+    )
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _actual_operation
+
+    binding = {
+        "run_id": "run-pending-cleanup-parent",
+        "stage": "screen_understanding",
+        "operation_id": "operation-pending-cleanup-parent",
+        "window_binding_ref": {
+            "id": "window-pending-cleanup-parent",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": "capture-pending-cleanup-parent",
+            "content_sha256": "b" * 64,
+        },
+    }
+    pending = compose_benchmark_v2_workflow_service_step(
+        operation_ref=_actual_operation(
+            mode="hybrid_v1_1",
+            operation_id=binding["operation_id"],
+            request_ref={"id": "request-pending", "content_sha256": "c" * 64},
+            binding=binding,
+            revision=1,
+        ),
+        observed_task_kind="panel_learning_hybrid_omni_discovery",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={"worker_cleanup_ref": None, "provider_cleanup_ref": None},
+    )
+
+    with pytest.raises(ValueError, match="status is not terminal"):
+        runtime_module._cleanup_parent_ref(
+            pending,
+            parent_kind="workflow_service_terminal",
+            name="pending workflow service step",
+        )
+
+
 def test_cleanup_parent_projection_accepts_each_production_worker_contract() -> None:
     from app.learn import workflow_worker
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module

@@ -22,6 +22,7 @@ from app.learn.hybrid.benchmark_v2_contracts import (
     content_sha256,
 )
 from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+    BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT,
     compose_benchmark_v2_hybrid_screen_group_start,
     compose_benchmark_v2_workflow_window_binding,
     get_production_benchmark_v2_workflow_service,
@@ -4199,6 +4200,10 @@ def _validate_cleanup_parent_semantics(
         ):
             raise ValueError("provider cleanup receipt is invalid")
         return "provider_cleanup", str(contract)
+    if contract == BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT:
+        step = validate_benchmark_v2_workflow_service_step(producer)
+        _validate_service_terminal(step)
+        return "workflow_service_terminal", str(contract)
     terminal_fields = {
         "status",
         "operation_ref",
