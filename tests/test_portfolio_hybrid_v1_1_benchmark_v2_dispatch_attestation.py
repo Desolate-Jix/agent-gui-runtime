@@ -220,17 +220,19 @@ def _completed_qwen_reconciliation_fixture(
             "process_scope_cleanup": deepcopy(scope_cleanup),
         },
     }
-    tombstone = {
-        "contract_version": "qwen_model_request_owner_receipt_v1",
-        "status": "finalized",
-        "owner_request_id": request_id,
-        "profile_id": lease["profile_id"],
-        "lease_id": lease["lease_id"],
-        "incarnation_id": lease["incarnation_id"],
-        "server_termination": release["server_termination"],
-        "release_result": deepcopy(release),
-        "finalization_token": "token-qwen",
-    }
+    tombstone = seal_immutable(
+        {
+            "contract_version": "qwen_model_request_owner_receipt_v1",
+            "status": "finalized",
+            "owner_request_id": request_id,
+            "profile_id": lease["profile_id"],
+            "lease_id": lease["lease_id"],
+            "incarnation_id": lease["incarnation_id"],
+            "server_termination": release["server_termination"],
+            "release_result": deepcopy(release),
+            "finalization_token": "token-qwen",
+        }
+    )
     runtime_owner = seal_immutable(
         {
             "contract_version": "hybrid_qwen_model_owner_v1",
@@ -241,7 +243,7 @@ def _completed_qwen_reconciliation_fixture(
             "model_lease": deepcopy(lease),
             "profile": {"profile_id": "profile-qwen"},
             "release_result": deepcopy(release),
-            "tombstone_sha256": seal_immutable(tombstone)["content_sha256"],
+            "tombstone_sha256": tombstone["content_sha256"],
             "scope_cleanup": deepcopy(scope_cleanup),
         }
     )
@@ -1529,6 +1531,7 @@ def test_completed_qwen_cleanup_uses_sealed_runtime_owner_when_acquisition_sidec
         "tampered_runtime_owner",
         "stale_lineage",
         "stale_scope_cleanup",
+        "tampered_tombstone_digest",
         "partial_acquisition_artifact",
     ],
 )
@@ -1566,6 +1569,10 @@ def test_completed_qwen_reconciliation_cleanup_fails_closed(
         reconciliation["provider_cleanup_evidence"]["scope_cleanup_evidence"][
             "stable_zero_observations"
         ] = 4
+    elif mutation == "tampered_tombstone_digest":
+        reconciliation["provider_cleanup_evidence"]["owner_tombstone"][
+            "content_sha256"
+        ] = "0" * 64
     else:
         paths = model_server._qwen_acquisition_artifact_paths(
             str(record["model_request_id"])

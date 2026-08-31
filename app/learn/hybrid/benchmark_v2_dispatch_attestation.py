@@ -911,8 +911,10 @@ def _authoritative_completed_qwen_reconciliation_cleanup(
             "server_termination",
             "release_result",
             "finalization_token",
+            "content_sha256",
         }
-        or owner.get("tombstone_sha256") != content_sha256(tombstone)
+        or tombstone.get("content_sha256") != content_sha256(tombstone)
+        or owner.get("tombstone_sha256") != tombstone.get("content_sha256")
         or tombstone.get("contract_version")
         != "qwen_model_request_owner_receipt_v1"
         or tombstone.get("status") != "finalized"

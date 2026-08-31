@@ -578,6 +578,9 @@ def test_abnormal_qwen_owner_reconciliation_finalizes_exact_lease_and_tombstone(
             expected_scope_name=scope_name,
         )
         assert evidence["status"] == "verified"
+        assert evidence["owner_tombstone"]["content_sha256"] == (
+            model_server.content_sha256(evidence["owner_tombstone"])
+        )
         assert model_server.qwen_model_lease_is_active(lease) is False
         assert model_server._load_qwen_owner_tombstone(
             "qwen-abnormal-owner"

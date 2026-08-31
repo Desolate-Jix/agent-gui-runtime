@@ -1321,6 +1321,7 @@ def reconcile_hybrid_qwen_owner(
     ):
         raise RuntimeError("Hybrid Qwen owner tombstone is inconsistent")
     _validate_exact_qwen_cleanup_evidence(release_result, lease)
+    tombstone = seal_immutable(tombstone)
     if qwen_model_lease_is_active(lease) or _qwen_lease_state_path(
         str(lease["incarnation_id"])
     ).exists():
@@ -1341,7 +1342,7 @@ def reconcile_hybrid_qwen_owner(
     document.pop("content_sha256", None)
     document["state"] = "released"
     document["release_result"] = deepcopy(release_result)
-    document["tombstone_sha256"] = content_sha256(tombstone)
+    document["tombstone_sha256"] = tombstone["content_sha256"]
     document["scope_cleanup"] = scope_cleanup
     _write_hybrid_qwen_runtime(path, seal_immutable(document))
     return {
