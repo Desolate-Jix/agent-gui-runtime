@@ -471,7 +471,7 @@ def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
                 "items": {
                     "type": "object",
                     "properties": {
-                        "semantic_id": {"type": "string", "pattern": "^semantic/"},
+                        "semantic_id": {"type": "string", "pattern": "^semantic/.*$"},
                         "role": {"type": "string"},
                         "label": {"type": "string"},
                         "description": {"type": "string"},

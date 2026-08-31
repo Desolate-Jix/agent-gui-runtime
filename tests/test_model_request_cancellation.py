@@ -3134,7 +3134,7 @@ def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
     assert orphan_semantics_schema["items"] == {
         "type": "object",
         "properties": {
-            "semantic_id": {"type": "string", "pattern": "^semantic/"},
+            "semantic_id": {"type": "string", "pattern": "^semantic/.*$"},
             "role": {"type": "string"},
             "label": {"type": "string"},
             "description": {"type": "string"},
