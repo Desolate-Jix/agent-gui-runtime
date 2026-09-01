@@ -7636,6 +7636,280 @@ def test_hybrid_omni_cleanup_accepts_canonical_safe_result_success_status(
     assert inventory["source_cleanup_evidence"]["provider_receipt"]["status"] == "succeeded"
 
 
+def test_hybrid_omni_failure_preserves_verified_cleanup_and_failure_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_worker
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+    from app.learn.recognition.uei import omniparser_shadow_adapter, store
+
+    run_id = "run-omni-canonical-failure"
+    task_kind = "panel_learning_hybrid_omni_discovery"
+    lineage = _hybrid_lineage(run_id=run_id, task_kind=task_kind)
+    invocation_id = "invocation/canonical-failure"
+    result_ref = {"id": "result/canonical-failure", "content_sha256": "1" * 64}
+    receipt_ref = {"id": "receipt/canonical-failure", "content_sha256": "2" * 64}
+    error_ref = {"id": "error/canonical-failure", "content_sha256": "3" * 64}
+    capture_lineage_ref = {"id": "capture/canonical-failure", "content_sha256": "4" * 64}
+    provider_result = {
+        "contract_version": "hybrid_omni_discovery_result_v1",
+        "outcome": "failed",
+        "hybrid_capture_bundle_ref": capture_lineage_ref,
+        "provider_receipt_ref": receipt_ref,
+        "provider_result_ref": result_ref,
+        "provider_error_ref": error_ref,
+        "provider_invocation_id": invocation_id,
+        "provider_claim_status": "complete",
+        "provider_status": "failed",
+        "provider_reason_class": "runtime_worker_failed",
+        "failure_reason": "runtime_worker_failed",
+        "inventory": None,
+        "omni_candidate_ledger": None,
+        "duration_ms": 0,
+        "cleanup_status": "clean",
+    }
+    stored = {
+        "provider_runtime_receipt_v1": {
+            "receipt_id": "receipt/canonical-failure",
+            "result_ref": result_ref,
+            "error_ref": error_ref,
+            "provider_id": "local.runtime/omniparser",
+            "profile_id": "local.runtime/omniparser/shadow-v2",
+            "cleanup_status": "clean",
+            "status": "failed",
+            "reason_class": "runtime_worker_failed",
+            "capture_lineage_ref": capture_lineage_ref,
+        },
+        "provider_safe_result_v1": {
+            "result_id": "result/canonical-failure",
+            "status": "failed",
+            "error_ref": error_ref,
+            "provider_id": "local.runtime/omniparser",
+            "profile_id": "local.runtime/omniparser/shadow-v2",
+            "capture_lineage_ref": capture_lineage_ref,
+        },
+    }
+
+    class _ObjectStore:
+        def __init__(self, *, root: Path) -> None:
+            self.root = root
+
+        def get(self, ref: dict, *, contract_version: str) -> dict:
+            expected_ref = (
+                receipt_ref
+                if contract_version == "provider_runtime_receipt_v1"
+                else result_ref
+            )
+            assert ref == expected_ref
+            return deepcopy(stored[contract_version])
+
+    process_identity = {"pid": 4201, "create_time_ns": 100_000_000_001}
+    scope_name = process_scope_name(lineage, "omni")
+    cleanup_observation = {
+        "cleanup_status": "verified",
+        "process_scope_name": scope_name,
+        "process_scope_cleanup": {
+            "scope_name": scope_name,
+            "cleanup_status": "verified",
+        },
+        "process_scope_acquisition": {
+            "scope_name": scope_name,
+            "member_pids": [process_identity["pid"]],
+        },
+        "process_identity": process_identity,
+        "inventory_observable": True,
+        "provider_processes_after": [],
+        "orphan_descendant_identities": [],
+        "lease_files_after": [],
+        "active_listeners_after": [],
+    }
+    monkeypatch.setattr(store, "UEIObjectStore", _ObjectStore)
+    monkeypatch.setattr(
+        omniparser_shadow_adapter,
+        "load_omniparser_invocation_cleanup_observation",
+        lambda value: deepcopy(cleanup_observation),
+    )
+
+    receipt = workflow_worker._omni_cleanup_receipt(
+        provider_result,
+        lineage=lineage,
+        predecessor_sha256="5" * 64,
+    )
+
+    assert receipt["cleanup_status"] == "verified"
+    assert receipt["termination_reason"] == "completed"
+    assert receipt["provider_result_sha256"] == result_ref["content_sha256"]
+    assert receipt["source_cleanup_evidence"]["provider_receipt"]["status"] == "failed"
+
+    from app.learn import workflow_continuation
+
+    qwen_start_count = 0
+
+    def _unexpected_qwen_projection(task_kind: str, payload: dict) -> dict:
+        nonlocal qwen_start_count
+        qwen_start_count += 1
+        return {"task_kind": task_kind, "payload": payload}
+
+    monkeypatch.setattr(
+        workflow_continuation,
+        "_hybrid_next_worker",
+        _unexpected_qwen_projection,
+    )
+    decision = workflow_continuation.interpret_learning_stage_worker_result(
+        stage="screen_understanding",
+        task_kind=task_kind,
+        response={
+            "contract_version": "learning_hybrid_managed_stage_result_v1",
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "task_kind": task_kind,
+            "outcome": provider_result["outcome"],
+            "result": deepcopy(provider_result),
+            "orchestration": {"omni_cleanup_receipt": deepcopy(receipt)},
+        },
+        learning_pipeline_mode="hybrid_v1_1",
+    )
+
+    assert provider_result["outcome"] == "failed"
+    assert decision["outcome"] == "safe_stopped"
+    assert "next_worker" not in decision
+    assert qwen_start_count == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "tampered_value"),
+    [
+        ("contract_version", "hybrid_omni_discovery_result_v0"),
+        ("outcome", "completed"),
+        ("hybrid_capture_bundle_ref", None),
+        ("provider_result_ref", None),
+        ("provider_error_ref", {"id": "error/bad"}),
+        ("provider_receipt_ref", None),
+        ("provider_invocation_id", ""),
+        ("provider_claim_status", "not_created"),
+        ("provider_status", "succeeded"),
+        ("provider_reason_class", ""),
+        ("provider_reason_class", "Runtime Worker Failed"),
+        ("failure_reason", ""),
+        ("failure_reason", "runtime worker failed"),
+        ("inventory", {}),
+        ("omni_candidate_ledger", {}),
+        ("duration_ms", True),
+        ("cleanup_status", "failed"),
+    ],
+)
+def test_hybrid_omni_failure_cleanup_rejects_noncanonical_result_fields(
+    field: str,
+    tampered_value: object,
+) -> None:
+    from app.learn import workflow_worker
+
+    result = {
+        "contract_version": "hybrid_omni_discovery_result_v1",
+        "outcome": "failed",
+        "hybrid_capture_bundle_ref": {
+            "id": "capture/canonical-failure",
+            "content_sha256": "4" * 64,
+        },
+        "provider_result_ref": {
+            "id": "result/canonical-failure",
+            "content_sha256": "1" * 64,
+        },
+        "provider_error_ref": {
+            "id": "error/canonical-failure",
+            "content_sha256": "3" * 64,
+        },
+        "provider_receipt_ref": {
+            "id": "receipt/canonical-failure",
+            "content_sha256": "2" * 64,
+        },
+        "provider_invocation_id": "invocation/canonical-failure",
+        "provider_claim_status": "complete",
+        "provider_status": "failed",
+        "provider_reason_class": "runtime_worker_failed",
+        "failure_reason": "runtime_worker_failed",
+        "inventory": None,
+        "omni_candidate_ledger": None,
+        "duration_ms": 0,
+        "cleanup_status": "clean",
+    }
+    result[field] = tampered_value
+
+    with pytest.raises(
+        workflow_worker.LearningStageWorkerError,
+        match="Hybrid Omni cleanup result is invalid",
+    ):
+        workflow_worker._omni_cleanup_receipt(
+            result,
+            lineage=_hybrid_lineage(
+                run_id="run-omni-canonical-failure-tamper",
+                task_kind="panel_learning_hybrid_omni_discovery",
+            ),
+            predecessor_sha256="5" * 64,
+        )
+
+def test_hybrid_omni_failure_cleanup_rejects_result_extensions() -> None:
+    from app.learn import workflow_worker
+
+    result = {
+        "contract_version": "hybrid_omni_discovery_result_v1",
+        "outcome": "failed",
+        "hybrid_capture_bundle_ref": {
+            "id": "capture/canonical-failure",
+            "content_sha256": "4" * 64,
+        },
+        "provider_result_ref": {
+            "id": "result/canonical-failure",
+            "content_sha256": "1" * 64,
+        },
+        "provider_error_ref": {
+            "id": "error/canonical-failure",
+            "content_sha256": "3" * 64,
+        },
+        "provider_receipt_ref": {
+            "id": "receipt/canonical-failure",
+            "content_sha256": "2" * 64,
+        },
+        "provider_invocation_id": "invocation/canonical-failure",
+        "provider_claim_status": "complete",
+        "provider_status": "failed",
+        "provider_reason_class": "runtime_worker_failed",
+        "failure_reason": "runtime_worker_failed",
+        "inventory": None,
+        "omni_candidate_ledger": None,
+        "duration_ms": 0,
+        "cleanup_status": "clean",
+        "unexpected": True,
+    }
+
+    with pytest.raises(
+        workflow_worker.LearningStageWorkerError,
+        match="Hybrid Omni cleanup result is invalid",
+    ):
+        workflow_worker._omni_cleanup_receipt(
+            result,
+            lineage=_hybrid_lineage(
+                run_id="run-omni-canonical-failure-extension",
+                task_kind="panel_learning_hybrid_omni_discovery",
+            ),
+            predecessor_sha256="5" * 64,
+        )
+
+    result.pop("unexpected")
+    result.pop("provider_claim_status")
+    with pytest.raises(
+        workflow_worker.LearningStageWorkerError,
+        match="Hybrid Omni cleanup result is invalid",
+    ):
+        workflow_worker._omni_cleanup_receipt(
+            result,
+            lineage=_hybrid_lineage(
+                run_id="run-omni-canonical-failure-missing-field",
+                task_kind="panel_learning_hybrid_omni_discovery",
+            ),
+            predecessor_sha256="5" * 64,
+        )
+
+
 def test_hybrid_vista_completion_releases_before_review_receipt(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

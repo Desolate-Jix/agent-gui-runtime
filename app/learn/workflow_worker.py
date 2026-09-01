@@ -1783,19 +1783,90 @@ def _hybrid_previous_provider_result_sha256(
     return _artifact_digest(value)
 
 
+_HYBRID_OMNI_FAILED_RESULT_FIELDS = frozenset(
+    {
+        "contract_version",
+        "outcome",
+        "hybrid_capture_bundle_ref",
+        "provider_result_ref",
+        "provider_error_ref",
+        "provider_receipt_ref",
+        "provider_invocation_id",
+        "provider_claim_status",
+        "provider_status",
+        "provider_reason_class",
+        "failure_reason",
+        "inventory",
+        "omni_candidate_ledger",
+        "duration_ms",
+        "cleanup_status",
+    }
+)
+
+
+def _is_hybrid_omni_failure_token(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and value == value.strip()
+        and 0 < len(value) <= 128
+        and all(
+            character in "abcdefghijklmnopqrstuvwxyz0123456789_:-."
+            for character in value
+        )
+    )
+
+
+def _is_closed_hybrid_omni_failed_result(result: object) -> bool:
+    if not isinstance(result, dict) or set(result) != _HYBRID_OMNI_FAILED_RESULT_FIELDS:
+        return False
+    duration_ms = result.get("duration_ms")
+    invocation_id = result.get("provider_invocation_id")
+    return (
+        result.get("contract_version") == "hybrid_omni_discovery_result_v1"
+        and result.get("outcome") == "failed"
+        and _is_immutable_ref(result.get("hybrid_capture_bundle_ref"))
+        and _is_immutable_ref(result.get("provider_result_ref"))
+        and _is_immutable_ref(result.get("provider_error_ref"))
+        and _is_immutable_ref(result.get("provider_receipt_ref"))
+        and isinstance(invocation_id, str)
+        and invocation_id.startswith("invocation/")
+        and bool(invocation_id.removeprefix("invocation/"))
+        and invocation_id == invocation_id.strip()
+        and result.get("provider_claim_status") == "complete"
+        and result.get("provider_status") == "failed"
+        and _is_hybrid_omni_failure_token(result.get("provider_reason_class"))
+        and _is_hybrid_omni_failure_token(result.get("failure_reason"))
+        and result.get("inventory") is None
+        and result.get("omni_candidate_ledger") is None
+        and isinstance(duration_ms, int)
+        and not isinstance(duration_ms, bool)
+        and 0 <= duration_ms <= 86_400_000
+        and result.get("cleanup_status") == "clean"
+    )
+
+
 def _omni_cleanup_receipt(
     result: object,
     *,
     lineage: dict[str, Any],
     predecessor_sha256: str,
 ) -> dict[str, Any]:
-    if not isinstance(result, dict) or not isinstance(result.get("inventory"), dict):
+    if not isinstance(result, dict):
+        raise LearningStageWorkerError("Hybrid Omni cleanup result is invalid")
+    inventory_result = result.get("inventory")
+    if result.get("outcome") == "failed":
+        if not _is_closed_hybrid_omni_failed_result(result):
+            raise LearningStageWorkerError("Hybrid Omni cleanup result is invalid")
+        provider_result_sha256 = _artifact_digest(result["provider_result_ref"])
+    elif isinstance(inventory_result, dict):
+        provider_result_sha256 = _artifact_digest(inventory_result)
+    else:
         raise LearningStageWorkerError("Hybrid Omni cleanup result is invalid")
     inventory = _observe_hybrid_omni_cleanup(
         result,
         lineage=lineage,
         predecessor_sha256=predecessor_sha256,
-        provider_result_sha256=_artifact_digest(result["inventory"]),
+        provider_result_sha256=provider_result_sha256,
     )
     return release_hybrid_provider(
         "omni",
@@ -1825,22 +1896,37 @@ def _observe_hybrid_omni_cleanup(
     invocation_id = str(result.get("provider_invocation_id") or "").strip()
     expected_suffix = invocation_id.rsplit("/", 1)[-1]
     omni_inventory = result.get("inventory")
-    refs_match = (
+    common_refs_match = (
         receipt.get("receipt_id") == f"receipt/{expected_suffix}"
         and persisted_result.get("result_id") == f"result/{expected_suffix}"
         and receipt.get("result_ref") == result_ref
         and receipt.get("provider_id") == "local.runtime/omniparser"
         and receipt.get("profile_id") == "local.runtime/omniparser/shadow-v2"
         and receipt.get("cleanup_status") == "clean"
-        and receipt.get("status") == "succeeded"
-        and persisted_result.get("status") == "success"
         and persisted_result.get("provider_id") == receipt.get("provider_id")
         and persisted_result.get("profile_id") == receipt.get("profile_id")
         and persisted_result.get("capture_lineage_ref")
         == receipt.get("capture_lineage_ref")
+    )
+    success_refs_match = (
+        result.get("outcome") in {None, "completed"}
+        and receipt.get("status") == "succeeded"
+        and persisted_result.get("status") == "success"
         and isinstance(omni_inventory, dict)
         and omni_inventory.get("provider_result_ref") == result_ref
     )
+    failure_error_ref = result.get("provider_error_ref")
+    failure_refs_match = (
+        _is_closed_hybrid_omni_failed_result(result)
+        and receipt.get("status") == "failed"
+        and persisted_result.get("status") == "failed"
+        and result.get("provider_status") == "failed"
+        and omni_inventory is None
+        and receipt.get("error_ref") == failure_error_ref
+        and persisted_result.get("error_ref") == failure_error_ref
+        and receipt.get("reason_class") == result.get("provider_reason_class")
+    )
+    refs_match = common_refs_match and (success_refs_match or failure_refs_match)
     cleanup_observation = load_omniparser_invocation_cleanup_observation(invocation_id)
     from app.learn.hybrid.windows_process_scope import process_scope_name
 
