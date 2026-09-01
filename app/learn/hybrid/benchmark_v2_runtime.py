@@ -3658,13 +3658,49 @@ def _validate_partial_actual_terminal_cleanup(
     cleanup = terminal["cleanup_refs"]
     worker_cleanup = cleanup.get("worker_cleanup_ref")
     provider_cleanup = cleanup.get("provider_cleanup_ref")
-    if not isinstance(worker_cleanup, Mapping) or not isinstance(
-        provider_cleanup, Mapping
-    ):
+    if not isinstance(worker_cleanup, Mapping):
         raise ValueError("partial actual terminal cleanup proof is unavailable")
     worker_kind, _ = _validate_cleanup_parent_semantics(
         worker_cleanup, name="partial actual worker cleanup"
     )
+    if provider_cleanup is None:
+        terminal = validate_benchmark_v2_workflow_service_step(terminal)
+        operation = terminal["operation_ref"]
+        worker = operation["worker_ref"]
+        worker_cleanup = terminal["cleanup_refs"]["worker_cleanup_ref"]
+        context_projection = terminal.get("provider_dispatch_context_projection")
+        qwen_zero_dispatch = (
+            worker_kind == "worker_cleanup"
+            and terminal.get("status") == "safe_stopped"
+            and terminal.get("observed_task_kind")
+            == "panel_learning_hybrid_qwen_binding"
+            and terminal.get("adopted_result_projection") is None
+            and terminal.get("terminal_receipt") is None
+            and operation.get("mode") == "hybrid_v1_1"
+            and isinstance(worker, Mapping)
+            and worker.get("task_kind")
+            == "panel_learning_hybrid_qwen_binding"
+            and operation.get("predecessor_content_sha256") is not None
+            and worker_cleanup.get("contract_version")
+            == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+            and isinstance(context_projection, Mapping)
+            and context_projection.get("provider") == "qwen"
+        )
+        operation_identity = ("run_id", "stage", "operation_id")
+        worker_identity = ("worker_id", "model_request_id", "payload_sha256")
+        if not qwen_zero_dispatch or any(
+            worker_cleanup.get(name) != operation[name]
+            for name in operation_identity
+        ) or any(
+            worker_cleanup.get(name) != worker[name]
+            for name in worker_identity
+        ):
+            raise ValueError(
+                "partial actual terminal cleanup Qwen zero-dispatch lineage is stale"
+            )
+        return terminal
+    if not isinstance(provider_cleanup, Mapping):
+        raise ValueError("partial actual terminal cleanup proof is unavailable")
     provider_kind, _ = _validate_cleanup_parent_semantics(
         provider_cleanup, name="partial actual provider cleanup"
     )
@@ -4257,9 +4293,10 @@ def _validate_actual_operations_cleanup_aggregate(
         raise ValueError("actual operations cleanup aggregate operation is duplicated")
 
     cleanup_shas = [
-        str(terminal["cleanup_refs"][name]["content_sha256"])
+        str(cleanup_ref["content_sha256"])
         for terminal in partial_terminals
-        for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+        for cleanup_ref in terminal["cleanup_refs"].values()
+        if isinstance(cleanup_ref, Mapping)
     ] + [
         str(cleanup[name]["content_sha256"])
         for cleanup in completed_cleanups
@@ -6667,6 +6704,20 @@ def _actual_provider_cleanup_parent_refs(
             if operation_sha in completed_cleanups:
                 raise ValueError("actual terminal cleanup proof is duplicated")
             cleanup_source = cleanup
+        elif isinstance(cleanup.get("worker_cleanup_ref"), Mapping) and (
+            cleanup.get("provider_cleanup_ref") is None
+        ):
+            if operation_sha in completed_cleanups:
+                raise ValueError("actual terminal cleanup proof is duplicated")
+            _validate_partial_actual_terminal_cleanup(terminal)
+            result.append(
+                _cleanup_parent_ref(
+                    cleanup["worker_cleanup_ref"],
+                    parent_kind="worker_cleanup",
+                    name="actual worker_cleanup_ref",
+                )
+            )
+            continue
         elif cleanup == {
             "worker_cleanup_ref": None,
             "provider_cleanup_ref": None,

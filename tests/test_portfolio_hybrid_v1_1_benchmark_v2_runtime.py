@@ -1083,6 +1083,117 @@ def _actual_completed_review_cleanup(
     )
 
 
+def _actual_qwen_zero_dispatch_terminal(
+    operation_id: str,
+    *,
+    violation: str | None = None,
+) -> dict[str, object]:
+    run_id = f"run-{operation_id}"
+    stage = "screen_understanding"
+    task_kind = (
+        "panel_learning_hybrid_omni_discovery"
+        if violation == "wrong_task_kind"
+        else "panel_learning_hybrid_qwen_binding"
+    )
+    window_binding_ref = {
+        "id": f"window-{operation_id}",
+        "content_sha256": "1" * 64,
+    }
+    capture_ref = {
+        "id": f"capture-{operation_id}",
+        "content_sha256": "2" * 64,
+    }
+    worker = _sealed(
+        {
+            "contract_version": "benchmark_v2_workflow_service_generic_worker_ref_v1",
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "worker_id": f"worker-{operation_id}",
+            "model_request_id": f"request-{operation_id}",
+            "payload_sha256": hashlib.sha256(operation_id.encode()).hexdigest(),
+            "task_kind": task_kind,
+        }
+    )
+    operation = incumbent.compose_benchmark_v2_workflow_service_operation_ref(
+        mode="hybrid_v1_1",
+        run_id=run_id,
+        stage=stage,
+        operation_id=operation_id,
+        workflow_state_ref={
+            "run_id": run_id,
+            "revision": 7,
+            "content_sha256": "7" * 64,
+        },
+        stage_execution_ref={
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "revision": 7,
+            "content_sha256": "8" * 64,
+        },
+        request_ref={
+            "id": f"request-ref-{operation_id}",
+            "content_sha256": "3" * 64,
+        },
+        window_binding_ref=window_binding_ref,
+        capture_ref=capture_ref,
+        worker_ref=worker,
+        status="safe_stopped",
+        predecessor_content_sha256=(
+            None if violation == "missing_predecessor" else "4" * 64
+        ),
+    )
+    context_operation = _sealed(
+        {
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "revision": 5,
+            "window_binding_ref": window_binding_ref,
+            "capture_ref": capture_ref,
+        }
+    )
+    context_projection = (
+        incumbent.compose_benchmark_v2_provider_dispatch_context_projection(
+            provider="omni" if violation == "wrong_provider" else "qwen",
+            context_content_sha256="5" * 64,
+            operation_ref=context_operation,
+        )
+    )
+    worker_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            "run_id": run_id,
+            "stage": stage,
+            "operation_id": operation_id,
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "backend_compute_termination": (
+                "not_covered"
+                if violation == "nonterminal_cleanup"
+                else "not_running"
+            ),
+            "model_service_compute_termination": "request_not_active",
+            "cancellation_ref": {"content_sha256": "6" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    return incumbent.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation,
+        observed_task_kind=task_kind,
+        provider_dispatch_context_projection=context_projection,
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={
+            "worker_cleanup_ref": worker_cleanup,
+            "provider_cleanup_ref": None,
+        },
+    )
+
+
 def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> None:
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
 
@@ -4274,6 +4385,96 @@ def test_partial_actual_review_no_provider_cleanup_is_exact_and_non_authorizing(
     foreign["content_sha256"] = content_sha256(foreign)
     with pytest.raises(ValueError, match="cleanup.*stale"):
         runtime_module._validate_partial_actual_terminal_cleanup(foreign)
+
+
+def test_qwen_zero_dispatch_partial_cleanup_keeps_only_worker_parent() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    terminal_a = _actual_qwen_zero_dispatch_terminal("qwen-zero-a")
+    terminal_b = _actual_qwen_zero_dispatch_terminal("qwen-zero-b")
+
+    assert (
+        runtime_module._validate_partial_actual_terminal_cleanup(terminal_a)
+        == terminal_a
+    )
+    parents = runtime_module._actual_provider_cleanup_parent_refs(
+        actual_terminals=[terminal_a],
+        actual_attestations=[],
+        actual_completed_hybrid_cleanups=[],
+    )
+    assert [item["parent_kind"] for item in parents] == ["worker_cleanup"]
+    runtime_module._validate_actual_operations_cleanup_aggregate(
+        {
+            "full_group_attestation_refs": [],
+            "pre_reservation_recovery_refs": [],
+            "completed_hybrid_cleanup_refs": [],
+            "partial_workflow_terminal_refs": [terminal_a, terminal_b],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "violation",
+    (
+        "wrong_task_kind",
+        "wrong_provider",
+        "missing_predecessor",
+        "nonterminal_cleanup",
+        "stale_window_binding",
+        "stale_capture",
+        "mismatched_step_worker",
+    ),
+)
+def test_qwen_zero_dispatch_partial_cleanup_rejects_ambiguous_lineage(
+    violation: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    terminal = _actual_qwen_zero_dispatch_terminal(
+        f"qwen-zero-{violation}",
+        violation=(
+            None
+            if violation
+            in {"stale_window_binding", "stale_capture", "mismatched_step_worker"}
+            else violation
+        ),
+    )
+    if violation in {"stale_window_binding", "stale_capture"}:
+        projection = deepcopy(terminal["provider_dispatch_context_projection"])
+        context_operation = deepcopy(projection["operation_ref"])
+        context_operation.pop("content_sha256")
+        ref_name = (
+            "window_binding_ref"
+            if violation == "stale_window_binding"
+            else "capture_ref"
+        )
+        context_operation[ref_name] = {
+            "id": f"foreign-{ref_name}",
+            "content_sha256": "f" * 64,
+        }
+        projection["operation_ref"] = _sealed(context_operation)
+        projection.pop("content_sha256")
+        terminal["provider_dispatch_context_projection"] = _sealed(projection)
+        terminal.pop("content_sha256")
+        terminal = _sealed(terminal)
+    elif violation == "mismatched_step_worker":
+        terminal["worker_ref"] = _sealed(
+            {
+                "worker_id": "foreign-worker",
+                "model_request_id": "foreign-request",
+                "payload_sha256": "f" * 64,
+            }
+        )
+        terminal.pop("content_sha256")
+        terminal = _sealed(terminal)
+    with pytest.raises(
+        ValueError,
+        match=(
+            "partial actual terminal cleanup|Hybrid worker cleanup|"
+            "benchmark workflow service"
+        ),
+    ):
+        runtime_module._validate_partial_actual_terminal_cleanup(terminal)
 
 
 @pytest.mark.parametrize(
