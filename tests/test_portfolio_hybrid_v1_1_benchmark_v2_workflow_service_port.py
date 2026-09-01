@@ -3610,14 +3610,9 @@ def _s3_fusion_safe_stop_response(worker: dict[str, object]) -> dict[str, object
     }
 
 
-def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from types import SimpleNamespace
-
-    from app.learn import workflow_service
-    from app.learn.hybrid import benchmark_v2_incumbent_operation as operation
-
+def _s3_qwen_closed_json_quality_failure_response(
+    worker: dict[str, object],
+) -> dict[str, object]:
     raw = '{"bindings":['
     try:
         json.loads(raw)
@@ -3636,8 +3631,8 @@ def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
             "execute_binding_enabled": False,
             "evidence_use": "benchmark_non_authorizing_diagnostic",
             "request_lineage": {
-                "model_request_id": "request-h1",
-                "request_content_sha256": "1" * 64,
+                "model_request_id": worker["model_request_id"],
+                "request_content_sha256": worker["payload_sha256"],
                 "screenshot_sha256": "2" * 64,
                 "profile_id": "qwen3_vl_8b_q4_k_m",
                 "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
@@ -3647,14 +3642,16 @@ def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
                 "response_body_sha256": "3" * 64,
                 "raw_message_content": raw,
                 "raw_message_content_utf8_bytes": len(raw.encode("utf-8")),
-                "raw_message_content_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                "raw_message_content_sha256": hashlib.sha256(
+                    raw.encode("utf-8")
+                ).hexdigest(),
                 "finish_reason": "length",
                 "usage": {"completion_tokens": 4096},
             },
             "parse_error": parse_error,
         }
     )
-    response = {
+    return {
         "contract_version": "learning_hybrid_managed_stage_result_v1",
         "learning_pipeline_mode": "hybrid_v1_1",
         "task_kind": "panel_learning_hybrid_qwen_binding",
@@ -3669,11 +3666,167 @@ def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
         },
         "orchestration": {},
     }
-    from app.learn.hybrid.benchmark_v2_contracts import (
-        validate_qwen_closed_json_quality_failure_response,
+
+
+def _s3_qwen_dispatch_context(tmp_path: Path) -> dict[str, object]:
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    binding = _s3_window_binding()
+    operation_ref = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "revision": 4,
+        "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+        "capture_ref": deepcopy(binding["capture_ref"]),
+    }
+    return attestation.compose_benchmark_dispatch_context(
+        provider="qwen",
+        operation_ref=operation_ref,
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-h1",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(
+            operation_ref
+        ),
     )
 
-    validate_qwen_closed_json_quality_failure_response(response)
+
+def test_s3_qwen_completed_cleanup_safe_stop_projects_adopted_result_bridge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+        monkeypatch.setattr(
+            workflow_service,
+            "build_learning_pipeline_initial_worker_request",
+            lambda **_kwargs: {
+                "task_kind": "panel_learning_hybrid_qwen_binding",
+                "payload": _hybrid_worker_payload(),
+            },
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_dispatch_context_for_worker",
+            lambda **_kwargs: _s3_qwen_dispatch_context(tmp_path),
+        )
+
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        worker = registry.current
+        assert worker is not None
+        response = _s3_qwen_closed_json_quality_failure_response(worker)
+        registry.complete_current(response)
+        worker["benchmark_provider_cleanup_ref"] = _s3_provider_cleanup_ref(worker)
+
+        returned = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+        replay = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert returned["status"] == "safe_stopped"
+        assert returned["adopted_result_projection"]["response"] == response
+        assert returned["cleanup_refs"]["worker_cleanup_ref"][
+            "contract_version"
+        ] == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+        assert returned["cleanup_refs"]["provider_cleanup_ref"] == worker[
+            "benchmark_provider_cleanup_ref"
+        ]
+        assert canonical_json_bytes(replay) == canonical_json_bytes(returned)
+        assert registry.adopt_calls == 1
+        assert registry.cancel_calls == 0
+        assert registry.materialize_cleanup_calls == 0
+    finally:
+        store.close()
+
+
+def test_completed_worker_cleanup_bridge_rejects_missing_or_forged_lineage() -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    registry.start(
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        task_kind="panel_learning_hybrid_qwen_binding",
+        payload=_hybrid_worker_payload(),
+    )
+    registry.complete_current({"outcome": "failed"})
+    worker = registry.current
+    assert worker is not None
+    registry.adopt_result(
+        worker_id=worker["worker_id"],
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+    )
+    provider_cleanup = _s3_provider_cleanup_ref(worker)
+    worker_cleanup = (
+        workflow_service._compose_benchmark_v2_hybrid_completed_worker_cleanup_ref(
+            worker_record=worker,
+            provider_cleanup_ref=provider_cleanup,
+        )
+    )
+
+    assert workflow_service._benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+        worker_cleanup_ref=worker_cleanup,
+        provider_cleanup_ref=provider_cleanup,
+        worker_record=worker,
+    )
+    assert not workflow_service._benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+        worker_cleanup_ref=worker_cleanup,
+        provider_cleanup_ref=None,
+        worker_record=worker,
+    )
+    non_exact_worker_cleanup = deepcopy(worker_cleanup)
+    non_exact_worker_cleanup["unexpected"] = True
+    _reseal(non_exact_worker_cleanup)
+    assert not workflow_service._benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+        worker_cleanup_ref=non_exact_worker_cleanup,
+        provider_cleanup_ref=provider_cleanup,
+        worker_record=worker,
+    )
+    forged_worker_cleanup = _reseal(deepcopy(worker_cleanup))
+    forged_worker_cleanup["worker_id"] = "forged-worker"
+    _reseal(forged_worker_cleanup)
+    assert not workflow_service._benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+        worker_cleanup_ref=forged_worker_cleanup,
+        provider_cleanup_ref=provider_cleanup,
+        worker_record=worker,
+    )
+    forged_provider_cleanup = _reseal(deepcopy(provider_cleanup))
+    forged_provider_cleanup["worker_id"] = "forged-worker"
+    _reseal(forged_provider_cleanup)
+    assert not workflow_service._benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+        worker_cleanup_ref=worker_cleanup,
+        provider_cleanup_ref=forged_provider_cleanup,
+        worker_record=worker,
+    )
+
+
+def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_incumbent_operation as operation
+
     worker = {
         "run_id": "run-h1",
         "stage": "screen_understanding",
@@ -3684,6 +3837,12 @@ def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
         "task_kind": "panel_learning_hybrid_qwen_binding",
         "result_adopted": True,
     }
+    response = _s3_qwen_closed_json_quality_failure_response(worker)
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        validate_qwen_closed_json_quality_failure_response,
+    )
+
+    validate_qwen_closed_json_quality_failure_response(response)
     projection = operation.compose_benchmark_v2_adopted_result_projection(
         mode="hybrid_v1_1",
         run_id="run-h1",
@@ -5526,7 +5685,7 @@ def test_s3_safe_stopped_projection_requires_terminal_cancellation_cleanup(
         "model_request_id": "request-h1",
         "payload_sha256": "1" * 64,
         "task_kind": "panel_learning_hybrid_qwen_binding",
-        "result_adopted": True,
+        "result_adopted": False,
         "benchmark_provider_cleanup_ref": {"content_sha256": "2" * 64},
     }
     captured: dict[str, object] = {}

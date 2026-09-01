@@ -6734,6 +6734,7 @@ def _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
     *,
     worker_cleanup_ref: object,
     worker_record: Mapping[str, object],
+    provider_cleanup_ref: object = None,
 ) -> bool:
     if not isinstance(worker_cleanup_ref, Mapping):
         return False
@@ -6754,7 +6755,7 @@ def _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
         "execute_binding_enabled",
         "content_sha256",
     }
-    return (
+    cancellation_cleanup_verified = (
         set(worker_cleanup) == cleanup_fields
         and worker_cleanup.get("contract_version")
         == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
@@ -6777,6 +6778,81 @@ def _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
         and worker_cleanup.get("artifact_is_authorization") is False
         and worker_cleanup.get("execute_binding_enabled") is False
     )
+    if cancellation_cleanup_verified:
+        return True
+    return _benchmark_v2_hybrid_completed_worker_cleanup_is_verified(
+        worker_cleanup_ref=worker_cleanup,
+        provider_cleanup_ref=provider_cleanup_ref,
+        worker_record=worker_record,
+    )
+
+
+def _benchmark_v2_hybrid_completed_worker_cleanup_is_verified(
+    *,
+    worker_cleanup_ref: Mapping[str, object],
+    provider_cleanup_ref: object,
+    worker_record: Mapping[str, object],
+) -> bool:
+    if not isinstance(provider_cleanup_ref, Mapping):
+        return False
+    try:
+        provider_cleanup = _validate_benchmark_v2_hybrid_provider_cleanup(
+            cleanup=provider_cleanup_ref,
+            worker_record=worker_record,
+        )
+        authoritative_worker_record_sha256 = (
+            _benchmark_v2_hybrid_completed_worker_record_sha256(
+                worker_record=worker_record,
+                provider_cleanup_ref=provider_cleanup,
+            )
+        )
+        worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+    except (LearningWorkflowStageOperationError, KeyError, TypeError, ValueError):
+        return False
+    completed_cleanup_fields = {
+        "contract_version",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "worker_status",
+        "runtime_attached",
+        "result_available",
+        "authoritative_worker_record_sha256",
+        "provider_cleanup_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    return (
+        set(worker_cleanup_ref) == completed_cleanup_fields
+        and worker_cleanup_ref.get("contract_version")
+        == "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+        and worker_cleanup_ref.get("content_sha256")
+        == content_sha256(dict(worker_cleanup_ref))
+        and all(
+            worker_cleanup_ref.get(name) == worker_identity[name]
+            for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+        )
+        and worker_cleanup_ref.get("worker_status") == "completed"
+        and worker_cleanup_ref.get("runtime_attached") is False
+        and worker_cleanup_ref.get("result_available") is True
+        and worker_cleanup_ref.get("authoritative_worker_record_sha256")
+        == authoritative_worker_record_sha256
+        and worker_cleanup_ref.get("provider_cleanup_ref")
+        == {"content_sha256": provider_cleanup["content_sha256"]}
+        and worker_cleanup_ref.get("artifact_is_authorization") is False
+        and worker_cleanup_ref.get("execute_binding_enabled") is False
+    )
 
 
 def _benchmark_v2_hybrid_qwen_zero_dispatch_cleanup_verified(
@@ -6796,6 +6872,7 @@ def _benchmark_v2_hybrid_qwen_zero_dispatch_cleanup_verified(
         _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
             worker_cleanup_ref=worker_cleanup_ref,
             worker_record=worker_record,
+            provider_cleanup_ref=provider_cleanup_ref,
         )
         and provider_cleanup_ref is None
         and worker_record.get("benchmark_provider_cleanup_ref") is None
@@ -7338,6 +7415,7 @@ def _project_benchmark_v2_hybrid_step(
             _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
                 worker_cleanup_ref=worker_cleanup_ref,
                 worker_record=worker_record,
+                provider_cleanup_ref=provider_cleanup_ref,
             )
         )
         if terminal_worker_cleanup and isinstance(provider_cleanup_ref, Mapping):
