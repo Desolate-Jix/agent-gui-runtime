@@ -6545,6 +6545,59 @@ def _materialize_benchmark_v2_hybrid_completed_cleanup(
     )
 
 
+def _materialize_benchmark_v2_hybrid_qwen_quality_safe_stop_cleanup(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    binding: Mapping[str, object],
+    worker_record: Mapping[str, object],
+) -> dict[str, Any]:
+    if (
+        worker_record.get("task_kind")
+        != "panel_learning_hybrid_qwen_binding"
+        or worker_record.get("status") != "completed"
+        or worker_record.get("runtime_attached") is not False
+        or worker_record.get("result_available") is not True
+        or worker_record.get("result_adopted") is not True
+    ):
+        return deepcopy(dict(worker_record))
+    provider_cleanup_ref = worker_record.get("benchmark_provider_cleanup_ref")
+    if provider_cleanup_ref is not None:
+        if not isinstance(provider_cleanup_ref, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid completed provider cleanup is invalid"
+            )
+        return deepcopy(dict(worker_record))
+    candidate_projection = _read_benchmark_v2_hybrid_adopted_projection(
+        composition=composition,
+        worker_record=worker_record,
+        binding=binding,
+    )
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        validate_qwen_closed_json_quality_failure_response,
+    )
+
+    try:
+        quality_response = validate_qwen_closed_json_quality_failure_response(
+            candidate_projection.get("response")
+        )
+        model_request_ref = candidate_projection.get("model_request_ref")
+        if (
+            not isinstance(model_request_ref, Mapping)
+            or quality_response["result"]["diagnostics"]["request_lineage"][
+                "model_request_id"
+            ]
+            != model_request_ref.get("id")
+        ):
+            raise ValueError("Qwen quality failure model request lineage differs")
+    except (TypeError, ValueError):
+        return deepcopy(dict(worker_record))
+    return _materialize_benchmark_v2_hybrid_completed_cleanup(
+        composition=composition,
+        binding=binding,
+        worker_record=worker_record,
+    )
+
+
 def _project_benchmark_v2_hybrid_expired_failure_cleanup(
     *,
     workflow_state: Mapping[str, object],
@@ -7768,6 +7821,12 @@ def _replay_benchmark_v2_hybrid_consumed_operation_ref(
             raise LearningWorkflowStageOperationError(
                 "benchmark_v2 hybrid consumed operation replay is stale"
             )
+    if returned_status == "safe_stopped":
+        worker_record = _materialize_benchmark_v2_hybrid_qwen_quality_safe_stop_cleanup(
+            composition=composition,
+            binding=binding,
+            worker_record=worker_record,
+        )
     return _project_benchmark_v2_hybrid_step(
         composition=composition,
         workflow_state=current,
@@ -8275,6 +8334,14 @@ def _continue_benchmark_v2_hybrid_workflow_service(
                 worker_record=worker_record,
             )
             if status in {"complete", "safe_stopped"}:
+                if status == "safe_stopped":
+                    worker_record = (
+                        _materialize_benchmark_v2_hybrid_qwen_quality_safe_stop_cleanup(
+                            composition=composition,
+                            binding=binding,
+                            worker_record=worker_record,
+                        )
+                    )
                 return _project_benchmark_v2_hybrid_step(
                     composition=composition,
                     workflow_state=current,
@@ -8531,6 +8598,14 @@ def _continue_benchmark_v2_hybrid_workflow_service(
             stage=stage,
             worker_record=worker_record,
         )
+        if status == "safe_stopped":
+            worker_record = (
+                _materialize_benchmark_v2_hybrid_qwen_quality_safe_stop_cleanup(
+                    composition=composition,
+                    binding=binding,
+                    worker_record=worker_record,
+                )
+            )
         if status not in {"complete", "safe_stopped"}:
             current = _persist_benchmark_v2_hybrid_continuation_receipt(
                 composition=composition,

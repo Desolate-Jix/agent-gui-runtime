@@ -3696,7 +3696,7 @@ def _s3_qwen_dispatch_context(tmp_path: Path) -> dict[str, object]:
     )
 
 
-def test_s3_qwen_completed_cleanup_safe_stop_projects_adopted_result_bridge(
+def test_s3_qwen_closed_json_quality_safe_stop_materializes_cleanup_before_projection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3729,7 +3729,7 @@ def test_s3_qwen_completed_cleanup_safe_stop_projects_adopted_result_bridge(
         assert worker is not None
         response = _s3_qwen_closed_json_quality_failure_response(worker)
         registry.complete_current(response)
-        worker["benchmark_provider_cleanup_ref"] = _s3_provider_cleanup_ref(worker)
+        assert worker.get("benchmark_provider_cleanup_ref") is None
 
         returned = service.continue_hybrid_operation(
             operation_ref=initial["operation_ref"]
@@ -3750,6 +3750,207 @@ def test_s3_qwen_completed_cleanup_safe_stop_projects_adopted_result_bridge(
         assert canonical_json_bytes(replay) == canonical_json_bytes(returned)
         assert registry.adopt_calls == 1
         assert registry.cancel_calls == 0
+        assert registry.materialize_cleanup_calls == 1
+    finally:
+        store.close()
+
+
+def test_s3_qwen_quality_safe_stop_replay_retries_after_pre_materialization_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+        monkeypatch.setattr(
+            workflow_service,
+            "build_learning_pipeline_initial_worker_request",
+            lambda **_kwargs: {
+                "task_kind": "panel_learning_hybrid_qwen_binding",
+                "payload": _hybrid_worker_payload(),
+            },
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_dispatch_context_for_worker",
+            lambda **_kwargs: _s3_qwen_dispatch_context(tmp_path),
+        )
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        worker = registry.current
+        assert worker is not None
+        response = _s3_qwen_closed_json_quality_failure_response(worker)
+        registry.complete_current(response)
+        materialize = registry.materialize_completed_hybrid_provider_cleanup
+        materialization_attempts = 0
+
+        def _lost_response(**kwargs: object) -> dict[str, object]:
+            nonlocal materialization_attempts
+            materialization_attempts += 1
+            if materialization_attempts == 1:
+                raise RuntimeError("lost completed provider cleanup response")
+            return materialize(**kwargs)
+
+        monkeypatch.setattr(
+            registry,
+            "materialize_completed_hybrid_provider_cleanup",
+            _lost_response,
+        )
+
+        with pytest.raises(RuntimeError, match="lost completed provider cleanup response"):
+            service.continue_hybrid_operation(operation_ref=initial["operation_ref"])
+
+        state = store.get("run-h1")
+        assert state["stages"]["screen_understanding"]["status"] == "safe_stopped"
+        returned = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+
+        assert returned["status"] == "safe_stopped"
+        assert returned["adopted_result_projection"]["response"] == response
+        assert returned["cleanup_refs"]["worker_cleanup_ref"]["contract_version"] == (
+            "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+        )
+        assert returned["cleanup_refs"]["provider_cleanup_ref"] == worker[
+            "benchmark_provider_cleanup_ref"
+        ]
+        assert materialization_attempts == 2
+        assert registry.materialize_cleanup_calls == 1
+        assert registry.cancel_calls == 0
+    finally:
+        store.close()
+
+
+def test_s3_qwen_quality_safe_stop_replay_short_circuits_after_post_materialization_lost_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+
+    registry = _S3Registry()
+    store, _composition, service, _started = _s3_service(tmp_path, registry)
+    try:
+        monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path.resolve())
+        monkeypatch.setattr(
+            workflow_service,
+            "build_learning_pipeline_initial_worker_request",
+            lambda **_kwargs: {
+                "task_kind": "panel_learning_hybrid_qwen_binding",
+                "payload": _hybrid_worker_payload(),
+            },
+        )
+        monkeypatch.setattr(
+            workflow_service,
+            "_benchmark_v2_dispatch_context_for_worker",
+            lambda **_kwargs: _s3_qwen_dispatch_context(tmp_path),
+        )
+        initial = service.start_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        worker = registry.current
+        assert worker is not None
+        response = _s3_qwen_closed_json_quality_failure_response(worker)
+        registry.complete_current(response)
+        materialize = registry.materialize_completed_hybrid_provider_cleanup
+        materialization_attempts = 0
+
+        def _lost_response_after_materialization(**kwargs: object) -> dict[str, object]:
+            nonlocal materialization_attempts
+            materialization_attempts += 1
+            result = materialize(**kwargs)
+            if materialization_attempts == 1:
+                raise RuntimeError("lost completed provider cleanup response after materialization")
+            return result
+
+        monkeypatch.setattr(
+            registry,
+            "materialize_completed_hybrid_provider_cleanup",
+            _lost_response_after_materialization,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="lost completed provider cleanup response after materialization",
+        ):
+            service.continue_hybrid_operation(operation_ref=initial["operation_ref"])
+
+        provider_cleanup = worker.get("benchmark_provider_cleanup_ref")
+        assert isinstance(provider_cleanup, dict)
+        returned = service.continue_hybrid_operation(
+            operation_ref=initial["operation_ref"]
+        )
+
+        assert returned["status"] == "safe_stopped"
+        assert returned["adopted_result_projection"]["response"] == response
+        assert returned["cleanup_refs"]["worker_cleanup_ref"]["contract_version"] == (
+            "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+        )
+        assert returned["cleanup_refs"]["provider_cleanup_ref"] == provider_cleanup
+        assert materialization_attempts == 1
+        assert registry.materialize_cleanup_calls == 1
+        assert registry.cancel_calls == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("scenario", ("non_quality_response", "not_adopted"))
+def test_qwen_quality_safe_stop_cleanup_materialization_rejects_nonquality_or_incomplete_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+) -> None:
+    from app.learn import workflow_service
+
+    registry = _S3Registry()
+    store, composition, _service, _started = _s3_service(tmp_path, registry)
+    try:
+        worker = registry.start(
+            run_id="run-h1",
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            task_kind="panel_learning_hybrid_qwen_binding",
+            payload=_hybrid_worker_payload(),
+        )
+        registry.complete_current({"outcome": "failed"})
+        worker = registry.current
+        assert worker is not None
+        worker["result_adopted"] = scenario != "not_adopted"
+
+        if scenario == "not_adopted":
+            monkeypatch.setattr(
+                workflow_service,
+                "_read_benchmark_v2_hybrid_adopted_projection",
+                lambda **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("incomplete worker read adopted result")
+                ),
+            )
+        else:
+            monkeypatch.setattr(
+                workflow_service,
+                "_read_benchmark_v2_hybrid_adopted_projection",
+                lambda **_kwargs: {
+                    "response": {"outcome": "failed"},
+                    "model_request_ref": {"id": worker["model_request_id"]},
+                },
+            )
+
+        refreshed = (
+            workflow_service._materialize_benchmark_v2_hybrid_qwen_quality_safe_stop_cleanup(
+                composition=composition,
+                binding={"provider_dispatch_context_refs": {"qwen": {}}},
+                worker_record=worker,
+            )
+        )
+
+        assert refreshed == worker
         assert registry.materialize_cleanup_calls == 0
     finally:
         store.close()
