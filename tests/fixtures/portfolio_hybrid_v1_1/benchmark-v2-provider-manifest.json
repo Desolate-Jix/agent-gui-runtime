@@ -137,7 +137,7 @@
         "role": "panel_service"
       },
       {
-        "file_sha256": "a428a0d2d507046b86554f49dc53d404edb86a3d9a5497f91da0925e2095ce75",
+        "file_sha256": "9cea85d2cb5514ffd525cfa4bfaf81da979705f3856eabedea0b1544c5d60a03",
         "relative_path": "app/core/model_server.py",
         "role": "model_server"
       },
@@ -187,12 +187,12 @@
         "role": "predictions"
       },
       {
-        "file_sha256": "22031a8f2bf89ca1fe2c84ea1f06eabb323c4de0902bfdef983479e7c190748c",
+        "file_sha256": "b3f605ad675041a814934007da6cf1e01fc8232d11a6127e2020247c77a2d1c5",
         "relative_path": "app/learn/hybrid/qwen_binding.py",
         "role": "qwen_binding"
       },
       {
-        "file_sha256": "dc15ed82547abd4b48f17be0da4b0c7f91e71ba07f6732e8b5de823d1b310e31",
+        "file_sha256": "aed935423698bb2aa87e3d22025af796773476dc02a84c0d29303f592eafb046",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
       },
@@ -202,7 +202,7 @@
         "role": "window_owner"
       },
       {
-        "file_sha256": "d53f04a0ba1f374e70801eb619485fce3d216d076d76d513512b383453b3860c",
+        "file_sha256": "7551a9bad5a89d795c61fbfab638433ef409ba788c984a86e81913c1e31ead85",
         "relative_path": "app/learn/hybrid/benchmark_v2_worker_binding.py",
         "role": "worker_binding"
       },
@@ -237,12 +237,12 @@
         "role": "uei_projections"
       },
       {
-        "file_sha256": "242a7ccbf5f60daea1ce993b5a177e9c2a47594407f5173b61aaf36f1e812a2a",
+        "file_sha256": "413f0f99b695b9ce6b1ce48903396f433fdbc5238d8f6f697d47da28411c9029",
         "relative_path": "app/learn/workflow_service.py",
         "role": "workflow_service"
       },
       {
-        "file_sha256": "6e93f76e1cb605b0d6f5c1d8f38faab95bbb3106fbe11728031bf0abfc29d6e3",
+        "file_sha256": "b4b7be9ecec1a12a892ec141894f7a44c492dd041ed97957feab069e911b3e50",
         "relative_path": "app/learn/workflow_worker.py",
         "role": "workflow_worker"
       },
@@ -257,7 +257,7 @@
         "role": "test_window"
       },
       {
-        "file_sha256": "85a5b0cfb07b1049f65530b44c8943582ecdac2749a6a9ea17963ec109142035",
+        "file_sha256": "457a33bb2a34b6c6740215bbaf17da59ff13f39beb9aa4514b13d32d876d109a",
         "relative_path": "scripts/run_omniparser_learn_smoke.py",
         "role": "omniparser_learn_smoke"
       },
