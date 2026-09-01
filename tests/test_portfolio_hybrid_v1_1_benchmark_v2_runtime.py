@@ -1084,6 +1084,8 @@ def _actual_completed_review_cleanup(
 
 
 def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
     binding = {
         "stage": "screen_understanding",
         "window_binding_ref": {
@@ -1177,6 +1179,27 @@ def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> No
 
     assert incumbent.validate_benchmark_v2_actual_operations_stable_zero(receipt) == receipt
 
+    actual_terminals = [
+        review_step,
+        *(
+            service.terminal_steps_by_sha[
+                str(item["operation_ref"]["content_sha256"])
+            ]
+            for item in incumbent_terminals
+        ),
+    ]
+    cleanup_parent_refs = runtime_module._actual_provider_cleanup_parent_refs(
+        actual_terminals=actual_terminals,
+        actual_attestations=[receipt],
+        actual_completed_hybrid_cleanups=[],
+    )
+    assert len(cleanup_parent_refs) == 12
+    producer_shas = {
+        str(item["producer_content_sha256"]) for item in cleanup_parent_refs
+    }
+    assert review_cleanup["worker_cleanup_ref"]["content_sha256"] in producer_shas
+    assert review_cleanup["provider_cleanup_ref"]["content_sha256"] in producer_shas
+
     for field, value in (
         ("task_kind", "panel_learning_calibration_sequence"),
         ("provider_role", "qwen"),
@@ -1188,6 +1211,36 @@ def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> No
         foreign["content_sha256"] = content_sha256(foreign)
         with pytest.raises(ValueError):
             incumbent.validate_benchmark_v2_actual_operations_stable_zero(foreign)
+        with pytest.raises(ValueError):
+            runtime_module._actual_provider_cleanup_parent_refs(
+                actual_terminals=actual_terminals,
+                actual_attestations=[foreign],
+                actual_completed_hybrid_cleanups=[],
+            )
+
+    with pytest.raises(
+        ValueError,
+        match="actual terminal cleanup has no exact cleanup proof",
+    ):
+        runtime_module._actual_provider_cleanup_parent_refs(
+            actual_terminals=actual_terminals,
+            actual_attestations=[],
+            actual_completed_hybrid_cleanups=[],
+        )
+
+    with pytest.raises(ValueError, match="cleanup proof is duplicated"):
+        runtime_module._actual_provider_cleanup_parent_refs(
+            actual_terminals=actual_terminals,
+            actual_attestations=[receipt],
+            actual_completed_hybrid_cleanups=[review_cleanup],
+        )
+
+    with pytest.raises(ValueError, match="terminal cleanup proof is duplicated"):
+        runtime_module._actual_provider_cleanup_parent_refs(
+            actual_terminals=[*actual_terminals, review_step],
+            actual_attestations=[receipt],
+            actual_completed_hybrid_cleanups=[],
+        )
 
 
 def test_actual_stable_zero_uses_incumbent_terminal_receipt_contract_hash() -> None:

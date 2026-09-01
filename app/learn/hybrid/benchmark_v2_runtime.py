@@ -2505,51 +2505,13 @@ class _BenchmarkV2ProductionRuntime:
                 else None
             )
         if actual_terminals or actual_completed_hybrid_cleanups:
-            provider_cleanup_refs = []
-            completed_operation_shas = {
-                str(item["operation_ref"]["content_sha256"])
-                for item in actual_completed_hybrid_cleanups
-            }
-            for terminal in actual_terminals:
-                cleanup = terminal["cleanup_refs"]
-                if all(
-                    isinstance(cleanup.get(name), Mapping)
-                    for name in ("worker_cleanup_ref", "provider_cleanup_ref")
-                ):
-                    provider_cleanup_refs.extend(
-                        _cleanup_parent_ref(
-                            cleanup[name],
-                            parent_kind=parent_kind,
-                            name=f"actual {name}",
-                        )
-                        for name, parent_kind in (
-                            ("worker_cleanup_ref", "worker_cleanup"),
-                            ("provider_cleanup_ref", "provider_cleanup"),
-                        )
-                    )
-                elif (
-                    cleanup
-                    == {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
-                    and str(terminal["operation_ref"]["content_sha256"])
-                    in completed_operation_shas
-                ):
-                    continue
-                else:
-                    raise ValueError(
-                        "actual terminal cleanup has no exact cleanup proof"
-                    )
-            for completed_cleanup in actual_completed_hybrid_cleanups:
-                provider_cleanup_refs.extend(
-                    _cleanup_parent_ref(
-                        completed_cleanup[name],
-                        parent_kind=parent_kind,
-                        name=f"actual completed Hybrid {name}",
-                    )
-                    for name, parent_kind in (
-                        ("worker_cleanup_ref", "worker_cleanup"),
-                        ("provider_cleanup_ref", "provider_cleanup"),
-                    )
-                )
+            provider_cleanup_refs = _actual_provider_cleanup_parent_refs(
+                actual_terminals=actual_terminals,
+                actual_attestations=actual_attestations,
+                actual_completed_hybrid_cleanups=(
+                    actual_completed_hybrid_cleanups
+                ),
+            )
         else:
             provider_cleanup_refs = _provider_cleanup_refs(service_terminal)
         counts = dict(self.resource_counts())
@@ -6657,6 +6619,91 @@ def _provider_cleanup_refs(
                     name=name,
                 )
             )
+    return result
+
+
+def _actual_provider_cleanup_parent_refs(
+    *,
+    actual_terminals: list[Mapping[str, object]],
+    actual_attestations: list[Mapping[str, object]],
+    actual_completed_hybrid_cleanups: list[Mapping[str, object]],
+) -> list[dict[str, Any]]:
+    attested_cleanup_entries: dict[str, Mapping[str, object]] = {}
+    for raw_attestation in actual_attestations:
+        attestation = validate_benchmark_v2_actual_operations_stable_zero(
+            raw_attestation
+        )
+        for entry in attestation["cleanup_entries"]:
+            operation_sha = str(entry["operation_ref_sha256"])
+            if operation_sha in attested_cleanup_entries:
+                raise ValueError(
+                    "actual stable-zero cleanup operation proof is duplicated"
+                )
+            attested_cleanup_entries[operation_sha] = entry
+
+    completed_cleanups: dict[str, dict[str, Any]] = {}
+    for raw_cleanup in actual_completed_hybrid_cleanups:
+        cleanup = validate_benchmark_v2_actual_completed_hybrid_cleanup(raw_cleanup)
+        operation_sha = str(cleanup["operation_ref"]["content_sha256"])
+        if operation_sha in completed_cleanups:
+            raise ValueError("actual completed Hybrid cleanup proof is duplicated")
+        completed_cleanups[operation_sha] = cleanup
+    if set(attested_cleanup_entries).intersection(completed_cleanups):
+        raise ValueError("actual cleanup proof is duplicated across sources")
+
+    result: list[dict[str, Any]] = []
+    terminal_operation_shas: set[str] = set()
+    for raw_terminal in actual_terminals:
+        terminal = _validate_service_terminal(raw_terminal)
+        operation_sha = str(terminal["operation_ref"]["content_sha256"])
+        if operation_sha in terminal_operation_shas:
+            raise ValueError("actual terminal cleanup proof is duplicated")
+        terminal_operation_shas.add(operation_sha)
+        cleanup = terminal["cleanup_refs"]
+        if all(
+            isinstance(cleanup.get(name), Mapping)
+            for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+        ):
+            if operation_sha in completed_cleanups:
+                raise ValueError("actual terminal cleanup proof is duplicated")
+            cleanup_source = cleanup
+        elif cleanup == {
+            "worker_cleanup_ref": None,
+            "provider_cleanup_ref": None,
+        }:
+            if operation_sha in completed_cleanups:
+                continue
+            cleanup_source = attested_cleanup_entries.get(operation_sha)
+            if cleanup_source is None:
+                raise ValueError(
+                    "actual terminal cleanup has no exact cleanup proof"
+                )
+        else:
+            raise ValueError("actual terminal cleanup has no exact cleanup proof")
+        result.extend(
+            _cleanup_parent_ref(
+                cleanup_source[name],
+                parent_kind=parent_kind,
+                name=f"actual {name}",
+            )
+            for name, parent_kind in (
+                ("worker_cleanup_ref", "worker_cleanup"),
+                ("provider_cleanup_ref", "provider_cleanup"),
+            )
+        )
+
+    for cleanup in completed_cleanups.values():
+        result.extend(
+            _cleanup_parent_ref(
+                cleanup[name],
+                parent_kind=parent_kind,
+                name=f"actual completed Hybrid {name}",
+            )
+            for name, parent_kind in (
+                ("worker_cleanup_ref", "worker_cleanup"),
+                ("provider_cleanup_ref", "provider_cleanup"),
+            )
+        )
     return result
 
 
