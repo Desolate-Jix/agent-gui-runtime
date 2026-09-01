@@ -5242,8 +5242,10 @@ def _validate_benchmark_v2_dispatch_response(
     provider_dispatch_context_refs: Mapping[str, object] | None = None,
     provider_case_ref: Mapping[str, object] | None = None,
     allow_verified_owner_cleanup_replay: bool = False,
+    hybrid_task_kind: str | None = None,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        read_latest_benchmark_dispatch_receipt,
         validate_benchmark_dispatch_context_ref,
         validate_benchmark_dispatch_receipt_refs,
     )
@@ -5272,19 +5274,83 @@ def _validate_benchmark_v2_dispatch_response(
             raise LearningWorkflowStageOperationError(
                 "benchmark_v2 server-issued dispatch contexts are unavailable"
             )
+        try:
+            issued_context_refs = {
+                str(provider): validate_benchmark_dispatch_context_ref(context_ref)
+                for provider, context_ref in provider_dispatch_context_refs.items()
+            }
+        except (TypeError, ValueError) as error:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 server-issued dispatch context is invalid"
+            ) from error
+        if any(
+            context_ref["provider"] != provider
+            for provider, context_ref in issued_context_refs.items()
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 server-issued dispatch context provider differs"
+            )
+        if (
+            hybrid_task_kind == "panel_learning_hybrid_qwen_binding"
+            and "qwen" not in issued_context_refs
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 server-issued dispatch context is invalid"
+            )
+        try:
+            expected_operation_lineage = {
+                "run_id": window_binding["run_id"],
+                "stage": window_binding["stage"],
+                "operation_id": window_binding["operation_id"],
+                "window_binding_ref": window_binding["window_binding_ref"],
+                "capture_ref": window_binding["capture_ref"],
+            }
+            expected_journal_path = str(
+                _benchmark_v2_dispatch_journal_path(
+                    composition=composition,
+                    window_binding=window_binding,
+                )
+            )
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 current dispatch context lineage is invalid"
+            ) from error
+        for context_ref in issued_context_refs.values():
+            context = context_ref["dispatch_context"]
+            operation_ref = context["operation_ref"]
+            if (
+                any(
+                    operation_ref.get(name) != expected
+                    for name, expected in expected_operation_lineage.items()
+                )
+                or context["receipt_journal_path"] != expected_journal_path
+            ):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 server-issued dispatch context lineage is invalid"
+                )
         expected_context_refs: dict[str, dict[str, Any]] = {}
         expected_contexts: dict[str, dict[str, Any]] = {}
         for provider in expected_provider_counts:
-            try:
-                context_ref = validate_benchmark_dispatch_context_ref(
-                    provider_dispatch_context_refs[provider]
-                )
-            except (KeyError, TypeError, ValueError) as error:
+            context_ref = issued_context_refs.get(provider)
+            if context_ref is None:
                 raise LearningWorkflowStageOperationError(
                     "benchmark_v2 server-issued dispatch context is invalid"
-                ) from error
+                )
             expected_context_refs[provider] = context_ref
             expected_contexts[provider] = deepcopy(context_ref["dispatch_context"])
+        for provider in set(issued_context_refs) - set(expected_provider_counts):
+            try:
+                latest_receipt = read_latest_benchmark_dispatch_receipt(
+                    dispatch_context=issued_context_refs[provider]["dispatch_context"]
+                )
+            except (OSError, TypeError, ValueError) as error:
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 omitted dispatch context absence is invalid"
+                ) from error
+            if latest_receipt is not None:
+                raise LearningWorkflowStageOperationError(
+                    "benchmark_v2 committed dispatch context was omitted"
+                )
         try:
             projected = {
                 provider: validate_benchmark_dispatch_context_ref(context_ref)
@@ -5383,10 +5449,49 @@ def _benchmark_v2_expected_dispatch_counts(
         )
     if task_kind == "panel_learning_hybrid_omni_discovery":
         return {"omni": 1}
-    if task_kind in {
-        "panel_learning_hybrid_qwen_binding",
-        "panel_learning_hybrid_fusion",
-    }:
+    if task_kind == "panel_learning_hybrid_qwen_binding":
+        if response.get("outcome") != "failed":
+            return {"omni": 1, "qwen": 1}
+        result = response.get("result")
+        receipt_refs = orchestration.get(
+            "benchmark_v2_provider_dispatch_receipt_refs"
+        )
+        if (
+            not isinstance(result, Mapping)
+            or result.get("contract_version")
+            != "learning_hybrid_stage_failure_v1"
+            or not isinstance(result.get("failure_reason"), str)
+            or not str(result["failure_reason"]).strip()
+            or not isinstance(result.get("error_type"), str)
+            or not str(result["error_type"]).strip()
+            or not isinstance(result.get("model_lifecycle"), Mapping)
+            or not isinstance(receipt_refs, list)
+            or any(not isinstance(item, Mapping) for item in receipt_refs)
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Qwen handler failure dispatch evidence is invalid"
+            )
+        qwen_dispatch_count = sum(
+            item.get("provider") == "qwen" for item in receipt_refs
+        )
+        if qwen_dispatch_count not in {0, 1}:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Qwen handler failure dispatch count is invalid"
+            )
+        model_lifecycle = result["model_lifecycle"]
+        if qwen_dispatch_count == 0 and (
+            model_lifecycle.get("status") != "request_not_active"
+            or model_lifecycle.get("model_service_compute_termination")
+            != "request_not_active"
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Qwen zero-dispatch failure lifecycle is invalid"
+            )
+        expected = {"omni": 1}
+        if qwen_dispatch_count:
+            expected["qwen"] = qwen_dispatch_count
+        return expected
+    if task_kind == "panel_learning_hybrid_fusion":
         return {"omni": 1, "qwen": 1}
     if task_kind not in {
         "panel_learning_calibration_sequence",
@@ -5483,6 +5588,7 @@ def _validate_benchmark_v2_hybrid_adoption(
         hybrid=True,
         dispatch_revision=None,
         provider_dispatch_context_refs=provider_dispatch_context_refs,
+        hybrid_task_kind=task_kind,
     )
 
 
@@ -6706,6 +6812,50 @@ def _project_benchmark_v2_hybrid_step(
                     returned_worker_ref=returned_worker_ref,
                     worker_cleanup_ref=deepcopy(dict(worker_cleanup_ref)),
                 )
+        if isinstance(worker_cleanup_ref, Mapping) and isinstance(
+            provider_cleanup_ref, Mapping
+        ):
+            worker_cleanup = dict(worker_cleanup_ref)
+            worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+            cleanup_fields = {
+                "contract_version",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+                "backend_compute_termination",
+                "model_service_compute_termination",
+                "cancellation_ref",
+                "artifact_is_authorization",
+                "execute_binding_enabled",
+                "content_sha256",
+            }
+            recovered_cleanup_verified = (
+                set(worker_cleanup) == cleanup_fields
+                and worker_cleanup.get("contract_version")
+                == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+                and worker_cleanup.get("content_sha256")
+                == content_sha256(worker_cleanup)
+                and all(
+                    worker_cleanup.get(name) == worker_identity[name]
+                    for name in (
+                        "run_id",
+                        "stage",
+                        "operation_id",
+                        "worker_id",
+                        "model_request_id",
+                        "payload_sha256",
+                    )
+                )
+                and worker_cleanup.get("backend_compute_termination")
+                in {"not_running", "terminated"}
+                and worker_cleanup.get("model_service_compute_termination")
+                in {"request_not_active", "terminated"}
+                and worker_cleanup.get("artifact_is_authorization") is False
+                and worker_cleanup.get("execute_binding_enabled") is False
+            )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:

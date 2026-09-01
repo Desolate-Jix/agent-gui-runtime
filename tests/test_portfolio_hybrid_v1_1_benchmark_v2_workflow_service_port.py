@@ -4635,6 +4635,84 @@ def test_s3_safe_stopped_completed_qwen_cancel_materializes_cleanup_before_proje
         store.close()
 
 
+@pytest.mark.parametrize(
+    ("backend_termination", "model_termination", "expected_verified"),
+    [
+        ("not_running", "request_not_active", True),
+        ("not_covered", "request_not_active", False),
+        ("not_running", "cancel_failed", False),
+    ],
+)
+def test_s3_safe_stopped_projection_requires_terminal_cancellation_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_termination: str,
+    model_termination: str,
+    expected_verified: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
+
+    worker = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "worker_id": "worker-h1",
+        "model_request_id": "request-h1",
+        "payload_sha256": "1" * 64,
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "result_adopted": True,
+        "benchmark_provider_cleanup_ref": {"content_sha256": "2" * 64},
+    }
+    captured: dict[str, object] = {}
+    provider_cleanup = {"content_sha256": "3" * 64}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_expired_failure_cleanup",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_validate_benchmark_v2_hybrid_provider_cleanup",
+        lambda **_kwargs: deepcopy(provider_cleanup),
+    )
+
+    def project_operation_ref(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"content_sha256": "4" * 64}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_operation_ref",
+        project_operation_ref,
+    )
+    monkeypatch.setattr(
+        incumbent,
+        "compose_benchmark_v2_workflow_service_step",
+        lambda **kwargs: deepcopy(dict(kwargs)),
+    )
+
+    projected = workflow_service._project_benchmark_v2_hybrid_step(
+        composition=SimpleNamespace(worker_registry=object()),
+        workflow_state={},
+        stage_execution={
+            "cancellation": {
+                "backend_compute_termination": backend_termination,
+                "model_service_compute_termination": model_termination,
+            }
+        },
+        binding={"provider_dispatch_context_refs": {}},
+        worker_record=worker,
+        status="safe_stopped",
+    )
+
+    assert captured["recovered_cleanup_verified"] is expected_verified
+    assert projected["cleanup_refs"]["worker_cleanup_ref"] is not None
+    assert projected["cleanup_refs"]["provider_cleanup_ref"] == provider_cleanup
+
+
 def test_s3_safe_stopped_completed_omni_cancel_materializes_cleanup_before_projection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4904,6 +4982,244 @@ def test_s3_managed_vista_failure_uses_only_actual_dispatch_counts(
     )
     assert adopted == response
     assert captured["expected_provider_counts"] == {"omni": 1, "qwen": 1}
+
+
+@pytest.mark.parametrize("qwen_dispatch_count", [0, 1])
+def test_s3_managed_qwen_handler_failure_uses_committed_dispatch_count(
+    monkeypatch: pytest.MonkeyPatch,
+    qwen_dispatch_count: int,
+) -> None:
+    from app.learn import workflow_service
+
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "outcome": "failed",
+        "result": {
+            "contract_version": "learning_hybrid_stage_failure_v1",
+            "failure_reason": "window binding geometry or DPI drifted",
+            "error_type": "ValueError",
+            "error_notes": [],
+            "model_lifecycle": {
+                "status": "request_not_active",
+                "model_service_compute_termination": "request_not_active",
+            },
+        },
+        "orchestration": {
+            "benchmark_v2_provider_dispatch_receipt_refs": [
+                {"provider": "omni", "content_sha256": "a" * 64},
+                *[
+                    {"provider": "qwen", "content_sha256": "b" * 64}
+                    for _ in range(qwen_dispatch_count)
+                ],
+            ],
+            "benchmark_v2_provider_dispatch_context_refs": {
+                "omni": {"provider": "omni"},
+                **(
+                    {"qwen": {"provider": "qwen"}}
+                    if qwen_dispatch_count
+                    else {}
+                ),
+            },
+        },
+    }
+    captured: dict[str, object] = {}
+
+    def validate_dispatch(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return deepcopy(dict(kwargs["response"]))
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_validate_benchmark_v2_dispatch_response",
+        validate_dispatch,
+    )
+
+    class _Composition:
+        composition_kind = "production"
+        benchmark_v2_worker_binding_resolver = object()
+
+    adopted = workflow_service._validate_benchmark_v2_hybrid_adoption(
+        composition=_Composition(),
+        response=response,
+        window_binding={},
+        task_kind="panel_learning_hybrid_qwen_binding",
+        provider_dispatch_context_refs={
+            "omni": {"provider": "omni"},
+            **(
+                {"qwen": {"provider": "qwen"}}
+                if qwen_dispatch_count
+                else {}
+            ),
+        },
+    )
+    assert adopted == response
+    expected_counts = {"omni": 1}
+    if qwen_dispatch_count:
+        expected_counts["qwen"] = qwen_dispatch_count
+    assert captured["expected_provider_counts"] == expected_counts
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "absent",
+        "committed",
+        "missing_issued_context",
+        "cross_lineage_context",
+        "response_task_kind_mismatch",
+    ],
+)
+def test_s3_qwen_predispatch_failure_requires_durable_dispatch_absence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation import (
+        _runtime_attestation,
+    )
+
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: _runtime_attestation(
+            attestation,
+            provider=provider,
+            digit={"omni": "1", "qwen": "2"}[provider],
+        ),
+    )
+    binding = _s3_window_binding()
+    serialized_window = {
+        "contract_version": "test_window_binding_v1",
+        "exact_hwnd": 101,
+        "process_identity": {"pid": 202, "create_time_ns": 303},
+        "job_name": "job-h1",
+        "payload_sha256": "c" * 64,
+    }
+
+    def context(
+        provider: str,
+        revision: int,
+        *,
+        operation_id: str = "operation-h1",
+    ) -> dict[str, object]:
+        operation_ref = {
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": operation_id,
+            "revision": revision,
+            "window_binding_ref": deepcopy(binding["window_binding_ref"]),
+            "capture_ref": deepcopy(binding["capture_ref"]),
+        }
+        return attestation.compose_benchmark_dispatch_context(
+            provider=provider,
+            operation_ref=operation_ref,
+            window_binding=deepcopy(serialized_window),
+            receipt_journal_path=attestation._fixed_dispatch_journal_path(
+                operation_ref
+            ),
+        )
+
+    omni_context = context("omni", 4)
+    qwen_context = context(
+        "qwen",
+        5,
+        operation_id=(
+            "operation-other" if scenario == "cross_lineage_context" else "operation-h1"
+        ),
+    )
+    with attestation.install_benchmark_dispatch_attestor(
+        dispatch_context=omni_context
+    ):
+        attestation.attest_benchmark_provider_dispatch(
+            provider="omni",
+            operation_ref=omni_context["operation_ref"],
+            window_binding=omni_context["window_binding"],
+            provider_runtime={"provider": "omni"},
+        )
+        omni_receipts = attestation.current_benchmark_dispatch_receipt_refs()
+    if scenario == "committed":
+        with attestation.install_benchmark_dispatch_attestor(
+            dispatch_context=qwen_context
+        ):
+            attestation.attest_benchmark_provider_dispatch(
+                provider="qwen",
+                operation_ref=qwen_context["operation_ref"],
+                window_binding=qwen_context["window_binding"],
+                provider_runtime={"provider": "qwen"},
+            )
+
+    omni_ref = attestation.compose_benchmark_dispatch_context_ref(
+        context=omni_context
+    )
+    qwen_ref = attestation.compose_benchmark_dispatch_context_ref(
+        context=qwen_context
+    )
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "outcome": "failed",
+        "result": {
+            "contract_version": "learning_hybrid_stage_failure_v1",
+            "failure_reason": "window binding geometry or DPI drifted",
+            "error_type": "ValueError",
+            "error_notes": [],
+            "model_lifecycle": {
+                "status": "request_not_active",
+                "model_service_compute_termination": "request_not_active",
+            },
+        },
+        "orchestration": {
+            "benchmark_v2_provider_dispatch_receipt_refs": omni_receipts,
+            "benchmark_v2_provider_dispatch_context_refs": {
+                "omni": omni_ref
+            },
+        },
+    }
+    if scenario == "response_task_kind_mismatch":
+        response["task_kind"] = "panel_learning_hybrid_omni_discovery"
+    composition = SimpleNamespace(
+        composition_kind="production",
+        benchmark_v2_worker_binding_resolver=object(),
+        project_root=tmp_path,
+    )
+    issued_context_refs = {"omni": omni_ref, "qwen": qwen_ref}
+    if scenario in {"missing_issued_context", "response_task_kind_mismatch"}:
+        issued_context_refs.pop("qwen")
+    kwargs = {
+        "composition": composition,
+        "response": response,
+        "window_binding": binding,
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "provider_dispatch_context_refs": issued_context_refs,
+    }
+    if scenario != "absent":
+        expected_error = (
+            "committed dispatch context was omitted"
+            if scenario == "committed"
+            else "server-issued dispatch context"
+        )
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match=expected_error,
+        ):
+            workflow_service._validate_benchmark_v2_hybrid_adoption(**kwargs)
+    else:
+        assert workflow_service._validate_benchmark_v2_hybrid_adoption(
+            **kwargs
+        ) == response
 
 
 @pytest.mark.parametrize("vista_dispatch_count", [0, 1])
