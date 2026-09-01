@@ -3131,6 +3131,118 @@ def test_actual_cleanup_reconciles_hybrid_started_before_any_incumbent_call(
     }
 
 
+def test_actual_cleanup_resumes_advanced_incumbent_instead_of_cancelling(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime_module, runtime, manifest, _, _, _ = _runtime(monkeypatch, tmp_path)
+    attempt_ref = _sealed({"attempt_id": "attempt-advanced-incumbent-cleanup"})
+    attempt_dir = (tmp_path / "attempt-advanced-incumbent-cleanup").resolve()
+    iterator = runtime.prepare_screen_groups(
+        provider_manifest=manifest,
+        partition="regression",
+        attempt_ref=attempt_ref,
+        attempt_dir=attempt_dir,
+    )
+    group = next(iterator)
+    binding = runtime.open_screen_group(provider_group=group)
+    case_ref = deepcopy(group["case_refs"][0])
+    parent_intent_sha = "e" * 64
+
+    class CompletionWonService(_DurableIncumbentService):
+        def cancel_operation(self, *, operation_ref):
+            if operation_ref["mode"] == "incumbent_qwen_only":
+                raise AssertionError("completion-won incumbent must not be cancelled")
+            return super().cancel_operation(operation_ref=operation_ref)
+
+        def adopt_and_terminalize_incumbent(self, *, operation_ref, worker_ref):
+            assert dict(worker_ref) == operation_ref["worker_ref"]
+            self.incumbent_adopt_calls += 1
+            operation_binding = {
+                name: deepcopy(operation_ref[name])
+                for name in (
+                    "run_id",
+                    "stage",
+                    "operation_id",
+                    "window_binding_ref",
+                    "capture_ref",
+                )
+            }
+            terminal_operation = _actual_operation(
+                mode="incumbent_qwen_only",
+                operation_id=str(operation_ref["operation_id"]),
+                request_ref=operation_ref["request_ref"],
+                binding=operation_binding,
+                revision=int(operation_ref["workflow_state_ref"]["revision"]) + 1,
+                status="complete",
+                predecessor=operation_ref,
+            )
+            cleanup = _ActualService([]).cancel_operation(
+                operation_ref=operation_ref
+            )["cleanup_refs"]
+            terminal = incumbent.compose_benchmark_v2_workflow_service_step(
+                operation_ref=terminal_operation,
+                observed_task_kind="vision_observe_screen",
+                adopted_result_projection=None,
+                terminal_receipt=None,
+                cleanup_refs=cleanup,
+            )
+            case_id = str(operation_ref["request_ref"]["id"])
+            self.incumbent_current[case_id] = deepcopy(terminal)
+            return terminal
+
+    service = CompletionWonService([])
+    service.start_hybrid_operation(screen_group=group, window_binding=binding)
+    pending = service.start_incumbent_observe(
+        provider_case_ref=case_ref,
+        window_binding=binding,
+    )
+    advanced = service.poll_incumbent_observe(
+        operation_ref=pending["operation_ref"]
+    )
+    assert advanced["status"] == "advanced"
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_screen_group_service_intents",
+        lambda **_kwargs: [
+            {
+                "provider_group": deepcopy(group),
+                "window_binding": deepcopy(binding),
+                "content_sha256": parent_intent_sha,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_incumbent_call_intents",
+        lambda **_kwargs: [
+            {
+                "provider_case_ref": deepcopy(case_ref),
+                "window_binding": deepcopy(binding),
+                "service_intent_ref": {"content_sha256": parent_intent_sha},
+            }
+        ],
+    )
+
+    first = runtime_module._reconcile_actual_operations(
+        attempt_dir=attempt_dir,
+        service=service,
+    )
+    second = runtime_module._reconcile_actual_operations(
+        attempt_dir=attempt_dir,
+        service=service,
+    )
+
+    assert first[0][1] == second[0][1]
+    assert first[0][1]["status"] == "complete"
+    assert service.incumbent_adopt_calls == 1
+    assert all(
+        operation["mode"] == "hybrid_v1_1"
+        for operation in service.cancelled_operation_refs
+    )
+    iterator.close()
+
+
 def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

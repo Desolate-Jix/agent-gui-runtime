@@ -3301,6 +3301,7 @@ def _reconcile_actual_operations(
         None,
     )
     cancel = getattr(service, "cancel_operation", None)
+    adopt_incumbent = getattr(service, "adopt_and_terminalize_incumbent", None)
     attest = getattr(service, "attest_actual_operations_stable_zero", None)
     attest_completed_hybrid = getattr(
         service,
@@ -3404,9 +3405,24 @@ def _reconcile_actual_operations(
                 binding=call_intent["window_binding"],
                 expected_operation=None,
             )
-            terminal = _validate_service_terminal(
-                cancel(operation_ref=deepcopy(step["operation_ref"]))
-            )
+            operation_status = str(step["operation_ref"]["status"])
+            if operation_status == "advanced":
+                if not callable(adopt_incumbent):
+                    raise RuntimeError(
+                        "WorkflowService incumbent completion recovery is unavailable"
+                    )
+                terminal = _validate_service_terminal(
+                    adopt_incumbent(
+                        operation_ref=deepcopy(step["operation_ref"]),
+                        worker_ref=deepcopy(step["worker_ref"]),
+                    )
+                )
+            elif operation_status in {"complete", "cancelled", "safe_stopped"}:
+                terminal = _validate_service_terminal(step)
+            else:
+                terminal = _validate_service_terminal(
+                    cancel(operation_ref=deepcopy(step["operation_ref"]))
+                )
             _validate_actual_terminal_successor(
                 terminal=terminal["operation_ref"],
                 supplied=step["operation_ref"],
