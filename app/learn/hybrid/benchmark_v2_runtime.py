@@ -4182,7 +4182,12 @@ def _cleanup_parent_ref(
         raise ValueError("benchmark cleanup parent kind is invalid")
     producer = (
         _runtime_sealed_parent(value, name=name)
-        if parent_kind in {"worker_cleanup", "provider_cleanup"}
+        if parent_kind
+        in {
+            "worker_cleanup",
+            "provider_cleanup",
+            "actual_operations_stable_zero",
+        }
         else _sealed_parent(value, name=name)
     )
     inferred_kind, producer_contract = _validate_cleanup_parent_semantics(

@@ -1348,6 +1348,15 @@ def test_actual_stable_zero_uses_incumbent_terminal_receipt_contract_hash() -> N
 
     assert incumbent.validate_benchmark_v2_actual_operations_stable_zero(receipt) == receipt
 
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    cleanup_parent = runtime_module._cleanup_parent_ref(
+        receipt,
+        parent_kind="actual_operations_stable_zero",
+        name="actual operations stable-zero attestation",
+    )
+    assert cleanup_parent["producer_content_sha256"] == receipt["content_sha256"]
+
     forged = deepcopy(receipt)
     forged["cleanup_entries"][1]["terminal_receipt_ref"]["content_sha256"] = "0" * 64
     forged = runtime_seal_immutable(
