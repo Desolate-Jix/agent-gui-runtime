@@ -1584,6 +1584,7 @@ class _FakeWorkflowService:
         stale_hybrid: bool = False,
         early_safe_stop: bool = False,
         quality_safe_stop: bool = False,
+        qwen_quality_safe_stop: bool = False,
         successor_fault: str | None = None,
     ) -> None:
         self.pending_replays = max(pending_replays, 1 if duplicate_reads else 0)
@@ -1591,6 +1592,7 @@ class _FakeWorkflowService:
         self.stale_hybrid = stale_hybrid
         self.early_safe_stop = early_safe_stop
         self.quality_safe_stop = quality_safe_stop
+        self.qwen_quality_safe_stop = qwen_quality_safe_stop
         self.successor_fault = successor_fault
         self.successor_fault_used = False
         self.window_binding: dict[str, object] | None = None
@@ -1684,6 +1686,74 @@ class _FakeWorkflowService:
         ]
         response["task_kind"] = "panel_learning_hybrid_fusion"
         response["result"] = deepcopy(fusion)
+        return response
+
+    def _qwen_quality_safe_stop_response(self) -> dict[str, object]:
+        response = self._hybrid_response()
+        orchestration = response["orchestration"]
+        for name in (
+            "qwen_bindings",
+            "fusion_result",
+            "qwen_cleanup_receipt",
+            "hybrid_vista_requests",
+        ):
+            orchestration.pop(name)
+        orchestration["benchmark_v2_provider_dispatch_receipt_refs"] = [
+            {"provider": "omni", "content_sha256": "1" * 64},
+            {"provider": "qwen", "content_sha256": "2" * 64},
+        ]
+        raw_message = '{"bindings":['
+        try:
+            json.loads(raw_message)
+        except json.JSONDecodeError as error:
+            parse_error = {
+                "type": "JSONDecodeError",
+                "message": str(error),
+                "line": error.lineno,
+                "column": error.colno,
+                "position": error.pos,
+            }
+        capture_identity = orchestration["capture_bundle"]["capture_identity"]
+        diagnostics = seal_immutable(
+            {
+                "contract_version": "qwen_binding_response_failure_trace_v1",
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "evidence_use": "benchmark_non_authorizing_diagnostic",
+                "request_lineage": {
+                    "model_request_id": f"model-{self.window_binding['operation_id']}",
+                    "request_content_sha256": "3" * 64,
+                    "screenshot_sha256": capture_identity["screenshot_sha256"],
+                    "profile_id": "qwen3_vl_8b_q4_k_m",
+                    "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+                },
+                "http_response": {
+                    "response_body_bytes": 42,
+                    "response_body_sha256": "5" * 64,
+                    "raw_message_content": raw_message,
+                    "raw_message_content_utf8_bytes": len(raw_message.encode("utf-8")),
+                    "raw_message_content_sha256": hashlib.sha256(raw_message.encode("utf-8")).hexdigest(),
+                    "finish_reason": "length",
+                    "usage": {"completion_tokens": 4096},
+                },
+                "parse_error": parse_error,
+            }
+        )
+        response["task_kind"] = "panel_learning_hybrid_qwen_binding"
+        response["outcome"] = "failed"
+        response["result"] = {
+            "contract_version": "learning_hybrid_stage_failure_v1",
+            "failure_reason": "Qwen binding response is not a closed JSON object",
+            "error_type": "ValueError",
+            "error_notes": [],
+            "model_lifecycle": {
+                "status": "finalized",
+                "model_service_compute_termination": "terminated",
+            },
+            "diagnostics": diagnostics,
+        }
+        response.pop("supervisor_lineage")
+        response.pop("lifecycle_evidence")
         return response
 
     def _hybrid_step(self, *, status: str) -> dict[str, object]:
@@ -1783,6 +1853,33 @@ class _FakeWorkflowService:
             return _step(
                 stopped,
                 task_kind="panel_learning_hybrid_fusion",
+                projection=projection,
+            )
+        if self.qwen_quality_safe_stop:
+            assert self.window_binding is not None
+            assert self.provider_group is not None
+            consumed = deepcopy(self.active_ops["hybrid"])
+            stopped = _operation_ref(
+                mode="hybrid_v1_1",
+                operation_id=str(self.window_binding["operation_id"]),
+                request_ref=self.provider_group["request_ref"],
+                window_binding=self.window_binding,
+                worker_ref=consumed["worker_ref"],
+                status="safe_stopped",
+                revision=int(consumed["workflow_state_ref"]["revision"]) + 1,
+                predecessor=consumed,
+            )
+            projection = _projection(
+                mode="hybrid_v1_1",
+                operation_ref=stopped,
+                response=self._qwen_quality_safe_stop_response(),
+                terminal=True,
+            )
+            self.active_workers.discard(str(consumed["worker_ref"]["content_sha256"]))
+            self.active_ops["hybrid"] = deepcopy(stopped)
+            return _step(
+                stopped,
+                task_kind="panel_learning_hybrid_qwen_binding",
                 projection=projection,
             )
         if self.successor_fault is not None and not self.successor_fault_used:
@@ -2066,6 +2163,7 @@ def _ports(
     stale_hybrid: bool = False,
     early_safe_stop: bool = False,
     quality_safe_stop: bool = False,
+    qwen_quality_safe_stop: bool = False,
     successor_fault: str | None = None,
 ):
     events: list[str] = []
@@ -2076,6 +2174,7 @@ def _ports(
         stale_hybrid=stale_hybrid,
         early_safe_stop=early_safe_stop,
         quality_safe_stop=quality_safe_stop,
+        qwen_quality_safe_stop=qwen_quality_safe_stop,
         successor_fault=successor_fault,
     )
     owner = _FakeWindowOwner(events)
@@ -2659,6 +2758,68 @@ def test_quality_fusion_safe_stop_remains_in_denominator_with_twenty_rows() -> N
         == {"omni", "qwen"}
         for row in vista_rows
     )
+    assert events[-3:] == [
+        "window-close",
+        "lifecycle-stable-zero",
+        "prediction-write",
+    ]
+
+
+def test_qwen_output_quality_safe_stop_keeps_real_arms_and_omits_two_hybrid_arms() -> None:
+    events, service, owner, lifecycle, sink = _ports(qwen_quality_safe_stop=True)
+
+    result = run_screen_group(
+        provider_group=_provider_group(),
+        service=service,
+        window_owner=owner,
+        lifecycle=lifecycle,
+        prediction_sink=sink,
+    )
+
+    assert len(result["rows"]) == 20
+    assert service.incumbent_start_calls == 5
+    evidence = result["pre_vista_evidence"]
+    qwen_marker = json.loads(
+        base64.b64decode(
+            evidence["qwen_bindings_envelope"]["canonical_bytes_b64"],
+            validate=True,
+        )
+    )
+    fusion_marker = json.loads(
+        base64.b64decode(
+            evidence["fusion_result_envelope"]["canonical_bytes_b64"],
+            validate=True,
+        )
+    )
+    assert qwen_marker == fusion_marker
+    assert qwen_marker["contract_version"] == (
+        "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    )
+    assert qwen_marker["omitted_artifacts"] == [
+        "hybrid_qwen_bindings_v1",
+        "hybrid_fusion_result_v1",
+    ]
+    assert qwen_marker["failure_reason"] == (
+        "Qwen binding response is not a closed JSON object"
+    )
+    assert evidence["submitted_vista_request_envelopes"] == []
+    from app.learn.hybrid import benchmark_v2_runtime as benchmark_runtime
+
+    group = _provider_group()
+    benchmark_runtime._validate_pre_vista_evidence(evidence, group=group)
+    benchmark_lifecycle._s13_pre_vista_parent(
+        evidence,
+        provider_group_ref={
+            "id": group["screen_group"],
+            "content_sha256": group["content_sha256"],
+        },
+        hybrid_capture_bundle_ref=group["hybrid_capture_bundle_ref"],
+    )
+    for row in result["rows"]:
+        observation = row["observation"]
+        if row["arm_id"] in {"omni_to_qwen", "omni_to_qwen_vista"}:
+            assert observation["qwen_quality_safe_stop_omission"] == qwen_marker
+            assert "review_projection" not in observation
     assert events[-3:] == [
         "window-close",
         "lifecycle-stable-zero",

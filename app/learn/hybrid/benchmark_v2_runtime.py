@@ -20,6 +20,8 @@ from app.learn.hybrid import benchmark_v2_window_owner
 from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes,
     content_sha256,
+    validate_qwen_quality_safe_stop_omission,
+    validate_qwen_quality_safe_stop_runtime_lineage,
 )
 from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     BENCHMARK_V2_WORKFLOW_SERVICE_STEP_CONTRACT,
@@ -3825,10 +3827,36 @@ def _validate_actual_projection(
         raise ValueError("benchmark actual projection cleanup lineage is stale")
     if projection.get("execution_refs") != stable.get("execution_refs"):
         raise ValueError("benchmark actual projection execution lineage is stale")
-    _validate_pre_vista_evidence(
+    pre_vista = _validate_pre_vista_evidence(
         projection.get("pre_vista_evidence"),
         group=group,
     )
+    qwen_pre_vista = _validate_pre_vista_envelope(
+        pre_vista["qwen_bindings_envelope"],
+        name="Qwen bindings",
+        id_prefix="qwen-bindings",
+        domain=b"benchmark-v2-qwen-bindings\0",
+    )
+    qwen_omission = (
+        validate_qwen_quality_safe_stop_omission(qwen_pre_vista)
+        if qwen_pre_vista.get("contract_version")
+        == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+        else None
+    )
+    qwen_cleanup_entry = None
+    if qwen_omission is not None:
+        stable_attestation = validate_benchmark_v2_actual_operations_stable_zero(
+            stable.get("service_stable_zero_attestation")
+        )
+        hybrid_operation_sha = projection["execution_refs"][0]["content_sha256"]
+        matching_cleanup = [
+            item
+            for item in stable_attestation["cleanup_entries"]
+            if item["operation_ref_sha256"] == hybrid_operation_sha
+        ]
+        if len(matching_cleanup) != 1:
+            raise ValueError("benchmark actual Qwen omission Hybrid cleanup differs")
+        qwen_cleanup_entry = matching_cleanup[0]
     rows = projection.get("rows")
     expected_pairs = {
         (str(case["case_id"]), arm)
@@ -3853,6 +3881,21 @@ def _validate_actual_projection(
             if isinstance(observation, Mapping)
             else None
         )
+        if qwen_omission is not None and row.get("arm_id") in {
+            "omni_to_qwen",
+            "omni_to_qwen_vista",
+        }:
+            if (
+                observation.get("qwen_quality_safe_stop_omission")
+                != qwen_omission
+                or "review_projection" in observation
+            ):
+                raise ValueError("benchmark actual Qwen omission row differs")
+            validate_qwen_quality_safe_stop_runtime_lineage(
+                qwen_omission,
+                dispatch_receipt_refs=receipts,
+                cleanup_entry=qwen_cleanup_entry,
+            )
         if not isinstance(receipts, list) or not receipts:
             raise ValueError("benchmark actual projection dispatch evidence is missing")
         for receipt in receipts:
@@ -3897,7 +3940,7 @@ def _validate_pre_vista_evidence(
         id_prefix="omni-inventory",
         domain=b"benchmark-v2-omni-inventory\0",
     )
-    _validate_pre_vista_envelope(
+    qwen = _validate_pre_vista_envelope(
         evidence["qwen_bindings_envelope"],
         name="Qwen bindings",
         id_prefix="qwen-bindings",
@@ -3921,6 +3964,22 @@ def _validate_pre_vista_evidence(
         )
         for item in raw_requests
     ]
+    if qwen.get("contract_version") == "benchmark_v2_qwen_quality_safe_stop_omission_v1":
+        marker = validate_qwen_quality_safe_stop_omission(qwen)
+        if fusion != marker or requests:
+            raise ValueError("benchmark actual Qwen quality safe-stop evidence differs")
+        if (
+            marker["provider_group_ref"] != expected_group_ref
+            or marker["omni_inventory_ref"]["content_sha256"]
+            != _validate_pre_vista_envelope(
+                evidence["omni_inventory_envelope"],
+                name="Omni inventory",
+                id_prefix="omni-inventory",
+                domain=b"benchmark-v2-omni-inventory\0",
+            )["content_sha256"]
+        ):
+            raise ValueError("benchmark actual Qwen quality safe-stop lineage differs")
+        return evidence
     _validate_pre_vista_request_coverage(fusion=fusion, requests=requests)
     return evidence
 

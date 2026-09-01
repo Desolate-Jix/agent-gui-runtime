@@ -3610,6 +3610,174 @@ def _s3_fusion_safe_stop_response(worker: dict[str, object]) -> dict[str, object
     }
 
 
+def test_s3_qwen_closed_json_quality_safe_stop_projects_adopted_result_bridge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_incumbent_operation as operation
+
+    raw = '{"bindings":['
+    try:
+        json.loads(raw)
+    except json.JSONDecodeError as error:
+        parse_error = {
+            "type": "JSONDecodeError",
+            "message": str(error),
+            "line": error.lineno,
+            "column": error.colno,
+            "position": error.pos,
+        }
+    diagnostics = seal_immutable(
+        {
+            "contract_version": "qwen_binding_response_failure_trace_v1",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "evidence_use": "benchmark_non_authorizing_diagnostic",
+            "request_lineage": {
+                "model_request_id": "request-h1",
+                "request_content_sha256": "1" * 64,
+                "screenshot_sha256": "2" * 64,
+                "profile_id": "qwen3_vl_8b_q4_k_m",
+                "model_id": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+            },
+            "http_response": {
+                "response_body_bytes": 42,
+                "response_body_sha256": "3" * 64,
+                "raw_message_content": raw,
+                "raw_message_content_utf8_bytes": len(raw.encode("utf-8")),
+                "raw_message_content_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                "finish_reason": "length",
+                "usage": {"completion_tokens": 4096},
+            },
+            "parse_error": parse_error,
+        }
+    )
+    response = {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "outcome": "failed",
+        "result": {
+            "contract_version": "learning_hybrid_stage_failure_v1",
+            "failure_reason": "Qwen binding response is not a closed JSON object",
+            "error_type": "ValueError",
+            "error_notes": [],
+            "model_lifecycle": {"cleanup_status": "verified"},
+            "diagnostics": diagnostics,
+        },
+        "orchestration": {},
+    }
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        validate_qwen_closed_json_quality_failure_response,
+    )
+
+    validate_qwen_closed_json_quality_failure_response(response)
+    worker = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "worker_id": "worker-h1",
+        "model_request_id": "request-h1",
+        "payload_sha256": "1" * 64,
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "result_adopted": True,
+    }
+    projection = operation.compose_benchmark_v2_adopted_result_projection(
+        mode="hybrid_v1_1",
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        worker_ref=seal_immutable({
+            "worker_id": "worker-h1",
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-h1",
+            "task_kind": "panel_learning_hybrid_qwen_binding",
+            "model_request_id": "request-h1",
+            "payload_sha256": "1" * 64,
+        }),
+        model_request_ref={"id": "request-h1", "content_sha256": "1" * 64},
+        payload_ref={"content_sha256": "1" * 64},
+        result_ref={"content_sha256": "4" * 64},
+        adoption_ref=_sealed_parent("adoption"),
+        response=response,
+        terminal_receipt=None,
+        window_adoption_ref=None,
+        worker_cleanup_ref=None,
+        provider_cleanup_ref=None,
+    )
+    cleanup = {
+        "worker_cleanup_ref": _sealed_parent("worker-cleanup"),
+        "provider_cleanup_ref": _sealed_parent("provider-cleanup"),
+    }
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_expired_failure_cleanup",
+        lambda **_kwargs: cleanup,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_hybrid_terminal_worker_cleanup_is_verified",
+        lambda **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_read_benchmark_v2_hybrid_adopted_projection",
+        lambda **_kwargs: deepcopy(projection),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_operation_ref",
+        lambda **_kwargs: {"content_sha256": "5" * 64},
+    )
+    monkeypatch.setattr(
+        operation,
+        "compose_benchmark_v2_workflow_service_step",
+        lambda **kwargs: deepcopy(dict(kwargs)),
+    )
+
+    projected = workflow_service._project_benchmark_v2_hybrid_step(
+        composition=SimpleNamespace(worker_registry=object()),
+        workflow_state={},
+        stage_execution={},
+        binding={"provider_dispatch_context_refs": {}},
+        worker_record=worker,
+        status="safe_stopped",
+    )
+
+    assert projected["adopted_result_projection"] == projection
+    assert projected["cleanup_refs"] == cleanup
+    operation_ref = operation.compose_benchmark_v2_workflow_service_operation_ref(
+        mode="hybrid_v1_1",
+        run_id="run-h1",
+        stage="screen_understanding",
+        operation_id="operation-h1",
+        workflow_state_ref={"run_id": "run-h1", "revision": 7, "content_sha256": SHA_A},
+        stage_execution_ref={
+            "run_id": "run-h1",
+            "stage": "screen_understanding",
+            "operation_id": "operation-h1",
+            "revision": 7,
+            "content_sha256": SHA_B,
+        },
+        request_ref=_identity("request-h1"),
+        window_binding_ref=_identity("window-h1"),
+        capture_ref=_identity("capture-h1"),
+        worker_ref=projection["worker_ref"],
+        status="safe_stopped",
+    )
+    validated_step = operation.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation_ref,
+        observed_task_kind="panel_learning_hybrid_qwen_binding",
+        adopted_result_projection=projection,
+        terminal_receipt=None,
+        cleanup_refs=cleanup,
+    )
+    assert validated_step["adopted_result_projection"] == projection
+
+
 @pytest.mark.parametrize(
     ("continuation_sha_kind", "projects_result"),
     (("exact", True), ("wrong", False)),

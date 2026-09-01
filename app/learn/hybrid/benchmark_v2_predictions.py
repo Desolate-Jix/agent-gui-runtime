@@ -17,6 +17,9 @@ from app.learn.hybrid.benchmark_v2_pathless import (
     validate_pathless_recursive,
     validate_pathless_ref,
 )
+from app.learn.hybrid.benchmark_v2_contracts import (
+    validate_qwen_quality_safe_stop_omission,
+)
 
 SAFETY={"artifact_is_authorization":False,"execute_binding_enabled":False,"display_only":True}
 ARMS=("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista")
@@ -353,7 +356,18 @@ def select_pre_vista_prediction_rows(
         or any(item.get("submission_status") != "SUBMITTED" for item in submitted_vista_requests)
     ):
         raise ValueError("duplicate or invalid submitted VISTA request")
+    qwen_omission: dict[str, Any] | None = None
+    if (
+        isinstance(qwen_bindings, Mapping)
+        and qwen_bindings.get("contract_version")
+        == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    ):
+        qwen_omission = validate_qwen_quality_safe_stop_omission(qwen_bindings)
+        if fusion_result != qwen_omission or submitted_vista_requests:
+            raise ValueError("Qwen quality safe-stop omission evidence differs")
     fusion_candidates = fusion_result.get("candidates") if isinstance(fusion_result, Mapping) else None
+    if qwen_omission is not None:
+        fusion_candidates = []
     if not isinstance(fusion_candidates, list):
         raise ValueError("fusion result is incomplete")
     fusion_ids = [_public_identifier(item.get("candidate_id"), "fusion candidate") for item in fusion_candidates if isinstance(item, Mapping)]
@@ -415,6 +429,12 @@ def select_pre_vista_prediction_rows(
         selected = _selection_artifacts(case_id=case_id, arm_scope=["omni_only_discovery"], candidate_id=str(omni_candidate["candidate_id"]), bbox=_xyxy(omni_candidate.get("bbox_original"), "Omni candidate bbox"), capture_ref=capture, source_parent=parent)
         artifacts.extend(selected); rows.append(_selected_row(case_id, "omni_only_discovery", selected))
 
+    if qwen_omission is not None:
+        rows.extend(
+            _missing_row(case_id, arm, "qwen_quality_safe_stop")
+            for arm in ("omni_to_qwen", "omni_to_qwen_vista")
+        )
+        return {"rows": rows, "sealed_artifacts": artifacts}
     if not isinstance(qwen_bindings, Mapping) or not isinstance(qwen_bindings.get("bindings"), list) or not isinstance(qwen_bindings.get("ambiguity_sets"), list):
         raise ValueError("Qwen bindings are incomplete")
     bindings = qwen_bindings["bindings"]
@@ -838,6 +858,12 @@ def _screen_group_material(
     )
     qwen_by_case: dict[str, Mapping[str, object]] = {}
     vista_proposals: list[Mapping[str, object]] | None = None
+    qwen_omission = (
+        validate_qwen_quality_safe_stop_omission(decoded_raw["qwen_bindings"])
+        if decoded_raw["qwen_bindings"].get("contract_version")
+        == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+        else None
+    )
     for row in rows:
         if not isinstance(row, Mapping):
             raise ValueError("actual screen group row is invalid")
@@ -858,6 +884,19 @@ def _screen_group_material(
             if not isinstance(response, Mapping) or case_id in qwen_by_case:
                 raise ValueError("actual screen group Qwen response is invalid")
             qwen_by_case[case_id] = response
+        elif row.get("arm_id") in {"omni_to_qwen", "omni_to_qwen_vista"} and qwen_omission is not None:
+            if (
+                observation.get("qwen_quality_safe_stop_omission") != qwen_omission
+                or "review_projection" in observation
+                or observation.get("provider_dispatch_receipt_refs")
+                != qwen_omission["provider_dispatch_receipt_refs"]
+            ):
+                raise ValueError("actual screen group Qwen omission row differs")
+            if row.get("arm_id") == "omni_to_qwen_vista":
+                if vista_proposals is None:
+                    vista_proposals = []
+                elif vista_proposals:
+                    raise ValueError("actual screen group Qwen omission VISTA evidence differs")
         elif row.get("arm_id") == "omni_to_qwen_vista":
             proposals = _actual_vista_proposals(
                 observation=observation,

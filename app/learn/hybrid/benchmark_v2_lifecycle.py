@@ -20,6 +20,11 @@ from typing import Any, Mapping, Sequence
 
 import psutil
 
+from app.learn.hybrid.benchmark_v2_contracts import (
+    validate_qwen_quality_safe_stop_omission,
+    validate_qwen_quality_safe_stop_runtime_lineage,
+)
+
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256, seal_immutable
 
 
@@ -5435,14 +5440,24 @@ def _s13_pre_vista_parent(
         field_name="Qwen bindings",
         id_prefix="qwen-bindings",
         domain=b"benchmark-v2-qwen-bindings\0",
-        contract_version="hybrid_qwen_bindings_v1",
+        contract_version=(
+            "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+            if _pre_vista_envelope_contract(evidence["qwen_bindings_envelope"])
+            == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+            else "hybrid_qwen_bindings_v1"
+        ),
     )
     raw_fusion = _s13_pre_vista_envelope(
         evidence["fusion_result_envelope"],
         field_name="fusion result",
         id_prefix="fusion-result",
         domain=b"benchmark-v2-fusion-result\0",
-        contract_version="hybrid_fusion_result_v1",
+        contract_version=(
+            "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+            if raw_qwen.get("contract_version")
+            == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+            else "hybrid_fusion_result_v1"
+        ),
     )
     raw_requests = evidence.get("submitted_vista_request_envelopes")
     if not isinstance(raw_requests, list):
@@ -5457,6 +5472,17 @@ def _s13_pre_vista_parent(
         )
         for item in raw_requests
     ]
+    if raw_qwen.get("contract_version") == "benchmark_v2_qwen_quality_safe_stop_omission_v1":
+        marker = validate_qwen_quality_safe_stop_omission(raw_qwen)
+        if (
+            raw_fusion != marker
+            or raw_requests_decoded
+            or marker["provider_group_ref"] != dict(provider_group_ref)
+            or marker["omni_inventory_ref"]
+            != {"id": "omni_inventory", "content_sha256": raw_omni.get("content_sha256")}
+        ):
+            raise ValueError("benchmark v2 Qwen quality safe-stop lineage differs")
+        return evidence
 
     def unseal_provider(item: Mapping[str, object], name: str) -> dict[str, object]:
         current = deepcopy(dict(item))
@@ -5557,6 +5583,21 @@ def _s13_pre_vista_parent(
     ):
         raise ValueError("benchmark v2 submitted VISTA request coverage differs")
     return evidence
+
+
+def _pre_vista_envelope_contract(value: object) -> str:
+    """只读取候选 Contract；随后仍由 S13 envelope 验证完整字节和引用。"""
+
+    if not isinstance(value, Mapping):
+        return ""
+    encoded = value.get("canonical_bytes_b64")
+    if not isinstance(encoded, str):
+        return ""
+    try:
+        decoded = json.loads(base64.b64decode(encoded, validate=True).decode("utf-8"))
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    return str(decoded.get("contract_version") or "") if isinstance(decoded, Mapping) else ""
 
 
 def _s13_window_close_parent(value: object) -> dict[str, Any]:
@@ -5821,6 +5862,20 @@ def _s13_screen_group_parent(
     )
     if provider_group_ref != shared_group_ref:
         raise ValueError("benchmark v2 provider group lineage differs")
+    qwen_omission = None
+    if (
+        _pre_vista_envelope_contract(evidence["qwen_bindings_envelope"])
+        == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    ):
+        qwen_omission = validate_qwen_quality_safe_stop_omission(
+            _s13_pre_vista_envelope(
+                evidence["qwen_bindings_envelope"],
+                field_name="Qwen omission",
+                id_prefix="qwen-bindings",
+                domain=b"benchmark-v2-qwen-bindings\0",
+                contract_version="benchmark_v2_qwen_quality_safe_stop_omission_v1",
+            )
+        )
 
     rows = projection["rows"]
     case_order: list[dict[str, str]] = []
@@ -5904,6 +5959,14 @@ def _s13_screen_group_parent(
             or len(receipts) != len(providers)
         ):
             raise ValueError("benchmark v2 row provider dispatch coverage differs")
+        if qwen_omission is not None and arm_id in {
+            "omni_to_qwen",
+            "omni_to_qwen_vista",
+        } and (
+            observation.get("qwen_quality_safe_stop_omission") != qwen_omission
+            or receipts != qwen_omission["provider_dispatch_receipt_refs"]
+        ):
+            raise ValueError("benchmark v2 Qwen omission row lineage differs")
     expected_pairs = {
         (case["case_id"], arm_id) for case in case_order for arm_id in _S13_ARMS
     }
@@ -5948,7 +6011,7 @@ def _s13_screen_group_parent(
         or stable.get("execute_binding_enabled") is not False
     ):
         raise ValueError("benchmark v2 raw screen group lifecycle differs")
-    _s13_service_stable_zero_parent(
+    service_stable = _s13_service_stable_zero_parent(
         stable.get("service_stable_zero_attestation"),
         request_ref=request_ref,
         case_refs=case_order,
@@ -5956,6 +6019,20 @@ def _s13_screen_group_parent(
         capture_ref=normalized_shared["capture_ref"],
         execution_refs=normalized_executions,
     )
+    if qwen_omission is not None:
+        hybrid_operation_sha = normalized_executions[0]["content_sha256"]
+        matching_cleanup = [
+            item
+            for item in service_stable["cleanup_entries"]
+            if item["operation_ref_sha256"] == hybrid_operation_sha
+        ]
+        if len(matching_cleanup) != 1:
+            raise ValueError("benchmark v2 Qwen omission Hybrid cleanup differs")
+        validate_qwen_quality_safe_stop_runtime_lineage(
+            qwen_omission,
+            dispatch_receipt_refs=qwen_omission["provider_dispatch_receipt_refs"],
+            cleanup_entry=matching_cleanup[0],
+        )
     actual_screen_group_ref = {
         "id": str(screen_group),
         "content_sha256": str(projection["content_sha256"]),

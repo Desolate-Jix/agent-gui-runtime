@@ -12,6 +12,7 @@ from app.learn.hybrid.benchmark_v2_contracts import (
     BENCHMARK_RELEASE_ID,
     canonical_json_bytes,
     content_sha256,
+    validate_qwen_closed_json_quality_failure_response,
 )
 from app.learn.hybrid.benchmark_v2_provider_corpus import (
     provider_case_resolver_corpus_file_ref,
@@ -999,11 +1000,43 @@ def validate_benchmark_v2_workflow_service_step(value: object) -> dict[str, Any]
         )
     ):
         raise ValueError("benchmark workflow service cleanup lineage is stale")
+    qwen_quality_cleanup_projection = False
     if projection is not None:
+        if (
+            step["status"] == "safe_stopped"
+            and step["observed_task_kind"]
+            == "panel_learning_hybrid_qwen_binding"
+            and step["terminal_receipt"] is None
+            and all(
+                projection[name] is None
+                for name in (
+                    "terminal_receipt",
+                    "window_adoption_ref",
+                    "worker_cleanup_ref",
+                    "provider_cleanup_ref",
+                )
+            )
+        ):
+            try:
+                quality_response = validate_qwen_closed_json_quality_failure_response(
+                    projection["response"]
+                )
+                qwen_quality_cleanup_projection = (
+                    quality_response["result"]["diagnostics"]["request_lineage"][
+                        "model_request_id"
+                    ]
+                    == projection["model_request_ref"]["id"]
+                    and all(cleanup_refs[name] is not None for name in cleanup_refs)
+                )
+            except (KeyError, TypeError, ValueError):
+                qwen_quality_cleanup_projection = False
         if step["terminal_receipt"] != projection["terminal_receipt"]:
             raise ValueError("benchmark workflow service terminal receipt is stale")
         for name in ("worker_cleanup_ref", "provider_cleanup_ref"):
-            if cleanup_refs[name] != projection[name]:
+            if (
+                cleanup_refs[name] != projection[name]
+                and not qwen_quality_cleanup_projection
+            ):
                 raise ValueError(f"benchmark workflow service {name} is stale")
     if (
         step["artifact_is_authorization"] is not False

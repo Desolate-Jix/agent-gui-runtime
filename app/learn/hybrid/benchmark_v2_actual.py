@@ -12,6 +12,8 @@ from app.learn.hybrid.benchmark_v2_contracts import (
     BENCHMARK_RELEASE_ID,
     canonical_json_bytes,
     content_sha256,
+    validate_qwen_closed_json_quality_failure_response,
+    validate_qwen_quality_safe_stop_omission,
 )
 from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     validate_benchmark_v2_hybrid_screen_group_start,
@@ -230,7 +232,10 @@ def _run_hybrid(
         if status == "complete":
             _require_terminal_projection(step, "Hybrid")
             return step
-        if status == "safe_stopped" and _is_quality_fusion_safe_stop_step(step):
+        if status == "safe_stopped" and (
+            _is_quality_fusion_safe_stop_step(step)
+            or _is_qwen_output_quality_safe_stop_step(step)
+        ):
             _extract_hybrid_evidence(step, group=group)
             return step
         if status in _TERMINAL:
@@ -607,6 +612,31 @@ def _is_quality_fusion_safe_stop_step(step: Mapping[str, object]) -> bool:
     )
 
 
+def _is_qwen_output_quality_safe_stop_step(step: Mapping[str, object]) -> bool:
+    if (
+        step.get("status") != "safe_stopped"
+        or step.get("observed_task_kind")
+        != "panel_learning_hybrid_qwen_binding"
+    ):
+        return False
+    projection = step.get("adopted_result_projection")
+    response = projection.get("response") if isinstance(projection, Mapping) else None
+    if not isinstance(response, Mapping):
+        return False
+    try:
+        validated = validate_qwen_closed_json_quality_failure_response(response)
+        if (
+            validated["result"]["diagnostics"]["request_lineage"][
+                "model_request_id"
+            ]
+            != projection.get("model_request_ref", {}).get("id")
+        ):
+            return False
+    except (KeyError, TypeError, ValueError):
+        return False
+    return True
+
+
 def _require_incumbent_observe_step(step: Mapping[str, object]) -> None:
     if step.get("observed_task_kind") != "vision_observe_screen":
         raise ValueError("incumbent operation escaped its single-observe task")
@@ -723,13 +753,18 @@ def _extract_hybrid_evidence(
         and response.get("task_kind") == "panel_learning_hybrid_fusion"
         and response.get("outcome") == "completed"
     )
+    qwen_quality_safe_stop = _is_qwen_output_quality_safe_stop_step(terminal)
     if (
         response.get("contract_version")
         != "learning_hybrid_managed_stage_result_v1"
         or response.get("learning_pipeline_mode") != "hybrid_v1_1"
-        or response.get("outcome") != "completed"
+        or (
+            response.get("outcome") != "completed"
+            and not qwen_quality_safe_stop
+        )
         or (
             not quality_safe_stop
+            and not qwen_quality_safe_stop
             and response.get("task_kind")
             != "panel_learning_hybrid_review_projection"
         )
@@ -752,6 +787,51 @@ def _extract_hybrid_evidence(
         raise ValueError("Hybrid terminal capture parents are stale")
     omni = _mapping(orchestration.get("omni_inventory"), "Omni inventory")
     validated_omni = validate_sealed_omni_inventory(omni)
+    if qwen_quality_safe_stop:
+        dispatch_refs = _dispatch_receipt_refs(
+            orchestration.get("benchmark_v2_provider_dispatch_receipt_refs"),
+            expected_providers={"omni", "qwen"},
+        )
+        omni_refs = [item for item in dispatch_refs if item["provider"] == "omni"]
+        marker = _qwen_quality_safe_stop_marker(
+            response=response,
+            projection=projection,
+            provider_group_ref={
+                "id": str(group["screen_group"]),
+                "content_sha256": str(group["content_sha256"]),
+            },
+            omni_inventory_ref={
+                "id": "omni_inventory",
+                "content_sha256": str(omni["content_sha256"]),
+            },
+            capture_bundle=capture_bundle,
+            cleanup_refs=_mapping(terminal.get("cleanup_refs"), "Hybrid cleanup refs"),
+            dispatch_refs=dispatch_refs,
+        )
+        pre_vista_evidence = _compose_pre_vista_evidence(
+            group=group,
+            omni_inventory=omni,
+            qwen_bindings=marker,
+            fusion_result=marker,
+            submitted_vista_requests=[],
+        )
+        return (
+            {
+                "omni_only_discovery": {
+                    "omni_inventory": omni,
+                    "provider_dispatch_receipt_refs": omni_refs,
+                },
+                "omni_to_qwen": {
+                    "qwen_quality_safe_stop_omission": marker,
+                    "provider_dispatch_receipt_refs": dispatch_refs,
+                },
+                "omni_to_qwen_vista": {
+                    "qwen_quality_safe_stop_omission": deepcopy(marker),
+                    "provider_dispatch_receipt_refs": deepcopy(dispatch_refs),
+                },
+            },
+            pre_vista_evidence,
+        )
     qwen = _mapping(orchestration.get("qwen_bindings"), "Qwen bindings")
     validated_qwen = validate_qwen_bindings(
         _unseal_for_closed_validator(qwen, "Qwen bindings"),
@@ -884,6 +964,68 @@ def _extract_hybrid_evidence(
         },
     }
     return arms, pre_vista_evidence
+
+
+def _qwen_quality_safe_stop_marker(
+    *,
+    response: Mapping[str, object],
+    projection: Mapping[str, object],
+    provider_group_ref: Mapping[str, object] | None,
+    omni_inventory_ref: Mapping[str, object] | None,
+    capture_bundle: Mapping[str, object],
+    cleanup_refs: Mapping[str, object],
+    dispatch_refs: list[Mapping[str, object]],
+) -> dict[str, Any]:
+    validated = validate_qwen_closed_json_quality_failure_response(response)
+    result = validated["result"]
+    diagnostics = result["diagnostics"]
+    request_lineage = diagnostics["request_lineage"]
+    capture_identity = capture_bundle.get("capture_identity")
+    model_request_ref = projection.get("model_request_ref")
+    raw_cleanup: dict[str, dict[str, str]] = {}
+    if (
+        not isinstance(provider_group_ref, Mapping)
+        or not isinstance(omni_inventory_ref, Mapping)
+        or not isinstance(capture_identity, Mapping)
+        or request_lineage.get("model_request_id")
+        != (model_request_ref or {}).get("id")
+        or request_lineage.get("screenshot_sha256")
+        != capture_identity.get("screenshot_sha256")
+        or not isinstance(capture_identity.get("capture_lineage_ref"), Mapping)
+        or not isinstance(projection.get("result_ref"), Mapping)
+        or not isinstance(projection.get("response_canonical_sha256"), str)
+    ):
+        raise ValueError("Hybrid Qwen quality failure lineage differs")
+    for name in ("worker_cleanup_ref", "provider_cleanup_ref"):
+        ref = cleanup_refs.get(name)
+        if not isinstance(ref, Mapping) or not isinstance(ref.get("content_sha256"), str):
+            raise ValueError("Hybrid Qwen quality failure cleanup is incomplete")
+        raw_cleanup[name] = {"content_sha256": str(ref["content_sha256"])}
+    body = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1",
+        "provider_group_ref": deepcopy(dict(provider_group_ref)),
+        "omni_inventory_ref": deepcopy(dict(omni_inventory_ref)),
+        "failure_result_ref": deepcopy(dict(projection["result_ref"])),
+        "failure_response_sha256": str(projection["response_canonical_sha256"]),
+        "diagnostics_ref": {
+            "content_sha256": str(diagnostics["content_sha256"]),
+        },
+        "model_request_ref": deepcopy(dict(model_request_ref)),
+        "capture_lineage_ref": deepcopy(dict(capture_identity["capture_lineage_ref"])),
+        "screenshot_sha256": str(capture_identity["screenshot_sha256"]),
+        "provider_dispatch_receipt_refs": [deepcopy(dict(item)) for item in dispatch_refs],
+        "cleanup_refs": raw_cleanup,
+        "failure_reason": str(result["failure_reason"]),
+        "omitted_artifacts": [
+            "hybrid_qwen_bindings_v1",
+            "hybrid_fusion_result_v1",
+        ],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    marker = deepcopy(body)
+    marker["content_sha256"] = content_sha256(marker)
+    return validate_qwen_quality_safe_stop_omission(marker)
 
 
 def _require_exact_bound_request_coverage(

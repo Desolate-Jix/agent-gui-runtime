@@ -2059,6 +2059,80 @@ def test_s12_arm_aware_artifacts_are_closed_and_do_not_fabricate_fusion() -> Non
         assert item["artifact_id"].endswith(semantic_sha)
 
 
+def test_s12_qwen_quality_safe_stop_keeps_real_arms_and_marks_hybrid_missing() -> None:
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        content_sha256,
+        validate_qwen_quality_safe_stop_runtime_lineage,
+    )
+
+    inputs = _s12_inputs()
+    marker = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1",
+        "provider_group_ref": {"id": "group/one", "content_sha256": "1" * 64},
+        "omni_inventory_ref": {"id": "omni_inventory", "content_sha256": "2" * 64},
+        "failure_result_ref": {"content_sha256": "3" * 64},
+        "failure_response_sha256": "4" * 64,
+        "diagnostics_ref": {"content_sha256": "5" * 64},
+        "model_request_ref": {"id": "request/one", "content_sha256": "6" * 64},
+        "capture_lineage_ref": {"id": "capture/one", "content_sha256": "7" * 64},
+        "screenshot_sha256": "8" * 64,
+        "provider_dispatch_receipt_refs": [
+            {"provider": "omni", "content_sha256": "9" * 64},
+            {"provider": "qwen", "content_sha256": "a" * 64},
+        ],
+        "cleanup_refs": {
+            "worker_cleanup_ref": {"content_sha256": "b" * 64},
+            "provider_cleanup_ref": {"content_sha256": "c" * 64},
+        },
+        "failure_reason": "Qwen binding response is not a closed JSON object",
+        "omitted_artifacts": ["hybrid_qwen_bindings_v1", "hybrid_fusion_result_v1"],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    marker["content_sha256"] = content_sha256(marker)
+    inputs["qwen_bindings"] = marker
+    inputs["fusion_result"] = deepcopy(marker)
+    inputs["submitted_vista_requests"] = []
+
+    selected = _s12_select(inputs)
+    rows = {row["arm_id"]: row for row in selected["rows"]}
+
+    assert rows["qwen_only"]["selection_status"] == "selected"
+    assert rows["omni_only_discovery"]["selection_status"] == "selected"
+    for arm in ("omni_to_qwen", "omni_to_qwen_vista"):
+        assert rows[arm] == {
+            "case_id": inputs["provider_case"]["case_id"],
+            "arm_id": arm,
+            "selection_status": "missing",
+            "eligibility": "INELIGIBLE",
+            "failure_reason": "qwen_quality_safe_stop",
+        }
+    cleanup_entry = {
+        "worker_cleanup_ref": {"content_sha256": "b" * 64},
+        "provider_cleanup_ref": {"content_sha256": "c" * 64},
+    }
+    validate_qwen_quality_safe_stop_runtime_lineage(
+        marker,
+        dispatch_receipt_refs=marker["provider_dispatch_receipt_refs"],
+        cleanup_entry=cleanup_entry,
+    )
+    forged_dispatch = deepcopy(marker["provider_dispatch_receipt_refs"])
+    forged_dispatch[1]["content_sha256"] = "d" * 64
+    with pytest.raises(ValueError, match="row dispatch lineage"):
+        validate_qwen_quality_safe_stop_runtime_lineage(
+            marker,
+            dispatch_receipt_refs=forged_dispatch,
+            cleanup_entry=cleanup_entry,
+        )
+    forged_cleanup = deepcopy(cleanup_entry)
+    forged_cleanup["provider_cleanup_ref"]["content_sha256"] = "e" * 64
+    with pytest.raises(ValueError, match="stable-zero cleanup lineage"):
+        validate_qwen_quality_safe_stop_runtime_lineage(
+            marker,
+            dispatch_receipt_refs=marker["provider_dispatch_receipt_refs"],
+            cleanup_entry=forged_cleanup,
+        )
+
 def test_s12_zero_matches_emit_missing_without_any_binding() -> None:
     inputs = _s12_inputs()
     inputs["provider_case"]["goal"] = "Select the button labeled 'Absent'"

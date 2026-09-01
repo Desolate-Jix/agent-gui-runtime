@@ -7371,6 +7371,37 @@ def _project_benchmark_v2_hybrid_step(
                 worker_record=worker_record,
                 binding=binding,
             )
+        if (
+            recovered_cleanup_verified
+            and worker_record.get("task_kind")
+            == "panel_learning_hybrid_qwen_binding"
+            and worker_record.get("result_adopted") is True
+        ):
+            candidate_projection = _read_benchmark_v2_hybrid_adopted_projection(
+                composition=composition,
+                worker_record=worker_record,
+                binding=binding,
+            )
+            from app.learn.hybrid.benchmark_v2_contracts import (
+                validate_qwen_closed_json_quality_failure_response,
+            )
+
+            try:
+                quality_response = validate_qwen_closed_json_quality_failure_response(
+                    candidate_projection.get("response")
+                )
+                request_lineage = quality_response["result"]["diagnostics"][
+                    "request_lineage"
+                ]
+                if (
+                    request_lineage.get("model_request_id")
+                    != candidate_projection.get("model_request_ref", {}).get("id")
+                ):
+                    raise ValueError("Qwen quality failure model request lineage differs")
+            except (TypeError, ValueError):
+                pass
+            else:
+                projection = candidate_projection
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:
