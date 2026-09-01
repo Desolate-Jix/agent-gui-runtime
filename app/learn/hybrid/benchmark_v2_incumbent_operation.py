@@ -2541,6 +2541,30 @@ def validate_benchmark_v2_actual_operations_stable_zero(
         worker_cleanup = entry["worker_cleanup_ref"]
         provider_cleanup = entry["provider_cleanup_ref"]
         worker = operation["worker_ref"]
+        review_no_provider_cleanup = False
+        if (
+            operation["mode"] == "hybrid_v1_1"
+            and operation["status"] == "complete"
+            and worker_cleanup.get("contract_version")
+            == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+            and provider_cleanup.get("contract_version")
+            == "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+        ):
+            validate_benchmark_v2_actual_completed_hybrid_cleanup(
+                _seal(
+                    {
+                        "contract_version": (
+                            BENCHMARK_V2_ACTUAL_COMPLETED_HYBRID_CLEANUP_CONTRACT
+                        ),
+                        "operation_ref": operation,
+                        "worker_cleanup_ref": worker_cleanup,
+                        "provider_cleanup_ref": provider_cleanup,
+                        "cleanup_status": "stable_zero",
+                        **_NON_AUTHORIZING_SAFETY,
+                    }
+                )
+            )
+            review_no_provider_cleanup = True
         if any(
             terminal.get(name) != operation[name]
             for name in ("run_id", "stage", "operation_id")
@@ -2565,7 +2589,11 @@ def validate_benchmark_v2_actual_operations_stable_zero(
                 in {"request_not_active", "terminated"}
             )
             if (
-                not (completed_cleanup or cancelled_cleanup)
+                not (
+                    completed_cleanup
+                    or cancelled_cleanup
+                    or review_no_provider_cleanup
+                )
                 or any(
                     worker_cleanup.get(name) != operation[name]
                     for name in ("run_id", "stage", "operation_id")
@@ -2598,7 +2626,7 @@ def validate_benchmark_v2_actual_operations_stable_zero(
                 "benchmark actual stable-zero incumbent reservation ref",
             )
             incumbent_reservations.append(reservation["content_sha256"])
-        if (
+        if not review_no_provider_cleanup and (
             provider_cleanup.get("contract_version")
             != "benchmark_provider_cleanup_ref_v1"
             or provider_cleanup.get("status") != "cleanup_verified"

@@ -4070,52 +4070,73 @@ def _attest_benchmark_v2_actual_operations_stable_zero(
     )
     hybrid_cleanup = hybrid_step["cleanup_refs"]
     if hybrid_status == "complete":
-        provider_cleanup_value = worker_record.get("benchmark_provider_cleanup_ref")
-        if not isinstance(provider_cleanup_value, Mapping):
-            raise LearningWorkflowStageOperationError(
-                "benchmark actual Hybrid provider cleanup is incomplete"
-            )
-        hybrid_provider_cleanup = _validate_benchmark_v2_hybrid_provider_cleanup(
-            cleanup=provider_cleanup_value,
-            worker_record=worker_record,
-        )
         if (
-            hybrid_provider_cleanup.get("outcome")
-            != "verified_exact_process_exited"
-            or worker_record.get("status") != "completed"
-            or worker_record.get("runtime_attached") is not False
-            or worker_record.get("result_available") is not True
+            worker_record.get("task_kind")
+            == "panel_learning_hybrid_review_projection"
         ):
-            raise LearningWorkflowStageOperationError(
-                "benchmark actual Hybrid completed worker cleanup is incomplete"
+            completed_cleanup = (
+                _attest_benchmark_v2_actual_completed_hybrid_cleanup(
+                    composition=composition,
+                    operation_ref=exact_hybrid,
+                )
             )
-        hybrid_worker_cleanup = seal_immutable(
-            {
-                "contract_version": (
-                    "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
-                ),
-                "run_id": exact_hybrid["run_id"],
-                "stage": exact_hybrid["stage"],
-                "operation_id": exact_hybrid["operation_id"],
-                "worker_id": exact_hybrid["worker_ref"]["worker_id"],
-                "model_request_id": exact_hybrid["worker_ref"]["model_request_id"],
-                "payload_sha256": exact_hybrid["worker_ref"]["payload_sha256"],
-                "worker_status": "completed",
-                "runtime_attached": False,
-                "result_available": True,
-                "authoritative_worker_record_sha256": (
-                    _benchmark_v2_hybrid_completed_worker_record_sha256(
-                        worker_record=worker_record,
-                        provider_cleanup_ref=hybrid_provider_cleanup,
-                    )
-                ),
-                "provider_cleanup_ref": {
-                    "content_sha256": hybrid_provider_cleanup["content_sha256"]
-                },
-                "artifact_is_authorization": False,
-                "execute_binding_enabled": False,
-            }
-        )
+            hybrid_worker_cleanup = deepcopy(
+                completed_cleanup["worker_cleanup_ref"]
+            )
+            hybrid_provider_cleanup = deepcopy(
+                completed_cleanup["provider_cleanup_ref"]
+            )
+        else:
+            provider_cleanup_value = worker_record.get(
+                "benchmark_provider_cleanup_ref"
+            )
+            if not isinstance(provider_cleanup_value, Mapping):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark actual Hybrid provider cleanup is incomplete"
+                )
+            hybrid_provider_cleanup = _validate_benchmark_v2_hybrid_provider_cleanup(
+                cleanup=provider_cleanup_value,
+                worker_record=worker_record,
+            )
+            if (
+                hybrid_provider_cleanup.get("outcome")
+                != "verified_exact_process_exited"
+                or worker_record.get("status") != "completed"
+                or worker_record.get("runtime_attached") is not False
+                or worker_record.get("result_available") is not True
+            ):
+                raise LearningWorkflowStageOperationError(
+                    "benchmark actual Hybrid completed worker cleanup is incomplete"
+                )
+            hybrid_worker_cleanup = seal_immutable(
+                {
+                    "contract_version": (
+                        "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+                    ),
+                    "run_id": exact_hybrid["run_id"],
+                    "stage": exact_hybrid["stage"],
+                    "operation_id": exact_hybrid["operation_id"],
+                    "worker_id": exact_hybrid["worker_ref"]["worker_id"],
+                    "model_request_id": exact_hybrid["worker_ref"][
+                        "model_request_id"
+                    ],
+                    "payload_sha256": exact_hybrid["worker_ref"]["payload_sha256"],
+                    "worker_status": "completed",
+                    "runtime_attached": False,
+                    "result_available": True,
+                    "authoritative_worker_record_sha256": (
+                        _benchmark_v2_hybrid_completed_worker_record_sha256(
+                            worker_record=worker_record,
+                            provider_cleanup_ref=hybrid_provider_cleanup,
+                        )
+                    ),
+                    "provider_cleanup_ref": {
+                        "content_sha256": hybrid_provider_cleanup["content_sha256"]
+                    },
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
     elif hybrid_status == "safe_stopped" and all(
         isinstance(hybrid_cleanup.get(name), Mapping)
         for name in ("worker_cleanup_ref", "provider_cleanup_ref")

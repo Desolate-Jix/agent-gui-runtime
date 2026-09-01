@@ -890,6 +890,116 @@ def _actual_completed_review_cleanup(
     )
 
 
+def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> None:
+    binding = {
+        "stage": "screen_understanding",
+        "window_binding_ref": {
+            "id": "window-review-no-provider",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": "capture-review-no-provider",
+            "content_sha256": "b" * 64,
+        },
+    }
+    group = {
+        "request_ref": {
+            "id": "request-review-no-provider",
+            "content_sha256": "c" * 64,
+        }
+    }
+    review_step = _actual_completed_review_step(
+        group,
+        {
+            **binding,
+            "run_id": "run-review-no-provider",
+            "operation_id": "operation-review-no-provider",
+        },
+    )
+    review_operation = review_step["operation_ref"]
+    review_cleanup = _actual_completed_review_cleanup(review_operation)
+
+    service = _ActualService([])
+    incumbent_terminals = []
+    for index in range(5):
+        operation = _actual_operation(
+            mode="incumbent_qwen_only",
+            operation_id=f"incumbent-review-no-provider-{index}",
+            request_ref={
+                "id": f"case-review-no-provider-{index}",
+                "content_sha256": f"{index + 1:x}" * 64,
+            },
+            binding={
+                **binding,
+                "run_id": f"run-review-no-provider-{index}",
+            },
+            revision=index + 1,
+        )
+        incumbent_terminals.append(service.cancel_operation(operation_ref=operation))
+
+    operations = [
+        review_operation,
+        *(item["operation_ref"] for item in incumbent_terminals),
+    ]
+    cleanup_entries = [
+        {
+            "operation_ref_sha256": review_operation["content_sha256"],
+            "terminal_receipt_ref": _sealed(
+                {
+                    "run_id": review_operation["run_id"],
+                    "stage": review_operation["stage"],
+                    "operation_id": review_operation["operation_id"],
+                    "worker_id": review_operation["worker_ref"]["worker_id"],
+                }
+            ),
+            "worker_cleanup_ref": review_cleanup["worker_cleanup_ref"],
+            "provider_cleanup_ref": review_cleanup["provider_cleanup_ref"],
+        },
+        *(
+            {
+                "operation_ref_sha256": item["operation_ref"]["content_sha256"],
+                "terminal_receipt_ref": _sealed(
+                    {
+                        "run_id": item["operation_ref"]["run_id"],
+                        "stage": item["operation_ref"]["stage"],
+                        "operation_id": item["operation_ref"]["operation_id"],
+                        "worker_id": item["operation_ref"]["worker_ref"]["worker_id"],
+                    }
+                ),
+                "worker_cleanup_ref": item["cleanup_refs"]["worker_cleanup_ref"],
+                "provider_cleanup_ref": item["cleanup_refs"]["provider_cleanup_ref"],
+            }
+            for item in incumbent_terminals
+        ),
+    ]
+    receipt = _sealed(
+        {
+            "contract_version": "benchmark_v2_actual_operations_stable_zero_v1",
+            "operation_refs": operations,
+            "cleanup_entries": cleanup_entries,
+            "window_binding_ref": binding["window_binding_ref"],
+            "capture_ref": binding["capture_ref"],
+            "cleanup_status": "stable_zero",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+    assert incumbent.validate_benchmark_v2_actual_operations_stable_zero(receipt) == receipt
+
+    for field, value in (
+        ("task_kind", "panel_learning_calibration_sequence"),
+        ("provider_role", "qwen"),
+    ):
+        foreign = deepcopy(receipt)
+        provider_cleanup = foreign["cleanup_entries"][0]["provider_cleanup_ref"]
+        provider_cleanup[field] = value
+        provider_cleanup["content_sha256"] = content_sha256(provider_cleanup)
+        foreign["content_sha256"] = content_sha256(foreign)
+        with pytest.raises(ValueError):
+            incumbent.validate_benchmark_v2_actual_operations_stable_zero(foreign)
+
+
 @pytest.mark.parametrize(
     ("mode", "status"),
     (

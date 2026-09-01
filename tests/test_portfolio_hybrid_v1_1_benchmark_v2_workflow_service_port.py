@@ -3959,6 +3959,210 @@ def test_completed_review_hybrid_cleanup_is_separate_and_replay_stable(
         store.close()
 
 
+def test_actual_stable_zero_propagates_completed_review_no_provider_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import (
+        _ActualService,
+        _actual_completed_review_cleanup,
+        _actual_completed_review_step,
+        _actual_operation,
+    )
+
+    binding = {
+        "stage": "screen_understanding",
+        "window_binding_ref": _identity("window-review-stable-zero"),
+        "capture_ref": _identity("capture-review-stable-zero", SHA_B),
+    }
+    screen_group = {
+        "request_ref": _identity("request-review-stable-zero", "c" * 64)
+    }
+    review_step = _actual_completed_review_step(
+        screen_group,
+        {
+            **binding,
+            "run_id": "run-review-stable-zero",
+            "operation_id": "operation-review-stable-zero",
+        },
+    )
+    review_operation = review_step["operation_ref"]
+    review_cleanup = _actual_completed_review_cleanup(review_operation)
+    review_worker = {
+        **deepcopy(review_operation["worker_ref"]),
+        "status": "completed",
+        "runtime_attached": False,
+        "result_available": True,
+        "result_adopted": True,
+    }
+
+    fake_service = _ActualService([])
+    incumbent_terminals = []
+    child_states = {}
+    for index in range(5):
+        pending = _actual_operation(
+            mode="incumbent_qwen_only",
+            operation_id=f"incumbent-review-stable-zero-{index}",
+            request_ref={
+                "id": f"case-review-stable-zero-{index}",
+                "content_sha256": f"{index + 1:x}" * 64,
+            },
+            binding={
+                **binding,
+                "run_id": f"run-review-stable-zero-{index}",
+            },
+            revision=index + 1,
+        )
+        terminal = fake_service.cancel_operation(operation_ref=pending)
+        incumbent_terminals.append(terminal)
+        operation_ref = terminal["operation_ref"]
+        cleanup = terminal["cleanup_refs"]
+        child_states[operation_ref["run_id"]] = {
+            "execution": {"operation_id": operation_ref["operation_id"]},
+            "operation": {
+                "_operation_ref": operation_ref,
+                "phase": operation_ref["status"],
+                "run_id": operation_ref["run_id"],
+                "stage": operation_ref["stage"],
+                "operation_id": operation_ref["operation_id"],
+                "handler_payload_source": {
+                    "provider_case_ref": {
+                        "case_id": operation_ref["request_ref"]["id"]
+                    }
+                },
+                "window_binding_ref": operation_ref["window_binding_ref"],
+                "capture_ref": operation_ref["capture_ref"],
+                "worker_cleanup_ref": cleanup["worker_cleanup_ref"],
+                "provider_cleanup_ref": cleanup["provider_cleanup_ref"],
+                "reservation_ref": cleanup["worker_cleanup_ref"]["reservation_ref"],
+                "terminal_receipt": seal_immutable(
+                    {
+                        "run_id": operation_ref["run_id"],
+                        "stage": operation_ref["stage"],
+                        "operation_id": operation_ref["operation_id"],
+                        "worker_id": operation_ref["worker_ref"]["worker_id"],
+                    }
+                ),
+            },
+        }
+
+    class _Store:
+        def get(self, run_id: str) -> dict[str, object]:
+            return child_states[run_id]
+
+    class _Root:
+        authority_kind = "benchmark_v2_workflow_service_dispatch_cleanup"
+
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
+        store=_Store(),
+        worker_registry=object(),
+        project_root=tmp_path,
+        benchmark_supervision_root=_Root(),
+    )
+    service = incumbent.BenchmarkV2IncumbentWorkflowService(composition)
+    completed_cleanup_calls = []
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_hybrid_service_context",
+        lambda **_kwargs: (
+            {"run_id": review_operation["run_id"]},
+            {"operation_id": review_operation["operation_id"]},
+            {"content_sha256": "d" * 64},
+            review_worker,
+            review_operation,
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_hybrid_service_status",
+        lambda **_kwargs: "complete",
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_step",
+        lambda **_kwargs: {
+            "cleanup_refs": {
+                "worker_cleanup_ref": None,
+                "provider_cleanup_ref": None,
+            }
+        },
+    )
+
+    def _attest_completed(**kwargs: object) -> dict[str, object]:
+        completed_cleanup_calls.append(deepcopy(dict(kwargs)))
+        return deepcopy(review_cleanup)
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_attest_benchmark_v2_actual_completed_hybrid_cleanup",
+        _attest_completed,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_stage_execution",
+        lambda current, _stage: current["execution"],
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_incumbent_operation_from_state",
+        lambda current, _stage: current["operation"],
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_workflow_service_operation_ref",
+        lambda **kwargs: kwargs["operation"]["_operation_ref"],
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_incumbent_parent_binding_identity",
+        lambda **_kwargs: (
+            review_operation["run_id"],
+            review_operation["operation_id"],
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_validate_benchmark_v2_actual_incumbent_worker_cleanup",
+        lambda *, cleanup, operation: cleanup,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_validate_benchmark_v2_provider_cleanup_parent",
+        lambda *, cleanup, **_kwargs: cleanup,
+    )
+
+    operation_refs = [
+        review_operation,
+        *(item["operation_ref"] for item in incumbent_terminals),
+    ]
+    first = service.attest_actual_operations_stable_zero(
+        operation_refs=operation_refs
+    )
+    replay = service.attest_actual_operations_stable_zero(
+        operation_refs=operation_refs
+    )
+
+    assert canonical_json_bytes(replay) == canonical_json_bytes(first)
+    assert len(completed_cleanup_calls) == 2
+    assert all(
+        call["operation_ref"] == review_operation
+        for call in completed_cleanup_calls
+    )
+    hybrid_entry = next(
+        item
+        for item in first["cleanup_entries"]
+        if item["operation_ref_sha256"] == review_operation["content_sha256"]
+    )
+    assert hybrid_entry["provider_cleanup_ref"] == review_cleanup[
+        "provider_cleanup_ref"
+    ]
+    assert hybrid_entry["provider_cleanup_ref"]["contract_version"] == (
+        "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
+    )
+
+
 def test_completed_hybrid_cleanup_rejects_nonterminal_without_side_effects(
     tmp_path: Path,
 ) -> None:
