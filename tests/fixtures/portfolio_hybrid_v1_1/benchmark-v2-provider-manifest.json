@@ -152,7 +152,7 @@
         "role": "hybrid_contracts"
       },
       {
-        "file_sha256": "4989be42ace83d7d7762a76dcb9f42b07b2efa4bef6227f59ac5970f245afb99",
+        "file_sha256": "a0fac75c229d3327a83119d5cba1530d6e0e9efcc2a7f0572e11f7dcbf2a8b3d",
         "relative_path": "app/learn/hybrid/benchmark_v2_actual.py",
         "role": "benchmark_actual"
       },
