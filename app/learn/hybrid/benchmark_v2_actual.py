@@ -757,7 +757,17 @@ def _extract_hybrid_evidence(
         _unseal_for_closed_validator(qwen, "Qwen bindings"),
         validated_omni,
     )
-    fusion = _mapping(orchestration.get("fusion_result"), "fusion result")
+    if quality_safe_stop:
+        fusion = _mapping(review, "quality safe-stop fusion result")
+        duplicate_fusion = orchestration.get("fusion_result")
+        if duplicate_fusion is not None:
+            duplicate_fusion = _mapping(duplicate_fusion, "fusion result")
+            if canonical_json_bytes(duplicate_fusion) != canonical_json_bytes(fusion):
+                raise ValueError(
+                    "Hybrid quality safe-stop result differs from fusion result"
+                )
+    else:
+        fusion = _mapping(orchestration.get("fusion_result"), "fusion result")
     validate_fusion_result(
         _unseal_for_closed_validator(fusion, "fusion result"),
         validated_omni,
@@ -819,8 +829,6 @@ def _extract_hybrid_evidence(
         submitted_vista_requests=submitted_vista_requests,
     )
     if quality_safe_stop:
-        if canonical_json_bytes(review) != canonical_json_bytes(fusion):
-            raise ValueError("Hybrid quality safe-stop result differs from fusion result")
         if any(
             isinstance(candidate, Mapping)
             and candidate.get("state") == "BOUND"

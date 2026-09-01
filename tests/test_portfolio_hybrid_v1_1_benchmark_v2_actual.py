@@ -1669,7 +1669,7 @@ class _FakeWorkflowService:
     def _quality_safe_stop_response(self) -> dict[str, object]:
         response = self._hybrid_response()
         orchestration = response["orchestration"]
-        fusion = deepcopy(orchestration["fusion_result"])
+        fusion = deepcopy(orchestration.pop("fusion_result"))
         fusion.pop("content_sha256")
         for candidate in fusion["candidates"]:
             candidate["state"] = "UNBOUND"
@@ -1677,7 +1677,6 @@ class _FakeWorkflowService:
             candidate["review_required"] = True
             candidate["reason"] = "semantic_provider_did_not_bind"
         fusion = seal_immutable(fusion)
-        orchestration["fusion_result"] = fusion
         orchestration.pop("hybrid_vista_requests")
         orchestration["benchmark_v2_provider_dispatch_receipt_refs"] = [
             {"provider": "omni", "content_sha256": "1" * 64},
@@ -2721,10 +2720,10 @@ def test_quality_safe_stop_rejects_result_that_differs_from_fusion_parent() -> N
 
     def mismatched_response() -> dict[str, object]:
         response = original()
-        result = deepcopy(response["result"])
-        result.pop("content_sha256")
-        result["candidates"][0]["reason"] = "resealed_but_different"
-        response["result"] = seal_immutable(result)
+        duplicate = deepcopy(response["result"])
+        duplicate.pop("content_sha256")
+        duplicate["candidates"][0]["reason"] = "resealed_but_different"
+        response["orchestration"]["fusion_result"] = seal_immutable(duplicate)
         return response
 
     service._quality_safe_stop_response = mismatched_response
