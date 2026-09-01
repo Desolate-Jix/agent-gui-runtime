@@ -91,6 +91,42 @@ def _gpu_snapshot() -> dict[str, Any]:
     }
 
 
+def _python_entrypoint_identity(command: list[object]) -> str:
+    index = 1
+    while index < len(command):
+        token = str(command[index])
+        if token == "-m":
+            return str(command[index + 1]) if index + 1 < len(command) else ""
+        if token == "-c":
+            return "__python_inline__"
+        if token == "--":
+            return Path(str(command[index + 1])).name if index + 1 < len(command) else ""
+        if token in {"-X", "-W", "--check-hash-based-pycs"}:
+            index += 2
+            continue
+        if token.startswith(("-X", "-W", "--check-hash-based-pycs=")):
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return Path(token).name
+    return ""
+
+
+def _compute_process_identity(name: object, command: list[object]) -> str:
+    tokens = [str(name or "")]
+    if command:
+        executable_name = Path(str(command[0])).name
+        tokens.append(executable_name)
+        executable_key = executable_name.casefold()
+        if executable_key.startswith(("python", "pythonw")) and len(command) > 1:
+            entrypoint = _python_entrypoint_identity(command)
+            if entrypoint:
+                tokens.append(entrypoint)
+    return " ".join(tokens).casefold()
+
+
 def _resident_compute_models(*, psutil_module: Any = _AUTO, current_pid: int | None = None) -> list[dict[str, Any]]:
     if psutil_module is _AUTO:
         try:
@@ -108,9 +144,10 @@ def _resident_compute_models(*, psutil_module: Any = _AUTO, current_pid: int | N
             info = process.info
             if info.get("pid") == own_pid:
                 continue
-            command_line = " ".join(str(value) for value in (info.get("cmdline") or []))
-            haystack = f"{info.get('name') or ''} {command_line}".casefold()
-            if any(needle in haystack for needle in needles):
+            command = list(info.get("cmdline") or [])
+            command_line = " ".join(str(value) for value in command)
+            identity = _compute_process_identity(info.get("name"), command)
+            if any(needle in identity for needle in needles):
                 blocked.append({"pid": info.get("pid"), "name": info.get("name"), "command_line": command_line})
     except (OSError, RuntimeError, AttributeError, getattr(psutil_module, "Error", OSError)) as exc:
         raise OmniparserProviderError("runtime_preflight", f"Process residency inspection failed: {exc}") from exc

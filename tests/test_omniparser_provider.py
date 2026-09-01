@@ -132,6 +132,79 @@ def test_preflight_rejects_a_missing_process_inspector() -> None:
     assert exc_info.value.code == "dependency_missing"
 
 
+def test_residency_preflight_uses_process_identity_not_arbitrary_cli_paths() -> None:
+    class FakeProcess:
+        def __init__(self, pid: int, name: str, cmdline: list[str]) -> None:
+            self.info = {"pid": pid, "name": name, "cmdline": cmdline}
+
+    class FakePsutil:
+        Error = OSError
+
+        @staticmethod
+        def process_iter(fields: list[str]) -> list[FakeProcess]:
+            assert fields == ["pid", "name", "cmdline"]
+            return [
+                FakeProcess(
+                    40,
+                    "pwsh.exe",
+                    ["pwsh.exe", "-Command", "--output attempts-qwen-compact"],
+                ),
+                FakeProcess(
+                    41,
+                    "python.exe",
+                    [
+                        "python.exe",
+                        "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
+                        "--output-root",
+                        "attempts-qwen-compact",
+                    ],
+                ),
+                FakeProcess(
+                    42,
+                    "python.exe",
+                    ["python.exe", "scripts/run_uei_omniparser_shadow_worker.py"],
+                ),
+                FakeProcess(43, "llama-server.exe", ["llama-server.exe"]),
+                FakeProcess(
+                    44,
+                    "python.exe",
+                    ["python.exe", "scripts/run_vista_local_worker.py"],
+                ),
+                FakeProcess(
+                    45,
+                    "python.exe",
+                    ["python.exe", "-m", "pytest", "test_qwen_contract.py"],
+                ),
+                FakeProcess(
+                    46,
+                    "python.exe",
+                    ["python.exe", "-u", "scripts/model_servers/vista_openai_server.py"],
+                ),
+                FakeProcess(
+                    47,
+                    "python.exe",
+                    ["python.exe", "-O", "qwen_server.py"],
+                ),
+                FakeProcess(
+                    48,
+                    "python.exe",
+                    ["python.exe", "-X", "utf8", "-m", "vllm.entrypoints.openai.api_server"],
+                ),
+                FakeProcess(
+                    49,
+                    "python.exe",
+                    ["python.exe", "-c", "print('attempts-qwen-compact')"],
+                ),
+            ]
+
+    resident = runner._resident_compute_models(
+        psutil_module=FakePsutil,
+        current_pid=42,
+    )
+
+    assert [item["pid"] for item in resident] == [43, 44, 46, 47, 48]
+
+
 def test_benchmark_mode_requires_three_warm_repetitions() -> None:
     with pytest.raises(OmniparserProviderError, match="protocol_invalid"):
         runner._validate_warm_repetitions(2)
