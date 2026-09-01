@@ -1083,6 +1083,140 @@ def _actual_completed_review_cleanup(
     )
 
 
+def _actual_fusion_safe_stop_step(
+    group: Mapping[str, object], binding: Mapping[str, object]
+) -> dict[str, object]:
+    operation_id = str(binding["operation_id"])
+    worker = _sealed(
+        {
+            "contract_version": "benchmark_v2_workflow_service_generic_worker_ref_v1",
+            "run_id": str(binding["run_id"]),
+            "stage": str(binding["stage"]),
+            "operation_id": operation_id,
+            "worker_id": f"worker-{operation_id}",
+            "model_request_id": f"request-{operation_id}",
+            "payload_sha256": hashlib.sha256(operation_id.encode()).hexdigest(),
+            "task_kind": "panel_learning_hybrid_fusion",
+        }
+    )
+    operation = incumbent.compose_benchmark_v2_workflow_service_operation_ref(
+        mode="hybrid_v1_1",
+        run_id=str(binding["run_id"]),
+        stage=str(binding["stage"]),
+        operation_id=operation_id,
+        workflow_state_ref={
+            "run_id": str(binding["run_id"]),
+            "revision": 3,
+            "content_sha256": "3" * 64,
+        },
+        stage_execution_ref={
+            "run_id": str(binding["run_id"]),
+            "stage": str(binding["stage"]),
+            "operation_id": operation_id,
+            "revision": 3,
+            "content_sha256": "4" * 64,
+        },
+        request_ref=group["request_ref"],
+        window_binding_ref=binding["window_binding_ref"],
+        capture_ref=binding["capture_ref"],
+        worker_ref=worker,
+        status="safe_stopped",
+        predecessor_content_sha256="5" * 64,
+    )
+    return incumbent.compose_benchmark_v2_workflow_service_step(
+        operation_ref=operation,
+        observed_task_kind="panel_learning_hybrid_fusion",
+        adopted_result_projection=None,
+        terminal_receipt=None,
+        cleanup_refs={"worker_cleanup_ref": None, "provider_cleanup_ref": None},
+    )
+
+
+def _actual_fusion_safe_stop_cleanup(
+    operation: Mapping[str, object],
+) -> dict[str, object]:
+    worker = operation["worker_ref"]
+    worker_cleanup = _sealed(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            **{name: operation[name] for name in ("run_id", "stage", "operation_id")},
+            **{
+                name: worker[name]
+                for name in ("worker_id", "model_request_id", "payload_sha256")
+            },
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+            "cancellation_ref": {"content_sha256": "6" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    common = {
+        **{name: operation[name] for name in ("run_id", "stage", "operation_id")},
+        **{
+            name: worker[name]
+            for name in ("worker_id", "model_request_id", "payload_sha256", "task_kind")
+        },
+    }
+    observation = _sealed(
+        {
+            "contract_version": (
+                "benchmark_v2_hybrid_fusion_direct_provider_absence_observation_v1"
+            ),
+            **common,
+            "handler_registry_provider": None,
+            "evidence_scope": "fusion_worker_direct_provider_only",
+            "current_worker_ref": deepcopy(worker),
+            "latest_operation_worker_ref": deepcopy(worker),
+            "worker_runtime_attachment_absent": True,
+            "provider_scope_absent": True,
+            "provider_journal_absent": True,
+            "provider_cleanup_journal_absent": True,
+            "deterministic_provider_lease_artifact_absent": True,
+            "deterministic_provider_owner_artifact_absent": True,
+            "deterministic_provider_runtime_artifact_absent": True,
+            "historical_provider_lineage_allowed": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    direct = _sealed(
+        {
+            "contract_version": (
+                "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+            ),
+            "status": "cleanup_verified",
+            "outcome": "verified_fusion_direct_provider_not_applicable",
+            "authority_kind": (
+                "benchmark_v2_workflow_service_fusion_direct_provider_cleanup"
+            ),
+            **common,
+            "direct_provider_role": None,
+            "evidence_scope": "fusion_worker_direct_provider_only",
+            "worker_status": "completed",
+            "runtime_attached": False,
+            "result_available": True,
+            "result_adopted": True,
+            "continuation_phase": "returned",
+            "cancellation_backend_termination": "not_running",
+            "cancellation_model_request_termination": "request_not_active",
+            "service_binding_ref": {"content_sha256": "7" * 64},
+            "terminal_continuation_receipt_ref": {"content_sha256": "8" * 64},
+            "returned_worker_ref": deepcopy(worker),
+            "worker_cleanup_ref": {"content_sha256": worker_cleanup["content_sha256"]},
+            "live_absence_observation": observation,
+            "historical_provider_lineage_allowed": True,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    return incumbent.compose_benchmark_v2_actual_fusion_safe_stop_cleanup(
+        operation_ref=operation,
+        worker_cleanup_ref=worker_cleanup,
+        fusion_direct_provider_cleanup_ref=direct,
+    )
+
+
 def _actual_qwen_zero_dispatch_terminal(
     operation_id: str,
     *,
@@ -3970,6 +4104,81 @@ def test_actual_cleanup_resumes_advanced_incumbent_instead_of_cancelling(
         for operation in service.cancelled_operation_refs
     )
     iterator.close()
+
+
+def test_actual_cleanup_uses_explicit_fusion_safe_stop_attestation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+        run_id="fusion-cleanup-run",
+        operation_id="fusion-cleanup-operation",
+        window_binding_ref={"id": "fusion-window", "content_sha256": "1" * 64},
+        capture_ref={"id": "fusion-capture", "content_sha256": "2" * 64},
+        owner_journal_ref={"content_sha256": "3" * 64},
+        expected_uia_root_ref={"content_sha256": "4" * 64},
+    )
+    group = {
+        "request_ref": {"id": "fusion-request", "content_sha256": "5" * 64}
+    }
+    terminal = _actual_fusion_safe_stop_step(group, binding)
+
+    class FusionCleanupService:
+        def __init__(self) -> None:
+            self.attest_calls = 0
+
+        def lookup_hybrid_operation(self, **_kwargs):
+            return deepcopy(terminal)
+
+        def cancel_operation(self, *, operation_ref):
+            assert operation_ref == terminal["operation_ref"]
+            return deepcopy(terminal)
+
+        def attest_fusion_safe_stop_cleanup(self, *, operation_ref):
+            self.attest_calls += 1
+            return _actual_fusion_safe_stop_cleanup(operation_ref)
+
+    service = FusionCleanupService()
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_screen_group_service_intents",
+        lambda **_kwargs: [
+            {
+                "provider_group": deepcopy(group),
+                "window_binding": deepcopy(binding),
+                "content_sha256": "6" * 64,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_incumbent_call_intents",
+        lambda **_kwargs: [],
+    )
+
+    reconciled = runtime_module._reconcile_actual_operations(
+        attempt_dir=tmp_path,
+        service=service,
+    )
+
+    assert service.attest_calls == 1
+    assert reconciled[3][0]["contract_version"] == (
+        "benchmark_v2_actual_fusion_safe_stop_cleanup_v1"
+    )
+    assert reconciled[4] == []
+    with pytest.raises(ValueError, match="cleanup proof is unavailable"):
+        runtime_module._validate_partial_actual_terminal_cleanup(terminal)
+    parents = runtime_module._actual_provider_cleanup_parent_refs(
+        actual_terminals=[terminal],
+        actual_attestations=[],
+        actual_completed_hybrid_cleanups=reconciled[3],
+    )
+    assert [item["parent_kind"] for item in parents] == [
+        "worker_cleanup",
+        "fusion_direct_provider_cleanup",
+    ]
 
 
 def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation(

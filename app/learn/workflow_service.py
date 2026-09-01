@@ -114,6 +114,11 @@ class _LearningWorkflowRegistryOwner:
     ) -> dict[str, Any]:
         return self._registry.attest_completed_review_no_provider_cleanup(**kwargs)
 
+    def attest_completed_fusion_direct_provider_cleanup(
+        self, **kwargs: Any
+    ) -> dict[str, Any]:
+        return self._registry.attest_completed_fusion_direct_provider_cleanup(**kwargs)
+
     def prepare_benchmark_identity(self, **kwargs: Any) -> dict[str, Any]:
         return self._registry.prepare_benchmark_worker_identity(**kwargs)
 
@@ -4416,6 +4421,194 @@ def _attest_benchmark_v2_actual_completed_hybrid_cleanup(
             operation_ref=exact,
             worker_cleanup_ref=worker_cleanup_ref,
             provider_cleanup_ref=provider_cleanup_ref,
+        )
+
+
+def _attest_benchmark_v2_actual_fusion_safe_stop_cleanup(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    operation_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_actual_fusion_safe_stop_cleanup,
+        validate_benchmark_v2_workflow_service_operation_ref,
+    )
+
+    _require_minted_learning_workflow_service_composition(composition)
+    supplied = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=str(supplied["run_id"]),
+        operation_id=str(supplied["operation_id"]),
+    ):
+        current, stage_execution, binding, worker_record, exact = (
+            _benchmark_v2_hybrid_service_context(
+                composition=composition,
+                operation_ref=supplied,
+            )
+        )
+        status = _benchmark_v2_hybrid_service_status(
+            workflow_state=current,
+            stage=str(exact["stage"]),
+            worker_record=worker_record,
+        )
+        step = _project_benchmark_v2_hybrid_step(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            binding=binding,
+            worker_record=worker_record,
+            status=status,
+        )
+        legacy_verified = _benchmark_v2_hybrid_legacy_fusion_safe_stop_verified(
+            composition=composition,
+            workflow_state=current,
+            stage_execution=stage_execution,
+            binding=binding,
+            worker_record=worker_record,
+        )
+        receipt_value = binding.get("continuation_receipt")
+        receipt = _validate_benchmark_v2_hybrid_continuation_receipt(receipt_value)
+        terminal_prepared_verified = False
+        if receipt.get("receipt_phase") == "terminal_prepared":
+            try:
+                adopted = _read_benchmark_v2_hybrid_adopted_projection(
+                    composition=composition,
+                    worker_record=worker_record,
+                    binding=binding,
+                )
+                result_ref = adopted.get("result_ref")
+                result_sha256 = (
+                    result_ref.get("content_sha256")
+                    if isinstance(result_ref, Mapping)
+                    else None
+                )
+                continuation_replay = _matching_worker_continuation_replay(
+                    workflow_state=deepcopy(dict(current)),
+                    stage=str(worker_record["stage"]),
+                    operation_id=str(worker_record["operation_id"]),
+                    worker_id=str(worker_record["worker_id"]),
+                    task_kind="panel_learning_hybrid_fusion",
+                    result_sha256=str(result_sha256 or ""),
+                )
+            except (LearningWorkflowStageOperationError, TypeError, ValueError):
+                adopted = None
+                continuation_replay = None
+            terminal_prepared_verified = (
+                receipt.get("returned_worker_ref")
+                == _benchmark_v2_hybrid_worker_ref(worker_record)
+                and worker_record.get("task_kind")
+                == "panel_learning_hybrid_fusion"
+                and worker_record.get("status") == "completed"
+                and worker_record.get("runtime_attached") is False
+                and worker_record.get("result_available") is True
+                and worker_record.get("result_adopted") is True
+                and current.get("workflow_status") == "safe_stopped"
+                and current.get("terminal") is True
+                and stage_execution.get("result_outcome") == "safe_stopped"
+                and isinstance(adopted, Mapping)
+                and _benchmark_v2_hybrid_fusion_response_safe_stops(
+                    adopted.get("response")
+                )
+                and isinstance(continuation_replay, Mapping)
+                and continuation_replay.get("outcome") == "safe_stopped"
+            )
+        if (
+            status != "safe_stopped"
+            or step["operation_ref"] != exact
+            or step["observed_task_kind"] != "panel_learning_hybrid_fusion"
+            or step["cleanup_refs"]
+            != {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+            or exact["worker_ref"] != _benchmark_v2_hybrid_worker_ref(worker_record)
+            or not (legacy_verified or terminal_prepared_verified)
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 fusion safe-stop cleanup bridge is unavailable"
+            )
+        returned_worker_ref = _benchmark_v2_hybrid_worker_ref(worker_record)
+        cancellation = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).cancel_worker(
+            run_id=str(exact["run_id"]),
+            stage=str(exact["stage"]),
+            operation_id=str(exact["operation_id"]),
+        )
+        if (
+            cancellation.get("backend_compute_termination")
+            not in {"not_running", "terminated"}
+            or cancellation.get("model_service_compute_termination")
+            not in {"request_not_active", "terminated"}
+            or cancellation.get("worker_id") != returned_worker_ref["worker_id"]
+            or cancellation.get("model_request_id")
+            != returned_worker_ref["model_request_id"]
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 fusion worker absence is indeterminate"
+            )
+        cancellation_projection = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_fusion_safe_stop_cancellation_projection_v1"
+                ),
+                **{
+                    name: returned_worker_ref[name]
+                    for name in (
+                        "run_id", "stage", "operation_id", "worker_id",
+                        "model_request_id", "payload_sha256",
+                    )
+                },
+                "backend_compute_termination": str(
+                    cancellation["backend_compute_termination"]
+                ),
+                "model_service_compute_termination": str(
+                    cancellation["model_service_compute_termination"]
+                ),
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        worker_cleanup_ref = seal_immutable(
+            {
+                "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+                **{
+                    name: returned_worker_ref[name]
+                    for name in (
+                        "run_id", "stage", "operation_id", "worker_id",
+                        "model_request_id", "payload_sha256",
+                    )
+                },
+                "backend_compute_termination": str(
+                    cancellation["backend_compute_termination"]
+                ),
+                "model_service_compute_termination": str(
+                    cancellation["model_service_compute_termination"]
+                ),
+                "cancellation_ref": {
+                    "content_sha256": cancellation_projection["content_sha256"]
+                },
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        direct_provider_cleanup_ref = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).attest_completed_fusion_direct_provider_cleanup(
+            worker_id=str(worker_record["worker_id"]),
+            run_id=str(worker_record["run_id"]),
+            stage=str(worker_record["stage"]),
+            operation_id=str(worker_record["operation_id"]),
+            service_binding_ref={"content_sha256": str(binding["content_sha256"])},
+            terminal_continuation_receipt_ref={
+                "content_sha256": str(receipt["content_sha256"])
+            },
+            continuation_phase=str(receipt["receipt_phase"]),
+            returned_worker_ref=returned_worker_ref,
+            worker_cleanup_ref=worker_cleanup_ref,
+        )
+        return compose_benchmark_v2_actual_fusion_safe_stop_cleanup(
+            operation_ref=exact,
+            worker_cleanup_ref=worker_cleanup_ref,
+            fusion_direct_provider_cleanup_ref=direct_provider_cleanup_ref,
         )
 
 

@@ -7438,6 +7438,114 @@ def test_benchmark_v2_review_no_provider_cleanup_replays_and_reattests_absence(
         restarted.attest_completed_review_no_provider_cleanup(**kwargs)
 
 
+def test_benchmark_v2_fusion_direct_provider_cleanup_allows_historical_contexts_and_replays(
+    tmp_path: Path,
+) -> None:
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    contexts = {
+        "omni": {"content_sha256": "1" * 64},
+        "qwen": {"content_sha256": "2" * 64},
+    }
+    started = registry.start(
+        run_id="run-fusion-cleanup",
+        stage="screen_understanding",
+        operation_id="operation-fusion-cleanup",
+        task_kind="panel_learning_hybrid_fusion",
+        payload={
+            "learning_pipeline_mode": "hybrid_v1_1",
+            "workflow_revision": 8,
+            "_hybrid_orchestration": {
+                "benchmark_v2_provider_dispatch_context_refs": contexts,
+            },
+        },
+        authoritative_workflow_revision=8,
+    )
+    finished = _finish_fake_worker(
+        registry,
+        started,
+        response={
+            "outcome": "completed",
+            "orchestration": {
+                "benchmark_v2_provider_dispatch_context_refs": contexts,
+            },
+        },
+    )
+    registry.adopt_result(
+        worker_id=str(started["worker_id"]),
+        run_id="run-fusion-cleanup",
+        stage="screen_understanding",
+        operation_id="operation-fusion-cleanup",
+    )
+    returned_worker_ref = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_workflow_service_generic_worker_ref_v1",
+            **{
+                name: finished[name]
+                for name in (
+                    "run_id", "stage", "operation_id", "worker_id",
+                    "model_request_id", "payload_sha256", "task_kind",
+                )
+            },
+        }
+    )
+    worker_cleanup = seal_immutable(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            **{
+                name: finished[name]
+                for name in (
+                    "run_id", "stage", "operation_id", "worker_id",
+                    "model_request_id", "payload_sha256",
+                )
+            },
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+            "cancellation_ref": {"content_sha256": "3" * 64},
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    kwargs = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": "run-fusion-cleanup",
+        "stage": "screen_understanding",
+        "operation_id": "operation-fusion-cleanup",
+        "service_binding_ref": {"content_sha256": "4" * 64},
+        "terminal_continuation_receipt_ref": {"content_sha256": "5" * 64},
+        "continuation_phase": "returned",
+        "returned_worker_ref": returned_worker_ref,
+        "worker_cleanup_ref": worker_cleanup,
+    }
+
+    first = registry.attest_completed_fusion_direct_provider_cleanup(**kwargs)
+    restarted = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_fake_process_factory,
+    )
+    replay = restarted.attest_completed_fusion_direct_provider_cleanup(**kwargs)
+
+    assert json.dumps(replay, sort_keys=True) == json.dumps(first, sort_keys=True)
+    assert first["historical_provider_lineage_allowed"] is True
+    assert first["direct_provider_role"] is None
+    observation = replay["live_absence_observation"]
+    assert observation["worker_runtime_attachment_absent"] is True
+    assert "worker_process_absent" not in observation
+
+    (tmp_path / f"{started['worker_id']}.provider-owner.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    with pytest.raises(
+        LearningStageWorkerError,
+        match="fusion direct-provider live artifact absence differs",
+    ):
+        restarted.attest_completed_fusion_direct_provider_cleanup(**kwargs)
+
+
 def test_hybrid_cross_run_cleanup_receipt_replay_rejects_before_acquisition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

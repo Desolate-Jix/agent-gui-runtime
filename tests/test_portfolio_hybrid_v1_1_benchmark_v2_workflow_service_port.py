@@ -211,6 +211,7 @@ def test_canonical_service_surface_has_only_exact_keyword_inputs() -> None:
         "adopt_and_terminalize_incumbent": ("operation_ref", "worker_ref"),
         "cancel_operation": ("operation_ref",),
         "attest_completed_hybrid_cleanup": ("operation_ref",),
+        "attest_fusion_safe_stop_cleanup": ("operation_ref",),
         "attest_actual_operations_stable_zero": ("operation_refs",),
     }
     for method_name, names in expected.items():
@@ -1293,6 +1294,17 @@ class _S3Registry:
     def cancel_by_operation(self, **kwargs) -> dict[str, object]:
         self.cancel_calls += 1
         current = self._owned(kwargs)
+        if (
+            current["task_kind"] == "panel_learning_hybrid_fusion"
+            and current["status"] == "completed"
+        ):
+            self.active_resources = 0
+            return {
+                **deepcopy(current),
+                "backend_compute_termination": "not_running",
+                "model_service_compute_termination": "request_not_active",
+                "model_request_cancellation": {"status": "request_not_active"},
+            }
         current["status"] = "cancelled"
         current["runtime_attached"] = False
         self.active_resources = 0
@@ -1327,6 +1339,85 @@ class _S3Registry:
             "model_request_cancellation": {"status": "not_active"},
             "benchmark_provider_cleanup_ref": deepcopy(provider_cleanup_ref),
         }
+
+    def attest_completed_fusion_direct_provider_cleanup(
+        self, **kwargs
+    ) -> dict[str, object]:
+        current = self._owned(kwargs)
+        worker_ref = deepcopy(kwargs["returned_worker_ref"])
+        worker_cleanup = deepcopy(kwargs["worker_cleanup_ref"])
+        observation = seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_hybrid_fusion_direct_provider_absence_observation_v1"
+                ),
+                **{
+                    name: current[name]
+                    for name in (
+                        "run_id", "stage", "operation_id", "worker_id",
+                        "model_request_id", "payload_sha256", "task_kind",
+                    )
+                },
+                "handler_registry_provider": None,
+                "evidence_scope": "fusion_worker_direct_provider_only",
+                "current_worker_ref": worker_ref,
+                "latest_operation_worker_ref": worker_ref,
+                "worker_runtime_attachment_absent": True,
+                "provider_scope_absent": True,
+                "provider_journal_absent": True,
+                "provider_cleanup_journal_absent": True,
+                "deterministic_provider_lease_artifact_absent": True,
+                "deterministic_provider_owner_artifact_absent": True,
+                "deterministic_provider_runtime_artifact_absent": True,
+                "historical_provider_lineage_allowed": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
+        return seal_immutable(
+            {
+                "contract_version": (
+                    "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+                ),
+                "status": "cleanup_verified",
+                "outcome": "verified_fusion_direct_provider_not_applicable",
+                "authority_kind": (
+                    "benchmark_v2_workflow_service_fusion_direct_provider_cleanup"
+                ),
+                **{
+                    name: current[name]
+                    for name in (
+                        "run_id", "stage", "operation_id", "worker_id",
+                        "model_request_id", "payload_sha256", "task_kind",
+                    )
+                },
+                "direct_provider_role": None,
+                "evidence_scope": "fusion_worker_direct_provider_only",
+                "worker_status": "completed",
+                "runtime_attached": False,
+                "result_available": True,
+                "result_adopted": True,
+                "continuation_phase": kwargs["continuation_phase"],
+                "cancellation_backend_termination": worker_cleanup[
+                    "backend_compute_termination"
+                ],
+                "cancellation_model_request_termination": worker_cleanup[
+                    "model_service_compute_termination"
+                ],
+                "service_binding_ref": deepcopy(kwargs["service_binding_ref"]),
+                "terminal_continuation_receipt_ref": deepcopy(
+                    kwargs["terminal_continuation_receipt_ref"]
+                ),
+                "returned_worker_ref": worker_ref,
+                "worker_cleanup_ref": {
+                    "content_sha256": worker_cleanup["content_sha256"]
+                },
+                "live_absence_observation": observation,
+                "historical_provider_lineage_allowed": True,
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+            }
+        )
 
     def materialize_completed_hybrid_provider_cleanup(
         self, **kwargs
@@ -3756,6 +3847,88 @@ def test_s3_lookup_legacy_fusion_pending_receipt_projects_safe_stop_read_only(
         assert registry.adopt_calls == 1
         assert registry.cancel_calls == 0
         assert registry.materialize_cleanup_calls == 0
+    finally:
+        store.close()
+
+
+def test_s3_legacy_fusion_safe_stop_cleanup_bridge_is_explicit_and_replay_stable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    store, _composition, service, registry, pending = (
+        _s3_start_fusion_with_pending_receipt(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+        )
+    )
+    try:
+        worker = registry.current
+        assert worker is not None
+        registry.complete_current(_s3_fusion_safe_stop_response(worker))
+        adoption = registry.adopt_result(
+            worker_id=worker["worker_id"],
+            run_id="run-h1",
+            stage="screen_understanding",
+            operation_id="operation-h1",
+        )
+        state = store.get("run-h1")
+        workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="safe_stopped",
+            reason="Hybrid fusion produced no VISTA-eligible BOUND candidates",
+            evidence_refs={
+                "worker_continuation": {
+                    "contract_version": "learning_stage_worker_continuation_v1",
+                    "worker_id": worker["worker_id"],
+                    "operation_id": "operation-h1",
+                    "task_kind": "panel_learning_hybrid_fusion",
+                    "result_sha256": adoption["receipt"]["result_sha256"],
+                }
+            },
+        )
+        terminal = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+        revision_before = store.get("run-h1")["revision"]
+
+        cleanup = service.attest_fusion_safe_stop_cleanup(
+            operation_ref=terminal["operation_ref"]
+        )
+        replay = service.attest_fusion_safe_stop_cleanup(
+            operation_ref=terminal["operation_ref"]
+        )
+
+        assert terminal["cleanup_refs"] == {
+            "worker_cleanup_ref": None,
+            "provider_cleanup_ref": None,
+        }
+        assert cleanup["contract_version"] == (
+            "benchmark_v2_actual_fusion_safe_stop_cleanup_v1"
+        )
+        assert cleanup["operation_ref"] == terminal["operation_ref"]
+        assert cleanup["worker_cleanup_ref"]["backend_compute_termination"] in {
+            "not_running",
+            "terminated",
+        }
+        direct = cleanup["fusion_direct_provider_cleanup_ref"]
+        assert direct["contract_version"] == (
+            "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+        )
+        assert direct["direct_provider_role"] is None
+        assert direct["historical_provider_lineage_allowed"] is True
+        assert canonical_json_bytes(replay) == canonical_json_bytes(cleanup)
+        assert store.get("run-h1")["revision"] == revision_before
+        assert pending["operation_ref"]["content_sha256"] != terminal[
+            "operation_ref"
+        ]["content_sha256"]
     finally:
         store.close()
 

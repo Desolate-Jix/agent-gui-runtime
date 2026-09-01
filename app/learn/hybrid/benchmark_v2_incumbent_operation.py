@@ -63,6 +63,9 @@ BENCHMARK_V2_INCUMBENT_PRE_RESERVATION_RECOVERY_CONTRACT = (
 BENCHMARK_V2_ACTUAL_COMPLETED_HYBRID_CLEANUP_CONTRACT = (
     "benchmark_v2_actual_completed_hybrid_cleanup_v1"
 )
+BENCHMARK_V2_ACTUAL_FUSION_SAFE_STOP_CLEANUP_CONTRACT = (
+    "benchmark_v2_actual_fusion_safe_stop_cleanup_v1"
+)
 BENCHMARK_V2_PROVIDER_DISPATCH_CONTEXT_PROJECTION_CONTRACT = (
     "benchmark_v2_provider_dispatch_context_projection_v1"
 )
@@ -2464,6 +2467,199 @@ def validate_benchmark_v2_actual_completed_hybrid_cleanup(
     return receipt
 
 
+def compose_benchmark_v2_actual_fusion_safe_stop_cleanup(
+    *,
+    operation_ref: Mapping[str, object],
+    worker_cleanup_ref: Mapping[str, object],
+    fusion_direct_provider_cleanup_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    operation = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+    return validate_benchmark_v2_actual_fusion_safe_stop_cleanup(
+        _seal(
+            {
+                "contract_version": (
+                    BENCHMARK_V2_ACTUAL_FUSION_SAFE_STOP_CLEANUP_CONTRACT
+                ),
+                "operation_ref": operation,
+                "worker_cleanup_ref": deepcopy(dict(worker_cleanup_ref)),
+                "fusion_direct_provider_cleanup_ref": deepcopy(
+                    dict(fusion_direct_provider_cleanup_ref)
+                ),
+                "cleanup_status": "stable_zero",
+                **_NON_AUTHORIZING_SAFETY,
+            }
+        )
+    )
+
+
+def validate_benchmark_v2_actual_fusion_safe_stop_cleanup(
+    value: object,
+) -> dict[str, Any]:
+    receipt = _closed(
+        value,
+        {
+            "contract_version", "operation_ref", "worker_cleanup_ref",
+            "fusion_direct_provider_cleanup_ref", "cleanup_status",
+            "artifact_is_authorization", "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark actual fusion safe-stop cleanup",
+    )
+    operation = validate_benchmark_v2_workflow_service_operation_ref(
+        receipt["operation_ref"]
+    )
+    worker = _closed(
+        operation["worker_ref"],
+        {
+            "contract_version", "run_id", "stage", "operation_id", "worker_id",
+            "model_request_id", "payload_sha256", "task_kind", "content_sha256",
+        },
+        "benchmark actual fusion safe-stop worker ref",
+    )
+    worker_cleanup = _closed(
+        receipt["worker_cleanup_ref"],
+        {
+            "contract_version", "run_id", "stage", "operation_id", "worker_id",
+            "model_request_id", "payload_sha256", "backend_compute_termination",
+            "model_service_compute_termination", "cancellation_ref",
+            "artifact_is_authorization", "execute_binding_enabled", "content_sha256",
+        },
+        "benchmark actual fusion safe-stop worker cleanup",
+    )
+    direct = _closed(
+        receipt["fusion_direct_provider_cleanup_ref"],
+        {
+            "contract_version", "status", "outcome", "authority_kind", "run_id",
+            "stage", "operation_id", "worker_id", "model_request_id",
+            "payload_sha256", "task_kind", "direct_provider_role",
+            "evidence_scope", "worker_status", "runtime_attached",
+            "result_available", "result_adopted", "continuation_phase",
+            "cancellation_backend_termination",
+            "cancellation_model_request_termination", "service_binding_ref",
+            "terminal_continuation_receipt_ref", "returned_worker_ref",
+            "worker_cleanup_ref", "live_absence_observation",
+            "historical_provider_lineage_allowed", "artifact_is_authorization",
+            "execute_binding_enabled", "content_sha256",
+        },
+        "benchmark actual fusion direct-provider cleanup",
+    )
+    operation_identity = ("run_id", "stage", "operation_id")
+    worker_identity = ("worker_id", "model_request_id", "payload_sha256")
+    full_identity = (*operation_identity, *worker_identity, "task_kind")
+    if (
+        receipt["contract_version"]
+        != BENCHMARK_V2_ACTUAL_FUSION_SAFE_STOP_CLEANUP_CONTRACT
+        or operation["mode"] != "hybrid_v1_1"
+        or operation["status"] != "safe_stopped"
+        or worker.get("task_kind") != "panel_learning_hybrid_fusion"
+        or receipt["cleanup_status"] != "stable_zero"
+        or receipt["artifact_is_authorization"] is not False
+        or receipt["execute_binding_enabled"] is not False
+        or worker.get("contract_version")
+        != "benchmark_v2_workflow_service_generic_worker_ref_v1"
+        or worker.get("content_sha256") != content_sha256(worker)
+    ):
+        raise ValueError("benchmark actual fusion safe-stop cleanup is invalid")
+    if (
+        worker_cleanup.get("contract_version")
+        != "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+        or worker_cleanup.get("backend_compute_termination")
+        not in {"not_running", "terminated"}
+        or worker_cleanup.get("model_service_compute_termination")
+        not in {"request_not_active", "terminated"}
+        or any(worker_cleanup.get(name) != operation[name] for name in operation_identity)
+        or any(worker_cleanup.get(name) != worker[name] for name in worker_identity)
+        or worker_cleanup.get("artifact_is_authorization") is not False
+        or worker_cleanup.get("execute_binding_enabled") is not False
+        or worker_cleanup.get("content_sha256") != content_sha256(worker_cleanup)
+    ):
+        raise ValueError("benchmark actual fusion worker cleanup is stale")
+    _content_ref(worker_cleanup.get("cancellation_ref"), "fusion cancellation ref")
+    if (
+        direct.get("contract_version")
+        != "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+        or direct.get("status") != "cleanup_verified"
+        or direct.get("outcome")
+        != "verified_fusion_direct_provider_not_applicable"
+        or direct.get("authority_kind")
+        != "benchmark_v2_workflow_service_fusion_direct_provider_cleanup"
+        or direct.get("task_kind") != "panel_learning_hybrid_fusion"
+        or direct.get("direct_provider_role") is not None
+        or direct.get("evidence_scope") != "fusion_worker_direct_provider_only"
+        or direct.get("worker_status") != "completed"
+        or direct.get("runtime_attached") is not False
+        or direct.get("result_available") is not True
+        or direct.get("result_adopted") is not True
+        or direct.get("continuation_phase") not in {"returned", "terminal_prepared"}
+        or direct.get("cancellation_backend_termination")
+        != worker_cleanup["backend_compute_termination"]
+        or direct.get("cancellation_model_request_termination")
+        != worker_cleanup["model_service_compute_termination"]
+        or direct.get("worker_cleanup_ref")
+        != {"content_sha256": worker_cleanup["content_sha256"]}
+        or direct.get("returned_worker_ref") != worker
+        or direct.get("historical_provider_lineage_allowed") is not True
+        or any(direct.get(name) != operation[name] for name in operation_identity)
+        or any(direct.get(name) != worker[name] for name in (*worker_identity, "task_kind"))
+        or direct.get("artifact_is_authorization") is not False
+        or direct.get("execute_binding_enabled") is not False
+        or direct.get("content_sha256") != content_sha256(direct)
+    ):
+        raise ValueError("benchmark actual fusion direct-provider cleanup is stale")
+    for name in (
+        "service_binding_ref", "terminal_continuation_receipt_ref",
+        "worker_cleanup_ref",
+    ):
+        _content_ref(direct.get(name), f"fusion direct-provider {name}")
+    observation = _closed(
+        direct["live_absence_observation"],
+        {
+            "contract_version", "run_id", "stage", "operation_id", "worker_id",
+            "model_request_id", "payload_sha256", "task_kind",
+            "handler_registry_provider", "evidence_scope", "current_worker_ref",
+            "latest_operation_worker_ref", "worker_runtime_attachment_absent",
+            "provider_scope_absent", "provider_journal_absent",
+            "provider_cleanup_journal_absent",
+            "deterministic_provider_lease_artifact_absent",
+            "deterministic_provider_owner_artifact_absent",
+            "deterministic_provider_runtime_artifact_absent",
+            "historical_provider_lineage_allowed", "artifact_is_authorization",
+            "execute_binding_enabled", "content_sha256",
+        },
+        "benchmark actual fusion direct-provider absence",
+    )
+    if (
+        observation.get("contract_version")
+        != "benchmark_v2_hybrid_fusion_direct_provider_absence_observation_v1"
+        or observation.get("handler_registry_provider") is not None
+        or observation.get("evidence_scope") != "fusion_worker_direct_provider_only"
+        or any(observation.get(name) != direct.get(name) for name in full_identity)
+        or observation.get("current_worker_ref") != worker
+        or observation.get("latest_operation_worker_ref") != worker
+        or any(
+            observation.get(name) is not True
+            for name in (
+                "worker_runtime_attachment_absent", "provider_scope_absent",
+                "provider_journal_absent", "provider_cleanup_journal_absent",
+                "deterministic_provider_lease_artifact_absent",
+                "deterministic_provider_owner_artifact_absent",
+                "deterministic_provider_runtime_artifact_absent",
+                "historical_provider_lineage_allowed",
+            )
+        )
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or observation.get("content_sha256") != content_sha256(observation)
+    ):
+        raise ValueError("benchmark actual fusion direct-provider absence is stale")
+    receipt["operation_ref"] = operation
+    receipt["worker_cleanup_ref"] = worker_cleanup
+    receipt["fusion_direct_provider_cleanup_ref"] = direct
+    if receipt.get("content_sha256") != content_sha256(receipt):
+        raise ValueError("benchmark actual fusion safe-stop cleanup SHA differs")
+    return receipt
+
+
 def validate_benchmark_v2_actual_operations_stable_zero(
     value: object,
 ) -> dict[str, Any]:
@@ -2948,6 +3144,21 @@ class BenchmarkV2IncumbentWorkflowService:
         )
 
         return _attest_benchmark_v2_actual_completed_hybrid_cleanup(
+            composition=self._composition,
+            operation_ref=current,
+        )
+
+    def attest_fusion_safe_stop_cleanup(
+        self,
+        *,
+        operation_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        current = validate_benchmark_v2_workflow_service_operation_ref(operation_ref)
+        from app.learn.workflow_service import (
+            _attest_benchmark_v2_actual_fusion_safe_stop_cleanup,
+        )
+
+        return _attest_benchmark_v2_actual_fusion_safe_stop_cleanup(
             composition=self._composition,
             operation_ref=current,
         )

@@ -27,6 +27,7 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     compose_benchmark_v2_workflow_window_binding,
     get_production_benchmark_v2_workflow_service,
     validate_benchmark_v2_actual_completed_hybrid_cleanup,
+    validate_benchmark_v2_actual_fusion_safe_stop_cleanup,
     validate_benchmark_v2_actual_operations_stable_zero,
     validate_benchmark_v2_hybrid_screen_group_start,
     validate_benchmark_v2_incumbent_pre_reservation_recovery,
@@ -2456,8 +2457,14 @@ class _BenchmarkV2ProductionRuntime:
             ):
                 service_terminal_ref = _cleanup_parent_ref(
                     actual_completed_hybrid_cleanups[0],
-                    parent_kind="actual_completed_hybrid_cleanup",
-                    name="actual completed Hybrid cleanup",
+                    parent_kind=(
+                        "actual_fusion_safe_stop_cleanup"
+                        if actual_completed_hybrid_cleanups[0].get(
+                            "contract_version"
+                        ) == "benchmark_v2_actual_fusion_safe_stop_cleanup_v1"
+                        else "actual_completed_hybrid_cleanup"
+                    ),
+                    name="actual Hybrid cleanup",
                 )
             else:
                 service_terminal_ref = _cleanup_parent_ref(
@@ -3270,6 +3277,11 @@ def _reconcile_actual_operations(
         "attest_completed_hybrid_cleanup",
         None,
     )
+    attest_fusion_safe_stop = getattr(
+        service,
+        "attest_fusion_safe_stop_cleanup",
+        None,
+    )
     if not callable(cancel) or (
         any(targets.values()) and not callable(lookup)
     ) or (
@@ -3441,6 +3453,32 @@ def _reconcile_actual_operations(
                             "benchmark actual completed Hybrid cleanup lineage differs"
                         )
                     completed_hybrid_cleanups.append(completed_cleanup)
+                    continue
+                fusion_safe_stop_without_inline_cleanup = (
+                    operation["mode"] == "hybrid_v1_1"
+                    and operation["status"] == "safe_stopped"
+                    and terminal.get("observed_task_kind")
+                    == "panel_learning_hybrid_fusion"
+                    and cleanup
+                    == {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+                )
+                if fusion_safe_stop_without_inline_cleanup:
+                    if not callable(attest_fusion_safe_stop):
+                        raise RuntimeError(
+                            "WorkflowService fusion safe-stop cleanup attestation is unavailable"
+                        )
+                    fusion_cleanup = (
+                        validate_benchmark_v2_actual_fusion_safe_stop_cleanup(
+                            attest_fusion_safe_stop(
+                                operation_ref=deepcopy(operation)
+                            )
+                        )
+                    )
+                    if fusion_cleanup["operation_ref"] != operation:
+                        raise ValueError(
+                            "benchmark actual fusion safe-stop cleanup lineage differs"
+                        )
+                    completed_hybrid_cleanups.append(fusion_cleanup)
                     continue
                 _validate_partial_actual_terminal_cleanup(terminal)
                 partial_terminals.append(terminal)
@@ -4176,6 +4214,8 @@ def _cleanup_parent_ref(
         "actual_operations_stable_zero_aggregate",
         "actual_operations_cleanup_aggregate",
         "actual_completed_hybrid_cleanup",
+        "actual_fusion_safe_stop_cleanup",
+        "fusion_direct_provider_cleanup",
     }:
         raise ValueError("benchmark cleanup parent kind is invalid")
     producer = (
@@ -4248,10 +4288,7 @@ def _validate_actual_operations_cleanup_aggregate(
         validate_benchmark_v2_incumbent_pre_reservation_recovery(item)
         for item in recovery_values
     ]
-    completed_cleanups = [
-        validate_benchmark_v2_actual_completed_hybrid_cleanup(item)
-        for item in completed_values
-    ]
+    completed_cleanups = [_validate_actual_hybrid_cleanup(item) for item in completed_values]
     partial_terminals = [
         _validate_partial_actual_terminal_cleanup(item) for item in partial_values
     ]
@@ -4300,7 +4337,15 @@ def _validate_actual_operations_cleanup_aggregate(
     ] + [
         str(cleanup[name]["content_sha256"])
         for cleanup in completed_cleanups
-        for name in ("worker_cleanup_ref", "provider_cleanup_ref")
+        for name in (
+            "worker_cleanup_ref",
+            (
+                "fusion_direct_provider_cleanup_ref"
+                if cleanup["contract_version"]
+                == "benchmark_v2_actual_fusion_safe_stop_cleanup_v1"
+                else "provider_cleanup_ref"
+            ),
+        )
     ]
     if len(set(cleanup_shas)) != len(cleanup_shas):
         raise ValueError("actual operations cleanup aggregate proof is duplicated")
@@ -4322,6 +4367,17 @@ def _validate_actual_operations_cleanup_aggregate(
         raise ValueError(
             "actual operations cleanup recovery parent binding is stale"
         )
+
+
+def _validate_actual_hybrid_cleanup(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("actual Hybrid cleanup is invalid")
+    contract = value.get("contract_version")
+    if contract == "benchmark_v2_actual_completed_hybrid_cleanup_v1":
+        return validate_benchmark_v2_actual_completed_hybrid_cleanup(value)
+    if contract == "benchmark_v2_actual_fusion_safe_stop_cleanup_v1":
+        return validate_benchmark_v2_actual_fusion_safe_stop_cleanup(value)
+    raise ValueError("actual Hybrid cleanup contract is unsupported")
 
 
 def _validate_review_no_provider_cleanup_parent(
@@ -4575,6 +4631,111 @@ def validate_benchmark_v2_incumbent_worker_cleanup_contract(
     return deepcopy(dict(producer))
 
 
+def _validate_fusion_direct_provider_cleanup_parent(
+    producer: Mapping[str, object],
+) -> None:
+    fields = {
+        "contract_version", "status", "outcome", "authority_kind", "run_id",
+        "stage", "operation_id", "worker_id", "model_request_id",
+        "payload_sha256", "task_kind", "direct_provider_role", "evidence_scope",
+        "worker_status", "runtime_attached", "result_available", "result_adopted",
+        "continuation_phase", "cancellation_backend_termination",
+        "cancellation_model_request_termination", "service_binding_ref",
+        "terminal_continuation_receipt_ref", "returned_worker_ref",
+        "worker_cleanup_ref", "live_absence_observation",
+        "historical_provider_lineage_allowed", "artifact_is_authorization",
+        "execute_binding_enabled", "content_sha256",
+    }
+    identity_fields = (
+        "run_id", "stage", "operation_id", "worker_id", "model_request_id",
+        "payload_sha256", "task_kind",
+    )
+    if (
+        set(producer) != fields
+        or producer.get("status") != "cleanup_verified"
+        or producer.get("outcome")
+        != "verified_fusion_direct_provider_not_applicable"
+        or producer.get("authority_kind")
+        != "benchmark_v2_workflow_service_fusion_direct_provider_cleanup"
+        or producer.get("task_kind") != "panel_learning_hybrid_fusion"
+        or producer.get("direct_provider_role") is not None
+        or producer.get("evidence_scope") != "fusion_worker_direct_provider_only"
+        or producer.get("worker_status") != "completed"
+        or producer.get("runtime_attached") is not False
+        or producer.get("result_available") is not True
+        or producer.get("result_adopted") is not True
+        or producer.get("continuation_phase") not in {"returned", "terminal_prepared"}
+        or producer.get("cancellation_backend_termination")
+        not in {"not_running", "terminated"}
+        or producer.get("cancellation_model_request_termination")
+        not in {"request_not_active", "terminated"}
+        or producer.get("historical_provider_lineage_allowed") is not True
+        or producer.get("artifact_is_authorization") is not False
+        or producer.get("execute_binding_enabled") is not False
+        or not _cleanup_identity_fields_are_nonempty(producer)
+        or any(
+            not _is_exact_sha_ref(producer.get(name))
+            for name in (
+                "service_binding_ref", "terminal_continuation_receipt_ref",
+                "worker_cleanup_ref",
+            )
+        )
+    ):
+        raise ValueError("fusion direct-provider cleanup receipt is invalid")
+    returned = producer.get("returned_worker_ref")
+    worker_fields = {
+        "contract_version", "run_id", "stage", "operation_id", "worker_id",
+        "model_request_id", "payload_sha256", "task_kind", "content_sha256",
+    }
+    observation = producer.get("live_absence_observation")
+    observation_fields = {
+        "contract_version", "run_id", "stage", "operation_id", "worker_id",
+        "model_request_id", "payload_sha256", "task_kind",
+        "handler_registry_provider", "evidence_scope", "current_worker_ref",
+        "latest_operation_worker_ref", "worker_runtime_attachment_absent",
+        "provider_scope_absent", "provider_journal_absent",
+        "provider_cleanup_journal_absent",
+        "deterministic_provider_lease_artifact_absent",
+        "deterministic_provider_owner_artifact_absent",
+        "deterministic_provider_runtime_artifact_absent",
+        "historical_provider_lineage_allowed", "artifact_is_authorization",
+        "execute_binding_enabled", "content_sha256",
+    }
+    if (
+        not isinstance(returned, Mapping)
+        or set(returned) != worker_fields
+        or returned.get("contract_version")
+        != "benchmark_v2_workflow_service_generic_worker_ref_v1"
+        or any(returned.get(name) != producer.get(name) for name in identity_fields)
+        or returned.get("content_sha256") != content_sha256(returned)
+        or not isinstance(observation, Mapping)
+        or set(observation) != observation_fields
+        or observation.get("contract_version")
+        != "benchmark_v2_hybrid_fusion_direct_provider_absence_observation_v1"
+        or observation.get("handler_registry_provider") is not None
+        or observation.get("evidence_scope") != "fusion_worker_direct_provider_only"
+        or any(observation.get(name) != producer.get(name) for name in identity_fields)
+        or observation.get("current_worker_ref") != returned
+        or observation.get("latest_operation_worker_ref") != returned
+        or any(
+            observation.get(name) is not True
+            for name in (
+                "worker_runtime_attachment_absent", "provider_scope_absent",
+                "provider_journal_absent", "provider_cleanup_journal_absent",
+                "deterministic_provider_lease_artifact_absent",
+                "deterministic_provider_owner_artifact_absent",
+                "deterministic_provider_runtime_artifact_absent",
+                "historical_provider_lineage_allowed",
+            )
+        )
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or observation.get("content_sha256") != content_sha256(observation)
+        or producer.get("content_sha256") != content_sha256(producer)
+    ):
+        raise ValueError("fusion direct-provider cleanup lineage is stale")
+
+
 def _validate_cleanup_parent_semantics(
     producer: Mapping[str, object], *, name: str
 ) -> tuple[str, str]:
@@ -4594,6 +4755,9 @@ def _validate_cleanup_parent_semantics(
     if contract == "benchmark_v2_actual_completed_hybrid_cleanup_v1":
         validate_benchmark_v2_actual_completed_hybrid_cleanup(producer)
         return "actual_completed_hybrid_cleanup", str(contract)
+    if contract == "benchmark_v2_actual_fusion_safe_stop_cleanup_v1":
+        validate_benchmark_v2_actual_fusion_safe_stop_cleanup(producer)
+        return "actual_fusion_safe_stop_cleanup", str(contract)
     if contract == "benchmark_v2_runtime_resource_ref_v1":
         fields = {
             "contract_version",
@@ -4691,6 +4855,9 @@ def _validate_cleanup_parent_semantics(
     if contract == "benchmark_v2_hybrid_no_provider_cleanup_ref_v1":
         _validate_review_no_provider_cleanup_parent(producer)
         return "provider_cleanup", str(contract)
+    if contract == "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1":
+        _validate_fusion_direct_provider_cleanup_parent(producer)
+        return "fusion_direct_provider_cleanup", str(contract)
     if contract == "benchmark_provider_cleanup_ref_v1":
         common_fields = {
             "contract_version",
@@ -6680,7 +6847,7 @@ def _actual_provider_cleanup_parent_refs(
 
     completed_cleanups: dict[str, dict[str, Any]] = {}
     for raw_cleanup in actual_completed_hybrid_cleanups:
-        cleanup = validate_benchmark_v2_actual_completed_hybrid_cleanup(raw_cleanup)
+        cleanup = _validate_actual_hybrid_cleanup(raw_cleanup)
         operation_sha = str(cleanup["operation_ref"]["content_sha256"])
         if operation_sha in completed_cleanups:
             raise ValueError("actual completed Hybrid cleanup proof is duplicated")
@@ -6744,16 +6911,28 @@ def _actual_provider_cleanup_parent_refs(
         )
 
     for cleanup in completed_cleanups.values():
+        cleanup_fields = (
+            (
+                "worker_cleanup_ref",
+                "worker_cleanup",
+            ),
+            (
+                "fusion_direct_provider_cleanup_ref",
+                "fusion_direct_provider_cleanup",
+            ),
+        ) if cleanup["contract_version"] == (
+            "benchmark_v2_actual_fusion_safe_stop_cleanup_v1"
+        ) else (
+            ("worker_cleanup_ref", "worker_cleanup"),
+            ("provider_cleanup_ref", "provider_cleanup"),
+        )
         result.extend(
             _cleanup_parent_ref(
                 cleanup[name],
                 parent_kind=parent_kind,
-                name=f"actual completed Hybrid {name}",
+                name=f"actual Hybrid {name}",
             )
-            for name, parent_kind in (
-                ("worker_cleanup_ref", "worker_cleanup"),
-                ("provider_cleanup_ref", "provider_cleanup"),
-            )
+            for name, parent_kind in cleanup_fields
         )
     return result
 

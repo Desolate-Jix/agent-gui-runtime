@@ -171,6 +171,12 @@ _BENCHMARK_V2_REVIEW_NO_PROVIDER_ABSENCE_CONTRACT = (
 _BENCHMARK_V2_REVIEW_NO_PROVIDER_CLEANUP_CONTRACT = (
     "benchmark_v2_hybrid_no_provider_cleanup_ref_v1"
 )
+_BENCHMARK_V2_FUSION_DIRECT_PROVIDER_ABSENCE_CONTRACT = (
+    "benchmark_v2_hybrid_fusion_direct_provider_absence_observation_v1"
+)
+_BENCHMARK_V2_FUSION_DIRECT_PROVIDER_CLEANUP_CONTRACT = (
+    "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+)
 _BENCHMARK_PRIVATE_MARKERS = frozenset({
     "_benchmark_worker_supervision",
     "_benchmark_worker_bootstrap",
@@ -8453,6 +8459,18 @@ class LearningStageWorkerRegistry:
             payload["benchmark_v2_no_provider_cleanup_state"] = "sealed"
         elif record.get("benchmark_v2_no_provider_cleanup_state") == "sealed":
             payload["benchmark_v2_no_provider_cleanup_state"] = "sealed"
+        if isinstance(
+            record.get("benchmark_v2_fusion_direct_provider_cleanup_ref"), dict
+        ):
+            payload["benchmark_v2_fusion_direct_provider_cleanup_ref"] = deepcopy(
+                record["benchmark_v2_fusion_direct_provider_cleanup_ref"]
+            )
+            payload["benchmark_v2_fusion_direct_provider_cleanup_state"] = "sealed"
+        elif (
+            record.get("benchmark_v2_fusion_direct_provider_cleanup_state")
+            == "sealed"
+        ):
+            payload["benchmark_v2_fusion_direct_provider_cleanup_state"] = "sealed"
         _write_json_atomic(journal_path, payload)
 
     def _cleanup_failed_start_or_retain(
@@ -9370,6 +9388,235 @@ class LearningStageWorkerRegistry:
                 return persisted
             record["benchmark_v2_no_provider_cleanup_ref"] = deepcopy(projection)
             record["benchmark_v2_no_provider_cleanup_state"] = "sealed"
+            self._persist_record_journal(record)
+            return deepcopy(projection)
+
+    def attest_completed_fusion_direct_provider_cleanup(
+        self,
+        *,
+        worker_id: str,
+        run_id: str,
+        stage: str,
+        operation_id: str,
+        service_binding_ref: Mapping[str, object],
+        terminal_continuation_receipt_ref: Mapping[str, object],
+        continuation_phase: str,
+        returned_worker_ref: Mapping[str, object],
+        worker_cleanup_ref: Mapping[str, object],
+    ) -> dict[str, Any]:
+        worker = _required_text(worker_id, "worker_id")
+        operation_key = (
+            _required_text(run_id, "run_id"),
+            _required_text(stage, "stage"),
+            _required_text(operation_id, "operation_id"),
+        )
+        binding_ref = _benchmark_exact_ref(
+            dict(service_binding_ref),
+            "benchmark fusion direct-provider cleanup service binding ref",
+        )
+        continuation_ref = _benchmark_exact_ref(
+            dict(terminal_continuation_receipt_ref),
+            "benchmark fusion direct-provider cleanup continuation receipt ref",
+        )
+        phase = str(continuation_phase or "").strip()
+        if phase not in {"returned", "terminal_prepared"}:
+            raise LearningStageWorkerError(
+                "benchmark fusion direct-provider cleanup continuation phase is invalid"
+            )
+        with self._lock:
+            record = self._records.get(worker)
+            latest = self._latest_operation_record(operation_key)
+            if record is None or latest is not record:
+                raise LearningStageWorkerError(
+                    "benchmark fusion direct-provider cleanup current ownership differs"
+                )
+            self._refresh_record(record)
+            public = self._public_record(record)
+            if (
+                record.get("benchmark_v2_fusion_direct_provider_cleanup_state")
+                == "sealed"
+                and not isinstance(
+                    record.get("benchmark_v2_fusion_direct_provider_cleanup_ref"),
+                    Mapping,
+                )
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark fusion direct-provider cleanup persisted proof is missing"
+                )
+            returned = _validate_benchmark_v2_review_worker_ref(
+                returned_worker_ref,
+                identity=record,
+                expected_task_kind="panel_learning_hybrid_fusion",
+            )
+            cleanup = deepcopy(dict(worker_cleanup_ref))
+            cleanup_fields = {
+                "contract_version",
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+                "backend_compute_termination",
+                "model_service_compute_termination",
+                "cancellation_ref",
+                "artifact_is_authorization",
+                "execute_binding_enabled",
+                "content_sha256",
+            }
+            identity_fields = (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+            if (
+                set(cleanup) != cleanup_fields
+                or cleanup.get("contract_version")
+                != "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+                or cleanup.get("backend_compute_termination")
+                not in {"not_running", "terminated"}
+                or cleanup.get("model_service_compute_termination")
+                not in {"request_not_active", "terminated"}
+                or any(cleanup.get(name) != record.get(name) for name in identity_fields)
+                or cleanup.get("artifact_is_authorization") is not False
+                or cleanup.get("execute_binding_enabled") is not False
+                or cleanup.get("content_sha256") != content_sha256(cleanup)
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark fusion direct-provider cleanup worker lineage differs"
+                )
+            _benchmark_exact_ref(
+                cleanup.get("cancellation_ref"),
+                "benchmark fusion direct-provider cleanup cancellation ref",
+            )
+            process = record.get("process")
+            process_alive = bool(
+                process is not None
+                and callable(getattr(process, "is_alive", None))
+                and process.is_alive()
+            )
+            handler = HYBRID_STAGE_HANDLER_REGISTRY.get(
+                str(record.get("task_kind") or "")
+            )
+            artifact_paths = {
+                "lease": self._result_root / f"{worker}.provider-lease.json",
+                "owner": self._result_root / f"{worker}.provider-owner.json",
+                "runtime": self._result_root / f"{worker}.provider-runtime.json",
+            }
+            if (
+                record.get("task_kind") != "panel_learning_hybrid_fusion"
+                or not isinstance(handler, Mapping)
+                or handler.get("provider") is not None
+                or record.get("status") != "completed"
+                or public.get("runtime_attached") is not False
+                or public.get("result_available") is not True
+                or public.get("result_adopted") is not True
+                or process_alive
+                or record.get("provider_scope") is not None
+                or record.get("provider_scope_name") is not None
+                or record.get("provider_owner_path") is not None
+                or record.get("provider_runtime_path") is not None
+                or record.get("benchmark_provider_cleanup_ref") is not None
+                or self._benchmark_provider_journals.get(operation_key) is not None
+                or self._benchmark_provider_cleanup_journals.get(operation_key)
+                is not None
+                or any(path.exists() for path in artifact_paths.values())
+            ):
+                raise LearningStageWorkerError(
+                    "benchmark fusion direct-provider live artifact absence differs"
+                )
+            observation = seal_immutable(
+                {
+                    "contract_version": (
+                        _BENCHMARK_V2_FUSION_DIRECT_PROVIDER_ABSENCE_CONTRACT
+                    ),
+                    **{
+                        name: record[name]
+                        for name in (*identity_fields, "task_kind")
+                    },
+                    "handler_registry_provider": None,
+                    "evidence_scope": "fusion_worker_direct_provider_only",
+                    "current_worker_ref": deepcopy(returned),
+                    "latest_operation_worker_ref": deepcopy(returned),
+                    "worker_runtime_attachment_absent": True,
+                    "provider_scope_absent": True,
+                    "provider_journal_absent": True,
+                    "provider_cleanup_journal_absent": True,
+                    "deterministic_provider_lease_artifact_absent": True,
+                    "deterministic_provider_owner_artifact_absent": True,
+                    "deterministic_provider_runtime_artifact_absent": True,
+                    "historical_provider_lineage_allowed": True,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            projection = seal_immutable(
+                {
+                    "contract_version": (
+                        _BENCHMARK_V2_FUSION_DIRECT_PROVIDER_CLEANUP_CONTRACT
+                    ),
+                    "status": "cleanup_verified",
+                    "outcome": "verified_fusion_direct_provider_not_applicable",
+                    "authority_kind": (
+                        "benchmark_v2_workflow_service_fusion_direct_provider_cleanup"
+                    ),
+                    **{
+                        name: record[name]
+                        for name in (*identity_fields, "task_kind")
+                    },
+                    "direct_provider_role": None,
+                    "evidence_scope": "fusion_worker_direct_provider_only",
+                    "worker_status": "completed",
+                    "runtime_attached": False,
+                    "result_available": True,
+                    "result_adopted": True,
+                    "continuation_phase": phase,
+                    "cancellation_backend_termination": cleanup[
+                        "backend_compute_termination"
+                    ],
+                    "cancellation_model_request_termination": cleanup[
+                        "model_service_compute_termination"
+                    ],
+                    "service_binding_ref": binding_ref,
+                    "terminal_continuation_receipt_ref": continuation_ref,
+                    "returned_worker_ref": deepcopy(returned),
+                    "worker_cleanup_ref": {
+                        "content_sha256": cleanup["content_sha256"]
+                    },
+                    "live_absence_observation": observation,
+                    "historical_provider_lineage_allowed": True,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            projection = (
+                _validate_benchmark_v2_fusion_direct_provider_cleanup_projection(
+                    projection,
+                    identity=record,
+                )
+            )
+            existing = record.get(
+                "benchmark_v2_fusion_direct_provider_cleanup_ref"
+            )
+            if existing is not None:
+                persisted = (
+                    _validate_benchmark_v2_fusion_direct_provider_cleanup_projection(
+                        existing,
+                        identity=record,
+                    )
+                )
+                if persisted != projection:
+                    raise LearningStageWorkerError(
+                        "benchmark fusion direct-provider cleanup replay lineage differs"
+                    )
+                return persisted
+            record["benchmark_v2_fusion_direct_provider_cleanup_ref"] = deepcopy(
+                projection
+            )
+            record["benchmark_v2_fusion_direct_provider_cleanup_state"] = "sealed"
             self._persist_record_journal(record)
             return deepcopy(projection)
 
@@ -13817,6 +14064,7 @@ def _validate_benchmark_v2_review_worker_ref(
     value: object,
     *,
     identity: Mapping[str, object],
+    expected_task_kind: str = "panel_learning_hybrid_review_projection",
 ) -> dict[str, Any]:
     fields = {
         "contract_version",
@@ -13837,8 +14085,7 @@ def _validate_benchmark_v2_review_worker_ref(
     if (
         worker_ref.get("contract_version")
         != "benchmark_v2_workflow_service_generic_worker_ref_v1"
-        or worker_ref.get("task_kind")
-        != "panel_learning_hybrid_review_projection"
+        or worker_ref.get("task_kind") != expected_task_kind
         or any(
             worker_ref.get(name) != identity.get(name)
             for name in (
@@ -14031,6 +14278,121 @@ def _validate_benchmark_v2_review_no_provider_cleanup_projection(
     return projection
 
 
+def _validate_benchmark_v2_fusion_direct_provider_cleanup_projection(
+    value: object,
+    *,
+    identity: Mapping[str, object],
+) -> dict[str, Any]:
+    fields = {
+        "contract_version", "status", "outcome", "authority_kind",
+        "run_id", "stage", "operation_id", "worker_id", "model_request_id",
+        "payload_sha256", "task_kind", "direct_provider_role", "evidence_scope",
+        "worker_status", "runtime_attached", "result_available", "result_adopted",
+        "continuation_phase", "cancellation_backend_termination",
+        "cancellation_model_request_termination", "service_binding_ref",
+        "terminal_continuation_receipt_ref", "returned_worker_ref",
+        "worker_cleanup_ref", "live_absence_observation",
+        "historical_provider_lineage_allowed", "artifact_is_authorization",
+        "execute_binding_enabled", "content_sha256",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise LearningStageWorkerError(
+            "benchmark fusion direct-provider cleanup projection is not closed"
+        )
+    projection = deepcopy(dict(value))
+    identity_fields = (
+        "run_id", "stage", "operation_id", "worker_id", "model_request_id",
+        "payload_sha256", "task_kind",
+    )
+    returned = _validate_benchmark_v2_review_worker_ref(
+        projection.get("returned_worker_ref"),
+        identity=identity,
+        expected_task_kind="panel_learning_hybrid_fusion",
+    )
+    if (
+        projection.get("contract_version")
+        != _BENCHMARK_V2_FUSION_DIRECT_PROVIDER_CLEANUP_CONTRACT
+        or projection.get("status") != "cleanup_verified"
+        or projection.get("outcome")
+        != "verified_fusion_direct_provider_not_applicable"
+        or projection.get("authority_kind")
+        != "benchmark_v2_workflow_service_fusion_direct_provider_cleanup"
+        or projection.get("task_kind") != "panel_learning_hybrid_fusion"
+        or projection.get("direct_provider_role") is not None
+        or projection.get("evidence_scope") != "fusion_worker_direct_provider_only"
+        or projection.get("worker_status") != "completed"
+        or projection.get("runtime_attached") is not False
+        or projection.get("result_available") is not True
+        or projection.get("result_adopted") is not True
+        or projection.get("continuation_phase") not in {"returned", "terminal_prepared"}
+        or projection.get("cancellation_backend_termination")
+        not in {"not_running", "terminated"}
+        or projection.get("cancellation_model_request_termination")
+        not in {"request_not_active", "terminated"}
+        or projection.get("historical_provider_lineage_allowed") is not True
+        or any(projection.get(name) != identity.get(name) for name in identity_fields)
+        or projection.get("artifact_is_authorization") is not False
+        or projection.get("execute_binding_enabled") is not False
+        or projection.get("content_sha256") != content_sha256(projection)
+    ):
+        raise LearningStageWorkerError(
+            "benchmark fusion direct-provider cleanup projection lineage differs"
+        )
+    for name in (
+        "service_binding_ref",
+        "terminal_continuation_receipt_ref",
+        "worker_cleanup_ref",
+    ):
+        _benchmark_exact_ref(
+            projection.get(name), f"benchmark fusion direct-provider cleanup {name}"
+        )
+    observation = projection.get("live_absence_observation")
+    observation_fields = {
+        "contract_version", "run_id", "stage", "operation_id", "worker_id",
+        "model_request_id", "payload_sha256", "task_kind",
+        "handler_registry_provider", "evidence_scope", "current_worker_ref",
+        "latest_operation_worker_ref", "worker_runtime_attachment_absent",
+        "provider_scope_absent", "provider_journal_absent",
+        "provider_cleanup_journal_absent",
+        "deterministic_provider_lease_artifact_absent",
+        "deterministic_provider_owner_artifact_absent",
+        "deterministic_provider_runtime_artifact_absent",
+        "historical_provider_lineage_allowed", "artifact_is_authorization",
+        "execute_binding_enabled", "content_sha256",
+    }
+    if (
+        not isinstance(observation, Mapping)
+        or set(observation) != observation_fields
+        or observation.get("contract_version")
+        != _BENCHMARK_V2_FUSION_DIRECT_PROVIDER_ABSENCE_CONTRACT
+        or observation.get("handler_registry_provider") is not None
+        or observation.get("evidence_scope") != "fusion_worker_direct_provider_only"
+        or any(observation.get(name) != identity.get(name) for name in identity_fields)
+        or observation.get("current_worker_ref") != returned
+        or observation.get("latest_operation_worker_ref") != returned
+        or any(
+            observation.get(name) is not True
+            for name in (
+                "worker_runtime_attachment_absent", "provider_scope_absent",
+                "provider_journal_absent", "provider_cleanup_journal_absent",
+                "deterministic_provider_lease_artifact_absent",
+                "deterministic_provider_owner_artifact_absent",
+                "deterministic_provider_runtime_artifact_absent",
+                "historical_provider_lineage_allowed",
+            )
+        )
+        or observation.get("artifact_is_authorization") is not False
+        or observation.get("execute_binding_enabled") is not False
+        or observation.get("content_sha256") != content_sha256(observation)
+    ):
+        raise LearningStageWorkerError(
+            "benchmark fusion direct-provider cleanup absence lineage differs"
+        )
+    projection["returned_worker_ref"] = returned
+    projection["live_absence_observation"] = deepcopy(dict(observation))
+    return projection
+
+
 def _load_worker_journal(
     *,
     journal_path: Path,
@@ -14126,6 +14488,27 @@ def _load_worker_journal(
     if (no_provider_cleanup_ref is None) != (no_provider_cleanup_state is None):
         raise LearningStageWorkerError(
             "benchmark review no-provider cleanup persisted proof is missing"
+        )
+    fusion_direct_cleanup_ref = payload.get(
+        "benchmark_v2_fusion_direct_provider_cleanup_ref"
+    )
+    fusion_direct_cleanup_state = payload.get(
+        "benchmark_v2_fusion_direct_provider_cleanup_state"
+    )
+    if fusion_direct_cleanup_state not in {None, "sealed"}:
+        raise LearningStageWorkerError(
+            "benchmark fusion direct-provider cleanup persisted state is invalid"
+        )
+    if fusion_direct_cleanup_ref is not None:
+        fusion_direct_cleanup_ref = (
+            _validate_benchmark_v2_fusion_direct_provider_cleanup_projection(
+                fusion_direct_cleanup_ref,
+                identity=identity,
+            )
+        )
+    if (fusion_direct_cleanup_ref is None) != (fusion_direct_cleanup_state is None):
+        raise LearningStageWorkerError(
+            "benchmark fusion direct-provider cleanup persisted proof is missing"
         )
 
     benchmark_provider_scope_context = None
@@ -14323,6 +14706,12 @@ def _load_worker_journal(
         "benchmark_provider_cleanup_ref": provider_cleanup_ref,
         "benchmark_v2_no_provider_cleanup_ref": no_provider_cleanup_ref,
         "benchmark_v2_no_provider_cleanup_state": no_provider_cleanup_state,
+        "benchmark_v2_fusion_direct_provider_cleanup_ref": (
+            fusion_direct_cleanup_ref
+        ),
+        "benchmark_v2_fusion_direct_provider_cleanup_state": (
+            fusion_direct_cleanup_state
+        ),
         "benchmark_provider_scope": None,
         "benchmark_provider_scope_context": benchmark_provider_scope_context,
         "benchmark_provider_scope_context_path": (
