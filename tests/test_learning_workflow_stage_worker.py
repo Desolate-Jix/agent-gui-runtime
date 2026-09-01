@@ -915,6 +915,48 @@ def _benchmark_real_gated_worker(bootstrap, ready_queue) -> None:
     time.sleep(60)
 
 
+def _benchmark_completed_result_worker(
+    result_path,
+    task_kind,
+    payload,
+    model_request_id,
+    identity,
+    cancellation_event,
+    completion_event,
+    bootstrap,
+) -> None:
+    del payload, cancellation_event, completion_event
+    from app.learn.workflow_worker import _wait_for_benchmark_worker_startup_gate
+
+    _wait_for_benchmark_worker_startup_gate(bootstrap)
+    Path(result_path).write_text(
+        json.dumps(
+            {
+                "contract_version": "learning_stage_worker_result_v2",
+                **identity,
+                "task_kind": task_kind,
+                "model_request_id": model_request_id,
+                "status": "completed",
+                "response": {"success": True},
+                "normal_binding_evidence_ref": {"content_sha256": "a" * 64},
+                "provider_cleanup_evidence_ref": None,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+
+
+def _benchmark_completed_result_process_factory(*, target, args, name):
+    del target
+    return multiprocessing.get_context("spawn").Process(
+        target=_benchmark_completed_result_worker,
+        args=args,
+        name=name,
+    )
+
+
 def _benchmark_controller_owner_helper(root_path: str, ready_queue) -> None:
     root = compose_test_benchmark_worker_supervision_root(
         journal_root=Path(root_path), test_capability=object(),
@@ -5193,6 +5235,57 @@ def test_completed_result_identity_is_pre_adopt_read_only_and_closed(
     )
     assert inspected_again == inspected
     assert journal_path.read_text(encoding="utf-8") == journal_after_first_inspection
+
+
+def test_benchmark_completed_result_identity_remains_inspectable_after_exact_cleanup(
+    tmp_path: Path,
+) -> None:
+    registry, root, store, source, reservation, anchor = _benchmark_registry_fixture(
+        tmp_path
+    )
+    del store, source
+    confirmation = registry.confirm_prepared_benchmark_worker_anchor(
+        reservation_ref={"content_sha256": reservation["content_sha256"]},
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=tmp_path,
+        process_factory=_benchmark_completed_result_process_factory,
+        benchmark_supervision_root=root,
+    )
+    started = registry.launch_prepared_benchmark_worker(
+        reservation_ref=confirmation["anchored_reservation_ref"],
+        expected_operation_anchor=anchor,
+        authoritative_payload={"capture_live": False},
+        supervision_root=root,
+    )
+    arguments = {
+        "worker_id": str(started["worker_id"]),
+        "run_id": str(reservation["run_id"]),
+        "stage": str(reservation["stage"]),
+        "operation_id": str(reservation["operation_id"]),
+    }
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if registry.status(
+            worker_id=arguments["worker_id"],
+            run_id=arguments["run_id"],
+            operation_id=arguments["operation_id"],
+        )["status"] == "completed":
+            break
+        time.sleep(0.01)
+    before = registry.inspect_completed_result_identity(**arguments)
+
+    receipt = registry.observe_benchmark_worker_cleanup(
+        **arguments,
+        terminate=True,
+        expected_operation_anchor=anchor,
+        supervision_root=root,
+    )
+
+    assert receipt["outcome"] == "verified_exact_worker_exited"
+    assert registry.inspect_completed_result_identity(**arguments) == before
 
 
 @pytest.mark.parametrize(

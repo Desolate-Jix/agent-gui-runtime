@@ -7960,7 +7960,8 @@ class LearningStageWorkerRegistry:
                     "artifact_is_authorization": False, "execute_binding_enabled": False,
                 })
                 _write_benchmark_cleanup_receipt_atomic(receipt_path, receipt)
-                record["status"] = "cancelled" if terminate else record.get("status", "completed")
+                if terminate and record.get("status") not in {"completed", "failed"}:
+                    record["status"] = "cancelled"
                 self._active_by_operation.pop(key, None)
                 return receipt
 
