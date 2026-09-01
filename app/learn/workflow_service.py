@@ -6449,6 +6449,169 @@ def _project_benchmark_v2_hybrid_expired_failure_cleanup(
     }
 
 
+def _benchmark_v2_hybrid_terminal_worker_cleanup_ref(
+    *,
+    stage_execution: Mapping[str, object],
+    worker_record: Mapping[str, object],
+) -> dict[str, Any] | None:
+    cancellation = stage_execution.get("cancellation")
+    if not isinstance(cancellation, Mapping):
+        return None
+    worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+    return seal_immutable(
+        {
+            "contract_version": "benchmark_v2_hybrid_worker_cleanup_ref_v1",
+            "run_id": worker_identity["run_id"],
+            "stage": worker_identity["stage"],
+            "operation_id": worker_identity["operation_id"],
+            "worker_id": worker_identity["worker_id"],
+            "model_request_id": worker_identity["model_request_id"],
+            "payload_sha256": worker_identity["payload_sha256"],
+            "backend_compute_termination": str(
+                cancellation.get("backend_compute_termination") or "not_covered"
+            ),
+            "model_service_compute_termination": str(
+                cancellation.get("model_service_compute_termination")
+                or "not_covered"
+            ),
+            "cancellation_ref": {
+                "content_sha256": content_sha256(dict(cancellation))
+            },
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+    *,
+    worker_cleanup_ref: object,
+    worker_record: Mapping[str, object],
+) -> bool:
+    if not isinstance(worker_cleanup_ref, Mapping):
+        return False
+    worker_cleanup = dict(worker_cleanup_ref)
+    worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
+    cleanup_fields = {
+        "contract_version",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "model_request_id",
+        "payload_sha256",
+        "backend_compute_termination",
+        "model_service_compute_termination",
+        "cancellation_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    return (
+        set(worker_cleanup) == cleanup_fields
+        and worker_cleanup.get("contract_version")
+        == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+        and worker_cleanup.get("content_sha256") == content_sha256(worker_cleanup)
+        and all(
+            worker_cleanup.get(name) == worker_identity[name]
+            for name in (
+                "run_id",
+                "stage",
+                "operation_id",
+                "worker_id",
+                "model_request_id",
+                "payload_sha256",
+            )
+        )
+        and worker_cleanup.get("backend_compute_termination")
+        in {"not_running", "terminated"}
+        and worker_cleanup.get("model_service_compute_termination")
+        in {"request_not_active", "terminated"}
+        and worker_cleanup.get("artifact_is_authorization") is False
+        and worker_cleanup.get("execute_binding_enabled") is False
+    )
+
+
+def _benchmark_v2_hybrid_qwen_zero_dispatch_cleanup_verified(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    binding: Mapping[str, object],
+    worker_record: Mapping[str, object],
+    worker_cleanup_ref: object,
+    provider_cleanup_ref: object,
+) -> bool:
+    from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
+        read_latest_benchmark_dispatch_receipt,
+        validate_benchmark_dispatch_context_ref,
+    )
+
+    if not (
+        _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+            worker_cleanup_ref=worker_cleanup_ref,
+            worker_record=worker_record,
+        )
+        and provider_cleanup_ref is None
+        and worker_record.get("benchmark_provider_cleanup_ref") is None
+        and worker_record.get("task_kind")
+        == "panel_learning_hybrid_qwen_binding"
+        and worker_record.get("status") == "completed"
+        and worker_record.get("runtime_attached") is False
+        and worker_record.get("result_available") is True
+        and worker_record.get("result_adopted") is False
+    ):
+        return False
+    context_refs = binding.get("provider_dispatch_context_refs")
+    context_ref_value = (
+        context_refs.get("qwen") if isinstance(context_refs, Mapping) else None
+    )
+    window_binding = binding.get("window_binding")
+    if not isinstance(context_ref_value, Mapping) or not isinstance(
+        window_binding, Mapping
+    ):
+        return False
+    try:
+        context_ref = validate_benchmark_dispatch_context_ref(context_ref_value)
+        context = context_ref["dispatch_context"]
+        operation_ref = context["operation_ref"]
+        expected_journal_path = str(
+            _benchmark_v2_dispatch_journal_path(
+                composition=composition,
+                window_binding=window_binding,
+            )
+        )
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Qwen predispatch cleanup context is invalid"
+        ) from error
+    worker_lineage = {
+        name: worker_record[name]
+        for name in ("run_id", "stage", "operation_id")
+    }
+    lineage_valid = (
+        context.get("provider") == "qwen"
+        and all(
+            window_binding.get(name) == value
+            and operation_ref.get(name) == value
+            for name, value in worker_lineage.items()
+        )
+        and operation_ref.get("window_binding_ref")
+        == window_binding.get("window_binding_ref")
+        and operation_ref.get("capture_ref") == window_binding.get("capture_ref")
+        and context.get("receipt_journal_path") == expected_journal_path
+    )
+    if not lineage_valid:
+        return False
+    try:
+        latest_receipt = read_latest_benchmark_dispatch_receipt(
+            dispatch_context=context
+        )
+    except (OSError, TypeError, ValueError) as error:
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Qwen predispatch cleanup absence is invalid"
+        ) from error
+    return latest_receipt is None
+
+
 def _benchmark_v2_hybrid_service_status(
     *,
     workflow_state: Mapping[str, object],
@@ -6580,15 +6743,38 @@ def _benchmark_v2_hybrid_service_context(
         )
     recovered_cleanup_verified = False
     if current_status == "safe_stopped":
-        recovered_cleanup_verified = isinstance(
-            _project_benchmark_v2_hybrid_expired_failure_cleanup(
-                workflow_state=current,
-                stage_execution=stage_execution,
-                binding=binding,
-                worker_record=worker_record,
-            ),
-            Mapping,
+        recovered_cleanup = _project_benchmark_v2_hybrid_expired_failure_cleanup(
+            workflow_state=current,
+            stage_execution=stage_execution,
+            binding=binding,
+            worker_record=worker_record,
         )
+        recovered_cleanup_verified = isinstance(recovered_cleanup, Mapping)
+        if not recovered_cleanup_verified:
+            worker_cleanup_ref = _benchmark_v2_hybrid_terminal_worker_cleanup_ref(
+                stage_execution=stage_execution,
+                worker_record=worker_record,
+            )
+            provider_cleanup_ref = None
+            provider_cleanup_value = worker_record.get(
+                "benchmark_provider_cleanup_ref"
+            )
+            if isinstance(provider_cleanup_value, Mapping):
+                provider_cleanup_ref = (
+                    _validate_benchmark_v2_hybrid_provider_cleanup(
+                        cleanup=provider_cleanup_value,
+                        worker_record=worker_record,
+                    )
+                )
+            recovered_cleanup_verified = (
+                _benchmark_v2_hybrid_qwen_zero_dispatch_cleanup_verified(
+                    composition=composition,
+                    binding=binding,
+                    worker_record=worker_record,
+                    worker_cleanup_ref=worker_cleanup_ref,
+                    provider_cleanup_ref=provider_cleanup_ref,
+                )
+            )
     expected = _project_benchmark_v2_hybrid_operation_ref(
         workflow_state=current,
         stage_execution=stage_execution,
@@ -6690,7 +6876,6 @@ def _project_benchmark_v2_hybrid_step(
         compose_benchmark_v2_workflow_service_step,
     )
     from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
-        read_latest_benchmark_dispatch_receipt,
         validate_benchmark_dispatch_context_ref,
     )
 
@@ -6718,35 +6903,10 @@ def _project_benchmark_v2_hybrid_step(
             provider_cleanup_ref = recovered_cleanup["provider_cleanup_ref"]
             recovered_cleanup_verified = True
         else:
-            cancellation = stage_execution.get("cancellation")
-            if isinstance(cancellation, Mapping):
-                worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
-                worker_cleanup_ref = seal_immutable(
-                    {
-                        "contract_version": (
-                            "benchmark_v2_hybrid_worker_cleanup_ref_v1"
-                        ),
-                        "run_id": worker_identity["run_id"],
-                        "stage": worker_identity["stage"],
-                        "operation_id": worker_identity["operation_id"],
-                        "worker_id": worker_identity["worker_id"],
-                        "model_request_id": worker_identity["model_request_id"],
-                        "payload_sha256": worker_identity["payload_sha256"],
-                        "backend_compute_termination": str(
-                            cancellation.get("backend_compute_termination")
-                            or "not_covered"
-                        ),
-                        "model_service_compute_termination": str(
-                            cancellation.get("model_service_compute_termination")
-                            or "not_covered"
-                        ),
-                        "cancellation_ref": {
-                            "content_sha256": content_sha256(dict(cancellation))
-                        },
-                        "artifact_is_authorization": False,
-                        "execute_binding_enabled": False,
-                    }
-                )
+            worker_cleanup_ref = _benchmark_v2_hybrid_terminal_worker_cleanup_ref(
+                stage_execution=stage_execution,
+                worker_record=worker_record,
+            )
             provider_cleanup_value = worker_record.get(
                 "benchmark_provider_cleanup_ref"
             )
@@ -6813,116 +6973,24 @@ def _project_benchmark_v2_hybrid_step(
                     returned_worker_ref=returned_worker_ref,
                     worker_cleanup_ref=deepcopy(dict(worker_cleanup_ref)),
                 )
-        terminal_worker_cleanup = False
-        if isinstance(worker_cleanup_ref, Mapping):
-            worker_cleanup = dict(worker_cleanup_ref)
-            worker_identity = _benchmark_v2_hybrid_worker_ref(worker_record)
-            cleanup_fields = {
-                "contract_version",
-                "run_id",
-                "stage",
-                "operation_id",
-                "worker_id",
-                "model_request_id",
-                "payload_sha256",
-                "backend_compute_termination",
-                "model_service_compute_termination",
-                "cancellation_ref",
-                "artifact_is_authorization",
-                "execute_binding_enabled",
-                "content_sha256",
-            }
-            terminal_worker_cleanup = (
-                set(worker_cleanup) == cleanup_fields
-                and worker_cleanup.get("contract_version")
-                == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
-                and worker_cleanup.get("content_sha256")
-                == content_sha256(worker_cleanup)
-                and all(
-                    worker_cleanup.get(name) == worker_identity[name]
-                    for name in (
-                        "run_id",
-                        "stage",
-                        "operation_id",
-                        "worker_id",
-                        "model_request_id",
-                        "payload_sha256",
-                    )
-                )
-                and worker_cleanup.get("backend_compute_termination")
-                in {"not_running", "terminated"}
-                and worker_cleanup.get("model_service_compute_termination")
-                in {"request_not_active", "terminated"}
-                and worker_cleanup.get("artifact_is_authorization") is False
-                and worker_cleanup.get("execute_binding_enabled") is False
+        terminal_worker_cleanup = (
+            _benchmark_v2_hybrid_terminal_worker_cleanup_is_verified(
+                worker_cleanup_ref=worker_cleanup_ref,
+                worker_record=worker_record,
             )
+        )
         if terminal_worker_cleanup and isinstance(provider_cleanup_ref, Mapping):
             recovered_cleanup_verified = True
-        elif (
-            terminal_worker_cleanup
-            and provider_cleanup_ref is None
-            and worker_record.get("benchmark_provider_cleanup_ref") is None
-            and worker_record.get("task_kind")
-            == "panel_learning_hybrid_qwen_binding"
-            and worker_record.get("status") == "completed"
-            and worker_record.get("runtime_attached") is False
-            and worker_record.get("result_available") is True
-            and worker_record.get("result_adopted") is False
-        ):
-            context_refs = binding.get("provider_dispatch_context_refs")
-            context_ref_value = (
-                context_refs.get("qwen")
-                if isinstance(context_refs, Mapping)
-                else None
-            )
-            window_binding = binding.get("window_binding")
-            if isinstance(context_ref_value, Mapping) and isinstance(
-                window_binding, Mapping
-            ):
-                try:
-                    context_ref = validate_benchmark_dispatch_context_ref(
-                        context_ref_value
-                    )
-                    context = context_ref["dispatch_context"]
-                    operation_ref = context["operation_ref"]
-                    expected_journal_path = str(
-                        _benchmark_v2_dispatch_journal_path(
-                            composition=composition,
-                            window_binding=window_binding,
-                        )
-                    )
-                except (KeyError, OSError, TypeError, ValueError) as error:
-                    raise LearningWorkflowStageOperationError(
-                        "benchmark_v2 Qwen predispatch cleanup context is invalid"
-                    ) from error
-                worker_lineage = {
-                    name: worker_record[name]
-                    for name in ("run_id", "stage", "operation_id")
-                }
-                lineage_valid = (
-                    context.get("provider") == "qwen"
-                    and all(
-                        window_binding.get(name) == value
-                        and operation_ref.get(name) == value
-                        for name, value in worker_lineage.items()
-                    )
-                    and operation_ref.get("window_binding_ref")
-                    == window_binding.get("window_binding_ref")
-                    and operation_ref.get("capture_ref")
-                    == window_binding.get("capture_ref")
-                    and context.get("receipt_journal_path")
-                    == expected_journal_path
+        else:
+            recovered_cleanup_verified = (
+                _benchmark_v2_hybrid_qwen_zero_dispatch_cleanup_verified(
+                    composition=composition,
+                    binding=binding,
+                    worker_record=worker_record,
+                    worker_cleanup_ref=worker_cleanup_ref,
+                    provider_cleanup_ref=provider_cleanup_ref,
                 )
-                if lineage_valid:
-                    try:
-                        latest_receipt = read_latest_benchmark_dispatch_receipt(
-                            dispatch_context=context
-                        )
-                    except (OSError, TypeError, ValueError) as error:
-                        raise LearningWorkflowStageOperationError(
-                            "benchmark_v2 Qwen predispatch cleanup absence is invalid"
-                        ) from error
-                    recovered_cleanup_verified = latest_receipt is None
+            )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:

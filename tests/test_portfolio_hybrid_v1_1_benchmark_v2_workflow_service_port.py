@@ -4909,6 +4909,152 @@ def test_s3_qwen_predispatch_safe_stop_requires_durable_zero_dispatch_cleanup(
     assert worker == original_worker
 
 
+def test_s3_qwen_zero_dispatch_cleanup_is_reused_by_service_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
+    from test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation import (
+        _runtime_attestation,
+    )
+
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: _runtime_attestation(
+            attestation,
+            provider=provider,
+            digit="2",
+        ),
+    )
+    window_binding = _s3_window_binding()
+    operation_context_ref = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "revision": 5,
+        "window_binding_ref": deepcopy(window_binding["window_binding_ref"]),
+        "capture_ref": deepcopy(window_binding["capture_ref"]),
+    }
+    context = attestation.compose_benchmark_dispatch_context(
+        provider="qwen",
+        operation_ref=operation_context_ref,
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-h1",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(
+            operation_context_ref
+        ),
+    )
+    binding = {
+        "window_binding": window_binding,
+        "provider_dispatch_context_refs": {
+            "qwen": attestation.compose_benchmark_dispatch_context_ref(
+                context=context
+            )
+        },
+    }
+    worker = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "worker_id": "worker-h1",
+        "model_request_id": "request-h1",
+        "payload_sha256": "1" * 64,
+        "task_kind": "panel_learning_hybrid_qwen_binding",
+        "status": "completed",
+        "runtime_attached": False,
+        "result_available": True,
+        "result_adopted": False,
+    }
+    stage_execution = {
+        "cancellation": {
+            "backend_compute_termination": "not_running",
+            "model_service_compute_termination": "request_not_active",
+        }
+    }
+    current = {"run_id": "run-h1", "revision": 7}
+    supplied = {
+        "mode": "hybrid_v1_1",
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": "operation-h1",
+        "status": "safe_stopped",
+    }
+
+    class _Store:
+        def get(self, run_id: str) -> dict[str, object]:
+            assert run_id == "run-h1"
+            return deepcopy(current)
+
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
+        store=_Store(),
+        worker_registry=object(),
+        project_root=tmp_path,
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        incumbent,
+        "validate_benchmark_v2_workflow_service_operation_ref",
+        lambda value: deepcopy(supplied),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_stage_execution",
+        lambda *_args: deepcopy(stage_execution),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_hybrid_service_binding_from_execution",
+        lambda _execution: deepcopy(binding),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_hybrid_attachment",
+        lambda **_kwargs: deepcopy(worker),
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_hybrid_service_status",
+        lambda **_kwargs: "safe_stopped",
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_expired_failure_cleanup",
+        lambda **_kwargs: None,
+    )
+
+    def project_operation_ref(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return deepcopy(supplied)
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_operation_ref",
+        project_operation_ref,
+    )
+
+    result = workflow_service._benchmark_v2_hybrid_service_context(
+        composition=composition,
+        operation_ref=supplied,
+    )
+
+    assert result[-1] == supplied
+    assert captured["recovered_cleanup_verified"] is True
+
+
 def test_s3_safe_stopped_completed_omni_cancel_materializes_cleanup_before_projection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
