@@ -1998,9 +1998,21 @@ def _validate_benchmark_v2_provider_cleanup_parent(
         "content_sha256",
     }
     worker = operation["worker_ref"]
+    cleanup_receipt_ref = projection.get("cleanup_receipt_ref")
+    terminal_cleanup_ref_is_closed = (
+        isinstance(cleanup_receipt_ref, Mapping)
+        and set(cleanup_receipt_ref) == {"content_sha256"}
+        and isinstance(cleanup_receipt_ref.get("content_sha256"), str)
+        and len(cleanup_receipt_ref["content_sha256"]) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in cleanup_receipt_ref["content_sha256"]
+        )
+    )
     terminal_shape = (
         projection.get("status") == "cleanup_verified"
         and projection.get("outcome") in allowed_outcomes
+        and terminal_cleanup_ref_is_closed
     )
     pending_shape = (
         allow_pending
@@ -2035,9 +2047,12 @@ def _validate_benchmark_v2_provider_cleanup_parent(
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent B2 cleanup lineage differs"
         )
-    if result_identity is not None and projection.get(
-        "cleanup_receipt_ref"
-    ) != result_identity.get("provider_cleanup_evidence_ref"):
+    result_cleanup_ref = (
+        result_identity.get("provider_cleanup_evidence_ref")
+        if result_identity is not None
+        else None
+    )
+    if result_cleanup_ref is not None and cleanup_receipt_ref != result_cleanup_ref:
         raise LearningWorkflowStageOperationError(
             "benchmark_v2 incumbent B2 and A cleanup parent differ"
         )
@@ -2734,6 +2749,7 @@ def _resume_benchmark_v2_incumbent_operation(
             launch_owner: dict[str, Any] | None = None
             worker_cleanup: dict[str, Any] | None = None
             provider_cleanup: dict[str, Any] | None = None
+            provider_cleanup_evidence_ref: dict[str, Any] | None = None
             if operation["phase"] in {"result_ready", "terminal_intent", "adopted"}:
                 launch_owner = _inspect_benchmark_v2_launch_owner(
                     registry=registry,
@@ -2795,6 +2811,10 @@ def _resume_benchmark_v2_incumbent_operation(
                     authority_kind=root.authority_kind,
                     allowed_outcomes={"verified_exact_process_exited"},
                 )
+                provider_cleanup_evidence_ref = deepcopy(
+                    result_identity["provider_cleanup_evidence_ref"]
+                    or provider_cleanup["cleanup_receipt_ref"]
+                )
                 existing_intent = operation.get("terminal_intent")
                 if existing_intent is not None and (
                     existing_intent.get("result_sha256")
@@ -2802,7 +2822,7 @@ def _resume_benchmark_v2_incumbent_operation(
                     or existing_intent.get("normal_binding_evidence_ref")
                     != result_identity["normal_binding_evidence_ref"]
                     or existing_intent.get("provider_cleanup_evidence_ref")
-                    != result_identity["provider_cleanup_evidence_ref"]
+                    != provider_cleanup_evidence_ref
                     or existing_intent.get("worker_cleanup_evidence_ref")
                     != worker_cleanup
                 ):
@@ -2811,15 +2831,14 @@ def _resume_benchmark_v2_incumbent_operation(
                     )
             if operation["phase"] == "result_ready":
                 assert worker_cleanup is not None
+                assert provider_cleanup_evidence_ref is not None
                 intent = compose_benchmark_v2_incumbent_terminal_intent(
                     operation=operation,
                     result_sha256=result_identity["result_sha256"],
                     normal_binding_evidence_ref=result_identity[
                         "normal_binding_evidence_ref"
                     ],
-                    provider_cleanup_evidence_ref=result_identity[
-                        "provider_cleanup_evidence_ref"
-                    ],
+                    provider_cleanup_evidence_ref=provider_cleanup_evidence_ref,
                     worker_cleanup_evidence_ref=worker_cleanup,
                     intent_at=_utc_datetime(None).isoformat(),
                 )

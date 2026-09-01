@@ -3416,6 +3416,7 @@ def test_b1_not_launched_cleanup_rejects_correctly_resealed_wrong_reservation(
         ("b2", "extra"),
         ("b2", "missing"),
         ("b2", "cross_parent"),
+        ("b2", "cleanup_parent"),
     ],
 )
 def test_result_ready_completion_rejects_resealed_cleanup_projection_without_store_cas(
@@ -3558,6 +3559,8 @@ def test_result_ready_completion_rejects_resealed_cleanup_projection_without_sto
         target.pop("finalization_intent_ref" if parent_kind == "b1" else "status")
     elif parent_kind == "b1":
         target["supervision_ref"] = {"content_sha256": "d" * 64}
+    elif mutation == "cleanup_parent":
+        target["cleanup_receipt_ref"] = {"content_sha256": "d" * 64}
     else:
         target["acquisition_owner_ref"] = {"content_sha256": "d" * 64}
     malformed = seal_immutable(target)
@@ -3709,7 +3712,7 @@ def test_result_ready_completion_rejects_resealed_cleanup_projection_without_sto
         store.close()
 
 
-def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
+def test_completion_persists_real_cleanup_parents_only_after_all_parent_joins(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     source_bundle: dict[str, object],
@@ -3733,7 +3736,7 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
         "result_sha256": "a" * 64,
         "result_available": True,
         "normal_binding_evidence_ref": {"content_sha256": "b" * 64},
-        "provider_cleanup_evidence_ref": {"content_sha256": "c" * 64},
+        "provider_cleanup_evidence_ref": None,
     }
     operation = _result_ready_document(
         source_bundle, result_identity=seal_immutable(snapshot)
@@ -3788,6 +3791,7 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
             "execute_binding_enabled": False,
         }
     )
+    provider_cleanup_receipt_ref = {"content_sha256": "c" * 64}
     provider_cleanup = seal_immutable(
         {
             "contract_version": "benchmark_provider_cleanup_ref_v1",
@@ -3804,7 +3808,7 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
             "acquisition_owner_ref": operation["acquisition_owner_ref"],
             "acquisition_intent_ref": operation["acquisition_intent_ref"],
             "runtime_owner_ref": operation["runtime_owner_ref"],
-            "cleanup_receipt_ref": snapshot["provider_cleanup_evidence_ref"],
+            "cleanup_receipt_ref": provider_cleanup_receipt_ref,
         }
     )
     events: list[str] = []
@@ -3896,6 +3900,9 @@ def test_completion_persists_real_b1_cleanup_parent_only_after_all_parent_joins(
         "persist_intent",
     ]
     assert persisted[0]["terminal_intent"]["worker_cleanup_evidence_ref"] == worker_cleanup
+    assert persisted[0]["terminal_intent"]["provider_cleanup_evidence_ref"] == (
+        provider_cleanup_receipt_ref
+    )
 
 
 def test_cancel_restart_rejects_b1_identity_drift_before_cleanup(
