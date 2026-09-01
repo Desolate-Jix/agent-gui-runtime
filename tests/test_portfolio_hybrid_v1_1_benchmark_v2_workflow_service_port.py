@@ -4713,6 +4713,202 @@ def test_s3_safe_stopped_projection_requires_terminal_cancellation_cleanup(
     assert projected["cleanup_refs"]["provider_cleanup_ref"] == provider_cleanup
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected_verified"),
+    [
+        ("absent", True),
+        ("committed", False),
+        ("missing_context", False),
+        ("malformed_context", False),
+        ("provider_mismatch", False),
+        ("cross_lineage", False),
+        ("run_mismatch", False),
+        ("stage_mismatch", False),
+        ("window_binding_ref_mismatch", False),
+        ("capture_ref_mismatch", False),
+        ("journal_binding_mismatch", False),
+        ("not_completed", False),
+        ("runtime_attached", False),
+        ("result_unavailable", False),
+        ("nonterminal_cleanup", False),
+        ("adopted", False),
+        ("non_qwen", False),
+    ],
+)
+def test_s3_qwen_predispatch_safe_stop_requires_durable_zero_dispatch_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    expected_verified: bool,
+) -> None:
+    from types import SimpleNamespace
+
+    from app.learn import workflow_service
+    from app.learn.hybrid import benchmark_v2_dispatch_attestation as attestation
+    from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
+    from test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation import (
+        _runtime_attestation,
+    )
+
+    monkeypatch.setattr(attestation, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_window",
+        lambda value: {"content_sha256": "d" * 64},
+    )
+    monkeypatch.setattr(
+        attestation,
+        "_attest_exact_provider_runtime",
+        lambda provider, value: _runtime_attestation(
+            attestation,
+            provider=provider,
+            digit="2",
+        ),
+    )
+    window_binding = _s3_window_binding()
+    operation_ref = {
+        "run_id": "run-h1",
+        "stage": "screen_understanding",
+        "operation_id": (
+            "operation-other" if scenario == "cross_lineage" else "operation-h1"
+        ),
+        "revision": 5,
+        "window_binding_ref": deepcopy(window_binding["window_binding_ref"]),
+        "capture_ref": deepcopy(window_binding["capture_ref"]),
+    }
+    if scenario == "window_binding_ref_mismatch":
+        operation_ref["window_binding_ref"] = deepcopy(
+            window_binding["window_binding_ref"]
+        )
+        operation_ref["window_binding_ref"]["content_sha256"] = "e" * 64
+    if scenario == "capture_ref_mismatch":
+        operation_ref["capture_ref"] = deepcopy(window_binding["capture_ref"])
+        operation_ref["capture_ref"]["content_sha256"] = "f" * 64
+    context = attestation.compose_benchmark_dispatch_context(
+        provider="omni" if scenario == "provider_mismatch" else "qwen",
+        operation_ref=operation_ref,
+        window_binding={
+            "contract_version": "test_window_binding_v1",
+            "exact_hwnd": 101,
+            "process_identity": {"pid": 202, "create_time_ns": 303},
+            "job_name": "job-h1",
+            "payload_sha256": "c" * 64,
+        },
+        receipt_journal_path=attestation._fixed_dispatch_journal_path(operation_ref),
+    )
+    if scenario == "committed":
+        with attestation.install_benchmark_dispatch_attestor(
+            dispatch_context=context
+        ):
+            attestation.attest_benchmark_provider_dispatch(
+                provider="qwen",
+                operation_ref=context["operation_ref"],
+                window_binding=context["window_binding"],
+                provider_runtime={"provider": "qwen"},
+            )
+    context_refs = {
+        "qwen": attestation.compose_benchmark_dispatch_context_ref(context=context)
+    }
+    if scenario == "missing_context":
+        context_refs = {}
+    elif scenario == "malformed_context":
+        context_refs["qwen"]["content_sha256"] = "0" * 64
+    worker = {
+        "run_id": "run-other" if scenario == "run_mismatch" else "run-h1",
+        "stage": (
+            "stage-other"
+            if scenario == "stage_mismatch"
+            else "screen_understanding"
+        ),
+        "operation_id": "operation-h1",
+        "worker_id": "worker-h1",
+        "model_request_id": "request-h1",
+        "payload_sha256": "1" * 64,
+        "task_kind": (
+            "panel_learning_hybrid_omni_discovery"
+            if scenario == "non_qwen"
+            else "panel_learning_hybrid_qwen_binding"
+        ),
+        "status": "failed" if scenario == "not_completed" else "completed",
+        "runtime_attached": scenario == "runtime_attached",
+        "result_available": scenario != "result_unavailable",
+        "result_adopted": scenario == "adopted",
+    }
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_expired_failure_cleanup",
+        lambda **_kwargs: None,
+    )
+
+    def project_operation_ref(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"content_sha256": "4" * 64}
+
+    monkeypatch.setattr(
+        workflow_service,
+        "_project_benchmark_v2_hybrid_operation_ref",
+        project_operation_ref,
+    )
+    monkeypatch.setattr(
+        incumbent,
+        "compose_benchmark_v2_workflow_service_step",
+        lambda **kwargs: deepcopy(dict(kwargs)),
+    )
+
+    binding = {
+        "window_binding": window_binding,
+        "provider_dispatch_context_refs": context_refs,
+    }
+    original_binding = deepcopy(binding)
+    original_worker = deepcopy(worker)
+    project_root = (
+        tmp_path / "other-root"
+        if scenario == "journal_binding_mismatch"
+        else tmp_path
+    )
+
+    def call() -> dict[str, object]:
+        return workflow_service._project_benchmark_v2_hybrid_step(
+            composition=SimpleNamespace(
+                worker_registry=object(), project_root=project_root
+            ),
+            workflow_state={},
+            stage_execution={
+                "cancellation": {
+                    "backend_compute_termination": (
+                        "not_covered"
+                        if scenario == "nonterminal_cleanup"
+                        else "not_running"
+                    ),
+                    "model_service_compute_termination": "request_not_active",
+                }
+            },
+            binding=binding,
+            worker_record=worker,
+            status="safe_stopped",
+        )
+
+    if scenario == "malformed_context":
+        with pytest.raises(
+            workflow_service.LearningWorkflowStageOperationError,
+            match="Qwen predispatch cleanup context is invalid",
+        ):
+            call()
+        assert binding == original_binding
+        assert worker == original_worker
+        return
+
+    projected = call()
+
+    assert captured["recovered_cleanup_verified"] is expected_verified
+    assert projected["cleanup_refs"]["worker_cleanup_ref"] is not None
+    assert projected["cleanup_refs"]["provider_cleanup_ref"] is None
+    assert binding == original_binding
+    assert worker == original_worker
+
+
 def test_s3_safe_stopped_completed_omni_cancel_materializes_cleanup_before_projection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
