@@ -6908,6 +6908,12 @@ def _actual_provider_cleanup_parent_refs(
                 )
         else:
             raise ValueError("actual terminal cleanup has no exact cleanup proof")
+        provider_parent_kind = (
+            "fusion_direct_provider_cleanup"
+            if cleanup_source["provider_cleanup_ref"].get("contract_version")
+            == "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+            else "provider_cleanup"
+        )
         result.extend(
             _cleanup_parent_ref(
                 cleanup_source[name],
@@ -6916,7 +6922,7 @@ def _actual_provider_cleanup_parent_refs(
             )
             for name, parent_kind in (
                 ("worker_cleanup_ref", "worker_cleanup"),
-                ("provider_cleanup_ref", "provider_cleanup"),
+                ("provider_cleanup_ref", provider_parent_kind),
             )
         )
 

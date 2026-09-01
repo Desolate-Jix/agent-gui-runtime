@@ -4228,6 +4228,178 @@ def test_actual_cleanup_uses_explicit_fusion_safe_stop_attestation(
     ]
 
 
+def test_actual_cleanup_full_group_routes_fusion_safe_stop_through_stable_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+        run_id="fusion-full-run",
+        operation_id="fusion-full-operation",
+        window_binding_ref={"id": "fusion-full-window", "content_sha256": "1" * 64},
+        capture_ref={"id": "fusion-full-capture", "content_sha256": "2" * 64},
+        owner_journal_ref={"content_sha256": "3" * 64},
+        expected_uia_root_ref={"content_sha256": "4" * 64},
+    )
+    group = {
+        "request_ref": {"id": "fusion-full-request", "content_sha256": "5" * 64}
+    }
+    fusion_terminal = _actual_fusion_safe_stop_step(group, binding)
+    fusion_cleanup = _actual_fusion_safe_stop_cleanup(
+        fusion_terminal["operation_ref"]
+    )
+    fixture_service = _ActualService([])
+    incumbent_terminals = []
+    call_intents = []
+    for index in range(5):
+        case_ref = {
+            "case_id": f"fusion-full-case-{index}",
+            "case_content_sha256": f"{index + 6:x}" * 64,
+        }
+        operation = _actual_operation(
+            mode="incumbent_qwen_only",
+            operation_id=f"fusion-full-incumbent-{index}",
+            request_ref={
+                "id": case_ref["case_id"],
+                "content_sha256": case_ref["case_content_sha256"],
+            },
+            binding={**binding, "run_id": f"fusion-full-child-{index}"},
+            revision=index + 1,
+        )
+        terminal_result = fixture_service.cancel_operation(operation_ref=operation)
+        terminal = deepcopy(
+            fixture_service.terminal_steps_by_sha[
+                str(terminal_result["operation_ref"]["content_sha256"])
+            ]
+        )
+        incumbent_terminals.append(terminal)
+        call_intents.append(
+            {
+                "provider_case_ref": case_ref,
+                "window_binding": deepcopy(binding),
+                "service_intent_ref": {"content_sha256": "6" * 64},
+            }
+        )
+
+    operations = [
+        fusion_terminal["operation_ref"],
+        *(item["operation_ref"] for item in incumbent_terminals),
+    ]
+    cleanup_entries = [
+        {
+            "operation_ref_sha256": fusion_terminal["operation_ref"][
+                "content_sha256"
+            ],
+            "terminal_receipt_ref": _sealed(
+                {
+                    "run_id": fusion_terminal["operation_ref"]["run_id"],
+                    "stage": fusion_terminal["operation_ref"]["stage"],
+                    "operation_id": fusion_terminal["operation_ref"]["operation_id"],
+                    "worker_id": fusion_terminal["worker_ref"]["worker_id"],
+                }
+            ),
+            "worker_cleanup_ref": fusion_cleanup["worker_cleanup_ref"],
+            "provider_cleanup_ref": fusion_cleanup[
+                "fusion_direct_provider_cleanup_ref"
+            ],
+        },
+        *(
+            {
+                "operation_ref_sha256": item["operation_ref"]["content_sha256"],
+                "terminal_receipt_ref": _actual_incumbent_cancelled_terminal_receipt(
+                    operation=item["operation_ref"],
+                    worker_cleanup_ref=item["cleanup_refs"]["worker_cleanup_ref"],
+                    provider_cleanup_ref=item["cleanup_refs"]["provider_cleanup_ref"],
+                ),
+                "worker_cleanup_ref": item["cleanup_refs"]["worker_cleanup_ref"],
+                "provider_cleanup_ref": item["cleanup_refs"]["provider_cleanup_ref"],
+            }
+            for item in incumbent_terminals
+        ),
+    ]
+    attestation = runtime_seal_immutable(
+        {
+            "contract_version": "benchmark_v2_actual_operations_stable_zero_v1",
+            "operation_refs": operations,
+            "cleanup_entries": cleanup_entries,
+            "window_binding_ref": binding["window_binding_ref"],
+            "capture_ref": binding["capture_ref"],
+            "cleanup_status": "stable_zero",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+    class FullGroupFusionService:
+        def __init__(self) -> None:
+            self.stable_zero_calls = 0
+            self.fusion_cleanup_calls = 0
+
+        def lookup_hybrid_operation(self, **_kwargs):
+            return deepcopy(fusion_terminal)
+
+        def lookup_incumbent_observe(self, *, provider_case_ref, window_binding):
+            assert window_binding == binding
+            return next(
+                deepcopy(item)
+                for item in incumbent_terminals
+                if item["operation_ref"]["request_ref"]["id"]
+                == provider_case_ref["case_id"]
+            )
+
+        def cancel_operation(self, *, operation_ref):
+            if operation_ref == fusion_terminal["operation_ref"]:
+                return deepcopy(fusion_terminal)
+            raise AssertionError(f"unexpected cancellation: {operation_ref}")
+
+        def attest_actual_operations_stable_zero(self, *, operation_refs):
+            self.stable_zero_calls += 1
+            assert operation_refs == operations
+            return deepcopy(attestation)
+
+        def attest_fusion_safe_stop_cleanup(self, *, operation_ref):
+            self.fusion_cleanup_calls += 1
+            return _actual_fusion_safe_stop_cleanup(operation_ref)
+
+    service = FullGroupFusionService()
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_screen_group_service_intents",
+        lambda **_kwargs: [
+            {
+                "provider_group": deepcopy(group),
+                "window_binding": deepcopy(binding),
+                "content_sha256": "6" * 64,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_incumbent_call_intents",
+        lambda **_kwargs: deepcopy(call_intents),
+    )
+
+    reconciled = runtime_module._reconcile_actual_operations(
+        attempt_dir=tmp_path,
+        service=service,
+    )
+
+    assert service.stable_zero_calls == 1
+    assert service.fusion_cleanup_calls == 0
+    assert reconciled[1] == [attestation]
+    assert reconciled[3] == []
+    parents = runtime_module._actual_provider_cleanup_parent_refs(
+        actual_terminals=reconciled[0],
+        actual_attestations=reconciled[1],
+        actual_completed_hybrid_cleanups=reconciled[3],
+    )
+    assert len(parents) == 12
+    assert [item["parent_kind"] for item in parents].count(
+        "fusion_direct_provider_cleanup"
+    ) == 1
+
+
 def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

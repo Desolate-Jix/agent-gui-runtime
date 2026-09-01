@@ -4155,6 +4155,25 @@ def _attest_benchmark_v2_actual_operations_stable_zero(
     ):
         hybrid_worker_cleanup = deepcopy(hybrid_cleanup["worker_cleanup_ref"])
         hybrid_provider_cleanup = deepcopy(hybrid_cleanup["provider_cleanup_ref"])
+    elif (
+        hybrid_status == "safe_stopped"
+        and hybrid_step.get("observed_task_kind")
+        == "panel_learning_hybrid_fusion"
+        and hybrid_cleanup
+        == {"worker_cleanup_ref": None, "provider_cleanup_ref": None}
+    ):
+        fusion_cleanup = _attest_benchmark_v2_actual_fusion_safe_stop_cleanup(
+            composition=composition,
+            operation_ref=exact_hybrid,
+        )
+        if fusion_cleanup.get("operation_ref") != exact_hybrid:
+            raise LearningWorkflowStageOperationError(
+                "benchmark actual fusion cleanup lineage differs"
+            )
+        hybrid_worker_cleanup = deepcopy(fusion_cleanup["worker_cleanup_ref"])
+        hybrid_provider_cleanup = deepcopy(
+            fusion_cleanup["fusion_direct_provider_cleanup_ref"]
+        )
     else:
         raise LearningWorkflowStageOperationError(
             "benchmark actual Hybrid authoritative cleanup is incomplete"

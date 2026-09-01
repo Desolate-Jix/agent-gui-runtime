@@ -656,3 +656,90 @@ def test_stable_zero_validator_rejects_active_cross_worker_and_aggregate_cleanup
         match="(terminal cleanup lineage|worker cleanup) is stale",
     ):
         incumbent.validate_benchmark_v2_actual_operations_stable_zero(aggregate)
+
+
+def test_stable_zero_validator_accepts_only_exact_fusion_safe_stop_cleanup() -> None:
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import (
+        _actual_fusion_safe_stop_cleanup,
+        _actual_fusion_safe_stop_step,
+    )
+
+    fusion_step = _actual_fusion_safe_stop_step(
+        {"request_ref": {"id": "request-0", "content_sha256": SHA_A}},
+        {
+            "run_id": "parent-run",
+            "stage": "screen_understanding",
+            "operation_id": "parent-operation",
+            "window_binding_ref": {"id": "window-1", "content_sha256": SHA_A},
+            "capture_ref": {"id": "capture-1", "content_sha256": SHA_B},
+        },
+    )
+    operation = fusion_step["operation_ref"]
+    cleanup = _actual_fusion_safe_stop_cleanup(operation)
+    receipt = deepcopy(_stable_receipt())
+    receipt["operation_refs"][0] = operation
+    receipt["cleanup_entries"][0] = {
+        "operation_ref_sha256": operation["content_sha256"],
+        "terminal_receipt_ref": seal_immutable(
+            {
+                "run_id": operation["run_id"],
+                "stage": operation["stage"],
+                "operation_id": operation["operation_id"],
+                "worker_id": operation["worker_ref"]["worker_id"],
+            }
+        ),
+        "worker_cleanup_ref": cleanup["worker_cleanup_ref"],
+        "provider_cleanup_ref": cleanup[
+            "fusion_direct_provider_cleanup_ref"
+        ],
+    }
+    receipt = seal_immutable(
+        {key: value for key, value in receipt.items() if key != "content_sha256"}
+    )
+
+    assert incumbent.validate_benchmark_v2_actual_operations_stable_zero(receipt) == receipt
+
+    for mutation in ("nonfusion", "complete", "cross_lineage"):
+        malformed = deepcopy(receipt)
+        if mutation == "nonfusion":
+            malformed["operation_refs"][0]["worker_ref"]["task_kind"] = (
+                "panel_learning_hybrid_qwen_binding"
+            )
+            malformed["operation_refs"][0]["worker_ref"] = seal_immutable(
+                {
+                    key: value
+                    for key, value in malformed["operation_refs"][0]["worker_ref"].items()
+                    if key != "content_sha256"
+                }
+            )
+        elif mutation == "complete":
+            malformed["operation_refs"][0]["status"] = "complete"
+        else:
+            malformed["cleanup_entries"][0]["provider_cleanup_ref"][
+                "operation_id"
+            ] = "foreign-operation"
+            malformed["cleanup_entries"][0]["provider_cleanup_ref"] = seal_immutable(
+                {
+                    key: value
+                    for key, value in malformed["cleanup_entries"][0][
+                        "provider_cleanup_ref"
+                    ].items()
+                    if key != "content_sha256"
+                }
+            )
+        if mutation in {"nonfusion", "complete"}:
+            malformed["operation_refs"][0] = seal_immutable(
+                {
+                    key: value
+                    for key, value in malformed["operation_refs"][0].items()
+                    if key != "content_sha256"
+                }
+            )
+            malformed["cleanup_entries"][0]["operation_ref_sha256"] = malformed[
+                "operation_refs"
+            ][0]["content_sha256"]
+        malformed = seal_immutable(
+            {key: value for key, value in malformed.items() if key != "content_sha256"}
+        )
+        with pytest.raises(ValueError):
+            incumbent.validate_benchmark_v2_actual_operations_stable_zero(malformed)

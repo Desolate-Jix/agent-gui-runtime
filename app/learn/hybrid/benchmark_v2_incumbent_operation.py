@@ -2804,6 +2804,32 @@ def validate_benchmark_v2_actual_operations_stable_zero(
                 )
             )
             review_no_provider_cleanup = True
+        fusion_direct_provider_cleanup = False
+        if (
+            operation["mode"] == "hybrid_v1_1"
+            and operation["status"] == "safe_stopped"
+            and isinstance(worker, Mapping)
+            and worker.get("task_kind") == "panel_learning_hybrid_fusion"
+            and worker_cleanup.get("contract_version")
+            == "benchmark_v2_hybrid_worker_cleanup_ref_v1"
+            and provider_cleanup.get("contract_version")
+            == "benchmark_v2_hybrid_fusion_direct_provider_cleanup_ref_v1"
+        ):
+            validate_benchmark_v2_actual_fusion_safe_stop_cleanup(
+                _seal(
+                    {
+                        "contract_version": (
+                            BENCHMARK_V2_ACTUAL_FUSION_SAFE_STOP_CLEANUP_CONTRACT
+                        ),
+                        "operation_ref": operation,
+                        "worker_cleanup_ref": worker_cleanup,
+                        "fusion_direct_provider_cleanup_ref": provider_cleanup,
+                        "cleanup_status": "stable_zero",
+                        **_NON_AUTHORIZING_SAFETY,
+                    }
+                )
+            )
+            fusion_direct_provider_cleanup = True
         if any(
             terminal.get(name) != operation[name]
             for name in ("run_id", "stage", "operation_id")
@@ -2865,7 +2891,7 @@ def validate_benchmark_v2_actual_operations_stable_zero(
                 "benchmark actual stable-zero incumbent reservation ref",
             )
             incumbent_reservations.append(reservation["content_sha256"])
-        if not review_no_provider_cleanup and (
+        if not (review_no_provider_cleanup or fusion_direct_provider_cleanup) and (
             provider_cleanup.get("contract_version")
             != "benchmark_provider_cleanup_ref_v1"
             or provider_cleanup.get("status") != "cleanup_verified"
