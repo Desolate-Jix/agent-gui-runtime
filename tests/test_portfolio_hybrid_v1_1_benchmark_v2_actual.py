@@ -13,6 +13,8 @@ import pytest
 
 from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
 from app.learn.hybrid import benchmark_v2_actual as actual
+from app.learn.hybrid import benchmark_v2_lifecycle as benchmark_lifecycle
+from app.learn.hybrid import benchmark_v2_predictions as benchmark_predictions
 from app.learn.hybrid.benchmark_v2_actual import (
     WorkflowServicePort,
     run_screen_group,
@@ -1581,12 +1583,14 @@ class _FakeWorkflowService:
         never_complete_hybrid: bool = False,
         stale_hybrid: bool = False,
         early_safe_stop: bool = False,
+        quality_safe_stop: bool = False,
         successor_fault: str | None = None,
     ) -> None:
         self.pending_replays = max(pending_replays, 1 if duplicate_reads else 0)
         self.never_complete_hybrid = never_complete_hybrid
         self.stale_hybrid = stale_hybrid
         self.early_safe_stop = early_safe_stop
+        self.quality_safe_stop = quality_safe_stop
         self.successor_fault = successor_fault
         self.successor_fault_used = False
         self.window_binding: dict[str, object] | None = None
@@ -1662,6 +1666,27 @@ class _FakeWorkflowService:
             "lifecycle_evidence": {},
         }
 
+    def _quality_safe_stop_response(self) -> dict[str, object]:
+        response = self._hybrid_response()
+        orchestration = response["orchestration"]
+        fusion = deepcopy(orchestration["fusion_result"])
+        fusion.pop("content_sha256")
+        for candidate in fusion["candidates"]:
+            candidate["state"] = "UNBOUND"
+            candidate["vista_eligible"] = False
+            candidate["review_required"] = True
+            candidate["reason"] = "semantic_provider_did_not_bind"
+        fusion = seal_immutable(fusion)
+        orchestration["fusion_result"] = fusion
+        orchestration.pop("hybrid_vista_requests")
+        orchestration["benchmark_v2_provider_dispatch_receipt_refs"] = [
+            {"provider": "omni", "content_sha256": "1" * 64},
+            {"provider": "qwen", "content_sha256": "2" * 64},
+        ]
+        response["task_kind"] = "panel_learning_hybrid_fusion"
+        response["result"] = deepcopy(fusion)
+        return response
+
     def _hybrid_step(self, *, status: str) -> dict[str, object]:
         assert self.window_binding is not None
         assert self.provider_group is not None
@@ -1734,6 +1759,33 @@ class _FakeWorkflowService:
             )
             self.active_ops["hybrid"] = deepcopy(stopped)
             return _step(stopped, task_kind="server-managed-hybrid-safe-stop")
+        if self.quality_safe_stop:
+            assert self.window_binding is not None
+            assert self.provider_group is not None
+            consumed = deepcopy(self.active_ops["hybrid"])
+            stopped = _operation_ref(
+                mode="hybrid_v1_1",
+                operation_id=str(self.window_binding["operation_id"]),
+                request_ref=self.provider_group["request_ref"],
+                window_binding=self.window_binding,
+                worker_ref=consumed["worker_ref"],
+                status="safe_stopped",
+                revision=int(consumed["workflow_state_ref"]["revision"]) + 1,
+                predecessor=consumed,
+            )
+            projection = _projection(
+                mode="hybrid_v1_1",
+                operation_ref=stopped,
+                response=self._quality_safe_stop_response(),
+                terminal=False,
+            )
+            self.active_workers.discard(str(consumed["worker_ref"]["content_sha256"]))
+            self.active_ops["hybrid"] = deepcopy(stopped)
+            return _step(
+                stopped,
+                task_kind="panel_learning_hybrid_fusion",
+                projection=projection,
+            )
         if self.successor_fault is not None and not self.successor_fault_used:
             self.successor_fault_used = True
             if self.successor_fault == "same_digest_changed_step":
@@ -2014,6 +2066,7 @@ def _ports(
     never_complete_hybrid: bool = False,
     stale_hybrid: bool = False,
     early_safe_stop: bool = False,
+    quality_safe_stop: bool = False,
     successor_fault: str | None = None,
 ):
     events: list[str] = []
@@ -2023,6 +2076,7 @@ def _ports(
         never_complete_hybrid=never_complete_hybrid,
         stale_hybrid=stale_hybrid,
         early_safe_stop=early_safe_stop,
+        quality_safe_stop=quality_safe_stop,
         successor_fault=successor_fault,
     )
     owner = _FakeWindowOwner(events)
@@ -2568,6 +2622,122 @@ def test_chained_early_safe_stop_preserves_primary_terminal_error_and_cleanup() 
     assert not service.active_ops
     assert not service.active_workers
     assert not owner.active_windows
+
+
+def test_quality_fusion_safe_stop_remains_in_denominator_with_twenty_rows() -> None:
+    events, service, owner, lifecycle, sink = _ports(quality_safe_stop=True)
+
+    result = run_screen_group(
+        provider_group=_provider_group(),
+        service=service,
+        window_owner=owner,
+        lifecycle=lifecycle,
+        prediction_sink=sink,
+    )
+
+    assert len(result["rows"]) == 20
+    assert service.incumbent_start_calls == 5
+    assert result["pre_vista_evidence"]["submitted_vista_request_envelopes"] == []
+    vista_rows = [
+        row for row in result["rows"] if row["arm_id"] == "omni_to_qwen_vista"
+    ]
+    assert len(vista_rows) == 5
+    assert all(
+        row["observation"]["review_projection"]
+        == {
+            "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
+            "outcome": "quality_safe_stop",
+            "reason": "no_vista_eligible_bound_candidates",
+            "proposals": [],
+            "automatic_acceptance": False,
+            "execute_binding_enabled": False,
+            "no_live_click_authorization": True,
+        }
+        for row in vista_rows
+    )
+    assert all(
+        {item["provider"] for item in row["observation"]["provider_dispatch_receipt_refs"]}
+        == {"omni", "qwen"}
+        for row in vista_rows
+    )
+    assert events[-3:] == [
+        "window-close",
+        "lifecycle-stable-zero",
+        "prediction-write",
+    ]
+
+
+def test_zero_vista_prediction_materializer_requires_explicit_quality_safe_stop() -> None:
+    review = {
+        "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
+        "outcome": "quality_safe_stop",
+        "reason": "no_vista_eligible_bound_candidates",
+        "proposals": [],
+        "automatic_acceptance": False,
+        "execute_binding_enabled": False,
+        "no_live_click_authorization": True,
+    }
+
+    assert benchmark_predictions._actual_vista_proposals(
+        observation={"review_projection": review},
+        submitted_vista_requests=[],
+    ) == []
+    forged = deepcopy(review)
+    forged["reason"] = "different_reason"
+    with pytest.raises(ValueError, match="quality safe-stop"):
+        benchmark_predictions._actual_vista_proposals(
+            observation={"review_projection": forged},
+            submitted_vista_requests=[],
+        )
+
+
+def test_lifecycle_quality_safe_stop_uses_only_dispatched_omni_and_qwen() -> None:
+    review = {
+        "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
+        "outcome": "quality_safe_stop",
+        "reason": "no_vista_eligible_bound_candidates",
+        "proposals": [],
+        "automatic_acceptance": False,
+        "execute_binding_enabled": False,
+        "no_live_click_authorization": True,
+    }
+
+    assert benchmark_lifecycle._s13_expected_dispatch_providers(
+        arm_id="omni_to_qwen_vista",
+        observation={"review_projection": review},
+        zero_vista_requests=True,
+    ) == {"omni", "qwen"}
+    with pytest.raises(ValueError, match="quality safe-stop"):
+        benchmark_lifecycle._s13_expected_dispatch_providers(
+            arm_id="omni_to_qwen_vista",
+            observation={"review_projection": {**review, "proposals": [{}]}},
+            zero_vista_requests=True,
+        )
+
+
+def test_quality_safe_stop_rejects_result_that_differs_from_fusion_parent() -> None:
+    events, service, owner, lifecycle, sink = _ports(quality_safe_stop=True)
+    original = service._quality_safe_stop_response
+
+    def mismatched_response() -> dict[str, object]:
+        response = original()
+        result = deepcopy(response["result"])
+        result.pop("content_sha256")
+        result["candidates"][0]["reason"] = "resealed_but_different"
+        response["result"] = seal_immutable(result)
+        return response
+
+    service._quality_safe_stop_response = mismatched_response
+    with pytest.raises(ValueError, match="fusion result"):
+        run_screen_group(
+            provider_group=_provider_group(),
+            service=service,
+            window_owner=owner,
+            lifecycle=lifecycle,
+            prediction_sink=sink,
+        )
+    assert service.incumbent_start_calls == 0
+    assert not sink.values
 
 
 def test_hybrid_start_failure_before_operation_ref_preserves_primary_error() -> None:

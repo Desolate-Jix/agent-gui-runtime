@@ -230,6 +230,9 @@ def _run_hybrid(
         if status == "complete":
             _require_terminal_projection(step, "Hybrid")
             return step
+        if status == "safe_stopped" and _is_quality_fusion_safe_stop_step(step):
+            _extract_hybrid_evidence(step, group=group)
+            return step
         if status in _TERMINAL:
             raise ValueError(f"Hybrid operation stopped without a complete result: {status}")
         if status not in _NONTERMINAL:
@@ -575,6 +578,35 @@ def _require_terminal_projection(step: Mapping[str, object], label: str) -> None
         raise ValueError(f"{label} terminal step lost its adopted response")
 
 
+def _is_quality_fusion_safe_stop_step(step: Mapping[str, object]) -> bool:
+    if (
+        step.get("status") != "safe_stopped"
+        or step.get("observed_task_kind") != "panel_learning_hybrid_fusion"
+    ):
+        return False
+    projection = step.get("adopted_result_projection")
+    response = projection.get("response") if isinstance(projection, Mapping) else None
+    result = response.get("result") if isinstance(response, Mapping) else None
+    candidates = result.get("candidates") if isinstance(result, Mapping) else None
+    return (
+        isinstance(response, Mapping)
+        and response.get("contract_version")
+        == "learning_hybrid_managed_stage_result_v1"
+        and response.get("learning_pipeline_mode") == "hybrid_v1_1"
+        and response.get("task_kind") == "panel_learning_hybrid_fusion"
+        and response.get("outcome") == "completed"
+        and isinstance(result, Mapping)
+        and result.get("contract_version") == "hybrid_fusion_result_v1"
+        and isinstance(candidates, list)
+        and all(isinstance(candidate, Mapping) for candidate in candidates)
+        and not any(
+            candidate.get("state") == "BOUND"
+            and candidate.get("vista_eligible") is True
+            for candidate in candidates
+        )
+    )
+
+
 def _require_incumbent_observe_step(step: Mapping[str, object]) -> None:
     if step.get("observed_task_kind") != "vision_observe_screen":
         raise ValueError("incumbent operation escaped its single-observe task")
@@ -685,14 +717,22 @@ def _extract_hybrid_evidence(
     response = projection.get("response") if isinstance(projection, Mapping) else None
     if not isinstance(response, Mapping):
         raise ValueError("Hybrid terminal response is missing")
+    quality_safe_stop = (
+        terminal.get("status") == "safe_stopped"
+        and terminal.get("observed_task_kind") == "panel_learning_hybrid_fusion"
+        and response.get("task_kind") == "panel_learning_hybrid_fusion"
+        and response.get("outcome") == "completed"
+    )
     if (
         response.get("contract_version")
         != "learning_hybrid_managed_stage_result_v1"
-        or
-        response.get("learning_pipeline_mode") != "hybrid_v1_1"
-        or response.get("task_kind")
-        != "panel_learning_hybrid_review_projection"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
         or response.get("outcome") != "completed"
+        or (
+            not quality_safe_stop
+            and response.get("task_kind")
+            != "panel_learning_hybrid_review_projection"
+        )
     ):
         raise ValueError("Hybrid terminal response is not complete")
     orchestration = response.get("orchestration")
@@ -739,6 +779,10 @@ def _extract_hybrid_evidence(
     ):
         raise ValueError("Hybrid workflow revision is stale")
     raw_vista_requests = orchestration.get("hybrid_vista_requests")
+    if quality_safe_stop:
+        if raw_vista_requests is not None:
+            raise ValueError("Hybrid quality safe-stop cannot claim submitted VISTA requests")
+        raw_vista_requests = []
     if not isinstance(raw_vista_requests, list):
         raise ValueError("Hybrid exact submitted VISTA requests are missing")
     submitted_vista_requests = [
@@ -774,7 +818,26 @@ def _extract_hybrid_evidence(
         fusion_result=fusion,
         submitted_vista_requests=submitted_vista_requests,
     )
-    if (
+    if quality_safe_stop:
+        if canonical_json_bytes(review) != canonical_json_bytes(fusion):
+            raise ValueError("Hybrid quality safe-stop result differs from fusion result")
+        if any(
+            isinstance(candidate, Mapping)
+            and candidate.get("state") == "BOUND"
+            and candidate.get("vista_eligible") is True
+            for candidate in fusion.get("candidates", [])
+        ):
+            raise ValueError("Hybrid quality safe-stop contains a VISTA-eligible BOUND candidate")
+        review = {
+            "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
+            "outcome": "quality_safe_stop",
+            "reason": "no_vista_eligible_bound_candidates",
+            "proposals": [],
+            "automatic_acceptance": False,
+            "execute_binding_enabled": False,
+            "no_live_click_authorization": True,
+        }
+    elif (
         review.get("outcome") != "completed"
         or review.get("review_status") != "REVIEW_REQUIRED"
         or review.get("automatic_acceptance") is not False
@@ -785,7 +848,9 @@ def _extract_hybrid_evidence(
         raise ValueError("Hybrid terminal review projection is invalid")
     dispatch_refs = _dispatch_receipt_refs(
         orchestration.get("benchmark_v2_provider_dispatch_receipt_refs"),
-        expected_providers={"omni", "qwen", "vista"},
+        expected_providers=(
+            {"omni", "qwen"} if quality_safe_stop else {"omni", "qwen", "vista"}
+        ),
     )
     omni_refs = [item for item in dispatch_refs if item["provider"] == "omni"]
     omni_qwen_refs = [

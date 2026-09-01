@@ -837,7 +837,7 @@ def _screen_group_material(
         case_id for case_id, item in case_context.items() if item["provider_group_id"] == group_id
     )
     qwen_by_case: dict[str, Mapping[str, object]] = {}
-    vista_proposals: list[Mapping[str, object]] = []
+    vista_proposals: list[Mapping[str, object]] | None = None
     for row in rows:
         if not isinstance(row, Mapping):
             raise ValueError("actual screen group row is invalid")
@@ -859,11 +859,14 @@ def _screen_group_material(
                 raise ValueError("actual screen group Qwen response is invalid")
             qwen_by_case[case_id] = response
         elif row.get("arm_id") == "omni_to_qwen_vista":
-            review = observation.get("review_projection")
-            proposals = review.get("proposals") if isinstance(review, Mapping) else None
-            if not isinstance(proposals, list):
-                raise ValueError("actual screen group VISTA proposals are invalid")
-            vista_proposals = proposals
+            proposals = _actual_vista_proposals(
+                observation=observation,
+                submitted_vista_requests=submitted,
+            )
+            if vista_proposals is None:
+                vista_proposals = proposals
+            elif canonical_bytes(vista_proposals) != canonical_bytes(proposals):
+                raise ValueError("actual screen group VISTA proposals differ across rows")
     if sorted(qwen_by_case) != group_case_ids:
         raise ValueError("actual screen group case coverage differs")
     selected_rows: list[dict[str, object]] = []
@@ -879,7 +882,7 @@ def _screen_group_material(
             actual_screen_group_ref=actual_group_ref,
             capture_ref=shared["capture_ref"],
         )
-        attached = attach_vista_outcomes(selection, list(vista_proposals))
+        attached = attach_vista_outcomes(selection, list(vista_proposals or []))
         selected_rows.extend(deepcopy(attached["rows"]))
         sealed_artifacts.extend(deepcopy(attached["sealed_artifacts"]))
     dependency = {
@@ -893,6 +896,33 @@ def _screen_group_material(
         "submitted_vista_request_refs": [deepcopy(dict(item["ref"])) for item in submitted_envelopes],
     }
     return dependency, selected_rows, sealed_artifacts, {"raw_envelopes": raw_envelopes}
+
+
+def _actual_vista_proposals(
+    *,
+    observation: Mapping[str, object],
+    submitted_vista_requests: list[Mapping[str, object]],
+) -> list[Mapping[str, object]]:
+    review = observation.get("review_projection")
+    if not isinstance(review, Mapping):
+        raise ValueError("actual screen group VISTA review projection is invalid")
+    proposals = review.get("proposals")
+    if submitted_vista_requests:
+        if not isinstance(proposals, list):
+            raise ValueError("actual screen group VISTA proposals are invalid")
+        return deepcopy(proposals)
+    expected = {
+        "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
+        "outcome": "quality_safe_stop",
+        "reason": "no_vista_eligible_bound_candidates",
+        "proposals": [],
+        "automatic_acceptance": False,
+        "execute_binding_enabled": False,
+        "no_live_click_authorization": True,
+    }
+    if dict(review) != expected:
+        raise ValueError("actual screen group zero-VISTA quality safe-stop is invalid")
+    return []
 
 
 def _prediction_external_refs(

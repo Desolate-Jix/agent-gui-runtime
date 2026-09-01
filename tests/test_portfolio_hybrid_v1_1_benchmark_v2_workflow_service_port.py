@@ -3610,9 +3610,15 @@ def _s3_fusion_safe_stop_response(worker: dict[str, object]) -> dict[str, object
     }
 
 
+@pytest.mark.parametrize(
+    ("continuation_sha_kind", "projects_result"),
+    (("exact", True), ("wrong", False)),
+)
 def test_s3_fusion_terminal_safe_stop_prepares_terminal_receipt_before_transition(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    continuation_sha_kind: str,
+    projects_result: bool,
 ) -> None:
     import app.learn.workflow_service as workflow_service
 
@@ -3624,6 +3630,13 @@ def test_s3_fusion_terminal_safe_stop_prepares_terminal_receipt_before_transitio
     )
 
     def _continue(**_kwargs):
+        current_worker = registry.current
+        assert current_worker is not None
+        adoption_receipt = current_worker.get("adoption_receipt")
+        assert isinstance(adoption_receipt, dict)
+        result_sha256 = str(adoption_receipt["result_sha256"])
+        if continuation_sha_kind == "wrong":
+            result_sha256 = SHA_B
         state = store.get("run-h1")
         finished = workflow_service.finish_learning_workflow_stage_operation(
             store=store,
@@ -3634,6 +3647,15 @@ def test_s3_fusion_terminal_safe_stop_prepares_terminal_receipt_before_transitio
             operation_id="operation-h1",
             outcome="safe_stopped",
             reason="Hybrid fusion produced no VISTA-eligible BOUND candidates",
+            evidence_refs={
+                "worker_continuation": {
+                    "contract_version": "learning_stage_worker_continuation_v1",
+                    "worker_id": current_worker["worker_id"],
+                    "operation_id": "operation-h1",
+                    "task_kind": "panel_learning_hybrid_fusion",
+                    "result_sha256": result_sha256,
+                }
+            },
         )
         return {
             "stage_finished": True,
@@ -3664,6 +3686,13 @@ def test_s3_fusion_terminal_safe_stop_prepares_terminal_receipt_before_transitio
         ]
 
         assert returned["status"] == "safe_stopped"
+        if projects_result:
+            projection = returned["adopted_result_projection"]
+            assert projection["response"] == _s3_fusion_safe_stop_response(worker)
+            assert projection["artifact_is_authorization"] is False
+            assert projection["execute_binding_enabled"] is False
+        else:
+            assert returned["adopted_result_projection"] is None
         assert receipt["receipt_phase"] == "terminal_prepared"
         assert receipt["returned_status"] is None
         assert receipt["consumed_operation_ref_sha256"] == consumed_ref[
@@ -3839,6 +3868,10 @@ def test_s3_lookup_legacy_fusion_pending_receipt_projects_safe_stop_read_only(
         )
 
         assert projected["status"] == "safe_stopped"
+        projection = projected["adopted_result_projection"]
+        assert projection["response"] == _s3_fusion_safe_stop_response(worker)
+        assert projection["artifact_is_authorization"] is False
+        assert projection["execute_binding_enabled"] is False
         assert projected["operation_ref"]["predecessor_content_sha256"] == pending[
             "operation_ref"
         ]["predecessor_content_sha256"]

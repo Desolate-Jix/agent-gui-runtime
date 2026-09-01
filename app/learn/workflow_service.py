@@ -7126,8 +7126,16 @@ def _benchmark_v2_hybrid_legacy_fusion_safe_stop_verified(
     stage = str(worker_record.get("stage") or "")
     stage_record = stages.get(stage) if isinstance(stages, Mapping) else None
     if (
-        receipt.get("receipt_phase") != "returned"
-        or receipt.get("returned_status") != "pending"
+        not (
+            (
+                receipt.get("receipt_phase") == "returned"
+                and receipt.get("returned_status") == "pending"
+            )
+            or (
+                receipt.get("receipt_phase") == "terminal_prepared"
+                and receipt.get("returned_status") is None
+            )
+        )
         or worker_record.get("task_kind") != "panel_learning_hybrid_fusion"
         or worker_record.get("status") != "completed"
         or worker_record.get("runtime_attached") is not False
@@ -7334,6 +7342,16 @@ def _project_benchmark_v2_hybrid_step(
                 worker_record=worker_record,
             )
         )
+        if (
+            legacy_fusion_safe_stop_verified
+            and worker_cleanup_ref is None
+            and provider_cleanup_ref is None
+        ):
+            projection = _read_benchmark_v2_hybrid_adopted_projection(
+                composition=composition,
+                worker_record=worker_record,
+                binding=binding,
+            )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:

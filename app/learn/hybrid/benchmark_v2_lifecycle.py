@@ -5325,6 +5325,38 @@ _S13_ARMS = (
 )
 
 
+def _s13_expected_dispatch_providers(
+    *,
+    arm_id: str,
+    observation: Mapping[str, object],
+    zero_vista_requests: bool,
+) -> set[str]:
+    expected = {
+        "qwen_only": {"qwen"},
+        "omni_only_discovery": {"omni"},
+        "omni_to_qwen": {"omni", "qwen"},
+        "omni_to_qwen_vista": {"omni", "qwen", "vista"},
+    }
+    providers = expected.get(arm_id)
+    if providers is None:
+        raise ValueError("benchmark v2 row arm is invalid")
+    if arm_id != "omni_to_qwen_vista" or not zero_vista_requests:
+        return providers
+    review = observation.get("review_projection")
+    expected_review = {
+        "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
+        "outcome": "quality_safe_stop",
+        "reason": "no_vista_eligible_bound_candidates",
+        "proposals": [],
+        "automatic_acceptance": False,
+        "execute_binding_enabled": False,
+        "no_live_click_authorization": True,
+    }
+    if not isinstance(review, Mapping) or dict(review) != expected_review:
+        raise ValueError("benchmark v2 zero-VISTA quality safe-stop differs")
+    return {"omni", "qwen"}
+
+
 def _s13_pre_vista_envelope(
     value: object,
     *,
@@ -5794,12 +5826,7 @@ def _s13_screen_group_parent(
     case_order: list[dict[str, str]] = []
     row_pairs: list[tuple[str, str]] = []
     incumbent_execution_by_case: dict[str, dict[str, str]] = {}
-    expected_dispatch_providers = {
-        "qwen_only": {"qwen"},
-        "omni_only_discovery": {"omni"},
-        "omni_to_qwen": {"omni", "qwen"},
-        "omni_to_qwen_vista": {"omni", "qwen", "vista"},
-    }
+    zero_vista_requests = evidence.get("submitted_vista_request_envelopes") == []
     for row in rows:
         if (
             not isinstance(row, Mapping)
@@ -5867,8 +5894,13 @@ def _s13_screen_group_parent(
             ):
                 raise ValueError("benchmark v2 row dispatch evidence is invalid")
             providers.add(str(receipt["provider"]))
+        expected_dispatch_providers = _s13_expected_dispatch_providers(
+            arm_id=arm_id,
+            observation=observation,
+            zero_vista_requests=zero_vista_requests,
+        )
         if (
-            providers != expected_dispatch_providers[arm_id]
+            providers != expected_dispatch_providers
             or len(receipts) != len(providers)
         ):
             raise ValueError("benchmark v2 row provider dispatch coverage differs")
