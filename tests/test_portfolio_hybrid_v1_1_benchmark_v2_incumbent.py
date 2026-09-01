@@ -789,6 +789,90 @@ def test_incumbent_child_identity_resolves_only_its_deterministic_parent(
         )
 
 
+def test_incumbent_dispatch_context_resolves_parent_binding_for_child_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    source_bundle: dict[str, object],
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+
+    operation = _prepared_document(source_bundle)
+    parent_run_id = str(operation["run_id"])
+    parent_operation_id = str(operation["operation_id"])
+    case_ref = deepcopy(
+        operation["handler_payload_source"]["provider_case_ref"]
+    )
+    child_token = content_sha256(
+        {
+            "contract_version": "benchmark_v2_incumbent_child_slot_identity_v1",
+            "parent_run_id": parent_run_id,
+            "parent_stage": operation["stage"],
+            "parent_operation_id": parent_operation_id,
+            "case_id": case_ref["case_id"],
+        }
+    )
+    separator = "::benchmark-v2-incumbent::"
+    child_binding = {
+        "run_id": f"{parent_run_id}{separator}{child_token}",
+        "stage": operation["stage"],
+        "operation_id": f"{parent_operation_id}{separator}{child_token}",
+        "window_binding_ref": deepcopy(operation["window_binding_ref"]),
+        "capture_ref": deepcopy(operation["capture_ref"]),
+    }
+    resolver = object()
+    composition = workflow_service.compose_test_learning_workflow_service_unit(
+        store=object(),
+        worker_registry=object(),
+        project_root=tmp_path,
+        benchmark_v2_worker_binding_resolver=resolver,
+    )
+    serialized = deepcopy(
+        source_bundle["authoritative_payload"]["_benchmark_v2_window_binding"]
+    )
+    resolution_calls: list[dict[str, object]] = []
+    context_calls: list[dict[str, object]] = []
+
+    def resolve_binding(**kwargs):
+        resolution_calls.append(dict(kwargs))
+        return {"serialized_window_binding": deepcopy(serialized)}
+
+    def compose_context(**kwargs):
+        context_calls.append(deepcopy(kwargs))
+        return {"operation_ref": deepcopy(kwargs["window_binding"])}
+
+    monkeypatch.setattr(
+        "app.learn.hybrid.benchmark_v2_worker_binding.resolve_server_worker_window_binding",
+        resolve_binding,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "_benchmark_v2_dispatch_context_from_serialized",
+        compose_context,
+    )
+
+    context = workflow_service._benchmark_v2_dispatch_context_for_worker(
+        composition=composition,
+        window_binding=child_binding,
+        task_kind="vision_observe_screen",
+        revision=4,
+        provider_case_ref=case_ref,
+    )
+
+    assert resolution_calls == [
+        {
+            "resolver": composition.benchmark_v2_worker_binding_resolver,
+            "run_id": parent_run_id,
+            "stage": operation["stage"],
+            "operation_id": parent_operation_id,
+            "window_binding_ref": operation["window_binding_ref"],
+            "capture_ref": operation["capture_ref"],
+        }
+    ]
+    assert context_calls[0]["window_binding"] == child_binding
+    assert context == {"operation_ref": child_binding}
+
+
 def test_incumbent_result_binding_resolves_task5_with_parent_identity(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

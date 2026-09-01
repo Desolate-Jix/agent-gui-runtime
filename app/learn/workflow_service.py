@@ -2882,6 +2882,7 @@ def _resume_benchmark_v2_incumbent_operation(
                                 dispatch_revision=int(
                                     operation["prepared_revision"]
                                 ),
+                                provider_case_ref=request["provider_case_ref"],
                             )
                         )
 
@@ -2934,6 +2935,7 @@ def _resume_benchmark_v2_incumbent_operation(
                             expected_provider_counts={"qwen": 1},
                             hybrid=False,
                             dispatch_revision=int(operation["prepared_revision"]),
+                            provider_case_ref=request["provider_case_ref"],
                         )
                     )
                 operation = transition_benchmark_v2_incumbent_operation(
@@ -2987,6 +2989,7 @@ def _resume_benchmark_v2_incumbent_operation(
                     expected_provider_counts={"qwen": 1},
                     hybrid=False,
                     dispatch_revision=int(operation["prepared_revision"]),
+                    provider_case_ref=request["provider_case_ref"],
                 )
             projection = _benchmark_v2_source_projection(
                 composition=composition,
@@ -5038,6 +5041,7 @@ def _benchmark_v2_dispatch_context_for_worker(
     window_binding: Mapping[str, object],
     task_kind: str,
     revision: int,
+    provider_case_ref: Mapping[str, object] | None = None,
 ) -> dict[str, Any] | None:
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(task_kind)
     if provider is None:
@@ -5056,11 +5060,22 @@ def _benchmark_v2_dispatch_context_for_worker(
 
     try:
         binding = deepcopy(dict(window_binding))
+        binding_run_id = str(binding["run_id"])
+        binding_operation_id = str(binding["operation_id"])
+        if provider_case_ref is not None:
+            binding_run_id, binding_operation_id = (
+                _benchmark_v2_incumbent_parent_binding_identity(
+                    run_id=binding_run_id,
+                    stage=str(binding["stage"]),
+                    operation_id=binding_operation_id,
+                    request={"provider_case_ref": deepcopy(dict(provider_case_ref))},
+                )
+            )
         resolution = resolve_server_worker_window_binding(
             resolver=resolver,
-            run_id=str(binding["run_id"]),
+            run_id=binding_run_id,
             stage=str(binding["stage"]),
-            operation_id=str(binding["operation_id"]),
+            operation_id=binding_operation_id,
             window_binding_ref=binding["window_binding_ref"],
             capture_ref=binding["capture_ref"],
         )
@@ -5134,6 +5149,7 @@ def _validate_benchmark_v2_dispatch_response(
     hybrid: bool,
     dispatch_revision: int | None,
     provider_dispatch_context_refs: Mapping[str, object] | None = None,
+    provider_case_ref: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
         validate_benchmark_dispatch_context_ref,
@@ -5192,6 +5208,10 @@ def _validate_benchmark_v2_dispatch_response(
             )
     else:
         refs = result.get("_benchmark_v2_provider_dispatch_receipt_refs")
+        if not isinstance(provider_case_ref, Mapping):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 incumbent provider case ref is unavailable"
+            )
         if (
             isinstance(dispatch_revision, bool)
             or not isinstance(dispatch_revision, int)
@@ -5218,6 +5238,7 @@ def _validate_benchmark_v2_dispatch_response(
                 window_binding=window_binding,
                 task_kind=provider_task[provider],
                 revision=resolved_dispatch_revision,
+                provider_case_ref=provider_case_ref,
             )
             if not isinstance(context, dict):
                 raise LearningWorkflowStageOperationError(
