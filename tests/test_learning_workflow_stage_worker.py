@@ -9883,6 +9883,20 @@ def test_benchmark_launch_recovery_reopens_real_gate_and_cleans_exact_child(
             expected_operation_anchor=anchor,
             supervision_root=root,
         ) == receipt
+        assert receipt["supervisor_absence_observation_ref"] is None
+
+        from app.learn import workflow_service
+
+        assert workflow_service._validate_benchmark_v2_actual_incumbent_worker_cleanup(
+            cleanup=receipt,
+            operation={
+                "operation_anchor_ref": receipt["operation_anchor_ref"],
+                "run_id": reservation["run_id"],
+                "stage": reservation["stage"],
+                "operation_id": reservation["operation_id"],
+                "worker_ref": {"worker_id": reservation["worker_id"]},
+            },
+        ) == receipt
     finally:
         if event_handle is not None:
             win32api.CloseHandle(event_handle)

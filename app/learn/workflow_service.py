@@ -3950,9 +3950,17 @@ def _lookup_benchmark_v2_incumbent_workflow_service(
 def _validate_benchmark_v2_actual_incumbent_worker_cleanup(
     *, cleanup: object, operation: Mapping[str, object]
 ) -> dict[str, Any]:
+    from app.learn.hybrid.benchmark_v2_runtime import (
+        validate_benchmark_v2_incumbent_worker_cleanup_contract,
+    )
+
     receipt = _benchmark_v2_sealed_mapping(
         cleanup, "benchmark actual incumbent worker cleanup"
     )
+    try:
+        validate_benchmark_v2_incumbent_worker_cleanup_contract(receipt)
+    except ValueError as error:
+        raise LearningWorkflowStageOperationError(str(error)) from error
     fields = {
         "contract_version",
         "outcome",
@@ -4015,7 +4023,6 @@ def _validate_benchmark_v2_actual_incumbent_worker_cleanup(
             "finalization_intent_ref",
             "job_absence_observation_ref",
             "worker_absence_observation_ref",
-            "supervisor_absence_observation_ref",
         ):
             if receipt.get(name) is None:
                 raise LearningWorkflowStageOperationError(

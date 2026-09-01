@@ -636,6 +636,164 @@ def _actual_service_step(
     )
 
 
+def _canonical_incumbent_worker_cleanup(
+    operation: Mapping[str, object],
+    *,
+    exact_handle_observation_refs: Mapping[str, object],
+    supervisor_absence_observation_ref: object,
+) -> dict[str, object]:
+    return runtime_seal_immutable(
+        {
+            "contract_version": "benchmark_worker_cleanup_receipt_v1",
+            "outcome": "verified_exact_worker_exited",
+            "operation_anchor_ref": operation["operation_anchor_ref"],
+            "reservation_ref": {"content_sha256": "2" * 64},
+            "supervision_ref": {"content_sha256": "3" * 64},
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": operation["worker_ref"]["worker_id"],
+            "process_identity": {"pid": 1234, "create_time_ns": 5678},
+            "assignment_proven_ref": {"content_sha256": "4" * 64},
+            "finalization_intent_ref": {"content_sha256": "5" * 64},
+            "exact_handle_observation_refs": dict(exact_handle_observation_refs),
+            "job_absence_observation_ref": {"content_sha256": "6" * 64},
+            "worker_absence_observation_ref": {"content_sha256": "7" * 64},
+            "supervisor_absence_observation_ref": (
+                supervisor_absence_observation_ref
+            ),
+            "reservation_abort_ref": None,
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+
+def _canonical_explicit_close_handle_refs() -> dict[str, object]:
+    return {
+        "worker_process": {"content_sha256": "8" * 64},
+        "startup_event": {"content_sha256": "9" * 64},
+        "beacon_file": {"content_sha256": "a" * 64},
+        "owner_job": {"content_sha256": "b" * 64},
+        "incumbent_provider_job": {"content_sha256": "c" * 64},
+    }
+
+
+@pytest.mark.parametrize("cleanup_path", ("explicit_close", "dead_supervisor"))
+def test_incumbent_cleanup_supervisor_contract_accepts_canonical_paths(
+    cleanup_path: str,
+) -> None:
+    from app.learn import workflow_service
+    from app.learn.hybrid.benchmark_v2_runtime import (
+        validate_benchmark_v2_incumbent_worker_cleanup_contract,
+    )
+
+    binding = {
+        "run_id": f"run-{cleanup_path}",
+        "stage": "screen_understanding",
+        "operation_id": f"operation-{cleanup_path}",
+        "window_binding_ref": {"id": "window", "content_sha256": "d" * 64},
+        "capture_ref": {"id": "capture", "content_sha256": "e" * 64},
+    }
+    operation = _actual_operation(
+        mode="incumbent_qwen_only",
+        operation_id=str(binding["operation_id"]),
+        request_ref={"id": "case", "content_sha256": "f" * 64},
+        binding=binding,
+        revision=2,
+        status="complete",
+    )
+    operation = {
+        **operation,
+        "operation_anchor_ref": {"content_sha256": "1" * 64},
+    }
+    receipt = _canonical_incumbent_worker_cleanup(
+        operation,
+        exact_handle_observation_refs=(
+            _canonical_explicit_close_handle_refs()
+            if cleanup_path == "explicit_close"
+            else {}
+        ),
+        supervisor_absence_observation_ref=(
+            None
+            if cleanup_path == "explicit_close"
+            else {"content_sha256": "0" * 64}
+        ),
+    )
+
+    assert validate_benchmark_v2_incumbent_worker_cleanup_contract(receipt) == receipt
+    assert workflow_service._validate_benchmark_v2_actual_incumbent_worker_cleanup(
+        cleanup=receipt,
+        operation=operation,
+    ) == receipt
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "missing_dead_supervisor_ref",
+        "malformed_dead_supervisor_ref",
+        "missing_explicit_handle_ref",
+        "cross_operation_anchor",
+    ),
+)
+def test_incumbent_cleanup_supervisor_contract_rejects_invalid_or_cross_lineage(
+    mutation: str,
+) -> None:
+    from app.learn import workflow_service
+
+    binding = {
+        "run_id": f"run-{mutation}",
+        "stage": "screen_understanding",
+        "operation_id": f"operation-{mutation}",
+        "window_binding_ref": {"id": "window", "content_sha256": "d" * 64},
+        "capture_ref": {"id": "capture", "content_sha256": "e" * 64},
+    }
+    operation = _actual_operation(
+        mode="incumbent_qwen_only",
+        operation_id=str(binding["operation_id"]),
+        request_ref={"id": "case", "content_sha256": "f" * 64},
+        binding=binding,
+        revision=2,
+        status="complete",
+    )
+    operation = {
+        **operation,
+        "operation_anchor_ref": {"content_sha256": "1" * 64},
+    }
+    handles = _canonical_explicit_close_handle_refs()
+    supervisor_ref: object = None
+    if mutation in {"missing_dead_supervisor_ref", "malformed_dead_supervisor_ref"}:
+        handles = {}
+    if mutation == "malformed_dead_supervisor_ref":
+        supervisor_ref = {"content_sha256": "not-a-sha"}
+    receipt = _canonical_incumbent_worker_cleanup(
+        operation,
+        exact_handle_observation_refs=handles,
+        supervisor_absence_observation_ref=supervisor_ref,
+    )
+    if mutation == "missing_explicit_handle_ref":
+        body = dict(receipt)
+        body.pop("content_sha256")
+        body["exact_handle_observation_refs"] = {
+            key: value
+            for key, value in handles.items()
+            if key != "beacon_file"
+        }
+        receipt = runtime_seal_immutable(body)
+    elif mutation == "cross_operation_anchor":
+        body = dict(receipt)
+        body.pop("content_sha256")
+        body["operation_anchor_ref"] = {"content_sha256": "0" * 64}
+        receipt = runtime_seal_immutable(body)
+
+    with pytest.raises(workflow_service.LearningWorkflowStageOperationError):
+        workflow_service._validate_benchmark_v2_actual_incumbent_worker_cleanup(
+            cleanup=receipt,
+            operation=operation,
+        )
+
+
 def test_partial_terminal_accepts_runtime_jcs_and_phase_specific_reservations(
 ) -> None:
     from app.learn.hybrid import benchmark_v2_runtime as runtime_module
@@ -686,7 +844,7 @@ def test_partial_terminal_accepts_runtime_jcs_and_phase_specific_reservations(
             },
             "assignment_proven_ref": {"content_sha256": "4" * 64},
             "finalization_intent_ref": {"content_sha256": "5" * 64},
-            "exact_handle_observation_refs": {},
+            "exact_handle_observation_refs": _canonical_explicit_close_handle_refs(),
             "job_absence_observation_ref": {"content_sha256": "6" * 64},
             "worker_absence_observation_ref": {"content_sha256": "7" * 64},
             "supervisor_absence_observation_ref": None,

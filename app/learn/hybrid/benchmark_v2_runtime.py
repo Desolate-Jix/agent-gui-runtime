@@ -4474,6 +4474,103 @@ def _validate_review_no_provider_cleanup_parent(
         raise ValueError("review no-provider cleanup absence observation is stale")
 
 
+def validate_benchmark_v2_incumbent_worker_cleanup_contract(
+    producer: Mapping[str, object],
+) -> dict[str, object]:
+    fields = {
+        "contract_version",
+        "outcome",
+        "operation_anchor_ref",
+        "reservation_ref",
+        "supervision_ref",
+        "run_id",
+        "stage",
+        "operation_id",
+        "worker_id",
+        "process_identity",
+        "assignment_proven_ref",
+        "finalization_intent_ref",
+        "exact_handle_observation_refs",
+        "job_absence_observation_ref",
+        "worker_absence_observation_ref",
+        "supervisor_absence_observation_ref",
+        "reservation_abort_ref",
+        "artifact_is_authorization",
+        "execute_binding_enabled",
+        "content_sha256",
+    }
+    outcome = producer.get("outcome")
+    if (
+        set(producer) != fields
+        or producer.get("contract_version") != "benchmark_worker_cleanup_receipt_v1"
+        or outcome not in {"verified_not_launched", "verified_exact_worker_exited"}
+        or producer.get("artifact_is_authorization") is not False
+        or producer.get("execute_binding_enabled") is not False
+        or not all(
+            isinstance(producer.get(field), str) and producer.get(field)
+            for field in ("run_id", "stage", "operation_id", "worker_id")
+        )
+        or not _is_exact_sha_ref(producer.get("operation_anchor_ref"))
+        or not _is_exact_sha_ref(producer.get("reservation_ref"))
+    ):
+        raise ValueError("incumbent worker cleanup receipt is invalid")
+    if outcome == "verified_not_launched":
+        absent_fields = (
+            "supervision_ref",
+            "process_identity",
+            "assignment_proven_ref",
+            "finalization_intent_ref",
+            "exact_handle_observation_refs",
+            "job_absence_observation_ref",
+            "worker_absence_observation_ref",
+            "supervisor_absence_observation_ref",
+        )
+        if any(producer.get(field) is not None for field in absent_fields) or not (
+            _is_exact_sha_ref(producer.get("reservation_abort_ref"))
+        ):
+            raise ValueError("incumbent not-launched cleanup receipt is invalid")
+        return deepcopy(dict(producer))
+
+    process_identity = producer.get("process_identity")
+    handle_refs = producer.get("exact_handle_observation_refs")
+    if (
+        not _is_exact_sha_ref(producer.get("supervision_ref"))
+        or not isinstance(process_identity, Mapping)
+        or set(process_identity) != {"pid", "create_time_ns"}
+        or any(
+            isinstance(process_identity.get(field), bool)
+            or not isinstance(process_identity.get(field), int)
+            or int(process_identity[field]) <= 0
+            for field in ("pid", "create_time_ns")
+        )
+        or not _is_exact_sha_ref(producer.get("assignment_proven_ref"))
+        or not _is_exact_sha_ref(producer.get("finalization_intent_ref"))
+        or not isinstance(handle_refs, Mapping)
+        or not _is_exact_sha_ref(producer.get("job_absence_observation_ref"))
+        or not _is_exact_sha_ref(producer.get("worker_absence_observation_ref"))
+        or producer.get("reservation_abort_ref") is not None
+    ):
+        raise ValueError("incumbent exited worker cleanup receipt is invalid")
+
+    supervisor_ref = producer.get("supervisor_absence_observation_ref")
+    base_handle_keys = {"worker_process", "startup_event", "beacon_file"}
+    optional_handle_keys = {"owner_job", "incumbent_provider_job"}
+    if supervisor_ref is None:
+        if (
+            not base_handle_keys.issubset(handle_refs)
+            or not set(handle_refs).issubset(base_handle_keys | optional_handle_keys)
+            or any(not _is_exact_sha_ref(ref) for ref in handle_refs.values())
+        ):
+            raise ValueError(
+                "incumbent explicit-close worker cleanup receipt is invalid"
+            )
+    elif handle_refs or not _is_exact_sha_ref(supervisor_ref):
+        raise ValueError(
+            "incumbent dead-supervisor worker cleanup receipt is invalid"
+        )
+    return deepcopy(dict(producer))
+
+
 def _validate_cleanup_parent_semantics(
     producer: Mapping[str, object], *, name: str
 ) -> tuple[str, str]:
@@ -4585,68 +4682,7 @@ def _validate_cleanup_parent_semantics(
             raise ValueError("completed Hybrid worker cleanup receipt is invalid")
         return "worker_cleanup", str(contract)
     if contract == "benchmark_worker_cleanup_receipt_v1":
-        fields = {
-            "contract_version",
-            "outcome",
-            "operation_anchor_ref",
-            "reservation_ref",
-            "supervision_ref",
-            "run_id",
-            "stage",
-            "operation_id",
-            "worker_id",
-            "process_identity",
-            "assignment_proven_ref",
-            "finalization_intent_ref",
-            "exact_handle_observation_refs",
-            "job_absence_observation_ref",
-            "worker_absence_observation_ref",
-            "supervisor_absence_observation_ref",
-            "reservation_abort_ref",
-            "artifact_is_authorization",
-            "execute_binding_enabled",
-            "content_sha256",
-        }
-        outcome = producer.get("outcome")
-        if (
-            set(producer) != fields
-            or outcome not in {"verified_not_launched", "verified_exact_worker_exited"}
-            or producer.get("artifact_is_authorization") is not False
-            or producer.get("execute_binding_enabled") is not False
-            or not all(
-                isinstance(producer.get(field), str) and producer.get(field)
-                for field in ("run_id", "stage", "operation_id", "worker_id")
-            )
-            or not _is_exact_sha_ref(producer.get("operation_anchor_ref"))
-            or not _is_exact_sha_ref(producer.get("reservation_ref"))
-        ):
-            raise ValueError("incumbent worker cleanup receipt is invalid")
-        if outcome == "verified_not_launched":
-            absent_fields = (
-                "supervision_ref",
-                "process_identity",
-                "assignment_proven_ref",
-                "finalization_intent_ref",
-                "exact_handle_observation_refs",
-                "job_absence_observation_ref",
-                "worker_absence_observation_ref",
-                "supervisor_absence_observation_ref",
-            )
-            if any(producer.get(field) is not None for field in absent_fields) or not (
-                _is_exact_sha_ref(producer.get("reservation_abort_ref"))
-            ):
-                raise ValueError("incumbent not-launched cleanup receipt is invalid")
-        elif (
-            not _is_exact_sha_ref(producer.get("supervision_ref"))
-            or not isinstance(producer.get("process_identity"), Mapping)
-            or not _is_exact_sha_ref(producer.get("assignment_proven_ref"))
-            or not _is_exact_sha_ref(producer.get("finalization_intent_ref"))
-            or not isinstance(producer.get("exact_handle_observation_refs"), Mapping)
-            or not _is_exact_sha_ref(producer.get("job_absence_observation_ref"))
-            or not _is_exact_sha_ref(producer.get("worker_absence_observation_ref"))
-            or producer.get("reservation_abort_ref") is not None
-        ):
-            raise ValueError("incumbent exited worker cleanup receipt is invalid")
+        validate_benchmark_v2_incumbent_worker_cleanup_contract(producer)
         return "worker_cleanup", str(contract)
     if contract == "benchmark_v2_hybrid_no_provider_cleanup_ref_v1":
         _validate_review_no_provider_cleanup_parent(producer)
