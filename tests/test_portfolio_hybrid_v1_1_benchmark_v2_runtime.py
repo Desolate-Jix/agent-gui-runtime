@@ -1655,6 +1655,53 @@ def test_actual_stable_zero_uses_incumbent_terminal_receipt_contract_hash() -> N
     )
     assert cleanup_parent["producer_content_sha256"] == receipt["content_sha256"]
 
+    runtime_ref = runtime_module._runtime_content_ref(
+        receipt,
+        name="actual group attestation",
+    )
+    assert runtime_ref == receipt
+    stable_zero_aggregate = runtime_module._runtime_resource_ref(
+        "actual_group_stable_zero_attestations",
+        {"group_attestation_refs": [runtime_ref, deepcopy(runtime_ref)]},
+    )
+    runtime_module._cleanup_parent_ref(
+        stable_zero_aggregate,
+        parent_kind="actual_operations_stable_zero_aggregate",
+        name="actual operations stable-zero aggregate",
+    )
+
+    fusion_binding = {
+        **binding,
+        "run_id": "run-hash-domain-fusion",
+        "operation_id": "operation-hash-domain-fusion",
+    }
+    fusion_step = _actual_fusion_safe_stop_step(group, fusion_binding)
+    fusion_cleanup = _actual_fusion_safe_stop_cleanup(
+        fusion_step["operation_ref"]
+    )
+    mixed_aggregate = runtime_module._runtime_resource_ref(
+        "actual_operations_cleanup_aggregate",
+        {
+            "full_group_attestation_refs": [runtime_ref],
+            "pre_reservation_recovery_refs": [],
+            "completed_hybrid_cleanup_refs": [fusion_cleanup],
+            "partial_workflow_terminal_refs": [],
+        },
+    )
+    runtime_module._cleanup_parent_ref(
+        mixed_aggregate,
+        parent_kind="actual_operations_cleanup_aggregate",
+        name="actual operations cleanup aggregate",
+    )
+
+    malformed_runtime_receipt = deepcopy(receipt)
+    malformed_runtime_receipt["content_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="content SHA differs"):
+        runtime_module._runtime_content_ref(
+            malformed_runtime_receipt,
+            name="actual group attestation",
+        )
+
     forged = deepcopy(receipt)
     forged["cleanup_entries"][1]["terminal_receipt_ref"]["content_sha256"] = "0" * 64
     forged = runtime_seal_immutable(

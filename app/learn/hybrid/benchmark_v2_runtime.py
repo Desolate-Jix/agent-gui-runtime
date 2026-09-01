@@ -2425,7 +2425,9 @@ class _BenchmarkV2ProductionRuntime:
                         "actual_group_stable_zero_attestations",
                         {
                             "group_attestation_refs": [
-                                _content_ref(item, name="actual group attestation")
+                                _runtime_content_ref(
+                                    item, name="actual group attestation"
+                                )
                                 for item in actual_attestations
                             ]
                         },
@@ -2472,7 +2474,9 @@ class _BenchmarkV2ProductionRuntime:
                         "actual_operations_cleanup_aggregate",
                         {
                             "full_group_attestation_refs": [
-                                _content_ref(item, name="actual group attestation")
+                                _runtime_content_ref(
+                                    item, name="actual group attestation"
+                                )
                                 for item in actual_attestations
                             ],
                             "pre_reservation_recovery_refs": [
@@ -4200,6 +4204,12 @@ def _event_ref(event: Mapping[str, object]) -> dict[str, Any]:
 
 def _content_ref(value: Mapping[str, object], *, name: str) -> dict[str, Any]:
     return _sealed_parent(value, name=name)
+
+
+def _runtime_content_ref(
+    value: Mapping[str, object], *, name: str
+) -> dict[str, Any]:
+    return _runtime_sealed_parent(value, name=name)
 
 
 def _cleanup_parent_ref(
