@@ -108,7 +108,7 @@
         "role": "bootstrap"
       },
       {
-        "file_sha256": "2499d9c0f87ca16298e900dd05843ad6445f674dfd0aea35bc2508512bf18989",
+        "file_sha256": "db6b3114453ece1470aef4960e44f00de9f1101d3f7a25d1c7748374fbc22feb",
         "relative_path": "app/learn/hybrid/benchmark_v2_contracts.py",
         "role": "contracts"
       },
@@ -152,7 +152,7 @@
         "role": "hybrid_contracts"
       },
       {
-        "file_sha256": "a0fac75c229d3327a83119d5cba1530d6e0e9efcc2a7f0572e11f7dcbf2a8b3d",
+        "file_sha256": "f63d66b2f6340c96d35fbdefd798a94cc574dbcf666dc9c17116f6113a2ce936",
         "relative_path": "app/learn/hybrid/benchmark_v2_actual.py",
         "role": "benchmark_actual"
       },
@@ -172,17 +172,17 @@
         "role": "holdout_ledger"
       },
       {
-        "file_sha256": "c5484f6d0b8addcfc454f868647083c31b3b70f452b332de711c9a34ce4873db",
+        "file_sha256": "119580ee77b1c65ca52f11e7a3cbba692582401380d27dacfb2b98bcd01d29e3",
         "relative_path": "app/learn/hybrid/benchmark_v2_incumbent_operation.py",
         "role": "incumbent_operation"
       },
       {
-        "file_sha256": "0c1a3e3d69a0a73b0b9b8d9635f6ef91aa56f3d454e744b21e4b4370974810f9",
+        "file_sha256": "2127302aa0754c9435a185c21f51ae3d6edb2ce41e4c4a7c29dcdae1620316a5",
         "relative_path": "app/learn/hybrid/benchmark_v2_lifecycle.py",
         "role": "lifecycle"
       },
       {
-        "file_sha256": "3f09310a3fac64d086b3c0ceff79b8302519fc99d91b5ca6d3e534ddaef8963b",
+        "file_sha256": "38086d45402b3ec39ac540b06ba1ab58fdbbb121f1a7418325e6a6825e0b20ff",
         "relative_path": "app/learn/hybrid/benchmark_v2_predictions.py",
         "role": "predictions"
       },
@@ -192,7 +192,7 @@
         "role": "qwen_binding"
       },
       {
-        "file_sha256": "60791c247354de352997ff6638612c5acf75c58de524464f068b90096d4e3fec",
+        "file_sha256": "deb306dce330ea2a696d0a683040d2864801acb480172838a449f1a0f52b544d",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
       },
@@ -237,7 +237,7 @@
         "role": "uei_projections"
       },
       {
-        "file_sha256": "cadd31e48c88fd591a07a528b25be4871f6e2af9f4f87c62b6f2e4442b573199",
+        "file_sha256": "1b14b6586a6990feefeaefa3b99049ba0ba72d0ae80263b620b1b3b10f69a5e9",
         "relative_path": "app/learn/workflow_service.py",
         "role": "workflow_service"
       },
