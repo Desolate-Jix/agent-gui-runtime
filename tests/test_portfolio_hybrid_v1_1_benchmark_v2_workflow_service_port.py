@@ -3968,6 +3968,7 @@ def test_actual_stable_zero_propagates_completed_review_no_provider_cleanup(
         _ActualService,
         _actual_completed_review_cleanup,
         _actual_completed_review_step,
+        _actual_incumbent_cancelled_terminal_receipt,
         _actual_operation,
     )
 
@@ -4036,14 +4037,11 @@ def test_actual_stable_zero_propagates_completed_review_no_provider_cleanup(
                 "worker_cleanup_ref": cleanup["worker_cleanup_ref"],
                 "provider_cleanup_ref": cleanup["provider_cleanup_ref"],
                 "reservation_ref": cleanup["worker_cleanup_ref"]["reservation_ref"],
-                "terminal_receipt": seal_immutable(
-                    {
-                        "run_id": operation_ref["run_id"],
-                        "stage": operation_ref["stage"],
-                        "operation_id": operation_ref["operation_id"],
-                        "worker_id": operation_ref["worker_ref"]["worker_id"],
-                    }
-                ),
+                    "terminal_receipt": _actual_incumbent_cancelled_terminal_receipt(
+                        operation=operation_ref,
+                        worker_cleanup_ref=cleanup["worker_cleanup_ref"],
+                        provider_cleanup_ref=cleanup["provider_cleanup_ref"],
+                    ),
             },
         }
 

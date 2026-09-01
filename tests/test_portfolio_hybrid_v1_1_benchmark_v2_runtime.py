@@ -669,6 +669,41 @@ def _canonical_incumbent_worker_cleanup(
     )
 
 
+def _actual_incumbent_cancelled_terminal_receipt(
+    *,
+    operation: Mapping[str, object],
+    worker_cleanup_ref: Mapping[str, object],
+    provider_cleanup_ref: Mapping[str, object],
+) -> dict[str, object]:
+    worker = operation["worker_ref"]
+    return _sealed(
+        {
+            "contract_version": "benchmark_v2_incumbent_terminal_receipt_v1",
+            "outcome": "benchmark_v2_incumbent_cancelled",
+            "run_id": operation["run_id"],
+            "stage": operation["stage"],
+            "operation_id": operation["operation_id"],
+            "worker_id": worker["worker_id"],
+            "model_request_id": worker["model_request_id"],
+            "payload_sha256": worker["payload_sha256"],
+            "result_sha256": None,
+            "terminal_intent_ref": None,
+            "cancel_intent_ref": {"content_sha256": "f" * 64},
+            "generic_adoption_ref": None,
+            "window_adoption_ref": None,
+            "worker_cleanup_ref": deepcopy(dict(worker_cleanup_ref)),
+            "provider_cleanup_ref": deepcopy(dict(provider_cleanup_ref)),
+            "provider_cleanup_outcome": provider_cleanup_ref["outcome"],
+            "terminal_at": "2026-09-01T05:00:00+00:00",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+            "predecessor_content_sha256": operation[
+                "predecessor_content_sha256"
+            ],
+        }
+    )
+
+
 def _canonical_explicit_close_handle_refs() -> dict[str, object]:
     return {
         "worker_process": {"content_sha256": "8" * 64},
@@ -1116,13 +1151,10 @@ def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> No
         *(
             {
                 "operation_ref_sha256": item["operation_ref"]["content_sha256"],
-                "terminal_receipt_ref": _sealed(
-                    {
-                        "run_id": item["operation_ref"]["run_id"],
-                        "stage": item["operation_ref"]["stage"],
-                        "operation_id": item["operation_ref"]["operation_id"],
-                        "worker_id": item["operation_ref"]["worker_ref"]["worker_id"],
-                    }
+                "terminal_receipt_ref": _actual_incumbent_cancelled_terminal_receipt(
+                    operation=item["operation_ref"],
+                    worker_cleanup_ref=item["cleanup_refs"]["worker_cleanup_ref"],
+                    provider_cleanup_ref=item["cleanup_refs"]["provider_cleanup_ref"],
                 ),
                 "worker_cleanup_ref": item["cleanup_refs"]["worker_cleanup_ref"],
                 "provider_cleanup_ref": item["cleanup_refs"]["provider_cleanup_ref"],
@@ -1130,7 +1162,7 @@ def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> No
             for item in incumbent_terminals
         ),
     ]
-    receipt = _sealed(
+    receipt = runtime_seal_immutable(
         {
             "contract_version": "benchmark_v2_actual_operations_stable_zero_v1",
             "operation_refs": operations,
@@ -1156,6 +1188,253 @@ def test_actual_stable_zero_accepts_completed_review_no_provider_cleanup() -> No
         foreign["content_sha256"] = content_sha256(foreign)
         with pytest.raises(ValueError):
             incumbent.validate_benchmark_v2_actual_operations_stable_zero(foreign)
+
+
+def test_actual_stable_zero_uses_incumbent_terminal_receipt_contract_hash() -> None:
+    binding = {
+        "stage": "screen_understanding",
+        "window_binding_ref": {
+            "id": "window-incumbent-terminal",
+            "content_sha256": "a" * 64,
+        },
+        "capture_ref": {
+            "id": "capture-incumbent-terminal",
+            "content_sha256": "b" * 64,
+        },
+    }
+    group = {
+        "request_ref": {
+            "id": "request-incumbent-terminal",
+            "content_sha256": "c" * 64,
+        }
+    }
+    review_step = _actual_completed_review_step(
+        group,
+        {
+            **binding,
+            "run_id": "run-incumbent-terminal-review",
+            "operation_id": "operation-incumbent-terminal-review",
+        },
+    )
+    review_operation = review_step["operation_ref"]
+    review_cleanup = _actual_completed_review_cleanup(review_operation)
+
+    service = _ActualService([])
+    incumbent_terminals = []
+    for index in range(5):
+        operation = _actual_operation(
+            mode="incumbent_qwen_only",
+            operation_id=f"incumbent-terminal-{index}",
+            request_ref={
+                "id": f"case-incumbent-terminal-{index}",
+                "content_sha256": f"{index + 1:x}" * 64,
+            },
+            binding={
+                **binding,
+                "run_id": f"run-incumbent-terminal-{index}",
+            },
+            revision=index + 1,
+        )
+        incumbent_terminals.append(service.cancel_operation(operation_ref=operation))
+
+    operations = [
+        review_operation,
+        *(item["operation_ref"] for item in incumbent_terminals),
+    ]
+    entries = [
+        {
+            "operation_ref_sha256": review_operation["content_sha256"],
+            "terminal_receipt_ref": _sealed(
+                {
+                    "run_id": review_operation["run_id"],
+                    "stage": review_operation["stage"],
+                    "operation_id": review_operation["operation_id"],
+                    "worker_id": review_operation["worker_ref"]["worker_id"],
+                }
+            ),
+            "worker_cleanup_ref": review_cleanup["worker_cleanup_ref"],
+            "provider_cleanup_ref": review_cleanup["provider_cleanup_ref"],
+        }
+    ]
+    for index, item in enumerate(incumbent_terminals):
+        operation = item["operation_ref"]
+        worker = operation["worker_ref"]
+        worker_cleanup = deepcopy(item["cleanup_refs"]["worker_cleanup_ref"])
+        if index == 0:
+            worker_cleanup = runtime_seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_cleanup_receipt_v1",
+                    "outcome": "verified_exact_worker_exited",
+                    "operation_anchor_ref": {"content_sha256": "6" * 64},
+                    "reservation_ref": deepcopy(worker_cleanup["reservation_ref"]),
+                    "supervision_ref": {"content_sha256": "7" * 64},
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                    "process_identity": {
+                        "pid": 107888,
+                        "create_time_ns": 1788238246637361408,
+                    },
+                    "assignment_proven_ref": {"content_sha256": "8" * 64},
+                    "finalization_intent_ref": {"content_sha256": "9" * 64},
+                    "exact_handle_observation_refs": {
+                        "worker_process": {"content_sha256": "a" * 64},
+                        "startup_event": {"content_sha256": "b" * 64},
+                        "beacon_file": {"content_sha256": "c" * 64},
+                    },
+                    "job_absence_observation_ref": {"content_sha256": "d" * 64},
+                    "worker_absence_observation_ref": {"content_sha256": "e" * 64},
+                    "supervisor_absence_observation_ref": None,
+                    "reservation_abort_ref": None,
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+        provider_cleanup = item["cleanup_refs"]["provider_cleanup_ref"]
+        terminal_receipt = _sealed(
+            {
+                "contract_version": "benchmark_v2_incumbent_terminal_receipt_v1",
+                "outcome": "benchmark_v2_incumbent_cancelled",
+                "run_id": operation["run_id"],
+                "stage": operation["stage"],
+                "operation_id": operation["operation_id"],
+                "worker_id": worker["worker_id"],
+                "model_request_id": worker["model_request_id"],
+                "payload_sha256": worker["payload_sha256"],
+                "result_sha256": None,
+                "terminal_intent_ref": None,
+                "cancel_intent_ref": {"content_sha256": "f" * 64},
+                "generic_adoption_ref": None,
+                "window_adoption_ref": None,
+                "worker_cleanup_ref": worker_cleanup,
+                "provider_cleanup_ref": provider_cleanup,
+                "provider_cleanup_outcome": provider_cleanup["outcome"],
+                "terminal_at": "2026-09-01T05:00:00+00:00",
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "predecessor_content_sha256": operation[
+                    "predecessor_content_sha256"
+                ],
+            }
+        )
+        assert (
+            incumbent.validate_benchmark_v2_incumbent_terminal_receipt(
+                terminal_receipt
+            )
+            == terminal_receipt
+        )
+        entries.append(
+            {
+                "operation_ref_sha256": operation["content_sha256"],
+                "terminal_receipt_ref": terminal_receipt,
+                "worker_cleanup_ref": worker_cleanup,
+                "provider_cleanup_ref": provider_cleanup,
+            }
+        )
+
+    receipt = runtime_seal_immutable(
+        {
+            "contract_version": "benchmark_v2_actual_operations_stable_zero_v1",
+            "operation_refs": operations,
+            "cleanup_entries": entries,
+            "window_binding_ref": binding["window_binding_ref"],
+            "capture_ref": binding["capture_ref"],
+            "cleanup_status": "stable_zero",
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+
+    assert incumbent.validate_benchmark_v2_actual_operations_stable_zero(receipt) == receipt
+
+    forged = deepcopy(receipt)
+    forged["cleanup_entries"][1]["terminal_receipt_ref"]["content_sha256"] = "0" * 64
+    forged = runtime_seal_immutable(
+        {key: value for key, value in forged.items() if key != "content_sha256"}
+    )
+    with pytest.raises(ValueError, match="terminal receipt content SHA mismatch"):
+        incumbent.validate_benchmark_v2_actual_operations_stable_zero(forged)
+
+    malformed = deepcopy(receipt)
+    del malformed["cleanup_entries"][1]["terminal_receipt_ref"]["terminal_at"]
+    malformed = runtime_seal_immutable(
+        {key: value for key, value in malformed.items() if key != "content_sha256"}
+    )
+    with pytest.raises(ValueError, match="terminal receipt schema is not closed"):
+        incumbent.validate_benchmark_v2_actual_operations_stable_zero(malformed)
+
+    hybrid_discriminator = deepcopy(receipt)
+    hybrid_terminal = deepcopy(
+        hybrid_discriminator["cleanup_entries"][1]["terminal_receipt_ref"]
+    )
+    hybrid_terminal.update(
+        {
+            "run_id": review_operation["run_id"],
+            "stage": review_operation["stage"],
+            "operation_id": review_operation["operation_id"],
+            "worker_id": review_operation["worker_ref"]["worker_id"],
+            "model_request_id": review_operation["worker_ref"]["model_request_id"],
+            "payload_sha256": review_operation["worker_ref"]["payload_sha256"],
+            "predecessor_content_sha256": review_operation[
+                "predecessor_content_sha256"
+            ],
+        }
+    )
+    hybrid_discriminator["cleanup_entries"][0]["terminal_receipt_ref"] = _sealed(
+        {
+            key: value
+            for key, value in hybrid_terminal.items()
+            if key != "content_sha256"
+        }
+    )
+    hybrid_discriminator = runtime_seal_immutable(
+        {
+            key: value
+            for key, value in hybrid_discriminator.items()
+            if key != "content_sha256"
+        }
+    )
+    with pytest.raises(ValueError, match="terminal receipt ref content SHA mismatch"):
+        incumbent.validate_benchmark_v2_actual_operations_stable_zero(
+            hybrid_discriminator
+        )
+
+    cross_lineage = deepcopy(receipt)
+    terminal = cross_lineage["cleanup_entries"][1]["terminal_receipt_ref"]
+    terminal["operation_id"] = "operation-cross-lineage"
+    cross_lineage["cleanup_entries"][1]["terminal_receipt_ref"] = _sealed(
+        {key: value for key, value in terminal.items() if key != "content_sha256"}
+    )
+    cross_lineage = runtime_seal_immutable(
+        {key: value for key, value in cross_lineage.items() if key != "content_sha256"}
+    )
+    with pytest.raises(ValueError, match="terminal lineage is stale"):
+        incumbent.validate_benchmark_v2_actual_operations_stable_zero(cross_lineage)
+
+    terminal_lineage_mutations = (
+        ("model_request_id", "request-cross-lineage"),
+        ("payload_sha256", "0" * 64),
+        ("predecessor_content_sha256", "1" * 64),
+        ("worker_cleanup_ref", receipt["cleanup_entries"][2]["worker_cleanup_ref"]),
+        (
+            "provider_cleanup_ref",
+            receipt["cleanup_entries"][2]["provider_cleanup_ref"],
+        ),
+        ("provider_cleanup_outcome", "verified_exact_process_exited"),
+    )
+    for field, value in terminal_lineage_mutations:
+        mutated = deepcopy(receipt)
+        terminal = mutated["cleanup_entries"][1]["terminal_receipt_ref"]
+        terminal[field] = deepcopy(value)
+        mutated["cleanup_entries"][1]["terminal_receipt_ref"] = _sealed(
+            {key: child for key, child in terminal.items() if key != "content_sha256"}
+        )
+        mutated = runtime_seal_immutable(
+            {key: child for key, child in mutated.items() if key != "content_sha256"}
+        )
+        with pytest.raises(ValueError, match="terminal .*lineage is stale"):
+            incumbent.validate_benchmark_v2_actual_operations_stable_zero(mutated)
 
 
 @pytest.mark.parametrize(
@@ -1427,23 +1706,32 @@ class _ActualService:
         cleanup_entries = []
         for step in steps:
             operation = step["operation_ref"]
+            worker_cleanup = deepcopy(step["cleanup_refs"]["worker_cleanup_ref"])
+            provider_cleanup = deepcopy(
+                step["cleanup_refs"]["provider_cleanup_ref"]
+            )
+            terminal_receipt = (
+                _actual_incumbent_cancelled_terminal_receipt(
+                    operation=operation,
+                    worker_cleanup_ref=worker_cleanup,
+                    provider_cleanup_ref=provider_cleanup,
+                )
+                if operation["mode"] == "incumbent_qwen_only"
+                else _sealed(
+                    {
+                        "run_id": operation["run_id"],
+                        "stage": operation["stage"],
+                        "operation_id": operation["operation_id"],
+                        "worker_id": operation["worker_ref"]["worker_id"],
+                    }
+                )
+            )
             cleanup_entries.append(
                 {
                     "operation_ref_sha256": operation["content_sha256"],
-                    "terminal_receipt_ref": _sealed(
-                        {
-                            "run_id": operation["run_id"],
-                            "stage": operation["stage"],
-                            "operation_id": operation["operation_id"],
-                            "worker_id": operation["worker_ref"]["worker_id"],
-                        }
-                    ),
-                    "worker_cleanup_ref": deepcopy(
-                        step["cleanup_refs"]["worker_cleanup_ref"]
-                    ),
-                    "provider_cleanup_ref": deepcopy(
-                        step["cleanup_refs"]["provider_cleanup_ref"]
-                    ),
+                    "terminal_receipt_ref": terminal_receipt,
+                    "worker_cleanup_ref": worker_cleanup,
+                    "provider_cleanup_ref": provider_cleanup,
                 }
             )
         return _sealed(

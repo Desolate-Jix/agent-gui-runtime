@@ -466,7 +466,7 @@ def _stable_operation(
             }
         ),
         status=status,
-        predecessor_content_sha256=None,
+        predecessor_content_sha256="f" * 64,
     )
 
 
@@ -542,17 +542,47 @@ def _stable_receipt(*, hybrid_status: str = "safe_stopped") -> dict[str, object]
                 "payload_sha256": worker["payload_sha256"],
             }
         )
+        terminal_receipt = (
+            seal_immutable(
+                {
+                    "contract_version": "benchmark_v2_incumbent_terminal_receipt_v1",
+                    "outcome": "benchmark_v2_incumbent_cancelled",
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                    "model_request_id": worker["model_request_id"],
+                    "payload_sha256": worker["payload_sha256"],
+                    "result_sha256": None,
+                    "terminal_intent_ref": None,
+                    "cancel_intent_ref": {"content_sha256": "f" * 64},
+                    "generic_adoption_ref": None,
+                    "window_adoption_ref": None,
+                    "worker_cleanup_ref": worker_cleanup,
+                    "provider_cleanup_ref": provider_cleanup,
+                    "provider_cleanup_outcome": provider_cleanup["outcome"],
+                    "terminal_at": "2026-09-01T05:00:00+00:00",
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                    "predecessor_content_sha256": operation[
+                        "predecessor_content_sha256"
+                    ],
+                }
+            )
+            if operation["mode"] == "incumbent_qwen_only"
+            else seal_immutable(
+                {
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                }
+            )
+        )
         entries.append(
             {
                 "operation_ref_sha256": operation["content_sha256"],
-                "terminal_receipt_ref": seal_immutable(
-                    {
-                        "run_id": operation["run_id"],
-                        "stage": operation["stage"],
-                        "operation_id": operation["operation_id"],
-                        "worker_id": worker["worker_id"],
-                    }
-                ),
+                "terminal_receipt_ref": terminal_receipt,
                 "worker_cleanup_ref": worker_cleanup,
                 "provider_cleanup_ref": provider_cleanup,
             }
@@ -608,7 +638,10 @@ def test_stable_zero_validator_rejects_active_cross_worker_and_aggregate_cleanup
     cross_worker = seal_immutable(
         {key: value for key, value in cross_worker.items() if key != "content_sha256"}
     )
-    with pytest.raises(ValueError, match="worker cleanup is stale"):
+    with pytest.raises(
+        ValueError,
+        match="(terminal cleanup lineage|worker cleanup) is stale",
+    ):
         incumbent.validate_benchmark_v2_actual_operations_stable_zero(cross_worker)
 
     aggregate = deepcopy(receipt)
@@ -618,5 +651,8 @@ def test_stable_zero_validator_rejects_active_cross_worker_and_aggregate_cleanup
     aggregate = seal_immutable(
         {key: value for key, value in aggregate.items() if key != "content_sha256"}
     )
-    with pytest.raises(ValueError, match="worker cleanup is stale"):
+    with pytest.raises(
+        ValueError,
+        match="(terminal cleanup lineage|worker cleanup) is stale",
+    ):
         incumbent.validate_benchmark_v2_actual_operations_stable_zero(aggregate)

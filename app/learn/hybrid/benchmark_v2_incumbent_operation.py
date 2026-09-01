@@ -393,6 +393,35 @@ def _runtime_sealed_parent(value: object, name: str) -> dict[str, Any]:
     return result
 
 
+def _validate_actual_stable_zero_terminal_ref(
+    value: object,
+    *,
+    operation: Mapping[str, object],
+) -> dict[str, Any]:
+    if (
+        operation.get("mode") == "incumbent_qwen_only"
+        and isinstance(value, Mapping)
+        and value.get("contract_version")
+        == BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT
+    ):
+        receipt = validate_benchmark_v2_incumbent_terminal_receipt(value)
+        worker = operation["worker_ref"]
+        if (
+            receipt["model_request_id"] != worker["model_request_id"]
+            or receipt["payload_sha256"] != worker["payload_sha256"]
+            or receipt["predecessor_content_sha256"]
+            != operation["predecessor_content_sha256"]
+        ):
+            raise ValueError(
+                "benchmark actual stable-zero terminal lineage is stale"
+            )
+        return receipt
+    return _runtime_sealed_parent(
+        value,
+        "benchmark actual stable-zero terminal receipt ref",
+    )
+
+
 def _seal(body: Mapping[str, object]) -> dict[str, Any]:
     result = deepcopy(dict(body))
     result["content_sha256"] = content_sha256(result)
@@ -2525,9 +2554,15 @@ def validate_benchmark_v2_actual_operations_stable_zero(
         if operation_sha not in expected:
             raise ValueError("benchmark actual stable-zero cleanup operation is stale")
         operation = expected[operation_sha]
-        entry["terminal_receipt_ref"] = _runtime_sealed_parent(
+        authoritative_incumbent_terminal = (
+            operation["mode"] == "incumbent_qwen_only"
+            and isinstance(entry["terminal_receipt_ref"], Mapping)
+            and entry["terminal_receipt_ref"].get("contract_version")
+            == BENCHMARK_V2_INCUMBENT_TERMINAL_RECEIPT_CONTRACT
+        )
+        entry["terminal_receipt_ref"] = _validate_actual_stable_zero_terminal_ref(
             entry["terminal_receipt_ref"],
-            "benchmark actual stable-zero terminal receipt ref",
+            operation=operation,
         )
         entry["worker_cleanup_ref"] = _runtime_sealed_parent(
             entry["worker_cleanup_ref"],
@@ -2541,6 +2576,14 @@ def validate_benchmark_v2_actual_operations_stable_zero(
         worker_cleanup = entry["worker_cleanup_ref"]
         provider_cleanup = entry["provider_cleanup_ref"]
         worker = operation["worker_ref"]
+        if authoritative_incumbent_terminal and (
+            terminal["worker_cleanup_ref"] != worker_cleanup
+            or terminal["provider_cleanup_ref"] != provider_cleanup
+            or terminal["provider_cleanup_outcome"] != provider_cleanup["outcome"]
+        ):
+            raise ValueError(
+                "benchmark actual stable-zero terminal cleanup lineage is stale"
+            )
         review_no_provider_cleanup = False
         if (
             operation["mode"] == "hybrid_v1_1"
@@ -2655,7 +2698,7 @@ def validate_benchmark_v2_actual_operations_stable_zero(
     ):
         raise ValueError("benchmark actual stable-zero cannot authorize actions")
     _sha(receipt["content_sha256"], "benchmark actual stable-zero SHA")
-    if receipt["content_sha256"] != content_sha256(receipt):
+    if receipt["content_sha256"] != runtime_content_sha256(receipt):
         raise ValueError("benchmark actual stable-zero content SHA mismatch")
     receipt["operation_refs"] = operations
     receipt["cleanup_entries"] = entries
