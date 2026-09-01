@@ -1087,6 +1087,25 @@ def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest
                 capture_ref=capture_ref,
             )
 
+        reminted = deepcopy(generic)
+        reminted_evidence = reminted["response"][
+            "_benchmark_v2_window_binding_evidence"
+        ]
+        reminted_evidence["snapshot"]["unexpected"] = "self-minted"
+        reminted_adopted = reminted_evidence["adopted_receipt"]
+        reminted_adopted["snapshot_ref"]["content_sha256"] = hashlib.sha256(
+            canonical_json_bytes(reminted_evidence["snapshot"])
+        ).hexdigest()
+        reminted_adopted["content_sha256"] = content_sha256(reminted_adopted)
+        with pytest.raises(LearningWorkflowStageOperationError, match="adoption"):
+            validate_benchmark_v2_worker_window_binding_adoption(
+                worker_payload=worker_payload,
+                generic_adoption=reminted,
+                operation_ref=operation_ref,
+                owner=owner,
+                capture_ref=capture_ref,
+            )
+
         _assert_window_cleanup(
             close_owned_window(
                 journal_path=Path(str(owner["journal_path"])),
@@ -1117,25 +1136,6 @@ def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest
         assert canonical_json_bytes(replayed_from_resolver) == canonical_json_bytes(
             receipt
         )
-
-        reminted = deepcopy(generic)
-        reminted_evidence = reminted["response"][
-            "_benchmark_v2_window_binding_evidence"
-        ]
-        reminted_evidence["snapshot"]["unexpected"] = "self-minted"
-        reminted_adopted = reminted_evidence["adopted_receipt"]
-        reminted_adopted["snapshot_ref"]["content_sha256"] = hashlib.sha256(
-            canonical_json_bytes(reminted_evidence["snapshot"])
-        ).hexdigest()
-        reminted_adopted["content_sha256"] = content_sha256(reminted_adopted)
-        with pytest.raises(LearningWorkflowStageOperationError, match="adoption"):
-            validate_benchmark_v2_worker_window_binding_adoption(
-                worker_payload=worker_payload,
-                generic_adoption=reminted,
-                operation_ref=operation_ref,
-                owner=owner,
-                capture_ref=capture_ref,
-            )
 
 
 @pytest.mark.parametrize(
