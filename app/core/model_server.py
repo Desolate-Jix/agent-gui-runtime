@@ -411,27 +411,21 @@ def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
         "candidate_id",
         "role",
         "label",
-        "description",
-        "semantic_confidence",
-        "task_relevance",
-        "relation",
-        "ambiguity",
+        "binding_status",
+        "confidence",
     ]
-    ambiguity_fields = ["contract_version", "candidate_ids"]
-    orphan_fields = ["semantic_id", "role", "label", "description", "reason"]
 
     def _binding_schema(candidate_id: str) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
                 "candidate_id": {"const": candidate_id},
-                "role": {"type": "string"},
-                "label": {"type": "string"},
-                "description": {"type": "string"},
-                "semantic_confidence": {"type": "number"},
-                "task_relevance": {"type": "number"},
-                "relation": {"type": "string"},
-                "ambiguity": {"type": ["string", "null"]},
+                "role": {"type": "string", "minLength": 1, "maxLength": 64},
+                "label": {"type": "string", "minLength": 1, "maxLength": 256},
+                "binding_status": {
+                    "enum": ["BOUND", "UNBOUND", "AMBIGUOUS", "CONFLICT"]
+                },
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             },
             "required": binding_fields,
             "additionalProperties": False,
@@ -448,43 +442,8 @@ def _qwen_binding_response_schema(request: Mapping[str, Any]) -> dict[str, Any]:
                 "minItems": len(candidate_ids),
                 "maxItems": len(candidate_ids),
             },
-            "ambiguity_sets": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "contract_version": {
-                            "const": "hybrid_semantic_ambiguity_set_v1"
-                        },
-                        "candidate_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "minItems": 2,
-                            "uniqueItems": True,
-                        },
-                    },
-                    "required": ambiguity_fields,
-                    "additionalProperties": False,
-                },
-            },
-            "orphan_semantics": {
-                "type": "array",
-                "maxItems": 64,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "semantic_id": {"type": "string", "pattern": "^semantic/.*$"},
-                        "role": {"type": "string"},
-                        "label": {"type": "string"},
-                        "description": {"type": "string"},
-                        "reason": {"const": "ORPHAN_SEMANTIC"},
-                    },
-                    "required": orphan_fields,
-                    "additionalProperties": False,
-                },
-            },
         },
-        "required": ["bindings", "ambiguity_sets", "orphan_semantics"],
+        "required": ["bindings"],
         "additionalProperties": False,
     }
 
@@ -523,23 +482,24 @@ def run_qwen_binding_model(
         + base64.b64encode(screenshot_bytes).decode("ascii")
     )
     prompt = (
-        "Bind semantics only to the supplied candidate_id values. Return exactly one JSON object with the "
-        "three top-level fields bindings, ambiguity_sets, and orphan_semantics. Never output geometry, action "
-        "authority, new candidate IDs, or prose. "
-        "Every supplied candidate_id must appear exactly once. Important visible semantics without a candidate "
-        "must use reason ORPHAN_SEMANTIC. Canonical request: "
+        "Act only as a semantic classifier and binder for the supplied candidate_id values. Return exactly one "
+        "JSON object with the single top-level field bindings. Every supplied candidate_id must appear exactly "
+        "once in the given order. Each binding may contain only candidate_id, role, label, binding_status, and "
+        "confidence. binding_status must be BOUND, UNBOUND, AMBIGUOUS, or CONFLICT. Do not output descriptions, "
+        "reasoning, explanations, relationships, geometry, action authority, new candidate IDs, or prose. "
+        "Canonical request: "
         + json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
     body_payload: dict[str, Any] = {
         "model": str(profile.get("model_name") or profile.get("model_id") or "qwen"),
         "temperature": 0.0,
-        "max_tokens": 4096,
+        "max_tokens": 1536,
         "response_format": {
             "type": "json_object",
             "schema": _qwen_binding_response_schema(request),
         },
         "messages": [
-            {"role": "system", "content": "Return one closed JSON object only."},
+            {"role": "system", "content": "Return one compact closed JSON object only."},
             {
                 "role": "user",
                 "content": [
@@ -3086,19 +3046,43 @@ def _validate_sealed_qwen_release_artifact(
         raise ValueError("sealed Qwen binding artifact is required before release")
     try:
         from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+
+        if not isinstance(artifact.get("bindings"), list):
+            raise ValueError("binding artifact is not a compact projection")
+        wire_bindings: list[dict[str, Any]] = []
+        for binding in artifact["bindings"]:
+            if not isinstance(binding, dict):
+                raise ValueError("binding artifact is not a compact projection")
+            ambiguity = binding.get("ambiguity")
+            confidence = binding.get("semantic_confidence")
+            if ambiguity == "qwen_binding_ambiguous":
+                status = "AMBIGUOUS"
+            elif ambiguity == "qwen_binding_conflict":
+                status = "CONFLICT"
+            elif ambiguity is None:
+                status = "BOUND" if confidence != 0 else "UNBOUND"
+            else:
+                raise ValueError("binding artifact is not a compact projection")
+            wire_bindings.append(
+                {
+                    "candidate_id": binding.get("candidate_id"),
+                    "role": binding.get("role"),
+                    "label": binding.get("label"),
+                    "binding_status": status,
+                    "confidence": confidence,
+                }
+            )
         parsed = parse_qwen_candidate_bindings(
-            {
-                "bindings": deepcopy(artifact.get("bindings")),
-                "ambiguity_sets": deepcopy(artifact.get("ambiguity_sets")),
-                "orphan_semantics": deepcopy(artifact.get("orphan_semantics")),
-            },
-            omni_inventory,
+            {"bindings": wire_bindings},
+            deepcopy(omni_inventory),
             context_ref=deepcopy(artifact.get("context_ref")),
         )
         if parsed != artifact:
-            raise ValueError("binding artifact does not match canonical parser output")
+            raise ValueError("binding artifact is not a compact projection")
     except ValueError as error:
-        raise ValueError(f"sealed Qwen binding artifact is invalid: {error}") from error
+        raise ValueError(
+            f"sealed Qwen binding artifact is invalid compact projection: {error}"
+        ) from error
 
 
 def _qwen_server_incarnation(

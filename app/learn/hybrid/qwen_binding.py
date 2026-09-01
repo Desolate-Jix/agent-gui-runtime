@@ -7,6 +7,7 @@ from copy import deepcopy
 from hashlib import sha256
 from io import BytesIO
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any, Callable
@@ -39,18 +40,16 @@ _PAYLOAD_FIELDS = {
     "capture_image_path",
     "omni_inventory",
 }
-_BINDING_FIELDS = {
+_WIRE_BINDING_FIELDS = {
     "candidate_id",
     "role",
     "label",
-    "description",
-    "semantic_confidence",
-    "task_relevance",
-    "relation",
-    "ambiguity",
+    "binding_status",
+    "confidence",
 }
-_ORPHAN_FIELDS = {"semantic_id", "role", "label", "description", "reason"}
-_AMBIGUITY_SET_FIELDS = {"contract_version", "candidate_ids"}
+_WIRE_BINDING_STATUSES = {"BOUND", "UNBOUND", "AMBIGUOUS", "CONFLICT"}
+_MAX_WIRE_ROLE_CHARS = 64
+_MAX_WIRE_LABEL_CHARS = 256
 _FORBIDDEN_FIELDS = {
     "action_authorized",
     "approved_to_click",
@@ -75,7 +74,6 @@ _FORBIDDEN_FIELDS = {
 }
 _MAX_JSON_DEPTH = 16
 _MAX_MODEL_STRING_BYTES = 4096
-_MAX_ORPHAN_SEMANTICS = 64
 _MAX_MODEL_JSON_BYTES = 1024 * 1024
 
 
@@ -128,7 +126,7 @@ def build_qwen_binding_request(
         "context_ref": deepcopy(bundle.get("context_ref")),
         "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
         "allowed_output_fields": sorted(
-            _BINDING_FIELDS | _ORPHAN_FIELDS | _AMBIGUITY_SET_FIELDS | {"ambiguity_sets"}
+            _WIRE_BINDING_FIELDS | {"bindings"}
         ),
     }
     return seal_immutable(request)
@@ -140,13 +138,9 @@ def parse_qwen_candidate_bindings(
     *,
     context_ref: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """解析 candidate-ID-closed 模型输出，不接受任何自由几何或执行权限。"""
+    """将紧凑的 candidate-ID-closed wire 输出投影到既有 artifact。"""
     inventory = _validated_inventory(omni_inventory)
-    if not isinstance(raw, Mapping) or set(raw) != {
-        "bindings",
-        "ambiguity_sets",
-        "orphan_semantics",
-    }:
+    if not isinstance(raw, Mapping) or set(raw) != {"bindings"}:
         raise ValueError("unbound Qwen prose or non-closed output")
     value = deepcopy(dict(raw))
     _validate_model_json_bounds(value)
@@ -155,32 +149,63 @@ def parse_qwen_candidate_bindings(
         raise ValueError(f"forbidden Qwen field: {forbidden}")
     if not isinstance(value["bindings"], list):
         raise ValueError("Qwen bindings must be a list")
-    if not isinstance(value["orphan_semantics"], list):
-        raise ValueError("Qwen orphan_semantics must be a list")
-    if not isinstance(value["ambiguity_sets"], list):
-        raise ValueError("Qwen ambiguity_sets must be a list")
     if len(value["bindings"]) != len(inventory["candidates"]):
         raise ValueError("candidate omission in Qwen bindings")
-    if len(value["orphan_semantics"]) > _MAX_ORPHAN_SEMANTICS:
-        raise ValueError("Qwen orphan count exceeds limit")
+    expected_ids = [candidate["candidate_id"] for candidate in inventory["candidates"]]
+    seen_ids: set[str] = set()
+    projected_bindings: list[dict[str, Any]] = []
     for index, binding in enumerate(value["bindings"]):
-        if not isinstance(binding, Mapping) or set(binding) != _BINDING_FIELDS:
+        if not isinstance(binding, Mapping) or set(binding) != _WIRE_BINDING_FIELDS:
             raise ValueError(f"binding[{index}] is not closed")
-    for index, orphan in enumerate(value["orphan_semantics"]):
-        if not isinstance(orphan, Mapping) or set(orphan) != _ORPHAN_FIELDS:
-            raise ValueError(f"orphan_semantic[{index}] is not closed")
-        semantic_id = orphan.get("semantic_id")
-        if not isinstance(semantic_id, str) or not semantic_id.startswith("semantic/"):
-            raise ValueError("orphan semantic cannot use a fabricated candidate identity")
-        if orphan.get("reason") != "ORPHAN_SEMANTIC":
-            raise ValueError("orphan semantic reason must be ORPHAN_SEMANTIC")
-    for index, ambiguity in enumerate(value["ambiguity_sets"]):
-        if not isinstance(ambiguity, Mapping) or set(ambiguity) != _AMBIGUITY_SET_FIELDS:
-            raise ValueError(f"ambiguity_set[{index}] is not closed")
-    value["ambiguity_sets"] = _complete_missing_ambiguity_sets(
-        value["bindings"],
-        value["ambiguity_sets"],
-    )
+        candidate_id = binding["candidate_id"]
+        if candidate_id not in expected_ids:
+            raise ValueError("unknown candidate_id in Qwen bindings")
+        if candidate_id in seen_ids:
+            raise ValueError("duplicate candidate_id in Qwen bindings")
+        seen_ids.add(candidate_id)
+        role = binding["role"]
+        label = binding["label"]
+        if not isinstance(role, str) or not role.strip():
+            raise ValueError(f"binding[{index}].role must be a non-empty string")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(f"binding[{index}].label must be a non-empty string")
+        if len(role) > _MAX_WIRE_ROLE_CHARS:
+            raise ValueError(f"binding[{index}].role exceeds maximum length")
+        if len(label) > _MAX_WIRE_LABEL_CHARS:
+            raise ValueError(f"binding[{index}].label exceeds maximum length")
+        status = binding["binding_status"]
+        if not isinstance(status, str) or status not in _WIRE_BINDING_STATUSES:
+            raise ValueError(f"binding[{index}].binding_status is invalid")
+        confidence = binding["confidence"]
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(confidence)
+            or confidence < 0
+            or confidence > 1
+        ):
+            raise ValueError(f"binding[{index}].confidence must be between 0 and 1")
+        safe_confidence = confidence if status == "BOUND" else 0.0
+        projected_bindings.append(
+            {
+                "candidate_id": candidate_id,
+                "role": role,
+                "label": label,
+                "description": "",
+                "semantic_confidence": safe_confidence,
+                "task_relevance": safe_confidence,
+                "relation": "candidate_binding",
+                "ambiguity": {
+                    "BOUND": None,
+                    "UNBOUND": None,
+                    "AMBIGUOUS": "qwen_binding_ambiguous",
+                    "CONFLICT": "qwen_binding_conflict",
+                }[status],
+            }
+        )
+    if [binding["candidate_id"] for binding in projected_bindings] != expected_ids:
+        raise ValueError("Qwen binding candidate order is invalid")
+    ambiguity_sets = _complete_missing_ambiguity_sets(projected_bindings, [])
     verified_context_ref = _immutable_context_ref(context_ref)
 
     artifact = {
@@ -188,15 +213,14 @@ def parse_qwen_candidate_bindings(
         "capture_identity": deepcopy(inventory["capture_identity"]),
         "context_ref": verified_context_ref,
         "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
-        "bindings": value["bindings"],
-        "ambiguity_sets": value["ambiguity_sets"],
-        "orphan_semantics": value["orphan_semantics"],
+        "bindings": projected_bindings,
+        "ambiguity_sets": ambiguity_sets,
+        "orphan_semantics": [],
         **_NON_AUTHORIZING,
     }
     validated = validate_qwen_bindings(artifact, inventory)
-    expected_ids = [candidate["candidate_id"] for candidate in inventory["candidates"]]
     actual_ids = [binding["candidate_id"] for binding in validated["bindings"]]
-    if set(actual_ids) != set(expected_ids) or len(actual_ids) != len(expected_ids):
+    if actual_ids != expected_ids:
         raise ValueError("candidate omission in Qwen bindings")
     semantic_targets = {
         canonical_semantic_target_key(binding) for binding in validated["bindings"]

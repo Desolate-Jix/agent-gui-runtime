@@ -265,15 +265,15 @@ def test_duplicate_overlapping_semantic_relation_uses_configured_tie_delta(
     sealed_inventory = seal_immutable(inventory)
     raw = _raw_for(sealed_inventory)
     for binding in raw["bindings"]:
-        binding.update({"role": "button", "label": "Apply", "relation": "primary_action"})
-    raw["bindings"][0]["semantic_confidence"] = 0.90
-    raw["bindings"][1]["semantic_confidence"] = 0.90 - confidence_delta
-    raw["ambiguity_sets"] = [
-        {
-            "contract_version": "hybrid_semantic_ambiguity_set_v1",
-            "candidate_ids": sorted(item["candidate_id"] for item in raw["bindings"]),
-        }
-    ]
+        binding.update(
+            {
+                "role": "button",
+                "label": "Apply",
+                "binding_status": "BOUND",
+                "confidence": 0.90,
+            }
+        )
+    raw["bindings"][1]["confidence"] = 0.90 - confidence_delta
     bindings = parse_qwen_candidate_bindings(
         raw,
         sealed_inventory,
@@ -301,13 +301,14 @@ def test_non_overlapping_duplicate_semantic_relation_is_conflict() -> None:
     sealed_inventory = seal_immutable(inventory)
     raw = _raw_for(sealed_inventory)
     for binding in raw["bindings"]:
-        binding.update({"role": "button", "label": "Apply", "relation": "primary_action"})
-    raw["ambiguity_sets"] = [
-        {
-            "contract_version": "hybrid_semantic_ambiguity_set_v1",
-            "candidate_ids": sorted(item["candidate_id"] for item in raw["bindings"]),
-        }
-    ]
+        binding.update(
+            {
+                "role": "button",
+                "label": "Apply",
+                "binding_status": "BOUND",
+                "confidence": 0.90,
+            }
+        )
     bindings = parse_qwen_candidate_bindings(
         raw,
         sealed_inventory,

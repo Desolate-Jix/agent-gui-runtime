@@ -1063,7 +1063,7 @@ def _server_readiness(
 
 def _valid_binding_artifacts() -> tuple[dict, dict]:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
-    from test_learn_hybrid_contracts import inventory_fixture
+    from tests.test_learn_hybrid_contracts import inventory_fixture
 
     inventory = seal_immutable(inventory_fixture())
     candidate_id = inventory["candidates"][0]["candidate_id"]
@@ -1073,19 +1073,55 @@ def _valid_binding_artifacts() -> tuple[dict, dict]:
                 "candidate_id": candidate_id,
                 "role": "button",
                 "label": "申请职位",
-                "description": "打开申请流程",
-                "semantic_confidence": 0.94,
-                "task_relevance": 0.88,
-                "relation": "primary_action",
-                "ambiguity": None,
+                "binding_status": "BOUND",
+                "confidence": 0.94,
             }],
-            "ambiguity_sets": [],
-            "orphan_semantics": [],
         },
         inventory,
         context_ref={"id": "hybrid-context/test", "content_sha256": "56" * 32},
     )
     return inventory, seal_immutable(parsed)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda artifact: artifact["bindings"][0].update({"description": "forged"}),
+        lambda artifact: artifact["bindings"][0].update({"relation": "forged"}),
+        lambda artifact: artifact["bindings"][0].update({"task_relevance": 0.1}),
+        lambda artifact: artifact.update(
+            {
+                "orphan_semantics": [
+                    {
+                        "semantic_id": "semantic/forged",
+                        "role": "text",
+                        "label": "forged",
+                        "description": "",
+                        "reason": "ORPHAN_SEMANTIC",
+                    }
+                ]
+            }
+        ),
+        lambda artifact: artifact["bindings"][0].update(
+            {"ambiguity": "not_a_compact_wire_marker"}
+        ),
+        lambda artifact: artifact["bindings"][0].update({"role": "   "}),
+        lambda artifact: artifact["bindings"][0].update({"label": "   "}),
+        lambda artifact: artifact["bindings"][0].update({"role": "r" * 65}),
+        lambda artifact: artifact["bindings"][0].update({"label": "l" * 257}),
+    ],
+)
+def test_qwen_release_rejects_legacy_artifact_that_is_not_compact_projection(
+    mutation,
+) -> None:
+    inventory, artifact = _valid_binding_artifacts()
+    unsealed = deepcopy(artifact)
+    unsealed.pop("content_sha256")
+    mutation(unsealed)
+    forged = seal_immutable(unsealed)
+
+    with pytest.raises(ValueError, match="compact projection"):
+        model_server._validate_sealed_qwen_release_artifact(forged, inventory)
 
 
 def _current_process_readiness(*, model_id: str) -> dict:
@@ -3087,11 +3123,8 @@ def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
 
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
-    assert set(schema["properties"]) == {
-        "bindings",
-        "ambiguity_sets",
-        "orphan_semantics",
-    }
+    assert schema["required"] == ["bindings"]
+    assert set(schema["properties"]) == {"bindings"}
     bindings_schema = schema["properties"]["bindings"]
     assert set(bindings_schema) == {
         "type",
@@ -3109,11 +3142,8 @@ def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
         "candidate_id",
         "role",
         "label",
-        "description",
-        "semantic_confidence",
-        "task_relevance",
-        "relation",
-        "ambiguity",
+        "binding_status",
+        "confidence",
     }
     assert all(
         set(item["properties"]) == binding_fields
@@ -3121,35 +3151,17 @@ def test_qwen_binding_response_schema_closes_each_supplied_candidate_id(
         and item["additionalProperties"] is False
         for item in bindings_schema["prefixItems"]
     )
-    ambiguity_item_schema = schema["properties"]["ambiguity_sets"]["items"]
-    assert ambiguity_item_schema == {
-        "type": "object",
-        "properties": {
-            "contract_version": {"const": "hybrid_semantic_ambiguity_set_v1"},
-            "candidate_ids": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 2,
-                "uniqueItems": True,
-            },
-        },
-        "required": ["contract_version", "candidate_ids"],
-        "additionalProperties": False,
-    }
-    orphan_semantics_schema = schema["properties"]["orphan_semantics"]
-    assert orphan_semantics_schema["maxItems"] == 64
-    assert orphan_semantics_schema["items"] == {
-        "type": "object",
-        "properties": {
-            "semantic_id": {"type": "string", "pattern": "^semantic/.*$"},
-            "role": {"type": "string"},
-            "label": {"type": "string"},
-            "description": {"type": "string"},
-            "reason": {"const": "ORPHAN_SEMANTIC"},
-        },
-        "required": ["semantic_id", "role", "label", "description", "reason"],
-        "additionalProperties": False,
-    }
+    assert all(
+        item["properties"]["binding_status"] == {
+            "enum": ["BOUND", "UNBOUND", "AMBIGUOUS", "CONFLICT"]
+        }
+        and item["properties"]["role"]["maxLength"] == 64
+        and item["properties"]["label"]["maxLength"] == 256
+        and item["properties"]["confidence"] == {
+            "type": "number", "minimum": 0, "maximum": 1
+        }
+        for item in bindings_schema["prefixItems"]
+    )
 
 
 def test_qwen_binding_response_schema_rejects_missing_candidate_inventory() -> None:
@@ -3209,16 +3221,11 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
                 "candidate_id": candidate_id,
                 "role": "button",
                 "label": f"candidate {index}",
-                "description": "",
-                "semantic_confidence": 0.5,
-                "task_relevance": 0.5,
-                "relation": "visible",
-                "ambiguity": None,
+                "binding_status": "BOUND",
+                "confidence": 0.5,
             }
             for index, candidate_id in enumerate(candidate_ids)
         ],
-        "ambiguity_sets": [],
-        "orphan_semantics": [],
     }
 
     def fake_urlopen(request, timeout):
@@ -3260,7 +3267,7 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
     schema = response_format["schema"]
     assert schema["type"] == "object"
     assert schema["additionalProperties"] is False
-    assert schema["required"] == ["bindings", "ambiguity_sets", "orphan_semantics"]
+    assert schema["required"] == ["bindings"]
     bindings_schema = schema["properties"]["bindings"]
     assert "items" not in bindings_schema
     assert bindings_schema["minItems"] == len(candidate_ids)
@@ -3276,17 +3283,16 @@ def test_qwen_binding_runner_reuses_understanding_endpoint_and_request_id(
             "candidate_id",
             "role",
             "label",
-            "description",
-            "semantic_confidence",
-            "task_relevance",
-            "relation",
-            "ambiguity",
+            "binding_status",
+            "confidence",
         }
         for item in bindings_schema["prefixItems"]
     )
     prompt = seen["body"]["messages"][1]["content"][0]["text"]
     assert "申请职位" in prompt
-    assert "three top-level fields bindings, ambiguity_sets, and orphan_semantics" in prompt
+    assert "semantic classifier and binder" in prompt
+    assert "single top-level field bindings" in prompt
+    assert "descriptions, reasoning, explanations, relationships" in prompt
     image_url = seen["body"]["messages"][1]["content"][1]["image_url"]["url"]
     assert base64.b64decode(image_url.split(",", 1)[1]) == screenshot_bytes
 
@@ -3377,7 +3383,7 @@ def test_qwen_binding_runner_preserves_hash_bound_parse_failure_diagnostics(
     assert diagnostics["parse_error"]["column"] == len(raw_content) + 1
     assert diagnostics["parse_error"]["position"] == len(raw_content)
     assert diagnostics["content_sha256"] == content_sha256(diagnostics)
-    assert seen["request"]["max_tokens"] == 4096
+    assert seen["request"]["max_tokens"] == 1536
     assert seen["request"]["temperature"] == 0.0
     assert seen["request"]["response_format"]["type"] == "json_object"
 
