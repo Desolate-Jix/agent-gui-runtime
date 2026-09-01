@@ -3453,6 +3453,313 @@ def test_s3_early_failure_persists_predecessor_before_terminal_transition(
         store.close()
 
 
+def _s3_start_fusion_with_pending_receipt(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import app.learn.workflow_service as workflow_service
+
+    registry = _S3Registry()
+    store, composition, service, _started = _s3_service(tmp_path, registry)
+    monkeypatch.setattr(
+        workflow_service,
+        "build_learning_pipeline_initial_worker_request",
+        lambda **_kwargs: {
+            "task_kind": "panel_learning_hybrid_fusion",
+            "payload": _hybrid_worker_payload(),
+        },
+    )
+    initial = service.start_hybrid_operation(
+        screen_group=_screen_group(),
+        window_binding=_s3_window_binding(),
+    )
+    worker = registry.current
+    assert worker is not None
+    current = store.get("run-h1")
+    stage_execution = current["stages"]["screen_understanding"]["evidence_refs"][
+        "stage_execution"
+    ]
+    binding = stage_execution["benchmark_v2_workflow_service_hybrid"]
+    current = workflow_service._persist_benchmark_v2_hybrid_continuation_receipt(
+        composition=composition,
+        workflow_state=current,
+        stage="screen_understanding",
+        binding=binding,
+        consumed_operation_ref=initial["operation_ref"],
+        worker_record=worker,
+        returned_status="pending",
+    )
+    stage_execution = current["stages"]["screen_understanding"]["evidence_refs"][
+        "stage_execution"
+    ]
+    binding = stage_execution["benchmark_v2_workflow_service_hybrid"]
+    pending = workflow_service._project_benchmark_v2_hybrid_step(
+        composition=composition,
+        workflow_state=current,
+        stage_execution=stage_execution,
+        binding=binding,
+        worker_record=worker,
+        status="pending",
+    )
+    return store, composition, service, registry, pending
+
+
+def _s3_fusion_safe_stop_response(worker: dict[str, object]) -> dict[str, object]:
+    return {
+        "contract_version": "learning_hybrid_managed_stage_result_v1",
+        "learning_pipeline_mode": "hybrid_v1_1",
+        "task_kind": "panel_learning_hybrid_fusion",
+        "outcome": "completed",
+        "orchestration": deepcopy(worker["payload"]["_hybrid_orchestration"]),
+        "result": {
+            "contract_version": "hybrid_fusion_result_v1",
+            "candidates": [],
+        },
+    }
+
+
+def test_s3_fusion_terminal_safe_stop_prepares_terminal_receipt_before_transition(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    store, _composition, service, registry, pending = (
+        _s3_start_fusion_with_pending_receipt(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+        )
+    )
+
+    def _continue(**_kwargs):
+        state = store.get("run-h1")
+        finished = workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="safe_stopped",
+            reason="Hybrid fusion produced no VISTA-eligible BOUND candidates",
+        )
+        return {
+            "stage_finished": True,
+            "outcome": "safe_stopped",
+            "next_stage_operation": None,
+            "next_stage_worker": None,
+            "workflow_state": finished["workflow_state"],
+        }
+
+    monkeypatch.setattr(
+        workflow_service,
+        "continue_guarded_learning_stage_worker_result",
+        _continue,
+    )
+    try:
+        worker = registry.current
+        assert worker is not None
+        registry.complete_current(_s3_fusion_safe_stop_response(worker))
+        consumed_ref = deepcopy(pending["operation_ref"])
+
+        returned = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        replay = service.continue_hybrid_operation(operation_ref=consumed_ref)
+        terminal_state = store.get("run-h1")
+        receipt = terminal_state["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]["benchmark_v2_workflow_service_hybrid"][
+            "continuation_receipt"
+        ]
+
+        assert returned["status"] == "safe_stopped"
+        assert receipt["receipt_phase"] == "terminal_prepared"
+        assert receipt["returned_status"] is None
+        assert receipt["consumed_operation_ref_sha256"] == consumed_ref[
+            "content_sha256"
+        ]
+        assert returned["operation_ref"]["predecessor_content_sha256"] == (
+            consumed_ref["content_sha256"]
+        )
+        assert canonical_json_bytes(replay) == canonical_json_bytes(returned)
+        assert registry.cancel_calls == 0
+        assert registry.materialize_cleanup_calls == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize(
+    "violation",
+    (
+        "wrong_task_kind",
+        "not_adopted",
+        "wrong_result_outcome",
+        "vista_eligible_bound",
+        "missing_worker_continuation",
+        "extra_worker_continuation_field",
+        "wrong_continuation_worker",
+        "wrong_continuation_operation",
+        "wrong_continuation_task",
+        "wrong_continuation_result_sha",
+    ),
+)
+def test_s3_legacy_fusion_pending_receipt_compatibility_is_narrow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    violation: str,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    store, composition, _service, registry, _pending = (
+        _s3_start_fusion_with_pending_receipt(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+        )
+    )
+    try:
+        worker = registry.current
+        assert worker is not None
+        response = _s3_fusion_safe_stop_response(worker)
+        if violation == "vista_eligible_bound":
+            response["result"]["candidates"] = [
+                {"state": "BOUND", "vista_eligible": True}
+            ]
+        registry.complete_current(response)
+        adoption = None
+        if violation != "not_adopted":
+            adoption = registry.adopt_result(
+                worker_id=worker["worker_id"],
+                run_id="run-h1",
+                stage="screen_understanding",
+                operation_id="operation-h1",
+            )
+        if violation == "wrong_task_kind":
+            assert registry.current is not None
+            registry.current["task_kind"] = "panel_learning_hybrid_qwen_binding"
+        continuation = {
+            "contract_version": "learning_stage_worker_continuation_v1",
+            "worker_id": worker["worker_id"],
+            "operation_id": "operation-h1",
+            "task_kind": "panel_learning_hybrid_fusion",
+            "result_sha256": (
+                adoption["receipt"]["result_sha256"]
+                if isinstance(adoption, dict)
+                else SHA_A
+            ),
+        }
+        if violation == "extra_worker_continuation_field":
+            continuation["unexpected"] = True
+        elif violation == "wrong_continuation_worker":
+            continuation["worker_id"] = "worker-from-another-run"
+        elif violation == "wrong_continuation_operation":
+            continuation["operation_id"] = "operation-from-another-run"
+        elif violation == "wrong_continuation_task":
+            continuation["task_kind"] = "panel_learning_hybrid_qwen_binding"
+        elif violation == "wrong_continuation_result_sha":
+            continuation["result_sha256"] = SHA_B
+        state = store.get("run-h1")
+        workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome=(
+                "failed" if violation == "wrong_result_outcome" else "safe_stopped"
+            ),
+            reason="terminal compatibility negative control",
+            evidence_refs=(
+                {}
+                if violation == "missing_worker_continuation"
+                else {"worker_continuation": continuation}
+            ),
+        )
+        current = store.get("run-h1")
+        stage_execution = current["stages"]["screen_understanding"][
+            "evidence_refs"
+        ]["stage_execution"]
+        binding = stage_execution["benchmark_v2_workflow_service_hybrid"]
+        attached = registry.current
+        assert attached is not None
+
+        assert (
+            workflow_service._benchmark_v2_hybrid_legacy_fusion_safe_stop_verified(
+                composition=composition,
+                workflow_state=current,
+                stage_execution=stage_execution,
+                binding=binding,
+                worker_record=attached,
+            )
+            is False
+        )
+    finally:
+        store.close()
+
+
+def test_s3_lookup_legacy_fusion_pending_receipt_projects_safe_stop_read_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.learn.workflow_service as workflow_service
+
+    store, _composition, service, registry, pending = (
+        _s3_start_fusion_with_pending_receipt(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+        )
+    )
+    try:
+        worker = registry.current
+        assert worker is not None
+        registry.complete_current(_s3_fusion_safe_stop_response(worker))
+        adoption = registry.adopt_result(
+            worker_id=worker["worker_id"],
+            run_id="run-h1",
+            stage="screen_understanding",
+            operation_id="operation-h1",
+        )
+        state = store.get("run-h1")
+        workflow_service.finish_learning_workflow_stage_operation(
+            store=store,
+            project_root=tmp_path,
+            run_id="run-h1",
+            expected_revision=state["revision"],
+            stage="screen_understanding",
+            operation_id="operation-h1",
+            outcome="safe_stopped",
+            reason="Hybrid fusion produced no VISTA-eligible BOUND candidates",
+            evidence_refs={
+                "worker_continuation": {
+                    "contract_version": "learning_stage_worker_continuation_v1",
+                    "worker_id": worker["worker_id"],
+                    "operation_id": "operation-h1",
+                    "task_kind": "panel_learning_hybrid_fusion",
+                    "result_sha256": adoption["receipt"]["result_sha256"],
+                }
+            },
+        )
+        state_before = store.get("run-h1")
+        state_bytes = canonical_json_bytes(state_before)
+
+        projected = service.lookup_hybrid_operation(
+            screen_group=_screen_group(),
+            window_binding=_s3_window_binding(),
+        )
+
+        assert projected["status"] == "safe_stopped"
+        assert projected["operation_ref"]["predecessor_content_sha256"] == pending[
+            "operation_ref"
+        ]["predecessor_content_sha256"]
+        assert canonical_json_bytes(store.get("run-h1")) == state_bytes
+        assert registry.start_calls == 1
+        assert registry.adopt_calls == 1
+        assert registry.cancel_calls == 0
+        assert registry.materialize_cleanup_calls == 0
+    finally:
+        store.close()
+
+
 def test_s3_expired_completed_terminal_result_recovers_without_second_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -6107,6 +6107,7 @@ def _benchmark_v2_hybrid_continuation_predecessor(
     worker_record: Mapping[str, object],
     status: str,
     recovered_cleanup_verified: bool = False,
+    legacy_fusion_safe_stop_verified: bool = False,
 ) -> str | None:
     current = _validate_benchmark_v2_hybrid_service_binding(binding)
     receipt = current.get("continuation_receipt")
@@ -6123,7 +6124,7 @@ def _benchmark_v2_hybrid_continuation_predecessor(
         validated_receipt["receipt_phase"] == "returned"
         and validated_receipt["returned_status"] == status
     ) or (
-        recovered_cleanup_verified
+        (recovered_cleanup_verified or legacy_fusion_safe_stop_verified)
         and validated_receipt["receipt_phase"] == "returned"
         and validated_receipt["returned_status"] == "pending"
         and status == "safe_stopped"
@@ -6138,12 +6139,46 @@ def _benchmark_v2_hybrid_continuation_predecessor(
     return str(validated_receipt["consumed_operation_ref_sha256"])
 
 
+def _benchmark_v2_hybrid_fusion_response_safe_stops(
+    response: Mapping[str, object],
+) -> bool:
+    result = response.get("result")
+    candidates = result.get("candidates") if isinstance(result, Mapping) else None
+    if (
+        response.get("contract_version")
+        != "learning_hybrid_managed_stage_result_v1"
+        or response.get("learning_pipeline_mode") != "hybrid_v1_1"
+        or response.get("task_kind") != "panel_learning_hybrid_fusion"
+        or response.get("outcome") != "completed"
+        or not isinstance(result, Mapping)
+        or result.get("contract_version") != "hybrid_fusion_result_v1"
+        or not isinstance(candidates, list)
+        or any(
+            not isinstance(candidate, Mapping)
+            or not isinstance(candidate.get("state"), str)
+            or not isinstance(candidate.get("vista_eligible"), bool)
+            for candidate in candidates
+        )
+    ):
+        return False
+    return not any(
+        candidate.get("state") == "BOUND"
+        and candidate.get("vista_eligible") is True
+        for candidate in candidates
+    )
+
+
 def _benchmark_v2_hybrid_requires_terminal_preparation(
     *,
     task_kind: str,
     response: Mapping[str, object],
 ) -> bool:
     if task_kind == "panel_learning_hybrid_review_projection":
+        return True
+    if (
+        task_kind == "panel_learning_hybrid_fusion"
+        and _benchmark_v2_hybrid_fusion_response_safe_stops(response)
+    ):
         return True
     outcome = response.get("outcome")
     return (
@@ -6647,6 +6682,7 @@ def _project_benchmark_v2_hybrid_operation_ref(
     worker_record: Mapping[str, object],
     status: str,
     recovered_cleanup_verified: bool = False,
+    legacy_fusion_safe_stop_verified: bool = False,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_contracts import (
         content_sha256 as benchmark_content_sha256,
@@ -6686,6 +6722,9 @@ def _project_benchmark_v2_hybrid_operation_ref(
                 worker_record=worker_record,
                 status=status,
                 recovered_cleanup_verified=recovered_cleanup_verified,
+                legacy_fusion_safe_stop_verified=(
+                    legacy_fusion_safe_stop_verified
+                ),
             )
         ),
     )
@@ -6742,6 +6781,7 @@ def _benchmark_v2_hybrid_service_context(
             "benchmark_v2 hybrid service operation status is stale"
         )
     recovered_cleanup_verified = False
+    legacy_fusion_safe_stop_verified = False
     if current_status == "safe_stopped":
         recovered_cleanup = _project_benchmark_v2_hybrid_expired_failure_cleanup(
             workflow_state=current,
@@ -6775,6 +6815,15 @@ def _benchmark_v2_hybrid_service_context(
                     provider_cleanup_ref=provider_cleanup_ref,
                 )
             )
+        legacy_fusion_safe_stop_verified = (
+            _benchmark_v2_hybrid_legacy_fusion_safe_stop_verified(
+                composition=composition,
+                workflow_state=current,
+                stage_execution=stage_execution,
+                binding=binding,
+                worker_record=worker_record,
+            )
+        )
     expected = _project_benchmark_v2_hybrid_operation_ref(
         workflow_state=current,
         stage_execution=stage_execution,
@@ -6782,6 +6831,7 @@ def _benchmark_v2_hybrid_service_context(
         worker_record=worker_record,
         status=supplied["status"],
         recovered_cleanup_verified=recovered_cleanup_verified,
+        legacy_fusion_safe_stop_verified=legacy_fusion_safe_stop_verified,
     )
     if supplied != expected:
         raise LearningWorkflowStageOperationError(
@@ -6862,6 +6912,96 @@ def _read_benchmark_v2_hybrid_adopted_projection(
     )
 
 
+def _benchmark_v2_hybrid_legacy_fusion_safe_stop_verified(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    workflow_state: Mapping[str, object],
+    stage_execution: Mapping[str, object],
+    binding: Mapping[str, object],
+    worker_record: Mapping[str, object],
+) -> bool:
+    receipt_value = binding.get("continuation_receipt")
+    if not isinstance(receipt_value, Mapping):
+        return False
+    try:
+        receipt = _validate_benchmark_v2_hybrid_continuation_receipt(
+            receipt_value
+        )
+    except LearningWorkflowStageOperationError:
+        return False
+    stages = workflow_state.get("stages")
+    stage = str(worker_record.get("stage") or "")
+    stage_record = stages.get(stage) if isinstance(stages, Mapping) else None
+    if (
+        receipt.get("receipt_phase") != "returned"
+        or receipt.get("returned_status") != "pending"
+        or worker_record.get("task_kind") != "panel_learning_hybrid_fusion"
+        or worker_record.get("status") != "completed"
+        or worker_record.get("runtime_attached") is not False
+        or worker_record.get("result_available") is not True
+        or worker_record.get("result_adopted") is not True
+        or not isinstance(stage_record, Mapping)
+        or stage_record.get("status") != "safe_stopped"
+        or workflow_state.get("workflow_status") != "safe_stopped"
+        or workflow_state.get("terminal") is not True
+        or stage_execution.get("result_outcome") != "safe_stopped"
+    ):
+        return False
+    try:
+        projection = _read_benchmark_v2_hybrid_adopted_projection(
+            composition=composition,
+            worker_record=worker_record,
+            binding=binding,
+        )
+    except (LearningWorkflowStageOperationError, TypeError, ValueError):
+        return False
+    response = projection.get("response")
+    result_ref = projection.get("result_ref")
+    result_sha256 = (
+        result_ref.get("content_sha256") if isinstance(result_ref, Mapping) else None
+    )
+    evidence_refs = stage_record.get("evidence_refs")
+    continuation = (
+        evidence_refs.get("worker_continuation")
+        if isinstance(evidence_refs, Mapping)
+        else None
+    )
+    continuation_fields = {
+        "contract_version",
+        "worker_id",
+        "operation_id",
+        "task_kind",
+        "result_sha256",
+    }
+    window_binding = binding.get("window_binding")
+    if (
+        not isinstance(response, Mapping)
+        or not _benchmark_v2_hybrid_fusion_response_safe_stops(response)
+        or not isinstance(result_sha256, str)
+        or not isinstance(continuation, Mapping)
+        or set(continuation) != continuation_fields
+        or continuation.get("contract_version")
+        != LEARNING_STAGE_WORKER_CONTINUATION_CONTRACT_VERSION
+        or not isinstance(window_binding, Mapping)
+        or any(
+            worker_record.get(name) != window_binding.get(name)
+            for name in ("run_id", "stage", "operation_id")
+        )
+        or stage_execution.get("stage") != worker_record.get("stage")
+        or stage_execution.get("operation_id") != worker_record.get("operation_id")
+    ):
+        return False
+    replay = _matching_worker_continuation_replay(
+        workflow_state=deepcopy(dict(workflow_state)),
+        stage=stage,
+        operation_id=str(worker_record["operation_id"]),
+        worker_id=str(worker_record["worker_id"]),
+        task_kind="panel_learning_hybrid_fusion",
+        result_sha256=result_sha256,
+    )
+    return isinstance(replay, Mapping) and replay.get("outcome") == "safe_stopped"
+
+
 def _project_benchmark_v2_hybrid_step(
     *,
     composition: LearningWorkflowServiceComposition,
@@ -6889,6 +7029,7 @@ def _project_benchmark_v2_hybrid_step(
     worker_cleanup_ref = None
     provider_cleanup_ref = None
     recovered_cleanup_verified = False
+    legacy_fusion_safe_stop_verified = False
     if status == "safe_stopped":
         recovered_cleanup = (
             _project_benchmark_v2_hybrid_expired_failure_cleanup(
@@ -6991,6 +7132,15 @@ def _project_benchmark_v2_hybrid_step(
                     provider_cleanup_ref=provider_cleanup_ref,
                 )
             )
+        legacy_fusion_safe_stop_verified = (
+            _benchmark_v2_hybrid_legacy_fusion_safe_stop_verified(
+                composition=composition,
+                workflow_state=workflow_state,
+                stage_execution=stage_execution,
+                binding=binding,
+                worker_record=worker_record,
+            )
+        )
     provider_context_projection = None
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(str(worker_record["task_kind"]))
     if provider is not None:
@@ -7013,6 +7163,7 @@ def _project_benchmark_v2_hybrid_step(
             worker_record=worker_record,
             status=status,
             recovered_cleanup_verified=recovered_cleanup_verified,
+            legacy_fusion_safe_stop_verified=legacy_fusion_safe_stop_verified,
         ),
         observed_task_kind=str(worker_record["task_kind"]),
         provider_dispatch_context_projection=provider_context_projection,
