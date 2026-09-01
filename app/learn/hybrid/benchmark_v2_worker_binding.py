@@ -25,6 +25,7 @@ from app.learn.hybrid.benchmark_v2_window_owner import (
     _load_root,
     _raw_hwnd_attestation,
     _validate_binding,
+    close_owned_window,
 )
 from app.operation.screen_reading.uia_provider import (
     pinned_uia_snapshot,
@@ -505,9 +506,9 @@ def _owner_from_journal(serialized: Mapping[str, object]) -> dict[str, object]:
     return owner
 
 
-def _assert_owner_matches_serialized(
+def _assert_owner_lineage_matches_serialized(
     *, serialized: Mapping[str, object], owner: Mapping[str, object]
-) -> dict[str, object]:
+) -> None:
     process_identity = dict(serialized["process_identity"])
     expected = {
         "operation_id": serialized["operation_id"],
@@ -538,6 +539,13 @@ def _assert_owner_matches_serialized(
         != serialized["expected_uia_root_content_sha256"]
     ):
         raise ValueError("worker binding expected UIA identity differs")
+
+
+def _assert_owner_matches_serialized(
+    *, serialized: Mapping[str, object], owner: Mapping[str, object]
+) -> dict[str, object]:
+    _assert_owner_lineage_matches_serialized(serialized=serialized, owner=owner)
+    process_identity = dict(serialized["process_identity"])
     attestation = _raw_hwnd_attestation(owner)
     if (
         attestation.get("process_identity") != process_identity
@@ -549,6 +557,44 @@ def _assert_owner_matches_serialized(
     ):
         raise ValueError("worker binding child attestation differs")
     return attestation
+
+
+def _validate_verified_owner_cleanup_replay(
+    *, serialized: Mapping[str, object], owner: Mapping[str, object]
+) -> dict[str, object]:
+    journal_path = Path(str(serialized["owner_journal_path"]))
+    events = _load_events(journal_path, owner_id=str(serialized["owner_id"]))
+    if not events or events[-1].get("event_type") != "cleanup_verified":
+        raise ValueError("worker binding owner last event is not cleanup")
+    payload = events[-1].get("payload")
+    if not isinstance(payload, Mapping):
+        raise ValueError("worker binding owner cleanup receipt is invalid")
+    expected = {
+        "owner_id": serialized["owner_id"],
+        "exact_hwnd": serialized["exact_hwnd"],
+        "process_identity": serialized["process_identity"],
+        "ready_event_sha256": serialized["owner_ready_event_sha256"],
+        "cleanup_status": "verified",
+        "enum_windows_exact_hwnd_absent": True,
+        "matching_owned_windows_after": [],
+        "member_pids_after": [],
+        "scope_absent_after_owner_close": True,
+        "active_listeners_after": [],
+        "listener_or_lease_residue": [],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    if any(payload.get(key) != value for key, value in expected.items()):
+        raise ValueError("worker binding owner cleanup lineage or absence differs")
+    replayed = close_owned_window(
+        journal_path=journal_path,
+        reason=str(payload.get("reason") or "verified_owner_cleanup_replay"),
+    )
+    if replayed != payload:
+        raise ValueError("worker binding owner cleanup replay differs")
+    _validate_binding(owner)
+    _assert_owner_lineage_matches_serialized(serialized=serialized, owner=owner)
+    return deepcopy(dict(replayed))
 
 
 def _publisher_binding(publisher: object) -> tuple[Path, str]:
@@ -671,7 +717,10 @@ def _load_server_binding_authority(
     operation_id: str,
     window_binding_ref: Mapping[str, object],
     capture_ref: Mapping[str, object],
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> tuple[dict[str, object], dict[str, object]]:
+    if not isinstance(allow_verified_owner_cleanup_replay, bool):
+        raise ValueError("worker binding owner cleanup replay flag is invalid")
     root, authority_kind = _resolver_binding(resolver)
     normalized_run_id = _required_text(run_id, "run_id")
     normalized_stage = _required_text(stage, "stage")
@@ -712,17 +761,20 @@ def _load_server_binding_authority(
     if owner_journal_path.parent.resolve() != root:
         raise ValueError("worker binding authority root differs from owner journal root")
     owner = _owner_from_journal(serialized)
-    _assert_owner_matches_serialized(serialized=serialized, owner=owner)
-    rebuilt_serialized = serialize_worker_window_binding(
-        operation_ref={"operation_id": normalized_operation_id},
-        owner=owner,
-        capture_ref={
-            **closed_capture,
-            "capture_image_path": serialized["capture_image_path"],
-        },
-    )
-    if rebuilt_serialized != serialized:
-        raise ValueError("worker binding authority no longer matches Task 5 owner")
+    if allow_verified_owner_cleanup_replay:
+        _validate_verified_owner_cleanup_replay(serialized=serialized, owner=owner)
+    else:
+        _assert_owner_matches_serialized(serialized=serialized, owner=owner)
+        rebuilt_serialized = serialize_worker_window_binding(
+            operation_ref={"operation_id": normalized_operation_id},
+            owner=owner,
+            capture_ref={
+                **closed_capture,
+                "capture_image_path": serialized["capture_image_path"],
+            },
+        )
+        if rebuilt_serialized != serialized:
+            raise ValueError("worker binding authority no longer matches Task 5 owner")
     expected_window = {
         "id": serialized["owner_id"],
         "content_sha256": serialized["payload_sha256"],
@@ -799,6 +851,7 @@ def resolve_server_worker_window_binding(
     capture_ref: Mapping[str, object],
     worker_process_identity: Mapping[str, object] | None = None,
     normal_binding_evidence_ref: Mapping[str, object] | None = None,
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> Mapping[str, object]:
     """从closed refs按exact filename解析并重验Task 5 binding authority。"""
 
@@ -813,6 +866,7 @@ def resolve_server_worker_window_binding(
         operation_id=operation_id,
         window_binding_ref=window_binding_ref,
         capture_ref=capture_ref,
+        allow_verified_owner_cleanup_replay=allow_verified_owner_cleanup_replay,
     )
     serialized = deepcopy(dict(authority["serialized_window_binding"]))
     normalized_process_identity = None
@@ -876,6 +930,7 @@ def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
     normal_binding_evidence_ref: Mapping[str, object],
     worker_payload: Mapping[str, object],
     generic_adoption: Mapping[str, object],
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> dict[str, object]:
     """重新打开exact authority后复用既有Task 5 adoption validator。"""
 
@@ -888,6 +943,7 @@ def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
         capture_ref=capture_ref,
         worker_process_identity=worker_process_identity,
         normal_binding_evidence_ref=normal_binding_evidence_ref,
+        allow_verified_owner_cleanup_replay=allow_verified_owner_cleanup_replay,
     )
     authority, owner = _load_server_binding_authority(
         resolver=resolver,
@@ -896,6 +952,7 @@ def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
         operation_id=operation_id,
         window_binding_ref=window_binding_ref,
         capture_ref=capture_ref,
+        allow_verified_owner_cleanup_replay=allow_verified_owner_cleanup_replay,
     )
     if resolution["binding_authority_ref"] != {
         "content_sha256": authority["content_sha256"]
@@ -915,6 +972,9 @@ def validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
             **_closed_identity_ref(capture_ref, "capture ref"),
             "capture_image_path": serialized["capture_image_path"],
         },
+        expected_serialized_window_binding=(
+            serialized if allow_verified_owner_cleanup_replay else None
+        ),
     )
     normal_parent = resolution["normal_binding_evidence_ref"]
     if (

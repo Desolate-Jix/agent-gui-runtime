@@ -519,6 +519,7 @@ def validate_benchmark_v2_worker_window_binding_adoption(
     operation_ref: Mapping[str, object],
     owner: Mapping[str, object],
     capture_ref: Mapping[str, object],
+    expected_serialized_window_binding: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """用server refs与generic digest重建benchmark专用adoption receipt。"""
 
@@ -526,6 +527,7 @@ def validate_benchmark_v2_worker_window_binding_adoption(
     from app.learn.hybrid.benchmark_v2_worker_binding import (
         ADOPTED_RECEIPT_CONTRACT,
         _validate_normal_clear_receipt,
+        _validate_serialized,
         serialize_worker_window_binding,
         validate_spawned_worker_observation_payload,
         validate_spawned_worker_uia_snapshot,
@@ -537,11 +539,16 @@ def validate_benchmark_v2_worker_window_binding_adoption(
         serialized = worker_payload.get(_BENCHMARK_V2_WINDOW_BINDING_FIELD)
         if not isinstance(serialized, Mapping):
             raise ValueError("sealed worker binding is missing")
-        expected_serialized = serialize_worker_window_binding(
-            operation_ref=operation_ref,
-            owner=owner,
-            capture_ref=capture_ref,
-        )
+        if expected_serialized_window_binding is None:
+            expected_serialized = serialize_worker_window_binding(
+                operation_ref=operation_ref,
+                owner=owner,
+                capture_ref=capture_ref,
+            )
+        else:
+            expected_serialized = _validate_serialized(
+                expected_serialized_window_binding
+            )
         if dict(serialized) != expected_serialized:
             raise ValueError("serialized worker binding differs from server refs")
         handler_payload = {
@@ -1321,6 +1328,7 @@ def _benchmark_v2_source_projection(
     operation_id: str,
     request: Mapping[str, object],
     dispatch_revision: int | None = None,
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_incumbent_operation import (
         compose_benchmark_v2_incumbent_payload_projection,
@@ -1354,6 +1362,11 @@ def _benchmark_v2_source_projection(
             operation_id=binding_operation_id,
             window_binding_ref=request["window_binding_ref"],
             capture_ref=request["capture_ref"],
+            **(
+                {"allow_verified_owner_cleanup_replay": True}
+                if allow_verified_owner_cleanup_replay
+                else {}
+            ),
         )
         resolved_dispatch_revision = (
             int(dispatch_revision)
@@ -1715,6 +1728,7 @@ def _resolve_benchmark_v2_result_binding(
     operation: Mapping[str, object],
     result_identity: Mapping[str, object],
     launch_owner: Mapping[str, object],
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> dict[str, Any]:
     if composition.benchmark_v2_worker_binding_resolver is None:
         raise LearningWorkflowStageOperationError(
@@ -1748,6 +1762,11 @@ def _resolve_benchmark_v2_result_binding(
             normal_binding_evidence_ref=result_identity[
                 "normal_binding_evidence_ref"
             ],
+            **(
+                {"allow_verified_owner_cleanup_replay": True}
+                if allow_verified_owner_cleanup_replay
+                else {}
+            ),
         )
     except (OSError, TypeError, ValueError, UnicodeError) as error:
         raise LearningWorkflowStageOperationError(
@@ -2568,6 +2587,7 @@ def _rebuild_benchmark_v2_window_adoption(
     authoritative_payload: Mapping[str, object],
     launch_owner: Mapping[str, object],
     result_identity: Mapping[str, object],
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> dict[str, object]:
     resolver = composition.benchmark_v2_worker_binding_resolver
     if resolver is None:
@@ -2606,6 +2626,11 @@ def _rebuild_benchmark_v2_window_adoption(
             ],
             worker_payload=authoritative_payload,
             generic_adoption=generic_adoption,
+            **(
+                {"allow_verified_owner_cleanup_replay": True}
+                if allow_verified_owner_cleanup_replay
+                else {}
+            ),
         )
     except (OSError, TypeError, ValueError, UnicodeError) as error:
         raise LearningWorkflowStageOperationError(
@@ -2751,6 +2776,10 @@ def _resume_benchmark_v2_incumbent_operation(
             provider_cleanup: dict[str, Any] | None = None
             provider_cleanup_evidence_ref: dict[str, Any] | None = None
             if operation["phase"] in {"result_ready", "terminal_intent", "adopted"}:
+                allow_verified_owner_cleanup_replay = operation["phase"] in {
+                    "terminal_intent",
+                    "adopted",
+                }
                 launch_owner = _inspect_benchmark_v2_launch_owner(
                     registry=registry,
                     operation=operation,
@@ -2758,12 +2787,13 @@ def _resume_benchmark_v2_incumbent_operation(
                     root=root,
                     require_assignment=True,
                 )
-                _resolve_benchmark_v2_result_binding(
-                    composition=composition,
-                    operation=operation,
-                    result_identity=result_identity,
-                    launch_owner=launch_owner,
-                )
+                if not allow_verified_owner_cleanup_replay:
+                    _resolve_benchmark_v2_result_binding(
+                        composition=composition,
+                        operation=operation,
+                        result_identity=result_identity,
+                        launch_owner=launch_owner,
+                    )
                 observed_worker_cleanup = registry.observe_benchmark_cleanup(
                         worker_id=expected_worker_id,
                         run_id=run_id,
@@ -2829,6 +2859,18 @@ def _resume_benchmark_v2_incumbent_operation(
                     raise LearningWorkflowStageOperationError(
                         "benchmark_v2 incumbent terminal intent parents differ"
                     )
+                if allow_verified_owner_cleanup_replay:
+                    if existing_intent is None:
+                        raise LearningWorkflowStageOperationError(
+                            "benchmark_v2 incumbent cleanup replay requires terminal intent"
+                        )
+                    _resolve_benchmark_v2_result_binding(
+                        composition=composition,
+                        operation=operation,
+                        result_identity=result_identity,
+                        launch_owner=launch_owner,
+                        allow_verified_owner_cleanup_replay=True,
+                    )
             if operation["phase"] == "result_ready":
                 assert worker_cleanup is not None
                 assert provider_cleanup_evidence_ref is not None
@@ -2883,6 +2925,9 @@ def _resume_benchmark_v2_incumbent_operation(
                                     operation["prepared_revision"]
                                 ),
                                 provider_case_ref=request["provider_case_ref"],
+                                allow_verified_owner_cleanup_replay=(
+                                    allow_verified_owner_cleanup_replay
+                                ),
                             )
                         )
 
@@ -2936,6 +2981,9 @@ def _resume_benchmark_v2_incumbent_operation(
                             hybrid=False,
                             dispatch_revision=int(operation["prepared_revision"]),
                             provider_case_ref=request["provider_case_ref"],
+                            allow_verified_owner_cleanup_replay=(
+                                allow_verified_owner_cleanup_replay
+                            ),
                         )
                     )
                 operation = transition_benchmark_v2_incumbent_operation(
@@ -2990,6 +3038,9 @@ def _resume_benchmark_v2_incumbent_operation(
                     hybrid=False,
                     dispatch_revision=int(operation["prepared_revision"]),
                     provider_case_ref=request["provider_case_ref"],
+                    allow_verified_owner_cleanup_replay=(
+                        allow_verified_owner_cleanup_replay
+                    ),
                 )
             projection = _benchmark_v2_source_projection(
                 composition=composition,
@@ -2998,6 +3049,9 @@ def _resume_benchmark_v2_incumbent_operation(
                 operation_id=operation_id,
                 request=request,
                 dispatch_revision=int(operation["prepared_revision"]),
+                allow_verified_owner_cleanup_replay=(
+                    allow_verified_owner_cleanup_replay
+                ),
             )
             window_adoption = _rebuild_benchmark_v2_window_adoption(
                 composition=composition,
@@ -3006,6 +3060,9 @@ def _resume_benchmark_v2_incumbent_operation(
                 authoritative_payload=projection["authoritative_payload"],
                 launch_owner=launch_owner,
                 result_identity=result_identity,
+                allow_verified_owner_cleanup_replay=(
+                    allow_verified_owner_cleanup_replay
+                ),
             )
             assert worker_cleanup is not None and provider_cleanup is not None
             receipt = compose_benchmark_v2_incumbent_terminal_receipt(
@@ -5042,6 +5099,7 @@ def _benchmark_v2_dispatch_context_for_worker(
     task_kind: str,
     revision: int,
     provider_case_ref: Mapping[str, object] | None = None,
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> dict[str, Any] | None:
     provider = _BENCHMARK_V2_PROVIDER_TASKS.get(task_kind)
     if provider is None:
@@ -5078,6 +5136,11 @@ def _benchmark_v2_dispatch_context_for_worker(
             operation_id=binding_operation_id,
             window_binding_ref=binding["window_binding_ref"],
             capture_ref=binding["capture_ref"],
+            **(
+                {"allow_verified_owner_cleanup_replay": True}
+                if allow_verified_owner_cleanup_replay
+                else {}
+            ),
         )
         return _benchmark_v2_dispatch_context_from_serialized(
             composition=composition,
@@ -5150,6 +5213,7 @@ def _validate_benchmark_v2_dispatch_response(
     dispatch_revision: int | None,
     provider_dispatch_context_refs: Mapping[str, object] | None = None,
     provider_case_ref: Mapping[str, object] | None = None,
+    allow_verified_owner_cleanup_replay: bool = False,
 ) -> dict[str, Any]:
     from app.learn.hybrid.benchmark_v2_dispatch_attestation import (
         validate_benchmark_dispatch_context_ref,
@@ -5239,6 +5303,11 @@ def _validate_benchmark_v2_dispatch_response(
                 task_kind=provider_task[provider],
                 revision=resolved_dispatch_revision,
                 provider_case_ref=provider_case_ref,
+                **(
+                    {"allow_verified_owner_cleanup_replay": True}
+                    if allow_verified_owner_cleanup_replay
+                    else {}
+                ),
             )
             if not isinstance(context, dict):
                 raise LearningWorkflowStageOperationError(

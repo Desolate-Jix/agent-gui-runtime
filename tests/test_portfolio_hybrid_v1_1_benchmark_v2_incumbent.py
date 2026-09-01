@@ -4371,6 +4371,18 @@ def test_window_adoption_rebuild_uses_only_resolver_and_exact_a_b1_parents(
             "generic_adoption": generic_adoption,
         }
     ]
+    calls.clear()
+    replayed = workflow_service._rebuild_benchmark_v2_window_adoption(
+        composition=composition,
+        operation=operation,
+        generic_adoption=generic_adoption,
+        authoritative_payload=source_bundle["authoritative_payload"],
+        launch_owner=launch_owner,
+        result_identity=result_identity,
+        allow_verified_owner_cleanup_replay=True,
+    )
+    assert replayed == expected
+    assert calls[0]["allow_verified_owner_cleanup_replay"] is True
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows benchmark ownership required")

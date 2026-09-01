@@ -472,6 +472,84 @@ def test_server_binding_publication_and_fresh_resolution_use_only_closed_exact_r
         assert resolution["content_sha256"] == content_sha256(resolution)
 
 
+def test_server_binding_resolution_replays_only_after_verified_owner_cleanup(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path.resolve()
+    with _owned(tmp_path, "verified-cleanup-replay") as (owner, journal):
+        capture_ref = {
+            "id": "capture-verified-cleanup-replay",
+            "content_sha256": owner["screenshot_sha256"],
+        }
+        authority = publish_server_worker_window_binding(
+            publisher=compose_test_server_worker_window_binding_publisher(
+                authority_root=authority_root,
+            ),
+            run_id="run-verified-cleanup-replay",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            owner=owner,
+            capture_ref=capture_ref,
+        )
+        resolver = compose_test_server_worker_window_binding_resolver(
+            authority_root=authority_root,
+        )
+        expected = deepcopy(authority["serialized_window_binding"])
+
+        live = resolve_server_worker_window_binding(
+            resolver=resolver,
+            run_id="run-verified-cleanup-replay",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            window_binding_ref=authority["window_binding_ref"],
+            capture_ref=capture_ref,
+        )
+        assert live["serialized_window_binding"] == expected
+
+        _assert_window_cleanup(
+            close_owned_window(journal_path=journal, reason="verified_replay")
+        )
+        with pytest.raises(ValueError, match="process is missing"):
+            resolve_server_worker_window_binding(
+                resolver=resolver,
+                run_id="run-verified-cleanup-replay",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                window_binding_ref=authority["window_binding_ref"],
+                capture_ref=capture_ref,
+            )
+
+        replay = resolve_server_worker_window_binding(
+            resolver=resolver,
+            run_id="run-verified-cleanup-replay",
+            stage="screen_understanding",
+            operation_id=str(owner["operation_id"]),
+            window_binding_ref=authority["window_binding_ref"],
+            capture_ref=capture_ref,
+            allow_verified_owner_cleanup_replay=True,
+        )
+        assert replay["serialized_window_binding"] == expected
+        assert replay["artifact_is_authorization"] is False
+        assert replay["execute_binding_enabled"] is False
+
+        events_path = Path(str(owner["journal_root"]["events_path"]))
+        sealed_events = events_path.read_bytes()
+        try:
+            events_path.write_bytes(b"\n".join(sealed_events.splitlines()[:-1]) + b"\n")
+            with pytest.raises(ValueError, match="last event is not cleanup"):
+                resolve_server_worker_window_binding(
+                    resolver=resolver,
+                    run_id="run-verified-cleanup-replay",
+                    stage="screen_understanding",
+                    operation_id=str(owner["operation_id"]),
+                    window_binding_ref=authority["window_binding_ref"],
+                    capture_ref=capture_ref,
+                    allow_verified_owner_cleanup_replay=True,
+                )
+        finally:
+            events_path.write_bytes(sealed_events)
+
+
 def test_server_binding_authority_rejects_substitution_corruption_and_cross_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1008,6 +1086,37 @@ def test_service_rebuilds_benchmark_adoption_from_server_refs_and_generic_digest
                 owner=owner,
                 capture_ref=capture_ref,
             )
+
+        _assert_window_cleanup(
+            close_owned_window(
+                journal_path=Path(str(owner["journal_path"])),
+                reason="adoption_replay",
+            )
+        )
+        replayed_from_resolver = (
+            validate_benchmark_v2_worker_window_binding_adoption_from_resolver(
+                resolver=compose_test_server_worker_window_binding_resolver(
+                    authority_root=tmp_path.resolve(),
+                ),
+                run_id="run-adoption",
+                stage="screen_understanding",
+                operation_id=str(owner["operation_id"]),
+                window_binding_ref=authority["window_binding_ref"],
+                capture_ref=closed_capture_ref,
+                worker_process_identity={"pid": os.getpid(), "create_time_ns": 1},
+                normal_binding_evidence_ref={
+                    "content_sha256": lifecycle["normal_clear_receipt"][
+                        "content_sha256"
+                    ]
+                },
+                worker_payload=worker_payload,
+                generic_adoption=generic,
+                allow_verified_owner_cleanup_replay=True,
+            )
+        )
+        assert canonical_json_bytes(replayed_from_resolver) == canonical_json_bytes(
+            receipt
+        )
 
         reminted = deepcopy(generic)
         reminted_evidence = reminted["response"][
