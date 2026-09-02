@@ -16,6 +16,7 @@ import re
 import struct
 import subprocess
 import sys
+import sysconfig
 from threading import RLock
 import time
 from typing import Any, Mapping
@@ -879,7 +880,7 @@ def _child_env() -> dict[str, str]:
     env = dict(os.environ)
     root = Path(__file__).resolve().parents[3]
     env["PYTHONPATH"] = os.pathsep.join(
-        [str(root / ".venv" / "Lib" / "site-packages"), str(root)]
+        [str(Path(sysconfig.get_path("purelib")).resolve()), str(root)]
     )
     return env
 

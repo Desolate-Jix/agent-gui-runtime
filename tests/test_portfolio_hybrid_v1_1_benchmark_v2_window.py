@@ -8,6 +8,7 @@ import os
 import struct
 import subprocess
 import sys
+import sysconfig
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -330,6 +331,36 @@ def test_owned_bitmap_window_has_exact_job_hwnd_and_uia_binding(tmp_path: Path) 
             canonical_json_bytes(json.loads(line)) + b"\n"
             for line in event_raw.splitlines()
         )
+
+
+def test_window_helper_child_env_uses_active_runtime_site_packages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid import benchmark_v2_window_owner as window_owner
+
+    snapshot_root = tmp_path / "sealed-snapshot"
+    snapshot_root.mkdir()
+    snapshot_module = (
+        snapshot_root / "app" / "learn" / "hybrid" / "benchmark_v2_window_owner.py"
+    )
+    monkeypatch.setattr(window_owner, "__file__", str(snapshot_module))
+
+    child_env = window_owner._child_env()
+    python_paths = child_env["PYTHONPATH"].split(os.pathsep)
+    assert Path(python_paths[0]).resolve() == Path(
+        sysconfig.get_path("purelib")
+    ).resolve()
+    assert Path(python_paths[1]).resolve() == snapshot_root.resolve()
+
+    completed = subprocess.run(
+        [sys._base_executable, "-c", "from PIL import Image"],
+        cwd=snapshot_root,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 @windows_only
