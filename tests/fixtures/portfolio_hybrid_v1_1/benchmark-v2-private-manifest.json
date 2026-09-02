@@ -29,7 +29,7 @@
       "app/learn/recognition/omniparser_provider.py": "5c411dc791fd0c3f6c749fd34fabc22564fad4d90c6e59e1221117be60eefd7a",
       "app/learn/recognition/omniparser_quality.py": "5488b85302b7d8cb4475c6a37dbe67b792837302544c6802b7ec975a29043ef5",
       "app/learn/recognition/uei/builtin_learning_projection.py": "481aca70db82953b1a2e1b54a968b1d3cec12545eba1614456706eccb9f9ab16",
-      "app/learn/recognition/uei/omniparser_shadow_adapter.py": "d9f487004b466fb6d6b54d4164426f793534d090cfbd009adda57a163d237928",
+      "app/learn/recognition/uei/omniparser_shadow_adapter.py": "75c1bc575b12528a35e6bf1862c44d906c0aa6deb8bc78d2d48a9076f1f25836",
       "app/learn/recognition/uei/projections.py": "51798f108e84d3ccafa8f4af99498f6195c0a3648dbdd040f858a9262bc6b704",
       "app/learn/workflow_service.py": "143819c7eb4362b22880fa45cc5be80627673a7b1ab554267b6260b2fba6124b",
       "app/learn/workflow_worker.py": "1c2e7e9972f364ae54d6de73b86d545e73c2c857fb98875d95a54dd6e78d9b56",
@@ -81,7 +81,7 @@
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "297e6560640bcc862519ce4cdb4e93a48854b14f43a74a9ca649f1416d90cb40",
+  "content_sha256": "98cf6f9f0bf791df6cd30c16ccde6e4e75bbf2a5bf98497d742b247593ff54ce",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -116,7 +116,7 @@
   },
   "provider_manifest_ref": {
     "contract_version": "portfolio_hybrid_v1_1_provider_manifest_v2_1",
-    "file_sha256": "0d9ce86a8cdcbc1b2d3ba0507f384dba85a449f301a8c5f250c2aafc8967aa21",
+    "file_sha256": "b81e952df4f0ded3dcd5f4545613f1ce42dbe0869d5a1b924a6e64738934f7c1",
     "relative_path": "benchmark-v2-provider-manifest.json"
   },
   "safety": {
